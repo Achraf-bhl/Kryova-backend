@@ -262,6 +262,13 @@ def chat(
         db.rollback()
         raise _translate(exc) from exc
 
+    # The agent may have created a project this turn. Adopt it as the
+    # conversation's scope so the next turn resolves "the latest run" without
+    # the client having to pass an id it only just learned about.
+    if conversation.project_id is None and toolbox.project_id:
+        conversation.project_id = toolbox.project_id
+        db.commit()
+
     return ChatResponse(
         conversation_id=conversation.id,
         reply=reply.text,
@@ -354,6 +361,11 @@ def chat_stream(
                 max_tokens=settings.ai_max_tokens,
             ):
                 yield f"data: {json.dumps(event, default=str)}\n\n"
+            # Same adoption as the non-streaming route: a project created
+            # mid-stream has to outlive this request.
+            if conversation.project_id is None and toolbox.project_id:
+                conversation.project_id = toolbox.project_id
+                db.commit()
         except LLMError as exc:
             db.rollback()
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"

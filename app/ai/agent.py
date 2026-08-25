@@ -68,6 +68,8 @@ The unit system is mm-N-MPa: lengths and displacements in millimetres, forces \
 in newtons, stresses in megapascals, mass in kilograms. Nothing is converted \
 anywhere.
 
+Starting a new project: the user arrives with a part in mind and nothing else. Ask what they are analysing, call create_project as soon as you have a usable name, and say it exists. Then walk them through what you need, one step at a time and in this order: the CAD file (STEP, IGES or STL, which they must upload themselves -- you have no tool for it), then how it is held and what loads it carries, then the material. Ask for one thing at a time and never present the whole checklist at once. If they describe the loading before the geometry is there, capture it and come back to it.
+
 Running a simulation costs real compute and takes minutes. Never submit one \
 the user did not ask for. When a run is ready, say what will be analysed and \
 what you assumed, and let them confirm.
@@ -81,6 +83,7 @@ short, and say plainly when something is unknown or unverified.\
 #: Human labels for the step list in the UI. A user reading "list_geometry"
 #: has to decode it; "Checking geometry versions" they can just read.
 TOOL_LABELS: dict[str, str] = {
+    "create_project": "Creating the project",
     "list_projects": "Looking up your projects",
     "list_materials": "Checking the material library",
     "list_geometry": "Checking geometry versions",
@@ -101,6 +104,8 @@ def _summarise(tool: str, result: Any, ok: bool) -> str:
     if not isinstance(result, dict):
         return "Done"
 
+    if tool == "create_project":
+        return f"Created {result.get('name', 'project')}"
     if tool == "list_projects":
         return f"Found {len(result.get('projects', []))} project(s)"
     if tool == "list_materials":
@@ -232,6 +237,7 @@ def stream_agent(
             yield {
                 "type": "done",
                 "conversation_id": conversation.id,
+                "project_id": toolbox.project_id,
                 "truncated": False,
                 "steps": len(steps),
             }
@@ -331,6 +337,7 @@ def stream_agent(
     yield {
         "type": "done",
         "conversation_id": conversation.id,
+        "project_id": toolbox.project_id,
         "truncated": True,
         "steps": len(steps),
     }

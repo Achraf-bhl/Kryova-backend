@@ -5,6 +5,7 @@ service, the routes and the error translation can be exercised against a stub,
 which keeps the suite offline, deterministic and free.
 """
 
+import json
 from typing import Any, TypeVar
 
 import pytest
@@ -15,6 +16,7 @@ from app.ai import service
 from app.ai.provider import LLMError, LLMProvider, LLMRefusal, LLMUnavailable
 from app.ai.providers._json_schema import strictify
 from app.ai.schemas import Finding, LoadCaseDraft, ResultInterpretation
+from app.core.config import settings
 from app.main import app
 from tests.typing import AuthenticatedTestClient
 
@@ -182,9 +184,13 @@ class TestAIRoutes:
         response = client.get("/api/v1/ai/status")
         assert response.status_code == 200
         body = response.json()
-        assert body["provider"] == "ollama"
-        # No Ollama running in CI, so it must report unavailable with a reason
-        # rather than pretending the feature works.
+        # Assert against configuration, not a literal: the provider is a
+        # deployment choice, and pinning "ollama" here made this test fail the
+        # moment the app was pointed at a hosted one.
+        assert body["provider"] == settings.ai_provider
+        assert body["model"] == settings.ai_model
+        # No provider reachable in CI, so it must report unavailable with a
+        # reason rather than pretending the feature works.
         if not body["enabled"]:
             assert body["detail"]
 
@@ -273,3 +279,72 @@ def test_app_exposes_the_ai_routes_in_the_schema() -> None:
 def test_the_streaming_endpoint_is_registered_and_declares_sse() -> None:
     paths = app.openapi()["paths"]
     assert "/api/v1/ai/chat/stream" in paths
+
+
+class TestOpenAIWireFormat:
+    """Translation to the OpenAI message shape.
+
+    These are regression tests for a silent failure: the endpoint answered a
+    bare 400 with no field named, and only the *second* turn of a conversation
+    was affected, because the first has no tool calls to replay.
+    """
+
+    def test_tool_call_arguments_are_serialised_to_a_string(self) -> None:
+        from app.ai.providers.openai_compatible import _to_wire
+
+        wire = _to_wire(
+            [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "create_project", "arguments": {"name": "Arm"}},
+                        }
+                    ],
+                }
+            ]
+        )
+        arguments = wire[0]["tool_calls"][0]["function"]["arguments"]
+        assert isinstance(arguments, str)
+        assert json.loads(arguments) == {"name": "Arm"}
+
+    def test_already_serialised_arguments_are_left_alone(self) -> None:
+        from app.ai.providers.openai_compatible import _to_wire
+
+        wire = _to_wire(
+            [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"function": {"name": "f", "arguments": '{"a": 1}'}}
+                    ],
+                }
+            ]
+        )
+        assert wire[0]["tool_calls"][0]["function"]["arguments"] == '{"a": 1}'
+
+    def test_our_is_error_flag_never_reaches_the_wire(self) -> None:
+        from app.ai.providers.openai_compatible import _to_wire
+
+        wire = _to_wire(
+            [
+                {
+                    "role": "tool",
+                    "tool_call_id": "c1",
+                    "name": "f",
+                    "content": "{}",
+                    "is_error": True,
+                }
+            ]
+        )
+        assert set(wire[0]) == {"role", "tool_call_id", "name", "content"}
+
+    def test_plain_messages_pass_through_untouched(self) -> None:
+        from app.ai.providers.openai_compatible import _to_wire
+
+        messages = [{"role": "user", "content": "hello"}]
+        assert _to_wire(messages) == messages

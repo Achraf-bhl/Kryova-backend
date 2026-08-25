@@ -295,3 +295,60 @@ class TestOwnershipScoping:
         box = ToolBox(db=db_session, user=user, project_id=None)
         result = box.call("list_projects", {}, allow_mutations=False)
         assert [p["id"] for p in result["projects"]] == [project.id]
+
+
+class TestCreateProject:
+    """The entry point of the chat-first flow: the agent makes the project."""
+
+    def test_creates_a_project_owned_by_the_caller(
+        self, db_session: Session, user: User
+    ) -> None:
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        result = box.call(
+            "create_project",
+            {"name": "Bracket", "description": "Motor mount"},
+            allow_mutations=False,
+        )
+
+        row = db_session.get(Project, result["id"])
+        assert row is not None
+        assert row.owner_id == user.id
+        assert row.name == "Bracket"
+        assert row.description == "Motor mount"
+
+    def test_adopts_the_new_project_as_the_conversation_scope(
+        self, db_session: Session, user: User
+    ) -> None:
+        """Without this, every later tool in the turn has no project to resolve."""
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        assert box.project_id is None
+
+        result = box.call("create_project", {"name": "Arm"}, allow_mutations=False)
+
+        assert box.project_id == result["id"]
+        # A tool called with no project_id must now resolve to the new project.
+        # It has no geometry yet, so the *content* of the error is the proof:
+        # it names "Arm" rather than complaining there is no project in scope.
+        with pytest.raises(ToolError, match="'Arm' has no geometry"):
+            box.call("list_geometry", {}, allow_mutations=False)
+
+    def test_is_available_without_the_mutation_gate(
+        self, db_session: Session, user: User
+    ) -> None:
+        """Creating an empty project is cheap; only compute-burning tools are gated."""
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        names = {s["function"]["name"] for s in box.schemas(include_mutating=False)}
+        assert "create_project" in names
+        assert "run_simulation" not in names
+
+    def test_a_blank_name_is_a_tool_error_not_a_crash(
+        self, db_session: Session, user: User
+    ) -> None:
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError):
+            box.call("create_project", {"name": "   "}, allow_mutations=False)
+
+    def test_an_overlong_name_is_refused(self, db_session: Session, user: User) -> None:
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError):
+            box.call("create_project", {"name": "x" * 256}, allow_mutations=False)

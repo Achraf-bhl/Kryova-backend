@@ -28,6 +28,46 @@ from app.ai.providers._json_schema import strictify
 T = TypeVar("T", bound=BaseModel)
 
 
+def _to_wire(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate the agent's normal form into the OpenAI message shape.
+
+    Two things differ and both are silent failures if missed:
+
+    * ``tool_calls[].function.arguments`` must be a **JSON-encoded string**, not
+      an object. The agent stores the parsed dict (that is what every other
+      provider wants), so replaying a transcript verbatim sends an object and a
+      strict endpoint answers 400 with no indication of which field was wrong.
+    * Tool messages carry ``is_error``, which is ours, not OpenAI's. Only the
+      documented keys go on the wire; the error text is already in ``content``.
+    """
+    wire: list[dict[str, Any]] = []
+    for message in messages:
+        if message.get("role") == "tool":
+            wire.append(
+                {
+                    key: message[key]
+                    for key in ("role", "tool_call_id", "name", "content")
+                    if key in message
+                }
+            )
+            continue
+
+        calls = message.get("tool_calls")
+        if not calls:
+            wire.append(message)
+            continue
+
+        normalised = []
+        for call in calls:
+            function = dict(call.get("function") or {})
+            arguments = function.get("arguments")
+            if not isinstance(arguments, str):
+                function["arguments"] = json.dumps(arguments or {})
+            normalised.append({**call, "function": function})
+        wire.append({**message, "tool_calls": normalised})
+    return wire
+
+
 class OpenAICompatibleProvider(LLMProvider):
     name = "openai_compatible"
 
@@ -139,7 +179,10 @@ class OpenAICompatibleProvider(LLMProvider):
         payload: dict[str, Any] = {
             "model": self._model,
             "max_completion_tokens": max_tokens,
-            "messages": [{"role": "system", "content": system}, *messages],
+            "messages": [
+                {"role": "system", "content": system},
+                *_to_wire(messages),
+            ],
         }
         if tools:
             payload["tools"] = tools

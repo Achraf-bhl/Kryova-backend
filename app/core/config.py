@@ -29,8 +29,11 @@ def _as_psycopg_url(url: str) -> str:
 class Settings(BaseSettings):
     """Application settings, loaded from the environment / .env file."""
 
+    # `.env` is tracked in this repo on purpose, so it is the wrong place for a
+    # real credential. `.env.local` is gitignored and read second, which means
+    # it wins for any key it sets -- put provider API keys there.
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=(".env", ".env.local"), env_file_encoding="utf-8", extra="ignore"
     )
 
     project_name: str = "Kryova API"

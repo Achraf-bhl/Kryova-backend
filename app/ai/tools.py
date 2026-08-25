@@ -99,6 +99,33 @@ class ToolBox:
     def _build(self) -> list[Tool]:
         return [
             Tool(
+                name="create_project",
+                description=(
+                    "Create a new, empty project and make it the conversation's current "
+                    "project. Call this once, at the start of a new-project conversation, "
+                    "as soon as you know what the user is working on -- a short name is "
+                    "enough to begin; the geometry comes afterwards. Do not call it again "
+                    "in the same conversation, and do not call it to 'reset' a project."
+                ),
+                parameters=_object(
+                    {
+                        "name": {
+                            "type": "string",
+                            "description": (
+                                "Short human name for the part or assembly, e.g. "
+                                "'Bracket assembly'. Max 255 characters."
+                            ),
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "One line on what it is or what it must carry.",
+                        },
+                    },
+                    required=["name"],
+                ),
+                handler=self._create_project,
+            ),
+            Tool(
                 name="list_projects",
                 description=(
                     "List the user's projects with their ids. Call this first whenever "
@@ -196,6 +223,43 @@ class ToolBox:
         ]
 
     # -- handlers -----------------------------------------------------------
+
+    def _create_project(self, name: str, description: str | None = None) -> dict[str, Any]:
+        """Create a project and adopt it as the conversation's scope.
+
+        Deliberately *not* marked mutating. That gate exists for tools that burn
+        compute or destroy results (`run_simulation`); an empty project row is
+        cheap and reversible, and gating it would mean a new-project chat has to
+        ask permission for the thing the user just clicked a button to do. The
+        expensive tools stay gated.
+        """
+        name = (name or "").strip()
+        if not name:
+            raise ToolError("A project needs a name. Ask the user what to call it.")
+        # Mirrors ProjectCreate's bound rather than letting the DB truncate.
+        if len(name) > 255:
+            raise ToolError("That name is too long; keep it under 255 characters.")
+
+        project = Project(
+            owner_id=self.user.id,
+            name=name,
+            description=(description or "").strip() or None,
+        )
+        self.db.add(project)
+        self.db.flush()
+
+        # Adopting the id here is what lets every later tool in this turn omit
+        # project_id and still resolve -- see _project().
+        self.project_id = project.id
+        return {
+            "id": project.id,
+            "name": project.name,
+            "description": project.description,
+            "next_step": (
+                "Tell the user the project exists and ask them to upload a CAD file "
+                "(STEP, IGES or STL). You cannot upload it for them."
+            ),
+        }
 
     def _list_projects(self) -> dict[str, Any]:
         rows = self.db.scalars(

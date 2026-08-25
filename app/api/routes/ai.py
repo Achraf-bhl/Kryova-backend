@@ -5,9 +5,12 @@ translate provider failures into HTTP. The model that answers is chosen by
 configuration -- see `app/ai/providers/`.
 """
 
-from typing import Annotated
+import json
+from collections.abc import Iterator
+from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -21,9 +24,11 @@ from app.ai import (
     get_provider,
     interpret_result,
 )
-from app.api.deps import DbSession, OwnedProject
+from app.ai.agent import AgentReply, run_agent, stream_agent
+from app.ai.tools import ToolBox
+from app.api.deps import CurrentUser, DbSession, OwnedProject
 from app.core.config import settings
-from app.models import GeometryVersion, JobStatus, SimulationJob
+from app.models import Conversation, GeometryVersion, JobStatus, SimulationJob
 
 router = APIRouter(tags=["ai"])
 
@@ -153,3 +158,213 @@ def draft_project_load_case(
         )
     except LLMError as exc:
         raise _translate(exc) from exc
+
+
+# --------------------------------------------------------------------------
+# Agent chat: the model chooses the tools and drives the flow itself.
+# --------------------------------------------------------------------------
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=8_000)
+    conversation_id: str | None = Field(
+        default=None,
+        description="Omit to start a new conversation. Pass it back to continue one.",
+    )
+    project_id: str | None = Field(
+        default=None,
+        description=(
+            "Scopes a new conversation to a project so the agent can resolve "
+            "'the latest run' without being given ids every turn."
+        ),
+    )
+    allow_mutations: bool = Field(
+        default=False,
+        description=(
+            "Unlocks tools that change state or cost compute. The agent is told "
+            "to ask before it needs this; send true only once the user has said yes."
+        ),
+    )
+
+
+class AgentStepRead(BaseModel):
+    tool: str
+    arguments: dict[str, Any]
+    ok: bool
+    result: Any
+
+
+class ChatResponse(BaseModel):
+    conversation_id: str
+    reply: str
+    steps: list[AgentStepRead] = Field(
+        description="Tool calls the agent made, in order, so the UI can show its work."
+    )
+    truncated: bool = Field(
+        description="True when the step budget ran out before the agent finished."
+    )
+
+
+def _resolve_conversation(
+    db: DbSession, user: Any, payload: ChatRequest
+) -> Conversation:
+    if payload.conversation_id:
+        conversation = db.get(Conversation, payload.conversation_id)
+        # 404 rather than 403 for someone else's conversation, matching the
+        # rest of the API -- never confirm that an id exists.
+        if conversation is None or conversation.owner_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+            )
+        return conversation
+
+    conversation = Conversation(
+        owner_id=user.id,
+        project_id=payload.project_id,
+        title=payload.message[:60],
+    )
+    db.add(conversation)
+    db.flush()
+    return conversation
+
+
+@router.post("/ai/chat", response_model=ChatResponse)
+def chat(
+    db: DbSession, current_user: CurrentUser, payload: Annotated[ChatRequest, ...]
+) -> ChatResponse:
+    """Talk to the agent. It decides which tools to call and in what order.
+
+    The conversation is the memory: pass `conversation_id` back on each turn and
+    the agent replays everything it did before, including the calls that failed,
+    so it does not repeat them.
+    """
+    conversation = _resolve_conversation(db, current_user, payload)
+
+    if payload.project_id and conversation.project_id is None:
+        conversation.project_id = payload.project_id
+
+    provider = _provider_or_503()
+    toolbox = ToolBox(db=db, user=current_user, project_id=conversation.project_id)
+
+    try:
+        reply: AgentReply = run_agent(
+            db=db,
+            provider=provider,
+            conversation=conversation,
+            toolbox=toolbox,
+            user_message=payload.message,
+            allow_mutations=payload.allow_mutations,
+            max_tokens=settings.ai_max_tokens,
+        )
+    except LLMError as exc:
+        # The user turn is already persisted, so roll back to the last committed
+        # state rather than leaving a question with no answer in the transcript.
+        db.rollback()
+        raise _translate(exc) from exc
+
+    return ChatResponse(
+        conversation_id=conversation.id,
+        reply=reply.text,
+        steps=[
+            AgentStepRead(tool=s.tool, arguments=s.arguments, ok=s.ok, result=s.result)
+            for s in reply.steps
+        ],
+        truncated=reply.truncated,
+    )
+
+
+class ConversationMessageRead(BaseModel):
+    """One stored turn. Typed rather than a bare dict so the schema is not `any`."""
+
+    role: str
+    content: str | None
+    tool_name: str | None
+    is_error: bool
+    created_at: str
+
+
+class ConversationRead(BaseModel):
+    conversation_id: str
+    title: str
+    project_id: str | None
+    messages: list[ConversationMessageRead]
+
+
+@router.get("/ai/conversations/{conversation_id}", response_model=ConversationRead)
+def read_conversation(
+    db: DbSession, current_user: CurrentUser, conversation_id: str
+) -> ConversationRead:
+    """The stored transcript, so a client can rehydrate a conversation."""
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None or conversation.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        )
+    return ConversationRead(
+        conversation_id=conversation.id,
+        title=conversation.title,
+        project_id=conversation.project_id,
+        messages=[
+            ConversationMessageRead(
+                role=m.role.value,
+                content=m.content,
+                tool_name=m.tool_name,
+                is_error=m.is_error,
+                created_at=m.created_at.isoformat(),
+            )
+            for m in conversation.messages
+        ],
+    )
+
+
+@router.post("/ai/chat/stream")
+def chat_stream(
+    db: DbSession, current_user: CurrentUser, payload: Annotated[ChatRequest, ...]
+) -> StreamingResponse:
+    """The same agent loop, streamed as Server-Sent Events.
+
+    The UI subscribes and renders each step as it happens -- which tool the
+    agent reached for, what it found, how long it took -- instead of showing a
+    spinner for however long the whole turn takes.
+
+    Event types: `thinking`, `narration`, `tool_start`, `tool_end`, `message`,
+    `done`, `error`.
+    """
+    conversation = _resolve_conversation(db, current_user, payload)
+    if payload.project_id and conversation.project_id is None:
+        conversation.project_id = payload.project_id
+
+    provider = _provider_or_503()
+    toolbox = ToolBox(db=db, user=current_user, project_id=conversation.project_id)
+    conversation_id = conversation.id
+
+    def events() -> Iterator[str]:
+        # The conversation id goes first so the client can store it before any
+        # work happens -- a stream that dies mid-turn still leaves a resumable
+        # conversation rather than an orphan.
+        yield f"data: {json.dumps({'type': 'start', 'conversation_id': conversation_id})}\n\n"
+        try:
+            for event in stream_agent(
+                db=db,
+                provider=provider,
+                conversation=conversation,
+                toolbox=toolbox,
+                user_message=payload.message,
+                allow_mutations=payload.allow_mutations,
+                max_tokens=settings.ai_max_tokens,
+            ):
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+        except LLMError as exc:
+            db.rollback()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "cache-control": "no-cache",
+            # Tell nginx not to buffer, or events arrive in one batch at the end
+            # and the whole point of streaming is lost.
+            "x-accel-buffering": "no",
+        },
+    )

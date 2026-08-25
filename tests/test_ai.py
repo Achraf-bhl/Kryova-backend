@@ -60,6 +60,10 @@ class StubProvider(LLMProvider):
         if isinstance(self._error, LLMUnavailable):
             raise self._error
 
+    def chat(self, **_: Any) -> Any:
+        """Unused here -- the agent loop is exercised in test_agent.py."""
+        raise NotImplementedError
+
     def complete(
         self, *, system: str, user: str, schema: type[T], effort: str, max_tokens: int
     ) -> T:
@@ -253,9 +257,19 @@ def test_app_exposes_the_ai_routes_in_the_schema() -> None:
     assert "/api/v1/projects/{project_id}/ai/load-case" in paths
     assert "/api/v1/projects/{project_id}/simulations/{simulation_id}/interpretation" in paths
 
-    # response_model set on every one, so the schema is never `any`.
+    # response_model set on every JSON endpoint, so the schema is never `any`.
+    # The SSE endpoint is exempt: it streams text/event-stream and genuinely
+    # has no JSON body to describe.
+    streaming = {"/api/v1/ai/chat/stream"}
     for path, methods in paths.items():
+        if path in streaming:
+            continue
         if "/ai/" in path or path.endswith("/interpretation"):
             for operation in methods.values():
                 schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
                 assert schema.get("$ref"), f"{path} has an untyped 200 response"
+
+
+def test_the_streaming_endpoint_is_registered_and_declares_sse() -> None:
+    paths = app.openapi()["paths"]
+    assert "/api/v1/ai/chat/stream" in paths

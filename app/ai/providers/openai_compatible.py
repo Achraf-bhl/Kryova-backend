@@ -9,12 +9,20 @@ Kept deliberately SDK-free: the wire format is small and stable, and adding the
 `openai` package to reach a local llama.cpp would be a dependency for nothing.
 """
 
+import json
 from typing import Any, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from app.ai.provider import LLMError, LLMProvider, LLMRefusal, LLMUnavailable
+from app.ai.provider import (
+    AssistantTurn,
+    LLMError,
+    LLMProvider,
+    LLMRefusal,
+    LLMUnavailable,
+    ToolCall,
+)
 from app.ai.providers._json_schema import strictify
 
 T = TypeVar("T", bound=BaseModel)
@@ -118,3 +126,66 @@ class OpenAICompatibleProvider(LLMProvider):
             raise LLMError(
                 f"The model returned output that does not match the expected schema: {exc}"
             ) from exc
+
+
+    def chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> AssistantTurn:
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "max_completion_tokens": max_tokens,
+            "messages": [{"role": "system", "content": system}, *messages],
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        try:
+            response = httpx.post(
+                f"{self._base_url}/chat/completions",
+                json=payload,
+                headers=self._headers(),
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise LLMError(f"The model did not respond within {self._timeout:g}s.") from exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (401, 403):
+                raise LLMUnavailable("The API key was rejected.") from exc
+            raise LLMError(
+                f"Chat failed ({exc.response.status_code}): {exc.response.text[:200]}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Chat request failed: {exc}") from exc
+
+        choices = response.json().get("choices") or []
+        if not choices:
+            raise LLMError("The model returned no choices.")
+        choice = choices[0]
+        if choice.get("finish_reason") == "content_filter":
+            raise LLMRefusal("The provider's content filter rejected this request.")
+
+        message = choice.get("message") or {}
+        calls = []
+        for raw in message.get("tool_calls") or []:
+            function = raw.get("function") or {}
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
+            calls.append(
+                ToolCall(
+                    id=raw.get("id") or function.get("name", "call"),
+                    name=function.get("name", ""),
+                    arguments=arguments or {},
+                )
+            )
+        return AssistantTurn(text=message.get("content") or "", tool_calls=calls)

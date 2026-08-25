@@ -11,10 +11,68 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from app.ai.provider import LLMError, LLMProvider, LLMRefusal, LLMUnavailable
+from app.ai.provider import (
+    AssistantTurn,
+    LLMError,
+    LLMProvider,
+    LLMRefusal,
+    LLMUnavailable,
+    ToolCall,
+)
 from app.ai.providers._json_schema import strictify
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _to_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate the OpenAI-shaped normal form into Anthropic content blocks.
+
+    Two structural differences drive this: Anthropic carries tool calls as
+    `tool_use` blocks inside the assistant turn rather than a sibling field,
+    and tool results come back as `tool_result` blocks in a *user* turn rather
+    than a `tool` role. Consecutive results must also be merged into one user
+    message, which is why this cannot be a simple per-message map.
+    """
+    out: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+
+        if role == "tool":
+            block = {
+                "type": "tool_result",
+                "tool_use_id": message.get("tool_call_id", ""),
+                "content": message.get("content") or "",
+            }
+            if message.get("is_error"):
+                block["is_error"] = True
+            # Merge into the preceding user turn if it is already tool results:
+            # the API rejects a tool_use that is not answered in a single turn.
+            if out and out[-1]["role"] == "user" and isinstance(out[-1]["content"], list):
+                out[-1]["content"].append(block)
+            else:
+                out.append({"role": "user", "content": [block]})
+            continue
+
+        if role == "assistant":
+            content: list[dict[str, Any]] = []
+            if message.get("content"):
+                content.append({"type": "text", "text": message["content"]})
+            for call in message.get("tool_calls") or []:
+                function = call.get("function") or {}
+                content.append(
+                    {
+                        "type": "tool_use",
+                        "id": call.get("id", ""),
+                        "name": function.get("name", ""),
+                        "input": function.get("arguments") or {},
+                    }
+                )
+            if content:
+                out.append({"role": "assistant", "content": content})
+            continue
+
+        out.append({"role": "user", "content": message.get("content") or ""})
+    return out
 
 
 class AnthropicProvider(LLMProvider):
@@ -120,3 +178,62 @@ class AnthropicProvider(LLMProvider):
             raise LLMError(
                 f"Anthropic returned output that does not match the expected schema: {exc}"
             ) from exc
+
+    def chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> AssistantTurn:
+        import anthropic
+
+        client = self._get_client()
+        # Anthropic nests the schema differently: name/description/input_schema
+        # at the top level of each tool, not under a "function" key.
+        anthropic_tools = [
+            {
+                "name": tool["function"]["name"],
+                "description": tool["function"]["description"],
+                "input_schema": tool["function"]["parameters"],
+            }
+            for tool in tools
+        ]
+
+        try:
+            response = client.messages.create(
+                model=self._model,
+                max_tokens=max_tokens,
+                system=[
+                    {
+                        "type": "text",
+                        "text": system,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                tools=anthropic_tools,
+                messages=_to_anthropic_messages(messages),
+            )
+        except anthropic.AuthenticationError as exc:
+            raise LLMUnavailable("ANTHROPIC_API_KEY was rejected.") from exc
+        except anthropic.RateLimitError as exc:
+            raise LLMError("Anthropic rate limit reached. Retry shortly.") from exc
+        except anthropic.APIStatusError as exc:
+            raise LLMError(f"Anthropic API error {exc.status_code}: {exc.message}") from exc
+        except anthropic.APIConnectionError as exc:
+            raise LLMError(f"Could not reach the Anthropic API: {exc}") from exc
+
+        if response.stop_reason == "refusal":
+            raise LLMRefusal("The model declined this request.")
+
+        text_parts: list[str] = []
+        calls: list[ToolCall] = []
+        for block in response.content:
+            if block.type == "text":
+                text_parts.append(block.text)
+            elif block.type == "tool_use":
+                calls.append(
+                    ToolCall(id=block.id, name=block.name, arguments=dict(block.input or {}))
+                )
+        return AssistantTurn(text="".join(text_parts), tool_calls=calls)

@@ -13,11 +13,36 @@ here.
 """
 
 from abc import ABC, abstractmethod
-from typing import TypeVar
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass
+class ToolCall:
+    """One tool invocation the model asked for."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class AssistantTurn:
+    """What the model produced in one step of the agent loop.
+
+    `tool_calls` empty means the model is done and `text` is its answer.
+    """
+
+    text: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+
+    @property
+    def wants_tools(self) -> bool:
+        return bool(self.tool_calls)
 
 
 class LLMError(RuntimeError):
@@ -53,6 +78,30 @@ class LLMProvider(ABC):
         `system` is frozen per call site and placed first so providers that
         support prompt caching get a stable prefix. `effort` is a hint --
         providers that have no equivalent ignore it rather than failing.
+        """
+
+    @abstractmethod
+    def chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> AssistantTurn:
+        """One step of an agent loop: given the transcript, decide what to do next.
+
+        `messages` uses the OpenAI-shaped normal form, which Ollama and every
+        OpenAI-compatible server take as-is and the Anthropic provider
+        translates:
+
+            {"role": "user",      "content": str}
+            {"role": "assistant", "content": str, "tool_calls": [...]}
+            {"role": "tool",      "tool_call_id": str, "name": str, "content": str}
+
+        `tools` is a list of OpenAI function schemas. Providers must return an
+        `AssistantTurn`; a provider that cannot do tool calling raises
+        `LLMUnavailable` rather than silently answering without them.
         """
 
     @abstractmethod

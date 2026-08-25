@@ -16,7 +16,7 @@ from typing import Any, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from app.ai.provider import LLMError, LLMProvider, LLMUnavailable
+from app.ai.provider import AssistantTurn, LLMError, LLMProvider, LLMUnavailable, ToolCall
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -113,3 +113,53 @@ class OllamaProvider(LLMProvider):
             ) from exc
         except json.JSONDecodeError as exc:
             raise LLMError("Ollama returned malformed JSON.") from exc
+
+
+    def chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> AssistantTurn:
+        """Ollama speaks the OpenAI message and tool shape natively."""
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "stream": False,
+            "messages": [{"role": "system", "content": system}, *messages],
+            "options": {"num_predict": max_tokens},
+        }
+        if tools:
+            payload["tools"] = tools
+
+        try:
+            response = httpx.post(
+                f"{self._base_url}/api/chat", json=payload, timeout=self._timeout
+            )
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise LLMError(f"Ollama did not respond within {self._timeout:g}s.") from exc
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Ollama request failed: {exc}") from exc
+
+        message = response.json().get("message") or {}
+        calls = []
+        # Ollama omits call ids, so synthesise stable ones by position -- the
+        # loop only needs them to pair a result back to its request.
+        for index, raw in enumerate(message.get("tool_calls") or []):
+            function = raw.get("function") or {}
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
+            calls.append(
+                ToolCall(
+                    id=raw.get("id") or f"call_{index}",
+                    name=function.get("name", ""),
+                    arguments=arguments or {},
+                )
+            )
+        return AssistantTurn(text=message.get("content") or "", tool_calls=calls)

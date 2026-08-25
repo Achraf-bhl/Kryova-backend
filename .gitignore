@@ -13,7 +13,8 @@ build/
 dist/
 
 # Environment variables
-.env
+# .env is intentionally tracked at the owner's explicit instruction.
+# Restore this line to stop tracking it again.
 .env.local
 .env.*.local
 

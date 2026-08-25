@@ -27,8 +27,6 @@ class Project(UUIDPrimaryKey, TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="GeometryVersion.version_number",
     )
-    # SQLite does not enforce ON DELETE CASCADE unless foreign keys are switched
-    # on per connection, so the ORM owns the cascade instead.
     simulations: Mapped[list["SimulationJob"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )

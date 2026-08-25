@@ -22,3 +22,8 @@ gmsh==4.15.2
 
 # Local vector indexes
 faiss-cpu==1.15.0
+
+# AI providers talk HTTP. The Anthropic SDK is deliberately NOT here: the
+# default provider is local Ollama, and only AI_PROVIDER=anthropic needs it.
+# Install it with `pip install anthropic` if you pick that provider.
+httpx==0.28.1

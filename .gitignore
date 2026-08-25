@@ -42,3 +42,4 @@ htmlcov/
 
 # Local heavy-file store (CAD, meshes, result fields, vector indexes)
 media_data/
+data/

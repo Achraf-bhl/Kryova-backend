@@ -61,7 +61,7 @@ def begin_upload(
         )
     except UploadError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+            status_code=422, detail=str(exc)
         ) from exc
     db.commit()
     db.refresh(session)
@@ -84,7 +84,7 @@ async def upload_chunk(
         media.save_chunk(session, index, body)
     except UploadError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+            status_code=422, detail=str(exc)
         ) from exc
     db.commit()
     db.refresh(session)

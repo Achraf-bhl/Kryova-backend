@@ -12,7 +12,7 @@ import shutil
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -216,7 +216,8 @@ class MediaService:
             )
 
         staging = self._staging_dir(session)
-        with _ChunkReader(staging, session.total_chunks) as stream:
+        stream: BinaryIO = cast(BinaryIO, _ChunkReader(staging, session.total_chunks))
+        with stream:
             info = self.store.write(stream, max_bytes=settings.max_media_bytes)
 
         if info.size_bytes != session.total_size_bytes:

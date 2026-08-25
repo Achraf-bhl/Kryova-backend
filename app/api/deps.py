@@ -1,8 +1,9 @@
+import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Path, status
+from fastapi import Cookie, Depends, HTTPException, Path, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -14,11 +15,12 @@ from app.media import LocalMediaStore, MediaService, get_media_store
 from app.models import Project, User
 from app.simulation.runner import SessionScope
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.api_v1_prefix}/auth/login")
-
 DbSession = Annotated[Session, Depends(get_db)]
 MediaStoreDep = Annotated[LocalMediaStore, Depends(get_media_store)]
 JobQueueDep = Annotated[JobQueue, Depends(get_job_queue)]
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.api_v1_prefix}/auth/login", auto_error=False
+)
 
 
 def get_media_service(db: DbSession, store: MediaStoreDep) -> MediaService:
@@ -50,14 +52,18 @@ SessionScopeDep = Annotated[SessionScope, Depends(get_session_scope)]
 
 
 def get_current_user(
-    db: DbSession, token: Annotated[str, Depends(oauth2_scheme)]
+    request: Request,
+    db: DbSession,
+    bearer_token: Annotated[str | None, Depends(oauth2_scheme)] = None,
+    cookie_token: Annotated[str | None, Cookie(alias="kryova_access")] = None,
 ) -> User:
+    token = bearer_token or cookie_token
     credentials_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    user_id = decode_access_token(token)
+    user_id = decode_access_token(token) if token else None
     if user_id is None:
         raise credentials_error
     user = db.get(User, user_id)
@@ -65,6 +71,15 @@ def get_current_user(
         raise credentials_error
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
+    if (
+        request.method not in {"GET", "HEAD", "OPTIONS"}
+        and "authorization" not in request.headers
+        and not secrets.compare_digest(
+            request.headers.get("x-csrf-token") or "",
+            request.cookies.get("kryova_csrf") or "",
+        )
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF failure")
     return user
 
 

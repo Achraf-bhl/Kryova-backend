@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test --
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          # 3.12, not 3.11: numpy's stubs use PEP 695 syntax that mypy rejects
+          # under an older target. Keep in step with pyproject's python_version.
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: mypy app tests
+      - run: pytest -q
+        env:
+          # Set these as repository secrets (Settings > Secrets and variables >
+          # Actions). Never inline a connection string here -- this file is
+          # public in any public repo, and a committed password is a leaked one.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.TEST_SECRET_KEY || 'ci-only-secret-key-not-used-in-production' }}

@@ -76,7 +76,7 @@ def distribute_force(
         # Each triangle gives a third of its area to each of its corners.
         np.add.at(weights, triangles, (areas / 3.0)[:, None])
 
-    total = weights[nodes].sum()
+    total = float(weights[nodes].sum())
     if total <= 0.0:
         weights = np.zeros(mesh.node_count, dtype=np.float64)
         weights[nodes] = 1.0

@@ -1,12 +1,12 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
+import app.models  # noqa: F401  -- registers all models on Base.metadata
 from app.core.config import settings
 from app.core.database import Base
 from app.models.base import UTCDateTime
-import app.models  # noqa: F401  -- registers all models on Base.metadata
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
@@ -48,10 +48,16 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
+        if not connection.dialect.has_schema(connection, settings.db_schema):
+            connection.execute(
+                text(f'CREATE SCHEMA "{settings.db_schema}"')
+            )
+            connection.commit()
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             render_item=render_item,
+            version_table_schema=settings.db_schema,
         )
         with context.begin_transaction():
             context.run_migrations()

@@ -3,11 +3,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import BigInteger, Enum, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.base import TimestampMixin, UTCDateTime, UUIDPrimaryKey
+from app.models.types import JSONB_compat as JSONB
 
 if TYPE_CHECKING:
     from app.models.user import User

@@ -1,9 +1,11 @@
-from fastapi import APIRouter, status
-from sqlalchemy import select
+from typing import Annotated
+
+from fastapi import APIRouter, Query, status
+from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject
 from app.models import Project
-from app.schemas import ProjectCreate, ProjectRead, ProjectUpdate
+from app.schemas import ProjectCreate, ProjectPage, ProjectRead, ProjectUpdate
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -18,14 +20,31 @@ def create_project(payload: ProjectCreate, db: DbSession, current_user: CurrentU
     return project
 
 
-@router.get("", response_model=list[ProjectRead])
-def list_projects(db: DbSession, current_user: CurrentUser) -> list[Project]:
+@router.get("", response_model=ProjectPage)
+def list_projects(
+    db: DbSession,
+    current_user: CurrentUser,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> ProjectPage:
     stmt = (
         select(Project)
         .where(Project.owner_id == current_user.id)
-        .order_by(Project.updated_at.desc())
+        .order_by(Project.updated_at.desc(), Project.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    return list(db.scalars(stmt))
+    total = (
+        db.scalar(
+            select(func.count())
+            .select_from(Project)
+            .where(Project.owner_id == current_user.id)
+        )
+        or 0
+    )
+    read_items = [ProjectRead.model_validate(project) for project in db.scalars(stmt)]
+    return ProjectPage(total=total, page=page, page_size=page_size, items=read_items)
+
 
 
 @router.get("/{project_id}", response_model=ProjectRead)

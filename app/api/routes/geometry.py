@@ -1,17 +1,17 @@
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject
 from app.core.config import settings
-from app.geometry.formats import GEOMETRY_FORMATS, detect_format
+from app.geometry.formats import detect_format, rejection_reason
 from app.geometry.inspect import GeometryError, inspect
 from app.media import MediaNotFound, MediaTooLarge
 from app.models import GeometryVersion, MediaKind
-from app.schemas import GeometryVersionRead
+from app.schemas import GeometryVersionPage, GeometryVersionRead
 
 router = APIRouter(prefix="/projects/{project_id}/geometry", tags=["geometry"])
 
@@ -19,10 +19,11 @@ router = APIRouter(prefix="/projects/{project_id}/geometry", tags=["geometry"])
 def _require_supported(filename: str) -> str:
     file_format = detect_format(filename)
     if file_format is None:
-        supported = sorted(ext for exts in GEOMETRY_FORMATS.values() for ext in exts)
+        # A native CAD file (.CATPart, .sldprt) gets told how to convert it,
+        # rather than a bare list of extensions it has to work backwards from.
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported geometry format. Supported extensions: {', '.join(supported)}",
+            detail=rejection_reason(filename),
         )
     return file_format
 
@@ -64,13 +65,13 @@ def upload_geometry(
         )
     except MediaTooLarge as exc:
         raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            status_code=413,
             detail=f"File exceeds the {settings.max_upload_bytes} byte limit",
         ) from exc
 
     if stored.size_bytes == 0:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="File is empty"
+            status_code=422, detail="File is empty"
         )
 
     return _attach(db, media, project.id, stored, file_format, note)
@@ -97,7 +98,7 @@ def attach_uploaded_geometry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found")
     if stored.kind is not MediaKind.CAD:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=422,
             detail=f"Media {media_id} is a {stored.kind.value}, not a CAD file",
         )
 
@@ -114,7 +115,7 @@ def _attach(db, media, project_id: str, stored, file_format: str, note: str | No
         media.delete(stored)
         db.commit()
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+            status_code=422, detail=str(exc)
         ) from exc
     except MediaNotFound as exc:
         raise HTTPException(
@@ -136,14 +137,25 @@ def _attach(db, media, project_id: str, stored, file_format: str, note: str | No
     return version
 
 
-@router.get("", response_model=list[GeometryVersionRead])
-def list_geometry_versions(project: OwnedProject, db: DbSession) -> list[GeometryVersion]:
+@router.get("", response_model=GeometryVersionPage)
+def list_geometry_versions(
+    project: OwnedProject,
+    db: DbSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> GeometryVersionPage:
+    owner_filter = GeometryVersion.project_id == project.id
     stmt = (
         select(GeometryVersion)
-        .where(GeometryVersion.project_id == project.id)
+        .where(owner_filter)
         .order_by(GeometryVersion.version_number.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    return list(db.scalars(stmt))
+    total = db.scalar(select(func.count()).select_from(GeometryVersion).where(owner_filter)) or 0
+    return GeometryVersionPage(
+        total=total, page=page, page_size=page_size, items=list(db.scalars(stmt))
+    )
 
 
 def _get_version(db: DbSession, project_id: str, version_number: int) -> GeometryVersion:

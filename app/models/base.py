@@ -14,11 +14,7 @@ def utcnow() -> datetime:
 
 
 class UTCDateTime(TypeDecorator):
-    """Always store and return timezone-aware UTC datetimes.
-
-    SQLite has no native timestamp type and hands back naive datetimes, which a
-    client would read as local time. Normalising here keeps every backend equal.
-    """
+    """Always store and return timezone-aware UTC datetimes."""
 
     impl = DateTime(timezone=True)
     cache_ok = True

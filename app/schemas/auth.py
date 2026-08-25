@@ -22,3 +22,8 @@ class UserRead(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class SessionRead(BaseModel):
+    user: UserRead
+    csrf_token: str

@@ -5,9 +5,9 @@ finished and the assertions can check real numbers rather than poll.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
 from tests.test_mesh import box_stl
+from tests.typing import AuthenticatedTestClient
 
 BOX = (20.0, 20.0, 60.0)  # mm
 FORCE = 8_000.0  # N
@@ -21,7 +21,7 @@ UNIAXIAL_FIXTURES = [
 
 
 @pytest.fixture
-def project_with_geometry(auth_client: TestClient, project_id: str) -> str:
+def project_with_geometry(auth_client: AuthenticatedTestClient, project_id: str) -> str:
     response = auth_client.post(
         f"/api/v1/projects/{project_id}/geometry",
         files={"file": ("box.stl", box_stl(BOX), "application/octet-stream")},
@@ -53,12 +53,12 @@ def load_case(material: str = "aluminium-6061-t6", force: float = FORCE) -> dict
     }
 
 
-def _fields_digest(client: TestClient, job: dict) -> str:
+def _fields_digest(client: AuthenticatedTestClient, job: dict) -> str:
     media = client.get(f"/api/v1/media/{job['fields_media_id']}").json()
     return media["sha256"]
 
 
-def run(client: TestClient, project_id: str, **overrides) -> dict:
+def run(client: AuthenticatedTestClient, project_id: str, **overrides) -> dict:
     payload = {"load_case": load_case(), "element_size_mm": 10.0, **overrides}
     response = client.post(f"/api/v1/projects/{project_id}/simulations", json=payload)
     assert response.status_code == 202, response.text
@@ -67,7 +67,7 @@ def run(client: TestClient, project_id: str, **overrides) -> dict:
 
 class TestRunningASimulation:
     def test_result_matches_the_hand_calculation(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         job = run(auth_client, project_with_geometry)
         assert job["status"] == "succeeded", job["error"]
@@ -78,7 +78,7 @@ class TestRunningASimulation:
         assert job["result"]["yields"] is False
 
     def test_mesh_statistics_are_recorded(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         job = run(auth_client, project_with_geometry)
         stats = job["mesh_stats"]
@@ -87,13 +87,13 @@ class TestRunningASimulation:
         assert stats["inverted_count"] == 0
         assert stats["volume_mm3"] == pytest.approx(BOX[0] * BOX[1] * BOX[2], rel=1e-6)
 
-    def test_mass_is_reported(self, auth_client: TestClient, project_with_geometry: str) -> None:
+    def test_mass_is_reported(self, auth_client: AuthenticatedTestClient, project_with_geometry: str) -> None:
         job = run(auth_client, project_with_geometry)
         expected = BOX[0] * BOX[1] * BOX[2] * 1e-9 * 2700
         assert job["result"]["mass_kg"] == pytest.approx(expected, rel=1e-6)
 
     def test_defaults_to_the_latest_geometry_version(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         auth_client.post(
             f"/api/v1/projects/{project_with_geometry}/geometry",
@@ -103,7 +103,7 @@ class TestRunningASimulation:
         assert job["mesh_stats"]["volume_mm3"] == pytest.approx(1000.0, rel=1e-6)
 
     def test_an_explicit_version_can_be_analysed(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         auth_client.post(
             f"/api/v1/projects/{project_with_geometry}/geometry",
@@ -115,7 +115,7 @@ class TestRunningASimulation:
         )
 
     def test_overloading_the_part_is_flagged(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         # 200 kN over 400 mm^2 = 500 MPa, well past 6061's 276 MPa yield.
         job = run(auth_client, project_with_geometry, load_case=load_case(force=200_000.0))
@@ -125,7 +125,7 @@ class TestRunningASimulation:
 
 class TestResultSurface:
     def test_surface_is_ready_for_a_viewer(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         job = run(auth_client, project_with_geometry)
         response = auth_client.get(
@@ -145,7 +145,7 @@ class TestResultSurface:
         )
 
     def test_surface_carries_only_boundary_nodes(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         job = run(auth_client, project_with_geometry)
         surface = auth_client.get(
@@ -154,7 +154,7 @@ class TestResultSurface:
         assert len(surface["node_positions"]) < job["mesh_stats"]["node_count"]
 
     def test_surface_is_unavailable_before_success(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         job = run(auth_client, project_with_geometry, load_case=_unconstrained_case())
         assert job["status"] == "failed"
@@ -175,7 +175,7 @@ def _unconstrained_case() -> dict:
 
 class TestFailureReporting:
     def test_an_ill_posed_model_fails_with_an_explanation(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         job = run(auth_client, project_with_geometry, load_case=_unconstrained_case())
         assert job["status"] == "failed"
@@ -183,7 +183,7 @@ class TestFailureReporting:
         assert job["result"] is None
 
     def test_a_selection_matching_nothing_fails_clearly(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         case = load_case()
         case["loads"][0]["where"] = {"type": "box", "min": [500, 500, 500], "max": [600, 600, 600]}
@@ -192,7 +192,7 @@ class TestFailureReporting:
         assert "matched no nodes" in job["error"]
 
     def test_too_fine_a_mesh_is_refused(
-        self, auth_client: TestClient, project_with_geometry: str, monkeypatch
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
     ) -> None:
         from app.simulation import runner
 
@@ -204,7 +204,7 @@ class TestFailureReporting:
 
 class TestSimulationLifecycle:
     def test_simulations_are_listed_newest_first(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         first = run(auth_client, project_with_geometry)
         second = run(auth_client, project_with_geometry, load_case=load_case(force=1_000.0))
@@ -212,10 +212,13 @@ class TestSimulationLifecycle:
         listed = auth_client.get(
             f"/api/v1/projects/{project_with_geometry}/simulations"
         ).json()
-        assert [job["id"] for job in listed] == [second["id"], first["id"]]
+        assert [job["id"] for job in listed["items"]] == [
+            second["id"],
+            first["id"],
+        ]
 
     def test_deleting_a_simulation_removes_its_fields(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         job = run(auth_client, project_with_geometry)
         digest = _fields_digest(auth_client, job)
@@ -230,7 +233,7 @@ class TestSimulationLifecycle:
         assert not auth_client.store.exists(digest)
 
     def test_deleting_a_project_removes_its_simulation_fields(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         job = run(auth_client, project_with_geometry)
         digest = _fields_digest(auth_client, job)
@@ -239,28 +242,28 @@ class TestSimulationLifecycle:
         assert not auth_client.store.exists(digest)
 
     def test_another_users_simulation_is_not_visible(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         job = run(auth_client, project_with_geometry)
         auth_client.post(
             "/api/v1/auth/register",
             json={"email": "rival@kryova.dev", "password": "another-password"},
         )
-        token = auth_client.post(
+        auth_client.post(
             "/api/v1/auth/login",
             data={"username": "rival@kryova.dev", "password": "another-password"},
-        ).json()["access_token"]
+        )
+        auth_client.headers["x-csrf-token"] = auth_client.cookies["kryova_csrf"]
 
         response = auth_client.get(
             f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}",
-            headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 404
 
 
 class TestPreconditions:
     def test_simulating_a_project_without_geometry_is_rejected(
-        self, auth_client: TestClient, project_id: str
+        self, auth_client: AuthenticatedTestClient, project_id: str
     ) -> None:
         response = auth_client.post(
             f"/api/v1/projects/{project_id}/simulations",
@@ -270,7 +273,7 @@ class TestPreconditions:
         assert "upload a CAD file first" in response.json()["detail"]
 
     def test_a_missing_geometry_version_is_rejected(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         response = auth_client.post(
             f"/api/v1/projects/{project_with_geometry}/simulations",
@@ -279,7 +282,7 @@ class TestPreconditions:
         assert response.status_code == 404
 
     def test_a_load_case_without_fixtures_is_rejected(
-        self, auth_client: TestClient, project_with_geometry: str
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         case = load_case()
         case["fixtures"] = []
@@ -290,15 +293,15 @@ class TestPreconditions:
 
 
 class TestMaterialLibrary:
-    def test_materials_are_listed(self, client: TestClient) -> None:
+    def test_materials_are_listed(self, client: AuthenticatedTestClient) -> None:
         materials = client.get("/api/v1/materials").json()["materials"]
         names = [m["name"] for m in materials]
         assert "aluminium-6061-t6" in names
         assert "steel-1018" in names
 
-    def test_a_material_can_be_fetched_by_name(self, client: TestClient) -> None:
+    def test_a_material_can_be_fetched_by_name(self, client: AuthenticatedTestClient) -> None:
         material = client.get("/api/v1/materials/steel-1018").json()
         assert material["youngs_modulus_mpa"] == 205_000
 
-    def test_an_unknown_material_is_404(self, client: TestClient) -> None:
+    def test_an_unknown_material_is_404(self, client: AuthenticatedTestClient) -> None:
         assert client.get("/api/v1/materials/unobtainium").status_code == 404

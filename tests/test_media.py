@@ -5,11 +5,11 @@ import io
 
 import numpy as np
 import pytest
-from fastapi.testclient import TestClient
 
 from app.media.store import LocalMediaStore, MediaError, MediaNotFound, MediaTooLarge
 from app.media.vectors import LocalVectorIndex, VectorIndexError
 from app.models import MediaKind
+from tests.typing import AuthenticatedTestClient
 
 
 class TestBlobStore:
@@ -76,7 +76,7 @@ class TestBlobStore:
 
 class TestMediaService:
     def test_a_shared_blob_survives_deleting_one_record(
-        self, auth_client: TestClient, current_user_id: str
+        self, auth_client: AuthenticatedTestClient, current_user_id: str
     ) -> None:
         # Two records, one digest: deleting either must not orphan the other.
         media = auth_client.media
@@ -97,7 +97,7 @@ class TestMediaService:
 
 
 class TestChunkedUpload:
-    def upload_in_chunks(self, client: TestClient, data: bytes, chunk_size: int, **extra) -> dict:
+    def upload_in_chunks(self, client: AuthenticatedTestClient, data: bytes, chunk_size: int, **extra) -> dict:
         session = client.post(
             "/api/v1/media/uploads",
             json={
@@ -115,7 +115,7 @@ class TestChunkedUpload:
             assert response.status_code == 200, response.text
         return client.post(f"/api/v1/media/uploads/{session['id']}/complete").json()
 
-    def test_chunks_reassemble_into_the_original_file(self, auth_client: TestClient) -> None:
+    def test_chunks_reassemble_into_the_original_file(self, auth_client: AuthenticatedTestClient) -> None:
         data = bytes(range(256)) * 700  # 179,200 bytes
         media = self.upload_in_chunks(auth_client, data, chunk_size=50_000)
 
@@ -123,7 +123,7 @@ class TestChunkedUpload:
         assert media["sha256"] == hashlib.sha256(data).hexdigest()
         assert b"".join(auth_client.store.iter_chunks(media["sha256"])) == data
 
-    def test_progress_reports_which_chunks_are_missing(self, auth_client: TestClient) -> None:
+    def test_progress_reports_which_chunks_are_missing(self, auth_client: AuthenticatedTestClient) -> None:
         data = b"q" * 300
         session = auth_client.post(
             "/api/v1/media/uploads",
@@ -136,7 +136,7 @@ class TestChunkedUpload:
         assert progress["received_chunks"] == [1]
         assert progress["missing_chunks"] == [0, 2]
 
-    def test_chunks_may_arrive_out_of_order(self, auth_client: TestClient) -> None:
+    def test_chunks_may_arrive_out_of_order(self, auth_client: AuthenticatedTestClient) -> None:
         data = b"".join(bytes([i]) * 100 for i in range(3))
         session = auth_client.post(
             "/api/v1/media/uploads",
@@ -150,7 +150,7 @@ class TestChunkedUpload:
         media = auth_client.post(f"/api/v1/media/uploads/{session['id']}/complete").json()
         assert media["sha256"] == hashlib.sha256(data).hexdigest()
 
-    def test_a_retried_chunk_is_not_counted_twice(self, auth_client: TestClient) -> None:
+    def test_a_retried_chunk_is_not_counted_twice(self, auth_client: AuthenticatedTestClient) -> None:
         data = b"r" * 200
         session = auth_client.post(
             "/api/v1/media/uploads",
@@ -163,7 +163,7 @@ class TestChunkedUpload:
         progress = auth_client.get(f"/api/v1/media/uploads/{session['id']}").json()
         assert progress["received_chunks"] == [0]
 
-    def test_completing_early_is_refused(self, auth_client: TestClient) -> None:
+    def test_completing_early_is_refused(self, auth_client: AuthenticatedTestClient) -> None:
         session = auth_client.post(
             "/api/v1/media/uploads",
             json={"filename": "part.stl", "total_size_bytes": 300, "chunk_size": 100},
@@ -174,7 +174,7 @@ class TestChunkedUpload:
         assert response.status_code == 409
         assert "2 chunk(s) still missing" in response.json()["detail"]
 
-    def test_a_wrong_sized_chunk_is_refused(self, auth_client: TestClient) -> None:
+    def test_a_wrong_sized_chunk_is_refused(self, auth_client: AuthenticatedTestClient) -> None:
         session = auth_client.post(
             "/api/v1/media/uploads",
             json={"filename": "part.stl", "total_size_bytes": 300, "chunk_size": 100},
@@ -185,7 +185,7 @@ class TestChunkedUpload:
         assert response.status_code == 422
         assert "expected 100" in response.json()["detail"]
 
-    def test_a_chunk_index_out_of_range_is_refused(self, auth_client: TestClient) -> None:
+    def test_a_chunk_index_out_of_range_is_refused(self, auth_client: AuthenticatedTestClient) -> None:
         session = auth_client.post(
             "/api/v1/media/uploads",
             json={"filename": "part.stl", "total_size_bytes": 200, "chunk_size": 100},
@@ -195,7 +195,7 @@ class TestChunkedUpload:
         )
         assert response.status_code == 422
 
-    def test_a_corrupted_transfer_is_caught_by_the_checksum(self, auth_client: TestClient) -> None:
+    def test_a_corrupted_transfer_is_caught_by_the_checksum(self, auth_client: AuthenticatedTestClient) -> None:
         data = b"m" * 200
         wrong = hashlib.sha256(b"something else entirely").hexdigest()
         session = auth_client.post(
@@ -217,7 +217,7 @@ class TestChunkedUpload:
         assert response.status_code == 409
         assert "corrupted" in response.json()["detail"]
 
-    def test_aborting_discards_the_staged_chunks(self, auth_client: TestClient) -> None:
+    def test_aborting_discards_the_staged_chunks(self, auth_client: AuthenticatedTestClient) -> None:
         session = auth_client.post(
             "/api/v1/media/uploads",
             json={"filename": "part.stl", "total_size_bytes": 200, "chunk_size": 100},
@@ -230,7 +230,7 @@ class TestChunkedUpload:
             f"/api/v1/media/uploads/{session['id']}/complete"
         ).status_code == 409
 
-    def test_another_users_session_is_not_visible(self, auth_client: TestClient) -> None:
+    def test_another_users_session_is_not_visible(self, auth_client: AuthenticatedTestClient) -> None:
         session = auth_client.post(
             "/api/v1/media/uploads",
             json={"filename": "part.stl", "total_size_bytes": 100, "chunk_size": 100},
@@ -239,21 +239,21 @@ class TestChunkedUpload:
             "/api/v1/auth/register",
             json={"email": "nosy@kryova.dev", "password": "another-password"},
         )
-        token = auth_client.post(
+        auth_client.post(
             "/api/v1/auth/login",
             data={"username": "nosy@kryova.dev", "password": "another-password"},
-        ).json()["access_token"]
+        )
+        auth_client.headers["x-csrf-token"] = auth_client.cookies["kryova_csrf"]
 
         response = auth_client.get(
             f"/api/v1/media/uploads/{session['id']}",
-            headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 404
 
 
 class TestChunkedGeometryUpload:
     def test_a_chunked_cad_upload_becomes_a_geometry_version(
-        self, auth_client: TestClient, project_id: str
+        self, auth_client: AuthenticatedTestClient, project_id: str
     ) -> None:
         from tests.test_mesh import box_stl
 
@@ -285,7 +285,7 @@ class TestChunkedGeometryUpload:
 
 
 class TestMediaEndpoints:
-    def test_media_content_downloads_intact(self, auth_client: TestClient, project_id: str, cube_stl) -> None:
+    def test_media_content_downloads_intact(self, auth_client: AuthenticatedTestClient, project_id: str, cube_stl) -> None:
         version = auth_client.post(
             f"/api/v1/projects/{project_id}/geometry",
             files={"file": ("part.stl", cube_stl, "application/octet-stream")},
@@ -295,7 +295,7 @@ class TestMediaEndpoints:
         assert response.status_code == 200
         assert response.content == cube_stl
 
-    def test_verify_confirms_an_intact_blob(self, auth_client: TestClient, project_id: str, cube_stl) -> None:
+    def test_verify_confirms_an_intact_blob(self, auth_client: AuthenticatedTestClient, project_id: str, cube_stl) -> None:
         version = auth_client.post(
             f"/api/v1/projects/{project_id}/geometry",
             files={"file": ("part.stl", cube_stl, "application/octet-stream")},
@@ -305,7 +305,7 @@ class TestMediaEndpoints:
         assert result["intact"] is True
         assert result["sha256"] == hashlib.sha256(cube_stl).hexdigest()
 
-    def test_media_is_listed_for_its_owner_only(self, auth_client: TestClient, project_id: str, cube_stl) -> None:
+    def test_media_is_listed_for_its_owner_only(self, auth_client: AuthenticatedTestClient, project_id: str, cube_stl) -> None:
         auth_client.post(
             f"/api/v1/projects/{project_id}/geometry",
             files={"file": ("part.stl", cube_stl, "application/octet-stream")},
@@ -316,13 +316,12 @@ class TestMediaEndpoints:
             "/api/v1/auth/register",
             json={"email": "other@kryova.dev", "password": "another-password"},
         )
-        token = auth_client.post(
+        auth_client.post(
             "/api/v1/auth/login",
             data={"username": "other@kryova.dev", "password": "another-password"},
-        ).json()["access_token"]
-        listed = auth_client.get(
-            "/api/v1/media", headers={"Authorization": f"Bearer {token}"}
-        ).json()
+        )
+        auth_client.headers["x-csrf-token"] = auth_client.cookies["kryova_csrf"]
+        listed = auth_client.get("/api/v1/media").json()
         assert listed == []
 
 
@@ -352,7 +351,7 @@ class TestVectorIndex:
         assert [hit.id for hit in hits] == [1, 0, 2]
 
     def test_index_survives_a_save_and_load(
-        self, auth_client: TestClient, current_user_id: str
+        self, auth_client: AuthenticatedTestClient, current_user_id: str
     ) -> None:
         client = auth_client
         vectors = self.sample()
@@ -370,7 +369,7 @@ class TestVectorIndex:
         assert reloaded.search(vectors[3], k=1)[0][0].id == 3
 
     def test_a_saved_index_is_content_addressed_like_any_blob(
-        self, auth_client: TestClient, current_user_id: str
+        self, auth_client: AuthenticatedTestClient, current_user_id: str
     ) -> None:
         client = auth_client
         index = LocalVectorIndex.build(self.sample(10), ids=list(range(10)))

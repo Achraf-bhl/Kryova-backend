@@ -1,8 +1,11 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+INSECURE_SECRET_KEY = "changeme"
+MIN_SECRET_KEY_LENGTH = 32
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -33,9 +36,8 @@ class Settings(BaseSettings):
     project_name: str = "Kryova API"
     api_v1_prefix: str = "/api/v1"
 
-    # Postgres only -- Neon in every environment, so what runs in dev is what
-    # runs in production, down to the dialect.
-    database_url: str
+    # Neon Postgres is required in every environment.
+    database_url: str = "postgresql://localhost/kryova"
     db_pool_size: int = 5
     db_max_overflow: int = 5
     # Neon closes idle connections; recycle before it does rather than after.
@@ -50,11 +52,19 @@ class Settings(BaseSettings):
     # run can never touch application data.
     test_schema: str = "kryova_test"
 
+    # Deployment posture. "production" turns on the guards below; anything else
+    # is treated as a developer machine.
+    environment: str = "development"
+
     secret_key: str = "changeme"
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60 * 24
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
+    cookie_secure: bool = False
+    cookie_samesite: str = "lax"
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    frontend_url: str = "http://localhost:3000"
 
     # Local heavy-file store. CAD files, meshes, result fields and vector
     # indexes never leave this machine: only their small metadata rows go to
@@ -73,6 +83,27 @@ class Settings(BaseSettings):
     # Analysis limits, to keep one upload from consuming the whole machine.
     max_elements: int = 400_000
 
+    # AI. Which model serves the AI features is the user's choice -- see
+    # app/ai/providers/. The default is local Ollama: CAD geometry and load
+    # cases are proprietary engineering IP, so nothing is posted to a third
+    # party unless the user opts in. A misconfigured provider makes the AI
+    # endpoints report themselves unavailable; it never stops the app booting.
+    #   ollama            -> local, no key, offline (default)
+    #   anthropic         -> hosted Claude, needs AI_API_KEY
+    #   openai_compatible -> OpenAI / LM Studio / vLLM / llama.cpp / Groq /
+    #                        OpenRouter, needs AI_BASE_URL
+    ai_provider: str = "ollama"
+    ai_model: str = "qwen2.5-coder:7b"
+    ai_base_url: str | None = None
+    ai_api_key: str | None = None
+    # Interpreting a result is a judgement task and gets more headroom than
+    # parsing a sentence into a load case, which is near-mechanical.
+    ai_effort_interpret: str = "high"
+    ai_effort_parse: str = "low"
+    ai_max_tokens: int = 8_000
+    # A 7B model on CPU can take a minute; the default is generous on purpose.
+    ai_timeout_seconds: float = 120.0
+
     # Uploads
     max_upload_bytes: int = 200 * 1024 * 1024
     allowed_geometry_formats: list[str] = Field(
@@ -89,6 +120,42 @@ class Settings(BaseSettings):
                 f"Got: {value.split('://', 1)[0] if '://' in value else value!r}"
             )
         return normalised
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() == "production"
+
+    @model_validator(mode="after")
+    def _harden_production(self) -> "Settings":
+        """Refuse to boot a production process with development-grade secrets.
+
+        `secret_key` signs every access and refresh token. Left at its default,
+        anyone holding a copy of this source can mint a valid token for any
+        user, so a missing environment variable has to be a startup crash rather
+        than a silently insecure deployment.
+        """
+        if not self.is_production:
+            return self
+
+        problems = []
+        if self.secret_key == INSECURE_SECRET_KEY:
+            problems.append("SECRET_KEY is still the default 'changeme'")
+        elif len(self.secret_key) < MIN_SECRET_KEY_LENGTH:
+            problems.append(
+                f"SECRET_KEY is shorter than {MIN_SECRET_KEY_LENGTH} characters "
+                "(generate one with `python -c \"import secrets; "
+                'print(secrets.token_urlsafe(48))"`)'
+            )
+        if not self.cookie_secure:
+            problems.append("COOKIE_SECURE must be true so session cookies are HTTPS-only")
+        if any(origin.startswith("http://") for origin in self.cors_origins):
+            problems.append(f"CORS_ORIGINS contains a plaintext http:// origin: {self.cors_origins}")
+
+        if problems:
+            raise ValueError(
+                "Refusing to start with ENVIRONMENT=production:\n  - " + "\n  - ".join(problems)
+            )
+        return self
 
     @property
     def media_staging_dir(self) -> Path:

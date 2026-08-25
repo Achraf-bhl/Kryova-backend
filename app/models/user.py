@@ -15,6 +15,7 @@ class User(UUIDPrimaryKey, TimestampMixin, Base):
 
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
+    refresh_token_hash: Mapped[str | None] = mapped_column(String(64), default=None)
     full_name: Mapped[str | None] = mapped_column(String(255), default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

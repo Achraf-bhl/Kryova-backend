@@ -1,6 +1,8 @@
+from typing import Annotated
+
 import numpy as np
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, HTTPException, Query, status
+from sqlalchemy import func, select
 
 from app.api.deps import (
     DbSession,
@@ -12,7 +14,7 @@ from app.api.deps import (
 )
 from app.media import MediaNotFound
 from app.models import GeometryVersion, JobStatus, SimulationJob
-from app.schemas import SimulationCreate, SimulationRead, SurfaceField
+from app.schemas import SimulationCreate, SimulationPage, SimulationRead, SurfaceField
 from app.simulation.runner import run_simulation
 from app.solve.linear_static import LinearStaticSolver
 
@@ -66,14 +68,29 @@ def create_simulation(
     return job
 
 
-@router.get("", response_model=list[SimulationRead])
-def list_simulations(project: OwnedProject, db: DbSession) -> list[SimulationJob]:
+@router.get("", response_model=SimulationPage)
+def list_simulations(
+    project: OwnedProject,
+    db: DbSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> SimulationPage:
     stmt = (
         select(SimulationJob)
         .where(SimulationJob.project_id == project.id)
         .order_by(SimulationJob.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    return list(db.scalars(stmt))
+    total = (
+        db.scalar(
+            select(func.count())
+            .select_from(SimulationJob)
+            .where(SimulationJob.project_id == project.id)
+        )
+        or 0
+    )
+    return SimulationPage(total=total, page=page, page_size=page_size, items=list(db.scalars(stmt)))
 
 
 def _get_job(db: DbSession, project_id: str, simulation_id: str) -> SimulationJob:

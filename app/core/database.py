@@ -12,6 +12,7 @@ class Base(DeclarativeBase):
 
 engine = create_engine(
     settings.database_url,
+    connect_args={"sslmode": "require"},
     # Neon sits behind a pooler that drops idle connections; without pre-ping
     # the first query after an idle spell fails instead of reconnecting.
     pool_pre_ping=True,
@@ -21,11 +22,10 @@ engine = create_engine(
     # Compile every table reference schema-qualified instead of trusting
     # search_path. Neon's pooled endpoint is PgBouncer in transaction-pooling
     # mode, where session state set by one client stays on the shared backend
-    # connection and is handed to the next one. A stray `SET search_path`
-    # anywhere -- another service, a psql session, a test run -- would otherwise
-    # silently redirect this application's reads and writes to another schema.
+    # connection and is handed to the next one.
     execution_options={"schema_translate_map": {None: settings.db_schema}},
 )
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 

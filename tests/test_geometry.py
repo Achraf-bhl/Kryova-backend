@@ -67,7 +67,7 @@ def test_uploads_increment_version_numbers(auth_client, project_id, cube_stl) ->
         assert response.json()["version_number"] == expected
 
     listed = auth_client.get(f"/api/v1/projects/{project_id}/geometry").json()
-    assert [v["version_number"] for v in listed] == [3, 2, 1]  # newest first
+    assert [v["version_number"] for v in listed["items"]] == [3, 2, 1]  # newest first
 
 
 def test_download_returns_the_original_bytes(auth_client, project_id, cube_stl) -> None:

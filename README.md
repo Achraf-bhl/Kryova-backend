@@ -8,12 +8,28 @@ for product scope.
 
 ## Status
 
-The physics pipeline works end to end: upload a STEP/IGES/STL file, queue a simulation, and
-get back stress, displacement, factor of safety, and a viewer-ready result surface. On a
-20×20×60 mm bar this runs in well under a second.
+**Working end to end.** Upload a STEP/IGES/STL file, queue a simulation, and get back stress,
+displacement, factor of safety, and a viewer-ready result surface. On a 20×20×60 mm bar this
+runs in well under a second. Auth, projects, immutable geometry versions, resumable chunked
+uploads and content-addressed storage are all in place.
 
-Not yet built: DFM checks, the AI layer, PDF reports, and the frontend. See
-[Roadmap](#roadmap).
+**Not built yet** — and these are the parts the product thesis actually rests on:
+
+| | State |
+|---|---|
+| `ai/` — load-case inference, result summaries, geometry proposals | not started |
+| `dfm/` — manufacturability checks | not started |
+| PDF report export | not started |
+| Analysis types beyond linear static (modal, thermal, nonlinear, contact) | not started |
+| Tet10 elements | partially written, **not wired up and currently broken** — see [Accuracy](#accuracy) |
+| CI, linting, type checking, container image, deploy | none |
+
+A frontend exists in the sibling repo (`../Kryova-frontend`) covering sign-in, upload, load-case
+setup and a WebGL stress viewer.
+
+For a candid assessment of where this sits against SimScale, Onshape, Ansys Discovery and the
+AI-native entrants — and an ordered plan to close the gap — see
+[KRYOVA_STATE_OF_THE_PROJECT.md](KRYOVA_STATE_OF_THE_PROJECT.md).
 
 ## Where things live
 
@@ -32,7 +48,7 @@ latency flat no matter how large the parts get.
 
 ```bash
 python -m venv venv
-venv\Scripts\activate            # macOS/Linux: source venv/bin/activate
+source venv/bin/activate         # Windows: venv\Scripts\activate
 pip install -r requirements-dev.txt
 
 cp .env.example .env             # then paste your Neon URL and set SECRET_KEY
@@ -44,7 +60,14 @@ Interactive API docs: <http://127.0.0.1:8000/docs>
 
 Paste the Neon connection string exactly as the console gives it — the app rewrites
 `postgresql://` onto the psycopg 3 driver itself. Use the **pooled** (`-pooler`) endpoint.
-SQLite is refused at startup rather than silently accepted.
+
+`SECRET_KEY` **defaults to `changeme` and nothing stops the app booting on it.** Generate a
+real one (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) before the service is
+reachable by anyone, or every JWT it issues is signed with a public constant.
+
+A SQLite URL is accepted and takes a working code path (`app/core/database.py`), but it is a
+local convenience only: the schema, the pooling behaviour and the JSONB columns you actually
+ship on are Postgres. Do not treat a green SQLite run as evidence.
 
 Python 3.14 is fine — numpy, scipy, gmsh, psycopg and faiss all ship working wheels for it.
 
@@ -176,17 +199,30 @@ re-export:
 A fixture restrains all three translations by default; `"dofs": ["z"]` makes it a roller or a
 symmetry plane instead.
 
-### Accuracy
+### Accuracy — and its limits
 
-Tet4 elements are constant-strain and therefore stiff in bending — accuracy on
-bending-dominated parts comes from refining the mesh, and tet10 elements are the real fix.
-The solver is verified against closed-form solutions rather than recorded output: a bar in
+The solver is verified against **closed-form solutions** rather than recorded output: a bar in
 pure tension reproduces σ = F/A and δ = FL/AE to 1e-6, including through a real gmsh mesh.
 `tests/test_solver.py` also checks Poisson contraction, load linearity, modulus scaling, and
 that ill-posed models are refused.
 
 An under-constrained model is caught by the equilibrium residual, not by looking for NaNs —
 SuperLU will happily return a finite, meaningless vector for a singular system.
+
+Three limits are worth stating plainly, because a factor of safety is a number people make
+decisions on:
+
+- **Tet4 elements are constant-strain and stiff in bending.** A bending-dominated part is
+  under-predicted for deflection unless the mesh is refined hard. Tet10 is the real fix.
+  `assemble_stiffness_tet10` exists in `app/solve/linear_static.py` but **has no callers, is
+  not selected automatically despite what its module docstring says, and contains a leftover
+  placeholder expression that would raise if it were called.** Treat the solver as tet4-only.
+- **No mesh-convergence check and no error estimate.** Nothing tells the user whether the
+  answer moved between two mesh densities, so nothing distinguishes a converged result from a
+  coarse one.
+- **Factor of safety comes from the single peak element**, with no singularity handling. At a
+  re-entrant corner, peak stress rises without bound as the mesh refines, so the reported FoS
+  there is a mesh artefact rather than a property of the part.
 
 ## API
 
@@ -280,18 +316,51 @@ POST /api/v1/projects/{id}/simulations
   is not redundant — back it up, or move to the S3-backed store before this is more than a
   single node.
 
+## Development tooling
+
+There is deliberately little, and you should know what is missing before trusting a green run:
+
+| | State |
+|---|---|
+| Tests | `pytest` — 9 files. Physics offline, everything else needs live Neon |
+| Linter / formatter | **none** — no ruff, black, or `pyproject.toml` |
+| Type checker | **none** — the code is annotated throughout but nothing checks it |
+| CI | **none** — no `.github/`; nothing runs on push |
+| Container / deploy | **none** — no Dockerfile, no deployment config |
+| Observability | stdlib `logging` only — no structured logs, metrics, or error tracking |
+
+`/health` returns `{"status":"ok"}` unconditionally and does not touch the database, so it is a
+liveness probe, not a readiness one.
+
+## Repository note
+
+`data/` holds 266 MB of Dassault Systèmes and CATIA training PDFs, tracked in git. They are
+third-party copyrighted material and they are in every clone of a repo that ships its own
+LICENSE. They are reference reading, not a build input — resolve their status before this
+repository is published.
+
 ## Roadmap
 
-Next, in order:
+Ordered by what unblocks the most. The first three are not features; they are the difference
+between a demo and something that can be deployed.
 
-1. `dfm/` — rule-based manufacturability checks (wall thickness, sharp internal corners,
+1. **Make it safe to run.** Refuse to boot on `SECRET_KEY=changeme`; stop trusting a
+   client-supplied `X-Forwarded-For` for rate-limit identity; paginate every list endpoint.
+2. **Make it enforceable.** ruff + mypy + a `pyproject.toml`, and a CI workflow running the
+   offline physics tests on every push. The DB suite needs an ephemeral Postgres service
+   container rather than shared Neon before it can run in CI.
+3. **Make it deployable.** Dockerfile, a `/ready` probe that checks the database, structured
+   logging with request ids.
+4. **`dfm/`** — rule-based manufacturability checks (wall thickness, sharp internal corners,
    draft angle). Rule-based first: faster to ship and easier to trust than ML.
-2. `ai/` — thin LLM orchestration with tool-calling into the modules above: infer a load case
-   from a plain-language description, summarise results, propose geometry changes. Its
+5. **`ai/`** — thin LLM orchestration with tool-calling into the modules above: infer a load
+   case from a plain-language description, summarise results, propose geometry changes. Its
    document chunks and embeddings go through the existing vector index. It must not own
    geometry logic.
-3. PDF report export.
-4. Frontend: three.js viewer over `/surface`, load-case editor, chat panel.
-5. tet10 elements, so bending-dominated parts are accurate without brute-force refinement.
-6. A garbage-collection sweep for unreferenced blobs and expired upload sessions
+6. **PDF report export.**
+7. **Tet10 elements** — finish or delete the half-written implementation, and add a mesh
+   convergence indicator alongside it so a factor of safety comes with a confidence.
+8. **Modal analysis**, then thermal. These are the two analysis types users ask for first once
+   linear static works.
+9. A garbage-collection sweep for unreferenced blobs and expired upload sessions
    (`MediaService.sweep_expired_uploads` exists; nothing schedules it yet).

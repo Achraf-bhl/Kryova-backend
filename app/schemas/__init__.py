@@ -1,4 +1,10 @@
-from app.schemas.auth import SessionRead, UserCreate, UserRead
+from app.schemas.auth import (
+    PasswordReset,
+    PasswordResetRequest,
+    SessionRead,
+    UserCreate,
+    UserRead,
+)
 from app.schemas.geometry import GeometryVersionRead
 from app.schemas.media import MediaRead, UploadSessionCreate, UploadSessionRead
 from app.schemas.pagination import (
@@ -21,6 +27,8 @@ __all__ = [
     "MaterialList",
     "MediaRead",
     "Page",
+    "PasswordReset",
+    "PasswordResetRequest",
     "ProjectCreate",
     "ProjectPage",
     "ProjectRead",

@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_media_service, get_session_scope
 from app.api.rate_limit import auth_limiter
 from app.core.config import settings
-from app.core.database import Base, engine, get_db
+from app.core.database import Base, engine, get_async_db, get_db
 from app.jobs import InlineJobQueue, get_job_queue
 from app.main import app
 from app.media import LocalMediaStore, MediaService, get_media_store
@@ -40,16 +40,6 @@ from tests.typing import AuthenticatedTestClient
 
 @pytest.fixture(scope="session")
 def db_connection() -> Iterator[Connection]:
-    """Build the test schema once, on one connection held for the whole run.
-
-    The schema is selected with `schema_translate_map`, which qualifies table
-    names when the SQL is compiled. `SET search_path` would be the obvious
-    alternative and is a trap: Neon's pooled endpoint is PgBouncer in
-    transaction-pooling mode, so a session-level SET stays on the shared backend
-    connection and leaks into whichever client gets it next. A test run really
-    can point an unrelated process at the test schema that way -- and then break
-    it by dropping that schema on teardown.
-    """
     schema = settings.test_schema
     with engine.connect() as setup:
         setup.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
@@ -95,7 +85,9 @@ def client(
 ) -> Iterator[AuthenticatedTestClient]:
     monkeypatch.setattr(settings, "media_root", tmp_path / "media")
     app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_async_db] = lambda: db_session
     app.dependency_overrides[get_media_store] = lambda: media_store
+
     app.dependency_overrides[get_media_service] = lambda: MediaService(db_session, media_store)
     # Jobs run inline on the request thread, against the same transaction the
     # test holds open. A worker thread would use its own connection and see none

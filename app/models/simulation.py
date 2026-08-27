@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Enum, Float, ForeignKey, String, Text
+from sqlalchemy import Enum, Float, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -34,6 +34,9 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
     """
 
     __tablename__ = "simulation_jobs"
+    __table_args__ = (
+        Index("ix_simulation_project_created", "project_id", "created_at"),
+    )
 
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True

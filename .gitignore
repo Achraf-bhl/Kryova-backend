@@ -1,46 +1,48 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-env/
-ENV/
-.venv/
-*.egg-info/
-build/
-dist/
 
-# Environment variables
-# .env is intentionally tracked at the owner's explicit instruction.
-# Restore this line to stop tracking it again.
-.env.local
-.env.*.local
 
-# Databases
-*.db
-*.sqlite3
 
-# IDE
-.vscode/
-.idea/
 
-# OS
-.DS_Store
-Thumbs.db
 
-# Logs
-*.log
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
 
-# Alembic
+
 # (keep versions tracked, ignore local overrides if any)
-
+# .env is intentionally tracked at the owner's explicit instruction.
+# Alembic
+# Databases
+# Environment variables
+# IDE
 # Local heavy-file store (CAD, meshes, result fields, vector indexes)
-media_data/
+# Logs
+# OS
+# Python
+# Restore this line to stop tracking it again.
+# Testing
+*$py.class
+*.db
+*.egg-info/
+*.log
+*.py[cod]
+*.so
+*.sqlite3
+.DS_Store
+.Python
+.coverage
+.env
+.env.*.local
+.env.local
+.idea/
+.pytest_cache/
+.venv/
+.vscode/
+ENV/
+Thumbs.db
+__pycache__/
+build/
 data/
+data/
+dist/
+env/
+htmlcov/
+media_data/
+venv/

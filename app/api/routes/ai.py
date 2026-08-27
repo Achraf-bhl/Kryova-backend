@@ -73,7 +73,8 @@ def _translate(exc: LLMError) -> HTTPException:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         )
     if isinstance(exc, LLMRefusal):
-        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
 

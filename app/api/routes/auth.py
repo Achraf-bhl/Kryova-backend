@@ -1,4 +1,5 @@
 import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -18,7 +19,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models import User
-from app.schemas import SessionRead, UserCreate, UserRead
+from app.schemas import PasswordReset, PasswordResetRequest, SessionRead, UserCreate, UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -128,6 +129,12 @@ def refresh_session(request: Request, response: Response, db: DbSession) -> Sess
     token = request.cookies.get("kryova_refresh")
     if token is None:
         raise HTTPException(status_code=401, detail="Missing refresh token")
+    csrf_from_cookie = request.cookies.get("kryova_csrf")
+    csrf_from_header = request.headers.get("x-csrf-token")
+    if not csrf_from_cookie or not csrf_from_header or not secrets.compare_digest(
+        csrf_from_header, csrf_from_cookie
+    ):
+        raise HTTPException(status_code=403, detail="CSRF failure")
     user_id = decode_refresh_token(token)
     user = db.get(User, user_id) if user_id else None
     expected_hash = user.refresh_token_hash if user else None
@@ -156,3 +163,66 @@ def logout(response: Response, current_user: CurrentUser, db: DbSession) -> None
 @router.get("/me", response_model=UserRead)
 def read_current_user(current_user: CurrentUser) -> User:
     return current_user
+
+
+@router.post("/password-reset-request", status_code=status.HTTP_204_NO_CONTENT)
+def request_password_reset(
+    request: Request,
+    payload: PasswordResetRequest,
+    db: DbSession,
+) -> None:
+    if not auth_limiter.check(f"pwreset:{_client_ip(request)}"):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many reset requests. Try again in a minute.",
+        )
+
+    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    # Always return 204 so the response does not reveal whether the email exists.
+    if user is None:
+        return
+
+    raw_token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    user.password_reset_token_hash = hash_token(raw_token)
+    user.password_reset_expires_at = expires
+    db.commit()
+
+    # In production, send this via email. For now, log it so development works.
+    import logging
+    logging.getLogger(__name__).info(
+        "Password reset token for %s: %s", payload.email, raw_token
+    )
+
+
+@router.post("/password-reset", status_code=status.HTTP_204_NO_CONTENT)
+def confirm_password_reset(
+    request: Request,
+    payload: PasswordReset,
+    db: DbSession,
+) -> None:
+    if not auth_limiter.check(f"pwconfirm:{_client_ip(request)}"):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts. Try again in a minute.",
+        )
+
+    token_hash = hash_token(payload.token)
+    user = db.scalar(
+        select(User).where(User.password_reset_token_hash == token_hash)
+    )
+    if (
+        user is None
+        or user.password_reset_expires_at is None
+        or user.password_reset_expires_at < datetime.now(timezone.utc)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid or expired reset token",
+        )
+
+    user.hashed_password = hash_password(payload.new_password)
+    user.password_reset_token_hash = None
+    user.password_reset_expires_at = None
+    user.refresh_token_hash = None  # Invalidate all existing sessions
+    db.commit()

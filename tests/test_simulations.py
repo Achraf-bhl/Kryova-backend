@@ -153,6 +153,31 @@ class TestResultSurface:
         ).json()
         assert len(surface["node_positions"]) < job["mesh_stats"]["node_count"]
 
+    def test_surface_binary_stream(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        import struct
+
+        job = run(auth_client, project_with_geometry)
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/surface/binary"
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/octet-stream"
+
+        data = response.content
+        header = data[:32]
+        magic, version, num_nodes, num_triangles, max_vm, max_disp, _ = struct.unpack(
+            "<4sIIIff8s", header
+        )
+
+        assert magic == b"KRYO"
+        assert version == 1
+        assert num_nodes > 0
+        assert num_triangles > 0
+        assert max_vm == pytest.approx(job["result"]["max_von_mises_mpa"], rel=1e-6)
+
+
     def test_surface_is_unavailable_before_success(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:

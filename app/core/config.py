@@ -68,6 +68,7 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
     frontend_url: str = "http://localhost:3000"
+    redis_url: str | None = None
 
     # Local heavy-file store. CAD files, meshes, result fields and vector
     # indexes never leave this machine: only their small metadata rows go to
@@ -82,6 +83,8 @@ class Settings(BaseSettings):
     # is what tests and `--reload` dev servers want.
     inline_jobs: bool = False
     job_workers: int = 2
+    job_queue_backend: str = "threadpool"  # "threadpool", "inline", or "celery"
+    celery_broker_url: str | None = None
 
     # Analysis limits, to keep one upload from consuming the whole machine.
     max_elements: int = 400_000

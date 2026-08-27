@@ -1,4 +1,4 @@
-from app.api.rate_limit import RateLimiter
+from app.api.rate_limit import InMemoryBackend, RateLimiter
 from app.geometry.formats import detect_format, rejection_reason
 
 
@@ -45,11 +45,15 @@ class TestRateLimiterEviction:
         limiter = RateLimiter(max_requests=5, window_seconds=0, sweep_threshold=10)
         for i in range(50):
             limiter.check(f"ip-{i}")
-        assert len(limiter._requests) <= 10
+        backend = limiter._get_backend()
+        assert isinstance(backend, InMemoryBackend)
+        assert len(backend._requests) <= 10
 
     def test_active_keys_survive_a_sweep(self) -> None:
         limiter = RateLimiter(max_requests=5, window_seconds=60, sweep_threshold=2)
         limiter.check("keep-me")
         for i in range(5):
             limiter.check(f"other-{i}")
-        assert "keep-me" in limiter._requests
+        backend = limiter._get_backend()
+        assert isinstance(backend, InMemoryBackend)
+        assert "keep-me" in backend._requests

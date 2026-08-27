@@ -1,7 +1,7 @@
 from typing import Annotated
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 
 from app.api.deps import (
@@ -137,6 +137,69 @@ def read_surface_field(
                 np.linalg.norm(data["displacements"], axis=1).max()
             ),
         )
+
+
+@router.get("/{simulation_id}/surface/binary")
+def read_surface_field_binary(
+    project: OwnedProject, db: DbSession, media: MediaServiceDep, simulation_id: str
+) -> Response:
+    """High-performance packed binary surface field stream for 3D viewers."""
+    import struct
+    from fastapi import Response
+
+    job = _get_job(db, project.id, simulation_id)
+    if job.status is not JobStatus.SUCCEEDED or job.fields_media is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Simulation is {job.status.value}; results are not available",
+        )
+    try:
+        handle = media.open(job.fields_media)
+    except MediaNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="Result fields are no longer available"
+        ) from exc
+
+    with handle as fh, np.load(fh) as data:
+        triangles = data["surface_triangles"]
+        used, renumbered = np.unique(triangles, return_inverse=True)
+
+        nodes = np.ascontiguousarray(data["nodes"][used], dtype=np.float32)
+        tri_indices = np.ascontiguousarray(renumbered.reshape(triangles.shape), dtype=np.uint32)
+        displacements = np.ascontiguousarray(data["displacements"][used], dtype=np.float32)
+        von_mises = np.ascontiguousarray(data["von_mises_nodal"][used], dtype=np.float32)
+
+        num_nodes = len(nodes)
+        num_triangles = len(tri_indices)
+        max_von_mises = float(data["von_mises_element"].max())
+        max_disp = float(np.linalg.norm(data["displacements"], axis=1).max())
+
+        header = struct.pack(
+            "<4sIIIff8s",
+            b"KRYO",
+            1,  # Format version 1
+            num_nodes,
+            num_triangles,
+            max_von_mises,
+            max_disp,
+            b"\x00" * 8,
+        )
+
+
+        body = (
+            header
+            + nodes.tobytes()
+            + tri_indices.tobytes()
+            + displacements.tobytes()
+            + von_mises.tobytes()
+        )
+
+        return Response(
+            content=body,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="surface_{simulation_id}.bin"'},
+        )
+
 
 
 @router.delete("/{simulation_id}", status_code=status.HTTP_204_NO_CONTENT)

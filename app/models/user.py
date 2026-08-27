@@ -1,10 +1,11 @@
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.base import TimestampMixin, UUIDPrimaryKey
+from app.models.base import TimestampMixin, UTCDateTime, UUIDPrimaryKey
 
 if TYPE_CHECKING:
     from app.models.project import Project
@@ -16,6 +17,8 @@ class User(UUIDPrimaryKey, TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
     refresh_token_hash: Mapped[str | None] = mapped_column(String(64), default=None)
+    password_reset_token_hash: Mapped[str | None] = mapped_column(String(64), default=None)
+    password_reset_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     full_name: Mapped[str | None] = mapped_column(String(255), default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

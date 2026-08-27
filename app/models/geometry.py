@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -22,6 +22,7 @@ class GeometryVersion(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "geometry_versions"
     __table_args__ = (
         UniqueConstraint("project_id", "version_number", name="uq_geometry_project_version"),
+        Index("ix_geometry_project_created", "project_id", "created_at"),
     )
 
     project_id: Mapped[str] = mapped_column(

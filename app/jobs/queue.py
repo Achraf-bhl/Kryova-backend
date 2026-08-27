@@ -68,10 +68,38 @@ class ThreadPoolJobQueue(JobQueue):
         self._pool.shutdown(wait=True)
 
 
+class CeleryJobQueue(JobQueue):
+    """Dispatches simulation and geometry jobs to Celery workers via Redis/RabbitMQ."""
+
+    def submit(self, job: Job) -> None:
+        # If passed a raw callable (like in legacy tests), attempt inline/fallback call
+        try:
+            from app.jobs.celery_app import run_simulation_task
+
+            # If job closure contains a simulation_id, dispatch to Celery
+            sim_id = getattr(job, "simulation_id", None)
+            if sim_id:
+                run_simulation_task.delay(sim_id)
+            else:
+                job()
+        except Exception:
+            logger.exception("Failed to dispatch Celery job, falling back to thread execution")
+            job()
+
+    def submit_simulation(self, simulation_id: str) -> None:
+        """Submit a simulation job directly by ID to Celery task queue."""
+        from app.jobs.celery_app import run_simulation_task
+
+        run_simulation_task.delay(simulation_id)
+
+
 @lru_cache
 def get_job_queue() -> JobQueue:
     from app.core.config import settings
 
-    if settings.inline_jobs:
+    if settings.inline_jobs or settings.job_queue_backend == "inline":
         return InlineJobQueue()
+    if settings.job_queue_backend == "celery":
+        return CeleryJobQueue()
     return ThreadPoolJobQueue(max_workers=settings.job_workers)
+

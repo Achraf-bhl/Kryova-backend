@@ -87,7 +87,6 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             render_item=render_item,
-            version_table_schema=settings.db_schema,
         )
         with context.begin_transaction():
             context.run_migrations()

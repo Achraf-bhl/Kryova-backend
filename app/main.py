@@ -1,7 +1,10 @@
 import logging
+import os
+import subprocess
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,10 +14,40 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.api.router import api_router
-from app.core.config import settings
+from app.core.config import BASE_DIR, settings
 from app.jobs import get_job_queue
 
 logger = logging.getLogger(__name__)
+
+APP_VERSION = "0.1.1"
+
+
+def _resolve_git_sha() -> str:
+    """The short sha of the running build.
+
+    An installer build has no `.git` directory to inspect, so the value is
+    baked in as `KRYOVA_GIT_SHA` at build time (see the Windows integration
+    build stamp). A dev server falls back to asking git directly.
+    """
+    env_sha = os.environ.get("KRYOVA_GIT_SHA")
+    if env_sha:
+        return env_sha
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=BASE_DIR,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+GIT_SHA = _resolve_git_sha()
+BUILT_AT = os.environ.get("KRYOVA_BUILT_AT") or datetime.now(UTC).isoformat()
 
 
 def _configure_logging() -> None:
@@ -115,4 +148,9 @@ app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 @app.get("/health", tags=["health"])
 def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "git_sha": GIT_SHA,
+        "built_at": BUILT_AT,
+    }

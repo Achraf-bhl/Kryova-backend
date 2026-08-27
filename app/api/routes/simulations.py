@@ -145,6 +145,7 @@ def read_surface_field_binary(
 ) -> Response:
     """High-performance packed binary surface field stream for 3D viewers."""
     import struct
+
     from fastapi import Response
 
     job = _get_job(db, project.id, simulation_id)

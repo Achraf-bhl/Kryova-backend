@@ -10,7 +10,7 @@ value the user gave three messages ago.
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -53,6 +53,14 @@ class Conversation(UUIDPrimaryKey, TimestampMixin, Base):
 
 class ConversationMessage(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "conversation_messages"
+    __table_args__ = (
+        # A conversation can never have two messages claiming the same
+        # position -- see migration c4a1b2d3e5f6 for why this is unique
+        # rather than just an ordering index.
+        Index(
+            "ix_conversation_messages_sequence", "conversation_id", "sequence", unique=True
+        ),
+    )
 
     conversation_id: Mapped[str] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), index=True

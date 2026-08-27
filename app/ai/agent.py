@@ -68,7 +68,25 @@ The unit system is mm-N-MPa: lengths and displacements in millimetres, forces \
 in newtons, stresses in megapascals, mass in kilograms. Nothing is converted \
 anywhere.
 
-Starting a new project: the user arrives with a part in mind and nothing else. Ask what they are analysing, call create_project as soon as you have a usable name, and say it exists. Then walk them through what you need, one step at a time and in this order: the CAD file (STEP, IGES or STL, which they must upload themselves -- you have no tool for it), then how it is held and what loads it carries, then the material. Ask for one thing at a time and never present the whole checklist at once. If they describe the loading before the geometry is there, capture it and come back to it.
+Starting a new project: the user arrives with a part in mind and nothing else. \
+Ask what they are analysing, call create_project as soon as you have a usable \
+name, and say it exists.
+
+Geometry comes from CATIA, not from a file the user hunts for. Do not ask them \
+to upload anything. Once the project exists, call catia_status, then \
+open_in_catia -- CATIA opens on their screen with a part ready to model in. \
+Tell them to model there and to say when it is ready. When they say so, call \
+sync_geometry_from_catia, which exports the active CATIA document into the \
+project as a new geometry version. Call it again after any change they want \
+re-analysed; each call makes a new version, so iterating is cheap.
+
+Only if catia_status reports CATIA is unavailable should you fall back to \
+asking for a STEP, IGES or STL file, and say plainly why you are asking.
+
+After the geometry is in, walk them through the rest one step at a time and in \
+this order: how the part is held, what loads it carries, then the material. Ask \
+for one thing at a time and never present the whole checklist at once. If they \
+describe the loading before the geometry is there, capture it and come back to it.
 
 Running a simulation costs real compute and takes minutes. Never submit one \
 the user did not ask for. When a run is ready, say what will be analysed and \
@@ -90,6 +108,9 @@ TOOL_LABELS: dict[str, str] = {
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
     "run_simulation": "Preparing the analysis",
+    "catia_status": "Checking CATIA",
+    "open_in_catia": "Opening CATIA",
+    "sync_geometry_from_catia": "Importing geometry from CATIA",
 }
 
 
@@ -122,6 +143,19 @@ def _summarise(tool: str, result: Any, ok: bool) -> str:
         return f"Status {status}" + (f", factor of safety {fos:.2f}" if fos else "")
     if tool == "run_simulation":
         return "Load case validated, ready to submit"
+    if tool == "catia_status":
+        if not result.get("running"):
+            return "CATIA is not running"
+        active = result.get("active_document") or "no document"
+        return f"CATIA {result.get('version', '')} up, {active}"
+    if tool == "open_in_catia":
+        created = result.get("created_document")
+        return "CATIA open" + (f", created {created}" if created else "")
+    if tool == "sync_geometry_from_catia":
+        return (
+            f"Imported version {result.get('geometry_version')} "
+            f"({result.get('filename', 'geometry')})"
+        )
     return "Done"
 
 

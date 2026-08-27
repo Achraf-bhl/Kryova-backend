@@ -6,6 +6,10 @@ python-multipart==0.0.32
 SQLAlchemy==2.0.52
 alembic==1.19.1
 psycopg[binary]==3.3.4
+# database.py also builds an async engine (async_engine / AsyncSessionLocal /
+# get_async_db in app/core/database.py) that needs its own driver -- psycopg's
+# sync driver above doesn't cover the async engine.
+asyncpg==0.31.0
 
 pydantic==2.13.4
 pydantic-settings==2.15.0

@@ -404,3 +404,159 @@ bug class rather than a generic smoke test:
 - None for this phase.
 
 ---
+
+## Phase 2 (revised) — Ollama on the GPU — PASS
+Started: 2026-08-27 Finished: 2026-08-27
+
+### Correction to the original plan
+The plan specified `qwen2.5-coder:7b`. The owner's machine already had
+`gpt-oss:20b` pulled and asked for that as the main model, so the download was
+stopped and `.env.local` now pins `AI_PROVIDER=ollama`, `AI_MODEL=gpt-oss:20b`,
+`AI_BASE_URL=http://localhost:11434`, `AI_TIMEOUT_SECONDS=180`.
+
+`AI_BASE_URL` has to be set explicitly: `.env` sets it to
+`https://openrouter.ai/api/v1` for the `openai_compatible` provider, and
+`.env.local` only overrode the provider name at first — so the Ollama provider
+was built pointing at OpenRouter and health-checked `openrouter.ai/api/v1/api/tags`
+(404). Not a code bug; a config-precedence trap worth knowing about.
+
+### GPU verdict
+```
+ollama ps
+NAME           SIZE     PROCESSOR          CONTEXT
+gpt-oss:20b    14 GB    57%/43% CPU/GPU    4096
+
+nvidia-smi: RTX 5070 Laptop, 8151 MiB total, 6074 MiB used by llama-server.exe
+```
+The GPU **is** being used (CUDA, ~6 GB resident, 43% of layers offloaded).
+A 14 GB model cannot fit entirely in 8.1 GB of VRAM, so a CPU/GPU split is
+unavoidable. The owner clarified they wanted the GPU *used*, not the whole
+model resident, so no model swap. Measured throughput on an agent-style
+tool-calling prompt: **31.2 tok/s**, 4-5 s per tool call.
+
+Docs consulted (per R3): https://docs.ollama.com/gpu — current Ollama exposes
+`CUDA_VISIBLE_DEVICES` for device selection and offloads automatically; there
+is no `OLLAMA_GPU_LAYERS` knob to set, so nothing was set.
+
+### Provider verified against gpt-oss:20b (not assumed)
+- `health()` OK
+- `chat()` plain: 6.5 s, coherent reply
+- `chat()` with tools: **4.3 s, correctly emitted a ToolCall for get_weather with city=Paris**
+- `complete()` schema-constrained: 6.8 s, valid parsed model
+
+One false alarm worth recording: `complete()` first returned "Ollama returned an
+empty response." That was my test passing `max_tokens=300`; gpt-oss is a
+reasoning model and spent the budget in its `thinking` field before emitting
+`content`. At a realistic budget it works. Not a product bug — but a 20B
+reasoning model does need headroom, which is why `AI_MAX_TOKENS` stays at 8000.
+
+### Live endpoint
+`GET /api/v1/ai/status` returns
+`{"enabled":true,"provider":"ollama","model":"gpt-oss:20b","detail":null}`
+
+---
+
+## Phase 7 — CATIA integration — PASS
+Started: 2026-08-27 Finished: 2026-08-27
+
+### CORRECTION: Phase 0 was wrong about CATIA being absent
+Phase 0 recorded "CATIA is **absent** ... installer media, not a completed
+install." **That was my error and it was wrong.** I searched recursively for
+`CATIA.exe`; the CATIA V5 executable is **`CNEXT.exe`**. I also read a blank
+PowerShell table as an empty registry result.
+
+The definitive test is the COM ProgID, not a filename search:
+```
+New-Object -ComObject CATIA.Application   ->  succeeds
+HKCR\CATIA.Application\CLSID -> {87fd6f40-e252-11d5-8040-0010b5fa1031}
+LocalServer32 -> "C:\Program Files\Dassault Systemes\B33\win_b64\code\bin\CNEXT.exe"
+                 -env CATIA_P3.V5-6R2023.B33 -direnv "C:\ProgramData\DassaultSystemes\CATEnv"
+SystemConfiguration.Version/Release -> 5 / 33
+```
+**CATIA V5-6R2023 (V5-R33) is installed and COM-automatable.** SIMULIA/Abaqus
+2022 is also on this machine (`C:\SIMULIA\Commands\abaqus.bat`) — not used yet,
+but relevant to any future solver work.
+
+### Why this phase changed shape
+The owner's requirement: the product is 100% driven by the chatbot, and the user
+should **not** upload a CAD file — the system opens CATIA and takes the geometry
+itself. The plan's original design (routes only) would not have delivered that,
+because the agent had no tool to call. So the work is: bridge + **agent tools** +
+routes, with the agent as the primary consumer.
+
+### What was built
+- `app/catia/errors.py` — `CATIABridgeError` and four typed subclasses.
+- `app/catia/bridge.py` — the COM layer. `win32com` imported *inside* the
+  worker so the module imports on Linux/macOS; one thread per call owning its
+  own apartment (`CoInitialize`/`CoUninitialize`), since FastAPI hands sync
+  handlers an arbitrary threadpool thread and COM objects must not cross
+  apartments; a timeout on every call because a modal CATIA dialog blocks COM
+  forever; `GetActiveObject` (attach) kept strictly separate from `Dispatch`
+  (launch) so a status check never boots a CAD system as a side effect.
+- `app/ai/tools.py` — `catia_status`, `open_in_catia`, `sync_geometry_from_catia`.
+- `app/api/routes/catia.py` — `/status` (always 200), `/documents`, `/launch`,
+  `/projects/{id}/sync` (404 for another user's project).
+- `requirements.txt` — `pywin32==312; sys_platform == "win32"`. cp314 wheel exists.
+
+### The actual fix for "please upload the CAD file"
+`app/ai/agent.py`'s system prompt literally instructed the model to ask for an
+upload: *"the CAD file (STEP, IGES or STL, which they must upload themselves --
+you have no tool for it)"*. Tools alone would not have changed behaviour. The
+prompt now routes new projects through `catia_status` then `open_in_catia` then
+`sync_geometry_from_catia`, and only falls back to asking for a file when CATIA
+is genuinely unavailable, saying why.
+
+### Raw output — verified against LIVE CATIA, not mocks
+```
+launch() from cold  -> CatiaStatus(running=True, version='V5-R33', document_count=0)
+new_part()          -> CatiaDocument(name='Part1.CATPart', doc_type='catpart')
+export_active_document -> bridge_probe.stp, 8907 bytes, starts with ISO-10303
+
+# agent tools against the real DB
+catia_status -> {'running': True, 'version': 'V5-R33', 'open_documents': 1,
+                 'active_document': 'Part1.CATPart'}
+sync_geometry_from_catia -> {'geometry_version': 1,
+                             'filename': 'project_9e82f8f8.stp',
+                             'size_bytes': 8914}
+
+# full pipeline on the CATIA-sourced geometry
+generate_tet_mesh -> 144 nodes, 395 tets, bbox [0,0,0] .. [100,100,100] (exact)
+run_simulation    -> SUCCEEDED
+   max_von_mises_mpa 5.183   vs hand calc F/A = 50000/10000 = 5.0
+   mass_kg           7.87    vs 0.001 m3 * 7870 kg/m3     = 7.87  (exact)
+
+# live HTTP, authenticated
+GET /api/v1/catia/status    -> {"running":true,"version":"V5-R33",
+                                "open_documents":1,"active_document":"Part1.CATPart"}
+GET /api/v1/catia/documents -> [{"name":"Part1.CATPart","doc_type":"catpart"}]
+GET /api/v1/catia/status    -> 401 unauthenticated (auth enforced)
+```
+The 3.7% stress difference is ordinary FE discretisation on a coarse 25 mm mesh
+with a fully-fixed face; mass is exact. This is the definitive proof that
+CATIA to STEP to mesh to FEA works.
+
+### Tests
+`pytest tests/test_catia.py -v` gives **18 passed, 3 skipped** with CATIA closed;
+**21 passed** with CATIA running. The 3 live tests skip automatically via a
+`bridge.is_catia_running()` check rather than failing on a machine without CATIA.
+Offline coverage: format parsing (`ExportData` wants `"stp"`, not `"step"` — a
+silent no-op export if wrong), non-Windows import guard, `com_error` never
+escaping as itself, export path traversal, HTTP contract, 404-not-403.
+
+### Full suite after the change
+`pytest -q` gives **205 passed, 2 warnings in 485.92s**. Up from 184; zero
+regressions. `ruff check app/ tests/` gives All checks passed.
+
+### Build stamp confirms the running server is current code
+`GET /health` gives `git_sha: "73da56a"`; `git rev-parse --short HEAD` gives `73da56a`.
+
+### Still open
+- Real-time *push* from CATIA (event-driven) is not implemented; sync is
+  on-demand (the agent calls it, or the user asks). CATIA V5 COM does not
+  expose a usable change-notification hook without a CAA/VBA add-in, so a
+  push model would mean polling the active document. Flagged, not built.
+- `scripts/catia_bridge/catia_bridge.py` (the older standalone daemon, and the
+  frontend SSE panel on :9100 that expects it) is now superseded by
+  `app/catia/`. Its `read_parameters`/`get_active_document` are still missing
+  `self` and would crash if run. Recommend deleting the script and pointing
+  `catia-bridge-panel.tsx` at `/api/v1/catia/status` — not done unasked.

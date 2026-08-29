@@ -85,6 +85,22 @@ def max_steps() -> int:
         return DEFAULT_MAX_STEPS
 
 
+#: Human labels for the step list in the UI. A user reading "list_geometry"
+#: has to decode it; "Checking geometry versions" they can just read.
+TOOL_LABELS: dict[str, str] = {
+    "create_project": "Creating the project",
+    "list_projects": "Looking up your projects",
+    "list_materials": "Checking the material library",
+    "list_geometry": "Checking geometry versions",
+    "list_simulations": "Reviewing previous runs",
+    "get_simulation": "Reading the simulation result",
+    "run_simulation": "Preparing the analysis",
+    "catia_status": "Checking CATIA",
+    "open_in_catia": "Opening CATIA",
+    "sync_geometry_from_catia": "Importing geometry from CATIA",
+}
+
+
 def system_prompt() -> str:
     """The frozen prefix for this deployment.
 
@@ -123,9 +139,22 @@ def summarise_step(tool: str, result: Any, ok: bool) -> str:
         fos = (result.get("result") or {}).get("factor_of_safety")
         return f"Status {status}" + (f", factor of safety {fos:.2f}" if fos else "")
     if tool == "run_simulation":
-        return f"Queued run {result.get('id', '')}".strip()
+        return f"Queued run {result.get('id', '')}".strip() or "Load case validated, ready to submit"
     if tool == "delete_simulation":
         return "Run deleted"
+    if tool == "catia_status":
+        if not result.get("running", result.get("connected")):
+            return "CATIA is not running"
+        active = result.get("active_document") or "no document"
+        return f"CATIA {result.get('version', result.get('catia_version', ''))} up, {active}"
+    if tool == "open_in_catia":
+        created = result.get("created_document")
+        return "CATIA open" + (f", created {created}" if created else "")
+    if tool == "sync_geometry_from_catia":
+        return (
+            f"Imported version {result.get('geometry_version', result.get('geometry_version_id', ''))} "
+            f"({result.get('filename', 'geometry')})"
+        )
     if tool.startswith("catia_"):
         return _catia_summary(result)
     return "Done"

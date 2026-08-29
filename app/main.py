@@ -1,9 +1,12 @@
 import json
 import logging
+import os
+import subprocess
 import sys
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI
@@ -14,10 +17,40 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.api.router import api_router
-from app.core.config import settings
+from app.core.config import BASE_DIR, settings
 from app.jobs import get_job_queue
 
 logger = logging.getLogger(__name__)
+
+APP_VERSION = "0.1.1"
+
+
+def _resolve_git_sha() -> str:
+    """The short sha of the running build.
+
+    An installer build has no `.git` directory to inspect, so the value is
+    baked in as `KRYOVA_GIT_SHA` at build time (see the Windows integration
+    build stamp). A dev server falls back to asking git directly.
+    """
+    env_sha = os.environ.get("KRYOVA_GIT_SHA")
+    if env_sha:
+        return env_sha
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=BASE_DIR,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+GIT_SHA = _resolve_git_sha()
+BUILT_AT = os.environ.get("KRYOVA_BUILT_AT") or datetime.now(UTC).isoformat()
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -44,6 +77,7 @@ class JsonLogFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, default=str)
+
 
 
 def _configure_logging() -> None:
@@ -224,6 +258,9 @@ def health_check() -> Response:
         status_code=200 if healthy else 503,
         content={
             "status": "ok" if healthy else "degraded",
+            "version": APP_VERSION,
+            "git_sha": GIT_SHA,
+            "built_at": BUILT_AT,
             "checks": {name: failures.get(name, "ok") for name in ("database", "media_store")},
         },
     )

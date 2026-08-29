@@ -376,6 +376,62 @@ class ToolBox:
                 handler=self._delete_simulation,
                 mutating=True,
             ),
+            Tool(
+                name="catia_status",
+                description=(
+                    "Check whether CATIA is installed, running, and what is open in it. "
+                    "Call this before offering anything CATIA-related, so you can tell "
+                    "the user the truth about their setup rather than guessing. Never "
+                    "fails -- on a machine without CATIA it simply reports running=false."
+                ),
+                parameters=_object({}),
+                handler=self._catia_status,
+            ),
+            Tool(
+                name="open_in_catia",
+                description=(
+                    "Start CATIA, bring its window to the screen, and optionally open a "
+                    "fresh empty part for the user to model in. This is how a project "
+                    "gets its geometry in this product: the user models in CATIA rather "
+                    "than hunting for a file to upload. Call it right after creating a "
+                    "project, once the user has said what they are building. Takes up to "
+                    "a few minutes if CATIA is cold."
+                ),
+                parameters=_object(
+                    {
+                        "new_part": {
+                            "type": "boolean",
+                            "description": (
+                                "True to add a new empty CATPart. False to just bring up "
+                                "CATIA with whatever the user already has open."
+                            ),
+                        }
+                    }
+                ),
+                handler=self._open_in_catia,
+                mutating=True,
+            ),
+            Tool(
+                name="sync_geometry_from_catia",
+                description=(
+                    "Pull whatever part is currently active in CATIA into the project as "
+                    "a new geometry version, exporting it to STEP on the way. This "
+                    "replaces uploading a file by hand -- call it once the user says "
+                    "their model is ready, and again after any change they want analysed. "
+                    "Returns the new version number, which run_simulation can then use."
+                ),
+                parameters=_object(
+                    {
+                        "project_id": {"type": "string"},
+                        "note": {
+                            "type": "string",
+                            "description": "Short note, e.g. 'after adding the fillet'.",
+                        },
+                    }
+                ),
+                handler=self._sync_geometry_from_catia,
+                mutating=True,
+            ),
         ]
 
     # -- handlers -----------------------------------------------------------
@@ -777,6 +833,115 @@ class ToolBox:
         # in-place edits to a JSONB dict, so the update would never persist.
         conversation.catia_state = {**(conversation.catia_state or {}), **updates}
         self.db.flush()
+
+    # -- Direct COM CATIA bridge fallbacks -----------------------------------
+
+    def _catia_status(self) -> dict[str, Any]:
+        try:
+            from app.catia.bridge import get_status
+            status = get_status()
+            return {
+                "running": status.running,
+                "version": status.version,
+                "open_documents": status.document_count,
+                "active_document": status.active_document,
+                "detail": status.detail,
+            }
+        except Exception as exc:
+            return {"running": False, "detail": str(exc)}
+
+    def _open_in_catia(self, new_part: bool = True) -> dict[str, Any]:
+        from app.catia.bridge import CATIABridgeError, launch as catia_launch, new_part as catia_new_part
+
+        try:
+            status = catia_launch(visible=True)
+            document = catia_new_part() if new_part else None
+        except CATIABridgeError as exc:
+            raise ToolError(str(exc)) from exc
+
+        return {
+            "running": True,
+            "version": status.version,
+            "created_document": document.name if document else None,
+            "note": (
+                "CATIA is open on the user's screen. Tell them to model the part "
+                "there, then say when it is ready so you can call "
+                "sync_geometry_from_catia."
+            ),
+        }
+
+    def _sync_geometry_from_catia(
+        self, project_id: str | None = None, note: str | None = None
+    ) -> dict[str, Any]:
+        import tempfile
+        from pathlib import Path
+
+        from app.catia.bridge import CATIABridgeError, ExportFormat, export_active_document
+        from app.geometry.inspect import GeometryError, inspect
+        from app.media import MediaService, get_media_store
+        from app.models import MediaKind
+
+        project = self._project(project_id)
+
+        with tempfile.TemporaryDirectory(prefix="kryova-catia-") as staging:
+            try:
+                exported = export_active_document(
+                    Path(staging), ExportFormat.STEP, stem=f"project_{project.id[:8]}"
+                )
+            except CATIABridgeError as exc:
+                raise ToolError(str(exc)) from exc
+
+            media_service = MediaService(self.db, get_media_store())
+            stored = media_service.store_path(
+                owner_id=self.user.id,
+                kind=MediaKind.CAD,
+                path=exported,
+                filename=exported.name,
+                content_type="application/step",
+                meta={"source": "catia", "catia_export_format": "stp"},
+            )
+
+            try:
+                stats = inspect(media_service.local_path(stored), "step")
+            except GeometryError as exc:
+                media_service.delete(stored)
+                self.db.commit()
+                raise ToolError(
+                    f"CATIA exported a file Kryova could not read: {exc}"
+                ) from exc
+
+        version_number = (
+            self.db.scalar(
+                select(func.max(GeometryVersion.version_number)).where(
+                    GeometryVersion.project_id == project.id
+                )
+            )
+            or 0
+        ) + 1
+
+        version = GeometryVersion(
+            project_id=project.id,
+            media_id=stored.id,
+            version_number=version_number,
+            filename=stored.filename,
+            file_format="step",
+            note=(note or "Synced from CATIA").strip(),
+            stats=stats,
+        )
+        self.db.add(version)
+        self.db.commit()
+        self.db.refresh(version)
+
+        return {
+            "geometry_version": version.version_number,
+            "filename": version.filename,
+            "size_bytes": stored.size_bytes,
+            "stats": stats,
+            "note": (
+                "Geometry is in the project. You can now build a load case and "
+                "call run_simulation against this version."
+            ),
+        }
 
     # -- dispatch -----------------------------------------------------------
 

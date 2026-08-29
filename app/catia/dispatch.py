@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -706,18 +707,39 @@ def _bind_document(
     return document
 
 
+#: What a captured view can actually be. Real CATIA writes JPEG, because
+#: `CatCaptureFormat` has no PNG member; the mock daemon writes a PNG it encodes
+#: itself. Both arrive here, so the type is read off the name rather than
+#: assumed -- serving JPEG bytes labelled `image/png` leaves the browser to
+#: guess, and leaves the stored record lying about its own content.
+_IMAGE_CONTENT_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+}
+
+
+def _image_content_type(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    return _IMAGE_CONTENT_TYPES.get(suffix, "application/octet-stream")
+
+
 def _store_capture(
     db: Session, *, user_id: str, arguments: dict[str, Any], raw: dict[str, Any]
 ) -> dict[str, Any]:
     received: ReceivedFile | None = None
     try:
         received = receive_inline_file(raw)
+        filename = str(raw.get("filename") or "catia-view.jpg")
         stored = _media_service(db).store_path(
             owner_id=user_id,
             kind=MediaKind.OTHER,
             path=received.path,
-            filename=str(raw.get("filename") or "catia-view.png"),
-            content_type="image/png",
+            filename=filename,
+            content_type=_image_content_type(filename),
             meta={"source": "catia_capture_view", "view": arguments.get("view", "iso")},
         )
     except TransferError as exc:

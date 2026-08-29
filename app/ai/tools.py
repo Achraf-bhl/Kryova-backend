@@ -90,6 +90,10 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     "get_simulation": "Reading the simulation result",
     "run_simulation": "Submitting the analysis",
     "delete_simulation": "Deleting the run",
+    # The direct-COM tools. They carry no `catia_` prefix, so `catia_label`
+    # never sees them and an unlisted name would render as "open in catia".
+    "open_in_catia": "Opening CATIA",
+    "sync_geometry_from_catia": "Importing geometry from CATIA",
 }
 
 
@@ -222,7 +226,7 @@ class ToolBox:
     # -- the tools ----------------------------------------------------------
 
     def _build(self) -> list[Tool]:
-        return [
+        tools: list[Tool] = [
             Tool(
                 name="create_project",
                 description=(
@@ -377,19 +381,16 @@ class ToolBox:
                 mutating=True,
             ),
         ]
+        # The direct-COM tools, for the deployment where the backend runs on the
+        # same Windows box as CATIA. They sit alongside -- not instead of -- the
+        # WebSocket bridge tools that `_build_catia` derives from
+        # `CATIA_TOOL_SPECS`, which serve the workstation-daemon topology.
+        #
+        # `catia_status` is deliberately not among them: the spec table owns
+        # every `catia_*` name, and `_build_catia` runs after this method, so a
+        # second definition here would be built and then immediately shadowed.
         if _catia_dispatch() is not None:
             tools.extend([
-                Tool(
-                    name="catia_status",
-                    description=(
-                        "Check whether CATIA is installed, running, and what is open in it. "
-                        "Call this before offering anything CATIA-related, so you can tell "
-                        "the user the truth about their setup rather than guessing. Never "
-                        "fails -- on a machine without CATIA it simply reports running=false."
-                    ),
-                    parameters=_object({}),
-                    handler=self._catia_status,
-                ),
                 Tool(
                     name="open_in_catia",
                     description=(
@@ -855,7 +856,9 @@ class ToolBox:
             return {"running": False, "detail": str(exc)}
 
     def _open_in_catia(self, new_part: bool = True) -> dict[str, Any]:
-        from app.catia.bridge import CATIABridgeError, launch as catia_launch, new_part as catia_new_part
+        from app.catia.bridge import CATIABridgeError
+        from app.catia.bridge import launch as catia_launch
+        from app.catia.bridge import new_part as catia_new_part
 
         try:
             status = catia_launch(visible=True)

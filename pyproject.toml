@@ -31,6 +31,14 @@ module = [
   "anthropic",
   "anthropic.*",
   "bcrypt.*",
+  # pywin32, which `app/catia/bridge.py` imports to drive CATIA over COM. It is
+  # installed only on Windows (see the marker in requirements.txt), so CI --
+  # which runs on ubuntu -- has neither the package nor its stubs. Listing it
+  # here rather than adding `types-pywin32` to requirements-dev keeps the
+  # Windows install from carrying stubs that shadow the real package.
+  "pythoncom",
+  "win32com",
+  "win32com.*",
   "gmsh.*",
   "faiss.*",
   "jose.*",

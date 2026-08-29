@@ -289,7 +289,8 @@ class TestLiveCatia:
         exported = bridge.export_active_document(
             tmp_path, ExportFormat.STEP, stem="mesh_test"
         )
-        mesh = generate_tet_mesh(exported, element_size_mm=25.0, file_format="step")
-        mesh = mesh[0] if isinstance(mesh, tuple) else mesh
+        mesh, _quality = generate_tet_mesh(
+            exported, element_size_mm=25.0, file_format="step"
+        )
         assert len(mesh.nodes) > 0
         assert len(mesh.tets) > 0

@@ -180,9 +180,20 @@ def _catia_lines(
     if available is True:
         lines.append("catia_bridge: connected")
     elif available is False:
+        # Two different things used to be collapsed into "no CATIA tool will
+        # work", and the difference decides what the assistant should do next.
+        # The `catia_*` design tools do need a paired workstation. `open_in_catia`
+        # does not -- it drives CATIA over COM on the machine running this
+        # server, which on a desktop install is the user's own. Told only that
+        # the bridge was down, the model concluded it had no CATIA at all and
+        # asked the user to upload a STEP file, which is precisely the hand-off
+        # this product exists to remove.
         lines.append(
-            "catia_bridge: not connected (the user must start the Kryova CATIA "
-            "bridge on their Windows machine before any CATIA tool will work)"
+            "catia_bridge: not connected -- the catia_* modelling tools are "
+            "unavailable until a workstation is paired and the Kryova bridge is "
+            "running. open_in_catia still works: it starts CATIA on this machine, "
+            "and the bridge attaches by itself once CATIA is up. Offer that "
+            "before asking the user for a CAD file."
         )
 
     if not document:

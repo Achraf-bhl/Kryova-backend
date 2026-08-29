@@ -23,18 +23,26 @@ import logging
 import secrets
 from collections.abc import Iterator
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, status
+from fastapi import APIRouter, Body, HTTPException, Request, WebSocket, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketDisconnect
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject
 from app.api.rate_limit import RateLimiter
 from app.catia.approval import mint_approval
+from app.catia.bridge import (
+    CATIABridgeError,
+    CatiaStatus,
+    get_status,
+    launch,
+    list_open_documents,
+    new_part,
+)
 from app.catia.connection import (
     HELLO_TIMEOUT_S,
     BridgeError,
@@ -424,18 +432,6 @@ def _relay(user_id: str, device_id: str, frame: dict[str, Any]) -> None:
 
 
 # -- direct COM bridge compatibility helpers ----------------------------------
-
-from typing import Annotated
-from fastapi import Body
-from app.api.deps import MediaServiceDep, OwnedProject
-from app.catia.bridge import (
-    CATIABridgeError,
-    CatiaStatus,
-    get_status,
-    launch,
-    list_open_documents,
-    new_part,
-)
 
 
 class CatiaStatusRead(BaseModel):

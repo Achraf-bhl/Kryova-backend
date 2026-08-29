@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -133,6 +134,38 @@ def _hostname() -> str:
     return socket.gethostname()
 
 
+#: How often to look for CATIA while waiting for it to appear, in seconds.
+CATIA_POLL_S = 5.0
+
+
+def _wait_for_backend(mock: bool, workdir: Path, wait: bool) -> CatiaBackend:
+    """Open the backend, optionally waiting for CATIA to be started.
+
+    Without `--wait-for-catia` this is the original behaviour: no CATIA, no
+    daemon, exit and say so. That is right for someone running the command by
+    hand, who wants to be told immediately.
+
+    It is wrong for the desktop app, which starts this at launch. There the
+    ordinary sequence is that Kryova comes up first and CATIA is opened
+    afterwards -- by the engineer, or by the assistant calling `open_in_catia`
+    -- and a daemon that exited two seconds after login would mean the CATIA
+    tools never appear no matter what the user does next. So it waits, and
+    attaches when CATIA shows up.
+
+    This never *starts* CATIA. Launching it from a background process spends a
+    licence nobody asked to spend, which is the same reason the bridge attaches
+    to a running session rather than creating one.
+    """
+    while True:
+        try:
+            return _open_backend(mock, workdir)
+        except CatiaOperationError as exc:
+            if not wait:
+                raise
+            logger.info("%s Waiting for CATIA...", exc)
+            time.sleep(CATIA_POLL_S)
+
+
 # -- run ---------------------------------------------------------------------
 
 
@@ -146,9 +179,11 @@ def command_run(args: argparse.Namespace) -> int:
     workdir = work_dir()
     workdir.mkdir(parents=True, exist_ok=True)
     try:
-        backend = _open_backend(args.mock, workdir)
+        backend = _wait_for_backend(args.mock, workdir, args.wait_for_catia)
     except CatiaOperationError as exc:
         print(f"{exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
         return 1
 
     print(f"Kryova CATIA bridge {BRIDGE_VERSION}")
@@ -225,11 +260,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Simulate CATIA in memory. For testing without a CATIA licence.",
     )
+    run.add_argument(
+        "--wait-for-catia",
+        action="store_true",
+        help=(
+            "Keep waiting instead of exiting when CATIA is not running yet. "
+            "This is how the Kryova desktop app starts the bridge, because the "
+            "app is usually up before CATIA is."
+        ),
+    )
     run.set_defaults(handler=command_run)
 
     status = commands.add_parser("status", help="Report pairing and CATIA availability.")
     status.add_argument("--mock", action="store_true", help="Check the mock backend instead.")
     status.set_defaults(handler=command_status)
+
+    # `-v` is declared on the parent parser above, which means `run -v` is a
+    # parse error while `-v run` works. The setup guide tells people to "add -v
+    # to any command", so accept it in the place they will actually type it.
+    for command in (pair, run, status):
+        command.add_argument("-v", "--verbose", action="store_true", help="Debug logging.")
 
     return parser
 

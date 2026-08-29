@@ -17,6 +17,14 @@ MAX_UPLOAD_CHUNK_BYTES = 64 * 1024 * 1024
 
 JOB_QUEUE_BACKENDS = ("threadpool", "inline")
 
+# Every value below is an allow-list because each field is read straight into a
+# security decision: the signing algorithm, a Set-Cookie attribute, and the
+# switch that turns the production guards on. A free-text field there means a
+# typo fails *open*, which is exactly what happened before these existed.
+JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
+COOKIE_SAMESITE_VALUES = frozenset({"lax", "strict", "none"})
+ENVIRONMENTS = frozenset({"development", "test", "staging", "production"})
+
 
 def _as_psycopg_url(url: str) -> str:
     """Force SQLAlchemy onto the psycopg 3 driver.
@@ -200,6 +208,58 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("jwt_algorithm")
+    @classmethod
+    def _known_jwt_algorithm(cls, value: str) -> str:
+        """Refuse an algorithm the token layer cannot safely verify.
+
+        `"none"` is the important one: an unsigned JWT is a forged JWT, and
+        `jwt.decode(..., algorithms=["none"])` accepts one. This used to be a
+        free-text field, so a typo in the environment silently downgraded every
+        token in the system.
+        """
+        candidate = value.strip().upper()
+        if candidate not in JWT_ALGORITHMS:
+            raise ValueError(
+                f"JWT_ALGORITHM must be one of {', '.join(sorted(JWT_ALGORITHMS))}; got {value!r}."
+            )
+        return candidate
+
+    @field_validator("cookie_samesite")
+    @classmethod
+    def _known_samesite(cls, value: str) -> str:
+        """`SameSite` is emitted verbatim into a Set-Cookie header.
+
+        An unrecognised value makes browsers drop the attribute entirely, which
+        silently removes the cross-site protection the setting exists to give.
+        """
+        candidate = value.strip().lower()
+        if candidate not in COOKIE_SAMESITE_VALUES:
+            raise ValueError(
+                f"COOKIE_SAMESITE must be one of {', '.join(sorted(COOKIE_SAMESITE_VALUES))}; "
+                f"got {value!r}."
+            )
+        return candidate
+
+    @field_validator("environment")
+    @classmethod
+    def _known_environment(cls, value: str) -> str:
+        """Reject an environment name nothing recognises.
+
+        `is_production` used to be an exact match on "production", so
+        `ENVIRONMENT=prod` -- a plausible typo -- evaluated false and turned off
+        the docs gate, the cookie-secure requirement, HSTS and the secret-key
+        check all at once, with no warning. Naming the allowed values means the
+        typo is a startup crash instead of a silent downgrade.
+        """
+        candidate = value.strip().lower()
+        if candidate not in ENVIRONMENTS:
+            raise ValueError(
+                f"ENVIRONMENT must be one of {', '.join(sorted(ENVIRONMENTS))}; got {value!r}. "
+                "An unrecognised value used to disable every production guard silently."
+            )
+        return candidate
+
     @property
     def is_production(self) -> bool:
         return self.environment.strip().lower() == "production"
@@ -230,6 +290,16 @@ class Settings(BaseSettings):
         if any(origin.startswith("http://") for origin in self.cors_origins):
             problems.append(
                 f"CORS_ORIGINS contains a plaintext http:// origin: {self.cors_origins}"
+            )
+        if any(origin.strip() == "*" for origin in self.cors_origins):
+            # Starlette pairs `allow_origins=["*"]` with `allow_credentials=True`
+            # by echoing whichever Origin asked, which is credentialed
+            # any-origin access -- every authenticated endpoint readable by any
+            # site the user visits. The http:// check above deliberately does
+            # not catch this, because "*" has no scheme.
+            problems.append(
+                'CORS_ORIGINS contains "*", which with allow_credentials=True lets any '
+                "site read authenticated responses; list the exact origins instead"
             )
 
         if problems:

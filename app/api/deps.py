@@ -1,4 +1,3 @@
-import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated
@@ -8,6 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, requires_csrf, verify_csrf
 from app.core.database import SessionLocal, get_db
 from app.core.security import decode_access_token
 from app.jobs import JobQueue, get_job_queue
@@ -72,13 +72,8 @@ def get_current_user(
         raise credentials_error
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
-    if (
-        request.method not in {"GET", "HEAD", "OPTIONS"}
-        and "authorization" not in request.headers
-        and not secrets.compare_digest(
-            request.headers.get("x-csrf-token") or "",
-            request.cookies.get("kryova_csrf") or "",
-        )
+    if requires_csrf(request.method, "authorization" in request.headers) and not verify_csrf(
+        request.headers.get(CSRF_HEADER_NAME), request.cookies.get(CSRF_COOKIE_NAME)
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF failure")
     return user

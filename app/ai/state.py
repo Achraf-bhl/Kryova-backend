@@ -224,8 +224,16 @@ def _catia_lines(
         ("volume_mm3", "catia_volume_mm3"),
         ("bounding_box_mm", "catia_bounding_box_mm"),
     ):
-        if state.get(key) is not None:
-            lines.append(f"{label}: {state[key]}")
+        value = state.get(key)
+        if value is not None:
+            # `_clean` like every other field above, and for the same reason.
+            # These three are copied verbatim out of bridge tool results
+            # (`tools.py` CATIA_STATE_KEYS), so they are attacker-influenced
+            # text, not server-computed numbers. Interpolating them raw let a
+            # crafted mass property close `</current_state>` early and have
+            # everything after it read as server authority -- inside the one
+            # block the prompt tells the model to trust.
+            lines.append(f"{label}: {_clean(value)}")
     return lines
 
 

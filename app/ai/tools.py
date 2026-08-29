@@ -84,6 +84,9 @@ class Tool:
 BUILTIN_TOOL_LABELS: dict[str, str] = {
     "create_project": "Creating the project",
     "list_projects": "Looking up your projects",
+    "get_project": "Reading the project",
+    "update_project": "Renaming the project",
+    "delete_project": "Deleting the project",
     "list_materials": "Checking the material library",
     "list_geometry": "Checking geometry versions",
     "list_simulations": "Reviewing previous runs",
@@ -263,6 +266,67 @@ class ToolBox:
                 ),
                 parameters=_object({}),
                 handler=self._list_projects,
+            ),
+            Tool(
+                name="get_project",
+                description=(
+                    "Full detail for one project: name, description, when it was created "
+                    "and updated, how many geometry versions and simulations it holds, "
+                    "and the newest geometry version. Use this to answer 'what is in this "
+                    "project' in one call instead of three."
+                ),
+                parameters=_object(
+                    {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Defaults to the conversation's project.",
+                        }
+                    }
+                ),
+                handler=self._get_project,
+            ),
+            Tool(
+                name="update_project",
+                description=(
+                    "Rename a project or change its description. Pass only the fields to "
+                    "change; anything omitted is left alone. Use this when the user asks "
+                    "to rename or re-describe a project."
+                ),
+                parameters=_object(
+                    {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Defaults to the conversation's project.",
+                        },
+                        "name": {"type": "string", "description": "New name, 1-255 characters."},
+                        "description": {
+                            "type": "string",
+                            "description": "New description. Pass an empty string to clear it.",
+                        },
+                    }
+                ),
+                # Renaming is reversible and destroys nothing, so it stays
+                # ungated for the same reason `create_project` does.
+                handler=self._update_project,
+            ),
+            Tool(
+                name="delete_project",
+                description=(
+                    "Permanently delete a project and everything in it -- every geometry "
+                    "version, every simulation and every stored file. This cannot be "
+                    "undone. Confirm the project's name with the user before calling it, "
+                    "and never call it to 'clean up' on your own initiative."
+                ),
+                parameters=_object(
+                    {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Defaults to the conversation's project.",
+                        }
+                    },
+                ),
+                mutating=True,
+                handler=self._delete_project,
             ),
             Tool(
                 name="list_materials",
@@ -488,6 +552,148 @@ class ToolBox:
         return {
             "projects": [{"id": p.id, "name": p.name, "description": p.description} for p in rows],
             "current_project_id": self.project_id,
+        }
+
+    def _get_project(self, project_id: str | None = None) -> dict[str, Any]:
+        """One round trip for "what is in this project".
+
+        Counts come from dedicated aggregate queries rather than loading the
+        collections and taking `len()` -- a project with 400 simulations should
+        not materialise 400 rows to answer "how many".
+        """
+        project = self._project(project_id)
+        geometry_count = self.db.scalar(
+            select(func.count())
+            .select_from(GeometryVersion)
+            .where(GeometryVersion.project_id == project.id)
+        )
+        simulation_count = self.db.scalar(
+            select(func.count())
+            .select_from(SimulationJob)
+            .where(SimulationJob.project_id == project.id)
+        )
+        latest = self.db.scalar(
+            select(GeometryVersion)
+            .where(GeometryVersion.project_id == project.id)
+            .order_by(GeometryVersion.version_number.desc())
+            .limit(1)
+        )
+        return {
+            "id": project.id,
+            "name": project.name,
+            "description": project.description,
+            "created_at": project.created_at,
+            "updated_at": project.updated_at,
+            "geometry_version_count": int(geometry_count or 0),
+            "simulation_count": int(simulation_count or 0),
+            "latest_geometry": (
+                {
+                    "version": latest.version_number,
+                    "filename": latest.filename,
+                    "stats": latest.stats,
+                }
+                if latest is not None
+                else None
+            ),
+        }
+
+    def _update_project(
+        self,
+        project_id: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Rename or re-describe a project.
+
+        Only the fields actually supplied are touched, so a caller changing the
+        name cannot accidentally blank the description by omitting it.
+        """
+        project = self._project(project_id)
+        if name is None and description is None:
+            raise ToolError("Nothing to change: pass a new name, a new description, or both.")
+
+        if name is not None:
+            cleaned = name.strip()
+            if not cleaned:
+                raise ToolError("A project name cannot be blank.")
+            if len(cleaned) > 255:
+                raise ToolError("That name is too long; keep it under 255 characters.")
+            project.name = cleaned
+        if description is not None:
+            # An explicit empty string is how the model clears a description;
+            # `None` above already means "leave it alone".
+            project.description = description.strip() or None
+
+        self.db.commit()
+        return {
+            "id": project.id,
+            "name": project.name,
+            "description": project.description,
+            "updated": [
+                field for field, value in (("name", name), ("description", description))
+                if value is not None
+            ],
+        }
+
+    def _delete_project(self, project_id: str | None = None) -> dict[str, Any]:
+        """Delete a project and everything under it.
+
+        Mirrors the HTTP route's ordering: count what is about to go first, so
+        the reply can tell the user exactly what was destroyed, then let the
+        cascade run. Gated behind `mutating`, so it cannot fire without the
+        caller having confirmed this turn.
+        """
+        project = self._project(project_id)
+        geometry_count = int(
+            self.db.scalar(
+                select(func.count())
+                .select_from(GeometryVersion)
+                .where(GeometryVersion.project_id == project.id)
+            )
+            or 0
+        )
+        simulation_count = int(
+            self.db.scalar(
+                select(func.count())
+                .select_from(SimulationJob)
+                .where(SimulationJob.project_id == project.id)
+            )
+            or 0
+        )
+        running = self.db.scalar(
+            select(func.count())
+            .select_from(SimulationJob)
+            .where(
+                SimulationJob.project_id == project.id,
+                SimulationJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+            )
+        )
+        if running:
+            # Deleting the row out from under a live worker leaves it writing
+            # results to a project that no longer exists.
+            raise ToolError(
+                f"{running} simulation(s) in this project are still queued or running. "
+                "Wait for them to finish, or delete them first."
+            )
+
+        deleted = {
+            "id": project.id,
+            "name": project.name,
+            "geometry_versions_deleted": geometry_count,
+            "simulations_deleted": simulation_count,
+        }
+        self.db.delete(project)
+        self.db.commit()
+        if self.project_id == deleted["id"]:
+            # The conversation's scope just stopped existing; drop it rather
+            # than leaving every later tool call resolving a dead id.
+            self.project_id = None
+        return {
+            **deleted,
+            "next_step": (
+                "Tell the user exactly what was deleted, including the counts. "
+                "This cannot be undone."
+            ),
         }
 
     def _list_materials(self) -> dict[str, Any]:

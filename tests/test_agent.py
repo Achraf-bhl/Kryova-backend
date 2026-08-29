@@ -938,3 +938,235 @@ def test_completion_carries_both_the_value_and_the_cost() -> None:
     completion = Completion(value=finding, usage=TokenUsage(10, 5))
     assert completion.value is finding
     assert completion.usage.total_tokens == 15
+
+
+class TestEveryScopedToolChecksOwnership:
+    """The ownership check on each tool must be load-bearing, not decorative.
+
+    `TestOwnershipScoping` above covers `list_geometry` only. That left the
+    guard in `ToolBox._simulation` -- which fronts both `get_simulation` (a
+    cross-tenant read) and `delete_simulation` (a cross-tenant destroy) --
+    completely uncovered: deleting the line `self._project(job.project_id)`
+    left the entire suite green. These tests exist so that stops being true.
+
+    Every tool that resolves an id the model supplied gets a case here. If you
+    add another, add it to this class in the same commit.
+    """
+
+    @pytest.fixture
+    def stranger(self, db_session: Session) -> tuple[User, Project, str]:
+        """Another user, holding a project with one finished simulation."""
+        from app.core.security import hash_password
+
+        other = User(
+            email="stranger@kryova.dev",
+            hashed_password=hash_password("a-long-enough-password"),
+        )
+        db_session.add(other)
+        db_session.flush()
+        theirs = Project(name="Their bracket", owner_id=other.id)
+        db_session.add(theirs)
+        db_session.flush()
+        media = Media(
+            owner_id=other.id,
+            kind=MediaKind.CAD,
+            filename="theirs.stl",
+            content_type="model/stl",
+            size_bytes=128,
+            sha256="1" * 64,
+        )
+        db_session.add(media)
+        db_session.flush()
+        version = GeometryVersion(
+            project_id=theirs.id,
+            media_id=media.id,
+            version_number=1,
+            filename="theirs.stl",
+            file_format="stl",
+            stats={},
+        )
+        db_session.add(version)
+        db_session.flush()
+        job = SimulationJob(
+            project_id=theirs.id,
+            geometry_version_id=version.id,
+            status=JobStatus.SUCCEEDED,
+            solver="linear-static",
+            load_case={"name": "theirs"},
+            result={"max_von_mises_mpa": 42.0},
+        )
+        db_session.add(job)
+        db_session.flush()
+        return other, theirs, job.id
+
+    def test_get_simulation_refuses_another_users_run(
+        self, db_session: Session, user: User, stranger: tuple[User, Project, str]
+    ) -> None:
+        _, _, job_id = stranger
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError, match="belongs to you"):
+            box.call("get_simulation", {"simulation_id": job_id}, allow_mutations=False)
+
+    def test_delete_simulation_refuses_another_users_run(
+        self, db_session: Session, user: User, stranger: tuple[User, Project, str]
+    ) -> None:
+        """The destructive half of the same guard."""
+        _, _, job_id = stranger
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError, match="belongs to you"):
+            box.call("delete_simulation", {"simulation_id": job_id}, allow_mutations=True)
+        # And it must still be there.
+        assert db_session.get(SimulationJob, job_id) is not None
+
+    def test_list_simulations_refuses_another_users_project(
+        self, db_session: Session, user: User, stranger: tuple[User, Project, str]
+    ) -> None:
+        _, theirs, _ = stranger
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError, match="belongs to you"):
+            box.call("list_simulations", {"project_id": theirs.id}, allow_mutations=False)
+
+    def test_get_project_refuses_another_users_project(
+        self, db_session: Session, user: User, stranger: tuple[User, Project, str]
+    ) -> None:
+        _, theirs, _ = stranger
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError, match="belongs to you"):
+            box.call("get_project", {"project_id": theirs.id}, allow_mutations=False)
+
+    def test_update_project_refuses_another_users_project(
+        self, db_session: Session, user: User, stranger: tuple[User, Project, str]
+    ) -> None:
+        _, theirs, _ = stranger
+        original = theirs.name
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError, match="belongs to you"):
+            box.call(
+                "update_project",
+                {"project_id": theirs.id, "name": "hijacked"},
+                allow_mutations=True,
+            )
+        assert theirs.name == original
+
+    def test_delete_project_refuses_another_users_project(
+        self, db_session: Session, user: User, stranger: tuple[User, Project, str]
+    ) -> None:
+        _, theirs, _ = stranger
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError, match="belongs to you"):
+            box.call("delete_project", {"project_id": theirs.id}, allow_mutations=True)
+        assert db_session.get(Project, theirs.id) is not None
+
+    def test_run_simulation_refuses_another_users_project(
+        self, db_session: Session, user: User, stranger: tuple[User, Project, str]
+    ) -> None:
+        _, theirs, _ = stranger
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError, match="belongs to you"):
+            box.call(
+                "run_simulation",
+                {"project_id": theirs.id, "load_case": {"name": "x"}},
+                allow_mutations=True,
+            )
+
+
+class TestProjectManagementTools:
+    """`update_project` / `delete_project` / `get_project`.
+
+    These exist because the agent is the only surface that can rename or delete
+    a project -- the web UI never shipped either control.
+    """
+
+    def test_get_project_reports_counts_without_loading_rows(
+        self, db_session: Session, user: User, project: Project
+    ) -> None:
+        box = _toolbox(db_session, user, project)
+        result = box.call("get_project", {}, allow_mutations=False)
+        assert result["id"] == project.id
+        assert result["geometry_version_count"] == 0
+        assert result["simulation_count"] == 0
+        assert result["latest_geometry"] is None
+
+    def test_update_project_renames_without_clearing_the_description(
+        self, db_session: Session, user: User, project: Project
+    ) -> None:
+        project.description = "Motor mount"
+        db_session.flush()
+        box = _toolbox(db_session, user, project)
+        result = box.call("update_project", {"name": "Renamed"}, allow_mutations=True)
+        assert result["name"] == "Renamed"
+        # Omitting a field must leave it alone, not blank it.
+        assert project.description == "Motor mount"
+        assert result["updated"] == ["name"]
+
+    def test_update_project_clears_a_description_on_an_explicit_empty_string(
+        self, db_session: Session, user: User, project: Project
+    ) -> None:
+        project.description = "Motor mount"
+        db_session.flush()
+        box = _toolbox(db_session, user, project)
+        box.call("update_project", {"description": ""}, allow_mutations=True)
+        assert project.description is None
+
+    def test_update_project_refuses_a_blank_name(
+        self, db_session: Session, user: User, project: Project
+    ) -> None:
+        box = _toolbox(db_session, user, project)
+        with pytest.raises(ToolError, match="cannot be blank"):
+            box.call("update_project", {"name": "   "}, allow_mutations=True)
+
+    def test_update_project_refuses_a_no_op_call(
+        self, db_session: Session, user: User, project: Project
+    ) -> None:
+        box = _toolbox(db_session, user, project)
+        with pytest.raises(ToolError, match="Nothing to change"):
+            box.call("update_project", {}, allow_mutations=True)
+
+    def test_delete_project_is_gated_behind_confirmation(
+        self, db_session: Session, user: User, project: Project
+    ) -> None:
+        """Destroying every file in a project must never happen unconfirmed."""
+        box = _toolbox(db_session, user, project)
+        with pytest.raises(ToolError):
+            box.call("delete_project", {}, allow_mutations=False)
+        assert db_session.get(Project, project.id) is not None
+
+    def test_delete_project_refuses_while_a_run_is_in_flight(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        """A live worker must not have its project deleted out from under it."""
+        db_session.add(
+            SimulationJob(
+                project_id=project.id,
+                geometry_version_id=geometry.id,
+                status=JobStatus.RUNNING,
+                solver="linear-static",
+                load_case={"name": "in flight"},
+            )
+        )
+        db_session.flush()
+        box = _toolbox(db_session, user, project)
+        with pytest.raises(ToolError, match="queued or running"):
+            box.call("delete_project", {}, allow_mutations=True)
+        assert db_session.get(Project, project.id) is not None
+
+    def test_delete_project_reports_what_it_destroyed(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        db_session.add(
+            SimulationJob(
+                project_id=project.id,
+                geometry_version_id=geometry.id,
+                status=JobStatus.SUCCEEDED,
+                solver="linear-static",
+                load_case={"name": "done"},
+            )
+        )
+        db_session.flush()
+        project_id = project.id
+        box = _toolbox(db_session, user, project)
+        result = box.call("delete_project", {}, allow_mutations=True)
+        assert result["simulations_deleted"] == 1
+        assert db_session.get(Project, project_id) is None
+        # The conversation's scope pointed at the row that just vanished.
+        assert box.project_id is None

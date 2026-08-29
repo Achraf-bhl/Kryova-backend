@@ -525,6 +525,37 @@ def chat_stream(
         yield f"data: {json.dumps({'type': 'start', 'conversation_id': conversation_id})}\n\n"
         reply_text = ""
         spent = TokenUsage()
+        recorded = False
+
+        def settle() -> None:
+            """Persist what this turn actually cost, exactly once.
+
+            This runs from `finally`, so it also runs when the client hangs up
+            mid-stream and `GeneratorExit` is thrown at a `yield`. Previously
+            accounting sat after the loop with no `finally`: the transcript was
+            already committed by `stream_agent`, but no `AITokenUsage` row was
+            ever written, so aborting every stream was unmetered, unlimited
+            spend against a budget that never advanced.
+            """
+            nonlocal recorded
+            if recorded:
+                return
+            recorded = True
+            if not (spent.prompt_tokens or spent.completion_tokens):
+                return
+            try:
+                _record(
+                    db,
+                    current_user,
+                    spent,
+                    purpose=token_usage.PURPOSE_CHAT,
+                    provider=provider,
+                    conversation=conversation,
+                )
+            except Exception:  # noqa: BLE001 - accounting must not mask the real error
+                logger.exception("Failed to record token usage for conversation %s", conversation_id)
+                db.rollback()
+
         try:
             for event in stream_agent(
                 db=db,
@@ -550,18 +581,19 @@ def chat_stream(
             if conversation.project_id is None and toolbox.project_id:
                 conversation.project_id = toolbox.project_id
             _maybe_title(db, current_user, provider, conversation, payload.message, reply_text)
-            _record(
-                db,
-                current_user,
-                spent,
-                purpose=token_usage.PURPOSE_CHAT,
-                provider=provider,
-                conversation=conversation,
-            )
+            settle()
             yield ("data: " + json.dumps({"type": "title", "title": conversation.title}) + "\n\n")
         except LLMError as exc:
+            # Roll back the failed unit of work, then still bill the provider
+            # calls this turn already made -- steps 1..N-1 of a multi-step turn
+            # are real spend even though step N failed.
             db.rollback()
+            settle()
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        finally:
+            # Covers the client-disconnect path, where `GeneratorExit` unwinds
+            # the generator without reaching either branch above.
+            settle()
 
     return StreamingResponse(
         events(),

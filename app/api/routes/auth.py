@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, DbSession
 from app.api.rate_limit import auth_limiter
 from app.core.config import settings
-from app.core.csrf import new_csrf_token
+from app.core.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, new_csrf_token, verify_csrf
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -64,7 +64,20 @@ def _set_session_cookies(response: Response, user_id: str) -> IssuedSession:
         path=f"{settings.api_v1_prefix}/auth",
         **common,
     )
-    response.set_cookie("kryova_csrf", csrf, httponly=False, path="/", **common)
+    # Same lifetime as the refresh cookie, and deliberately NOT a session cookie.
+    # With no `max_age` the browser dropped this on restart while the persistent
+    # access cookie survived, leaving a window where the CSRF check had nothing
+    # to compare -- which `verify_csrf` now refuses outright, but a user whose
+    # token silently vanished would just see 403s on every action instead.
+    # `httponly=False` is required: double-submit needs JS to read it back.
+    response.set_cookie(
+        "kryova_csrf",
+        csrf,
+        max_age=settings.refresh_token_expire_days * 86400,
+        httponly=False,
+        path="/",
+        **common,
+    )
     response.headers["cache-control"] = "no-store"
     return IssuedSession(csrf=csrf, refresh=refresh)
 
@@ -102,6 +115,12 @@ def _client_ip(request: Request) -> str:
     return hops[index]
 
 
+# A real bcrypt digest of a value nobody can present, used only to spend the
+# same CPU on a login miss as on a hit. Computed once at import: doing it per
+# request would itself be a timing signal.
+_TIMING_EQUALISER_HASH = hash_password(secrets.token_urlsafe(32))
+
+
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(request: Request, payload: UserCreate, db: DbSession) -> User:
     if not auth_limiter.check(f"register:{_client_ip(request)}"):
@@ -136,6 +155,12 @@ def login(
             detail="Too many login attempts. Try again in a minute.",
         )
     user = db.scalar(select(User).where(User.email == form_data.username.lower()))
+    if user is None:
+        # Hash against a throwaway digest so a miss costs the same ~275ms a hit
+        # does. Returning early here made "no such account" and "wrong password"
+        # trivially distinguishable by response time -- a free user-enumeration
+        # oracle on an endpoint that is deliberately vague in its wording.
+        verify_password(form_data.password, _TIMING_EQUALISER_HASH)
     if user is None or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -152,15 +177,19 @@ def login(
 
 @router.post("/refresh", response_model=SessionRead)
 def refresh_session(request: Request, response: Response, db: DbSession) -> SessionRead:
+    # Rate-limited like every other credential-bearing auth route. This one was
+    # the exception, which made it the cheapest endpoint to grind refresh tokens
+    # against.
+    if not auth_limiter.check(f"refresh:{_client_ip(request)}"):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many refresh attempts. Try again in a minute.",
+        )
     token = request.cookies.get("kryova_refresh")
     if token is None:
         raise HTTPException(status_code=401, detail="Missing refresh token")
-    csrf_from_cookie = request.cookies.get("kryova_csrf")
-    csrf_from_header = request.headers.get("x-csrf-token")
-    if (
-        not csrf_from_cookie
-        or not csrf_from_header
-        or not secrets.compare_digest(csrf_from_header, csrf_from_cookie)
+    if not verify_csrf(
+        request.headers.get(CSRF_HEADER_NAME), request.cookies.get(CSRF_COOKIE_NAME)
     ):
         raise HTTPException(status_code=403, detail="CSRF failure")
     user_id = decode_refresh_token(token)
@@ -172,6 +201,11 @@ def refresh_session(request: Request, response: Response, db: DbSession) -> Sess
         or not secrets.compare_digest(hash_token(token), expected_hash)
     ):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+    # A deactivated account keeps a valid refresh chain unless this is checked:
+    # `login` and `get_current_user` both refuse an inactive user, so without it
+    # the one path that *renews* a session is the one path that ignores the flag.
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
 
     # Rotate: the presented token is single-use, so the row only ever holds the
     # hash of the newest one. Assigned in a single commit -- never blanked and

@@ -323,11 +323,45 @@ class LinearStaticSolver(Solver):
 
     @staticmethod
     def _solve_iterative(k_ff: sp.csc_matrix, applied: NDArray[np.float64]) -> NDArray[np.float64]:
-        ilu = spla.spilu(k_ff, drop_tol=1e-5, fill_factor=15.0, permc_spec="COLAMD")
-        precond = spla.LinearOperator(k_ff.shape, matvec=ilu.solve)
+        """Preconditioned CG for the systems too large to factorise directly.
+
+        The preconditioner is Jacobi (inverse diagonal), NOT incomplete-LU.
+        `spilu` looks like the stronger choice and is the obvious thing to
+        reach for, but SuperLU's ILUTP applies partial pivoting and a column
+        permutation, so the operator it produces is **not symmetric** -- and
+        CG's convergence proof requires an SPD preconditioner. The asymmetry
+        grows with element order (measured: 1.6e-3 on tet4, 3.6e-2 on tet10),
+        which is why linear meshes appeared to work and quadratic ones did not.
+
+        Measured on a 22,308-DOF tet10 cantilever:
+
+            spilu   diverged at maxiter, rel-residual 1.9e-3, 300 s
+            none    converged,           rel-residual 9.4e-9,   6.4 s
+            Jacobi  converged,           rel-residual 9.9e-9,   4.7 s
+
+        So the ILU path was not merely slower than nothing -- it turned every
+        simulation above `_ITERATIVE_THRESHOLD_DOF` into a five-minute failure.
+        K is SPD here (symmetric assembly, and the free-DOF restriction of a
+        properly constrained stiffness matrix is positive definite), so its
+        diagonal is strictly positive and Jacobi is SPD by construction.
+        """
+        diagonal = k_ff.diagonal()
+        if not np.all(diagonal > 0.0):
+            # A non-positive diagonal means the matrix is not SPD, so CG does
+            # not apply at all. That is an under-constrained model, not a
+            # numerical hiccup -- say so rather than iterating to nowhere.
+            raise _under_constrained("the stiffness matrix is not positive definite")
+
+        inverse_diagonal = 1.0 / diagonal
+        precond = spla.LinearOperator(
+            k_ff.shape, matvec=lambda x: inverse_diagonal * x, dtype=np.float64
+        )
         solution, info = spla.cg(k_ff, applied, rtol=_RESIDUAL_TOLERANCE, maxiter=5000, M=precond)
         if info != 0:
-            raise SolverError(f"Conjugate gradient failed to converge (info={info})")
+            raise SolverError(
+                f"Conjugate gradient failed to converge (info={info}). The model may be "
+                "under-constrained, or the mesh may need refining."
+            )
         return solution
 
     def _recover_stress(

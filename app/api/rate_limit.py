@@ -65,9 +65,11 @@ class RedisBackend(RateLimiterBackend):
         self._client = redis.Redis.from_url(url, decode_responses=True)
         try:
             self._client.ping()
-        except redis.ConnectionError as exc:
-            logger.warning("Redis unreachable at %s; falling back to in-memory", url)
-            raise ConnectionError from exc
+        except redis.RedisError as exc:
+            # Every redis-level failure -- unreachable, wrong password, wrong
+            # database -- is normalised to one exception type so the caller can
+            # name what it catches instead of catching everything.
+            raise ConnectionError(f"Redis is not usable at {url}: {exc}") from exc
 
     def check(self, key: str, max_requests: int, window_seconds: int) -> bool:
         full_key = f"ratelimit:{key}"
@@ -88,9 +90,7 @@ class RedisBackend(RateLimiterBackend):
 
 
 class RateLimiter:
-    def __init__(
-        self, max_requests: int, window_seconds: int, sweep_threshold: int = 1024
-    ) -> None:
+    def __init__(self, max_requests: int, window_seconds: int, sweep_threshold: int = 1024) -> None:
         self._max = max_requests
         self._window = window_seconds
         self._sweep_threshold = sweep_threshold
@@ -117,8 +117,16 @@ class RateLimiter:
             try:
                 self._backend = RedisBackend(redis_url)
                 return self._backend
-            except (ConnectionError, Exception):
-                pass
+            except (ConnectionError, OSError, ImportError, ValueError) as exc:
+                # Redis being down must not take auth down with it, so the
+                # in-memory limiter takes over -- but say so. A bare `except
+                # Exception` here also swallowed typos and bad URLs, which then
+                # looked like a working Redis deployment that silently was not.
+                logger.warning(
+                    "Falling back to the in-process rate limiter: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
         self._backend = InMemoryBackend(sweep_threshold=self._sweep_threshold)
         return self._backend
 

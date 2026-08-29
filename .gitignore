@@ -1,48 +1,51 @@
-
-
-
-
-
-
-
-
-# (keep versions tracked, ignore local overrides if any)
-# .env is intentionally tracked at the owner's explicit instruction.
-# Alembic
-# Databases
 # Environment variables
-# IDE
-# Local heavy-file store (CAD, meshes, result fields, vector indexes)
-# Logs
-# OS
-# Python
-# Restore this line to stop tracking it again.
-# Testing
-*$py.class
-*.db
-*.egg-info/
-*.log
-*.py[cod]
-*.so
-*.sqlite3
-.DS_Store
-.Python
-.coverage
+#
+# `.env` holds real credentials and is NEVER committed. It was, once, with live
+# Neon credentials in it -- those are in the public history and have to be
+# rotated, not just removed. `.env.example` is the tracked file: it documents
+# every setting with placeholders.
 .env
-.env.*.local
 .env.local
-.idea/
-.pytest_cache/
-.venv/
-.vscode/
-ENV/
-Thumbs.db
+.env.*.local
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
-data/
-data/
 dist/
-env/
-htmlcov/
-media_data/
+*.egg-info/
 venv/
+.venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Databases
+*.db
+*.sqlite3
+
+# Local heavy-file store (CAD, meshes, result fields, vector indexes)
+media_data/
+
+# Third-party reference material, not source
+data/
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

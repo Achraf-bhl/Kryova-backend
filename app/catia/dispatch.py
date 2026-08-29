@@ -1,0 +1,865 @@
+"""The interface the agent layer calls CATIA through.
+
+`app/ai/tools.py` builds one agent tool per entry of `CATIA_TOOL_SPECS` and
+routes it here. Everything that must be true of *every* CATIA call is true
+because it happens in `call_catia` and nowhere else:
+
+* the tool exists and its arguments satisfy its schema;
+* a device the requesting user owns is actually online;
+* the tier is enforced -- destructive calls carry a server-signed approval;
+* the device is inside its rate limit;
+* a mutating call is checkpointed first, so it can be undone;
+* the call is written to the append-only operation log, whether it succeeded,
+  failed, timed out, or was refused before it ever left this process.
+
+That last point is the one worth defending. The failure this feature has to be
+designed against is not a dramatic one -- it is a parameter quietly set to the
+wrong value in week two and noticed in week six. Logging only successes would
+lose exactly the calls that explain it.
+
+Sanitising sits here too, on the way back: everything CATIA returns is text
+somebody else wrote, and it goes straight into a prompt. See `sanitize.py`.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.api.rate_limit import RateLimiter
+from app.catia.approval import ApprovalError, verify_approval
+from app.catia.connection import (
+    BridgeBusy,
+    BridgeCallFailed,
+    BridgeError,
+    BridgeGone,
+    BridgeTimeout,
+    DeviceConnection,
+    registry,
+)
+from app.catia.geometry_import import GeometryImportError, import_step_export
+from app.catia.sanitize import clean_result, clean_text
+from app.catia.tool_specs import (
+    CATIA_TOOL_SPECS,
+    CatiaTier,
+    CatiaToolSpec,
+    get_spec,
+)
+from app.catia.transfer import (
+    INLINE_TRANSFER_MAX_BYTES,
+    ReceivedFile,
+    TransferError,
+    encode_inline_file,
+    receive_inline_file,
+)
+from app.catia.validation import SchemaError, validate
+from app.core.config import settings
+from app.media import MediaService, get_media_store
+from app.models import Conversation, MediaKind
+from app.models.base import utcnow
+from app.models.catia import (
+    CatiaCheckpoint,
+    CatiaDevice,
+    CatiaDeviceStatus,
+    CatiaDocument,
+    CatiaOperation,
+)
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "CATIA_TOOL_SPECS",
+    "CatiaError",
+    "CatiaUnavailable",
+    "call_catia",
+    "catia_available",
+    "status_payload",
+]
+
+
+class CatiaUnavailable(RuntimeError):
+    """No bridge is connected, or the one that was has gone away.
+
+    Distinct from `CatiaError` because the remedy is different and the agent
+    should say so: this one means "start the bridge on the Windows machine",
+    never "try a different argument".
+    """
+
+
+class CatiaError(RuntimeError):
+    """The tool ran, or was refused, and failed. The message is for the model."""
+
+
+#: Tools handled entirely on this side. `catia_status` asks a question only the
+#: server can answer -- the backend is the source of truth for "is CATIA
+#: connected", and asking the device whether the device is reachable is circular.
+_SERVER_SIDE_TOOLS = frozenset({"catia_status"})
+
+#: Mutating tools that are *not* auto-checkpointed, and why.
+_NO_AUTO_CHECKPOINT = frozenset(
+    {
+        "catia_new_part",  # there is nothing yet to snapshot
+        "catia_open_document",  # nothing is open yet either
+        "catia_checkpoint",  # it is the checkpoint
+        "catia_export_step",  # reads the model out; does not change it
+    }
+)
+
+# Per-device ceilings, mirroring the daemon's own. Both windows exist because
+# they catch different things: the minute window catches a runaway agent loop,
+# the hour window catches a slow drip that would never trip it.
+_ops_per_minute = RateLimiter(max_requests=settings.catia_ops_per_minute, window_seconds=60)
+_ops_per_hour = RateLimiter(max_requests=settings.catia_ops_per_minute * 10, window_seconds=3600)
+
+#: Longest string kept in an operation-log row. The log is for reading, and a
+#: base64 screenshot in a JSONB column is neither readable nor cheap.
+_LOG_STRING_LIMIT = 500
+
+
+# -- device resolution -------------------------------------------------------
+
+
+def _owned_devices(db: Session, user_id: str) -> list[CatiaDevice]:
+    return list(
+        db.scalars(
+            select(CatiaDevice).where(
+                CatiaDevice.owner_id == user_id,
+                CatiaDevice.status == CatiaDeviceStatus.ACTIVE,
+            )
+        )
+    )
+
+
+def _resolve_connection(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceConnection]:
+    """The user's online device, or an explanation of why there isn't one.
+
+    The database row is re-checked even though the socket is open: revoking a
+    device has to take effect on the next call, not whenever the socket happens
+    to drop.
+    """
+    for device in _owned_devices(db, user_id):
+        connection = registry.get(device.id)
+        if connection is not None and connection.user_id == user_id:
+            return device, connection
+
+    raise CatiaUnavailable(
+        "No CATIA workstation is connected to this account. Ask the user to start "
+        "the Kryova CATIA bridge on the Windows machine running CATIA (it connects "
+        "outbound; nothing needs to be opened on their network). Until then, work "
+        "from uploaded geometry instead."
+    )
+
+
+def catia_available(db: Session, user_id: str) -> bool:
+    """True when a tool call could be routed right now."""
+    if not settings.catia_enabled:
+        return False
+    return any(registry.get(device.id) is not None for device in _owned_devices(db, user_id))
+
+
+def status_payload(db: Session, user_id: str, conversation_id: str | None) -> dict[str, Any]:
+    """What `catia_status` answers, for the agent and for `GET /catia/status`."""
+    devices = _owned_devices(db, user_id)
+    online = [(d, c) for d in devices if (c := registry.get(d.id)) is not None]
+
+    document = None
+    if conversation_id:
+        bound = db.scalar(
+            select(CatiaDocument).where(CatiaDocument.conversation_id == conversation_id)
+        )
+        if bound is not None:
+            document = {
+                "doc_name": clean_text(bound.doc_name),
+                "latest_checkpoint_id": bound.latest_checkpoint_id,
+                "bound_at": bound.created_at.isoformat(),
+            }
+
+    if not online:
+        return {
+            "connected": False,
+            "enabled": settings.catia_enabled,
+            "paired_devices": len(devices),
+            "document": document,
+            "detail": (
+                "No workstation is connected."
+                if devices
+                else "No workstation has been paired with this account yet."
+            ),
+        }
+
+    device, connection = online[0]
+    return {
+        "connected": True,
+        "enabled": settings.catia_enabled,
+        "paired_devices": len(devices),
+        "device_id": device.id,
+        "device_name": clean_text(device.name),
+        "hostname": clean_text(connection.hello.hostname),
+        "catia_version": clean_text(connection.hello.catia_version, 64),
+        "bridge_version": clean_text(connection.hello.bridge_version, 32),
+        "mock": connection.hello.mock,
+        "capabilities": list(connection.hello.capabilities),
+        "queue_depth": connection.queue_depth,
+        "connected_since": connection.connected_at.isoformat(),
+        "document": document,
+    }
+
+
+# -- the public entry point --------------------------------------------------
+
+
+def call_catia(
+    db: Session,
+    *,
+    user_id: str,
+    conversation_id: str | None,
+    tool: str,
+    arguments: dict[str, Any],
+    timeout_s: float | None = None,
+) -> dict[str, Any]:
+    """Run one CATIA tool for one user and return its data dictionary.
+
+    Raises `CatiaUnavailable` when no bridge could take the call and `CatiaError`
+    for everything else. Both messages are written to be read by the model and
+    repeated to the user, so they say what to do next.
+    """
+    started = time.monotonic()
+    spec = get_spec(tool)
+    device: CatiaDevice | None = None
+    tier = spec.tier.value if spec else "unknown"
+
+    try:
+        if not settings.catia_enabled:
+            raise CatiaUnavailable(
+                "The CATIA bridge is switched off on this deployment. Work from "
+                "uploaded geometry instead."
+            )
+        if spec is None:
+            known = ", ".join(sorted(s.name for s in CATIA_TOOL_SPECS))
+            raise CatiaError(f"{tool!r} is not a CATIA tool. Available tools: {known}.")
+
+        try:
+            validate(arguments, spec.parameters)
+        except SchemaError as exc:
+            raise CatiaError(f"{tool}: {exc}") from exc
+
+        if tool in _SERVER_SIDE_TOOLS:
+            data = status_payload(db, user_id, conversation_id)
+            _log(
+                db,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                device_id=None,
+                tool=tool,
+                tier=tier,
+                arguments=arguments,
+                result=data,
+                ok=True,
+                error=None,
+                started=started,
+            )
+            return data
+
+        device, connection = _resolve_connection(db, user_id)
+        _enforce_rate_limit(device.id)
+        if spec.tier is CatiaTier.DESTRUCTIVE:
+            _enforce_approval(spec, user_id, conversation_id, arguments)
+
+        data = _execute(
+            db,
+            spec=spec,
+            device=device,
+            connection=connection,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            arguments=arguments,
+            timeout_s=timeout_s,
+        )
+    except (CatiaError, CatiaUnavailable) as exc:
+        _log(
+            db,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            device_id=device.id if device else None,
+            tool=tool,
+            tier=tier,
+            arguments=arguments,
+            result=None,
+            ok=False,
+            error=str(exc),
+            started=started,
+        )
+        raise
+
+    _log(
+        db,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        device_id=device.id if device else None,
+        tool=tool,
+        tier=tier,
+        arguments=arguments,
+        result=data,
+        ok=True,
+        error=None,
+        started=started,
+    )
+    return data
+
+
+# -- enforcement -------------------------------------------------------------
+
+
+def _enforce_rate_limit(device_id: str) -> None:
+    if not _ops_per_minute.check(f"catia:min:{device_id}"):
+        raise CatiaError(
+            f"This workstation has hit its limit of {settings.catia_ops_per_minute} CATIA "
+            "operations per minute. Wait a moment before continuing, and prefer one "
+            "parameter change over a burst of small edits."
+        )
+    if not _ops_per_hour.check(f"catia:hour:{device_id}"):
+        raise CatiaError(
+            f"This workstation has hit its limit of {settings.catia_ops_per_minute * 10} "
+            "CATIA operations per hour. Stop and tell the user; something is looping."
+        )
+
+
+def _enforce_approval(
+    spec: CatiaToolSpec, user_id: str, conversation_id: str | None, arguments: dict[str, Any]
+) -> None:
+    token = arguments.get("approval_token")
+    # The signature binds the target, so an approval for one checkpoint cannot
+    # roll back to another.
+    target = str(arguments.get("checkpoint_id") or "")
+    try:
+        verify_approval(
+            token if isinstance(token, str) else "",
+            user_id=user_id,
+            tool=spec.name,
+            conversation_id=conversation_id,
+            target=target,
+        )
+    except ApprovalError as exc:
+        raise CatiaError(str(exc)) from exc
+
+
+# -- execution ---------------------------------------------------------------
+
+
+def _timeout_for(spec: CatiaToolSpec, override: float | None) -> float:
+    if override is not None:
+        return override
+    return settings.catia_export_timeout_s if spec.long_running else settings.catia_call_timeout_s
+
+
+def _execute(
+    db: Session,
+    *,
+    spec: CatiaToolSpec,
+    device: CatiaDevice,
+    connection: DeviceConnection,
+    user_id: str,
+    conversation_id: str | None,
+    arguments: dict[str, Any],
+    timeout_s: float | None,
+) -> dict[str, Any]:
+    document = _bound_document(db, conversation_id)
+
+    if spec.mutating and spec.name not in _NO_AUTO_CHECKPOINT and document is not None:
+        # A mutation that could not be checkpointed does not run. Refusing is
+        # the whole reason checkpoints exist: an unrecoverable change made
+        # because the safety net was unavailable is the worst of both.
+        _auto_checkpoint(
+            db,
+            connection=connection,
+            document=document,
+            user_id=user_id,
+            label=f"before {spec.name}",
+        )
+
+    payload = _enrich(db, spec=spec, document=document, arguments=arguments)
+    raw = _send(
+        connection,
+        spec=spec,
+        conversation_id=conversation_id,
+        arguments=payload,
+        timeout_s=_timeout_for(spec, timeout_s),
+        # Forwarded, not re-derived: the daemon refuses a destructive call that
+        # arrives without one, and only the server can supply it.
+        approval_token=(
+            str(arguments.get("approval_token") or "")
+            if spec.tier is CatiaTier.DESTRUCTIVE
+            else None
+        ),
+    )
+    device.last_seen_at = utcnow()
+
+    return _post_process(
+        db,
+        spec=spec,
+        device=device,
+        document=document,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        arguments=arguments,
+        raw=raw,
+    )
+
+
+def _send(
+    connection: DeviceConnection,
+    *,
+    spec: CatiaToolSpec,
+    conversation_id: str | None,
+    arguments: dict[str, Any],
+    timeout_s: float,
+    approval_token: str | None = None,
+) -> dict[str, Any]:
+    """One round trip, with the transport's failures translated for the model."""
+    try:
+        return connection.call(
+            tool=spec.name,
+            arguments=arguments,
+            conversation_id=conversation_id,
+            timeout_s=timeout_s,
+            queue_timeout_s=timeout_s,
+            approval_token=approval_token,
+        )
+    except BridgeGone as exc:
+        raise CatiaUnavailable(str(exc)) from exc
+    except (BridgeBusy, BridgeTimeout, BridgeCallFailed) as exc:
+        raise CatiaError(str(exc)) from exc
+    except BridgeError as exc:  # pragma: no cover - defensive
+        raise CatiaError(f"The CATIA bridge failed: {exc}") from exc
+
+
+def _bound_document(db: Session, conversation_id: str | None) -> CatiaDocument | None:
+    if not conversation_id:
+        return None
+    return db.scalar(select(CatiaDocument).where(CatiaDocument.conversation_id == conversation_id))
+
+
+def _enrich(
+    db: Session,
+    *,
+    spec: CatiaToolSpec,
+    document: CatiaDocument | None,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Add the server-held context a tool needs, which the model never supplies.
+
+    The model names documents and checkpoints; paths and file bytes are resolved
+    here. That is what makes "no filesystem paths from the model" enforceable
+    rather than aspirational.
+    """
+    payload = {k: v for k, v in arguments.items() if k != "approval_token"}
+
+    if spec.name == "catia_open_document":
+        if document is None:
+            raise CatiaError(
+                "This conversation has no CATIA document yet. Call catia_new_part to start one."
+            )
+        payload["doc_name"] = document.doc_name
+        payload["remote_path"] = document.remote_path
+        # If the workstation lost the file, the daemon reopens from the blob we
+        # kept. That is the difference between "resume tomorrow" working and
+        # working only until someone cleans their temp directory.
+        checkpoint = _latest_checkpoint(db, document)
+        if checkpoint is not None:
+            payload["fallback_checkpoint"] = _checkpoint_payload(db, checkpoint)
+
+    elif spec.name == "catia_restore":
+        if document is None:
+            raise CatiaError("This conversation has no CATIA document to restore.")
+        checkpoint = db.get(CatiaCheckpoint, arguments.get("checkpoint_id"))
+        if checkpoint is None or checkpoint.document_id != document.id:
+            raise CatiaError(
+                "No checkpoint with that id belongs to this conversation's document. "
+                "List the checkpoints and name one of those."
+            )
+        payload = {"checkpoint": _checkpoint_payload(db, checkpoint)}
+
+    elif spec.name in {"catia_checkpoint", "catia_export_step", "catia_capture_view"}:
+        payload["max_inline_bytes"] = INLINE_TRANSFER_MAX_BYTES
+
+    return payload
+
+
+def _latest_checkpoint(db: Session, document: CatiaDocument) -> CatiaCheckpoint | None:
+    if document.latest_checkpoint_id:
+        return db.get(CatiaCheckpoint, document.latest_checkpoint_id)
+    return None
+
+
+def _checkpoint_payload(db: Session, checkpoint: CatiaCheckpoint) -> dict[str, Any]:
+    """A checkpoint as the daemon needs it: its own reference, plus bytes if we have them."""
+    payload: dict[str, Any] = {
+        "checkpoint_id": checkpoint.id,
+        "remote_ref": checkpoint.remote_ref,
+        "sha256": checkpoint.digest,
+    }
+    if checkpoint.media is not None:
+        media = _media_service(db)
+        try:
+            payload["content_b64"] = encode_inline_file(media.local_path(checkpoint.media))
+        except (TransferError, OSError) as exc:
+            # Not fatal: the daemon still has `remote_ref` and may hold its own
+            # copy. Losing the cloud copy is worth a log line, not a refusal.
+            logger.warning("Could not ship checkpoint %s to the daemon: %s", checkpoint.id, exc)
+    return payload
+
+
+# -- checkpointing -----------------------------------------------------------
+
+
+def _media_service(db: Session) -> MediaService:
+    return MediaService(db, get_media_store())
+
+
+def _auto_checkpoint(
+    db: Session,
+    *,
+    connection: DeviceConnection,
+    document: CatiaDocument,
+    user_id: str,
+    label: str,
+) -> CatiaCheckpoint:
+    spec = get_spec("catia_checkpoint")
+    assert spec is not None  # noqa: S101 - the vocabulary is a module constant
+    try:
+        raw = _send(
+            connection,
+            spec=spec,
+            conversation_id=document.conversation_id,
+            arguments={"label": label, "max_inline_bytes": INLINE_TRANSFER_MAX_BYTES},
+            timeout_s=settings.catia_call_timeout_s,
+        )
+    except (CatiaError, CatiaUnavailable) as exc:
+        raise CatiaError(
+            f"Refusing to run this change: CATIA could not save a checkpoint first "
+            f"({exc}). Fix that before modifying the part -- without a checkpoint the "
+            "change cannot be undone."
+        ) from exc
+    return _record_checkpoint(db, document=document, user_id=user_id, label=label, raw=raw)
+
+
+def _record_checkpoint(
+    db: Session,
+    *,
+    document: CatiaDocument,
+    user_id: str,
+    label: str,
+    raw: dict[str, Any],
+) -> CatiaCheckpoint:
+    """Store a snapshot's bytes (when they fit) and write the checkpoint row."""
+    media_id: str | None = None
+    digest = raw.get("sha256")
+    size_bytes = raw.get("size_bytes")
+
+    if raw.get("content_b64"):
+        received: ReceivedFile | None = None
+        try:
+            received = receive_inline_file(raw)
+            stored = _media_service(db).store_path(
+                owner_id=user_id,
+                kind=MediaKind.OTHER,
+                path=received.path,
+                filename=f"{document.doc_name}.CATPart",
+                content_type="application/octet-stream",
+                meta={"source": "catia_checkpoint", "document_id": document.id},
+            )
+            media_id = stored.id
+            digest = received.digest
+            size_bytes = received.size_bytes
+        except TransferError as exc:
+            # The daemon's own snapshot still exists, so the checkpoint is
+            # recorded and remains usable on that workstation. Say so rather
+            # than pretending the cloud copy is there.
+            logger.warning("Checkpoint for document %s did not transfer: %s", document.id, exc)
+        finally:
+            if received is not None:
+                received.path.unlink(missing_ok=True)
+
+    checkpoint = CatiaCheckpoint(
+        document_id=document.id,
+        media_id=media_id,
+        digest=str(digest)[:64] if digest else None,
+        size_bytes=int(size_bytes) if isinstance(size_bytes, int) else None,
+        remote_ref=clean_text(raw.get("remote_ref") or "", 1000) or None,
+        label=clean_text(label, 200),
+    )
+    db.add(checkpoint)
+    db.flush()
+    document.latest_checkpoint_id = checkpoint.id
+    db.flush()
+    return checkpoint
+
+
+# -- post-processing ---------------------------------------------------------
+
+
+def _post_process(
+    db: Session,
+    *,
+    spec: CatiaToolSpec,
+    device: CatiaDevice,
+    document: CatiaDocument | None,
+    user_id: str,
+    conversation_id: str | None,
+    arguments: dict[str, Any],
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    """Turn a daemon result into what the agent sees, with side effects recorded."""
+    if spec.name == "catia_new_part":
+        document = _bind_document(
+            db,
+            conversation_id=conversation_id,
+            device=device,
+            doc_name=str(raw.get("doc_name") or arguments.get("name") or "Part"),
+            remote_path=raw.get("remote_path"),
+            existing=document,
+        )
+        return _clean(raw) | {"document_id": document.id}
+
+    if spec.name == "catia_open_document" and document is not None:
+        if raw.get("remote_path"):
+            document.remote_path = str(raw["remote_path"])
+        db.flush()
+        return _clean(raw) | {"document_id": document.id}
+
+    if spec.name == "catia_checkpoint":
+        if document is None:
+            raise CatiaError(
+                "This conversation has no CATIA document to checkpoint. Call "
+                "catia_new_part or catia_open_document first."
+            )
+        checkpoint = _record_checkpoint(
+            db,
+            document=document,
+            user_id=user_id,
+            label=str(arguments.get("label") or "checkpoint"),
+            raw=raw,
+        )
+        return {
+            "checkpoint_id": checkpoint.id,
+            "label": checkpoint.label,
+            "size_bytes": checkpoint.size_bytes,
+            # Named honestly: a checkpoint held only on the workstation is not
+            # the same promise as one held in the blob store, and the agent
+            # should not tell the user their work is safely backed up when the
+            # only copy is on the laptop that might be the thing that fails.
+            "stored_in_cloud": checkpoint.media_id is not None,
+        }
+
+    if spec.name == "catia_restore":
+        return _clean(raw) | {"restored_checkpoint_id": arguments.get("checkpoint_id")}
+
+    if spec.name == "catia_capture_view":
+        return _store_capture(db, user_id=user_id, arguments=arguments, raw=raw)
+
+    if spec.name == "catia_export_step":
+        return _store_export(
+            db,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            arguments=arguments,
+            raw=raw,
+        )
+
+    return _clean(raw)
+
+
+def _bind_document(
+    db: Session,
+    *,
+    conversation_id: str | None,
+    device: CatiaDevice,
+    doc_name: str,
+    remote_path: Any,
+    existing: CatiaDocument | None,
+) -> CatiaDocument:
+    if conversation_id is None:
+        raise CatiaError(
+            "A CATIA document has to belong to a conversation, and this call was made outside one."
+        )
+    if existing is not None:
+        # One document per conversation is a unique constraint, so rebinding is
+        # an update, never a second row.
+        existing.doc_name = clean_text(doc_name, 255)
+        existing.remote_path = str(remote_path) if remote_path else None
+        existing.device_id = device.id
+        db.flush()
+        return existing
+
+    document = CatiaDocument(
+        conversation_id=conversation_id,
+        device_id=device.id,
+        doc_name=clean_text(doc_name, 255),
+        remote_path=str(remote_path) if remote_path else None,
+    )
+    db.add(document)
+    db.flush()
+    return document
+
+
+def _store_capture(
+    db: Session, *, user_id: str, arguments: dict[str, Any], raw: dict[str, Any]
+) -> dict[str, Any]:
+    received: ReceivedFile | None = None
+    try:
+        received = receive_inline_file(raw)
+        stored = _media_service(db).store_path(
+            owner_id=user_id,
+            kind=MediaKind.OTHER,
+            path=received.path,
+            filename=str(raw.get("filename") or "catia-view.png"),
+            content_type="image/png",
+            meta={"source": "catia_capture_view", "view": arguments.get("view", "iso")},
+        )
+    except TransferError as exc:
+        raise CatiaError(f"The screenshot did not arrive intact: {exc}") from exc
+    finally:
+        if received is not None:
+            received.path.unlink(missing_ok=True)
+
+    return {
+        "media_id": stored.id,
+        "view": arguments.get("view", "iso"),
+        "label": clean_text(arguments.get("label") or "", 120),
+        "width_px": raw.get("width_px"),
+        "height_px": raw.get("height_px"),
+        "size_bytes": stored.size_bytes,
+    }
+
+
+def _store_export(
+    db: Session,
+    *,
+    user_id: str,
+    conversation_id: str | None,
+    arguments: dict[str, Any],
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    conversation = db.get(Conversation, conversation_id) if conversation_id else None
+    if conversation is None or conversation.owner_id != user_id:
+        raise CatiaError("This call is not attached to one of your conversations.")
+    if conversation.project_id is None:
+        raise CatiaError(
+            "This conversation is not scoped to a project, so there is nowhere to put "
+            "the geometry. Create a project first, then export again."
+        )
+
+    received: ReceivedFile | None = None
+    try:
+        received = receive_inline_file(raw)
+        version = import_step_export(
+            db,
+            _media_service(db),
+            owner_id=user_id,
+            project_id=conversation.project_id,
+            path=received.path,
+            filename=str(raw.get("filename") or "catia-export.step"),
+            note=arguments.get("note"),
+        )
+    except TransferError as exc:
+        raise CatiaError(f"The STEP export did not arrive intact: {exc}") from exc
+    except GeometryImportError as exc:
+        raise CatiaError(str(exc)) from exc
+    finally:
+        if received is not None:
+            received.path.unlink(missing_ok=True)
+
+    return {
+        "project_id": conversation.project_id,
+        "geometry_version_id": version.id,
+        "version_number": version.version_number,
+        "filename": version.filename,
+        "size_bytes": version.size_bytes,
+        "stats": version.stats,
+        "next_step": (
+            f"Geometry version {version.version_number} is ready. Build a load case "
+            "against it and run a simulation."
+        ),
+    }
+
+
+def _clean(raw: dict[str, Any]) -> dict[str, Any]:
+    """Sanitised result, minus the transfer plumbing the model has no use for."""
+    stripped = {
+        key: value for key, value in raw.items() if key not in {"content_b64", "max_inline_bytes"}
+    }
+    cleaned = clean_result(stripped)
+    return cleaned if isinstance(cleaned, dict) else {}
+
+
+# -- the audit trail ---------------------------------------------------------
+
+
+#: Never written to the operation log. File payloads because they are huge and
+#: unreadable; the approval token because it is a live credential for its five
+#: minutes, and an audit table is exactly the wrong place to leave one.
+_REDACTED_LOG_KEYS = frozenset(
+    {"content_b64", "fallback_checkpoint", "checkpoint", "approval_token"}
+)
+
+
+def _loggable(value: Any, _depth: int = 0) -> Any:
+    """Shrink a payload to something worth keeping in a log row forever."""
+    if _depth > 6:
+        return "…"
+    if isinstance(value, dict):
+        return {
+            key: ("…" if key in _REDACTED_LOG_KEYS else _loggable(v, _depth + 1))
+            for key, v in list(value.items())[:64]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_loggable(item, _depth + 1) for item in list(value)[:32]]
+    if isinstance(value, str) and len(value) > _LOG_STRING_LIMIT:
+        return value[:_LOG_STRING_LIMIT] + "…"
+    return value
+
+
+def _log(
+    db: Session,
+    *,
+    user_id: str,
+    conversation_id: str | None,
+    device_id: str | None,
+    tool: str,
+    tier: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any] | None,
+    ok: bool,
+    error: str | None,
+    started: float,
+) -> None:
+    """Write one row to the append-only operation log, and commit it.
+
+    Committing here, rather than leaving it to the caller, is deliberate. The
+    agent loop rolls back when a turn fails, and an audit trail that disappears
+    with the failure it was meant to record is not an audit trail. The row
+    describes a call that really was made to a real workstation; that fact does
+    not become untrue because the surrounding transaction was abandoned.
+    """
+    operation = CatiaOperation(
+        conversation_id=conversation_id,
+        device_id=device_id,
+        user_id=user_id,
+        tool=tool[:64],
+        tier=tier[:16],
+        arguments=_loggable(arguments),
+        result=_loggable(result) if result is not None else None,
+        ok=ok,
+        error=error[:2000] if error else None,
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
+    db.add(operation)
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001 - logging must never mask the real failure
+        logger.exception("Could not write the CATIA operation log for %s", tool)
+        db.rollback()

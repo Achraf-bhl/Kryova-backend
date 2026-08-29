@@ -87,7 +87,9 @@ class TestRunningASimulation:
         assert stats["inverted_count"] == 0
         assert stats["volume_mm3"] == pytest.approx(BOX[0] * BOX[1] * BOX[2], rel=1e-6)
 
-    def test_mass_is_reported(self, auth_client: AuthenticatedTestClient, project_with_geometry: str) -> None:
+    def test_mass_is_reported(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
         job = run(auth_client, project_with_geometry)
         expected = BOX[0] * BOX[1] * BOX[2] * 1e-9 * 2700
         assert job["result"]["mass_kg"] == pytest.approx(expected, rel=1e-6)
@@ -110,9 +112,7 @@ class TestRunningASimulation:
             files={"file": ("box2.stl", box_stl((10.0, 10.0, 10.0)), "application/octet-stream")},
         )
         job = run(auth_client, project_with_geometry, geometry_version=1)
-        assert job["mesh_stats"]["volume_mm3"] == pytest.approx(
-            BOX[0] * BOX[1] * BOX[2], rel=1e-6
-        )
+        assert job["mesh_stats"]["volume_mm3"] == pytest.approx(BOX[0] * BOX[1] * BOX[2], rel=1e-6)
 
     def test_overloading_the_part_is_flagged(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str
@@ -177,7 +177,6 @@ class TestResultSurface:
         assert num_triangles > 0
         assert max_vm == pytest.approx(job["result"]["max_von_mises_mpa"], rel=1e-6)
 
-
     def test_surface_is_unavailable_before_success(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
@@ -193,7 +192,10 @@ def _unconstrained_case() -> dict:
     case = load_case()
     # A single interior point is not enough to stop the part rotating.
     case["fixtures"] = [
-        {"where": {"type": "box", "min": [0, 0, 0], "max": [0.1, 0.1, 0.1]}, "dofs": ["x", "y", "z"]}
+        {
+            "where": {"type": "box", "min": [0, 0, 0], "max": [0.1, 0.1, 0.1]},
+            "dofs": ["x", "y", "z"],
+        }
     ]
     return case
 
@@ -234,9 +236,7 @@ class TestSimulationLifecycle:
         first = run(auth_client, project_with_geometry)
         second = run(auth_client, project_with_geometry, load_case=load_case(force=1_000.0))
 
-        listed = auth_client.get(
-            f"/api/v1/projects/{project_with_geometry}/simulations"
-        ).json()
+        listed = auth_client.get(f"/api/v1/projects/{project_with_geometry}/simulations").json()
         assert [job["id"] for job in listed["items"]] == [
             second["id"],
             first["id"],
@@ -330,3 +330,173 @@ class TestMaterialLibrary:
 
     def test_an_unknown_material_is_404(self, client: AuthenticatedTestClient) -> None:
         assert client.get("/api/v1/materials/unobtainium").status_code == 404
+
+
+class TestConcurrencyQuota:
+    """The queue is shared. Without a per-user ceiling one account can occupy
+    every worker and everyone else waits behind it. The agent tool applies the
+    same rule before proposing a run; this is the one that binds, because the
+    HTTP route is reachable without the agent."""
+
+    @staticmethod
+    def _queue_jobs(client: AuthenticatedTestClient, project_id: str, count: int) -> None:
+        """Leave `count` jobs sitting in QUEUED, as a real backlog would."""
+        from app.models import JobStatus, SimulationJob
+
+        db = client.media.db
+        version_id = client.get(f"/api/v1/projects/{project_id}/geometry").json()["items"][0]["id"]
+        for _ in range(count):
+            db.add(
+                SimulationJob(
+                    project_id=project_id,
+                    geometry_version_id=version_id,
+                    status=JobStatus.QUEUED,
+                    solver="linear-static",
+                    load_case=load_case(),
+                )
+            )
+        db.flush()
+
+    def test_a_run_is_refused_once_the_quota_is_full(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
+    ) -> None:
+        from app.api.routes import simulations
+
+        monkeypatch.setattr(simulations.settings, "max_concurrent_simulations_per_user", 2)
+        self._queue_jobs(auth_client, project_with_geometry, 2)
+
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={"load_case": load_case(), "element_size_mm": 10.0},
+        )
+        assert response.status_code == 429
+        assert "limit of 2" in response.json()["detail"]
+
+    def test_the_message_says_how_to_proceed(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
+    ) -> None:
+        from app.api.routes import simulations
+
+        monkeypatch.setattr(simulations.settings, "max_concurrent_simulations_per_user", 1)
+        self._queue_jobs(auth_client, project_with_geometry, 1)
+
+        detail = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={"load_case": load_case(), "element_size_mm": 10.0},
+        ).json()["detail"]
+        assert "Wait for one to finish" in detail
+
+    def test_the_quota_counts_across_a_user_s_projects_not_within_one(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
+    ) -> None:
+        from app.api.routes import simulations
+
+        monkeypatch.setattr(simulations.settings, "max_concurrent_simulations_per_user", 1)
+        self._queue_jobs(auth_client, project_with_geometry, 1)
+
+        # A second project of the same user must not reset the budget.
+        other = auth_client.post("/api/v1/projects", json={"name": "Second"}).json()["id"]
+        auth_client.post(
+            f"/api/v1/projects/{other}/geometry",
+            files={"file": ("box.stl", box_stl(BOX), "application/octet-stream")},
+        )
+        response = auth_client.post(
+            f"/api/v1/projects/{other}/simulations",
+            json={"load_case": load_case(), "element_size_mm": 10.0},
+        )
+        assert response.status_code == 429
+
+    def test_finished_runs_do_not_count(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
+    ) -> None:
+        from app.api.routes import simulations
+
+        monkeypatch.setattr(simulations.settings, "max_concurrent_simulations_per_user", 1)
+        # Jobs run inline here, so this one is already SUCCEEDED on return.
+        assert run(auth_client, project_with_geometry)["status"] == "succeeded"
+        assert run(auth_client, project_with_geometry)["status"] == "succeeded"
+
+
+class TestElementOrder:
+    def test_the_default_is_linear(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = run(auth_client, project_with_geometry)
+        assert job["element_order"] == 1
+        assert job["mesh_stats"]["element_type"] == "tet4"
+
+    def test_order_two_meshes_and_solves_with_tet10(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = run(auth_client, project_with_geometry, element_order=2)
+        assert job["status"] == "succeeded", job["error"]
+        assert job["element_order"] == 2
+        assert job["mesh_stats"]["element_type"] == "tet10"
+
+    def test_both_orders_agree_on_a_statically_determinate_bar(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        # Pure tension has a closed form that does not depend on the element
+        # order, so the two must land on the same number.
+        linear = run(auth_client, project_with_geometry)
+        quadratic = run(auth_client, project_with_geometry, element_order=2)
+        expected = FORCE / (BOX[0] * BOX[1])
+
+        assert linear["result"]["max_von_mises_mpa"] == pytest.approx(expected, rel=1e-6)
+        assert quadratic["result"]["max_von_mises_mpa"] == pytest.approx(expected, rel=1e-6)
+        assert quadratic["result"]["node_count"] > linear["result"]["node_count"]
+
+    def test_an_unsupported_order_is_rejected_before_anything_runs(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={"load_case": load_case(), "element_order": 3},
+        )
+        assert response.status_code == 422
+
+    def test_a_quadratic_result_surface_is_still_renderable(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        # The viewer only ever draws corner triangles; midside nodes must not
+        # leak into the payload as unreferenced positions.
+        job = run(auth_client, project_with_geometry, element_order=2)
+        surface = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/surface"
+        ).json()
+
+        count = len(surface["node_positions"])
+        assert max(max(t) for t in surface["triangles"]) < count
+        assert len(surface["von_mises_mpa"]) == count
+
+
+class TestPreMeshLimits:
+    """`max_elements` alone only fires once the machine has already paid for
+    the mesh, and a small enough element size makes that bill unbounded."""
+
+    def test_an_absurdly_fine_element_size_is_refused_without_meshing(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        # 0.01 mm across a 66 mm bar is ~6,600 elements along the diagonal.
+        job = run(auth_client, project_with_geometry, element_size_mm=0.01)
+        assert job["status"] == "failed"
+        assert "finer than" in job["error"]
+        assert "Use at least" in job["error"]
+
+    def test_the_estimate_refuses_a_mesh_bomb_before_gmsh_runs(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
+    ) -> None:
+        import app.mesh.gmsh_mesher as mesher
+        from app.simulation import runner
+
+        monkeypatch.setattr(runner.settings, "max_elements", 100)
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("gmsh ran despite an estimate over the limit")
+
+        monkeypatch.setattr(mesher, "generate_tet_mesh", fail_if_called)
+        monkeypatch.setattr(runner, "generate_tet_mesh", fail_if_called)
+
+        job = run(auth_client, project_with_geometry, element_size_mm=1.0)
+        assert job["status"] == "failed"
+        assert "over the 100 limit" in job["error"]

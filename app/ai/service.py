@@ -1,17 +1,25 @@
 """AI features, expressed against the provider seam.
 
-Nothing here knows which model is answering. Both entry points follow the same
-shape: build the volatile half of the prompt, hand the frozen system prompt and
-a schema to the provider, return the validated object.
+Nothing here knows which model is answering. Every entry point follows the same
+shape: build the volatile half of the prompt, hand the frozen system prompt to
+the provider, return what came back together with what it cost. The usage half
+is not optional -- see `usage.py` for why LLM spend is metered the way FEA
+compute is.
 """
 
 import json
 from typing import Any
 
 from app.ai import prompts
-from app.ai.provider import LLMProvider
+from app.ai.provider import Completion, LLMError, LLMProvider, TokenUsage
+from app.ai.sanitise import sanitise_untrusted
 from app.ai.schemas import LoadCaseDraft, ResultInterpretation
 from app.core.config import settings
+
+#: Titles are one short line; anything more is the model ignoring the prompt.
+TITLE_MAX_TOKENS = 60
+#: Hard ceiling on the stored title, matching the column.
+TITLE_MAX_CHARS = 60
 
 
 def _result_payload(
@@ -62,7 +70,7 @@ def interpret_result(
     load_case: dict[str, Any],
     mesh_stats: dict[str, Any] | None = None,
     element_size_mm: float | None = None,
-) -> ResultInterpretation:
+) -> Completion[ResultInterpretation]:
     """Explain a finished linear static run in engineering terms."""
     return provider.complete(
         system=prompts.INTERPRET_SYSTEM,
@@ -80,7 +88,7 @@ def draft_load_case(
     *,
     description: str,
     bounding_box: dict[str, Any],
-) -> LoadCaseDraft:
+) -> Completion[LoadCaseDraft]:
     """Turn a sentence into a load case the solver can run.
 
     The result is a *draft*: it comes back with its assumptions and unresolved
@@ -97,3 +105,53 @@ def draft_load_case(
         effort=settings.ai_effort_parse,
         max_tokens=settings.ai_max_tokens,
     )
+
+
+def _fallback_title(user_message: str) -> str:
+    """The truncation the model call is trying to beat.
+
+    Kept as the fallback because a truncated prompt, however ugly, is still the
+    user's own words -- which beats "New conversation" for finding a session in
+    a sidebar three days later.
+    """
+    cleaned = " ".join(sanitise_untrusted(user_message, max_chars=400).split())
+    return cleaned[:TITLE_MAX_CHARS].strip() or "New conversation"
+
+
+def generate_title(
+    provider: LLMProvider, *, user_message: str, assistant_reply: str
+) -> tuple[str, TokenUsage]:
+    """Name a conversation from its first exchange.
+
+    Deliberately not a structured-output call: one short line does not need a
+    schema, and `chat` is the one method every provider is guaranteed to
+    implement usefully with an empty tool list.
+
+    Never raises. A sidebar label is not worth failing a turn over, so any
+    provider failure -- unavailable, refused, malformed -- falls back to the
+    truncated prompt the product used before.
+    """
+    try:
+        turn = provider.chat(
+            system=prompts.TITLE_SYSTEM,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompts.title_user_message(
+                        sanitise_untrusted(user_message, max_chars=2_000),
+                        sanitise_untrusted(assistant_reply, max_chars=2_000),
+                    ),
+                }
+            ],
+            tools=[],
+            max_tokens=TITLE_MAX_TOKENS,
+        )
+    except LLMError:
+        return _fallback_title(user_message), TokenUsage()
+
+    # Models like to wrap a title in quotes however firmly the prompt says not
+    # to, and a leading quote in a sidebar reads as a bug.
+    title = " ".join(turn.text.split()).strip().strip('"').strip("'")
+    if not title:
+        return _fallback_title(user_message), turn.usage
+    return title[:TITLE_MAX_CHARS], turn.usage

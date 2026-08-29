@@ -1,14 +1,21 @@
-"""Lightweight, dependency-free inspection of uploaded CAD files.
+"""Inspection of uploaded CAD files: enough to show the user something real
+immediately after upload, and to reject a file that is not what it claims.
 
-Deliberately shallow: enough to show the user something real immediately after
-upload (and to reject obviously broken files) without loading a CAD kernel.
-Full B-rep inspection belongs behind the geometry kernel once it lands.
+STL is read directly -- it is a bag of triangles and needs no kernel. STEP and
+IGES are B-rep formats, so their bounding box and volume come from the same
+OpenCASCADE kernel the mesher uses, through gmsh. That costs an import and a
+kernel load, but the alternative is what this module used to do: return only a
+schema string, leaving every CAD user without the bounding box that the load
+case editor and the AI load-case drafting both work from.
 """
 
+import logging
 import re
 import struct
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _BINARY_STL_HEADER = 84
 _BINARY_STL_TRIANGLE = 50
@@ -23,7 +30,9 @@ def inspect(path: Path, file_format: str) -> dict[str, Any]:
     if file_format == "stl":
         return _inspect_stl(path)
     if file_format in ("step", "iges"):
-        return _inspect_text_cad(path, file_format)
+        stats = _inspect_text_cad(path, file_format)
+        stats.update(_inspect_brep(path, file_format))
+        return stats
     return {}
 
 
@@ -128,3 +137,55 @@ def _inspect_text_cad(path: Path, file_format: str) -> dict[str, Any]:
     if not any(len(line) >= 73 and line[72] in "SGDPT" for line in head.splitlines()):
         raise GeometryError("file does not look like an IGES file")
     return {}
+
+
+# Gmsh reports an empty model's bounding box as this sentinel rather than
+# failing, and a box built from it would be nonsense in every consumer.
+_GMSH_EMPTY_BBOX = 1e21
+
+
+def _inspect_brep(path: Path, file_format: str) -> dict[str, Any]:
+    """Bounding box, volume and solid count for a STEP or IGES file.
+
+    Read through the same OpenCASCADE kernel the mesher uses, so the numbers
+    here are the numbers a simulation will see. Without this a CAD user gets no
+    bounding box at all, which is what both the load-case editor and the AI
+    load-case drafting select regions against.
+
+    Best effort by contract: `inspect` promises never to raise for a readable
+    file. A file the text sniff accepted but the kernel cannot open still
+    uploads -- the mesher will report the real problem, in terms of meshing,
+    when a simulation is actually run against it.
+    """
+    from app.mesh.gmsh_session import gmsh_session, staged_with_extension
+
+    try:
+        with staged_with_extension(path, file_format) as readable, gmsh_session() as gmsh:
+            gmsh.model.occ.importShapes(str(readable))
+            gmsh.model.occ.synchronize()
+            solids = gmsh.model.getEntities(3)
+            if not gmsh.model.getEntities():
+                return {}
+            extents = list(gmsh.model.getBoundingBox(-1, -1))
+            volume = float(sum(gmsh.model.occ.getMass(3, tag) for _, tag in solids))
+    except Exception as exc:  # noqa: BLE001 - any kernel failure is "no stats"
+        logger.info("Could not read %s through OpenCASCADE: %s", path.name, exc)
+        return {}
+
+    if any(abs(value) >= _GMSH_EMPTY_BBOX for value in extents):
+        return {}
+
+    lo, hi = extents[:3], extents[3:]
+    stats: dict[str, Any] = {
+        "bounding_box": {
+            "min": lo,
+            "max": hi,
+            "size": [hi[axis] - lo[axis] for axis in range(3)],
+        },
+        "solid_count": len(solids),
+    }
+    # A surfaces-only IGES has no volume, and reporting 0.0 mm^3 would read as a
+    # measurement rather than as "this file has no solid in it".
+    if volume > 0.0:
+        stats["volume_mm3"] = volume
+    return stats

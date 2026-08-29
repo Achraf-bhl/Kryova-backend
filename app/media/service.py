@@ -8,16 +8,19 @@ still references.
 
 import logging
 import math
+import os
 import shutil
+import tempfile
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import TracebackType
 from typing import BinaryIO, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.core.config import MAX_UPLOAD_CHUNK_BYTES, settings
 from app.media.store import BlobInfo, LocalMediaStore, MediaError
 from app.models.media import Media, MediaKind, MediaUploadSession, UploadStatus
 
@@ -153,11 +156,16 @@ class MediaService:
         if total_size_bytes <= 0:
             raise UploadError("total_size_bytes must be positive")
         if total_size_bytes > settings.max_media_bytes:
-            raise UploadError(
-                f"File is larger than the {settings.max_media_bytes} byte limit"
-            )
+            raise UploadError(f"File is larger than the {settings.max_media_bytes} byte limit")
 
         size = chunk_size or settings.media_chunk_size
+        if size > MAX_UPLOAD_CHUNK_BYTES:
+            # Also enforced by the request schema; repeated here because every
+            # PUT then stages exactly this many bytes, and a service that trusts
+            # its caller for that number has no ceiling at all.
+            raise UploadError(
+                f"chunk_size {size} is above the {MAX_UPLOAD_CHUNK_BYTES} byte maximum"
+            )
         session = MediaUploadSession(
             owner_id=owner_id,
             kind=kind,
@@ -176,34 +184,44 @@ class MediaService:
         self._staging_dir(session).mkdir(parents=True, exist_ok=True)
         return session
 
-    def save_chunk(self, session: MediaUploadSession, index: int, data: bytes) -> MediaUploadSession:
+    def open_chunk(self, session: MediaUploadSession, index: int) -> "ChunkWriter":
+        """Begin receiving one chunk, to be fed in as the bytes arrive.
+
+        The caller streams the request body straight through the writer, so a
+        chunk is never assembled in memory: reading a whole body first lets the
+        client choose how much RAM the process uses, however small its declared
+        `chunk_size` was.
+
+        Call `record_chunk` once the writer has closed cleanly.
+        """
         if session.status is not UploadStatus.IN_PROGRESS:
             raise UploadError(f"Upload session is {session.status.value}")
         if not 0 <= index < session.total_chunks:
-            raise UploadError(
-                f"Chunk index {index} is outside 0..{session.total_chunks - 1}"
-            )
+            raise UploadError(f"Chunk index {index} is outside 0..{session.total_chunks - 1}")
 
         is_last = index == session.total_chunks - 1
         expected = (
-            session.total_size_bytes - session.chunk_size * index
-            if is_last
-            else session.chunk_size
+            session.total_size_bytes - session.chunk_size * index if is_last else session.chunk_size
         )
-        if len(data) != expected:
-            raise UploadError(
-                f"Chunk {index} is {len(data)} bytes; expected {expected}"
-            )
+        return ChunkWriter(
+            directory=self._staging_dir(session), index=index, expected_bytes=expected
+        )
 
-        path = self._staging_dir(session) / f"{index:08d}.part"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-
+    def record_chunk(self, session: MediaUploadSession, index: int) -> MediaUploadSession:
+        """Mark a fully written chunk as received."""
         # Re-uploading a chunk after a timeout is normal; keep the set unique.
         received = sorted({*(session.received_chunks or []), index})
         session.received_chunks = received
         self.db.flush()
         return session
+
+    def save_chunk(
+        self, session: MediaUploadSession, index: int, data: bytes
+    ) -> MediaUploadSession:
+        """Store one chunk already held in memory. Prefer `open_chunk`."""
+        with self.open_chunk(session, index) as writer:
+            writer.write(data)
+        return self.record_chunk(session, index)
 
     def complete_upload(self, session: MediaUploadSession) -> Media:
         if session.status is UploadStatus.COMPLETED and session.media is not None:
@@ -264,6 +282,64 @@ class MediaService:
 
     def _staging_dir(self, session: MediaUploadSession) -> Path:
         return settings.media_staging_dir / session.id
+
+
+class ChunkWriter:
+    """Streams one chunk of a resumable upload onto disk, length-checked.
+
+    The declared length is enforced *as the bytes arrive*, so an over-long body
+    is refused at the first byte past the limit instead of after the whole thing
+    has been read. Bytes land in a temp file and are moved into place only once
+    the length matches exactly, so a dropped connection leaves no partial chunk
+    that a later `complete` would assemble into a corrupt file.
+    """
+
+    def __init__(self, directory: Path, index: int, expected_bytes: int) -> None:
+        self._directory = directory
+        self._index = index
+        self._expected = expected_bytes
+        self._written = 0
+        self._handle: BinaryIO | None = None
+        self._temp: Path | None = None
+
+    def __enter__(self) -> "ChunkWriter":
+        self._directory.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(dir=self._directory, suffix=".incoming")
+        self._temp = Path(name)
+        self._handle = os.fdopen(fd, "wb")
+        return self
+
+    def write(self, data: bytes) -> None:
+        if self._handle is None:  # pragma: no cover - misuse outside the `with`
+            raise UploadError("chunk writer is not open")
+        self._written += len(data)
+        if self._written > self._expected:
+            raise UploadError(
+                f"Chunk {self._index} is longer than the expected {self._expected} bytes"
+            )
+        self._handle.write(data)
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        handle, self._handle = self._handle, None
+        if handle is not None:
+            handle.close()
+        temp, self._temp = self._temp, None
+        if temp is None:  # pragma: no cover - `__enter__` always sets it
+            return
+        if exc_type is not None or self._written != self._expected:
+            temp.unlink(missing_ok=True)
+        if exc_type is not None:
+            return
+        if self._written != self._expected:
+            raise UploadError(
+                f"Chunk {self._index} is {self._written} bytes; expected {self._expected}"
+            )
+        os.replace(temp, self._directory / f"{self._index:08d}.part")
 
 
 class _ChunkReader:

@@ -20,6 +20,7 @@ from app.media import LocalMediaStore, MediaService
 from app.mesh.gmsh_mesher import generate_tet_mesh
 from app.mesh.types import MeshError, TetMesh
 from app.models import JobStatus, MediaKind, SimulationJob
+from app.simulation.limits import check_mesh_request
 from app.solve.base import Solver
 from app.solve.linear_static import LinearStaticSolver
 from app.solve.postprocess import nodal_average
@@ -84,10 +85,17 @@ def _execute(job: SimulationJob, media: MediaService, solver: Solver):
     version = job.geometry_version
     case = LoadCase.model_validate(job.load_case)
 
+    # Before gmsh, not after: the post-mesh check below only fires once the
+    # machine has already paid for the mesh, and a small enough element size
+    # makes that bill unbounded.
+    check_mesh_request(version.stats, job.element_size_mm)
+
     # Blobs live on this machine, so gmsh can read the file in place -- no
     # staging copy, however large the part is.
     path = media.local_path(version.media)
-    mesh, mesh_stats = generate_tet_mesh(path, version.file_format, job.element_size_mm)
+    mesh, mesh_stats = generate_tet_mesh(
+        path, version.file_format, job.element_size_mm, element_order=job.element_order
+    )
 
     if mesh.tet_count > settings.max_elements:
         raise MeshError(

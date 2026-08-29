@@ -42,9 +42,7 @@ class Media(TimestampMixin, UUIDPrimaryKey, Base):
         Index("ix_media_sha256", "sha256"),
     )
 
-    owner_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     kind: Mapped[MediaKind] = mapped_column(
         Enum(MediaKind, native_enum=False, length=32), index=True
     )
@@ -68,9 +66,7 @@ class MediaUploadSession(TimestampMixin, UUIDPrimaryKey, Base):
 
     __tablename__ = "media_upload_sessions"
 
-    owner_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     kind: Mapped[MediaKind] = mapped_column(Enum(MediaKind, native_enum=False, length=32))
     filename: Mapped[str] = mapped_column(String(512))
     content_type: Mapped[str] = mapped_column(String(255), default="application/octet-stream")

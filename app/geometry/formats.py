@@ -32,9 +32,7 @@ UNSUPPORTED_FORMAT_HINTS: dict[str, str] = {
     "3dm": "Rhino files cannot be read directly. Export as STEP (.step).",
 }
 
-_EXTENSION_TO_FORMAT = {
-    ext: fmt for fmt, exts in GEOMETRY_FORMATS.items() for ext in exts
-}
+_EXTENSION_TO_FORMAT = {ext: fmt for fmt, exts in GEOMETRY_FORMATS.items() for ext in exts}
 
 
 def _suffix(filename: str) -> str:

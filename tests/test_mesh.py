@@ -19,21 +19,25 @@ from app.solve.types import FaceSelector, Fixture, Load, LoadCase
 # Outward-wound triangulation of an axis-aligned box, as index pairs into its
 # eight corners (bit i of the index selects the high side of axis i).
 _BOX_TRIANGLES = [
-    (0, 2, 1), (1, 2, 3),  # x = min
-    (4, 5, 6), (5, 7, 6),  # x = max
-    (0, 1, 4), (1, 5, 4),  # y = min
-    (2, 6, 3), (3, 6, 7),  # y = max
-    (0, 4, 2), (2, 4, 6),  # z = min
-    (1, 3, 5), (3, 7, 5),  # z = max
+    (0, 2, 1),
+    (1, 2, 3),  # x = min
+    (4, 5, 6),
+    (5, 7, 6),  # x = max
+    (0, 1, 4),
+    (1, 5, 4),  # y = min
+    (2, 6, 3),
+    (3, 6, 7),  # y = max
+    (0, 4, 2),
+    (2, 4, 6),  # z = min
+    (1, 3, 5),
+    (3, 7, 5),  # z = max
 ]
 
 
 def box_stl(size: tuple[float, float, float]) -> bytes:
     """A watertight binary STL of a box with one corner at the origin."""
     sx, sy, sz = size
-    corners = [
-        (sx if i & 4 else 0.0, sy if i & 2 else 0.0, sz if i & 1 else 0.0) for i in range(8)
-    ]
+    corners = [(sx if i & 4 else 0.0, sy if i & 2 else 0.0, sz if i & 1 else 0.0) for i in range(8)]
     out = bytearray(b"\0" * 80) + struct.pack("<I", len(_BOX_TRIANGLES))
     for tri in _BOX_TRIANGLES:
         p = [np.array(corners[i]) for i in tri]
@@ -231,3 +235,93 @@ class TestNulHeavyStl:
 
         mesh, _ = generate_tet_mesh(blob, "step")
         assert mesh.volume == pytest.approx(1000.0, rel=1e-6)
+
+
+class TestQuadraticMeshing:
+    """Second-order meshing, end to end through gmsh rather than promoted from
+    a structured mesh -- the ordering of gmsh's midside nodes is what the
+    solver's shape functions are written against."""
+
+    def test_order_two_produces_tet10_elements(self, stl_box: Path) -> None:
+        mesh, stats = generate_tet_mesh(stl_box, "stl", element_order=2)
+        assert mesh.element_order == 2
+        assert stats["element_type"] == "tet10"
+        assert mesh.midside is not None
+        assert mesh.connectivity.shape[1] == 10
+
+    def test_the_default_is_still_linear(self, stl_box: Path) -> None:
+        mesh, stats = generate_tet_mesh(stl_box, "stl")
+        assert mesh.midside is None
+        assert stats["element_type"] == "tet4"
+
+    def test_the_volume_is_unchanged_by_the_order(self, stl_box: Path) -> None:
+        # Straight-edged quadratic elements occupy exactly their corners' volume.
+        linear, _ = generate_tet_mesh(stl_box, "stl", element_size_mm=10.0)
+        quadratic, _ = generate_tet_mesh(stl_box, "stl", element_size_mm=10.0, element_order=2)
+        assert quadratic.volume == pytest.approx(20.0 * 20.0 * 60.0, rel=1e-6)
+        assert quadratic.tet_count == linear.tet_count
+
+    def test_midside_nodes_sit_at_their_edge_midpoints(self, stl_box: Path) -> None:
+        # The check that catches a gmsh node-ordering change, which would
+        # otherwise return a plausible and wrong stiffness matrix.
+        from app.mesh.types import TET10_EDGES
+
+        mesh, _ = generate_tet_mesh(stl_box, "stl", element_size_mm=15.0, element_order=2)
+        assert mesh.midside is not None
+        corners = mesh.nodes[mesh.tets]
+        for local, (a, b) in enumerate(TET10_EDGES):
+            expected = 0.5 * (corners[:, a] + corners[:, b])
+            assert mesh.nodes[mesh.midside[:, local]] == pytest.approx(expected, abs=1e-6)
+
+    def test_a_shared_edge_gets_one_node_not_two(self, stl_box: Path) -> None:
+        mesh, _ = generate_tet_mesh(stl_box, "stl", element_size_mm=15.0, element_order=2)
+        assert mesh.midside is not None
+        # Every node in the array is referenced, and midside nodes are shared
+        # between neighbouring elements rather than duplicated.
+        assert len(np.unique(mesh.connectivity)) == mesh.node_count
+        assert mesh.midside.size > len(np.unique(mesh.midside))
+
+    def test_an_unsupported_order_is_rejected(self, stl_box: Path) -> None:
+        with pytest.raises(MeshError, match="element_order"):
+            generate_tet_mesh(stl_box, "stl", element_order=3)
+
+    def test_a_step_file_also_meshes_quadratically(self, tmp_path: Path) -> None:
+        path = write_step_box(tmp_path / "box.step", (10.0, 30.0, 40.0))
+        mesh, stats = generate_tet_mesh(path, "step", element_order=2)
+        assert stats["element_type"] == "tet10"
+        assert mesh.volume == pytest.approx(10.0 * 30.0 * 40.0, rel=1e-6)
+
+
+class TestFaceMidsideTable:
+    def test_each_face_midside_is_the_edge_between_its_two_corners(self) -> None:
+        """`_TET_FACE_MIDSIDES` is hand-written; this derives it instead.
+
+        A wrong entry would put a surface load on the wrong node, which shows up
+        as a stress field that is subtly wrong rather than as a crash.
+        """
+        from app.mesh.types import _TET_FACE_MIDSIDES, _TET_FACES, TET10_EDGES
+
+        edge_index = {frozenset(edge): i for i, edge in enumerate(TET10_EDGES)}
+        for face, midsides in zip(_TET_FACES, _TET_FACE_MIDSIDES, strict=True):
+            for corner in range(3):
+                pair = frozenset((int(face[corner]), int(face[(corner + 1) % 3])))
+                assert midsides[corner] == edge_index[pair]
+
+    def test_surface_midside_nodes_line_up_with_surface_triangles(self) -> None:
+        from app.mesh.primitives import box_mesh, promote_to_tet10
+
+        mesh = promote_to_tet10(box_mesh((10.0, 10.0, 10.0), divisions=(2, 2, 2)))
+        triangles = mesh.surface_triangles
+        midsides = mesh.surface_midside_nodes
+        assert midsides is not None and midsides.shape == triangles.shape
+
+        # Each midside node must be the midpoint of the two corners it claims.
+        p = mesh.nodes[triangles]
+        for corner in range(3):
+            expected = 0.5 * (p[:, corner] + p[:, (corner + 1) % 3])
+            assert mesh.nodes[midsides[:, corner]] == pytest.approx(expected, abs=1e-9)
+
+    def test_a_linear_mesh_reports_no_surface_midsides(self) -> None:
+        from app.mesh.primitives import box_mesh
+
+        assert box_mesh((1.0, 1.0, 1.0), divisions=(1, 1, 1)).surface_midside_nodes is None

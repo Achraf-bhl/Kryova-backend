@@ -1,11 +1,19 @@
 """Test fixtures.
 
-Tests that touch the database run against the same Neon Postgres the
-application uses, in a dedicated schema. This keeps JSONB, enum and cascade
-behaviour identical between tests and production.
+**Tests never run against `DATABASE_URL`.** They used to: the session fixture
+created and then `DROP SCHEMA ... CASCADE`-ed a schema inside whatever database
+the application was configured for, which on a developer machine pointed at the
+production Neon project. The target is now `TEST_DATABASE_URL`, and if that is
+unset the suite builds an in-memory SQLite database instead. A `TEST_DATABASE_URL`
+that resolves to the same host and database as `DATABASE_URL` is refused
+outright -- see `_resolve_test_database_url`.
 
-Neon is a round trip away (~250 ms from here), so the fixtures are built to
-spend as few round trips as possible:
+The trade is real and worth naming: SQLite is not Postgres, so JSONB, enum and
+cascade behaviour are exercised less faithfully than they were. Point
+`TEST_DATABASE_URL` at a local Postgres (or a scratch Neon branch) to get that
+fidelity back; the fixtures below adapt to either.
+
+The rest of the design is unchanged, and matters most when the target is remote:
 
 * one physical connection for the entire session, not one per test;
 * isolation by transaction rollback, not by rebuilding the schema per test;
@@ -17,6 +25,7 @@ fixture, so they never open a connection at all and run offline in under a
 second.
 """
 
+import os
 import struct
 from collections.abc import Iterator
 from contextlib import nullcontext
@@ -25,26 +34,91 @@ from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, Engine, create_engine, event, make_url, text
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_media_service, get_session_scope
 from app.api.rate_limit import auth_limiter
 from app.core.config import settings
-from app.core.database import Base, engine, get_async_db, get_db
+from app.core.database import Base, get_db
 from app.jobs import InlineJobQueue, get_job_queue
 from app.main import app
 from app.media import LocalMediaStore, MediaService, get_media_store
 from tests.typing import AuthenticatedTestClient
 
+# Shared by every connection in the process, so the schema one connection
+# creates is the schema the next one sees.
+_IN_MEMORY_SQLITE = "sqlite+pysqlite:///:memory:"
+
+
+def _resolve_test_database_url() -> str:
+    """Where the suite is allowed to create and drop tables.
+
+    Refuses anything that resolves to the same host and database as
+    `DATABASE_URL`. The fixtures below create tables and drop a schema; doing
+    that against the application's own database is a data-loss bug waiting for
+    the one run where the schema names happen to collide.
+    """
+    configured = os.environ.get("TEST_DATABASE_URL", "").strip()
+    if not configured:
+        return _IN_MEMORY_SQLITE
+
+    target, application = make_url(configured), make_url(settings.database_url)
+    same_host = (target.host or "") == (application.host or "")
+    same_database = (target.database or "") == (application.database or "")
+    if target.get_backend_name() != "sqlite" and same_host and same_database:
+        raise pytest.UsageError(
+            "TEST_DATABASE_URL points at the same host and database as DATABASE_URL "
+            f"({target.host}/{target.database}). The suite creates and drops tables; "
+            "give it its own database (or leave TEST_DATABASE_URL unset for SQLite)."
+        )
+    return configured
+
+
+def _build_engine(url: str) -> Engine:
+    if make_url(url).get_backend_name() != "sqlite":
+        return create_engine(url, pool_pre_ping=True)
+
+    # One shared connection: an in-memory SQLite database belongs to the
+    # connection that opened it, and a fresh one would find no tables.
+    engine = create_engine(url, connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+    # pysqlite's driver-level transaction handling has to be turned off and
+    # replaced, or the per-test rollback below does nothing: it commits
+    # implicitly before DDL and never opens a transaction of its own, so every
+    # test's rows survive into the next one. This is SQLAlchemy's documented
+    # recipe, not a workaround.
+    @event.listens_for(engine, "connect")
+    def _disable_pysqlite_transactions(dbapi_connection, _record) -> None:
+        dbapi_connection.isolation_level = None
+        # Nothing enforces ON DELETE CASCADE without this, so a cascade bug
+        # would pass here and fail on Postgres.
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+    @event.listens_for(engine, "begin")
+    def _emit_begin(connection) -> None:
+        connection.exec_driver_sql("BEGIN")
+
+    return engine
+
 
 @pytest.fixture(scope="session")
 def db_connection() -> Iterator[Connection]:
-    schema = settings.test_schema
-    with engine.connect() as setup:
-        setup.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
-        setup.commit()
-    connection = engine.connect().execution_options(schema_translate_map={None: schema})
+    engine = _build_engine(_resolve_test_database_url())
+    is_sqlite = engine.dialect.name == "sqlite"
+    schema = None if is_sqlite else settings.test_schema
+
+    if schema is not None:
+        with engine.connect() as setup:
+            setup.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+            setup.commit()
+
+    connection = engine.connect()
+    if schema is not None:
+        # Schema-qualify rather than `SET search_path`: on a pooled endpoint a
+        # session-level SET outlives the checkout and leaks to the next client.
+        connection = connection.execution_options(schema_translate_map={None: schema})
     Base.metadata.create_all(connection)
     connection.commit()
 
@@ -52,9 +126,10 @@ def db_connection() -> Iterator[Connection]:
         yield connection
     finally:
         connection.close()
-        with engine.connect() as teardown:
-            teardown.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-            teardown.commit()
+        if schema is not None:
+            with engine.connect() as teardown:
+                teardown.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+                teardown.commit()
         engine.dispose()
 
 
@@ -85,7 +160,6 @@ def client(
 ) -> Iterator[AuthenticatedTestClient]:
     monkeypatch.setattr(settings, "media_root", tmp_path / "media")
     app.dependency_overrides[get_db] = lambda: db_session
-    app.dependency_overrides[get_async_db] = lambda: db_session
     app.dependency_overrides[get_media_store] = lambda: media_store
 
     app.dependency_overrides[get_media_service] = lambda: MediaService(db_session, media_store)

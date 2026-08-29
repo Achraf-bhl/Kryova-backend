@@ -82,10 +82,16 @@ class TestMediaService:
         media = auth_client.media
         client = auth_client
         first = media.store_stream(
-            owner_id=current_user_id, kind=MediaKind.CAD, filename="a.stl", stream=io.BytesIO(b"same")
+            owner_id=current_user_id,
+            kind=MediaKind.CAD,
+            filename="a.stl",
+            stream=io.BytesIO(b"same"),
         )
         second = media.store_stream(
-            owner_id=current_user_id, kind=MediaKind.CAD, filename="b.stl", stream=io.BytesIO(b"same")
+            owner_id=current_user_id,
+            kind=MediaKind.CAD,
+            filename="b.stl",
+            stream=io.BytesIO(b"same"),
         )
         assert first.sha256 == second.sha256
 
@@ -97,7 +103,9 @@ class TestMediaService:
 
 
 class TestChunkedUpload:
-    def upload_in_chunks(self, client: AuthenticatedTestClient, data: bytes, chunk_size: int, **extra) -> dict:
+    def upload_in_chunks(
+        self, client: AuthenticatedTestClient, data: bytes, chunk_size: int, **extra
+    ) -> dict:
         session = client.post(
             "/api/v1/media/uploads",
             json={
@@ -115,7 +123,9 @@ class TestChunkedUpload:
             assert response.status_code == 200, response.text
         return client.post(f"/api/v1/media/uploads/{session['id']}/complete").json()
 
-    def test_chunks_reassemble_into_the_original_file(self, auth_client: AuthenticatedTestClient) -> None:
+    def test_chunks_reassemble_into_the_original_file(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
         data = bytes(range(256)) * 700  # 179,200 bytes
         media = self.upload_in_chunks(auth_client, data, chunk_size=50_000)
 
@@ -123,7 +133,9 @@ class TestChunkedUpload:
         assert media["sha256"] == hashlib.sha256(data).hexdigest()
         assert b"".join(auth_client.store.iter_chunks(media["sha256"])) == data
 
-    def test_progress_reports_which_chunks_are_missing(self, auth_client: AuthenticatedTestClient) -> None:
+    def test_progress_reports_which_chunks_are_missing(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
         data = b"q" * 300
         session = auth_client.post(
             "/api/v1/media/uploads",
@@ -150,16 +162,16 @@ class TestChunkedUpload:
         media = auth_client.post(f"/api/v1/media/uploads/{session['id']}/complete").json()
         assert media["sha256"] == hashlib.sha256(data).hexdigest()
 
-    def test_a_retried_chunk_is_not_counted_twice(self, auth_client: AuthenticatedTestClient) -> None:
+    def test_a_retried_chunk_is_not_counted_twice(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
         data = b"r" * 200
         session = auth_client.post(
             "/api/v1/media/uploads",
             json={"filename": "part.stl", "total_size_bytes": len(data), "chunk_size": 100},
         ).json()
         for _ in range(3):
-            auth_client.put(
-                f"/api/v1/media/uploads/{session['id']}/chunks/0", content=data[:100]
-            )
+            auth_client.put(f"/api/v1/media/uploads/{session['id']}/chunks/0", content=data[:100])
         progress = auth_client.get(f"/api/v1/media/uploads/{session['id']}").json()
         assert progress["received_chunks"] == [0]
 
@@ -185,7 +197,9 @@ class TestChunkedUpload:
         assert response.status_code == 422
         assert "expected 100" in response.json()["detail"]
 
-    def test_a_chunk_index_out_of_range_is_refused(self, auth_client: AuthenticatedTestClient) -> None:
+    def test_a_chunk_index_out_of_range_is_refused(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
         session = auth_client.post(
             "/api/v1/media/uploads",
             json={"filename": "part.stl", "total_size_bytes": 200, "chunk_size": 100},
@@ -195,7 +209,9 @@ class TestChunkedUpload:
         )
         assert response.status_code == 422
 
-    def test_a_corrupted_transfer_is_caught_by_the_checksum(self, auth_client: AuthenticatedTestClient) -> None:
+    def test_a_corrupted_transfer_is_caught_by_the_checksum(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
         data = b"m" * 200
         wrong = hashlib.sha256(b"something else entirely").hexdigest()
         session = auth_client.post(
@@ -217,7 +233,9 @@ class TestChunkedUpload:
         assert response.status_code == 409
         assert "corrupted" in response.json()["detail"]
 
-    def test_aborting_discards_the_staged_chunks(self, auth_client: AuthenticatedTestClient) -> None:
+    def test_aborting_discards_the_staged_chunks(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
         session = auth_client.post(
             "/api/v1/media/uploads",
             json={"filename": "part.stl", "total_size_bytes": 200, "chunk_size": 100},
@@ -225,12 +243,16 @@ class TestChunkedUpload:
         auth_client.put(f"/api/v1/media/uploads/{session['id']}/chunks/0", content=b"a" * 100)
 
         assert auth_client.delete(f"/api/v1/media/uploads/{session['id']}").status_code == 204
-        assert auth_client.get(f"/api/v1/media/uploads/{session['id']}").json()["status"] == "aborted"
-        assert auth_client.post(
-            f"/api/v1/media/uploads/{session['id']}/complete"
-        ).status_code == 409
+        assert (
+            auth_client.get(f"/api/v1/media/uploads/{session['id']}").json()["status"] == "aborted"
+        )
+        assert (
+            auth_client.post(f"/api/v1/media/uploads/{session['id']}/complete").status_code == 409
+        )
 
-    def test_another_users_session_is_not_visible(self, auth_client: AuthenticatedTestClient) -> None:
+    def test_another_users_session_is_not_visible(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
         session = auth_client.post(
             "/api/v1/media/uploads",
             json={"filename": "part.stl", "total_size_bytes": 100, "chunk_size": 100},
@@ -285,7 +307,9 @@ class TestChunkedGeometryUpload:
 
 
 class TestMediaEndpoints:
-    def test_media_content_downloads_intact(self, auth_client: AuthenticatedTestClient, project_id: str, cube_stl) -> None:
+    def test_media_content_downloads_intact(
+        self, auth_client: AuthenticatedTestClient, project_id: str, cube_stl
+    ) -> None:
         version = auth_client.post(
             f"/api/v1/projects/{project_id}/geometry",
             files={"file": ("part.stl", cube_stl, "application/octet-stream")},
@@ -295,7 +319,9 @@ class TestMediaEndpoints:
         assert response.status_code == 200
         assert response.content == cube_stl
 
-    def test_verify_confirms_an_intact_blob(self, auth_client: AuthenticatedTestClient, project_id: str, cube_stl) -> None:
+    def test_verify_confirms_an_intact_blob(
+        self, auth_client: AuthenticatedTestClient, project_id: str, cube_stl
+    ) -> None:
         version = auth_client.post(
             f"/api/v1/projects/{project_id}/geometry",
             files={"file": ("part.stl", cube_stl, "application/octet-stream")},
@@ -305,12 +331,14 @@ class TestMediaEndpoints:
         assert result["intact"] is True
         assert result["sha256"] == hashlib.sha256(cube_stl).hexdigest()
 
-    def test_media_is_listed_for_its_owner_only(self, auth_client: AuthenticatedTestClient, project_id: str, cube_stl) -> None:
+    def test_media_is_listed_for_its_owner_only(
+        self, auth_client: AuthenticatedTestClient, project_id: str, cube_stl
+    ) -> None:
         auth_client.post(
             f"/api/v1/projects/{project_id}/geometry",
             files={"file": ("part.stl", cube_stl, "application/octet-stream")},
         )
-        assert len(auth_client.get("/api/v1/media").json()) == 1
+        assert auth_client.get("/api/v1/media").json()["total"] == 1
 
         auth_client.post(
             "/api/v1/auth/register",
@@ -322,7 +350,26 @@ class TestMediaEndpoints:
         )
         auth_client.headers["x-csrf-token"] = auth_client.cookies["kryova_csrf"]
         listed = auth_client.get("/api/v1/media").json()
-        assert listed == []
+        assert listed["total"] == 0
+        assert listed["items"] == []
+
+    def test_media_is_paginated(
+        self, auth_client: AuthenticatedTestClient, project_id: str
+    ) -> None:
+        from tests.test_mesh import box_stl
+
+        for size in ((1.0, 2.0, 3.0), (4.0, 5.0, 6.0), (7.0, 8.0, 9.0)):
+            auth_client.post(
+                f"/api/v1/projects/{project_id}/geometry",
+                files={"file": ("part.stl", box_stl(size), "application/octet-stream")},
+            )
+
+        first = auth_client.get("/api/v1/media", params={"page": 1, "page_size": 2}).json()
+        second = auth_client.get("/api/v1/media", params={"page": 2, "page_size": 2}).json()
+        assert first["total"] == 3
+        assert len(first["items"]) == 2
+        assert len(second["items"]) == 1
+        assert auth_client.get("/api/v1/media", params={"page_size": 101}).status_code == 422
 
 
 class TestVectorIndex:
@@ -396,3 +443,104 @@ class TestVectorIndex:
     def test_searching_an_empty_index_is_refused(self) -> None:
         with pytest.raises(VectorIndexError, match="empty"):
             LocalVectorIndex.create(8).search(self.sample(1, 8))
+
+
+class TestUploadSizeLimits:
+    """`chunk_size` had only `gt=0`, and the route buffered the whole body with
+    `await request.body()`. One request could therefore name any chunk size it
+    liked and make the process hold that much."""
+
+    def test_an_oversized_chunk_size_is_rejected(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
+        from app.core.config import MAX_UPLOAD_CHUNK_BYTES
+
+        response = auth_client.post(
+            "/api/v1/media/uploads",
+            json={
+                "filename": "huge.stl",
+                "total_size_bytes": 1024,
+                "chunk_size": MAX_UPLOAD_CHUNK_BYTES + 1,
+            },
+        )
+        assert response.status_code == 422
+
+    def test_the_maximum_itself_is_accepted(self, auth_client: AuthenticatedTestClient) -> None:
+        from app.core.config import MAX_UPLOAD_CHUNK_BYTES
+
+        response = auth_client.post(
+            "/api/v1/media/uploads",
+            json={
+                "filename": "big.stl",
+                "total_size_bytes": 1024,
+                "chunk_size": MAX_UPLOAD_CHUNK_BYTES,
+            },
+        )
+        assert response.status_code == 201
+
+    def test_the_service_enforces_the_cap_too(
+        self, auth_client: AuthenticatedTestClient, current_user_id: str
+    ) -> None:
+        # Not only the request schema: every PUT stages exactly this many bytes.
+        from app.core.config import MAX_UPLOAD_CHUNK_BYTES
+        from app.media import UploadError
+        from app.models import MediaKind
+
+        with pytest.raises(UploadError, match="maximum"):
+            auth_client.media.begin_upload(
+                owner_id=current_user_id,
+                kind=MediaKind.CAD,
+                filename="huge.stl",
+                total_size_bytes=1024,
+                chunk_size=MAX_UPLOAD_CHUNK_BYTES + 1,
+            )
+
+    def test_an_overlong_body_is_refused_and_leaves_nothing_staged(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
+        session = auth_client.post(
+            "/api/v1/media/uploads",
+            json={"filename": "part.stl", "total_size_bytes": 200, "chunk_size": 100},
+        ).json()
+
+        response = auth_client.put(
+            f"/api/v1/media/uploads/{session['id']}/chunks/0", content=b"a" * 250
+        )
+        assert response.status_code == 422
+        assert "expected 100" in response.json()["detail"]
+
+        # A partial chunk left on disk would be assembled into a corrupt file.
+        progress = auth_client.get(f"/api/v1/media/uploads/{session['id']}").json()
+        assert progress["received_chunks"] == []
+
+    def test_a_chunk_is_written_without_buffering_the_whole_body(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
+        # The regression guard: `Request.body()` reads the entire body into
+        # memory, and it must not be what reads a chunk. Patched only around the
+        # PUTs, since FastAPI legitimately uses it to parse a JSON request.
+        import pytest as _pytest
+        from starlette.requests import Request
+
+        data = b"s" * 300
+        session = auth_client.post(
+            "/api/v1/media/uploads",
+            json={"filename": "part.stl", "total_size_bytes": len(data), "chunk_size": 100},
+        ).json()
+
+        async def refuse(self) -> bytes:
+            raise AssertionError("the chunk body was buffered whole")
+
+        with _pytest.MonkeyPatch.context() as patch:
+            patch.setattr(Request, "body", refuse)
+            for index in range(3):
+                assert (
+                    auth_client.put(
+                        f"/api/v1/media/uploads/{session['id']}/chunks/{index}",
+                        content=data[index * 100 : (index + 1) * 100],
+                    ).status_code
+                    == 200
+                )
+
+        media = auth_client.post(f"/api/v1/media/uploads/{session['id']}/complete").json()
+        assert media["sha256"] == hashlib.sha256(data).hexdigest()

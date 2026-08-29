@@ -9,6 +9,14 @@ MIN_SECRET_KEY_LENGTH = 32
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
+# Hard ceiling on a client-chosen upload chunk. A chunk is held in memory or on
+# disk in one piece while it is verified, so an unbounded value lets one request
+# decide how much of the machine it gets. Lives here rather than in the schema
+# because both the schema's `le=` and the media service check it.
+MAX_UPLOAD_CHUNK_BYTES = 64 * 1024 * 1024
+
+JOB_QUEUE_BACKENDS = ("threadpool", "inline")
+
 
 def _as_psycopg_url(url: str) -> str:
     """Force SQLAlchemy onto the psycopg 3 driver.
@@ -29,9 +37,10 @@ def _as_psycopg_url(url: str) -> str:
 class Settings(BaseSettings):
     """Application settings, loaded from the environment / .env file."""
 
-    # `.env` is tracked in this repo on purpose, so it is the wrong place for a
-    # real credential. `.env.local` is gitignored and read second, which means
-    # it wins for any key it sets -- put provider API keys there.
+    # `.env` is gitignored: it holds real credentials and must never be
+    # committed. `.env.example` documents every setting with placeholders and is
+    # the file that is tracked. `.env.local` is read second, so it wins for any
+    # key it sets -- a convenient place for per-machine provider API keys.
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.local"), env_file_encoding="utf-8", extra="ignore"
     )
@@ -70,6 +79,16 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     redis_url: str | None = None
 
+    # Rate limiting keys off the client address. `X-Forwarded-For` is a header
+    # any client can write, so it is only believed when a reverse proxy is known
+    # to be in front and to append to it: turn this on ONLY when every request
+    # reaches the app through that proxy. `trusted_proxy_count` is how many
+    # proxies append, counted from the right-hand (nearest) end of the header --
+    # with one nginx in front the client address is the last-but-one entry, and
+    # everything to its left was supplied by the caller and is worthless.
+    trust_proxy_headers: bool = False
+    trusted_proxy_count: int = 1
+
     # Local heavy-file store. CAD files, meshes, result fields and vector
     # indexes never leave this machine: only their small metadata rows go to
     # the cloud database.
@@ -83,11 +102,19 @@ class Settings(BaseSettings):
     # is what tests and `--reload` dev servers want.
     inline_jobs: bool = False
     job_workers: int = 2
-    job_queue_backend: str = "threadpool"  # "threadpool", "inline", or "celery"
-    celery_broker_url: str | None = None
+    job_queue_backend: str = "threadpool"  # "threadpool" or "inline"
 
     # Analysis limits, to keep one upload from consuming the whole machine.
     max_elements: int = 400_000
+    # Element-size floor, as a divisor of the geometry's bounding-box diagonal.
+    # A size below diagonal/this is refused before meshing starts: it is never a
+    # deliberate request, and gmsh would spend minutes building a mesh that the
+    # `max_elements` check then throws away.
+    max_elements_along_diagonal: int = 2_000
+    # Queued or running simulations one user may hold at once. Meshing and
+    # solving are the most expensive thing this service does, so the quota is
+    # what stops a single account from occupying every worker.
+    max_concurrent_simulations_per_user: int = 3
 
     # AI. Which model serves the AI features is the user's choice -- see
     # app/ai/providers/. The default is local Ollama: CAD geometry and load
@@ -109,6 +136,34 @@ class Settings(BaseSettings):
     ai_max_tokens: int = 8_000
     # A 7B model on CPU can take a minute; the default is generous on purpose.
     ai_timeout_seconds: float = 120.0
+    # How many past turns of a conversation are replayed to the model. Beyond
+    # this the oldest turns are dropped, so a long session cannot grow the
+    # prompt (and its cost) without limit.
+    ai_max_context_messages: int = 40
+    # Once a conversation passes this many messages the older ones are folded
+    # into a running summary. Deliberately below `ai_max_context_messages`, so
+    # summarisation happens before anything would be dropped outright.
+    ai_summarise_after_messages: int = 30
+
+    # CATIA desktop bridge. The daemon dials out to this service over a
+    # WebSocket; see docs/CATIA_BRIDGE_PROTOCOL.md for the wire format.
+    # Off switches the tools out of the agent's vocabulary entirely rather than
+    # letting it call something that will always fail.
+    catia_enabled: bool = True
+    # One in-flight call per device (CATIA's automation surface is single
+    # threaded), so a wedged call blocks that device's queue until it times out.
+    catia_call_timeout_s: float = 30.0
+    # A STEP export re-tessellates the whole part and legitimately takes minutes
+    # on a large assembly, so it gets its own, much longer budget.
+    catia_export_timeout_s: float = 180.0
+    # Device tokens are long-lived by design: an engineer pairs the workstation
+    # once. Only the SHA-256 of the token is stored server-side.
+    catia_device_token_ttl_days: int = 365
+    # Pairing codes are single-use and short-lived -- they are read aloud or
+    # typed from a screen, so the window is the security boundary.
+    catia_pairing_code_ttl_minutes: int = 10
+    # Per-device op ceiling, mirroring the daemon's own limit.
+    catia_ops_per_minute: int = 60
 
     # Uploads
     max_upload_bytes: int = 200 * 1024 * 1024
@@ -126,6 +181,24 @@ class Settings(BaseSettings):
                 f"Got: {value.split('://', 1)[0] if '://' in value else value!r}"
             )
         return normalised
+
+    @field_validator("job_queue_backend")
+    @classmethod
+    def _known_job_backend(cls, value: str) -> str:
+        """Refuse an unknown backend rather than silently falling back.
+
+        `celery` used to be accepted here and was never implemented: the queue
+        it selected ran meshing and solving inline on the request thread. A
+        deployment that still sets it has to hear about it at startup, not
+        discover it from a request that takes four minutes.
+        """
+        if value not in JOB_QUEUE_BACKENDS:
+            raise ValueError(
+                f"JOB_QUEUE_BACKEND must be one of {', '.join(JOB_QUEUE_BACKENDS)}; got {value!r}. "
+                "Distributed queues are not implemented -- run more processes behind the "
+                "threadpool backend instead."
+            )
+        return value
 
     @property
     def is_production(self) -> bool:
@@ -149,13 +222,15 @@ class Settings(BaseSettings):
         elif len(self.secret_key) < MIN_SECRET_KEY_LENGTH:
             problems.append(
                 f"SECRET_KEY is shorter than {MIN_SECRET_KEY_LENGTH} characters "
-                "(generate one with `python -c \"import secrets; "
+                '(generate one with `python -c "import secrets; '
                 'print(secrets.token_urlsafe(48))"`)'
             )
         if not self.cookie_secure:
             problems.append("COOKIE_SECURE must be true so session cookies are HTTPS-only")
         if any(origin.startswith("http://") for origin in self.cors_origins):
-            problems.append(f"CORS_ORIGINS contains a plaintext http:// origin: {self.cors_origins}")
+            problems.append(
+                f"CORS_ORIGINS contains a plaintext http:// origin: {self.cors_origins}"
+            )
 
         if problems:
             raise ValueError(

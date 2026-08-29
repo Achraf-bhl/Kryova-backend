@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, NamedTuple
@@ -20,6 +21,8 @@ from app.core.security import (
 )
 from app.models import User
 from app.schemas import PasswordReset, PasswordResetRequest, SessionRead, UserCreate, UserRead
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -46,14 +49,20 @@ def _set_session_cookies(response: Response, user_id: str) -> IssuedSession:
     csrf = new_csrf_token()
     common = _cookie_options()
     response.set_cookie(
-        "kryova_access", access,
+        "kryova_access",
+        access,
         max_age=settings.access_token_expire_minutes * 60,
-        httponly=True, path="/", **common,
+        httponly=True,
+        path="/",
+        **common,
     )
     response.set_cookie(
-        "kryova_refresh", refresh,
+        "kryova_refresh",
+        refresh,
         max_age=settings.refresh_token_expire_days * 86400,
-        httponly=True, path=f"{settings.api_v1_prefix}/auth", **common,
+        httponly=True,
+        path=f"{settings.api_v1_prefix}/auth",
+        **common,
     )
     response.set_cookie("kryova_csrf", csrf, httponly=False, path="/", **common)
     response.headers["cache-control"] = "no-store"
@@ -68,10 +77,29 @@ def _clear_session_cookies(response: Response) -> None:
 
 
 def _client_ip(request: Request) -> str:
+    """The address the rate limiter counts against.
+
+    `X-Forwarded-For` is written by whoever sends the request, so trusting it
+    unconditionally means a client that rotates the header has no rate limit at
+    all. It is read only when `trust_proxy_headers` says a reverse proxy is in
+    front, and then from the right: each trusted proxy appends the address it
+    saw, so with N of them the real client is N entries from the end. Everything
+    to the left of that was supplied by the caller.
+    """
+    peer = request.client.host if request.client else "unknown"
+    if not settings.trust_proxy_headers:
+        return peer
+
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    if not forwarded:
+        return peer
+    hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+    index = len(hops) - settings.trusted_proxy_count
+    if not hops or index < 0:
+        # Fewer hops than the deployment claims: the chain is not what was
+        # configured, so believe the socket rather than guess.
+        return peer
+    return hops[index]
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
@@ -84,9 +112,7 @@ def register(request: Request, payload: UserCreate, db: DbSession) -> User:
     email = payload.email.lower()
     existing = db.scalar(select(User).where(User.email == email))
     if existing is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user = User(
         email=email,
         hashed_password=hash_password(payload.password),
@@ -131,15 +157,18 @@ def refresh_session(request: Request, response: Response, db: DbSession) -> Sess
         raise HTTPException(status_code=401, detail="Missing refresh token")
     csrf_from_cookie = request.cookies.get("kryova_csrf")
     csrf_from_header = request.headers.get("x-csrf-token")
-    if not csrf_from_cookie or not csrf_from_header or not secrets.compare_digest(
-        csrf_from_header, csrf_from_cookie
+    if (
+        not csrf_from_cookie
+        or not csrf_from_header
+        or not secrets.compare_digest(csrf_from_header, csrf_from_cookie)
     ):
         raise HTTPException(status_code=403, detail="CSRF failure")
     user_id = decode_refresh_token(token)
     user = db.get(User, user_id) if user_id else None
     expected_hash = user.refresh_token_hash if user else None
     if (
-        user is None or expected_hash is None
+        user is None
+        or expected_hash is None
         or not secrets.compare_digest(hash_token(token), expected_hash)
     ):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
@@ -171,6 +200,14 @@ def request_password_reset(
     payload: PasswordResetRequest,
     db: DbSession,
 ) -> None:
+    """Mint a single-use reset token for an account, if it exists.
+
+    TODO: there is no mail transport in this service yet, so nothing delivers
+    the token to the address that asked for it. Until an email sender exists
+    this endpoint is only usable in development, where the token is logged at
+    DEBUG; a production deployment records that a reset was requested and
+    nothing more, because a token in a log file is a password in a log file.
+    """
     if not auth_limiter.check(f"pwreset:{_client_ip(request)}"):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -188,11 +225,10 @@ def request_password_reset(
     user.password_reset_expires_at = expires
     db.commit()
 
-    # In production, send this via email. For now, log it so development works.
-    import logging
-    logging.getLogger(__name__).info(
-        "Password reset token for %s: %s", payload.email, raw_token
-    )
+    if settings.is_production:
+        logger.info("Password reset requested; no mail transport is configured to deliver it")
+    else:
+        logger.debug("Password reset token for %s: %s", payload.email, raw_token)
 
 
 @router.post("/password-reset", status_code=status.HTTP_204_NO_CONTENT)
@@ -208,9 +244,7 @@ def confirm_password_reset(
         )
 
     token_hash = hash_token(payload.token)
-    user = db.scalar(
-        select(User).where(User.password_reset_token_hash == token_hash)
-    )
+    user = db.scalar(select(User).where(User.password_reset_token_hash == token_hash))
     if (
         user is None
         or user.password_reset_expires_at is None

@@ -3,6 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.config import MAX_UPLOAD_CHUNK_BYTES
 from app.models.media import MediaKind, UploadStatus
 
 
@@ -24,7 +25,14 @@ class UploadSessionCreate(BaseModel):
     total_size_bytes: int = Field(gt=0)
     kind: MediaKind = MediaKind.CAD
     content_type: str = "application/octet-stream"
-    chunk_size: int | None = Field(default=None, gt=0)
+    # A chunk is staged as one file and its length is checked in one go, so the
+    # client does not get to choose how much of the server a single PUT occupies.
+    chunk_size: int | None = Field(
+        default=None,
+        gt=0,
+        le=MAX_UPLOAD_CHUNK_BYTES,
+        description=f"Bytes per chunk, at most {MAX_UPLOAD_CHUNK_BYTES}.",
+    )
     expected_sha256: str | None = Field(
         default=None,
         pattern="^[0-9a-fA-F]{64}$",

@@ -1,15 +1,13 @@
 """Gmsh-backed tetrahedral meshing of uploaded CAD files.
 
 Gmsh is a process-global singleton and is not thread-safe, so every call here
-serialises on a module lock. FastAPI runs sync endpoints in a threadpool, which
-would otherwise let two requests corrupt each other's model. Meshing belongs on
-a job queue anyway; the lock is the correctness floor, not the plan.
+goes through `gmsh_session`, which holds the module lock for the whole model's
+lifetime. FastAPI runs sync endpoints in a threadpool, which would otherwise let
+two requests corrupt each other's model. Meshing belongs on a job queue anyway;
+the lock is the correctness floor, not the plan.
 """
 
-import os
 import shutil
-import tempfile
-import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,13 +15,14 @@ from typing import Any
 
 import numpy as np
 
-from app.geometry.formats import GEOMETRY_FORMATS
 from app.geometry.inspect import is_binary_stl
-from app.mesh.types import MeshError, TetMesh, quality
-
-_GMSH_LOCK = threading.Lock()
+from app.mesh.gmsh_session import gmsh_session, staged_with_extension
+from app.mesh.types import TET10_EDGES, MeshError, TetMesh, quality
 
 _TET4_ELEMENT_TYPE = 4
+_TET10_ELEMENT_TYPE = 11
+_NODES_PER_ELEMENT = {_TET4_ELEMENT_TYPE: 4, _TET10_ELEMENT_TYPE: 10}
+_ELEMENT_TYPE_FOR_ORDER = {1: _TET4_ELEMENT_TYPE, 2: _TET10_ELEMENT_TYPE}
 
 # Default target: this many elements along the bounding-box diagonal. Enough to
 # resolve a simple part in seconds; refinement is a user-facing knob.
@@ -41,32 +40,35 @@ _STAGED_STL_HEADER = b"Kryova staged binary STL".ljust(_STL_HEADER_BYTES, b" ")
 
 
 def generate_tet_mesh(
-    path: Path, file_format: str, element_size_mm: float | None = None
+    path: Path,
+    file_format: str,
+    element_size_mm: float | None = None,
+    element_order: int = 1,
 ) -> tuple[TetMesh, dict[str, Any]]:
-    """Mesh a CAD file into linear tetrahedra.
+    """Mesh a CAD file into tetrahedra.
 
     Returns the mesh and its quality summary. `element_size_mm` overrides the
-    automatic target size.
+    automatic target size; `element_order` is 1 for tet4 or 2 for tet10.
     """
-    import gmsh
+    if element_order not in _ELEMENT_TYPE_FOR_ORDER:
+        raise MeshError(f"element_order must be 1 or 2, got {element_order}")
 
-    with _GMSH_LOCK, _named_for_gmsh(path, file_format) as readable:
-        # interruptible=False: gmsh otherwise installs a SIGINT handler, which
-        # raises off the main thread -- and meshing always runs on a worker.
-        gmsh.initialize(interruptible=False)
+    with _named_for_gmsh(path, file_format) as readable, gmsh_session() as gmsh:
+        _load(gmsh, readable, file_format)
+        _set_element_size(gmsh, element_size_mm)
         try:
-            gmsh.option.setNumber("General.Terminal", 0)
-            gmsh.option.setNumber("General.Verbosity", 1)
-            _load(gmsh, readable, file_format)
-            _set_element_size(gmsh, element_size_mm)
-            try:
-                gmsh.model.mesh.generate(3)
-            except Exception as exc:  # gmsh raises bare Exception subclasses
-                raise MeshError(f"Meshing failed: {exc}") from exc
-            mesh = _extract(gmsh)
-        finally:
-            gmsh.clear()
-            gmsh.finalize()
+            gmsh.model.mesh.generate(3)
+            if element_order == 2:
+                # Straight edges: gmsh otherwise pulls midside nodes onto the
+                # CAD surface, which buys geometric fidelity at the cost of an
+                # element whose volume no longer equals the volume of its four
+                # corners -- and every geometric quantity here (volume, mass,
+                # the boundary the viewer draws) is computed from those corners.
+                gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)
+                gmsh.model.mesh.setOrder(2)
+        except Exception as exc:  # gmsh raises bare Exception subclasses
+            raise MeshError(f"Meshing failed: {exc}") from exc
+        mesh = _extract(gmsh, element_order)
 
     stats = quality(mesh)
     stats["mesher"] = "gmsh"
@@ -77,36 +79,21 @@ def generate_tet_mesh(
 def _named_for_gmsh(path: Path, file_format: str) -> Iterator[Path]:
     """Present the file to gmsh under a name and header it can actually read.
 
-    Two things trip gmsh up:
+    Two things trip gmsh up. The extension is handled by
+    `staged_with_extension`; the second is STL-specific:
 
-    * It chooses its reader from the file extension, and blobs in the media
-      store are named by their SHA-256 with no extension at all.
-    * Its STL sniffer walks the file looking for a line it can classify as
-      "solid" (ASCII) or not (binary), but skips any line starting with a NUL.
-      A binary STL with the conventional zeroed 80-byte header and no 0x0A byte
-      anywhere -- which happens whenever the coordinates are NUL-heavy, e.g.
-      exact powers of two -- has no such line, so gmsh reaches EOF and reports
-      only "Error loading". Replacing the header with text costs one copy and
-      makes the file classify immediately.
-
-    A hard link is used where the bytes need no change; it costs nothing and
-    leaves the blob untouched.
+    Its STL sniffer walks the file looking for a line it can classify as
+    "solid" (ASCII) or not (binary), but skips any line starting with a NUL. A
+    binary STL with the conventional zeroed 80-byte header and no 0x0A byte
+    anywhere -- which happens whenever the coordinates are NUL-heavy, e.g.
+    exact powers of two -- has no such line, so gmsh reaches EOF and reports
+    only "Error loading". Replacing the header with text costs one copy and
+    makes the file classify immediately.
     """
-    rewrite_header = file_format == "stl" and _header_defeats_gmsh(path)
-    named_correctly = path.suffix.lower().lstrip(".") in GEOMETRY_FORMATS.get(file_format, ())
-    if named_correctly and not rewrite_header:
-        yield path
-        return
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        staged = Path(tmpdir) / f"model.{file_format}"
-        if rewrite_header:
-            _copy_with_text_header(path, staged)
-        else:
-            try:
-                os.link(path, staged)
-            except OSError:
-                shutil.copyfile(path, staged)
+    rewrite = (
+        _copy_with_text_header if file_format == "stl" and _header_defeats_gmsh(path) else None
+    )
+    with staged_with_extension(path, file_format, copy=rewrite) as staged:
         yield staged
 
 
@@ -193,7 +180,7 @@ def _set_element_size(gmsh, element_size_mm: float | None) -> None:
     gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
 
 
-def _extract(gmsh) -> TetMesh:
+def _extract(gmsh, element_order: int) -> TetMesh:
     node_tags, coordinates, _ = gmsh.model.mesh.getNodes()
     if len(node_tags) == 0:
         raise MeshError("Meshing produced no nodes")
@@ -204,20 +191,52 @@ def _extract(gmsh) -> TetMesh:
     lookup = np.full(int(tags.max()) + 1, -1, dtype=np.int64)
     lookup[tags] = np.arange(len(tags), dtype=np.int64)
 
+    wanted = _ELEMENT_TYPE_FOR_ORDER[element_order]
     element_types, _, element_nodes = gmsh.model.mesh.getElements(3)
     for element_type, connectivity in zip(element_types, element_nodes, strict=True):
-        if element_type != _TET4_ELEMENT_TYPE:
+        if element_type != wanted:
             continue
-        tets = lookup[np.asarray(connectivity, dtype=np.int64).reshape(-1, 4)]
-        if (tets < 0).any():
+        elements = lookup[
+            np.asarray(connectivity, dtype=np.int64).reshape(-1, _NODES_PER_ELEMENT[wanted])
+        ]
+        if (elements < 0).any():
             raise MeshError("Meshing produced an element referencing an unknown node")
-        return _drop_unused_nodes(nodes, tets)
+        mesh = _drop_unused_nodes(nodes, elements)
+        if element_order == 2:
+            _assert_midside_ordering(mesh)
+        return mesh
 
     raise MeshError("Meshing produced no tetrahedra; the geometry may not be a closed solid")
 
 
-def _drop_unused_nodes(nodes: np.ndarray, tets: np.ndarray) -> TetMesh:
+def _drop_unused_nodes(nodes: np.ndarray, elements: np.ndarray) -> TetMesh:
     """Gmsh keeps surface-only nodes in its node list; the solver would read
     them as unconstrained free DOFs and make the system singular."""
-    used, inverse = np.unique(tets, return_inverse=True)
-    return TetMesh(nodes=nodes[used], tets=inverse.reshape(tets.shape).astype(np.int64))
+    used, inverse = np.unique(elements, return_inverse=True)
+    renumbered = inverse.reshape(elements.shape).astype(np.int64)
+    return TetMesh(
+        nodes=nodes[used],
+        tets=renumbered[:, :4],
+        midside=renumbered[:, 4:] if elements.shape[1] == 10 else None,
+    )
+
+
+def _assert_midside_ordering(mesh: TetMesh) -> None:
+    """Confirm gmsh's midside node order still matches `TET10_EDGES`.
+
+    The solver's shape functions are written against that table, and a silent
+    disagreement would not crash -- it would return a plausible, wrong stiffness
+    matrix. `Mesh.SecondOrderLinear` puts each midside node exactly halfway
+    along its edge, so the check is a coordinate comparison.
+    """
+    assert mesh.midside is not None
+    corners = mesh.nodes[mesh.tets]
+    expected = np.stack([0.5 * (corners[:, a] + corners[:, b]) for a, b in TET10_EDGES], axis=1)
+    actual = mesh.nodes[mesh.midside]
+    lo, hi = mesh.bounding_box
+    scale = float(np.linalg.norm(hi - lo)) or 1.0
+    if not np.allclose(actual, expected, atol=1e-6 * scale):
+        raise MeshError(
+            "Gmsh returned tet10 nodes in an unexpected order; the quadratic "
+            "element formulation cannot be trusted against this mesh."
+        )

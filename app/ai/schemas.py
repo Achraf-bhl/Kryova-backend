@@ -1,9 +1,14 @@
 """Structured output shapes for the AI layer.
 
-Every model here is handed to `client.messages.parse()` as the response schema,
-so the API constrains generation to match rather than us parsing prose and
-hoping. Field descriptions are part of the prompt -- the model reads them, so
-they are written for the model, not for a docs page.
+Every model here is turned into a JSON Schema and handed to whichever provider
+is configured as a generation constraint -- Anthropic's `output_config.format`,
+OpenAI's `response_format`, Ollama's `format` -- so decoding is constrained to
+match rather than us parsing prose and hoping. `providers/_json_schema.py`
+closes the schema first, because the strict providers reject an object that
+allows extra properties.
+
+Field descriptions are part of the prompt -- the model reads them, so they are
+written for the model, not for a docs page.
 """
 
 from typing import Literal
@@ -32,7 +37,9 @@ class Finding(BaseModel):
 class DesignSuggestion(BaseModel):
     """A change the engineer could make, and what it would trade away."""
 
-    change: str = Field(description="The concrete change, e.g. 'Increase the web thickness to 6 mm'.")
+    change: str = Field(
+        description="The concrete change, e.g. 'Increase the web thickness to 6 mm'."
+    )
     rationale: str = Field(description="Why this addresses the finding.")
     tradeoff: str = Field(
         description="What it costs -- added mass, machining time, material cost. Never omit this."

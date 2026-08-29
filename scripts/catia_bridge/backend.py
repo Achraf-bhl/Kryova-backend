@@ -1,0 +1,167 @@
+"""The interface the mock and the real COM backend both implement.
+
+One abstract base with one method per tool, so `session.py` never branches on
+which backend it is talking to. That is what makes mock mode a genuine test of
+the system rather than a separate code path: the frame handling, the schema
+re-validation, the tier enforcement, the watchdog and the reconnect logic are
+all the same objects either way, and only the eighteen leaves below differ.
+
+Every method returns the plain data dictionary that becomes the `data` field of
+a `result` frame. Raising `CatiaOperationError` becomes `{"ok": false, "error":
+...}`; anything else raising is caught one level up and reported the same way,
+so a COM exception cannot take the daemon down.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Any
+
+
+class CatiaOperationError(RuntimeError):
+    """The operation failed in a way worth telling the agent about verbatim."""
+
+
+class CatiaBackend(ABC):
+    """Eighteen operations, minus the one the server answers itself."""
+
+    #: Reported in the `hello` frame.
+    catia_version: str = "unknown"
+    is_mock: bool = False
+    capabilities: tuple[str, ...] = ("part", "sketch", "measure", "export", "capture")
+
+    # -- lifecycle -----------------------------------------------------------
+
+    def close(self) -> None:
+        """Release whatever the backend holds. Called once on shutdown."""
+
+    @abstractmethod
+    def health(self) -> None:
+        """Raise `CatiaOperationError` if CATIA is not usable right now.
+
+        Called before every operation. On the real backend this is what turns a
+        modal dialog or a closed CATIA into an immediate, explicit error instead
+        of a call that blocks until the server's timeout fires.
+        """
+
+    # -- documents -----------------------------------------------------------
+
+    @abstractmethod
+    def new_part(self, *, name: str) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def open_document(
+        self,
+        *,
+        doc_name: str | None = None,
+        remote_path: str | None = None,
+        fallback_checkpoint: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    # -- parameters ----------------------------------------------------------
+
+    @abstractmethod
+    def list_parameters(self) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def set_parameter(self, *, name: str, value: float, unit: str) -> dict[str, Any]: ...
+
+    # -- sketches and features ----------------------------------------------
+
+    @abstractmethod
+    def sketch_rectangle(
+        self, *, plane: str, width_mm: float, height_mm: float
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def sketch_circle(self, *, plane: str, diameter_mm: float) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def pad(
+        self,
+        *,
+        sketch: str,
+        length_mm: float,
+        symmetric: bool = False,
+        reversed: bool = False,  # noqa: A002 - the protocol field is named this
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def pocket(
+        self, *, sketch: str, depth_mm: float | None = None, through_all: bool = False
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def hole(
+        self,
+        *,
+        face: str,
+        position: str,
+        diameter_mm: float,
+        depth_mm: float | None = None,
+        through_all: bool = True,
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def fillet(
+        self, *, radius_mm: float, feature: str | None = None, edges: str = "all"
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def chamfer(
+        self,
+        *,
+        length_mm: float,
+        angle_deg: float = 45.0,
+        feature: str | None = None,
+        edges: str = "all",
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def update(self) -> dict[str, Any]: ...
+
+    # -- inspection ----------------------------------------------------------
+
+    @abstractmethod
+    def measure(self) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def capture_view(
+        self, *, view: str = "iso", label: str = "", max_inline_bytes: int | None = None
+    ) -> dict[str, Any]: ...
+
+    # -- transfer and safety -------------------------------------------------
+
+    @abstractmethod
+    def export_step(
+        self, *, note: str | None = None, max_inline_bytes: int | None = None
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def checkpoint(
+        self, *, label: str, max_inline_bytes: int | None = None
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def restore(self, *, checkpoint: dict[str, Any]) -> dict[str, Any]: ...
+
+
+#: Tool name -> backend method. Kept as data so `session.py` cannot reach a
+#: method that is not on this list, whatever arrives on the wire.
+TOOL_METHODS: dict[str, str] = {
+    "catia_new_part": "new_part",
+    "catia_open_document": "open_document",
+    "catia_list_parameters": "list_parameters",
+    "catia_set_parameter": "set_parameter",
+    "catia_sketch_rectangle": "sketch_rectangle",
+    "catia_sketch_circle": "sketch_circle",
+    "catia_pad": "pad",
+    "catia_pocket": "pocket",
+    "catia_hole": "hole",
+    "catia_fillet": "fillet",
+    "catia_chamfer": "chamfer",
+    "catia_measure": "measure",
+    "catia_capture_view": "capture_view",
+    "catia_export_step": "export_step",
+    "catia_checkpoint": "checkpoint",
+    "catia_restore": "restore",
+    "catia_update": "update",
+}

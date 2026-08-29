@@ -1,14 +1,17 @@
+import json
 import logging
 import sys
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from app.api.router import api_router
 from app.core.config import settings
@@ -16,19 +19,40 @@ from app.jobs import get_job_queue
 
 logger = logging.getLogger(__name__)
 
+REQUEST_ID_HEADER = "X-Request-ID"
+
+
+class JsonLogFormatter(logging.Formatter):
+    """One JSON object per line, for log shippers that parse rather than grep.
+
+    Built with `json.dumps` rather than a `%`-format template: the obvious
+    `"msg":%(message)r` spelling produces Python's repr, which quotes with
+    apostrophes and escapes with Python rules, so every line it emitted was
+    invalid JSON. There is no format string that escapes correctly.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        request_id = getattr(record, "request_id", None)
+        if request_id:
+            payload["request_id"] = request_id
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, default=str)
+
 
 def _configure_logging() -> None:
     """JSON logs in production, human-readable in development."""
-    if settings.environment != "production":
+    if not settings.is_production:
         return
 
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        logging.Formatter(
-            '{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":%(message)r}',
-            datefmt="%Y-%m-%dT%H:%M:%S",
-        )
-    )
+    handler.setFormatter(JsonLogFormatter())
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
@@ -71,11 +95,49 @@ def _fail_orphaned_jobs(session_factory=None) -> None:
             logger.warning("Failed %d simulation job(s) orphaned by a restart", len(orphans))
 
 
+def docs_urls() -> dict[str, str | None]:
+    """Where the interactive docs are served, if at all.
+
+    They enumerate every route, schema and validation rule: a gift in
+    development and an attack map in production. Production serves none of the
+    three -- including the OpenAPI document, which is the one that actually
+    leaks; leaving it reachable while hiding the two HTML pages in front of it
+    hides nothing.
+    """
+    if settings.is_production:
+        return {"openapi_url": None, "docs_url": None, "redoc_url": None}
+    return {
+        "openapi_url": f"{settings.api_v1_prefix}/openapi.json",
+        "docs_url": "/docs",
+        "redoc_url": "/redoc",
+    }
+
+
+_docs = docs_urls()
+
 app = FastAPI(
     title=settings.project_name,
-    openapi_url=f"{settings.api_v1_prefix}/openapi.json",
     lifespan=lifespan,
+    openapi_url=_docs["openapi_url"],
+    docs_url=_docs["docs_url"],
+    redoc_url=_docs["redoc_url"],
 )
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """Tag every request with an id, echoed back on the response.
+
+    An id supplied by the caller is kept so a trace survives the hop from the
+    frontend; anything else gets a fresh one. It is stored on `request.state` so
+    handlers and log records can carry the same value.
+    """
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers[REQUEST_ID_HEADER] = request_id
+        return response
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -88,11 +150,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
             "frame-ancestors 'none'"
         )
-        if settings.environment == "production":
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
+        if settings.is_production:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,15 +165,65 @@ app.add_middleware(
         "Content-Type",
         "X-CSRF-Token",
         "X-Requested-With",
+        REQUEST_ID_HEADER,
     ],
+    expose_headers=[REQUEST_ID_HEADER],
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 
+def _probe(name: str, check) -> str | None:
+    """Run one health check, returning its failure message or None."""
+    try:
+        check()
+    except Exception as exc:  # noqa: BLE001 - any failure is a failed probe
+        logger.warning("Health check %s failed: %s", name, exc)
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
+def _check_media_store() -> None:
+    """Confirm the blob store's root exists and is writable.
+
+    A full or unmounted media volume is the failure this catches: the database
+    stays perfectly healthy while every upload and every finished simulation
+    fails to persist its bytes.
+    """
+    from app.media import get_media_store
+
+    root = get_media_store().root
+    root.mkdir(parents=True, exist_ok=True)
+    probe = root / ".health"
+    probe.write_bytes(b"")
+    probe.unlink()
+
+
 @app.get("/health", tags=["health"])
-def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+def health_check() -> Response:
+    """Readiness probe: 200 only when the dependencies a request needs are up.
+
+    Both the database and the media store are checked, because the service can
+    serve neither an upload nor a result without both, and a probe that only
+    reports the process is alive would keep a broken instance in the load
+    balancer.
+    """
+    from app.core.database import check_database
+
+    failures = {
+        name: message
+        for name, check in (("database", check_database), ("media_store", _check_media_store))
+        if (message := _probe(name, check)) is not None
+    }
+    healthy = not failures
+    return JSONResponse(
+        status_code=200 if healthy else 503,
+        content={
+            "status": "ok" if healthy else "degraded",
+            "checks": {name: failures.get(name, "ok") for name in ("database", "media_store")},
+        },
+    )

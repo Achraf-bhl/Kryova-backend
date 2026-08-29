@@ -8,7 +8,7 @@ fail these; a golden-file test would just record the new wrong answer.
 import numpy as np
 import pytest
 
-from app.mesh.primitives import box_mesh
+from app.mesh.primitives import box_mesh, promote_to_tet10
 from app.solve.linear_static import LinearStaticSolver, constitutive_matrix
 from app.solve.materials import MATERIALS
 from app.solve.types import (
@@ -64,9 +64,7 @@ class TestBoxMesh:
         # A correct boundary extraction recovers exactly the six faces of the box.
         mesh = box_mesh((10.0, 20.0, 30.0), divisions=(2, 2, 2))
         p = mesh.nodes[mesh.surface_triangles]
-        areas = 0.5 * np.linalg.norm(
-            np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]), axis=1
-        )
+        areas = 0.5 * np.linalg.norm(np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]), axis=1)
         expected = 2 * (10 * 20 + 20 * 30 + 30 * 10)
         assert areas.sum() == pytest.approx(expected)
 
@@ -198,9 +196,7 @@ class TestConstitutiveMatrix:
 
     def test_recovers_poissons_ratio(self) -> None:
         compliance = np.linalg.inv(constitutive_matrix(STEEL)[:3, :3])
-        assert -compliance[0, 1] / compliance[0, 0] == pytest.approx(
-            STEEL.poissons_ratio, rel=1e-9
-        )
+        assert -compliance[0, 1] / compliance[0, 0] == pytest.approx(STEEL.poissons_ratio, rel=1e-9)
 
     def test_shear_modulus_is_consistent(self) -> None:
         d = constitutive_matrix(STEEL)
@@ -260,3 +256,164 @@ class TestBadlyPosedModels:
         )
         output = LinearStaticSolver().solve(mesh, case)
         assert any("equally between its nodes" in w for w in output.result.warnings)
+
+
+class TestQuadraticElements:
+    """Tet4 elements are constant-strain and therefore stiff in bending -- the
+    documented weakness tet10 exists to fix. The comparison is at equal element
+    count (the same mesh, promoted), so it measures the elements rather than two
+    different discretisations.
+
+    The reference is the Euler-Bernoulli cantilever, delta = F L^3 / (3 E I).
+    It neglects shear deflection (~+0.8% here at L/h = 10) and the clamped end's
+    restraint of the Poisson contraction (~-1%), so a converged 3D solution
+    lands a percent or so away from it and cannot be expected to land on it.
+    """
+
+    width = 10.0  # mm, the bending direction
+    depth = 10.0
+    length = 100.0
+    force = 100.0  # N, transverse at the tip
+
+    @property
+    def analytic_tip_deflection(self) -> float:
+        second_moment = self.depth * self.width**3 / 12.0
+        return self.force * self.length**3 / (3.0 * STEEL.youngs_modulus_mpa * second_moment)
+
+    def cantilever_case(self) -> LoadCase:
+        return LoadCase(
+            name="cantilever",
+            material=STEEL,
+            fixtures=[Fixture(where=FaceSelector(axis="z", side="min"))],
+            loads=[
+                Load(
+                    where=FaceSelector(axis="z", side="max"),
+                    force_n=(self.force, 0.0, 0.0),
+                )
+            ],
+        )
+
+    def tip_deflection(self, mesh, output) -> float:
+        tip = np.flatnonzero(np.isclose(mesh.nodes[:, 2], self.length))
+        return float(output.displacements[tip, 0].mean())
+
+    @pytest.fixture
+    def both_orders(self):
+        linear = box_mesh((self.width, self.depth, self.length), divisions=(2, 2, 10))
+        quadratic = promote_to_tet10(linear)
+        solver, case = LinearStaticSolver(), self.cantilever_case()
+        return (
+            linear,
+            solver.solve(linear, case),
+            quadratic,
+            solver.solve(quadratic, case),
+        )
+
+    def test_promotion_keeps_the_element_count_and_the_geometry(self, both_orders) -> None:
+        linear, _, quadratic, _ = both_orders
+        assert quadratic.tet_count == linear.tet_count
+        assert quadratic.volume == pytest.approx(linear.volume, rel=1e-12)
+        assert quadratic.element_type == "tet10"
+
+    def test_tet10_beats_tet4_at_the_same_element_count(self, both_orders) -> None:
+        linear, linear_out, quadratic, quadratic_out = both_orders
+        exact = self.analytic_tip_deflection
+
+        linear_error = abs(self.tip_deflection(linear, linear_out) - exact) / exact
+        quadratic_error = abs(self.tip_deflection(quadratic, quadratic_out) - exact) / exact
+
+        # Not marginally: tet4 is over half the answer out at this refinement.
+        assert linear_error > 0.5
+        assert quadratic_error < 0.03
+        assert quadratic_error < linear_error / 10.0
+
+    def test_tet4_is_too_stiff_rather_than_too_soft(self, both_orders) -> None:
+        # The error has a known sign; a solver bug that happened to overshoot
+        # would not be "close enough".
+        linear, linear_out, _, _ = both_orders
+        assert self.tip_deflection(linear, linear_out) < self.analytic_tip_deflection
+
+    def test_refining_tet4_converges_towards_the_tet10_answer(self) -> None:
+        solver, case = LinearStaticSolver(), self.cantilever_case()
+        coarse = box_mesh((self.width, self.depth, self.length), divisions=(2, 2, 10))
+        fine = box_mesh((self.width, self.depth, self.length), divisions=(5, 5, 25))
+        exact = self.analytic_tip_deflection
+
+        coarse_error = abs(self.tip_deflection(coarse, solver.solve(coarse, case)) - exact)
+        fine_error = abs(self.tip_deflection(fine, solver.solve(fine, case)) - exact)
+        assert fine_error < coarse_error
+
+    def test_uniaxial_tension_is_still_exact_with_quadratic_elements(self) -> None:
+        # Quadratic elements must not lose what linear ones already got right.
+        mesh = promote_to_tet10(box_mesh((10.0, 20.0, 100.0), divisions=(1, 1, 4)))
+        output = LinearStaticSolver().solve(mesh, uniaxial_case(STEEL, 5_000.0))
+
+        assert output.result.max_von_mises_mpa == pytest.approx(5_000.0 / 200.0, rel=1e-6)
+        assert axial_extension(mesh, output, 100.0) == pytest.approx(
+            5_000.0 * 100.0 / (200.0 * STEEL.youngs_modulus_mpa), rel=1e-6
+        )
+
+    def test_mass_and_volume_are_unchanged_by_element_order(self) -> None:
+        linear = box_mesh((10.0, 20.0, 100.0), divisions=(1, 1, 4))
+        quadratic = promote_to_tet10(linear)
+        solver, case = LinearStaticSolver(), uniaxial_case(STEEL, 1_000.0)
+
+        assert solver.solve(quadratic, case).result.mass_kg == pytest.approx(
+            solver.solve(linear, case).result.mass_kg, rel=1e-12
+        )
+
+    def test_every_node_including_midsides_carries_a_stress_value(self) -> None:
+        from app.solve.postprocess import nodal_average
+
+        mesh = promote_to_tet10(box_mesh((10.0, 10.0, 30.0), divisions=(2, 2, 4)))
+        output = LinearStaticSolver().solve(mesh, uniaxial_case(STEEL, 1_000.0))
+        nodal = nodal_average(mesh, output.von_mises)
+
+        assert len(nodal) == mesh.node_count
+        assert (nodal > 0.0).all(), "a midside node with no value renders as a hole"
+
+    def test_an_unconstrained_quadratic_model_is_still_rejected(self) -> None:
+        # The equilibrium residual has to catch a singular tet10 system too.
+        mesh = promote_to_tet10(box_mesh((10.0, 10.0, 10.0), divisions=(2, 2, 2)))
+        case = LoadCase(
+            material=STEEL,
+            fixtures=[Fixture(where=BoxSelector(min=(-0.1, -0.1, -0.1), max=(0.1, 0.1, 0.1)))],
+            loads=[Load(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 100.0))],
+        )
+        with pytest.raises(SolverError, match="under-constrained"):
+            LinearStaticSolver().solve(mesh, case)
+
+
+class TestTet10ShapeFunctions:
+    def test_gradients_sum_to_zero_at_every_gauss_point(self) -> None:
+        # A partition of unity: sum(N) == 1 everywhere, so sum(dN) == 0.
+        from app.solve.linear_static import _TET_GAUSS_POINTS, _tet10_shape_gradients
+
+        for point in _TET_GAUSS_POINTS:
+            assert _tet10_shape_gradients(*point).sum(axis=0) == pytest.approx(
+                np.zeros(3), abs=1e-12
+            )
+
+    def test_assembly_refuses_a_linear_mesh(self) -> None:
+        from app.solve.linear_static import assemble_stiffness_tet10
+
+        with pytest.raises(SolverError, match="midside"):
+            assemble_stiffness_tet10(box_mesh((1.0, 1.0, 1.0), divisions=(1, 1, 1)), STEEL)
+
+    def test_the_stiffness_matrix_is_symmetric(self) -> None:
+        from app.solve.linear_static import assemble_stiffness
+
+        mesh = promote_to_tet10(box_mesh((10.0, 10.0, 10.0), divisions=(2, 2, 2)))
+        stiffness = assemble_stiffness(mesh, STEEL)
+        assert abs(stiffness - stiffness.T).max() < 1e-6 * abs(stiffness).max()
+
+    def test_rigid_body_translation_produces_no_force(self) -> None:
+        # The classic patch check: move every node by the same vector and the
+        # internal forces must be exactly zero.
+        from app.solve.linear_static import assemble_stiffness
+
+        mesh = promote_to_tet10(box_mesh((10.0, 10.0, 10.0), divisions=(2, 2, 2)))
+        stiffness = assemble_stiffness(mesh, STEEL)
+        translation = np.tile([1.0, -2.0, 3.0], mesh.node_count)
+        forces = stiffness @ translation
+        assert abs(forces).max() < 1e-6 * abs(stiffness).max()

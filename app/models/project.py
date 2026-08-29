@@ -17,9 +17,7 @@ class Project(UUIDPrimaryKey, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, default=None)
-    owner_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
 
     owner: Mapped["User"] = relationship(back_populates="projects")
     geometry_versions: Mapped[list["GeometryVersion"]] = relationship(

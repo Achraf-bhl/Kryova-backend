@@ -2,13 +2,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, MediaServiceDep
 from app.core.config import settings
 from app.media import MediaNotFound, UploadError
 from app.models import Media, MediaUploadSession
 from app.schemas import (
+    MediaPage,
     MediaRead,
     UploadSessionCreate,
     UploadSessionRead,
@@ -60,9 +61,7 @@ def begin_upload(
             expected_sha256=payload.expected_sha256,
         )
     except UploadError as exc:
-        raise HTTPException(
-            status_code=422, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     db.commit()
     db.refresh(session)
     return session
@@ -77,24 +76,27 @@ async def upload_chunk(
     db: DbSession,
     media: MediaServiceDep,
 ) -> MediaUploadSession:
-    """Send one chunk as a raw request body."""
+    """Send one chunk as a raw request body.
+
+    The body is streamed to disk as it arrives rather than read into memory:
+    `await request.body()` would let a client hold the whole chunk in RAM, and
+    an over-long one is refused here at the first byte past the declared size.
+    """
     session = _own_session(db, current_user, upload_id)
-    body = await request.body()
     try:
-        media.save_chunk(session, index, body)
+        with media.open_chunk(session, index) as writer:
+            async for piece in request.stream():
+                writer.write(piece)
+        media.record_chunk(session, index)
     except UploadError as exc:
-        raise HTTPException(
-            status_code=422, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     db.commit()
     db.refresh(session)
     return session
 
 
 @router.get("/uploads/{upload_id}", response_model=UploadSessionRead)
-def read_upload(
-    upload_id: str, current_user: CurrentUser, db: DbSession
-) -> MediaUploadSession:
+def read_upload(upload_id: str, current_user: CurrentUser, db: DbSession) -> MediaUploadSession:
     """Progress for a session, including which chunks are still missing."""
     return _own_session(db, current_user, upload_id)
 
@@ -109,9 +111,7 @@ def complete_upload(
         stored = media.complete_upload(session)
     except UploadError as exc:
         db.commit()  # keep the abort/error the service recorded
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     db.commit()
     db.refresh(stored)
     return stored
@@ -129,14 +129,23 @@ def abort_upload(
 # -- stored media -------------------------------------------------------------
 
 
-@router.get("", response_model=list[MediaRead])
-def list_media(current_user: CurrentUser, db: DbSession) -> list[Media]:
+@router.get("", response_model=MediaPage)
+def list_media(
+    current_user: CurrentUser,
+    db: DbSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> MediaPage:
+    owner_filter = Media.owner_id == current_user.id
     stmt = (
         select(Media)
-        .where(Media.owner_id == current_user.id)
-        .order_by(Media.created_at.desc())
+        .where(owner_filter)
+        .order_by(Media.created_at.desc(), Media.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    return list(db.scalars(stmt))
+    total = db.scalar(select(func.count()).select_from(Media).where(owner_filter)) or 0
+    return MediaPage(total=total, page=page, page_size=page_size, items=list(db.scalars(stmt)))
 
 
 @router.get("/{media_id}", response_model=MediaRead)

@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Enum, Float, ForeignKey, Index, String, Text
+from sqlalchemy import Enum, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -34,9 +34,7 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
     """
 
     __tablename__ = "simulation_jobs"
-    __table_args__ = (
-        Index("ix_simulation_project_created", "project_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_simulation_project_created", "project_id", "created_at"),)
 
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
@@ -51,6 +49,10 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
 
     load_case: Mapped[dict[str, Any]] = mapped_column(JSONB)
     element_size_mm: Mapped[float | None] = mapped_column(Float, default=None)
+    # 1 = tet4, 2 = tet10. Stored rather than derived because the mesh it
+    # produced is not kept, and a result is only reproducible alongside the
+    # element order that computed it.
+    element_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
     mesh_stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)

@@ -17,15 +17,31 @@ from pydantic import BaseModel, ValidationError
 
 from app.ai.provider import (
     AssistantTurn,
+    Completion,
     LLMError,
     LLMProvider,
     LLMRefusal,
     LLMUnavailable,
+    TokenUsage,
     ToolCall,
 )
 from app.ai.providers._json_schema import strictify
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _usage(body: dict[str, Any]) -> TokenUsage:
+    """Read the `usage` block, tolerating a server that omits it.
+
+    Several OpenAI-compatible servers (older llama.cpp builds, some gateways)
+    answer without one. Zeros are the honest report there; inventing an
+    estimate would put fiction into the spend ledger.
+    """
+    usage = body.get("usage") or {}
+    return TokenUsage(
+        prompt_tokens=int(usage.get("prompt_tokens") or 0),
+        completion_tokens=int(usage.get("completion_tokens") or 0),
+    )
 
 
 def _to_wire(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -77,6 +93,7 @@ class OpenAICompatibleProvider(LLMProvider):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
+        self.model = model
         self._timeout = timeout_seconds
 
     def _headers(self) -> dict[str, str]:
@@ -88,9 +105,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def health(self) -> None:
         try:
-            response = httpx.get(
-                f"{self._base_url}/models", headers=self._headers(), timeout=5.0
-            )
+            response = httpx.get(f"{self._base_url}/models", headers=self._headers(), timeout=5.0)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise LLMUnavailable(
@@ -105,7 +120,7 @@ class OpenAICompatibleProvider(LLMProvider):
         schema: type[T],
         effort: str,
         max_tokens: int,
-    ) -> T:
+    ) -> Completion[T]:
         payload: dict[str, Any] = {
             "model": self._model,
             "max_completion_tokens": max_tokens,
@@ -132,9 +147,7 @@ class OpenAICompatibleProvider(LLMProvider):
             )
             response.raise_for_status()
         except httpx.TimeoutException as exc:
-            raise LLMError(
-                f"The model did not respond within {self._timeout:g}s."
-            ) from exc
+            raise LLMError(f"The model did not respond within {self._timeout:g}s.") from exc
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in (401, 403):
                 raise LLMUnavailable("The API key was rejected.") from exc
@@ -144,7 +157,8 @@ class OpenAICompatibleProvider(LLMProvider):
         except httpx.HTTPError as exc:
             raise LLMError(f"Chat completion request failed: {exc}") from exc
 
-        choices = response.json().get("choices") or []
+        body = response.json()
+        choices = body.get("choices") or []
         if not choices:
             raise LLMError("The model returned no choices.")
 
@@ -152,21 +166,18 @@ class OpenAICompatibleProvider(LLMProvider):
         if choice.get("finish_reason") == "content_filter":
             raise LLMRefusal("The provider's content filter rejected this request.")
         if choice.get("finish_reason") == "length":
-            raise LLMError(
-                "The model hit the output limit before finishing. Raise AI_MAX_TOKENS."
-            )
+            raise LLMError("The model hit the output limit before finishing. Raise AI_MAX_TOKENS.")
 
         content = (choice.get("message") or {}).get("content") or ""
         if not content.strip():
             raise LLMError("The model returned an empty response.")
 
         try:
-            return schema.model_validate_json(content)
+            return Completion(value=schema.model_validate_json(content), usage=_usage(body))
         except ValidationError as exc:
             raise LLMError(
                 f"The model returned output that does not match the expected schema: {exc}"
             ) from exc
-
 
     def chat(
         self,
@@ -207,7 +218,8 @@ class OpenAICompatibleProvider(LLMProvider):
         except httpx.HTTPError as exc:
             raise LLMError(f"Chat request failed: {exc}") from exc
 
-        choices = response.json().get("choices") or []
+        body = response.json()
+        choices = body.get("choices") or []
         if not choices:
             raise LLMError("The model returned no choices.")
         choice = choices[0]
@@ -231,4 +243,9 @@ class OpenAICompatibleProvider(LLMProvider):
                     arguments=arguments or {},
                 )
             )
-        return AssistantTurn(text=message.get("content") or "", tool_calls=calls)
+        return AssistantTurn(
+            text=message.get("content") or "",
+            tool_calls=calls,
+            usage=_usage(body),
+            truncated=choice.get("finish_reason") == "length",
+        )

@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import binary_stl
@@ -111,3 +112,76 @@ def test_deleting_a_project_removes_its_blobs(auth_client, project_id, cube_stl)
 
 def test_missing_version_is_404(auth_client, project_id) -> None:
     assert auth_client.get(f"/api/v1/projects/{project_id}/geometry/7").status_code == 404
+
+
+class TestBrepInspection:
+    """STEP and IGES used to come back with a schema string and nothing else --
+    no bounding box, which is what the load-case editor and the AI load-case
+    drafting both select regions against. That locked every CAD user out."""
+
+    @staticmethod
+    def _cad_bytes(tmp_path, suffix: str, size=(10.0, 30.0, 40.0)) -> bytes:
+        from tests.test_mesh import write_step_box
+
+        return write_step_box(tmp_path / f"box{suffix}", size).read_bytes()
+
+    def test_a_step_upload_reports_its_bounding_box(
+        self, auth_client, project_id, tmp_path
+    ) -> None:
+        data = self._cad_bytes(tmp_path, ".step")
+        response = upload(auth_client, project_id, "bracket.step", data)
+        assert response.status_code == 201, response.text
+
+        stats = response.json()["stats"]
+        assert stats["bounding_box"]["size"] == pytest.approx([10.0, 30.0, 40.0], abs=1e-6)
+        assert stats["bounding_box"]["min"] == pytest.approx([0.0, 0.0, 0.0], abs=1e-6)
+
+    def test_a_step_upload_reports_its_solid_volume(
+        self, auth_client, project_id, tmp_path
+    ) -> None:
+        data = self._cad_bytes(tmp_path, ".step")
+        stats = upload(auth_client, project_id, "bracket.step", data).json()["stats"]
+        assert stats["volume_mm3"] == pytest.approx(10.0 * 30.0 * 40.0, rel=1e-6)
+        assert stats["solid_count"] == 1
+
+    def test_the_step_schema_is_still_reported(self, auth_client, project_id, tmp_path) -> None:
+        # The B-rep pass adds to the text inspection; it must not replace it.
+        data = self._cad_bytes(tmp_path, ".step")
+        stats = upload(auth_client, project_id, "bracket.step", data).json()["stats"]
+        assert "schema" in stats and "bounding_box" in stats
+
+    def test_an_iges_upload_reports_its_bounding_box(
+        self, auth_client, project_id, tmp_path
+    ) -> None:
+        data = self._cad_bytes(tmp_path, ".iges", size=(5.0, 6.0, 7.0))
+        response = upload(auth_client, project_id, "bracket.iges", data)
+        assert response.status_code == 201, response.text
+        stats = response.json()["stats"]
+        assert stats["bounding_box"]["size"] == pytest.approx([5.0, 6.0, 7.0], abs=1e-5)
+
+    def test_a_file_the_kernel_cannot_open_still_uploads(self, auth_client, project_id) -> None:
+        # `inspect` promises never to raise for a readable file. The mesher is
+        # what reports a real problem, in terms of meshing, when a run happens.
+        minimal_step = (
+            b"ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\n"
+            b"ENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
+        )
+        response = upload(auth_client, project_id, "empty.step", minimal_step)
+        assert response.status_code == 201
+        assert "bounding_box" not in response.json()["stats"]
+
+    def test_the_bounding_box_matches_what_the_mesher_measures(self, tmp_path) -> None:
+        # The inspection is only useful if it agrees with the mesh a simulation
+        # would build from the same file.
+        from app.geometry.inspect import inspect
+        from app.mesh.gmsh_mesher import generate_tet_mesh
+        from tests.test_mesh import write_step_box
+
+        path = write_step_box(tmp_path / "box.step", (12.0, 8.0, 25.0))
+        stats = inspect(path, "step")
+        mesh, _ = generate_tet_mesh(path, "step", element_size_mm=8.0)
+
+        lo, hi = mesh.bounding_box
+        assert stats["bounding_box"]["min"] == pytest.approx(lo, abs=1e-6)
+        assert stats["bounding_box"]["max"] == pytest.approx(hi, abs=1e-6)
+        assert stats["volume_mm3"] == pytest.approx(mesh.volume, rel=1e-4)

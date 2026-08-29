@@ -13,7 +13,14 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from app.ai import service
-from app.ai.provider import LLMError, LLMProvider, LLMRefusal, LLMUnavailable
+from app.ai.provider import (
+    Completion,
+    LLMError,
+    LLMProvider,
+    LLMRefusal,
+    LLMUnavailable,
+    TokenUsage,
+)
 from app.ai.providers._json_schema import strictify
 from app.ai.schemas import Finding, LoadCaseDraft, ResultInterpretation
 from app.core.config import settings
@@ -52,6 +59,7 @@ class StubProvider(LLMProvider):
     """Records what it was asked, returns whatever the test told it to."""
 
     name = "stub"
+    model = "stub-1"
 
     def __init__(self, response: BaseModel | None = None, error: Exception | None = None) -> None:
         self._response = response
@@ -68,14 +76,13 @@ class StubProvider(LLMProvider):
 
     def complete(
         self, *, system: str, user: str, schema: type[T], effort: str, max_tokens: int
-    ) -> T:
-        self.calls.append(
-            {"system": system, "user": user, "schema": schema, "effort": effort}
-        )
+    ) -> Completion[T]:
+        self.calls.append({"system": system, "user": user, "schema": schema, "effort": effort})
         if self._error is not None:
             raise self._error
         assert isinstance(self._response, schema)
-        return self._response
+        # Usage rides back with the value: the seam meters every call.
+        return Completion(value=self._response, usage=TokenUsage(120, 40))
 
 
 def _interpretation() -> ResultInterpretation:
@@ -118,6 +125,15 @@ class TestStrictify:
 
 
 class TestInterpretService:
+    def test_returns_the_interpretation_and_what_it_cost(self) -> None:
+        """Usage must not vanish between the provider and the meter."""
+        provider = StubProvider(response=_interpretation())
+        completion = service.interpret_result(
+            provider, result=SUCCEEDED_RESULT, load_case=LOAD_CASE
+        )
+        assert completion.value.verdict == "safe"
+        assert completion.usage.total_tokens == 160
+
     def test_passes_the_frozen_system_prompt_and_the_configured_effort(self) -> None:
         provider = StubProvider(response=_interpretation())
         service.interpret_result(provider, result=SUCCEEDED_RESULT, load_case=LOAD_CASE)
@@ -195,9 +211,7 @@ class TestAIRoutes:
             assert body["detail"]
 
     def test_interpretation_requires_authentication(self, client: TestClient) -> None:
-        response = client.post(
-            "/api/v1/projects/does-not-exist/simulations/nope/interpretation"
-        )
+        response = client.post("/api/v1/projects/does-not-exist/simulations/nope/interpretation")
         assert response.status_code == 401
 
     def test_interpretation_404s_for_another_users_project(
@@ -260,6 +274,8 @@ def test_app_exposes_the_ai_routes_in_the_schema() -> None:
     """
     paths = app.openapi()["paths"]
     assert "/api/v1/ai/status" in paths
+    assert "/api/v1/ai/conversations" in paths
+    assert "/api/v1/ai/conversations/{conversation_id}" in paths
     assert "/api/v1/projects/{project_id}/ai/load-case" in paths
     assert "/api/v1/projects/{project_id}/simulations/{simulation_id}/interpretation" in paths
 
@@ -272,7 +288,12 @@ def test_app_exposes_the_ai_routes_in_the_schema() -> None:
             continue
         if "/ai/" in path or path.endswith("/interpretation"):
             for operation in methods.values():
-                schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+                # A 204 endpoint (DELETE) genuinely has no body to describe.
+                success = operation["responses"].get("200")
+                if success is None:
+                    assert "204" in operation["responses"], f"{path} has no success response"
+                    continue
+                schema = success["content"]["application/json"]["schema"]
                 assert schema.get("$ref"), f"{path} has an untyped 200 response"
 
 
@@ -319,9 +340,7 @@ class TestOpenAIWireFormat:
                 {
                     "role": "assistant",
                     "content": "",
-                    "tool_calls": [
-                        {"function": {"name": "f", "arguments": '{"a": 1}'}}
-                    ],
+                    "tool_calls": [{"function": {"name": "f", "arguments": '{"a": 1}'}}],
                 }
             ]
         )

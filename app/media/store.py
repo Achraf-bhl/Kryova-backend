@@ -91,9 +91,7 @@ class LocalMediaStore:
                 while chunk := source.read(self.chunk_size):
                     size += len(chunk)
                     if max_bytes is not None and size > max_bytes:
-                        raise MediaTooLarge(
-                            f"stream exceeds the {max_bytes} byte limit"
-                        )
+                        raise MediaTooLarge(f"stream exceeds the {max_bytes} byte limit")
                     digest.update(chunk)
                     tmp.write(chunk)
             return self._commit(tmp_path, digest.hexdigest(), size)
@@ -176,4 +174,6 @@ class LocalMediaStore:
                 yield path.name
 
     def total_bytes(self) -> int:
-        return sum(path.stat().st_size for path in (self.root / "blobs").rglob("*") if path.is_file())
+        return sum(
+            path.stat().st_size for path in (self.root / "blobs").rglob("*") if path.is_file()
+        )

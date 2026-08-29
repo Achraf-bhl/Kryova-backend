@@ -4,10 +4,10 @@ The model decides what to do. It is given the transcript so far and a set of
 tools; it calls whichever it needs, reads the results, and keeps going until it
 has an answer. Nothing here scripts the order of operations.
 
-Three properties this loop is built to guarantee, because an LLM will not
+Four properties this loop is built to guarantee, because an LLM will not
 guarantee them on its own:
 
-**It terminates.** `MAX_STEPS` bounds the loop. A model that keeps calling
+**It terminates.** A step budget bounds the loop. A model that keeps calling
 tools forever gets cut off with a message saying so, rather than running until
 a timeout somewhere else.
 
@@ -17,13 +17,24 @@ and can correct itself -- a wrong argument name or a stale project id costs one
 step, not the turn.
 
 **It does not repeat itself.** Every step, including the failures, is persisted
-to the conversation. The next turn replays the whole transcript, so the model
-can see it already listed the projects, already tried that id, already ran that
-simulation.
+to the conversation. Later turns replay a bounded window of that transcript
+plus a running summary of everything older, so the model can still see that it
+already listed the projects, already tried that id, already ran that simulation.
+
+**It knows what is true right now.** The transcript is history, not state, so a
+block of live facts is rebuilt from the database every turn and injected ahead
+of the newest question. Where the two disagree, the block wins -- see
+`state.py`.
+
+Everything crossing the boundary from a tool into the transcript is fenced as
+untrusted data first (`sanitise.py`): part names, file metadata and parameter
+comments are attacker-controlled in exactly the way the prompt-injection
+literature describes.
 """
 
 import json
 import logging
+import os
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -31,69 +42,60 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.ai.provider import LLMError, LLMProvider
+from app.ai import prompts
+from app.ai.context import build_messages, maybe_summarise
+from app.ai.provider import LLMError, LLMProvider, TokenUsage
+from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
 from app.ai.tools import ToolBox, ToolError
-from app.models.conversation import Conversation, ConversationMessage, MessageRole
+from app.core.config import settings
+from app.models import Conversation, ConversationMessage, MessageRole, User
 
 logger = logging.getLogger(__name__)
 
-#: Ceiling on tool round-trips in a single user turn. Generous enough for
-#: list -> inspect -> validate -> answer, tight enough that a confused model
-#: cannot spin.
-MAX_STEPS = 8
-
-#: Tool output handed back to the model is truncated to this, so one chatty
-#: result cannot crowd the rest of the transcript out of the context window.
-MAX_TOOL_RESULT_CHARS = 6_000
-
-AGENT_SYSTEM = """\
-You are Kryova's engineering assistant. You help a mechanical engineer analyse \
-parts: finding their projects and geometry, building load cases, running linear \
-static FE analyses, and explaining results.
-
-You have tools. Use them rather than guessing:
-
-- Never invent an id. If the user names something in words, call the listing \
-tool and match it. If nothing matches, say so and show what does exist.
-- Never state a physics number you did not read from a tool result. You do not \
-compute, convert or adjust stresses, factors of safety or masses -- the solver \
-does that, and you report what it produced.
-- Check before acting. Before running a simulation, confirm the geometry exists \
-and the material is one the library actually has.
-- A tool result marked as an error is information, not a dead end. Read it, fix \
-what it tells you, and continue. Do not repeat the identical call.
-- When you have enough to answer, answer. Do not keep calling tools to be sure.
-
-The unit system is mm-N-MPa: lengths and displacements in millimetres, forces \
-in newtons, stresses in megapascals, mass in kilograms. Nothing is converted \
-anywhere.
-
-Starting a new project: the user arrives with a part in mind and nothing else. Ask what they are analysing, call create_project as soon as you have a usable name, and say it exists. Then walk them through what you need, one step at a time and in this order: the CAD file (STEP, IGES or STL, which they must upload themselves -- you have no tool for it), then how it is held and what loads it carries, then the material. Ask for one thing at a time and never present the whole checklist at once. If they describe the loading before the geometry is there, capture it and come back to it.
-
-Running a simulation costs real compute and takes minutes. Never submit one \
-the user did not ask for. When a run is ready, say what will be analysed and \
-what you assumed, and let them confirm.
-
-Answer as an engineer talking to an engineer: lead with the outcome, keep it \
-short, and say plainly when something is unknown or unverified.\
-"""
+#: Ceiling on tool round-trips in a single user turn. A CATIA modelling session
+#: legitimately needs a dozen -- sketch, pad, pocket, fillet, measure, capture,
+#: export -- so the old budget of 8 cut off real work, not just confused models.
+#: Still bounded: a model that has spent this many steps without answering is
+#: stuck, and more steps will not unstick it.
+DEFAULT_MAX_STEPS = 20
 
 
+def max_steps() -> int:
+    """The step budget for one turn, raisable without a code change.
 
-#: Human labels for the step list in the UI. A user reading "list_geometry"
-#: has to decode it; "Checking geometry versions" they can just read.
-TOOL_LABELS: dict[str, str] = {
-    "create_project": "Creating the project",
-    "list_projects": "Looking up your projects",
-    "list_materials": "Checking the material library",
-    "list_geometry": "Checking geometry versions",
-    "list_simulations": "Reviewing previous runs",
-    "get_simulation": "Reading the simulation result",
-    "run_simulation": "Preparing the analysis",
-}
+    `Settings` is the intended home and is checked first. The environment is a
+    documented fallback rather than a shortcut: `Settings` is configured with
+    `extra="ignore"`, so an `AI_MAX_STEPS` variable is silently dropped until
+    the field exists, and a deployment tuning a heavy CATIA workflow would find
+    the knob had no effect. Reading it here makes the knob real today and stops
+    mattering the moment the field lands.
+
+    A malformed value falls back to the default: a typo in an environment
+    variable should not take the agent down.
+    """
+    configured = getattr(settings, "ai_max_steps", None)
+    if configured is None:
+        configured = os.environ.get("AI_MAX_STEPS")
+    if configured is None:
+        return DEFAULT_MAX_STEPS
+    try:
+        return max(1, int(configured))
+    except (TypeError, ValueError):
+        logger.warning("Ignoring unusable AI_MAX_STEPS value %r", configured)
+        return DEFAULT_MAX_STEPS
 
 
-def _summarise(tool: str, result: Any, ok: bool) -> str:
+def system_prompt() -> str:
+    """The frozen prefix for this deployment.
+
+    Two constants rather than one prompt with an optional section: a prefix that
+    grows a paragraph when a feature flag flips is a different cache key, and
+    the whole point of freezing these strings is that the prefix is stable.
+    """
+    return prompts.AGENT_SYSTEM_CATIA if settings.catia_enabled else prompts.AGENT_SYSTEM
+
+
+def summarise_step(tool: str, result: Any, ok: bool) -> str:
     """One line describing what a tool actually found.
 
     The raw JSON goes to the model; this goes to the human, so it says
@@ -121,8 +123,26 @@ def _summarise(tool: str, result: Any, ok: bool) -> str:
         fos = (result.get("result") or {}).get("factor_of_safety")
         return f"Status {status}" + (f", factor of safety {fos:.2f}" if fos else "")
     if tool == "run_simulation":
-        return "Load case validated, ready to submit"
+        return f"Queued run {result.get('id', '')}".strip()
+    if tool == "delete_simulation":
+        return "Run deleted"
+    if tool.startswith("catia_"):
+        return _catia_summary(result)
     return "Done"
+
+
+def _catia_summary(result: dict[str, Any]) -> str:
+    """Say what the part looks like now, not just that the call returned."""
+    parts: list[str] = []
+    if result.get("feature"):
+        parts.append(str(result["feature"]))
+    if result.get("document"):
+        parts.append(str(result["document"]))
+    if result.get("mass_kg") is not None:
+        parts.append(f"{result['mass_kg']} kg")
+    if result.get("geometry_version") is not None:
+        parts.append(f"geometry v{result['geometry_version']}")
+    return ", ".join(parts) if parts else "Done"
 
 
 @dataclass
@@ -139,46 +159,24 @@ class AgentStep:
 class AgentReply:
     text: str
     steps: list[AgentStep] = field(default_factory=list)
-    #: True when MAX_STEPS cut the loop off before the model finished.
+    #: True when the step budget cut the loop off before the model finished.
     truncated: bool = False
+    #: Everything this turn cost, including summarisation.
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 def _serialise(value: Any) -> str:
+    """Render a tool result as fenced, untrusted text.
+
+    The fence is not cosmetic. Everything a tool returns is text somebody else
+    wrote -- a CATIA feature name, a filename, a parameter comment -- and this
+    is the boundary where it stops being able to pass as instruction.
+    """
     try:
         text = json.dumps(value, default=str, sort_keys=True)
     except (TypeError, ValueError):
         text = str(value)
-    if len(text) > MAX_TOOL_RESULT_CHARS:
-        return text[:MAX_TOOL_RESULT_CHARS] + "\n...[truncated]"
-    return text
-
-
-def _transcript(conversation: Conversation) -> list[dict[str, Any]]:
-    """Replay stored messages into the provider's normal form.
-
-    This is the memory. Tool calls and their results are replayed too, not just
-    the prose, so the model can see what it already tried.
-    """
-    messages: list[dict[str, Any]] = []
-    for stored in conversation.messages:
-        if stored.role is MessageRole.USER:
-            messages.append({"role": "user", "content": stored.content or ""})
-        elif stored.role is MessageRole.ASSISTANT:
-            entry: dict[str, Any] = {"role": "assistant", "content": stored.content or ""}
-            if stored.tool_calls:
-                entry["tool_calls"] = stored.tool_calls
-            messages.append(entry)
-        elif stored.role is MessageRole.TOOL:
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": stored.tool_call_id or "",
-                    "name": stored.tool_name or "",
-                    "content": stored.content or "",
-                    "is_error": stored.is_error,
-                }
-            )
-    return messages
+    return fence_tool_result(text, max_chars=MAX_TOOL_RESULT_CHARS)
 
 
 def _append(
@@ -186,7 +184,7 @@ def _append(
 ) -> ConversationMessage:
     message = ConversationMessage(
         conversation_id=conversation.id,
-        sequence=len(conversation.messages),
+        sequence=_next_sequence(conversation),
         role=role,
         **fields,
     )
@@ -196,6 +194,16 @@ def _append(
     return message
 
 
+def _next_sequence(conversation: Conversation) -> int:
+    """One past the highest sequence stored.
+
+    Not `len(messages)`: once older messages are folded into the summary they
+    are still stored, but any future pruning of them would make length-based
+    numbering collide with sequences already used.
+    """
+    return max((message.sequence for message in conversation.messages), default=-1) + 1
+
+
 def stream_agent(
     *,
     db: Session,
@@ -203,6 +211,7 @@ def stream_agent(
     conversation: Conversation,
     toolbox: ToolBox,
     user_message: str,
+    user: User | None = None,
     allow_mutations: bool = False,
     max_tokens: int = 4_000,
 ) -> Iterator[dict[str, Any]]:
@@ -216,30 +225,52 @@ def stream_agent(
     Everything is persisted as it happens, so a crash mid-loop leaves a
     transcript that still reflects what actually ran.
     """
+    owner = user if user is not None else toolbox.user
+    budget = max_steps()
+    system = system_prompt()
+    labels = toolbox.labels()
+    usage = TokenUsage()
+
     _append(db, conversation, MessageRole.USER, content=user_message)
+
+    # Fold before building the window, so the material being folded is still
+    # present to be read and the window that follows is already compacted.
+    usage += maybe_summarise(db, provider, conversation)
 
     steps: list[AgentStep] = []
     schemas = toolbox.schemas(include_mutating=allow_mutations)
 
-    for step in range(MAX_STEPS):
-        yield {"type": "thinking", "step": step + 1, "max_steps": MAX_STEPS}
+    for step in range(budget):
+        yield {"type": "thinking", "step": step + 1, "max_steps": budget}
         turn = provider.chat(
-            system=AGENT_SYSTEM,
-            messages=_transcript(conversation),
+            system=system,
+            messages=build_messages(db, owner, conversation),
             tools=schemas,
             max_tokens=max_tokens,
         )
+        usage += turn.usage
 
         if not turn.wants_tools:
-            _append(db, conversation, MessageRole.ASSISTANT, content=turn.text)
+            text = turn.text
+            if turn.truncated:
+                # A cut-off answer presented as a finished one is the worst
+                # outcome here: the user reads a confident half-sentence about
+                # their part and has no way to know the rest was lost.
+                text += (
+                    "\n\n[This answer was cut off at the model's output limit. "
+                    "Ask me to continue, or narrow the question.]"
+                )
+            _append(db, conversation, MessageRole.ASSISTANT, content=text)
             db.commit()
-            yield {"type": "message", "content": turn.text}
+            yield {"type": "message", "content": text}
             yield {
                 "type": "done",
                 "conversation_id": conversation.id,
                 "project_id": toolbox.project_id,
                 "truncated": False,
                 "steps": len(steps),
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
             }
             return
 
@@ -271,7 +302,7 @@ def stream_agent(
                 "type": "tool_start",
                 "id": call.id,
                 "tool": call.name,
-                "label": TOOL_LABELS.get(call.name, call.name.replace("_", " ")),
+                "label": labels.get(call.name, call.name.replace("_", " ")),
                 "arguments": call.arguments,
             }
             started = time.monotonic()
@@ -287,9 +318,7 @@ def stream_agent(
                 result, ok = {"error": f"{type(exc).__name__}: {exc}"}, False
             elapsed_ms = int((time.monotonic() - started) * 1000)
 
-            steps.append(
-                AgentStep(tool=call.name, arguments=call.arguments, ok=ok, result=result)
-            )
+            steps.append(AgentStep(tool=call.name, arguments=call.arguments, ok=ok, result=result))
             _append(
                 db,
                 conversation,
@@ -298,6 +327,7 @@ def stream_agent(
                 tool_call_id=call.id,
                 tool_name=call.name,
                 is_error=not ok,
+                duration_ms=elapsed_ms,
             )
             yield {
                 "type": "tool_end",
@@ -306,7 +336,7 @@ def stream_agent(
                 "arguments": call.arguments,
                 "ok": ok,
                 "result": result,
-                "summary": _summarise(call.name, result, ok),
+                "summary": summarise_step(call.name, result, ok),
                 "duration_ms": elapsed_ms,
             }
 
@@ -317,14 +347,13 @@ def stream_agent(
     # gets the model's best summary instead of a bare "gave up".
     try:
         closing = provider.chat(
-            system=AGENT_SYSTEM
-            + "\n\nYou have run out of tool calls for this turn. Answer with what "
-            "you have, and say plainly what is still unresolved.",
-            messages=_transcript(conversation),
+            system=system + prompts.AGENT_OUT_OF_STEPS,
+            messages=build_messages(db, owner, conversation),
             tools=[],
             max_tokens=max_tokens,
         )
         text = closing.text
+        usage += closing.usage
     except LLMError:
         text = (
             "I used all my tool calls for this turn without reaching an answer. "
@@ -340,6 +369,8 @@ def stream_agent(
         "project_id": toolbox.project_id,
         "truncated": True,
         "steps": len(steps),
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
     }
 
 
@@ -350,6 +381,7 @@ def run_agent(
     conversation: Conversation,
     toolbox: ToolBox,
     user_message: str,
+    user: User | None = None,
     allow_mutations: bool = False,
     max_tokens: int = 4_000,
 ) -> AgentReply:
@@ -361,6 +393,7 @@ def run_agent(
     text = ""
     steps: list[AgentStep] = []
     truncated = False
+    usage = TokenUsage()
 
     for event in stream_agent(
         db=db,
@@ -368,6 +401,7 @@ def run_agent(
         conversation=conversation,
         toolbox=toolbox,
         user_message=user_message,
+        user=user,
         allow_mutations=allow_mutations,
         max_tokens=max_tokens,
     ):
@@ -384,5 +418,9 @@ def run_agent(
             text = event["content"]
         elif event["type"] == "done":
             truncated = event["truncated"]
+            usage = TokenUsage(
+                prompt_tokens=event.get("prompt_tokens", 0),
+                completion_tokens=event.get("completion_tokens", 0),
+            )
 
-    return AgentReply(text=text, steps=steps, truncated=truncated)
+    return AgentReply(text=text, steps=steps, truncated=truncated, usage=usage)

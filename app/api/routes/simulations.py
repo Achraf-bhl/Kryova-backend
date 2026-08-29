@@ -1,3 +1,4 @@
+import struct
 from typing import Annotated
 
 import numpy as np
@@ -12,8 +13,9 @@ from app.api.deps import (
     OwnedProject,
     SessionScopeDep,
 )
+from app.core.config import settings
 from app.media import MediaNotFound
-from app.models import GeometryVersion, JobStatus, SimulationJob
+from app.models import GeometryVersion, JobStatus, Project, SimulationJob
 from app.schemas import SimulationCreate, SimulationPage, SimulationRead, SurfaceField
 from app.simulation.runner import run_simulation
 from app.solve.linear_static import LinearStaticSolver
@@ -39,6 +41,39 @@ def _resolve_geometry(db: DbSession, project_id: str, version: int | None) -> Ge
     return geometry
 
 
+def _assert_within_quota(db: DbSession, owner_id: str) -> None:
+    """Refuse a run when the user already holds their share of the workers.
+
+    Meshing and solving are the most expensive thing this service does, and the
+    queue is shared, so without a per-user ceiling one account can occupy every
+    worker and every other user's job waits behind it. The agent tool applies
+    the same rule before it proposes a run (`app/ai/tools.py`); this is the one
+    that actually binds, because the HTTP route is reachable without it.
+    """
+    limit = settings.max_concurrent_simulations_per_user
+    running = (
+        db.scalar(
+            select(func.count())
+            .select_from(SimulationJob)
+            .join(Project, Project.id == SimulationJob.project_id)
+            .where(
+                Project.owner_id == owner_id,
+                SimulationJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+            )
+        )
+        or 0
+    )
+    if running >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"You already have {running} simulation(s) queued or running, which is the "
+                f"limit of {limit}. Wait for one to finish, or delete a queued run, "
+                "before starting another."
+            ),
+        )
+
+
 @router.post("", response_model=SimulationRead, status_code=status.HTTP_202_ACCEPTED)
 def create_simulation(
     payload: SimulationCreate,
@@ -49,6 +84,7 @@ def create_simulation(
     session_scope: SessionScopeDep,
 ) -> SimulationJob:
     """Queue a mesh-and-solve run. Returns immediately with a job to poll."""
+    _assert_within_quota(db, project.owner_id)
     geometry = _resolve_geometry(db, project.id, payload.geometry_version)
 
     job = SimulationJob(
@@ -58,6 +94,7 @@ def create_simulation(
         solver=LinearStaticSolver.name,
         load_case=payload.load_case.model_dump(),
         element_size_mm=payload.element_size_mm,
+        element_order=payload.element_order,
     )
     db.add(job)
     db.commit()
@@ -133,9 +170,7 @@ def read_surface_field(
             displacements=data["displacements"][used].tolist(),
             von_mises_mpa=data["von_mises_nodal"][used].tolist(),
             max_von_mises_mpa=float(data["von_mises_element"].max()),
-            max_displacement_mm=float(
-                np.linalg.norm(data["displacements"], axis=1).max()
-            ),
+            max_displacement_mm=float(np.linalg.norm(data["displacements"], axis=1).max()),
         )
 
 
@@ -144,9 +179,6 @@ def read_surface_field_binary(
     project: OwnedProject, db: DbSession, media: MediaServiceDep, simulation_id: str
 ) -> Response:
     """High-performance packed binary surface field stream for 3D viewers."""
-    import struct
-    from fastapi import Response
-
     job = _get_job(db, project.id, simulation_id)
     if job.status is not JobStatus.SUCCEEDED or job.fields_media is None:
         raise HTTPException(
@@ -185,7 +217,6 @@ def read_surface_field_binary(
             b"\x00" * 8,
         )
 
-
         body = (
             header
             + nodes.tobytes()
@@ -199,7 +230,6 @@ def read_surface_field_binary(
             media_type="application/octet-stream",
             headers={"Content-Disposition": f'attachment; filename="surface_{simulation_id}.bin"'},
         )
-
 
 
 @router.delete("/{simulation_id}", status_code=status.HTTP_204_NO_CONTENT)

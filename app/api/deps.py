@@ -5,11 +5,10 @@ from typing import Annotated
 
 from fastapi import Cookie, Depends, HTTPException, Path, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import SessionLocal, get_async_db, get_db
+from app.core.database import SessionLocal, get_db
 from app.core.security import decode_access_token
 from app.jobs import JobQueue, get_job_queue
 from app.media import LocalMediaStore, MediaService, get_media_store
@@ -17,7 +16,6 @@ from app.models import Project, User
 from app.simulation.runner import SessionScope
 
 DbSession = Annotated[Session, Depends(get_db)]
-AsyncDbSession = Annotated[AsyncSession, Depends(get_async_db)]
 
 MediaStoreDep = Annotated[LocalMediaStore, Depends(get_media_store)]
 JobQueueDep = Annotated[JobQueue, Depends(get_job_queue)]

@@ -70,9 +70,7 @@ def upload_geometry(
         ) from exc
 
     if stored.size_bytes == 0:
-        raise HTTPException(
-            status_code=422, detail="File is empty"
-        )
+        raise HTTPException(status_code=422, detail="File is empty")
 
     return _attach(db, media, project.id, stored, file_format, note)
 
@@ -114,9 +112,7 @@ def _attach(db, media, project_id: str, stored, file_format: str, note: str | No
         # sweep decide whether it can go rather than deleting it here.
         media.delete(stored)
         db.commit()
-        raise HTTPException(
-            status_code=422, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except MediaNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_410_GONE, detail="Uploaded file is no longer on disk"

@@ -12,9 +12,7 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 @router.post("", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: DbSession, current_user: CurrentUser) -> Project:
-    project = Project(
-        name=payload.name, description=payload.description, owner_id=current_user.id
-    )
+    project = Project(name=payload.name, description=payload.description, owner_id=current_user.id)
     db.add(project)
     db.commit()
     return project
@@ -36,15 +34,12 @@ def list_projects(
     )
     total = (
         db.scalar(
-            select(func.count())
-            .select_from(Project)
-            .where(Project.owner_id == current_user.id)
+            select(func.count()).select_from(Project).where(Project.owner_id == current_user.id)
         )
         or 0
     )
     read_items = [ProjectRead.model_validate(project) for project in db.scalars(stmt)]
     return ProjectPage(total=total, page=page, page_size=page_size, items=read_items)
-
 
 
 @router.get("/{project_id}", response_model=ProjectRead)

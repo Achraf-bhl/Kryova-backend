@@ -6,21 +6,6 @@ on:
   pull_request:
 
 jobs:
-  frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npm test --
-      - run: npm run build
-
   backend:
     runs-on: ubuntu-latest
     steps:
@@ -36,8 +21,11 @@ jobs:
       - run: mypy app tests
       - run: pytest -q
         env:
-          # Set these as repository secrets (Settings > Secrets and variables >
-          # Actions). Never inline a connection string here -- this file is
-          # public in any public repo, and a committed password is a leaked one.
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SECRET_KEY: ${{ secrets.TEST_SECRET_KEY || 'ci-only-secret-key-not-used-in-production' }}
+          # A placeholder, deliberately not a secret: nothing in the suite
+          # connects to it. Settings validation requires a PostgreSQL URL, and
+          # the tests run against TEST_DATABASE_URL -- left unset here, so
+          # conftest builds an in-memory SQLite database instead. Pointing this
+          # at a real database would put CI one bug away from dropping a schema
+          # in production.
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/kryova_ci
+          SECRET_KEY: ci-only-secret-key-not-used-in-production

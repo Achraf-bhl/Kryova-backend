@@ -7,7 +7,7 @@ hand calculations rather than against its own previous output.
 
 import numpy as np
 
-from app.mesh.types import TetMesh
+from app.mesh.types import TET10_EDGES, TetMesh
 
 # Kuhn decomposition: the six tets that tile a unit cube without adding nodes.
 _CUBE_TETS = np.array(
@@ -48,12 +48,7 @@ def box_mesh(
 
     i, j, k = np.meshgrid(np.arange(nx), np.arange(ny), np.arange(nz), indexing="ij")
     corners = np.stack(
-        [
-            node_id(i + di, j + dj, k + dk)
-            for di in (0, 1)
-            for dj in (0, 1)
-            for dk in (0, 1)
-        ],
+        [node_id(i + di, j + dj, k + dk) for di in (0, 1) for dj in (0, 1) for dk in (0, 1)],
         axis=-1,
     ).reshape(-1, 8)
 
@@ -67,3 +62,28 @@ def box_mesh(
         mesh.tets[negative] = mesh.tets[negative][:, [0, 2, 1, 3]]
         mesh = TetMesh(nodes=mesh.nodes, tets=mesh.tets)
     return mesh
+
+
+def promote_to_tet10(mesh: TetMesh) -> TetMesh:
+    """Add a midside node at the middle of every edge, giving a tet10 mesh.
+
+    Edges stay straight, so the element geometry -- and therefore the volume and
+    the boundary surface -- is exactly the tet4 mesh's. Only the interpolation
+    order changes, which is what makes a tet4-versus-tet10 comparison at equal
+    element count a comparison of the elements rather than of two meshes.
+    """
+    if mesh.midside is not None:
+        return mesh
+
+    pairs = mesh.tets[:, np.asarray(TET10_EDGES, dtype=np.int64)]  # (n_tets, 6, 2)
+    # Sorting each pair makes the two elements sharing an edge agree on its key,
+    # so the shared edge gets one node rather than two coincident ones.
+    keys = np.sort(pairs, axis=2).reshape(-1, 2)
+    unique_edges, inverse = np.unique(keys, axis=0, return_inverse=True)
+
+    midpoints = 0.5 * (mesh.nodes[unique_edges[:, 0]] + mesh.nodes[unique_edges[:, 1]])
+    return TetMesh(
+        nodes=np.vstack([mesh.nodes, midpoints]),
+        tets=mesh.tets.copy(),
+        midside=(len(mesh.nodes) + inverse).reshape(len(mesh.tets), 6),
+    )

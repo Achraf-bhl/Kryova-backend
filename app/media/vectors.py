@@ -79,9 +79,7 @@ class LocalVectorIndex:
             )
         id_array = np.asarray(ids, dtype=np.int64)
         if len(id_array) != len(vectors):
-            raise VectorIndexError(
-                f"got {len(vectors)} vectors but {len(id_array)} ids"
-            )
+            raise VectorIndexError(f"got {len(vectors)} vectors but {len(id_array)} ids")
         self._index.add_with_ids(self._prepare(vectors), id_array)
 
     def remove(self, ids: NDArray[np.int64] | list[int]) -> int:

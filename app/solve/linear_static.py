@@ -4,9 +4,19 @@ Small-strain, isotropic, linear elastic. This is the ground-truth baseline the
 PRD calls for: unremarkable, well-understood physics whose numbers can be
 checked against closed-form solutions.
 
-Tet4 elements are constant-strain, so they are noticeably stiff in bending.
-Tet10 (quadratic) elements capture bending much more accurately per element,
-and are selected automatically when the mesh provides midside nodes.
+Tet4 elements are constant-strain, so they are noticeably stiff in bending: a
+cantilever meshed with them can come back less than half as flexible as the
+beam it represents. Tet10 (quadratic) elements have a linear strain field and
+recover that bending behaviour at the same element count, at roughly 2.5x the
+degrees of freedom. `solve` dispatches on what the mesh carries -- a mesh with
+midside nodes is assembled and post-processed as tet10 throughout -- and the
+mesher emits them when asked for `element_order=2`.
+
+Surface loads follow the element order too: `selection.distribute_force` puts a
+quadratic face's load on its midside nodes, which is where the face shape
+functions integrate to. Spreading it over the corners instead is only
+statically equivalent and overstates the peak stress next to a loaded face by
+around 20%.
 """
 
 import time
@@ -18,13 +28,35 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from numpy.typing import NDArray
 
-from app.mesh.types import TetMesh
+from app.mesh.types import TET10_EDGES, TetMesh
 from app.solve.base import SolveOutput, Solver
 from app.solve.selection import distribute_force, select_nodes
 from app.solve.types import LoadCase, Material, SolverError, StaticResult
 
 # Derivatives of the tet4 shape functions with respect to natural coordinates.
 _DN_DXI = np.array([[-1.0, -1.0, -1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+
+# Derivatives of the four barycentric coordinates with respect to (xi, eta,
+# zeta), where L = (1 - xi - eta - zeta, xi, eta, zeta). Numerically the same
+# table as _DN_DXI; kept separate because it means something different.
+_DL_DNAT = _DN_DXI
+
+# Four-point Gauss rule on the reference tetrahedron, exact to degree 2. The
+# tet10 integrand B^T D B is quadratic in the natural coordinates for a
+# straight-edged element, so this rule integrates it exactly rather than
+# approximately.
+_TET_GAUSS_ALPHA = (5.0 - np.sqrt(5.0)) / 20.0
+_TET_GAUSS_BETA = (5.0 + 3.0 * np.sqrt(5.0)) / 20.0
+_TET_GAUSS_POINTS = (
+    (_TET_GAUSS_ALPHA, _TET_GAUSS_ALPHA, _TET_GAUSS_ALPHA),
+    (_TET_GAUSS_BETA, _TET_GAUSS_ALPHA, _TET_GAUSS_ALPHA),
+    (_TET_GAUSS_ALPHA, _TET_GAUSS_BETA, _TET_GAUSS_ALPHA),
+    (_TET_GAUSS_ALPHA, _TET_GAUSS_ALPHA, _TET_GAUSS_BETA),
+)
+# The four equal weights sum to the reference tetrahedron's volume, 1/6.
+_TET_GAUSS_WEIGHT = 1.0 / 24.0
+
+_CENTROID = (0.25, 0.25, 0.25)
 
 _MIN_JACOBIAN = 1e-12
 
@@ -71,11 +103,15 @@ def _shape_gradients(mesh: TetMesh) -> tuple[NDArray[np.float64], NDArray[np.flo
 
 
 def _strain_displacement(grads: NDArray[np.float64]) -> NDArray[np.float64]:
-    """B matrices, shape (n_elem, 6, 12), using engineering shear strains."""
-    n = grads.shape[0]
-    b = np.zeros((n, 6, 12), dtype=np.float64)
+    """B matrices, shape (n_elem, 6, 3 * nodes_per_element), engineering shears.
+
+    Shared by both element orders: the layout only depends on how many nodes an
+    element has, which is `grads.shape[1]`.
+    """
+    n, per_element = grads.shape[0], grads.shape[1]
+    b = np.zeros((n, 6, 3 * per_element), dtype=np.float64)
     gx, gy, gz = grads[..., 0], grads[..., 1], grads[..., 2]
-    for node in range(4):
+    for node in range(per_element):
         col = 3 * node
         b[:, 0, col + 0] = gx[:, node]
         b[:, 1, col + 1] = gy[:, node]
@@ -89,9 +125,12 @@ def _strain_displacement(grads: NDArray[np.float64]) -> NDArray[np.float64]:
     return b
 
 
-def _element_dofs(tets: NDArray[np.int64]) -> NDArray[np.int64]:
-    """Global DOF index for each element-local DOF, shape (n_elem, 12)."""
-    return (tets[:, :, None] * 3 + np.arange(3)[None, None, :]).reshape(len(tets), 12)
+def _element_dofs(connectivity: NDArray[np.int64]) -> NDArray[np.int64]:
+    """Global DOF index for each element-local DOF, shape (n_elem, 3 * nodes)."""
+    per_element = connectivity.shape[1]
+    return (connectivity[:, :, None] * 3 + np.arange(3)[None, None, :]).reshape(
+        len(connectivity), 3 * per_element
+    )
 
 
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
@@ -122,134 +161,91 @@ def _under_constrained(detail: str) -> SolverError:
 
 
 def assemble_stiffness(mesh: TetMesh, material: Material) -> sp.csr_matrix:
+    """Global stiffness matrix, for whichever element order the mesh carries."""
+    if mesh.midside is not None:
+        return assemble_stiffness_tet10(mesh, material)
+    return assemble_stiffness_tet4(mesh, material)
+
+
+def assemble_stiffness_tet4(mesh: TetMesh, material: Material) -> sp.csr_matrix:
     grads, volumes = _shape_gradients(mesh)
     b = _strain_displacement(grads)
     d = constitutive_matrix(material)
 
-    # Ke = V * B.T D B, evaluated for every element at once.
+    # Ke = V * B.T D B, evaluated for every element at once. Tet4 strain is
+    # constant over the element, so one evaluation integrates it exactly.
     ke = volumes[:, None, None] * np.einsum("eji,jk,ekl->eil", b, d, b)
+    return _scatter(mesh, _element_dofs(mesh.tets), ke)
 
-    dofs = _element_dofs(mesh.tets)
-    rows = np.repeat(dofs, 12, axis=1).ravel()
-    cols = np.tile(dofs, (1, 12)).ravel()
+
+def assemble_stiffness_tet10(mesh: TetMesh, material: Material) -> sp.csr_matrix:
+    """Global stiffness for quadratic tets: 10 nodes, 30 local DOFs each.
+
+    Unlike tet4, strain varies over the element, so the element matrix is
+    integrated numerically -- at the four Gauss points that make the rule exact
+    for the quadratic integrand a straight-edged tet10 produces.
+    """
+    if mesh.midside is None:
+        raise SolverError("mesh has no midside nodes; it is not a tet10 mesh")
+
+    connectivity = mesh.connectivity
+    points = mesh.nodes[connectivity]  # (n_elem, 10, 3)
+    d = constitutive_matrix(material)
+    ke = np.zeros((len(connectivity), 30, 30), dtype=np.float64)
+
+    for point in _TET_GAUSS_POINTS:
+        grads, detj = _mapped_gradients(points, _tet10_shape_gradients(*point))
+        b = _strain_displacement(grads)
+        ke += _TET_GAUSS_WEIGHT * detj[:, None, None] * np.einsum("eji,jk,ekl->eil", b, d, b)
+
+    return _scatter(mesh, _element_dofs(connectivity), ke)
+
+
+def _tet10_shape_gradients(xi: float, eta: float, zeta: float) -> NDArray[np.float64]:
+    """dN/d(xi, eta, zeta) for the 10-node tet, shape (10, 3).
+
+    In barycentric coordinates L = (1 - xi - eta - zeta, xi, eta, zeta) the
+    shape functions are N_i = L_i (2 L_i - 1) at the corners and N_ab = 4 L_a L_b
+    at the midside of edge (a, b), so the derivatives fall straight out of the
+    product rule. Midside ordering is `TET10_EDGES`, the same table the mesher
+    fills in.
+    """
+    lam = np.array([1.0 - xi - eta - zeta, xi, eta, zeta], dtype=np.float64)
+    grad = np.zeros((10, 3), dtype=np.float64)
+    for corner in range(4):
+        grad[corner] = (4.0 * lam[corner] - 1.0) * _DL_DNAT[corner]
+    for local, (a, b) in enumerate(TET10_EDGES, start=4):
+        grad[local] = 4.0 * (lam[b] * _DL_DNAT[a] + lam[a] * _DL_DNAT[b])
+    return grad
+
+
+def _mapped_gradients(
+    points: NDArray[np.float64], dn_dnat: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Physical dN/dx and |det J| for every element at one natural point.
+
+    `points` is (n_elem, nodes, 3); `dn_dnat` is (nodes, 3).
+    """
+    jacobian = np.einsum("ji,ejk->eik", dn_dnat, points)  # J[i,k] = dx_k/dxi_i
+    determinant = np.abs(np.asarray(np.linalg.det(jacobian), dtype=np.float64))
+    degenerate = determinant < _MIN_JACOBIAN
+    if degenerate.any():
+        raise SolverError(
+            f"{int(degenerate.sum())} element(s) have zero volume; the mesh is degenerate"
+        )
+    inverse = np.linalg.inv(jacobian)
+    # Chain rule: dN/dx = dN/dxi @ inv(J).T
+    grads = np.asarray(np.einsum("ij,ekj->eik", dn_dnat, inverse), dtype=np.float64)
+    return grads, determinant
+
+
+def _scatter(mesh: TetMesh, dofs: NDArray[np.int64], ke: NDArray[np.float64]) -> sp.csr_matrix:
+    """Sum element matrices into the global sparse stiffness matrix."""
+    width = dofs.shape[1]
+    rows = np.repeat(dofs, width, axis=1).ravel()
+    cols = np.tile(dofs, (1, width)).ravel()
     n_dof = 3 * mesh.node_count
     return sp.coo_matrix((ke.ravel(), (rows, cols)), shape=(n_dof, n_dof)).tocsr()
-
-
-def assemble_stiffness_tet10(
-    nodes: NDArray[np.float64],
-    tets10: NDArray[np.int64],
-    material: Material,
-) -> sp.csr_matrix:
-    """Assemble the global stiffness matrix for quadratic (tet10) elements.
-
-    Each tet10 element has 10 nodes -> 30 local DOFs.
-    Node ordering follows Gmsh convention:
-      [v0, v1, v2, v3, m01, m12, m20, m03, m13, m23]
-    """
-    n_nodes = len(nodes)
-    n_elem = len(tets10)
-    n_dof = 3 * n_nodes
-    n_ldof = 30
-
-    p = nodes[tets10]  # shape (n_elem, 10, 3)
-    d = constitutive_matrix(material)
-
-    # For each element, compute B(ξ,η,ζ=1-ξ-η-ω), integrate at 4-point Gauss.
-    # Gauss points for tets: α = (5-sqrt(5))/20, β = (5+3sqrt(5))/20.
-    alpha = (5.0 - np.sqrt(5.0)) / 20.0
-    beta = (5.0 + 3.0 * np.sqrt(5.0)) / 20.0
-    gauss_pts = [
-        (alpha, alpha, alpha),
-        (beta, alpha, alpha),
-        (alpha, beta, alpha),
-        (alpha, alpha, beta),
-    ]
-    gauss_w = 1.0 / 24.0  # equal weights sum to 1/6 (tet volume)
-
-    ke_all = np.zeros((n_elem, n_ldof, n_ldof), dtype=np.float64)
-
-    for xi, eta, zeta in gauss_pts:
-        dn_dxi = _tet10_shape_gradients_natural(xi, eta, zeta)  # (10, 3)
-        # Compute Jacobian: J[i][k] = sum_j dn_dxi[j,i] * p[e,j,k]
-        jac = np.einsum("ji,ejk->eik", dn_dxi, p)  # (n_elem, 3, 3)
-        det_jac = np.linalg.det(jac)
-        if (np.abs(det_jac) < _MIN_JACOBIAN).any():
-            raise SolverError("Degenerate tet10 element detected during assembly")
-
-        inv_jac = np.linalg.inv(jac)
-        # Chain rule: dN/dx = dN/dxi @ inv(J).T, shape (n_elem, 10, 3)
-        grads = np.einsum("ij,ejk->eik", dn_dxi, inv_jac.transpose(0, 2, 1))
-
-        # Build B matrices (6 x 30) for all elements
-        b = np.zeros((n_elem, 6, 30))
-        for node_idx in range(10):
-            col_base = 3 * node_idx
-            gx = grads[:, node_idx, 0]
-            gy = grads[:, node_idx, 1]
-            gz = grads[:, node_idx, 2]
-            b[:, 0, col_base + 0] = gx
-            b[:, 1, col_base + 1] = gy
-            b[:, 2, col_base + 2] = gz
-            b[:, 3, col_base + 0] = gy
-            b[:, 3, col_base + 1] = gx
-            b[:, 4, col_base + 1] = gz
-            b[:, 4, col_base + 2] = gy
-            b[:, 5, col_base + 0] = gz
-            b[:, 5, col_base + 2] = gx
-
-        ke_gauss = gauss_w * det_jac[:, None, None] * np.einsum("eji,jk,ekl->eil", b, d, b)
-        ke_all += ke_gauss
-
-    dofs = (tets10[:, :, None] * 3 + np.arange(3)[None, None, :]).reshape(n_elem, 30)
-    rows = np.repeat(dofs, 30, axis=1).ravel()
-    cols = np.tile(dofs, (1, 30)).ravel()
-    return sp.coo_matrix((ke_all.ravel(), (rows, cols)), shape=(n_dof, n_dof)).tocsr()
-
-
-def _tet10_shape_gradients_natural(xi: float, eta: float, zeta: float) -> NDArray[np.float64]:
-    """dN/d(ξ,η,ζ) at natural coordinates for the 10-node tet.
-
-    Returns shape (10, 3). Ordering matches the node ordering above.
-    """
-    omega = 1.0 - xi - eta - zeta
-    # Corner nodes: N_i = L_i * (2*L_i - 1) where L = (omega, xi, eta, zeta).
-    # Mid-side nodes: N_ij = 4*L_i*L_j.
-    # Full derivatives computed symbolically below.
-    L = [omega, xi, eta, zeta]
-    corners = [(0, omega), (1, xi), (2, eta), (3, zeta)]
-    mids = [(4, 0, 1), (5, 1, 2), (6, 2, 0), (7, 0, 3), (8, 1, 3), (9, 2, 3)]
-    grad = np.zeros((10, 3))
-
-    # ∂N_corner/∂L_k = 4*L_i - 1 when k==i else 0; then chain through L→ξ,η,ζ.
-    # ∂N_mid/∂L_i = 4*L_j; ∂N_mid/∂L_j = 4*L_i; others 0.
-    dL_dnat = np.array([[-1,-1,-1],[1,0,0],[0,1,0],[0,0,1]], dtype=np.float64)
-
-    for i, (corner_id, Li) in enumerate(corners):
-        for nat_dir in range(3):
-            total = 0.0
-            for L_idx in range(4):
-                if L_idx == corner_id:
-                    dNi_dLj = 4.0 * L[L_idx] - 1.0
-                else:
-                    dNi_dLj = 0.0
-                total += dNi_dLj * dL_dnat[L_idx, nat_dir]
-            grad[corner_id, nat_dir] = total
-
-    for node_id, li, lj in mids:
-        for nat_dir in range(3):
-            total = 0.0
-            for L_idx in range(4):
-                if L_idx == li:
-                    dNi_dLj = 4.0 * L[lj]
-                elif L_idx == lj:
-                    dNi_dLj = 4.0 * L[li]
-                else:
-                    dNi_dLj = 0.0
-                total += dNi_dLj * dL_dnat[L_idx, nat_dir]
-            grad[node_id, nat_dir] = total
-
-    return grad
 
 
 def von_mises(stress: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -261,7 +257,7 @@ def von_mises(stress: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 class LinearStaticSolver(Solver):
-    name = "linear-static-tet4"
+    name = "linear-static"
 
     def solve(self, mesh: TetMesh, case: LoadCase) -> SolveOutput:
         started = time.perf_counter()
@@ -326,14 +322,10 @@ class LinearStaticSolver(Solver):
         return solution
 
     @staticmethod
-    def _solve_iterative(
-        k_ff: sp.csc_matrix, applied: NDArray[np.float64]
-    ) -> NDArray[np.float64]:
+    def _solve_iterative(k_ff: sp.csc_matrix, applied: NDArray[np.float64]) -> NDArray[np.float64]:
         ilu = spla.spilu(k_ff, drop_tol=1e-5, fill_factor=15.0, permc_spec="COLAMD")
         precond = spla.LinearOperator(k_ff.shape, matvec=ilu.solve)
-        solution, info = spla.cg(
-            k_ff, applied, rtol=_RESIDUAL_TOLERANCE, maxiter=5000, M=precond
-        )
+        solution, info = spla.cg(k_ff, applied, rtol=_RESIDUAL_TOLERANCE, maxiter=5000, M=precond)
         if info != 0:
             raise SolverError(f"Conjugate gradient failed to converge (info={info})")
         return solution
@@ -341,10 +333,19 @@ class LinearStaticSolver(Solver):
     def _recover_stress(
         self, mesh: TetMesh, material: Material, displacements: NDArray[np.float64]
     ) -> NDArray[np.float64]:
-        grads, _ = _shape_gradients(mesh)
+        if mesh.midside is None:
+            grads, _ = _shape_gradients(mesh)
+            # Tet4 strain is constant over the element, so one evaluation is exact.
+        else:
+            # Tet10 strain is linear, so it has to be sampled somewhere. The
+            # centroid is the element's superconvergent point: sampling at a
+            # face or a corner instead reads the extrapolated tail of the
+            # element's own approximation and overstates the peak.
+            grads, _ = _mapped_gradients(
+                mesh.nodes[mesh.connectivity], _tet10_shape_gradients(*_CENTROID)
+            )
         b = _strain_displacement(grads)
-        element_u = displacements[_element_dofs(mesh.tets)]
-        # Tet4 strain is constant over the element, so one evaluation is exact.
+        element_u = displacements[_element_dofs(mesh.connectivity)]
         strain = np.einsum("eij,ej->ei", b, element_u)
         stress = strain @ constitutive_matrix(material).T
         return von_mises(stress)

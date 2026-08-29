@@ -51,6 +51,5 @@ def get_provider() -> LLMProvider:
         )
 
     raise LLMUnavailable(
-        f"Unknown AI_PROVIDER '{settings.ai_provider}'. "
-        f"Valid values: {', '.join(PROVIDER_NAMES)}."
+        f"Unknown AI_PROVIDER '{settings.ai_provider}'. Valid values: {', '.join(PROVIDER_NAMES)}."
     )

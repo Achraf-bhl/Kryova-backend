@@ -16,9 +16,26 @@ from typing import Any, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from app.ai.provider import AssistantTurn, LLMError, LLMProvider, LLMUnavailable, ToolCall
+from app.ai.provider import (
+    AssistantTurn,
+    Completion,
+    LLMError,
+    LLMProvider,
+    LLMUnavailable,
+    TokenUsage,
+    ToolCall,
+)
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _usage(payload: dict[str, Any]) -> TokenUsage:
+    """Ollama reports counts at the top level under its own names."""
+    return TokenUsage(
+        prompt_tokens=int(payload.get("prompt_eval_count") or 0),
+        completion_tokens=int(payload.get("eval_count") or 0),
+    )
+
 
 # Ollama has no effort parameter. Map the hint onto a token ceiling for the
 # model's own reasoning so the knob still means something locally.
@@ -37,6 +54,7 @@ class OllamaProvider(LLMProvider):
     def __init__(self, base_url: str, model: str, timeout_seconds: float) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
+        self.model = model
         self._timeout = timeout_seconds
 
     def health(self) -> None:
@@ -50,8 +68,7 @@ class OllamaProvider(LLMProvider):
             ) from exc
 
         installed = {
-            model.get("name", "").split(":")[0]
-            for model in response.json().get("models", [])
+            model.get("name", "").split(":")[0] for model in response.json().get("models", [])
         }
         if self._model.split(":")[0] not in installed:
             raise LLMUnavailable(
@@ -67,7 +84,7 @@ class OllamaProvider(LLMProvider):
         schema: type[T],
         effort: str,
         max_tokens: int,
-    ) -> T:
+    ) -> Completion[T]:
         payload: dict[str, Any] = {
             "model": self._model,
             "stream": False,
@@ -87,9 +104,7 @@ class OllamaProvider(LLMProvider):
         }
 
         try:
-            response = httpx.post(
-                f"{self._base_url}/api/chat", json=payload, timeout=self._timeout
-            )
+            response = httpx.post(f"{self._base_url}/api/chat", json=payload, timeout=self._timeout)
             response.raise_for_status()
         except httpx.TimeoutException as exc:
             raise LLMError(
@@ -99,12 +114,13 @@ class OllamaProvider(LLMProvider):
         except httpx.HTTPError as exc:
             raise LLMError(f"Ollama request failed: {exc}") from exc
 
-        content = response.json().get("message", {}).get("content", "")
+        body = response.json()
+        content = body.get("message", {}).get("content", "")
         if not content.strip():
             raise LLMError("Ollama returned an empty response.")
 
         try:
-            return schema.model_validate_json(content)
+            return Completion(value=schema.model_validate_json(content), usage=_usage(body))
         except ValidationError as exc:
             # Schema-constrained decoding makes this rare, but a small quantised
             # model can still stop early and truncate the JSON.
@@ -113,7 +129,6 @@ class OllamaProvider(LLMProvider):
             ) from exc
         except json.JSONDecodeError as exc:
             raise LLMError("Ollama returned malformed JSON.") from exc
-
 
     def chat(
         self,
@@ -134,16 +149,15 @@ class OllamaProvider(LLMProvider):
             payload["tools"] = tools
 
         try:
-            response = httpx.post(
-                f"{self._base_url}/api/chat", json=payload, timeout=self._timeout
-            )
+            response = httpx.post(f"{self._base_url}/api/chat", json=payload, timeout=self._timeout)
             response.raise_for_status()
         except httpx.TimeoutException as exc:
             raise LLMError(f"Ollama did not respond within {self._timeout:g}s.") from exc
         except httpx.HTTPError as exc:
             raise LLMError(f"Ollama request failed: {exc}") from exc
 
-        message = response.json().get("message") or {}
+        body = response.json()
+        message = body.get("message") or {}
         calls = []
         # Ollama omits call ids, so synthesise stable ones by position -- the
         # loop only needs them to pair a result back to its request.
@@ -162,4 +176,11 @@ class OllamaProvider(LLMProvider):
                     arguments=arguments or {},
                 )
             )
-        return AssistantTurn(text=message.get("content") or "", tool_calls=calls)
+        return AssistantTurn(
+            text=message.get("content") or "",
+            tool_calls=calls,
+            usage=_usage(body),
+            # Ollama stops on `num_predict` without saying so in a dedicated
+            # field; `done_reason` is the closest thing it reports.
+            truncated=body.get("done_reason") == "length",
+        )

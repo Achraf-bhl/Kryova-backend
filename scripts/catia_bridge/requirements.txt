@@ -1,0 +1,29 @@
+# Kryova CATIA bridge daemon -- Windows workstation dependencies.
+#
+# The daemon is deliberately close to dependency-free. It runs beside CATIA on
+# an engineering workstation, which is frequently a locked-down machine where
+# every package is a conversation with IT, so the list is short and each entry
+# has to justify itself.
+
+# The outbound WebSocket. Pure Python, no build step, no compiler on the box.
+websockets>=13.0,<16.0
+
+# --- Windows only -----------------------------------------------------------
+# COM automation. Not needed for `run --mock`, which is why it is not a hard
+# dependency: mock mode has to work on a Linux CI machine with nothing
+# installed.
+pywin32>=306 ; sys_platform == "win32"
+
+# --- optional ---------------------------------------------------------------
+# `pycatia` is a typed wrapper over the same COM automation surface this daemon
+# uses directly. It is a reasonable dependency for someone extending the tool
+# vocabulary -- the type hints make the V5 API far more discoverable -- and it
+# is NOT required to run. Install it explicitly if you want it:
+#
+#     pip install pycatia
+#
+# Note that it, like `catia_com.py`, must stay on late binding. Running makepy
+# against the CATIA V5 Interfaces Object Library writes into pywin32's shared
+# gen_py cache and changes how every other early-binding application on the
+# workstation resolves CATIA -- including macro suites the engineer already
+# depends on.

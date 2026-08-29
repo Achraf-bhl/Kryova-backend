@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,6 +16,14 @@ class SimulationCreate(BaseModel):
     element_size_mm: float | None = Field(
         default=None, gt=0, description="Target element size. Defaults to an automatic size."
     )
+    element_order: Literal[1, 2] = Field(
+        default=1,
+        description=(
+            "1 for linear tets, 2 for quadratic (tet10). Quadratic elements are "
+            "far more accurate in bending at the same element count, at roughly "
+            "2.5x the degrees of freedom and solve time."
+        ),
+    )
 
 
 class SimulationRead(BaseModel):
@@ -28,6 +36,7 @@ class SimulationRead(BaseModel):
     solver: str
     load_case: dict[str, Any]
     element_size_mm: float | None
+    element_order: int
     mesh_stats: dict[str, Any] | None
     result: dict[str, Any] | None
     fields_media_id: str | None

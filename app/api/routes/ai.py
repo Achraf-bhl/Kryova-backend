@@ -1,34 +1,68 @@
 """AI endpoints.
 
-Both routes are thin: resolve and authorise the row, hand it to the service,
+The routes are thin: resolve and authorise the row, hand it to the service,
 translate provider failures into HTTP. The model that answers is chosen by
 configuration -- see `app/ai/providers/`.
+
+Two things live here rather than deeper, on purpose. **Token budgets** are
+checked at the route, alongside every other authorisation decision, because a
+service that enforced its own quota would be enforcing it differently depending
+on which caller reached it. And **wiring** -- the job queue, the media service,
+the session scope -- is injected here, so the toolbox can submit a real
+simulation without importing a queue itself.
 """
 
 import json
+import logging
 from collections.abc import Iterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from app.ai import (
+    Completion,
     LLMError,
+    LLMProvider,
     LLMRefusal,
     LLMUnavailable,
     LoadCaseDraft,
     ResultInterpretation,
     draft_load_case,
+    generate_title,
     get_provider,
     interpret_result,
 )
-from app.ai.agent import AgentReply, run_agent, stream_agent
-from app.ai.tools import ToolBox
-from app.api.deps import CurrentUser, DbSession, OwnedProject
+from app.ai import usage as token_usage
+from app.ai.agent import AgentReply, run_agent, stream_agent, summarise_step
+from app.ai.prompts import UNTRUSTED_CLOSE, UNTRUSTED_OPEN
+from app.ai.provider import TokenUsage
+from app.ai.state import bound_document_name
+from app.ai.tools import ToolBox, tool_label
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    JobQueueDep,
+    MediaServiceDep,
+    MediaStoreDep,
+    OwnedProject,
+    SessionScopeDep,
+)
 from app.core.config import settings
-from app.models import Conversation, GeometryVersion, JobStatus, SimulationJob
+from app.models import (
+    Conversation,
+    ConversationMessage,
+    GeometryVersion,
+    JobStatus,
+    MessageRole,
+    SimulationJob,
+    User,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ai"])
 
@@ -55,7 +89,7 @@ class LoadCaseRequest(BaseModel):
     )
 
 
-def _provider_or_503():
+def _provider_or_503() -> LLMProvider:
     """Build the configured provider, or explain what is wrong with it."""
     try:
         provider = get_provider()
@@ -69,13 +103,46 @@ def _provider_or_503():
 
 def _translate(exc: LLMError) -> HTTPException:
     if isinstance(exc, LLMUnavailable):
-        return HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
-        )
+        return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
     if isinstance(exc, LLMRefusal):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+
+def _enforce_budget(db: Session, user: User) -> None:
+    """Refuse a turn that starts over the daily allowance.
+
+    Checked before the call, never during: an agent cut off between a tool call
+    and its result leaves a transcript describing work whose outcome nobody
+    saw, which is worse for the user than a slightly overrun budget.
+    """
+    if token_usage.over_budget(db, user.id):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=token_usage.budget_message(db, user.id),
+        )
+
+
+def _record(
+    db: Session,
+    user: User,
+    usage: TokenUsage,
+    *,
+    purpose: str,
+    provider: LLMProvider,
+    conversation: Conversation | None = None,
+) -> None:
+    token_usage.record(
+        db,
+        user=user,
+        usage=usage,
+        purpose=purpose,
+        provider=provider.name,
+        model=provider.model,
+        conversation=conversation,
+    )
+    db.commit()
 
 
 @router.get("/ai/status", response_model=AIStatus)
@@ -94,7 +161,7 @@ def ai_status() -> AIStatus:
     response_model=ResultInterpretation,
 )
 def interpret_simulation(
-    project: OwnedProject, db: DbSession, simulation_id: str
+    project: OwnedProject, db: DbSession, current_user: CurrentUser, simulation_id: str
 ) -> ResultInterpretation:
     """Explain a finished run: what the numbers mean and what to change.
 
@@ -111,9 +178,10 @@ def interpret_simulation(
             detail=f"Simulation is {job.status.value}; there is nothing to interpret yet",
         )
 
+    _enforce_budget(db, current_user)
     provider = _provider_or_503()
     try:
-        return interpret_result(
+        completion: Completion[ResultInterpretation] = interpret_result(
             provider,
             result=job.result,
             load_case=job.load_case,
@@ -123,10 +191,22 @@ def interpret_simulation(
     except LLMError as exc:
         raise _translate(exc) from exc
 
+    _record(
+        db,
+        current_user,
+        completion.usage,
+        purpose=token_usage.PURPOSE_INTERPRET,
+        provider=provider,
+    )
+    return completion.value
+
 
 @router.post("/projects/{project_id}/ai/load-case", response_model=LoadCaseDraft)
 def draft_project_load_case(
-    project: OwnedProject, db: DbSession, payload: Annotated[LoadCaseRequest, ...]
+    project: OwnedProject,
+    db: DbSession,
+    current_user: CurrentUser,
+    payload: Annotated[LoadCaseRequest, ...],
 ) -> LoadCaseDraft:
     """Draft a load case from a sentence, against a real geometry's bounding box.
 
@@ -152,13 +232,23 @@ def draft_project_load_case(
             detail="This geometry has no bounding box, so 'top' and 'bottom' cannot be resolved",
         )
 
+    _enforce_budget(db, current_user)
     provider = _provider_or_503()
     try:
-        return draft_load_case(
+        completion: Completion[LoadCaseDraft] = draft_load_case(
             provider, description=payload.description, bounding_box=bounding_box
         )
     except LLMError as exc:
         raise _translate(exc) from exc
+
+    _record(
+        db,
+        current_user,
+        completion.usage,
+        purpose=token_usage.PURPOSE_LOAD_CASE,
+        provider=provider,
+    )
+    return completion.value
 
 
 # --------------------------------------------------------------------------
@@ -197,6 +287,7 @@ class AgentStepRead(BaseModel):
 
 class ChatResponse(BaseModel):
     conversation_id: str
+    title: str
     reply: str
     steps: list[AgentStepRead] = Field(
         description="Tool calls the agent made, in order, so the UI can show its work."
@@ -204,24 +295,28 @@ class ChatResponse(BaseModel):
     truncated: bool = Field(
         description="True when the step budget ran out before the agent finished."
     )
+    prompt_tokens: int
+    completion_tokens: int
 
 
-def _resolve_conversation(
-    db: DbSession, user: Any, payload: ChatRequest
-) -> Conversation:
+def _owned_conversation(db: Session, user: User, conversation_id: str) -> Conversation:
+    conversation = db.get(Conversation, conversation_id)
+    # 404 rather than 403 for someone else's conversation, matching the rest of
+    # the API -- never confirm that an id exists.
+    if conversation is None or conversation.owner_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    return conversation
+
+
+def _resolve_conversation(db: Session, user: User, payload: ChatRequest) -> Conversation:
     if payload.conversation_id:
-        conversation = db.get(Conversation, payload.conversation_id)
-        # 404 rather than 403 for someone else's conversation, matching the
-        # rest of the API -- never confirm that an id exists.
-        if conversation is None or conversation.owner_id != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
-            )
-        return conversation
+        return _owned_conversation(db, user, payload.conversation_id)
 
     conversation = Conversation(
         owner_id=user.id,
         project_id=payload.project_id,
+        # A placeholder, replaced by a real title once the first exchange has
+        # happened and there is something to name.
         title=payload.message[:60],
     )
     db.add(conversation)
@@ -229,23 +324,112 @@ def _resolve_conversation(
     return conversation
 
 
+def _build_toolbox(
+    db: Session,
+    user: User,
+    conversation: Conversation,
+    *,
+    queue: Any,
+    session_scope: Any,
+    store: Any,
+    media: Any,
+) -> ToolBox:
+    """Wire the toolbox with everything a mutating tool actually needs.
+
+    `run_simulation` submits a real job and `delete_simulation` drops a real
+    blob; both need the same collaborators the HTTP routes use. Injecting them
+    here keeps the tool layer free of a direct import of the queue.
+    """
+    return ToolBox(
+        db=db,
+        user=user,
+        project_id=conversation.project_id,
+        conversation=conversation,
+        job_queue=queue,
+        session_scope=session_scope,
+        media_store=store,
+        media=media,
+    )
+
+
+def _maybe_title(
+    db: Session,
+    user: User,
+    provider: LLMProvider,
+    conversation: Conversation,
+    user_message: str,
+    reply: str,
+) -> None:
+    """Name a conversation once, after its first exchange.
+
+    Only the first: a title that changes as the conversation goes on moves
+    around in the sidebar, and the opening exchange is what the user remembers
+    the session by anyway. Failures are absorbed inside `generate_title`.
+    """
+    if _message_count(db, conversation.id) > _FIRST_EXCHANGE_MESSAGES:
+        return
+    title, usage = generate_title(provider, user_message=user_message, assistant_reply=reply)
+    conversation.title = title
+    token_usage.record(
+        db,
+        user=user,
+        usage=usage,
+        purpose=token_usage.PURPOSE_TITLE,
+        provider=provider.name,
+        model=provider.model,
+        conversation=conversation,
+    )
+
+
+#: A first exchange is the user's message plus whatever the agent did to answer
+#: it. Anything beyond this and the conversation has a history worth keeping the
+#: existing title for.
+_FIRST_EXCHANGE_MESSAGES = 12
+
+
+def _message_count(db: Session, conversation_id: str) -> int:
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(ConversationMessage)
+            .where(ConversationMessage.conversation_id == conversation_id)
+        )
+        or 0
+    )
+
+
 @router.post("/ai/chat", response_model=ChatResponse)
 def chat(
-    db: DbSession, current_user: CurrentUser, payload: Annotated[ChatRequest, ...]
+    db: DbSession,
+    current_user: CurrentUser,
+    queue: JobQueueDep,
+    session_scope: SessionScopeDep,
+    store: MediaStoreDep,
+    media: MediaServiceDep,
+    payload: Annotated[ChatRequest, ...],
 ) -> ChatResponse:
     """Talk to the agent. It decides which tools to call and in what order.
 
     The conversation is the memory: pass `conversation_id` back on each turn and
-    the agent replays everything it did before, including the calls that failed,
-    so it does not repeat them.
+    the agent replays a bounded window of everything it did before -- including
+    the calls that failed -- plus a summary of anything older.
     """
+    _enforce_budget(db, current_user)
     conversation = _resolve_conversation(db, current_user, payload)
 
     if payload.project_id and conversation.project_id is None:
         conversation.project_id = payload.project_id
 
     provider = _provider_or_503()
-    toolbox = ToolBox(db=db, user=current_user, project_id=conversation.project_id)
+    toolbox = _build_toolbox(
+        db,
+        current_user,
+        conversation,
+        queue=queue,
+        session_scope=session_scope,
+        store=store,
+        media=media,
+    )
 
     try:
         reply: AgentReply = run_agent(
@@ -254,6 +438,7 @@ def chat(
             conversation=conversation,
             toolbox=toolbox,
             user_message=payload.message,
+            user=current_user,
             allow_mutations=payload.allow_mutations,
             max_tokens=settings.ai_max_tokens,
         )
@@ -268,66 +453,40 @@ def chat(
     # the client having to pass an id it only just learned about.
     if conversation.project_id is None and toolbox.project_id:
         conversation.project_id = toolbox.project_id
-        db.commit()
+
+    _maybe_title(db, current_user, provider, conversation, payload.message, reply.text)
+    _record(
+        db,
+        current_user,
+        reply.usage,
+        purpose=token_usage.PURPOSE_CHAT,
+        provider=provider,
+        conversation=conversation,
+    )
 
     return ChatResponse(
         conversation_id=conversation.id,
+        title=conversation.title,
         reply=reply.text,
         steps=[
             AgentStepRead(tool=s.tool, arguments=s.arguments, ok=s.ok, result=s.result)
             for s in reply.steps
         ],
         truncated=reply.truncated,
-    )
-
-
-class ConversationMessageRead(BaseModel):
-    """One stored turn. Typed rather than a bare dict so the schema is not `any`."""
-
-    role: str
-    content: str | None
-    tool_name: str | None
-    is_error: bool
-    created_at: str
-
-
-class ConversationRead(BaseModel):
-    conversation_id: str
-    title: str
-    project_id: str | None
-    messages: list[ConversationMessageRead]
-
-
-@router.get("/ai/conversations/{conversation_id}", response_model=ConversationRead)
-def read_conversation(
-    db: DbSession, current_user: CurrentUser, conversation_id: str
-) -> ConversationRead:
-    """The stored transcript, so a client can rehydrate a conversation."""
-    conversation = db.get(Conversation, conversation_id)
-    if conversation is None or conversation.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
-        )
-    return ConversationRead(
-        conversation_id=conversation.id,
-        title=conversation.title,
-        project_id=conversation.project_id,
-        messages=[
-            ConversationMessageRead(
-                role=m.role.value,
-                content=m.content,
-                tool_name=m.tool_name,
-                is_error=m.is_error,
-                created_at=m.created_at.isoformat(),
-            )
-            for m in conversation.messages
-        ],
+        prompt_tokens=reply.usage.prompt_tokens,
+        completion_tokens=reply.usage.completion_tokens,
     )
 
 
 @router.post("/ai/chat/stream")
 def chat_stream(
-    db: DbSession, current_user: CurrentUser, payload: Annotated[ChatRequest, ...]
+    db: DbSession,
+    current_user: CurrentUser,
+    queue: JobQueueDep,
+    session_scope: SessionScopeDep,
+    store: MediaStoreDep,
+    media: MediaServiceDep,
+    payload: Annotated[ChatRequest, ...],
 ) -> StreamingResponse:
     """The same agent loop, streamed as Server-Sent Events.
 
@@ -335,15 +494,28 @@ def chat_stream(
     agent reached for, what it found, how long it took -- instead of showing a
     spinner for however long the whole turn takes.
 
-    Event types: `thinking`, `narration`, `tool_start`, `tool_end`, `message`,
-    `done`, `error`.
+    Event types: `start`, `thinking`, `narration`, `tool_start`, `tool_end`,
+    `message`, `done`, `title`, `error`.
+
+    `title` is last and is emitted only when this turn named the conversation --
+    naming happens after the answer exists, so it cannot ride on `done`. A
+    client that does not know the event ignores it and keeps the title it had.
     """
+    _enforce_budget(db, current_user)
     conversation = _resolve_conversation(db, current_user, payload)
     if payload.project_id and conversation.project_id is None:
         conversation.project_id = payload.project_id
 
     provider = _provider_or_503()
-    toolbox = ToolBox(db=db, user=current_user, project_id=conversation.project_id)
+    toolbox = _build_toolbox(
+        db,
+        current_user,
+        conversation,
+        queue=queue,
+        session_scope=session_scope,
+        store=store,
+        media=media,
+    )
     conversation_id = conversation.id
 
     def events() -> Iterator[str]:
@@ -351,6 +523,8 @@ def chat_stream(
         # work happens -- a stream that dies mid-turn still leaves a resumable
         # conversation rather than an orphan.
         yield f"data: {json.dumps({'type': 'start', 'conversation_id': conversation_id})}\n\n"
+        reply_text = ""
+        spent = TokenUsage()
         try:
             for event in stream_agent(
                 db=db,
@@ -358,15 +532,33 @@ def chat_stream(
                 conversation=conversation,
                 toolbox=toolbox,
                 user_message=payload.message,
+                user=current_user,
                 allow_mutations=payload.allow_mutations,
                 max_tokens=settings.ai_max_tokens,
             ):
+                if event["type"] == "message":
+                    reply_text = event["content"]
+                elif event["type"] == "done":
+                    spent = TokenUsage(
+                        prompt_tokens=event.get("prompt_tokens", 0),
+                        completion_tokens=event.get("completion_tokens", 0),
+                    )
                 yield f"data: {json.dumps(event, default=str)}\n\n"
+
             # Same adoption as the non-streaming route: a project created
             # mid-stream has to outlive this request.
             if conversation.project_id is None and toolbox.project_id:
                 conversation.project_id = toolbox.project_id
-                db.commit()
+            _maybe_title(db, current_user, provider, conversation, payload.message, reply_text)
+            _record(
+                db,
+                current_user,
+                spent,
+                purpose=token_usage.PURPOSE_CHAT,
+                provider=provider,
+                conversation=conversation,
+            )
+            yield ("data: " + json.dumps({"type": "title", "title": conversation.title}) + "\n\n")
         except LLMError as exc:
             db.rollback()
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
@@ -381,3 +573,254 @@ def chat_stream(
             "x-accel-buffering": "no",
         },
     )
+
+
+# --------------------------------------------------------------------------
+# Conversation management: the sidebar, and rehydrating one session.
+# --------------------------------------------------------------------------
+
+
+class ConversationMessageRead(BaseModel):
+    """One stored turn, carrying everything the UI needs to redraw the step.
+
+    Tool `arguments` and `result` are included deliberately. Without them a
+    rehydrated conversation shows the prose and nothing else, so a user who
+    reloads the page loses the record of what the agent actually did -- which is
+    the part of the transcript an engineer is most likely to want to check.
+    """
+
+    sequence: int
+    role: str
+    content: str | None
+    tool_call_id: str | None
+    tool_name: str | None
+    label: str | None = Field(
+        default=None, description="Human label for a tool step, matching the live stream."
+    )
+    arguments: dict[str, Any] | None = Field(
+        default=None, description="Arguments the agent passed to this tool."
+    )
+    result: Any = Field(
+        default=None, description="Parsed tool result, as the live stream reported it."
+    )
+    summary: str | None = Field(
+        default=None, description="One-line outcome, matching the live stream."
+    )
+    is_error: bool
+    duration_ms: int | None
+    created_at: str
+
+
+class ConversationRead(BaseModel):
+    conversation_id: str
+    title: str
+    project_id: str | None
+    created_at: str
+    updated_at: str
+    has_catia_document: bool
+    catia_document: str | None
+    prompt_tokens: int
+    completion_tokens: int
+    messages: list[ConversationMessageRead]
+
+
+class ConversationSummaryRead(BaseModel):
+    """One row of the sidebar."""
+
+    conversation_id: str
+    title: str
+    project_id: str | None
+    created_at: str
+    updated_at: str
+    message_count: int
+    has_catia_document: bool
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class ConversationPage(BaseModel):
+    total: int = Field(ge=0)
+    page: int = Field(gt=0)
+    page_size: int = Field(gt=0)
+    items: list[ConversationSummaryRead]
+
+
+class ConversationUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+
+
+def _unfence(content: str | None) -> Any:
+    """Recover a tool result from its stored, fenced form.
+
+    Tool results are persisted exactly as the model saw them -- sanitised and
+    wrapped -- because the transcript has to be a faithful record of the prompt.
+    The UI wants the payload, so the fence is peeled here rather than storing a
+    second unfenced copy that could drift from the first.
+    """
+    if not content:
+        return None
+    body = content.strip()
+    if body.startswith(UNTRUSTED_OPEN) and body.endswith(UNTRUSTED_CLOSE):
+        body = body[len(UNTRUSTED_OPEN) : -len(UNTRUSTED_CLOSE)].strip()
+    try:
+        return json.loads(body)
+    except (TypeError, ValueError):
+        return body
+
+
+def _arguments_for(
+    message: ConversationMessage, by_call_id: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    if message.role is not MessageRole.TOOL or not message.tool_call_id:
+        return None
+    call = by_call_id.get(message.tool_call_id)
+    if call is None:
+        return None
+    return (call.get("function") or {}).get("arguments")
+
+
+@router.get("/ai/conversations", response_model=ConversationPage)
+def list_conversations(
+    db: DbSession,
+    current_user: CurrentUser,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> ConversationPage:
+    """The user's conversations, newest activity first.
+
+    Ordered by `updated_at` rather than `created_at`: a sidebar is a list of
+    what you were last working on, not what you started first.
+    """
+    total = (
+        db.scalar(
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.owner_id == current_user.id)
+        )
+        or 0
+    )
+    rows = list(
+        db.scalars(
+            select(Conversation)
+            .where(Conversation.owner_id == current_user.id)
+            .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    )
+
+    # One aggregate for the whole page rather than a count per row: this is the
+    # first screen of the product and it must not be N+1.
+    counts: dict[str, int] = {}
+    if rows:
+        ids = [row.id for row in rows]
+        counts = {
+            conversation_id: count
+            for conversation_id, count in db.execute(
+                select(ConversationMessage.conversation_id, func.count())
+                .where(ConversationMessage.conversation_id.in_(ids))
+                .group_by(ConversationMessage.conversation_id)
+            ).all()
+        }
+
+    return ConversationPage(
+        total=total,
+        page=page,
+        page_size=page_size,
+        items=[
+            ConversationSummaryRead(
+                conversation_id=row.id,
+                title=row.title,
+                project_id=row.project_id,
+                created_at=row.created_at.isoformat(),
+                updated_at=row.updated_at.isoformat(),
+                message_count=counts.get(row.id, 0),
+                has_catia_document=bound_document_name(db, row.id) is not None,
+                prompt_tokens=row.prompt_tokens,
+                completion_tokens=row.completion_tokens,
+            )
+            for row in rows
+        ],
+    )
+
+
+@router.get("/ai/conversations/{conversation_id}", response_model=ConversationRead)
+def read_conversation(
+    db: DbSession, current_user: CurrentUser, conversation_id: str
+) -> ConversationRead:
+    """The stored transcript, so a client can rehydrate a conversation."""
+    conversation = _owned_conversation(db, current_user, conversation_id)
+
+    # Tool calls are recorded on the assistant turn that requested them and the
+    # results on separate rows, so the arguments are stitched back on by call id
+    # rather than duplicated into both.
+    by_call_id: dict[str, dict[str, Any]] = {}
+    for message in conversation.messages:
+        for call in message.tool_calls or []:
+            if call.get("id"):
+                by_call_id[str(call["id"])] = call
+
+    messages: list[ConversationMessageRead] = []
+    for message in conversation.messages:
+        result = _unfence(message.content) if message.role is MessageRole.TOOL else None
+        label = None
+        summary = None
+        if message.role is MessageRole.TOOL and message.tool_name:
+            label = tool_label(message.tool_name)
+            summary = summarise_step(message.tool_name, result, not message.is_error)
+        messages.append(
+            ConversationMessageRead(
+                sequence=message.sequence,
+                role=message.role.value,
+                content=message.content,
+                tool_call_id=message.tool_call_id,
+                tool_name=message.tool_name,
+                label=label,
+                arguments=_arguments_for(message, by_call_id),
+                result=result,
+                summary=summary,
+                is_error=message.is_error,
+                duration_ms=message.duration_ms,
+                created_at=message.created_at.isoformat(),
+            )
+        )
+
+    document = bound_document_name(db, conversation.id)
+    return ConversationRead(
+        conversation_id=conversation.id,
+        title=conversation.title,
+        project_id=conversation.project_id,
+        created_at=conversation.created_at.isoformat(),
+        updated_at=conversation.updated_at.isoformat(),
+        has_catia_document=document is not None,
+        catia_document=document,
+        prompt_tokens=conversation.prompt_tokens,
+        completion_tokens=conversation.completion_tokens,
+        messages=messages,
+    )
+
+
+@router.patch("/ai/conversations/{conversation_id}", response_model=ConversationRead)
+def rename_conversation(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+    payload: Annotated[ConversationUpdate, ...],
+) -> ConversationRead:
+    """Rename a conversation. The only field a user may edit."""
+    conversation = _owned_conversation(db, current_user, conversation_id)
+    conversation.title = payload.title.strip()[:255]
+    db.commit()
+    return read_conversation(db, current_user, conversation_id)
+
+
+@router.delete("/ai/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(db: DbSession, current_user: CurrentUser, conversation_id: str) -> None:
+    """Delete a conversation and its transcript.
+
+    The token-usage ledger survives: its foreign key is SET NULL, so deleting a
+    chat does not erase the record of what it spent.
+    """
+    conversation = _owned_conversation(db, current_user, conversation_id)
+    db.delete(conversation)
+    db.commit()

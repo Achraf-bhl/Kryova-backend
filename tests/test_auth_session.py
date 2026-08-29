@@ -45,8 +45,12 @@ def test_refresh_rotates_token_and_me_uses_cookie(
 
 def test_cookie_mutation_requires_csrf(auth_client: AuthenticatedTestClient) -> None:
     csrf = auth_client.cookies["kryova_csrf"]
-    denied = auth_client.post("/api/v1/projects", headers={"x-csrf-token": "wrong"}, json={"name": "Nope"})
-    allowed = auth_client.post("/api/v1/projects", headers={"x-csrf-token": csrf}, json={"name": "Yes"})
+    denied = auth_client.post(
+        "/api/v1/projects", headers={"x-csrf-token": "wrong"}, json={"name": "Nope"}
+    )
+    allowed = auth_client.post(
+        "/api/v1/projects", headers={"x-csrf-token": csrf}, json={"name": "Yes"}
+    )
     assert denied.status_code == 403
     assert allowed.status_code == 201
 

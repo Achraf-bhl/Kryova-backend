@@ -10,15 +10,60 @@ message, a Pydantic schema) and returns a validated instance of that schema.
 Structured output is not optional: an engineering tool cannot parse prose and
 hope, so a provider that cannot constrain generation to a schema does not belong
 here.
+
+Both entry points also return a `TokenUsage`. Reporting it is part of the
+interface rather than an optional extra: tokens are money, and a provider that
+quietly drops the `usage` block makes spend unmeterable for everything above it.
+A provider whose backend reports nothing returns zeros, which is honest -- the
+caller can tell "free" from "unknown" by asking which provider answered.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class TokenUsage:
+    """What one model call cost, in tokens.
+
+    Named after the two things every provider reports under some spelling --
+    Anthropic's `input_tokens`/`output_tokens`, OpenAI's
+    `prompt_tokens`/`completion_tokens`, Ollama's `prompt_eval_count`/`eval_count`.
+    Cached-read and cache-write tokens are folded into `prompt_tokens`: they are
+    billed as input, and splitting them here would push provider billing detail
+    through a seam whose whole point is that callers do not know who answered.
+    """
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+        return TokenUsage(
+            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+            completion_tokens=self.completion_tokens + other.completion_tokens,
+        )
+
+
+@dataclass(frozen=True)
+class Completion(Generic[T]):
+    """A validated schema instance and what it cost to produce.
+
+    `complete()` returns this rather than the bare model so the caller can meter
+    the call. Unwrapping is `.value`; everything that only wants the answer says
+    so at one obvious place instead of the usage silently disappearing.
+    """
+
+    value: T
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 @dataclass
@@ -39,6 +84,11 @@ class AssistantTurn:
 
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: TokenUsage = field(default_factory=TokenUsage)
+    #: True when the provider stopped because it hit the output limit. The text
+    #: is then a fragment, not an answer, and the caller must say so rather than
+    #: presenting a sentence that stops mid-word as a considered reply.
+    truncated: bool = False
 
     @property
     def wants_tools(self) -> bool:
@@ -63,6 +113,10 @@ class LLMProvider(ABC):
     #: Shown to users when the provider is misconfigured, so the message can name it.
     name: str
 
+    #: The model this provider was built for, for the usage ledger. Providers
+    #: set it in `__init__`; the seam only needs it to be a string.
+    model: str = "unknown"
+
     @abstractmethod
     def complete(
         self,
@@ -72,8 +126,8 @@ class LLMProvider(ABC):
         schema: type[T],
         effort: str,
         max_tokens: int,
-    ) -> T:
-        """Return an instance of `schema`, or raise an `LLMError` subclass.
+    ) -> Completion[T]:
+        """Return an instance of `schema` plus its usage, or raise an `LLMError`.
 
         `system` is frozen per call site and placed first so providers that
         support prompt caching get a stable prefix. `effort` is a hint --

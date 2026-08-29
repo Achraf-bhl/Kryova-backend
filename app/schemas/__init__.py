@@ -9,6 +9,7 @@ from app.schemas.geometry import GeometryVersionRead
 from app.schemas.media import MediaRead, UploadSessionCreate, UploadSessionRead
 from app.schemas.pagination import (
     GeometryVersionPage,
+    MediaPage,
     Page,
     ProjectPage,
     SimulationPage,
@@ -25,6 +26,7 @@ __all__ = [
     "GeometryVersionPage",
     "GeometryVersionRead",
     "MaterialList",
+    "MediaPage",
     "MediaRead",
     "Page",
     "PasswordReset",

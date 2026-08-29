@@ -4,6 +4,12 @@ Meshing and solving take seconds to minutes, which is far too long to hold a
 request open. `JobQueue` is the seam: a thread pool is enough for a single-node
 deployment, and swapping in Celery or RQ later means implementing one method,
 not rewriting the API layer.
+
+That seam is all there is today. A `CeleryJobQueue` used to sit here that looked
+for a `simulation_id` attribute no caller ever set and, on the `except` branch,
+ran the job inline -- so selecting it silently moved four minutes of FEA onto the
+request thread. Celery is not a dependency and was never wired to one; the
+config validator now refuses the value outright rather than pretending.
 """
 
 import logging
@@ -41,9 +47,7 @@ class InlineJobQueue(JobQueue):
 
 class ThreadPoolJobQueue(JobQueue):
     def __init__(self, max_workers: int = 2) -> None:
-        self._pool = ThreadPoolExecutor(
-            max_workers=max_workers, thread_name_prefix="kryova-job"
-        )
+        self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="kryova-job")
         self._lock = threading.Lock()
         self._closed = False
 
@@ -68,38 +72,10 @@ class ThreadPoolJobQueue(JobQueue):
         self._pool.shutdown(wait=True)
 
 
-class CeleryJobQueue(JobQueue):
-    """Dispatches simulation and geometry jobs to Celery workers via Redis/RabbitMQ."""
-
-    def submit(self, job: Job) -> None:
-        # If passed a raw callable (like in legacy tests), attempt inline/fallback call
-        try:
-            from app.jobs.celery_app import run_simulation_task
-
-            # If job closure contains a simulation_id, dispatch to Celery
-            sim_id = getattr(job, "simulation_id", None)
-            if sim_id:
-                run_simulation_task.delay(sim_id)
-            else:
-                job()
-        except Exception:
-            logger.exception("Failed to dispatch Celery job, falling back to thread execution")
-            job()
-
-    def submit_simulation(self, simulation_id: str) -> None:
-        """Submit a simulation job directly by ID to Celery task queue."""
-        from app.jobs.celery_app import run_simulation_task
-
-        run_simulation_task.delay(simulation_id)
-
-
 @lru_cache
 def get_job_queue() -> JobQueue:
     from app.core.config import settings
 
     if settings.inline_jobs or settings.job_queue_backend == "inline":
         return InlineJobQueue()
-    if settings.job_queue_backend == "celery":
-        return CeleryJobQueue()
     return ThreadPoolJobQueue(max_workers=settings.job_workers)
-

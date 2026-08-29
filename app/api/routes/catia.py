@@ -423,6 +423,61 @@ def _relay(user_id: str, device_id: str, frame: dict[str, Any]) -> None:
     bus.publish(user_id, _envelope(name, {"device_id": device_id, **payload}))
 
 
+# -- direct COM bridge compatibility helpers ----------------------------------
+
+from typing import Annotated
+from fastapi import Body
+from app.api.deps import MediaServiceDep, OwnedProject
+from app.catia.bridge import (
+    CATIABridgeError,
+    CatiaStatus,
+    get_status,
+    launch,
+    list_open_documents,
+    new_part,
+)
+
+
+class CatiaStatusRead(BaseModel):
+    running: bool
+    version: str | None = None
+    open_documents: int = 0
+    active_document: str | None = None
+    detail: str | None = Field(
+        default=None, description="Why CATIA is unavailable, and what to do about it."
+    )
+
+
+class CatiaDocumentRead(BaseModel):
+    name: str
+    path: str | None
+    doc_type: str
+
+
+class LaunchRequest(BaseModel):
+    new_part: bool = Field(
+        default=True, description="Also open an empty CATPart to model in."
+    )
+
+
+class SyncRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=500)
+
+
+def _as_read(status_obj: CatiaStatus) -> CatiaStatusRead:
+    return CatiaStatusRead(
+        running=status_obj.running,
+        version=status_obj.version,
+        open_documents=status_obj.document_count,
+        active_document=status_obj.active_document,
+        detail=status_obj.detail,
+    )
+
+
+def _unavailable(exc: CATIABridgeError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+
+
 # -- browser-facing status and events ----------------------------------------
 
 
@@ -432,12 +487,37 @@ def catia_status(
     current_user: CurrentUser,
     conversation_id: str | None = None,
 ) -> dict[str, Any]:
-    """Is a workstation online for me, which CATIA, and what is this chat bound to?
+    """Always 200: 'CATIA is not here' is a state the UI renders, not a failure.
 
-    The backend is the only source of truth for "is CATIA connected" -- the
-    browser cannot reach the daemon, by design.
+    Returns the daemon status_payload when a WebSocket device is connected
+    (keys: connected, paired_devices, catia_version, mock, device_id, …).
+    Falls back to a direct COM probe when no daemon device is online, adding
+    running/version/open_documents aliases for backward compat.
     """
-    return status_payload(db, current_user.id, conversation_id)
+    payload = status_payload(db, current_user.id, conversation_id)
+    if payload.get("connected"):
+        # Daemon path: return the rich daemon payload with COM-compat aliases.
+        return {
+            **payload,
+            "running": True,
+            "version": payload.get("catia_version"),
+            "open_documents": 1 if payload.get("document") else 0,
+            "active_document": (payload.get("document") or {}).get("doc_name"),
+        }
+    # No daemon device online: probe the local COM bridge and return both shapes.
+    com = get_status()
+    # The daemon payload's detail ("No workstation has been paired…" /
+    # "No workstation is connected.") is always more actionable for the user
+    # than the COM probe result ("not on Windows"), so prefer it.
+    detail = payload.get("detail") or com.detail
+    return {
+        **payload,
+        "running": com.running,
+        "version": com.version,
+        "open_documents": com.document_count,
+        "active_document": com.active_document,
+        "detail": detail,
+    }
 
 
 @router.get("/tools")
@@ -567,58 +647,6 @@ def catia_events(current_user: CurrentUser) -> StreamingResponse:
 
 # -- direct COM bridge compatibility endpoints -------------------------------
 
-
-from typing import Annotated
-from fastapi import Body
-from app.api.deps import MediaServiceDep, OwnedProject
-from app.catia.bridge import (
-    CATIABridgeError,
-    CatiaStatus,
-    get_status,
-    launch,
-    list_open_documents,
-    new_part,
-)
-
-
-class CatiaStatusRead(BaseModel):
-    running: bool
-    version: str | None = None
-    open_documents: int = 0
-    active_document: str | None = None
-    detail: str | None = Field(
-        default=None, description="Why CATIA is unavailable, and what to do about it."
-    )
-
-
-class CatiaDocumentRead(BaseModel):
-    name: str
-    path: str | None
-    doc_type: str
-
-
-class LaunchRequest(BaseModel):
-    new_part: bool = Field(
-        default=True, description="Also open an empty CATPart to model in."
-    )
-
-
-class SyncRequest(BaseModel):
-    note: str | None = Field(default=None, max_length=500)
-
-
-def _as_read(status_obj: CatiaStatus) -> CatiaStatusRead:
-    return CatiaStatusRead(
-        running=status_obj.running,
-        version=status_obj.version,
-        open_documents=status_obj.document_count,
-        active_document=status_obj.active_document,
-        detail=status_obj.detail,
-    )
-
-
-def _unavailable(exc: CATIABridgeError) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
 
 
 @router.get("/documents", response_model=list[CatiaDocumentRead])

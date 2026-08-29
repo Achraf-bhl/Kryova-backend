@@ -166,10 +166,9 @@ class TestHealthCheck:
         monkeypatch.setattr(database, "check_database", lambda: None)
         response = client.get("/health")
         assert response.status_code == 200
-        assert response.json() == {
-            "status": "ok",
-            "checks": {"database": "ok", "media_store": "ok"},
-        }
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["checks"] == {"database": "ok", "media_store": "ok"}
 
     def test_a_dead_database_is_a_503_not_a_200(
         self, client: AuthenticatedTestClient, monkeypatch

@@ -376,63 +376,67 @@ class ToolBox:
                 handler=self._delete_simulation,
                 mutating=True,
             ),
-            Tool(
-                name="catia_status",
-                description=(
-                    "Check whether CATIA is installed, running, and what is open in it. "
-                    "Call this before offering anything CATIA-related, so you can tell "
-                    "the user the truth about their setup rather than guessing. Never "
-                    "fails -- on a machine without CATIA it simply reports running=false."
-                ),
-                parameters=_object({}),
-                handler=self._catia_status,
-            ),
-            Tool(
-                name="open_in_catia",
-                description=(
-                    "Start CATIA, bring its window to the screen, and optionally open a "
-                    "fresh empty part for the user to model in. This is how a project "
-                    "gets its geometry in this product: the user models in CATIA rather "
-                    "than hunting for a file to upload. Call it right after creating a "
-                    "project, once the user has said what they are building. Takes up to "
-                    "a few minutes if CATIA is cold."
-                ),
-                parameters=_object(
-                    {
-                        "new_part": {
-                            "type": "boolean",
-                            "description": (
-                                "True to add a new empty CATPart. False to just bring up "
-                                "CATIA with whatever the user already has open."
-                            ),
-                        }
-                    }
-                ),
-                handler=self._open_in_catia,
-                mutating=True,
-            ),
-            Tool(
-                name="sync_geometry_from_catia",
-                description=(
-                    "Pull whatever part is currently active in CATIA into the project as "
-                    "a new geometry version, exporting it to STEP on the way. This "
-                    "replaces uploading a file by hand -- call it once the user says "
-                    "their model is ready, and again after any change they want analysed. "
-                    "Returns the new version number, which run_simulation can then use."
-                ),
-                parameters=_object(
-                    {
-                        "project_id": {"type": "string"},
-                        "note": {
-                            "type": "string",
-                            "description": "Short note, e.g. 'after adding the fillet'.",
-                        },
-                    }
-                ),
-                handler=self._sync_geometry_from_catia,
-                mutating=True,
-            ),
         ]
+        if _catia_dispatch() is not None:
+            tools.extend([
+                Tool(
+                    name="catia_status",
+                    description=(
+                        "Check whether CATIA is installed, running, and what is open in it. "
+                        "Call this before offering anything CATIA-related, so you can tell "
+                        "the user the truth about their setup rather than guessing. Never "
+                        "fails -- on a machine without CATIA it simply reports running=false."
+                    ),
+                    parameters=_object({}),
+                    handler=self._catia_status,
+                ),
+                Tool(
+                    name="open_in_catia",
+                    description=(
+                        "Start CATIA, bring its window to the screen, and optionally open a "
+                        "fresh empty part for the user to model in. This is how a project "
+                        "gets its geometry in this product: the user models in CATIA rather "
+                        "than hunting for a file to upload. Call it right after creating a "
+                        "project, once the user has said what they are building. Takes up to "
+                        "a few minutes if CATIA is cold."
+                    ),
+                    parameters=_object(
+                        {
+                            "new_part": {
+                                "type": "boolean",
+                                "description": (
+                                    "True to add a new empty CATPart. False to just bring up "
+                                    "CATIA with whatever the user already has open."
+                                ),
+                            }
+                        }
+                    ),
+                    handler=self._open_in_catia,
+                    mutating=True,
+                ),
+                Tool(
+                    name="sync_geometry_from_catia",
+                    description=(
+                        "Pull whatever part is currently active in CATIA into the project as "
+                        "a new geometry version, exporting it to STEP on the way. This "
+                        "replaces uploading a file by hand -- call it once the user says "
+                        "their model is ready, and again after any change they want analysed. "
+                        "Returns the new version number, which run_simulation can then use."
+                    ),
+                    parameters=_object(
+                        {
+                            "project_id": {"type": "string"},
+                            "note": {
+                                "type": "string",
+                                "description": "Short note, e.g. 'after adding the fillet'.",
+                            },
+                        }
+                    ),
+                    handler=self._sync_geometry_from_catia,
+                    mutating=True,
+                ),
+            ])
+        return tools
 
     # -- handlers -----------------------------------------------------------
 

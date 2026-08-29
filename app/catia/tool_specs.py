@@ -303,10 +303,11 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
     CatiaToolSpec(
         name="catia_hole",
         description=(
-            "Put a hole on a named face of the part at a named position. Prefer this "
-            "over sketching a circle and pocketing it: a hole feature carries its "
-            "diameter as a parameter, so the user can change it later without "
-            "rebuilding the model. For a bolt pattern, call it once per position."
+            "Put a hole through a named face of the part at a named position. For a "
+            "bolt pattern, call it once per position. Cut as a circle sketched on "
+            "the face's plane and pocketed through the material, so it is a plain "
+            "through hole: no thread, no countersink, no tapping standard. If the "
+            "user needs any of those, say so rather than implying this produced them."
         ),
         parameters=_object(
             {

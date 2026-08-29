@@ -122,8 +122,29 @@ Add `-v` to any command for debug logging.
 ## Security notes worth reading before rollout
 
 - **No arbitrary code execution.** `SystemService.Evaluate` — CATIA's
-  arbitrary-VBScript hatch — is not exposed and must never be added. It would
-  turn one prompt injection into remote code execution on the workstation.
+  VBScript hatch — is never handed text that anything outside this repository
+  chose. It *is* used, by a closed library of hand-written snippets in
+  `scripts/catia_bridge/vba.py`, and the distinction is the whole of the
+  security argument:
+
+  - every script is a module-level constant, reviewed like any other code;
+  - `vba.run` refuses anything that is not one of them, so a caller cannot
+    supply its own;
+  - arguments are passed through `Evaluate`'s parameter array, never
+    interpolated into the script text — there is nothing to escape and nothing
+    to inject into.
+
+  A model can choose *which* frozen snippet runs, and nothing else. Building a
+  script from a string at run time, or templating one with a tool argument,
+  would turn one prompt injection into remote code execution on the
+  workstation; that is the thing that must never be added.
+
+  It is there because a class of CATIA methods returns results through a
+  SAFEARRAY out-parameter — `Measurable.GetCOG` among them — and pywin32's late
+  binding cannot marshal one. It accepts the call and leaves the array
+  untouched, so the caller reads back the zeros it initialised and believes it
+  measured something. That is worse than not measuring at all, and it shipped:
+  every centre of gravity the bridge ever reported was `[0, 0, 0]`.
 - **The daemon re-validates everything.** Tool name, tier and argument schema
   are checked against the daemon's own copy of the table, not the server's. It
   refuses what it does not recognise.

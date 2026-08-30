@@ -85,20 +85,50 @@ CATIA_DEFAULT_DENSITY_KG_M3 = 1000.0
 #: root. Searched in order; the first that opens wins.
 _CATALOGUE_NAMES = ("Catalog.CATMaterial", "Advanced_Materials.CATMaterial")
 
-#: Kryova's material keys mapped onto the family and material names in CATIA's
-#: shipped catalogue. Only the mapping is guessed -- the density that decides
-#: every reported mass comes from Kryova's own library and is passed in, so a
-#: wrong guess here costs the catalogue application and nothing else.
-_CATIA_MATERIAL = {
-    "aluminium-6061-t6": ("Metal", "Aluminium"),
-    "aluminium-7075-t6": ("Metal", "Aluminium"),
-    "steel-1018": ("Metal", "Steel"),
-    "stainless-304": ("Metal", "Stainless Steel"),
-    "titanium-ti6al4v": ("Metal", "Titanium"),
-    "abs": ("Other", "Plastic"),
-    "pla": ("Other", "Plastic"),
-    "nylon-pa12": ("Other", "Nylon"),
+#: Kryova's material keys mapped onto candidate names in CATIA's shipped
+#: catalogue, most specific first.
+#:
+#: Names, not families, and several per key. The catalogue is installed in the
+#: interface language: a French V5 ships `materials/French/Catalog.CATMaterial`
+#: whose families are `Metaux`, `Divers`, `Textiles` and whose steel is called
+#: `Acier`. Matching on an English family and an English name found nothing
+#: there, which is most of why applying a material had never once worked on the
+#: workstation this was written for. So every family is searched and only the
+#: material name has to match one of these.
+#:
+#: A miss costs the catalogue application and nothing else: the density that
+#: decides the reported mass comes from Kryova's own library and is passed in.
+_CATIA_MATERIAL: dict[str, tuple[str, ...]] = {
+    "aluminium-6061-t6": ("Aluminium", "Aluminum"),
+    "aluminium-7075-t6": ("Aluminium", "Aluminum"),
+    # The default catalogue ships no stainless grade, so plain steel is the
+    # closest honest attachment. The reported mass still follows Kryova's own
+    # density for the grade the user actually chose.
+    "steel-1018": ("Acier", "Steel"),
+    "stainless-304": ("Acier", "Steel"),
+    "titanium-ti6al4v": ("Titane", "Titanium"),
+    "abs": ("Plastique", "Plastic"),
+    "pla": ("Plastique", "Plastic"),
+    "nylon-pa12": ("Nylon",),
 }
+
+
+def _find_catalogue_material(catalogue: Any, names: tuple[str, ...]) -> Any:
+    """The first material in any family whose name is one of `names`.
+
+    Every family is searched rather than one named family, because the family
+    names are localised too (`Metaux`, `Divers`) and a material is unique
+    enough by name within the shipped catalogue.
+    """
+    for wanted in names:
+        families = catalogue.Families
+        for index in range(1, int(families.Count) + 1):
+            materials = families.Item(index).Materials
+            for position in range(1, int(materials.Count) + 1):
+                candidate = materials.Item(position)
+                if str(candidate.Name) == wanted:
+                    return candidate
+    return None
 
 
 class CatiaCom(CatiaBackend):
@@ -380,18 +410,19 @@ class CatiaCom(CatiaBackend):
         weighed every part at its default 1000 kg/m3: a 120x80x10 steel bracket
         was reported as 0.095 kg against a real 0.755 kg.
 
-        **The catalogue application is best effort.** `Documents.Open` on a
-        `.CATMaterial` fails outright on an install without the Material
-        Library product -- measured on a live V5-R33, all three shipped
-        catalogues refused with "La methode Open a echoue" in about ten
-        seconds each. That is a licensing fact about the workstation, not
-        something to retry, so it is reported rather than raised: the user
-        still gets correct mass and a part that Kryova knows the material of.
+        **The catalogue application is best effort, and now usually succeeds.**
+        It was believed for a while that `Documents.Open` on a `.CATMaterial`
+        fails without the Material Library product. It does not: the failures
+        measured here were this bridge's own bugs, listed in
+        `_apply_catalogue_material`. A live V5-R33 applies Acier and reports
+        7860 kg/m3. Where it genuinely cannot -- an install with no catalogue --
+        it is reported rather than raised, and the mass is still right.
 
-        # VERIFY: the `ApplyMaterialOnPart` path below is written from the V5
-        # automation reference and has never run to completion here, because
-        # this workstation cannot open a catalogue at all. Check it on an
-        # install that has the Material Library before trusting it.
+        Note that a part CATIA has taken a material for reports CATIA's density
+        for it, which is close to but not identical with Kryova's (7860 against
+        7870 for steel). `_measure_solid` prefers what CATIA says once a
+        material is attached, so the mass Kryova quotes and the mass the CATPart
+        itself reports are the same number.
         """
         self._density_kg_m3 = float(density_kg_m3)
         applied, detail = self._apply_catalogue_material(material)
@@ -409,31 +440,71 @@ class CatiaCom(CatiaBackend):
         }
 
     def _apply_catalogue_material(self, material: str) -> tuple[bool, str]:
-        """Try to attach a real CATIA material. Never raises."""
-        family_name, catia_name = _CATIA_MATERIAL.get(material, ("Metal", "Steel"))
+        """Attach a real CATIA material to the part. Never raises.
+
+        Three things had to be right and none of them were, which is why this
+        reported "your CATIA cannot do materials" on a workstation whose
+        material browser opens perfectly well from the toolbar.
+
+        **The manager hangs off the Part, not the Document.** The V5 reference
+        spells it `partDocument.GetItem("CATMatManagerVBExt")`, and on a live
+        V5-R33 that call succeeds and hands back a *Product* -- an object with
+        no `ApplyMaterialOnPart` on it, so the only symptom is an attribute
+        error naming a method the documentation says exists. `part.GetItem(...)`
+        returns the real `MaterialManager`. Asked to name the type, CATIA's own
+        script engine says `Product` for the first and `MaterialManager` for the
+        second.
+
+        **Opening the catalogue changes the active document.** Everything here
+        reaches the part through `ActiveDocument`, so a part looked up after the
+        catalogue was opened *is* the catalogue -- and the failure surfaced as
+        "the active CATIA document is not a part", which reads like the engineer
+        clicked the wrong window. The part is captured first, and held.
+
+        **The catalogue is installed in the interface language.** See
+        `_CATIA_MATERIAL`.
+
+        Success is confirmed by reading `Part.Density` back, not by the call
+        failing to raise: applying a material CATIA does not take leaves the
+        default 1000 kg/m3 in place without complaining.
+        """
+        names = _CATIA_MATERIAL.get(material, ("Acier", "Steel"))
+        # Captured before the catalogue is opened, because opening it makes the
+        # catalogue the active document.
+        part = self._part()
         catalogue = None
         try:  # pragma: no cover - Windows only
             catalogue = self._open_material_catalogue()
             if catalogue is None:
                 return False, (
-                    "This CATIA install cannot open a material catalogue, so no "
-                    "material was attached to the part in CATIA. Mass is still "
-                    "correct: Kryova computes it from the material you chose."
+                    "CATIA has no material catalogue this bridge could open, so no "
+                    "material was attached in CATIA. Mass is still correct: Kryova "
+                    "computes it from the material you chose."
                 )
-            families = catalogue.Families
-            for index in range(1, int(families.Count) + 1):
-                family = families.Item(index)
-                if str(family.Name) != family_name:
-                    continue
-                materials = family.Materials
-                for position in range(1, int(materials.Count) + 1):
-                    candidate = materials.Item(position)
-                    if str(candidate.Name) != catia_name:
-                        continue
-                    manager = self._document().GetItem("CATMatManagerVBExt")
-                    manager.ApplyMaterialOnPart(self._part(), candidate)
-                    return True, f"Applied CATIA material {catia_name!r}."
-            return False, f"CATIA's catalogue has no material called {catia_name!r}."
+
+            chosen = _find_catalogue_material(catalogue, names)
+            if chosen is None:
+                return False, (
+                    f"CATIA's catalogue has no material named any of {list(names)}. "
+                    "Mass is still correct: Kryova computes it from the material "
+                    "you chose."
+                )
+
+            manager = part.GetItem("CATMatManagerVBExt")
+            # Mode 1 links the material to the part, which is what the Apply
+            # Material dialog does and what makes it survive a save.
+            manager.ApplyMaterialOnPart(part, chosen, 1)
+            part.Update()
+
+            density = float(part.Density)
+            if density == CATIA_DEFAULT_DENSITY_KG_M3:
+                return False, (
+                    f"CATIA accepted {str(chosen.Name)!r} but still reports its "
+                    "default density, so nothing was really attached."
+                )
+            return True, (
+                f"Applied CATIA material {str(chosen.Name)!r}; CATIA now reports {density:g} kg/m3."
+            )
         except Exception as exc:  # noqa: BLE001 - best effort by design
             logger.info("Could not apply a CATIA material: %s", exc)
             return False, (

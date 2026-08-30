@@ -18,10 +18,18 @@ report, and "never state a physics number you did not read from a tool result"
 has to bind the tools too. The model names a material from the library; the
 server looks up what it weighs.
 
-**Applying it in CATIA is best effort, and reported honestly.** `Documents.Open`
-on a `.CATMaterial` fails outright without the Material Library product --
-measured on a live V5-R33, all three shipped catalogues refused in about ten
-seconds each. The mass has to be right on that workstation too.
+**Applying it in CATIA works, and is reported honestly when it does not.**
+This was first written believing the opposite -- that `Documents.Open` on a
+`.CATMaterial` fails without the Material Library product, "measured" on this
+very workstation. That conclusion was wrong, and the user disproved it by
+opening the material browser from the toolbar and pointing at Acier. What was
+really broken was three things in this bridge: the catalogue was searched for
+English names on a French install, the material manager was fetched from the
+document instead of the part, and opening the catalogue silently made *it* the
+active document. Fixed, a live V5-R33 applies Acier and reports 7860 kg/m3.
+
+The best-effort path stays, because an install genuinely without the catalogue
+must still get a correct mass. It is now only the fallback it was meant to be.
 """
 
 from __future__ import annotations
@@ -120,8 +128,10 @@ class TestMassFollowsTheChosenMaterial:
         )
 
     def test_it_says_whether_catia_actually_took_it(self, catia: Any) -> None:
-        # An install without the Material Library cannot attach anything, and
-        # claiming otherwise would be the same class of lie as the wrong mass.
+        # The mock has no catalogue to attach from, so it reports False -- and
+        # the point of the field is that the answer is reported either way.
+        # Claiming an attachment that did not happen would be the same class of
+        # lie as the wrong mass.
         result = catia.set_material(material="steel-1018", density_kg_m3=7870.0)
         assert result["applied_in_catia"] is False
         assert result["detail"]

@@ -128,9 +128,7 @@ class TestEveryToolNameInvokedExists:
             for path, line, name in self._invoked_names()
             if name not in registered
         ]
-        assert not unknown, (
-            "tool names invoked but never registered:\n  " + "\n  ".join(unknown)
-        )
+        assert not unknown, "tool names invoked but never registered:\n  " + "\n  ".join(unknown)
 
 
 class TestAgentVocabularyMatchesTheToolbox:
@@ -172,9 +170,7 @@ class TestAgentVocabularyMatchesTheToolbox:
 
     def test_every_summary_branch_names_a_real_tool(self, registered: set[str]) -> None:
         stale = sorted(self._summarised_names() - registered)
-        assert not stale, (
-            f"summarise_step has branches for tools that do not exist: {stale}."
-        )
+        assert not stale, f"summarise_step has branches for tools that do not exist: {stale}."
 
     def test_no_registered_tool_renders_as_raw_snake_case(self, registered: set[str]) -> None:
         # `tool_label` falls back to replacing underscores with spaces, which is
@@ -209,6 +205,4 @@ class TestCatiaVocabularyIsOneList:
 
         specs = {spec.name for spec in CATIA_TOOL_SPECS}
         stale = sorted(CATIA_NO_DOCUMENT_REQUIRED - specs)
-        assert not stale, (
-            f"CATIA_NO_DOCUMENT_REQUIRED exempts tools that do not exist: {stale}"
-        )
+        assert not stale, f"CATIA_NO_DOCUMENT_REQUIRED exempts tools that do not exist: {stale}"

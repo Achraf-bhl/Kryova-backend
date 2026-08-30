@@ -563,7 +563,9 @@ def chat_stream(
                     conversation=conversation,
                 )
             except Exception:  # noqa: BLE001 - accounting must not mask the real error
-                logger.exception("Failed to record token usage for conversation %s", conversation_id)
+                logger.exception(
+                    "Failed to record token usage for conversation %s", conversation_id
+                )
                 db.rollback()
 
         try:

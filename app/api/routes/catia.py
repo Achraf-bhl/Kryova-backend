@@ -451,9 +451,7 @@ class CatiaDocumentRead(BaseModel):
 
 
 class LaunchRequest(BaseModel):
-    new_part: bool = Field(
-        default=True, description="Also open an empty CATPart to model in."
-    )
+    new_part: bool = Field(default=True, description="Also open an empty CATPart to model in.")
 
 
 class SyncRequest(BaseModel):
@@ -644,7 +642,6 @@ def catia_events(current_user: CurrentUser) -> StreamingResponse:
 # -- direct COM bridge compatibility endpoints -------------------------------
 
 
-
 @router.get("/documents", response_model=list[CatiaDocumentRead])
 def catia_documents(current_user: CurrentUser) -> list[CatiaDocumentRead]:
     try:
@@ -701,4 +698,3 @@ def sync_geometry(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
-

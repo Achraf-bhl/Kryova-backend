@@ -81,9 +81,7 @@ class TestOneProjectPerConversation:
         user = db_session.get(User, current_user_id)
         box = ToolBox(db=db_session, user=user)
 
-        first = box.call(
-            "create_project", {"name": "Steel mounting bracket"}, allow_mutations=True
-        )
+        first = box.call("create_project", {"name": "Steel mounting bracket"}, allow_mutations=True)
         assert first["name"] == "Steel mounting bracket"
 
         with pytest.raises(ToolError) as caught:
@@ -94,9 +92,7 @@ class TestOneProjectPerConversation:
         assert first["id"] in message
         assert "Steel mounting bracket" in message
 
-    def test_the_second_project_is_not_created(
-        self, db_session: Any, current_user_id: str
-    ) -> None:
+    def test_the_second_project_is_not_created(self, db_session: Any, current_user_id: str) -> None:
         from sqlalchemy import func, select
 
         from app.models import User

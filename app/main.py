@@ -79,7 +79,6 @@ class JsonLogFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-
 def _configure_logging() -> None:
     """JSON logs in production, human-readable in development."""
     if not settings.is_production:

@@ -89,9 +89,7 @@ class TestConversationSurvivesAFailedTurn:
         events = _stream(auth_client, {"message": "model a spur gear"})
         assert any(e["type"] == "error" for e in events)
 
-    def test_that_id_is_readable_afterwards(
-        self, auth_client: Any, failing_provider: None
-    ) -> None:
+    def test_that_id_is_readable_afterwards(self, auth_client: Any, failing_provider: None) -> None:
         events = _stream(auth_client, {"message": "model a spur gear"})
         conversation_id = next(e for e in events if e["type"] == "start")["conversation_id"]
 

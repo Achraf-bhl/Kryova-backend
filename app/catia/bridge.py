@@ -81,12 +81,16 @@ class ExportFormat(StrEnum):
     @classmethod
     def parse(cls, value: str) -> "ExportFormat":
         normalised = (value or "").strip().lower().lstrip(".")
-        aliases = {"step": cls.STEP, "stp": cls.STEP, "stl": cls.STL,
-                   "iges": cls.IGES, "igs": cls.IGES}
+        aliases = {
+            "step": cls.STEP,
+            "stp": cls.STEP,
+            "stl": cls.STL,
+            "iges": cls.IGES,
+            "igs": cls.IGES,
+        }
         if normalised not in aliases:
             raise CATIAExportError(
-                f"Unsupported export format {value!r}. "
-                f"Use one of: step, stl, iges."
+                f"Unsupported export format {value!r}. Use one of: step, stl, iges."
             )
         return aliases[normalised]
 
@@ -309,8 +313,10 @@ def export_active_document(
     The destination is built here from a caller-supplied directory and a
     sanitised stem -- a path from the model or the browser never reaches COM.
     """
-    fmt = export_format if isinstance(export_format, ExportFormat) else ExportFormat.parse(
-        str(export_format)
+    fmt = (
+        export_format
+        if isinstance(export_format, ExportFormat)
+        else ExportFormat.parse(str(export_format))
     )
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)

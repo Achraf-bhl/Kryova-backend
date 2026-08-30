@@ -104,8 +104,12 @@ class TestCatiaNotRunning:
         fake_win32.client.GetActiveObject.side_effect = OSError("no such object")
 
         with patch.dict(
-            sys.modules, {"win32com": fake_win32, "win32com.client": fake_win32.client,
-                          "pythoncom": MagicMock()}
+            sys.modules,
+            {
+                "win32com": fake_win32,
+                "win32com.client": fake_win32.client,
+                "pythoncom": MagicMock(),
+            },
         ):
             with pytest.raises(CATIANotRunningError) as excinfo:
                 bridge._run_com(lambda catia: None, timeout=5.0, launch=False)
@@ -124,9 +128,7 @@ class TestCatiaNotRunning:
         assert status.detail is not None
 
     def test_is_catia_running_is_false_not_an_exception(self):
-        with patch.object(
-            bridge, "_run_com", side_effect=CATIANotRunningError("nope")
-        ):
+        with patch.object(bridge, "_run_com", side_effect=CATIANotRunningError("nope")):
             assert bridge.is_catia_running() is False
 
 
@@ -139,9 +141,7 @@ class TestExportPathSafety:
         with patch.object(bridge, "_run_com") as run_com:
             run_com.side_effect = AssertionError("should not reach COM")
             with pytest.raises((CATIAExportError, AssertionError)):
-                bridge.export_active_document(
-                    tmp_path, ExportFormat.STEP, stem="../../evil"
-                )
+                bridge.export_active_document(tmp_path, ExportFormat.STEP, stem="../../evil")
 
     def test_stem_is_sanitised_to_a_plain_filename(self, tmp_path):
         captured = {}
@@ -159,9 +159,7 @@ class TestExportPathSafety:
             with pytest.raises(CATIAExportError):
                 # No real file is written by the stub, so the emptiness check
                 # fires -- that check itself is the assertion here.
-                bridge.export_active_document(
-                    tmp_path, ExportFormat.STEP, stem="my/../part name!"
-                )
+                bridge.export_active_document(tmp_path, ExportFormat.STEP, stem="my/../part name!")
 
         written = Path(captured["export_arg"][0])
         assert written.parent == tmp_path.resolve()
@@ -241,9 +239,7 @@ class TestCatiaRoutes:
         assert response.status_code == 503
         assert "not running" in response.json()["detail"].lower()
 
-    def test_sync_on_another_users_project_is_404_not_403(
-        self, auth_client, project_id: str
-    ):
+    def test_sync_on_another_users_project_is_404_not_403(self, auth_client, project_id: str):
         """Ownership posture must match every other resource in this API."""
         auth_client.post(
             "/api/v1/auth/register",
@@ -255,9 +251,7 @@ class TestCatiaRoutes:
         )
         auth_client.headers["x-csrf-token"] = auth_client.cookies["kryova_csrf"]
 
-        response = auth_client.post(
-            f"/api/v1/catia/projects/{project_id}/sync", json={}
-        )
+        response = auth_client.post(f"/api/v1/catia/projects/{project_id}/sync", json={})
         # 404 not 403: project ids must not be enumerable across accounts.
         assert response.status_code == 404
 
@@ -273,9 +267,7 @@ class TestLiveCatia:
         assert status.version and status.version.startswith("V")
 
     def test_export_active_document_writes_a_real_step_file(self, tmp_path):
-        exported = bridge.export_active_document(
-            tmp_path, ExportFormat.STEP, stem="live_test"
-        )
+        exported = bridge.export_active_document(tmp_path, ExportFormat.STEP, stem="live_test")
         assert exported.exists()
         assert exported.suffix == ".stp"
         assert exported.stat().st_size > 0
@@ -295,16 +287,12 @@ class TestLiveCatia:
         """
         from app.mesh.gmsh_mesher import generate_tet_mesh
 
-        exported = bridge.export_active_document(
-            tmp_path, ExportFormat.STEP, stem="mesh_test"
-        )
+        exported = bridge.export_active_document(tmp_path, ExportFormat.STEP, stem="mesh_test")
         if not bridge.active_document_has_solid():
             pytest.skip(
                 "CATIA's active document has no solid body, so there is nothing to "
                 "mesh. Open a part with geometry in it to exercise this path."
             )
-        mesh, _quality = generate_tet_mesh(
-            exported, element_size_mm=25.0, file_format="step"
-        )
+        mesh, _quality = generate_tet_mesh(exported, element_size_mm=25.0, file_format="step")
         assert len(mesh.nodes) > 0
         assert len(mesh.tets) > 0

@@ -37,9 +37,7 @@ _HARMONY = re.compile(
 )
 
 #: The tag family used by Qwen, Hermes and most llama.cpp chat templates.
-_TAGGED = re.compile(
-    r"<(?:tool_call|function_call)>|<function\s*=\s*([a-z_][a-z0-9_]*)", re.I
-)
+_TAGGED = re.compile(r"<(?:tool_call|function_call)>|<function\s*=\s*([a-z_][a-z0-9_]*)", re.I)
 
 #: `catia_pad({"length_mm": 10})` -- a call written as source. The opening brace
 #: is required: `mesh(...)` in a sentence about meshing is not a tool call.

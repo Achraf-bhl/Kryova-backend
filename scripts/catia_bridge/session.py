@@ -156,10 +156,30 @@ class BridgeSession:
                 "operation at a time."
             )
         try:
-            self._check_alive(tool)
+            self._ensure_alive(tool)
             return getattr(self.backend, method)(**arguments)
         finally:
             self._lock.release()
+
+    def _ensure_alive(self, tool: str) -> None:
+        """Two checks, on two threads, because they answer different questions.
+
+        `_check_alive` runs on a watchdog thread and asks "is CATIA responding
+        at all, or is it wedged behind a modal dialog?" -- a question worth
+        asking off-thread precisely because the answer can be "it never
+        returns".
+
+        `ensure_connected` runs *here*, on the thread that is about to do the
+        work, and asks "is my own handle still good?". The first cannot answer
+        the second: a COM proxy belongs to the apartment of the thread that
+        acquired it, so the watchdog holds a different handle from the worker
+        and reports a healthy CATIA while the worker's pointer is stale.
+        """
+        self._check_alive(tool)
+        try:
+            self.backend.ensure_connected()
+        except Exception as exc:  # noqa: BLE001 - reported like any other failure
+            raise CatiaOperationError(str(exc)) from exc
 
     def _check_alive(self, tool: str) -> None:
         """Fail fast on a wedged CATIA instead of blocking until the timeout.

@@ -283,12 +283,26 @@ class TestLiveCatia:
         assert exported.read_text(errors="ignore").lstrip().startswith("ISO-10303")
 
     def test_exported_geometry_meshes_in_the_kryova_pipeline(self, tmp_path):
-        """The point of the bridge: CATIA output must reach the solver."""
+        """The point of the bridge: CATIA output must reach the solver.
+
+        Skipped rather than failed when the engineer's active document has no
+        solid in it. This test reads whatever CATIA happens to have in front,
+        so its result otherwise depends on ambient state nobody set for it: an
+        empty new part -- the thing you have open most often while starting
+        work -- made it fail with "The file contains no solid body", which
+        reads like a broken bridge and is nothing of the kind. Twice in one
+        session it did exactly that.
+        """
         from app.mesh.gmsh_mesher import generate_tet_mesh
 
         exported = bridge.export_active_document(
             tmp_path, ExportFormat.STEP, stem="mesh_test"
         )
+        if not bridge.active_document_has_solid():
+            pytest.skip(
+                "CATIA's active document has no solid body, so there is nothing to "
+                "mesh. Open a part with geometry in it to exercise this path."
+            )
         mesh, _quality = generate_tet_mesh(
             exported, element_size_mm=25.0, file_format="step"
         )

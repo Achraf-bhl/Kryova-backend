@@ -257,6 +257,29 @@ def list_open_documents() -> list[CatiaDocument]:
     return _run_com(work, timeout=DEFAULT_TIMEOUT_SECONDS, launch=False)
 
 
+def active_document_has_solid() -> bool:
+    """Whether CATIA's active document contains any solid material.
+
+    A newly created part is empty, and exporting one produces a valid STEP file
+    with nothing in it -- surfaces and axis systems only. Everything downstream
+    that expects a closed solid then fails with a message about the *file*
+    ("The file contains no solid body"), which reads like a broken export and
+    is nothing of the kind.
+
+    `Product.Analyze.Volume` is the cheapest honest answer, and reports zero for
+    an empty part. False on any COM failure: this exists to let a caller degrade
+    gracefully, so it must not become a new way to raise.
+    """
+
+    def work(catia: Any) -> bool:
+        try:
+            return float(catia.ActiveDocument.Product.Analyze.Volume) > 0.0
+        except Exception:  # noqa: BLE001 - a probe must not raise
+            return False
+
+    return _run_com(work, timeout=DEFAULT_TIMEOUT_SECONDS, launch=False)
+
+
 def new_part(name: str | None = None) -> CatiaDocument:
     """Create an empty CATPart and show it, so the user has somewhere to model."""
 

@@ -40,6 +40,23 @@ class CatiaBackend(ABC):
         Called before every operation. On the real backend this is what turns a
         modal dialog or a closed CATIA into an immediate, explicit error instead
         of a call that blocks until the server's timeout fires.
+
+        Must be free of side effects: it is issued on a short-lived watchdog
+        thread, so anything it acquires dies with that thread. Repairs go in
+        `reattach`.
+        """
+
+    def ensure_connected(self) -> None:
+        """Make this thread's connection usable, reconnecting if stale. Optional.
+
+        The default does nothing, which is right for any backend holding no
+        connection at all -- the mock, for one. `CatiaCom` overrides it, because
+        its COM handle points into a single CATIA process and does not survive
+        that process being closed and reopened.
+
+        Called on the operation thread, immediately before the operation, and
+        never on the watchdog: a COM proxy belongs to the apartment of the
+        thread that acquired it, so only this thread can repair its own.
         """
 
     # -- documents -----------------------------------------------------------
@@ -98,6 +115,7 @@ class CatiaBackend(ABC):
         diameter_mm: float,
         depth_mm: float | None = None,
         through_all: bool = True,
+        inset_mm: float | None = None,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -136,9 +154,7 @@ class CatiaBackend(ABC):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
-    def checkpoint(
-        self, *, label: str, max_inline_bytes: int | None = None
-    ) -> dict[str, Any]: ...
+    def checkpoint(self, *, label: str, max_inline_bytes: int | None = None) -> dict[str, Any]: ...
 
     @abstractmethod
     def restore(self, *, checkpoint: dict[str, Any]) -> dict[str, Any]: ...

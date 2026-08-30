@@ -29,6 +29,7 @@ import hashlib
 import logging
 import math
 import shutil
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -73,6 +74,13 @@ _CAPTURE_FORMAT_JPEG = 5
 
 _MM_PER_UNIT = 1.0  # CATIA's automation API reports lengths in millimetres.
 
+#: The density CATIA assumes for a part with no material applied, in kg/m3.
+#: Confirmed on a live V5-R33: a part with nothing applied reports
+#: `Part.Density == 1000.0`, and `Analyze.Mass / Analyze.Volume` agrees exactly.
+#: Nothing in this bridge applies a material, so this is what every part it
+#: builds is weighed with until someone does.
+CATIA_DEFAULT_DENSITY_KG_M3 = 1000.0
+
 
 class CatiaCom(CatiaBackend):
     is_mock = False
@@ -85,11 +93,45 @@ class CatiaCom(CatiaBackend):
         for directory in (self.documents, self.snapshots):
             directory.mkdir(parents=True, exist_ok=True)
 
-        self._app: Any = None
+        # Per-thread, not per-object -- see `_app`.
+        self._local = threading.local()
         self._connect()
         self.catia_version = self._read_version()
 
     # -- connection ----------------------------------------------------------
+
+    @property
+    def _app(self) -> Any:
+        """The CATIA handle belonging to *this* thread.
+
+        A COM interface pointer is marshalled for the apartment of the thread
+        that acquired it. Use it from any other thread and COM refuses with
+        RPC_E_WRONG_THREAD -- "the application called an interface that was
+        marshalled for a different thread" -- which the daemon reported as
+        "CATIA stopped responding to automation", pointing every diagnosis at
+        CATIA instead of at the threading.
+
+        That mattered because nothing here shares a thread. `__init__` runs on
+        the main thread, operations arrive on `asyncio.to_thread` workers, and
+        the liveness probe gets a fresh watchdog thread every single call. One
+        handle on the object could serve at most one of the three.
+
+        Handing each thread its own is legitimate and cheap: every thread joins
+        its own apartment and gets its own proxy to the same out-of-process
+        CATIA, verified live across three worker threads and a watchdog thread
+        all reading `Documents.Count = 19` at once. Serialisation is already
+        handled a level up by `session.py`'s lock.
+        """
+        local = self.__dict__.setdefault("_local", threading.local())
+        app = getattr(local, "app", None)
+        if app is None:
+            self._connect()
+            app = local.app
+        return app
+
+    @_app.setter
+    def _app(self, value: Any) -> None:
+        self.__dict__.setdefault("_local", threading.local()).app = value
 
     def _connect(self) -> None:
         try:
@@ -149,17 +191,51 @@ class CatiaCom(CatiaBackend):
         """A trivial property read, which a modal dialog will block.
 
         `session.py` runs this on a watchdog thread precisely because it can
-        block: the blocking *is* the signal.
+        block: the blocking *is* the signal. That thread is a different one
+        every call, and `_app` hands it a handle for its own apartment, so the
+        probe measures CATIA rather than measuring the threading.
+
+        It stays free of side effects beyond that first attach: repairing a
+        handle here would repair the watchdog's, which dies with the thread
+        moments later. `ensure_connected` repairs the one that matters.
         """
-        if self._app is None:  # pragma: no cover - Windows only
-            raise CatiaOperationError("The bridge is not attached to CATIA.")
         try:  # pragma: no cover - Windows only
             _ = self._app.Documents.Count
+        except CatiaOperationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise CatiaOperationError(
                 f"CATIA stopped responding to automation ({exc}). It may have been "
                 "closed, or it may be showing a dialog."
             ) from exc
+
+    def ensure_connected(self) -> None:
+        """Validate *this* thread's handle, reconnecting if it has gone stale.
+
+        Called on the operation thread, immediately before the operation runs,
+        and that is the only place it can usefully happen. The watchdog probe in
+        `health` cannot stand in for it: the watchdog is a fresh thread holding
+        a fresh handle, so it reports a healthy CATIA while the worker thread
+        that is about to do the work still holds a pointer into a CATIA process
+        that no longer exists.
+
+        Which is the failure this fixes. `_connect` used to run exactly once, so
+        closing CATIA and reopening it -- several times in any working day --
+        left every later call failing with "CATIA stopped responding to
+        automation", curable only by restarting a daemon nobody is watching.
+
+        One reconnection heals everything: documents, parts and bodies are all
+        derived from `_app` per call and never cached.
+        """
+        try:  # pragma: no cover - Windows only
+            _ = self._app.Documents.Count
+            return
+        except CatiaOperationError:
+            raise
+        except Exception:  # noqa: BLE001
+            self._app = None
+        self._connect()  # pragma: no cover - Windows only
+        logger.info("Re-attached to CATIA after this thread's handle went stale")
 
     # -- document handles ----------------------------------------------------
 
@@ -168,8 +244,7 @@ class CatiaCom(CatiaBackend):
             document = self._app.ActiveDocument
         except Exception as exc:  # noqa: BLE001
             raise CatiaOperationError(
-                "No document is open in CATIA. Call catia_new_part, or open the part "
-                "in CATIA."
+                "No document is open in CATIA. Call catia_new_part, or open the part in CATIA."
             ) from exc
         if document is None:
             raise CatiaOperationError("No document is open in CATIA.")
@@ -433,6 +508,7 @@ class CatiaCom(CatiaBackend):
         diameter_mm: float,
         depth_mm: float | None = None,
         through_all: bool = True,
+        inset_mm: float | None = None,
     ) -> dict[str, Any]:
         """Drill a named hole, as a sketched circle pocketed through the solid.
 
@@ -457,7 +533,7 @@ class CatiaCom(CatiaBackend):
                 "Placing a hole by face and position needs the part's bounding box, "
                 "and it could not be measured. Check that the part has a solid body."
             )
-        point = _face_point(box, face, position, diameter_mm)
+        point = _face_point(box, face, position, diameter_mm, inset_mm)
         plane, first, second = _SKETCH_FRAME[face]
         part = self._part()
 
@@ -545,9 +621,7 @@ class CatiaCom(CatiaBackend):
                 target, 1, 0, 1, float(length_mm), float(angle_deg)
             )
         except Exception as exc:  # noqa: BLE001
-            raise CatiaOperationError(
-                f"CATIA refused a {length_mm:g} mm chamfer ({exc})."
-            ) from exc
+            raise CatiaOperationError(f"CATIA refused a {length_mm:g} mm chamfer ({exc}).") from exc
         part.Update()
         return self._feature_result(str(chamfer.Name))
 
@@ -630,9 +704,7 @@ class CatiaCom(CatiaBackend):
             factory = part.HybridShapeFactory
             origin = part.OriginElements
             workbench = part.Parent.GetWorkbench("SPAWorkbench")
-            solid = workbench.GetMeasurable(
-                part.CreateReferenceFromObject(self._body())
-            )
+            solid = workbench.GetMeasurable(part.CreateReferenceFromObject(self._body()))
             temporary = part.HybridBodies.Add()
 
             extents: dict[tuple[str, int], float] = {}
@@ -645,9 +717,7 @@ class CatiaCom(CatiaBackend):
                     offset = factory.AddNewPlaneOffset(plane, sign * _BBOX_REACH, False)
                     temporary.AppendHybridShape(offset)
                     part.Update()
-                    gap = float(
-                        solid.GetMinimumDistance(part.CreateReferenceFromObject(offset))
-                    )
+                    gap = float(solid.GetMinimumDistance(part.CreateReferenceFromObject(offset)))
                     # The plane sits `_BBOX_REACH` out; whatever is left of that
                     # after the gap is how far the solid reaches on that side.
                     extents[(axis, sign)] = sign * (_BBOX_REACH - gap)
@@ -729,15 +799,20 @@ class CatiaCom(CatiaBackend):
             logger.warning("Could not read the centre of gravity", exc_info=True)
             centre = None
 
-        return {
+        # Density implied by what CATIA just reported, rather than a second COM
+        # call that could disagree with it. `Part.Density` returns the same
+        # number on a live V5-R33 (both 1000.0 on a part with no material), and
+        # this cannot raise or drift out of step with the mass above it.
+        density_kg_m3 = mass_kg / (volume_mm3 * 1e-9)
+
+        measurement: dict[str, Any] = {
             "has_solid": True,
             # Kilograms already. Nothing above this converts, by design.
             "mass_kg": round(mass_kg, 6),
+            "density_kg_m3": round(density_kg_m3, 1),
             "volume_mm3": round(volume_mm3, 4),
             "surface_area_mm2": round(area_mm2, 4),
-            "center_of_gravity_mm": (
-                [round(v, 4) for v in centre] if centre is not None else None
-            ),
+            "center_of_gravity_mm": ([round(v, 4) for v in centre] if centre is not None else None),
             # Constructed from six extremum points rather than queried -- see
             # `_bounding_box`. None if that construction failed, because a
             # measurement must never turn a successful mutation into a failure.
@@ -752,12 +827,36 @@ class CatiaCom(CatiaBackend):
             ),
         }
 
+        if abs(density_kg_m3 - CATIA_DEFAULT_DENSITY_KG_M3) <= 5.0:
+            # Nothing in this bridge applies a material, so this is the normal
+            # case, and it makes `mass_kg` wrong by the density ratio of
+            # whatever the engineer actually asked for -- 7.9x for steel, 2.7x
+            # for aluminium. Observed live: the agent answered "how heavy is
+            # it?" for a 120x80x10 steel bracket with "0.095 kg". The real
+            # answer is 0.755 kg.
+            #
+            # The number is not hidden, because it is what CATIA reports and a
+            # tool must not invent a different one. It is labelled instead, in
+            # terms the model cannot restate as a plain mass.
+            measurement["material_applied"] = False
+            measurement["mass_is_provisional"] = True
+            measurement["mass_warning"] = (
+                f"No material is applied to this part in CATIA, so mass_kg was computed "
+                f"with CATIA's default density of {CATIA_DEFAULT_DENSITY_KG_M3:g} kg/m3 and is "
+                "NOT the real mass. Do not quote it as the part's weight. Quote "
+                "volume_mm3 instead, or multiply it by the density of the material the "
+                "user asked for and say which material you used."
+            )
+        else:
+            measurement["material_applied"] = True
+            measurement["mass_is_provisional"] = False
+        return measurement
+
     def measure(self) -> dict[str, Any]:  # pragma: no cover - Windows only
         summary = self._measure_solid()
         if not summary.get("has_solid"):
             raise CatiaOperationError(
-                "The part has no solid geometry to measure yet. Sketch a profile and "
-                "pad it first."
+                "The part has no solid geometry to measure yet. Sketch a profile and pad it first."
             )
         return {**summary, "features": self._feature_list(), "approximate": False}
 
@@ -832,9 +931,7 @@ class CatiaCom(CatiaBackend):
             ) from exc
 
         if not path.is_file():
-            raise CatiaOperationError(
-                "CATIA reported a successful STEP export but wrote no file."
-            )
+            raise CatiaOperationError("CATIA reported a successful STEP export but wrote no file.")
         try:
             data = path.read_bytes()
         finally:
@@ -936,15 +1033,23 @@ def _face_point(
     face: str,
     position: str,
     diameter_mm: float,
+    inset_mm: float | None = None,
 ) -> tuple[float, float, float]:
     """Turn a named face and position into a point, in millimetres.
 
     This is the coordinate maths the model is deliberately never asked to do.
-    Corner positions are inset by the hole radius plus half again, so a hole
-    named "back_left" lands inside the material rather than breaking the edge.
+    Corner positions are inset from the edge; without `inset_mm` that inset is
+    the hole radius plus half again, which keeps the hole inside the material.
+
+    `inset_mm` exists because "15 mm in from each corner" is how bolt patterns
+    are actually specified, and the tool had no way to say it. Observed live:
+    asked for "four M8 bolt holes, 15 mm in from each corner", the model had
+    nowhere to put the 15 and spent the turn guessing invalid `face` and
+    `position` values until it ran out of steps and answered nothing at all.
+    Three of the four blank answers in a 66-turn run began this way.
     """
     xmin, ymin, zmin, xmax, ymax, zmax = box
-    inset = diameter_mm * 0.75
+    inset = diameter_mm * 0.75 if inset_mm is None else float(inset_mm)
     centre = ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
 
     x_lo, x_hi = xmin + inset, xmax - inset

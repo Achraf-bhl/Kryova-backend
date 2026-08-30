@@ -65,9 +65,7 @@ def _open_backend(mock: bool, workdir: Path) -> CatiaBackend:
     from .mock_catia import MockCatia
 
     if mock:
-        logger.warning(
-            "Running in MOCK mode: no CATIA is involved and every result is simulated."
-        )
+        logger.warning("Running in MOCK mode: no CATIA is involved and every result is simulated.")
         return MockCatia(workdir)
 
     from .catia_com import CatiaCom

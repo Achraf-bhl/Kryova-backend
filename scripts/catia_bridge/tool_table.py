@@ -141,6 +141,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
                 "diameter_mm": _length(1_000.0),
                 "depth_mm": _length(),
                 "through_all": {"type": "boolean"},
+                "inset_mm": _length(),
             },
             ["face", "position", "diameter_mm"],
         ),

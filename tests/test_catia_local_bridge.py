@@ -379,3 +379,65 @@ class TestItDoesNotOpenAConsoleWindow:
         local_bridge.ensure_started(db_session, user.id)
         expected = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         assert spawned[0]["creationflags"] == expected
+
+
+class TestASupersededDaemonStopsInsteadOfLooping:
+    """An orphaned daemon used to re-offer a dead token every 47 seconds.
+
+    The supervisor mints a fresh token per server process, so a backend restart
+    invalidates the credential the previous daemon is holding. That daemon then
+    failed its handshake with HTTP 403 and treated it like any other connection
+    failure: back off, reconnect, fail again, forever. Six of them were found
+    running on this machine after an afternoon of restarts.
+
+    A 401 or 403 on the handshake is an answer, not an outage. Retrying cannot
+    change it, so the daemon exits and lets whatever supervises it decide.
+    """
+
+    @pytest.fixture
+    def rejected(self) -> Any:
+        sys.path.insert(0, str(local_bridge.BASE_DIR / "scripts"))
+        from catia_bridge.bridge import _is_auth_rejection
+
+        return _is_auth_rejection
+
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_a_refused_credential_is_recognised_from_the_status(
+        self, rejected: Any, status: int
+    ) -> None:
+        class Rejection(Exception):
+            status_code = status
+
+        assert rejected(Rejection("refused")) is True
+
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_and_from_the_message_when_the_status_is_not_exposed(
+        self, rejected: Any, status: int
+    ) -> None:
+        # websockets has carried the code on different attributes across
+        # versions; this is the text it actually logged.
+        message = f"server rejected WebSocket connection: HTTP {status}"
+        assert rejected(Exception(message)) is True
+
+    def test_and_from_a_nested_response(self, rejected: Any) -> None:
+        class Response:
+            status_code = 403
+
+        class Rejection(Exception):
+            response = Response()
+
+        assert rejected(Rejection("refused")) is True
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            ConnectionRefusedError("the server is not up yet"),
+            TimeoutError("no route"),
+            Exception("server rejected WebSocket connection: HTTP 500"),
+            Exception("server rejected WebSocket connection: HTTP 503"),
+        ],
+    )
+    def test_a_real_outage_is_still_retried(self, rejected: Any, failure: Exception) -> None:
+        # The daemon is started before CATIA and before the server is listening,
+        # so exiting on an ordinary connection failure would defeat the point.
+        assert rejected(failure) is False

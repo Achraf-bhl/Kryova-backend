@@ -285,6 +285,7 @@ class TestLiveCatia:
         reads like a broken bridge and is nothing of the kind. Twice in one
         session it did exactly that.
         """
+        from app.geometry.inspect import inspect
         from app.mesh.gmsh_mesher import generate_tet_mesh
 
         exported = bridge.export_active_document(tmp_path, ExportFormat.STEP, stem="mesh_test")
@@ -293,6 +294,18 @@ class TestLiveCatia:
                 "CATIA's active document has no solid body, so there is nothing to "
                 "mesh. Open a part with geometry in it to exercise this path."
             )
-        mesh, _quality = generate_tet_mesh(exported, element_size_mm=25.0, file_format="step")
+
+        # Sized from the part, not from a constant. A fixed 25 mm suits the
+        # large plates this was written against and fails on anything thin: a
+        # 30 mm shaft with an 8 mm through hole leaves an 11 mm wall, and gmsh
+        # refuses it with "Invalid boundary mesh (overlapping facets)" -- which
+        # reads like a broken export and is nothing of the kind. Since this test
+        # meshes whatever the engineer happens to have open, the size has to
+        # follow the part or the result follows the ambient state instead.
+        box = inspect(exported, "step")["bounding_box"]
+        smallest = min(box["size"])
+        mesh, _quality = generate_tet_mesh(
+            exported, element_size_mm=max(smallest / 8.0, 0.5), file_format="step"
+        )
         assert len(mesh.nodes) > 0
         assert len(mesh.tets) > 0

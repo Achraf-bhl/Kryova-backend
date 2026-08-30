@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -47,12 +48,10 @@ def _reset_supervisor() -> Any:
     local_bridge._process = None
     local_bridge._last_attempt = 0.0
     local_bridge._last_error = None
-    local_bridge._tokens.clear()
     yield
     local_bridge._process = None
     local_bridge._last_attempt = 0.0
     local_bridge._last_error = None
-    local_bridge._tokens.clear()
 
 
 @pytest.fixture
@@ -193,8 +192,6 @@ class TestProvisioning:
             if d.name == local_bridge.LOCAL_DEVICE_NAME
         ]
         assert len(devices) == 1
-        # Same token too: a restart must not invalidate the credential a
-        # still-connected daemon is holding.
         assert spawned[0]["env"]["KRYOVA_BRIDGE_TOKEN"] == spawned[1]["env"]["KRYOVA_BRIDGE_TOKEN"]
 
     def test_a_hand_paired_workstation_is_left_alone(
@@ -441,3 +438,141 @@ class TestASupersededDaemonStopsInsteadOfLooping:
         # The daemon is started before CATIA and before the server is listening,
         # so exiting on an ordinary connection failure would defeat the point.
         assert rejected(failure) is False
+
+
+class TestTwoBackendsDoNotFightOverTheToken:
+    """The failure that made the whole feature useless on the real machine.
+
+    A random token minted per server process looks right and is not. Two
+    backends were up -- one left over, one started by the desktop app -- and
+    both supervise the same device row. Each mint overwrote the other's hash,
+    so whichever daemon connected always presented a credential that had just
+    been invalidated. The log is 403 after 403 after 403, and the assistant
+    waited 25 seconds per `catia_*` call for a bridge that could never attach:
+
+        18:31:48 Connecting to ws://127.0.0.1:8000/api/v1/catia/bridge/ws
+        18:31:49 ERROR The server rejected this workstation's credentials (403)
+
+    Deriving the token from the signing key and the device id removes the race
+    rather than narrowing it. Any two processes now compute the same answer.
+    """
+
+    def test_two_processes_derive_the_same_token(self) -> None:
+        assert local_bridge._device_token("device-1") == local_bridge._device_token("device-1")
+
+    def test_a_different_device_gets_a_different_token(self) -> None:
+        assert local_bridge._device_token("device-1") != local_bridge._device_token("device-2")
+
+    def test_rotating_the_signing_key_rotates_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        before = local_bridge._device_token("device-1")
+        monkeypatch.setattr(local_bridge.settings, "secret_key", "a-different-signing-key")
+        assert local_bridge._device_token("device-1") != before
+
+    def test_it_is_not_the_signing_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(local_bridge.settings, "secret_key", "the-actual-secret")
+        assert "the-actual-secret" not in local_bridge._device_token("device-1")
+
+    def test_a_second_supervisor_does_not_invalidate_the_first(
+        self, db_session: Session, user: User, spawned: list[dict[str, Any]]
+    ) -> None:
+        # Simulating the two backends: provision twice, as two processes would,
+        # and check the first daemon's token still authenticates afterwards.
+        first = local_bridge._provision(db_session, user.id)
+        assert first is not None
+        device, token = first
+
+        second = local_bridge._provision(db_session, user.id)
+        assert second is not None
+
+        db_session.refresh(device)
+        assert device.token_hash == hash_token(token)
+
+    def test_the_stored_hash_is_not_rewritten_every_turn(
+        self, db_session: Session, user: User, spawned: list[dict[str, Any]]
+    ) -> None:
+        provisioned = local_bridge._provision(db_session, user.id)
+        assert provisioned is not None
+        device, _ = provisioned
+        expiry = device.token_expires_at
+
+        local_bridge._provision(db_session, user.id)
+        db_session.refresh(device)
+        # Untouched, so nothing downstream sees a credential change that is not one.
+        assert device.token_expires_at == expiry
+
+
+class TestOnlyOneDaemonPerMachine:
+    """Two daemons for one device flap; they do not coexist.
+
+    The server's registry keeps the newest socket and closes the older, whose
+    owner reconnects and displaces it straight back. Duplicates are easy to
+    reach -- the backend supervises one, the desktop app spawns another -- so
+    the daemon refuses to be the second rather than trusting its launcher.
+    """
+
+    @pytest.fixture
+    def bridge_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+        sys.path.insert(0, str(local_bridge.BASE_DIR / "scripts"))
+        from catia_bridge import config as bridge_config
+
+        monkeypatch.setattr(bridge_config, "work_dir", lambda: tmp_path)
+        return bridge_config
+
+    def test_the_first_daemon_takes_the_lock(self, bridge_config: Any) -> None:
+        handle = bridge_config.acquire_single_instance_lock()
+        try:
+            assert bridge_config.lock_path().exists()
+        finally:
+            handle.close()
+
+    def test_the_second_is_refused(self, bridge_config: Any) -> None:
+        handle = bridge_config.acquire_single_instance_lock()
+        try:
+            with pytest.raises(bridge_config.AlreadyRunning, match="already running"):
+                bridge_config.acquire_single_instance_lock()
+        finally:
+            handle.close()
+
+    def test_the_lock_is_released_when_the_holder_lets_go(self, bridge_config: Any) -> None:
+        # Windows drops the lock when the process dies, so a killed daemon must
+        # not leave the machine unable to start another.
+        bridge_config.acquire_single_instance_lock().close()
+        second = bridge_config.acquire_single_instance_lock()
+        second.close()
+
+
+class TestTheStatusPanelBringsTheBridgeUp:
+    """The badge is what the user checks *before* asking for anything.
+
+    The device row is created on demand, so a fresh account had none and the
+    panel read "not connected" until a message had already been sent -- exactly
+    backwards for an indicator whose job is to say whether asking is worth it.
+    Asking whether the bridge is up is also the moment to bring it up.
+    """
+
+    def test_status_provisions_the_local_device(
+        self, db_session: Session, user: User, spawned: list[dict[str, Any]]
+    ) -> None:
+        from app.catia.dispatch import status_payload
+
+        assert local_bridge._local_device(db_session, user.id) is None
+        status_payload(db_session, user.id, None)
+        assert local_bridge._local_device(db_session, user.id) is not None
+        assert spawned
+
+    def test_it_does_not_block_the_call(
+        self, db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A status endpoint that waits 25 seconds for a socket is a status
+        # endpoint nobody can poll.
+        from app.catia import dispatch
+
+        waits: list[float] = []
+
+        def record(db: Any, user_id: str, *, wait_s: float = 0.0) -> bool:
+            waits.append(wait_s)
+            return False
+
+        monkeypatch.setattr(dispatch.local_bridge, "ensure_started", record)
+        dispatch.status_payload(db_session, user.id, None)
+        assert waits == [0.0]

@@ -26,6 +26,7 @@ import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 BRIDGE_VERSION = "1.0.0"
 
@@ -65,6 +66,54 @@ def work_dir() -> Path:
         return Path(base) / "Kryova" / "catia"
     base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
     return Path(base) / "kryova" / "catia"
+
+
+def lock_path() -> Path:
+    """The file whose exclusive lock means "a bridge is already running here"."""
+    return work_dir() / "bridge.lock"
+
+
+class AlreadyRunning(RuntimeError):
+    """Another bridge daemon holds the single-instance lock."""
+
+
+def acquire_single_instance_lock() -> Any:
+    """Take the machine-wide bridge lock, or raise `AlreadyRunning`.
+
+    Two daemons for one device do not coexist quietly: the server's registry
+    keeps the newest socket and closes the older one, whose owner reconnects
+    and displaces it right back. The pair flap forever and every call lands on
+    whichever happens to hold the slot.
+
+    A duplicate is easy to end up with -- the backend supervises one, the
+    desktop app spawns another, and a second backend process supervises a third.
+    So the daemon refuses to be the second one rather than relying on whoever
+    starts it to check.
+
+    The lock is an open file handle held for the process's lifetime; Windows
+    releases it when the process dies, including on a kill, so a crashed daemon
+    leaves nothing to clean up. The handle is returned and must stay referenced.
+    """
+    path = lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+b")  # noqa: SIM115 - held for the process lifetime
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        raise AlreadyRunning(
+            f"Another Kryova CATIA bridge is already running on this machine "
+            f"({path} is locked). Only one may be connected at a time."
+        ) from exc
+    return handle
 
 
 def config_path() -> Path:

@@ -225,6 +225,14 @@ def _offline_detail(devices: list[CatiaDevice]) -> str:
 
 def status_payload(db: Session, user_id: str, conversation_id: str | None) -> dict[str, Any]:
     """What `catia_status` answers, for the agent and for `GET /catia/status`."""
+    # Asking whether the bridge is up is also the moment to bring it up. The
+    # panel polls this before any message is sent, and on a fresh account there
+    # is no device row until something provisions one -- so the badge read "not
+    # connected" until the user had already asked for something, which is the
+    # wrong way round for the thing they check *before* asking. Non-blocking:
+    # a status call must stay fast, and the supervisor is rate-limited.
+    local_bridge.ensure_started(db, user_id)
+
     devices = _owned_devices(db, user_id)
     online = [(d, c) for d in devices if (c := registry.get(d.id)) is not None]
 

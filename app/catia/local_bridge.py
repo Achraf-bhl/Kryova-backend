@@ -41,6 +41,8 @@ supervised daemon leaves no credential behind for the next person on the box.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
 import subprocess
@@ -80,9 +82,33 @@ _lock = threading.Lock()
 _process: subprocess.Popen[bytes] | None = None
 _last_attempt: float = 0.0
 _last_error: str | None = None
-#: Minted once per process and reused, so restarting the daemon does not
-#: invalidate the token a still-connected one is holding.
-_tokens: dict[str, str] = {}
+
+
+def _device_token(device_id: str) -> str:
+    """The local daemon's credential, derived rather than drawn at random.
+
+    A random token per server process looks obviously right and is the bug that
+    made this whole feature fail on the user's own machine. Two backends were
+    up -- one left over, one started by the desktop app -- and both supervise
+    the same device row. Each minted a token and overwrote the other's hash, so
+    whichever daemon connected always presented a credential the last mint had
+    just invalidated: every handshake came back 403, forever, and the assistant
+    sat waiting 25 seconds per `catia_*` call for a bridge that could never
+    attach. Any two backend processes do it -- `--reload`, two workers, a
+    forgotten terminal.
+
+    Deriving it from the server's signing key and the device id removes the
+    race instead of narrowing it: every process computes the same token, so
+    there is nothing to invalidate. It is never stored (the row still keeps
+    only its SHA-256), it is scoped to one device, and rotating `SECRET_KEY`
+    rotates it.
+    """
+    digest = hmac.new(
+        settings.secret_key.encode("utf-8"),
+        f"catia-local-bridge:{device_id}".encode(),
+        hashlib.sha256,
+    )
+    return digest.hexdigest()
 
 
 def _daemon_package() -> Path | None:
@@ -128,7 +154,6 @@ def _provision(db: Session, user_id: str) -> tuple[CatiaDevice, str] | None:
     caller degrades to "no CATIA" exactly as it would on a machine that never
     had one.
     """
-    import secrets
     import socket
 
     device = _local_device(db, user_id)
@@ -146,13 +171,14 @@ def _provision(db: Session, user_id: str) -> tuple[CatiaDevice, str] | None:
     except OSError:
         pass
 
-    token = _tokens.get(device.id)
+    token = _device_token(device.id)
+    expected = hash_token(token)
     expiry = device.token_expires_at
-    expired = expiry is None or expiry <= utcnow()
-    if token is None or device.token_hash is None or expired:
-        token = secrets.token_urlsafe(48)
-        _tokens[device.id] = token
-        device.token_hash = hash_token(token)
+    # Written only when it would actually change. Rewriting the same hash on
+    # every turn is harmless but pointless, and a no-op here is what makes two
+    # backend processes agree instead of fighting.
+    if device.token_hash != expected or expiry is None or expiry <= utcnow():
+        device.token_hash = expected
         device.token_expires_at = utcnow() + timedelta(days=settings.catia_device_token_ttl_days)
 
     device.status = CatiaDeviceStatus.ACTIVE

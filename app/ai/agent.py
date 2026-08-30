@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import prompts
 from app.ai.context import build_messages, maybe_summarise
+from app.ai.malformed import correction_for, find_written_tool_calls
 from app.ai.provider import LLMError, LLMProvider, TokenUsage
 from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
 from app.ai.tools import ToolBox, ToolError
@@ -58,6 +59,12 @@ logger = logging.getLogger(__name__)
 #: Still bounded: a model that has spent this many steps without answering is
 #: stuck, and more steps will not unstick it.
 DEFAULT_MAX_STEPS = 20
+
+#: How many times in one turn the model may be told to re-issue a tool call it
+#: wrote as prose, or to answer at all after returning nothing. Two is enough to
+#: clear a one-off formatting slip; a model that needs more is not going to get
+#: there, and every retry is time the user spends watching a spinner.
+MAX_CORRECTIONS = 2
 
 
 def max_steps() -> int:
@@ -139,7 +146,9 @@ def summarise_step(tool: str, result: Any, ok: bool) -> str:
         fos = (result.get("result") or {}).get("factor_of_safety")
         return f"Status {status}" + (f", factor of safety {fos:.2f}" if fos else "")
     if tool == "run_simulation":
-        return f"Queued run {result.get('id', '')}".strip() or "Load case validated, ready to submit"
+        return (
+            f"Queued run {result.get('id', '')}".strip() or "Load case validated, ready to submit"
+        )
     if tool == "delete_simulation":
         return "Run deleted"
     if tool == "catia_status":
@@ -268,6 +277,8 @@ def stream_agent(
 
     steps: list[AgentStep] = []
     schemas = toolbox.schemas(include_mutating=allow_mutations)
+    known = set(labels)
+    corrections = 0
 
     for step in range(budget):
         yield {"type": "thinking", "step": step + 1, "max_steps": budget}
@@ -280,6 +291,48 @@ def stream_agent(
         usage += turn.usage
 
         if not turn.wants_tools:
+            # A turn with no tool calls is the model saying it is finished, and
+            # whatever it wrote becomes the answer. Two ways that is a lie, and
+            # both reach the user as a normal reply unless they are caught here.
+            written = find_written_tool_calls(turn.text, known)
+            blank = not turn.text.strip()
+            if (written or blank) and corrections < MAX_CORRECTIONS:
+                corrections += 1
+                # The model's own words go in first: it has to see what it
+                # actually produced, or the correction is about nothing.
+                _append(db, conversation, MessageRole.ASSISTANT, content=turn.text or None)
+                _append(
+                    db,
+                    conversation,
+                    MessageRole.USER,
+                    content=correction_for(written) if written else prompts.AGENT_EMPTY_TURN,
+                )
+                db.commit()
+                logger.info(
+                    "correcting turn: %s (attempt %d/%d)",
+                    f"tool call written as text: {written}" if written else "empty response",
+                    corrections,
+                    MAX_CORRECTIONS,
+                )
+                continue
+            if blank:
+                # Out of corrections and still nothing. Say so, rather than
+                # closing the turn with an empty chat bubble.
+                turn.text = (
+                    "I did not manage to produce an answer for that. Try asking "
+                    "again, or more specifically."
+                )
+            elif written:
+                # Out of corrections, and the text still describes work that was
+                # never done. Showing it as written would tell the user their
+                # part was built. Keep it, and say plainly that it did not run.
+                turn.text = (
+                    "I wrote out the steps below instead of running them, so "
+                    "**nothing has actually been done** -- no part was created "
+                    "and no file was changed. Ask me to run it and I will try "
+                    "again.\n\n" + turn.text
+                )
+
             text = turn.text
             if turn.truncated:
                 # A cut-off answer presented as a finished one is the worst

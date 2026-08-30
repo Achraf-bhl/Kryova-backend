@@ -320,7 +320,17 @@ def _resolve_conversation(db: Session, user: User, payload: ChatRequest) -> Conv
         title=payload.message[:60],
     )
     db.add(conversation)
-    db.flush()
+    # Committed, not merely flushed, and that distinction is the whole point.
+    # `chat_stream` hands this id to the browser in its first `start` event so a
+    # turn that dies is still resumable -- but its `LLMError` handler calls
+    # `db.rollback()`, which used to take the un-committed conversation row with
+    # it. The client then held an id for a row that never existed, and every
+    # later message in that chat answered 404 "Conversation not found": one
+    # provider hiccup on the first turn bricked the conversation permanently.
+    #
+    # Same rule as a queued job row (see CLAUDE.md): never hand out an id that
+    # is not durable yet.
+    db.commit()
     return conversation
 
 
@@ -553,7 +563,9 @@ def chat_stream(
                     conversation=conversation,
                 )
             except Exception:  # noqa: BLE001 - accounting must not mask the real error
-                logger.exception("Failed to record token usage for conversation %s", conversation_id)
+                logger.exception(
+                    "Failed to record token usage for conversation %s", conversation_id
+                )
                 db.rollback()
 
         try:

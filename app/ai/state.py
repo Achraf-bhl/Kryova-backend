@@ -100,6 +100,18 @@ def _catia_available(db: Session, user_id: str) -> bool | None:
         return None
 
 
+def _local_bridge_supported() -> bool:
+    """Whether this server starts the CATIA daemon itself. Never raises."""
+    try:
+        from app.catia.local_bridge import is_supported
+    except Exception:  # noqa: BLE001 - optional package
+        return False
+    try:
+        return is_supported()
+    except Exception:  # noqa: BLE001 - a state line must not kill the turn
+        return False
+
+
 def _project_lines(db: Session, project: Project) -> list[str]:
     lines = [f"project: {_clean(project.name)} (id {project.id})"]
     if project.description:
@@ -182,24 +194,48 @@ def _catia_lines(
     elif available is False:
         # Two different things used to be collapsed into "no CATIA tool will
         # work", and the difference decides what the assistant should do next.
-        # The `catia_*` design tools do need a paired workstation. `open_in_catia`
-        # does not -- it drives CATIA over COM on the machine running this
-        # server, which on a desktop install is the user's own. Told only that
-        # the bridge was down, the model concluded it had no CATIA at all and
-        # asked the user to upload a STEP file, which is precisely the hand-off
-        # this product exists to remove.
-        lines.append(
-            "catia_bridge: not connected -- the catia_* modelling tools are "
-            "unavailable until a workstation is paired and the Kryova bridge is "
-            "running. open_in_catia still works: it starts CATIA on this machine, "
-            "and the bridge attaches by itself once CATIA is up. Offer that "
-            "before asking the user for a CAD file."
-        )
+        # Told only that the bridge was down, the model concluded it had no
+        # CATIA at all and asked the user to upload a STEP file, which is
+        # precisely the hand-off this product exists to remove.
+        #
+        # On a single-machine install there is nothing for the user to do at
+        # all: Kryova starts and pairs the daemon itself, and the only thing it
+        # is ever waiting for is CATIA being open -- which the assistant can fix
+        # by itself with open_in_catia. Anything about pairing a workstation is
+        # false there, and it was still being said to a user with CATIA on
+        # screen, so the local case gets its own line rather than a qualifier on
+        # the remote one.
+        if _local_bridge_supported():
+            lines.append(
+                "catia_bridge: attaching -- Kryova runs the bridge on this machine "
+                "and pairs it itself, so there is nothing for the user to set up "
+                "and nothing to ask them for. It is waiting for CATIA to be open. "
+                "Call open_in_catia, then go straight on to the catia_* modelling "
+                "tools: the bridge attaches within a few seconds and those tools "
+                "wait for it. Never ask the user to pair a workstation, and never "
+                "ask them to upload or model the part themselves."
+            )
+        else:
+            lines.append(
+                "catia_bridge: not connected -- the catia_* modelling tools are "
+                "unavailable until a workstation is paired and the Kryova bridge is "
+                "running. open_in_catia still works: it starts CATIA on this machine, "
+                "and the bridge attaches by itself once CATIA is up. Offer that "
+                "before asking the user for a CAD file."
+            )
 
     if not document:
+        # Phrased so that dropping the qualifier cannot produce a falsehood.
+        # "none bound to this conversation yet" was accurate and got paraphrased
+        # into "there is no document open in CATIA" -- said to a user who had
+        # CATIA in front of them with a part open. The binding is a fact about
+        # this conversation, not about CATIA, and the line has to survive being
+        # compressed into one clause.
         lines.append(
-            "catia_document: none bound to this conversation yet -- call "
-            "catia_new_part before any other geometry operation"
+            "catia_document: this conversation has not created or opened a part yet. "
+            "This says nothing about what CATIA itself has open -- do not tell the "
+            "user their CATIA is empty. Call catia_new_part to start a part this "
+            "conversation owns, before any other geometry operation."
         )
         return lines
 
@@ -208,6 +244,22 @@ def _catia_lines(
         "have not opened it in this session, call catia_open_document first"
     )
     state = conversation.catia_state or {}
+    # The material is a decision, not a measurement, and it is the one thing the
+    # transcript held that nothing here reported. Asked "what material did we
+    # pick?" eight turns after "steel gearbox mounting plate", the assistant read
+    # CATIA -- which has no material applied unless the workstation is licensed
+    # for the Material Library -- and answered "none has been assigned, which
+    # grade would you like?", re-asking a question the user had already answered.
+    material = state.get("material")
+    if material:
+        density = state.get("density_kg_m3")
+        suffix = f" ({_clean(density)} kg/m3)" if density else ""
+        lines.append(f"catia_material: {_clean(material)}{suffix} -- already chosen, do not re-ask")
+    else:
+        lines.append(
+            "catia_material: not set yet -- masses are provisional until "
+            "catia_set_material is called"
+        )
     features = state.get("features")
     if isinstance(features, list) and features:
         lines.append(f"catia_features: {', '.join(_clean(f) for f in features[:20])}")

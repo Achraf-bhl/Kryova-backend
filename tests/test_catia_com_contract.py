@@ -466,15 +466,10 @@ class TestNoFabricatedInterfaces:
         import ast
 
         source = (
-            Path(__file__).resolve().parent.parent
-            / "scripts"
-            / "catia_bridge"
-            / "catia_com.py"
+            Path(__file__).resolve().parent.parent / "scripts" / "catia_bridge" / "catia_com.py"
         ).read_text(encoding="utf-8")
         return {
-            node.attr
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Attribute)
+            node.attr for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Attribute)
         }
 
     @pytest.mark.parametrize(
@@ -497,3 +492,103 @@ class TestNoFabricatedInterfaces:
     )
     def test_the_name_is_never_called(self, name: str, why: str) -> None:
         assert name not in self._attributes_accessed(), f"{name} is {why}"
+
+
+class TestMassIsLabelledWithItsMaterial:
+    """A mass computed from no material is not the part's weight.
+
+    Nothing in this bridge applies a material, so CATIA weighs every part it
+    builds at its default density of 1000 kg/m3. The stub above is that case:
+    1e6 mm3 massing 1.0 kg. For the steel bracket the agent was actually asked
+    about, the real mass is 7.9x what CATIA reported -- and observed live, the
+    agent answered "how heavy is it?" with "0.095 kg" for a part that weighs
+    0.755 kg.
+
+    The number is still reported, because a tool must not invent a different
+    one. It is labelled, in terms that cannot be restated as a plain weight.
+    """
+
+    def test_the_density_is_reported(self, tmp_path: Path) -> None:
+        assert _com(tmp_path).measure()["density_kg_m3"] == 1000.0
+
+    def test_a_part_with_no_material_is_flagged(self, tmp_path: Path) -> None:
+        measured = _com(tmp_path).measure()
+        assert measured["material_applied"] is False
+        assert measured["mass_is_provisional"] is True
+
+    def test_the_warning_says_not_to_quote_it(self, tmp_path: Path) -> None:
+        warning = _com(tmp_path).measure()["mass_warning"]
+        assert "NOT the real mass" in warning
+        assert "Do not quote it" in warning
+
+    def test_the_mass_itself_is_still_reported(self, tmp_path: Path) -> None:
+        # Hiding it would make the agent invent one, which is worse.
+        assert _com(tmp_path).measure()["mass_kg"] == 1.0
+
+    def test_a_real_material_is_not_flagged(self, tmp_path: Path) -> None:
+        com = _com(tmp_path)
+        # Steel: 1e6 mm3 at 7850 kg/m3 is 7.85 kg.
+        original = _Analyze.Mass
+        _Analyze.Mass = 7.85
+        try:
+            measured = com.measure()
+            assert measured["material_applied"] is True
+            assert measured["mass_is_provisional"] is False
+            assert "mass_warning" not in measured
+            assert measured["density_kg_m3"] == 7850.0
+        finally:
+            _Analyze.Mass = original
+
+
+class TestABoltPatternCanStateItsInset:
+    """ "15 mm in from each corner" is how bolt patterns are actually specified.
+
+    Before `inset_mm` there was nowhere to put that number. Observed live, asked
+    for "four M8 bolt holes, 15 mm in from each corner", the model had no field
+    for the 15 and spent the turn guessing invalid `face` and `position` values
+    until it ran out of steps and answered nothing at all. Three of the four
+    blank answers in a 66-turn run started exactly that way.
+    """
+
+    def test_the_default_is_still_derived_from_the_diameter(self) -> None:
+        from catia_bridge.catia_com import _face_point
+
+        # Radius plus half again: an 8 mm hole sits 6 mm in.
+        x, y, _ = _face_point(STUB_BOX, "top", "front_left", 8.0)
+        assert (x, y) == (STUB_BOX[0] + 6.0, STUB_BOX[1] + 6.0)
+
+    def test_an_explicit_inset_is_honoured(self) -> None:
+        from catia_bridge.catia_com import _face_point
+
+        x, y, _ = _face_point(STUB_BOX, "top", "front_left", 8.0, 15.0)
+        assert (x, y) == (STUB_BOX[0] + 15.0, STUB_BOX[1] + 15.0)
+
+    def test_it_applies_to_the_far_corner_too(self) -> None:
+        from catia_bridge.catia_com import _face_point
+
+        x, y, _ = _face_point(STUB_BOX, "top", "back_right", 8.0, 15.0)
+        assert (x, y) == (STUB_BOX[3] - 15.0, STUB_BOX[4] - 15.0)
+
+    def test_the_centre_is_unaffected(self) -> None:
+        from catia_bridge.catia_com import _face_point
+
+        assert _face_point(STUB_BOX, "top", "center", 8.0, 15.0) == _face_point(
+            STUB_BOX, "top", "center", 8.0
+        )
+
+    def test_both_schemas_accept_it(self) -> None:
+        # The daemon re-validates against its own copy; if the two disagree the
+        # server accepts a call the workstation then refuses.
+        from catia_bridge.tool_table import check_call
+
+        from app.catia.tool_specs import TOOL_SPECS_BY_NAME
+        from app.catia.validation import validate
+
+        arguments = {
+            "face": "top",
+            "position": "front_left",
+            "diameter_mm": 8.0,
+            "inset_mm": 15.0,
+        }
+        validate(arguments, TOOL_SPECS_BY_NAME["catia_hole"].parameters)
+        check_call("catia_hole", arguments, approval_token=None)

@@ -79,7 +79,6 @@ class JsonLogFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-
 def _configure_logging() -> None:
     """JSON logs in production, human-readable in development."""
     if not settings.is_production:
@@ -101,6 +100,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _fail_orphaned_jobs()
     yield
     get_job_queue().shutdown()
+    _stop_local_catia_bridge()
+
+
+def _stop_local_catia_bridge() -> None:
+    """Kill a bridge daemon this process started.
+
+    It is a child of ours and it holds a COM attachment to the engineer's CATIA
+    session; leaving it running after the server it talks to has gone means a
+    process nobody can see, holding a token nobody can use.
+    """
+    try:
+        from app.catia.local_bridge import stop
+    except Exception:  # noqa: BLE001 - CATIA support is optional
+        return
+    try:
+        stop()
+    except Exception:  # noqa: BLE001 - shutdown must not raise
+        logger.warning("Could not stop the local CATIA bridge", exc_info=True)
 
 
 def _fail_orphaned_jobs(session_factory=None) -> None:

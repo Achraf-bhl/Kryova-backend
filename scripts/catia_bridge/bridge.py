@@ -44,6 +44,32 @@ MAX_BACKOFF_S = 60.0
 MIN_SESSION_FOR_RESET_S = 30.0
 
 
+#: Handshake statuses that mean "this credential is dead", not "try later".
+#: 401 is a bad token, 403 a device that is no longer active. Both are answers,
+#: and re-asking cannot change either.
+_AUTH_REJECTION_STATUSES = (401, 403)
+
+
+def _is_auth_rejection(exc: Exception) -> bool:
+    """Whether a failed handshake was the server refusing the credential.
+
+    Read off the exception's own status where the websockets version exposes
+    one, and off the message otherwise -- `InvalidStatus` and `InvalidStatusCode`
+    have carried the code in different attributes across versions, and getting
+    this wrong in the tolerant direction only costs a retry.
+    """
+    for attribute in ("status_code", "code"):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, int) and value in _AUTH_REJECTION_STATUSES:
+            return True
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int) and status in _AUTH_REJECTION_STATUSES:
+        return True
+    text = str(exc)
+    return any(f"HTTP {status}" in text for status in _AUTH_REJECTION_STATUSES)
+
+
 class BridgeClient:
     def __init__(self, config: BridgeConfig, backend: CatiaBackend) -> None:
         self.config = config
@@ -62,6 +88,20 @@ class BridgeClient:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - every failure is a retry
+                if _is_auth_rejection(exc):
+                    # Not a retry. The token is dead and no amount of waiting
+                    # revives it -- this daemon has been superseded, usually by
+                    # a server restart that minted a fresh token for the same
+                    # workstation. Observed: six orphaned daemons on one machine,
+                    # each re-offering an invalid credential every 47 seconds
+                    # for as long as they were left alone.
+                    logger.error(
+                        "The server rejected this workstation's credentials (%s). "
+                        "This bridge has been superseded or revoked; exiting rather "
+                        "than retrying a token that cannot become valid again.",
+                        exc,
+                    )
+                    return
                 logger.warning("Bridge connection failed: %s", exc)
             else:
                 logger.info("Bridge connection closed by the server")

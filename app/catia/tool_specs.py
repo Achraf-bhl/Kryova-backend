@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from app.solve.materials import MATERIALS
+
 #: CATIA's three standard reference planes, and the only planes a sketch may be
 #: placed on in v1. Named rather than numbered so the model cannot invent one.
 SKETCH_PLANES = ("XY", "YZ", "ZX")
@@ -53,6 +55,12 @@ EDGE_SELECTORS = ("all", "vertical", "horizontal", "top", "bottom")
 
 #: Standard viewpoints for a screenshot.
 VIEWPOINTS = ("iso", "front", "back", "top", "bottom", "left", "right")
+
+#: The material library the agent may choose from, named rather than described
+#: by density: the model picks a material, the server looks up what it weighs.
+#: Sourced from the solver's own library so the two can never disagree about
+#: what "steel-1018" means.
+MATERIAL_KEYS = tuple(MATERIALS)
 
 #: Units a named parameter may be set in. CATIA parameters carry a unit and
 #: setting a length in degrees is a silent no-op, so the unit is required.
@@ -290,13 +298,42 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
         parameters=_object(
             {
                 "sketch": _FEATURE_NAME,
-                "depth_mm": _length("Cut depth. Ignored when `through_all` is true."),
+                "depth_mm": _length(
+                    "Cut depth. Omit entirely when `through_all` is true -- do not "
+                    "send 0, which is rejected as a depth."
+                ),
                 "through_all": {
                     "type": "boolean",
                     "description": "Cut entirely through the material. Default false.",
                 },
             },
             required=["sketch"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_set_material",
+        description=(
+            "Set the part's material. Call this as soon as the user names one -- "
+            "'a steel bracket' is naming one -- and before quoting any mass, because "
+            "an unspecified part is weighed at CATIA's default 1000 kg/m3 and every "
+            "mass you report until then is wrong by the density ratio (7.9x for "
+            "steel). Also call it when the user asks for a mass, a weight or a "
+            "structural analysis and no material has been set yet: ask which one "
+            "only if their request gives you nothing to go on. Applying it in CATIA "
+            "needs the Material Library product, and the result says whether that "
+            "happened; the mass Kryova reports is correct either way."
+        ),
+        parameters=_object(
+            {
+                "material": _enum(
+                    MATERIAL_KEYS,
+                    "Which material, from Kryova's library. Pick the closest match to "
+                    "what the user said -- 'steel' is 'steel-1018', 'aluminium' is "
+                    "'aluminium-6061-t6' -- and say which one you chose.",
+                )
+            },
+            required=["material"],
         ),
         tier=CatiaTier.WRITE,
     ),
@@ -318,14 +355,32 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
                 "position": _enum(
                     FACE_POSITIONS,
                     "Where on that face. Corner positions are inset from the edge by "
-                    "a clearance the daemon computes from the hole diameter.",
+                    "a clearance the daemon computes from the hole diameter, unless "
+                    "`inset_mm` says otherwise.",
                 ),
                 "diameter_mm": _length("Hole diameter.", maximum=1_000.0),
-                "depth_mm": _length("Hole depth. Ignored when `through_all` is true.", 10_000.0),
+                "depth_mm": _length(
+                    "Hole depth. Omit entirely when `through_all` is true -- do not "
+                    "send 0, which is rejected as a depth.",
+                    10_000.0,
+                ),
                 "through_all": {
                     "type": "boolean",
                     "description": "Drill entirely through the part. Default true.",
                 },
+                # A bolt pattern is specified as "15 mm in from each corner"
+                # far more often than it is left to a default. Without this the
+                # distance had nowhere to go: observed live, the model was
+                # asked for "four M8 bolt holes, 15 mm in from each corner",
+                # had no field for the 15, and spent the whole turn guessing
+                # invalid `face` and `position` values until it ran out of
+                # steps and answered nothing.
+                "inset_mm": _length(
+                    "Distance from the two nearest edges to the hole centre, for a "
+                    "corner position. Use this whenever the user gives a distance "
+                    "from the edge. Ignored for `center`.",
+                    10_000.0,
+                ),
             },
             required=["face", "position", "diameter_mm"],
         ),

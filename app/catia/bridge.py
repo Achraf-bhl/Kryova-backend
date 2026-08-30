@@ -81,12 +81,16 @@ class ExportFormat(StrEnum):
     @classmethod
     def parse(cls, value: str) -> "ExportFormat":
         normalised = (value or "").strip().lower().lstrip(".")
-        aliases = {"step": cls.STEP, "stp": cls.STEP, "stl": cls.STL,
-                   "iges": cls.IGES, "igs": cls.IGES}
+        aliases = {
+            "step": cls.STEP,
+            "stp": cls.STEP,
+            "stl": cls.STL,
+            "iges": cls.IGES,
+            "igs": cls.IGES,
+        }
         if normalised not in aliases:
             raise CATIAExportError(
-                f"Unsupported export format {value!r}. "
-                f"Use one of: step, stl, iges."
+                f"Unsupported export format {value!r}. Use one of: step, stl, iges."
             )
         return aliases[normalised]
 
@@ -257,6 +261,29 @@ def list_open_documents() -> list[CatiaDocument]:
     return _run_com(work, timeout=DEFAULT_TIMEOUT_SECONDS, launch=False)
 
 
+def active_document_has_solid() -> bool:
+    """Whether CATIA's active document contains any solid material.
+
+    A newly created part is empty, and exporting one produces a valid STEP file
+    with nothing in it -- surfaces and axis systems only. Everything downstream
+    that expects a closed solid then fails with a message about the *file*
+    ("The file contains no solid body"), which reads like a broken export and
+    is nothing of the kind.
+
+    `Product.Analyze.Volume` is the cheapest honest answer, and reports zero for
+    an empty part. False on any COM failure: this exists to let a caller degrade
+    gracefully, so it must not become a new way to raise.
+    """
+
+    def work(catia: Any) -> bool:
+        try:
+            return float(catia.ActiveDocument.Product.Analyze.Volume) > 0.0
+        except Exception:  # noqa: BLE001 - a probe must not raise
+            return False
+
+    return _run_com(work, timeout=DEFAULT_TIMEOUT_SECONDS, launch=False)
+
+
 def new_part(name: str | None = None) -> CatiaDocument:
     """Create an empty CATPart and show it, so the user has somewhere to model."""
 
@@ -286,8 +313,10 @@ def export_active_document(
     The destination is built here from a caller-supplied directory and a
     sanitised stem -- a path from the model or the browser never reaches COM.
     """
-    fmt = export_format if isinstance(export_format, ExportFormat) else ExportFormat.parse(
-        str(export_format)
+    fmt = (
+        export_format
+        if isinstance(export_format, ExportFormat)
+        else ExportFormat.parse(str(export_format))
     )
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)

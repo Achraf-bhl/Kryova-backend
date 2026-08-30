@@ -121,16 +121,11 @@ def write_box_step(
         # picking it by axis avoids a degenerate placement.
         reference = "+x" if normal[1] != "x" else "+y"
         placement = ent.add(
-            f"AXIS2_PLACEMENT_3D('',#{corner[anchor]},#{axis_dir[normal]},"
-            f"#{axis_dir[reference]})"
+            f"AXIS2_PLACEMENT_3D('',#{corner[anchor]},#{axis_dir[normal]},#{axis_dir[reference]})"
         )
         plane = ent.add(f"PLANE('',#{placement})")
-        oriented_edges = [
-            oriented(loop[n], loop[(n + 1) % len(loop)]) for n in range(len(loop))
-        ]
-        edge_loop = ent.add(
-            "EDGE_LOOP('',(" + ",".join(f"#{e}" for e in oriented_edges) + "))"
-        )
+        oriented_edges = [oriented(loop[n], loop[(n + 1) % len(loop)]) for n in range(len(loop))]
+        edge_loop = ent.add("EDGE_LOOP('',(" + ",".join(f"#{e}" for e in oriented_edges) + "))")
         bound = ent.add(f"FACE_OUTER_BOUND('',#{edge_loop},.T.)")
         faces.append(ent.add(f"ADVANCED_FACE('',(#{bound}),#{plane},.T.)"))
 
@@ -170,9 +165,7 @@ def write_box_step(
     definition_context = ent.add(
         f"PRODUCT_DEFINITION_CONTEXT('part definition',#{app_context},'design')"
     )
-    definition = ent.add(
-        f"PRODUCT_DEFINITION('design','',#{formation},#{definition_context})"
-    )
+    definition = ent.add(f"PRODUCT_DEFINITION('design','',#{formation},#{definition_context})")
     definition_shape = ent.add(f"PRODUCT_DEFINITION_SHAPE('','',#{definition})")
     ent.add(f"SHAPE_DEFINITION_REPRESENTATION(#{definition_shape},#{shape})")
 

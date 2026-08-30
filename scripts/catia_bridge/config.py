@@ -26,10 +26,24 @@ import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 BRIDGE_VERSION = "1.0.0"
 
 DEFAULT_SERVER = "http://localhost:8000"
+
+#: Credentials handed straight to the daemon by whatever started it, instead
+#: of being read from `bridge.json`. This is the single-machine install: the
+#: Kryova server is on the same box, under the same user, and it minted the
+#: token itself, so the pairing round trip would be the server authenticating
+#: to itself and the file would be a copy of a secret nobody else needs.
+#: An environment variable is at least as private as the file (a 0600 file in
+#: the profile, versus a value only this user's processes can read) and it
+#: dies with the process, so a supervised daemon leaves no credential behind.
+ENV_SERVER = "KRYOVA_BRIDGE_SERVER"
+ENV_TOKEN = "KRYOVA_BRIDGE_TOKEN"
+ENV_DEVICE_ID = "KRYOVA_BRIDGE_DEVICE_ID"
+ENV_DEVICE_NAME = "KRYOVA_BRIDGE_DEVICE_NAME"
 
 
 def config_dir() -> Path:
@@ -52,6 +66,54 @@ def work_dir() -> Path:
         return Path(base) / "Kryova" / "catia"
     base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
     return Path(base) / "kryova" / "catia"
+
+
+def lock_path() -> Path:
+    """The file whose exclusive lock means "a bridge is already running here"."""
+    return work_dir() / "bridge.lock"
+
+
+class AlreadyRunning(RuntimeError):
+    """Another bridge daemon holds the single-instance lock."""
+
+
+def acquire_single_instance_lock() -> Any:
+    """Take the machine-wide bridge lock, or raise `AlreadyRunning`.
+
+    Two daemons for one device do not coexist quietly: the server's registry
+    keeps the newest socket and closes the older one, whose owner reconnects
+    and displaces it right back. The pair flap forever and every call lands on
+    whichever happens to hold the slot.
+
+    A duplicate is easy to end up with -- the backend supervises one, the
+    desktop app spawns another, and a second backend process supervises a third.
+    So the daemon refuses to be the second one rather than relying on whoever
+    starts it to check.
+
+    The lock is an open file handle held for the process's lifetime; Windows
+    releases it when the process dies, including on a kill, so a crashed daemon
+    leaves nothing to clean up. The handle is returned and must stay referenced.
+    """
+    path = lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+b")  # noqa: SIM115 - held for the process lifetime
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        raise AlreadyRunning(
+            f"Another Kryova CATIA bridge is already running on this machine "
+            f"({path} is locked). Only one may be connected at a time."
+        ) from exc
+    return handle
 
 
 def config_path() -> Path:
@@ -114,7 +176,29 @@ def save(config: BridgeConfig) -> Path:
     return path
 
 
+def load_env() -> BridgeConfig | None:
+    """Credentials from the environment, or None if none were handed over.
+
+    Checked before the file so a supervisor can override a stale pairing --
+    a `bridge.json` left over from a different server is otherwise a config the
+    daemon will keep failing to use, and the user never asked for either.
+    """
+    token = os.environ.get(ENV_TOKEN)
+    if not token:
+        return None
+    return BridgeConfig(
+        server=os.environ.get(ENV_SERVER) or DEFAULT_SERVER,
+        device_token=token,
+        device_id=os.environ.get(ENV_DEVICE_ID) or "",
+        device_name=os.environ.get(ENV_DEVICE_NAME) or "",
+    )
+
+
 def load() -> BridgeConfig:
+    from_env = load_env()
+    if from_env is not None:
+        return from_env
+
     path = config_path()
     if not path.is_file():
         raise ConfigError(

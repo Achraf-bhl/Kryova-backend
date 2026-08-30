@@ -34,8 +34,10 @@ from .bridge import run as run_bridge
 from .config import (
     BRIDGE_VERSION,
     DEFAULT_SERVER,
+    AlreadyRunning,
     BridgeConfig,
     ConfigError,
+    acquire_single_instance_lock,
     config_path,
     load,
     save,
@@ -65,9 +67,7 @@ def _open_backend(mock: bool, workdir: Path) -> CatiaBackend:
     from .mock_catia import MockCatia
 
     if mock:
-        logger.warning(
-            "Running in MOCK mode: no CATIA is involved and every result is simulated."
-        )
+        logger.warning("Running in MOCK mode: no CATIA is involved and every result is simulated.")
         return MockCatia(workdir)
 
     from .catia_com import CatiaCom
@@ -178,6 +178,19 @@ def command_run(args: argparse.Namespace) -> int:
 
     workdir = work_dir()
     workdir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Held for this process's lifetime. Refusing to be the second daemon is
+        # cheaper than reconciling two: the server keeps the newest socket and
+        # closes the older, whose owner reconnects and displaces it right back,
+        # and the pair flap for as long as both are up.
+        lock = acquire_single_instance_lock()
+    except AlreadyRunning as exc:
+        print(str(exc), file=sys.stderr)
+        # Not a failure. The machine has the bridge it needs; this process is
+        # simply surplus, and a supervisor must not read that as "start again".
+        return 0
+
     try:
         backend = _wait_for_backend(args.mock, workdir, args.wait_for_catia)
     except CatiaOperationError as exc:
@@ -191,7 +204,12 @@ def command_run(args: argparse.Namespace) -> int:
     print(f"  CATIA     {backend.catia_version}{' [MOCK]' if backend.is_mock else ''}")
     print(f"  workdir   {workdir}")
     print("Connecting (outbound only; no port is opened on this machine)...")
-    run_bridge(config, backend)
+    try:
+        run_bridge(config, backend)
+    finally:
+        # Explicit, so the lock is not held by a name the reader has to trust
+        # the garbage collector to keep alive.
+        lock.close()
     return 0
 
 

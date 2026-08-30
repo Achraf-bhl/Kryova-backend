@@ -29,6 +29,7 @@ import hashlib
 import logging
 import math
 import shutil
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -73,6 +74,62 @@ _CAPTURE_FORMAT_JPEG = 5
 
 _MM_PER_UNIT = 1.0  # CATIA's automation API reports lengths in millimetres.
 
+#: The density CATIA assumes for a part with no material applied, in kg/m3.
+#: Confirmed on a live V5-R33: a part with nothing applied reports
+#: `Part.Density == 1000.0`, and `Analyze.Mass / Analyze.Volume` agrees exactly.
+#: Nothing in this bridge applies a material, so this is what every part it
+#: builds is weighed with until someone does.
+CATIA_DEFAULT_DENSITY_KG_M3 = 1000.0
+
+#: Where CATIA keeps its shipped material catalogues, relative to the install
+#: root. Searched in order; the first that opens wins.
+_CATALOGUE_NAMES = ("Catalog.CATMaterial", "Advanced_Materials.CATMaterial")
+
+#: Kryova's material keys mapped onto candidate names in CATIA's shipped
+#: catalogue, most specific first.
+#:
+#: Names, not families, and several per key. The catalogue is installed in the
+#: interface language: a French V5 ships `materials/French/Catalog.CATMaterial`
+#: whose families are `Metaux`, `Divers`, `Textiles` and whose steel is called
+#: `Acier`. Matching on an English family and an English name found nothing
+#: there, which is most of why applying a material had never once worked on the
+#: workstation this was written for. So every family is searched and only the
+#: material name has to match one of these.
+#:
+#: A miss costs the catalogue application and nothing else: the density that
+#: decides the reported mass comes from Kryova's own library and is passed in.
+_CATIA_MATERIAL: dict[str, tuple[str, ...]] = {
+    "aluminium-6061-t6": ("Aluminium", "Aluminum"),
+    "aluminium-7075-t6": ("Aluminium", "Aluminum"),
+    # The default catalogue ships no stainless grade, so plain steel is the
+    # closest honest attachment. The reported mass still follows Kryova's own
+    # density for the grade the user actually chose.
+    "steel-1018": ("Acier", "Steel"),
+    "stainless-304": ("Acier", "Steel"),
+    "titanium-ti6al4v": ("Titane", "Titanium"),
+    "abs": ("Plastique", "Plastic"),
+    "pla": ("Plastique", "Plastic"),
+    "nylon-pa12": ("Nylon",),
+}
+
+
+def _find_catalogue_material(catalogue: Any, names: tuple[str, ...]) -> Any:
+    """The first material in any family whose name is one of `names`.
+
+    Every family is searched rather than one named family, because the family
+    names are localised too (`Metaux`, `Divers`) and a material is unique
+    enough by name within the shipped catalogue.
+    """
+    for wanted in names:
+        families = catalogue.Families
+        for index in range(1, int(families.Count) + 1):
+            materials = families.Item(index).Materials
+            for position in range(1, int(materials.Count) + 1):
+                candidate = materials.Item(position)
+                if str(candidate.Name) == wanted:
+                    return candidate
+    return None
+
 
 class CatiaCom(CatiaBackend):
     is_mock = False
@@ -85,11 +142,45 @@ class CatiaCom(CatiaBackend):
         for directory in (self.documents, self.snapshots):
             directory.mkdir(parents=True, exist_ok=True)
 
-        self._app: Any = None
+        # Per-thread, not per-object -- see `_app`.
+        self._local = threading.local()
         self._connect()
         self.catia_version = self._read_version()
 
     # -- connection ----------------------------------------------------------
+
+    @property
+    def _app(self) -> Any:
+        """The CATIA handle belonging to *this* thread.
+
+        A COM interface pointer is marshalled for the apartment of the thread
+        that acquired it. Use it from any other thread and COM refuses with
+        RPC_E_WRONG_THREAD -- "the application called an interface that was
+        marshalled for a different thread" -- which the daemon reported as
+        "CATIA stopped responding to automation", pointing every diagnosis at
+        CATIA instead of at the threading.
+
+        That mattered because nothing here shares a thread. `__init__` runs on
+        the main thread, operations arrive on `asyncio.to_thread` workers, and
+        the liveness probe gets a fresh watchdog thread every single call. One
+        handle on the object could serve at most one of the three.
+
+        Handing each thread its own is legitimate and cheap: every thread joins
+        its own apartment and gets its own proxy to the same out-of-process
+        CATIA, verified live across three worker threads and a watchdog thread
+        all reading `Documents.Count = 19` at once. Serialisation is already
+        handled a level up by `session.py`'s lock.
+        """
+        local = self.__dict__.setdefault("_local", threading.local())
+        app = getattr(local, "app", None)
+        if app is None:
+            self._connect()
+            app = local.app
+        return app
+
+    @_app.setter
+    def _app(self, value: Any) -> None:
+        self.__dict__.setdefault("_local", threading.local()).app = value
 
     def _connect(self) -> None:
         try:
@@ -149,17 +240,51 @@ class CatiaCom(CatiaBackend):
         """A trivial property read, which a modal dialog will block.
 
         `session.py` runs this on a watchdog thread precisely because it can
-        block: the blocking *is* the signal.
+        block: the blocking *is* the signal. That thread is a different one
+        every call, and `_app` hands it a handle for its own apartment, so the
+        probe measures CATIA rather than measuring the threading.
+
+        It stays free of side effects beyond that first attach: repairing a
+        handle here would repair the watchdog's, which dies with the thread
+        moments later. `ensure_connected` repairs the one that matters.
         """
-        if self._app is None:  # pragma: no cover - Windows only
-            raise CatiaOperationError("The bridge is not attached to CATIA.")
         try:  # pragma: no cover - Windows only
             _ = self._app.Documents.Count
+        except CatiaOperationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise CatiaOperationError(
                 f"CATIA stopped responding to automation ({exc}). It may have been "
                 "closed, or it may be showing a dialog."
             ) from exc
+
+    def ensure_connected(self) -> None:
+        """Validate *this* thread's handle, reconnecting if it has gone stale.
+
+        Called on the operation thread, immediately before the operation runs,
+        and that is the only place it can usefully happen. The watchdog probe in
+        `health` cannot stand in for it: the watchdog is a fresh thread holding
+        a fresh handle, so it reports a healthy CATIA while the worker thread
+        that is about to do the work still holds a pointer into a CATIA process
+        that no longer exists.
+
+        Which is the failure this fixes. `_connect` used to run exactly once, so
+        closing CATIA and reopening it -- several times in any working day --
+        left every later call failing with "CATIA stopped responding to
+        automation", curable only by restarting a daemon nobody is watching.
+
+        One reconnection heals everything: documents, parts and bodies are all
+        derived from `_app` per call and never cached.
+        """
+        try:  # pragma: no cover - Windows only
+            _ = self._app.Documents.Count
+            return
+        except CatiaOperationError:
+            raise
+        except Exception:  # noqa: BLE001
+            self._app = None
+        self._connect()  # pragma: no cover - Windows only
+        logger.info("Re-attached to CATIA after this thread's handle went stale")
 
     # -- document handles ----------------------------------------------------
 
@@ -168,8 +293,7 @@ class CatiaCom(CatiaBackend):
             document = self._app.ActiveDocument
         except Exception as exc:  # noqa: BLE001
             raise CatiaOperationError(
-                "No document is open in CATIA. Call catia_new_part, or open the part "
-                "in CATIA."
+                "No document is open in CATIA. Call catia_new_part, or open the part in CATIA."
             ) from exc
         if document is None:
             raise CatiaOperationError("No document is open in CATIA.")
@@ -268,6 +392,144 @@ class CatiaCom(CatiaBackend):
             "features": self._feature_list(),
             **self._measure_solid(),
         }
+
+    # -- material ------------------------------------------------------------
+
+    def set_material(  # pragma: no cover - Windows only
+        self, *, material: str, density_kg_m3: float
+    ) -> dict[str, Any]:
+        """Record the part's material, and apply it in CATIA where possible.
+
+        Two things happen, and only one of them can fail.
+
+        **The density is recorded here, always.** It is what every mass this
+        bridge reports is computed from, and it arrives from Kryova's own
+        material library rather than being read out of CATIA -- so the mass is
+        right whether or not the catalogue below is available. That matters
+        because nothing applied a material before this existed, and CATIA
+        weighed every part at its default 1000 kg/m3: a 120x80x10 steel bracket
+        was reported as 0.095 kg against a real 0.755 kg.
+
+        **The catalogue application is best effort, and now usually succeeds.**
+        It was believed for a while that `Documents.Open` on a `.CATMaterial`
+        fails without the Material Library product. It does not: the failures
+        measured here were this bridge's own bugs, listed in
+        `_apply_catalogue_material`. A live V5-R33 applies Acier and reports
+        7860 kg/m3. Where it genuinely cannot -- an install with no catalogue --
+        it is reported rather than raised, and the mass is still right.
+
+        Note that a part CATIA has taken a material for reports CATIA's density
+        for it, which is close to but not identical with Kryova's (7860 against
+        7870 for steel). `_measure_solid` prefers what CATIA says once a
+        material is attached, so the mass Kryova quotes and the mass the CATPart
+        itself reports are the same number.
+        """
+        self._density_kg_m3 = float(density_kg_m3)
+        applied, detail = self._apply_catalogue_material(material)
+        try:
+            self._part().Update()
+        except Exception:  # noqa: BLE001 - an update failure must not lose the density
+            logger.warning("Could not update the part after setting the material")
+
+        return {
+            "material": material,
+            "density_kg_m3": round(float(density_kg_m3), 1),
+            "applied_in_catia": applied,
+            "detail": detail,
+            **self._measure_solid(),
+        }
+
+    def _apply_catalogue_material(self, material: str) -> tuple[bool, str]:
+        """Attach a real CATIA material to the part. Never raises.
+
+        Three things had to be right and none of them were, which is why this
+        reported "your CATIA cannot do materials" on a workstation whose
+        material browser opens perfectly well from the toolbar.
+
+        **The manager hangs off the Part, not the Document.** The V5 reference
+        spells it `partDocument.GetItem("CATMatManagerVBExt")`, and on a live
+        V5-R33 that call succeeds and hands back a *Product* -- an object with
+        no `ApplyMaterialOnPart` on it, so the only symptom is an attribute
+        error naming a method the documentation says exists. `part.GetItem(...)`
+        returns the real `MaterialManager`. Asked to name the type, CATIA's own
+        script engine says `Product` for the first and `MaterialManager` for the
+        second.
+
+        **Opening the catalogue changes the active document.** Everything here
+        reaches the part through `ActiveDocument`, so a part looked up after the
+        catalogue was opened *is* the catalogue -- and the failure surfaced as
+        "the active CATIA document is not a part", which reads like the engineer
+        clicked the wrong window. The part is captured first, and held.
+
+        **The catalogue is installed in the interface language.** See
+        `_CATIA_MATERIAL`.
+
+        Success is confirmed by reading `Part.Density` back, not by the call
+        failing to raise: applying a material CATIA does not take leaves the
+        default 1000 kg/m3 in place without complaining.
+        """
+        names = _CATIA_MATERIAL.get(material, ("Acier", "Steel"))
+        # Captured before the catalogue is opened, because opening it makes the
+        # catalogue the active document.
+        part = self._part()
+        catalogue = None
+        try:  # pragma: no cover - Windows only
+            catalogue = self._open_material_catalogue()
+            if catalogue is None:
+                return False, (
+                    "CATIA has no material catalogue this bridge could open, so no "
+                    "material was attached in CATIA. Mass is still correct: Kryova "
+                    "computes it from the material you chose."
+                )
+
+            chosen = _find_catalogue_material(catalogue, names)
+            if chosen is None:
+                return False, (
+                    f"CATIA's catalogue has no material named any of {list(names)}. "
+                    "Mass is still correct: Kryova computes it from the material "
+                    "you chose."
+                )
+
+            manager = part.GetItem("CATMatManagerVBExt")
+            # Mode 1 links the material to the part, which is what the Apply
+            # Material dialog does and what makes it survive a save.
+            manager.ApplyMaterialOnPart(part, chosen, 1)
+            part.Update()
+
+            density = float(part.Density)
+            if density == CATIA_DEFAULT_DENSITY_KG_M3:
+                return False, (
+                    f"CATIA accepted {str(chosen.Name)!r} but still reports its "
+                    "default density, so nothing was really attached."
+                )
+            return True, (
+                f"Applied CATIA material {str(chosen.Name)!r}; CATIA now reports {density:g} kg/m3."
+            )
+        except Exception as exc:  # noqa: BLE001 - best effort by design
+            logger.info("Could not apply a CATIA material: %s", exc)
+            return False, (
+                f"CATIA would not attach the material ({exc}). Mass is still correct: "
+                "Kryova computes it from the material you chose."
+            )
+        finally:
+            if catalogue is not None:
+                try:
+                    catalogue.Close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _open_material_catalogue(self) -> Any:
+        """The first shipped catalogue that opens, or None if none will."""
+        for directory in _material_catalogue_dirs():
+            for name in _CATALOGUE_NAMES:
+                path = directory / name
+                if not path.is_file():
+                    continue
+                try:  # pragma: no cover - Windows only
+                    return self._app.Documents.Open(str(path))
+                except Exception as exc:  # noqa: BLE001
+                    logger.info("Material catalogue %s would not open: %s", path, exc)
+        return None
 
     # -- parameters ----------------------------------------------------------
 
@@ -433,6 +695,7 @@ class CatiaCom(CatiaBackend):
         diameter_mm: float,
         depth_mm: float | None = None,
         through_all: bool = True,
+        inset_mm: float | None = None,
     ) -> dict[str, Any]:
         """Drill a named hole, as a sketched circle pocketed through the solid.
 
@@ -457,7 +720,7 @@ class CatiaCom(CatiaBackend):
                 "Placing a hole by face and position needs the part's bounding box, "
                 "and it could not be measured. Check that the part has a solid body."
             )
-        point = _face_point(box, face, position, diameter_mm)
+        point = _face_point(box, face, position, diameter_mm, inset_mm)
         plane, first, second = _SKETCH_FRAME[face]
         part = self._part()
 
@@ -545,9 +808,7 @@ class CatiaCom(CatiaBackend):
                 target, 1, 0, 1, float(length_mm), float(angle_deg)
             )
         except Exception as exc:  # noqa: BLE001
-            raise CatiaOperationError(
-                f"CATIA refused a {length_mm:g} mm chamfer ({exc})."
-            ) from exc
+            raise CatiaOperationError(f"CATIA refused a {length_mm:g} mm chamfer ({exc}).") from exc
         part.Update()
         return self._feature_result(str(chamfer.Name))
 
@@ -630,9 +891,7 @@ class CatiaCom(CatiaBackend):
             factory = part.HybridShapeFactory
             origin = part.OriginElements
             workbench = part.Parent.GetWorkbench("SPAWorkbench")
-            solid = workbench.GetMeasurable(
-                part.CreateReferenceFromObject(self._body())
-            )
+            solid = workbench.GetMeasurable(part.CreateReferenceFromObject(self._body()))
             temporary = part.HybridBodies.Add()
 
             extents: dict[tuple[str, int], float] = {}
@@ -645,9 +904,7 @@ class CatiaCom(CatiaBackend):
                     offset = factory.AddNewPlaneOffset(plane, sign * _BBOX_REACH, False)
                     temporary.AppendHybridShape(offset)
                     part.Update()
-                    gap = float(
-                        solid.GetMinimumDistance(part.CreateReferenceFromObject(offset))
-                    )
+                    gap = float(solid.GetMinimumDistance(part.CreateReferenceFromObject(offset)))
                     # The plane sits `_BBOX_REACH` out; whatever is left of that
                     # after the gap is how far the solid reaches on that side.
                     extents[(axis, sign)] = sign * (_BBOX_REACH - gap)
@@ -729,15 +986,31 @@ class CatiaCom(CatiaBackend):
             logger.warning("Could not read the centre of gravity", exc_info=True)
             centre = None
 
-        return {
+        # Density implied by what CATIA just reported, rather than a second COM
+        # call that could disagree with it. `Part.Density` returns the same
+        # number on a live V5-R33 (both 1000.0 on a part with no material), and
+        # this cannot raise or drift out of step with the mass above it.
+        density_kg_m3 = mass_kg / (volume_mm3 * 1e-9)
+
+        # A material chosen through `catia_set_material` overrides CATIA, and has
+        # to: on an install without the Material Library nothing can be attached
+        # to the part, so CATIA goes on weighing it at 1000 kg/m3 however clearly
+        # the user said "steel". The density here came from Kryova's own library,
+        # so the mass is right on every workstation rather than only the licensed
+        # ones. CATIA wins only when it has a real material of its own.
+        chosen = getattr(self, "_density_kg_m3", None)
+        if chosen and abs(density_kg_m3 - CATIA_DEFAULT_DENSITY_KG_M3) <= 5.0:
+            density_kg_m3 = float(chosen)
+            mass_kg = volume_mm3 * 1e-9 * density_kg_m3
+
+        measurement: dict[str, Any] = {
             "has_solid": True,
             # Kilograms already. Nothing above this converts, by design.
             "mass_kg": round(mass_kg, 6),
+            "density_kg_m3": round(density_kg_m3, 1),
             "volume_mm3": round(volume_mm3, 4),
             "surface_area_mm2": round(area_mm2, 4),
-            "center_of_gravity_mm": (
-                [round(v, 4) for v in centre] if centre is not None else None
-            ),
+            "center_of_gravity_mm": ([round(v, 4) for v in centre] if centre is not None else None),
             # Constructed from six extremum points rather than queried -- see
             # `_bounding_box`. None if that construction failed, because a
             # measurement must never turn a successful mutation into a failure.
@@ -752,12 +1025,36 @@ class CatiaCom(CatiaBackend):
             ),
         }
 
+        if abs(density_kg_m3 - CATIA_DEFAULT_DENSITY_KG_M3) <= 5.0:
+            # Nothing in this bridge applies a material, so this is the normal
+            # case, and it makes `mass_kg` wrong by the density ratio of
+            # whatever the engineer actually asked for -- 7.9x for steel, 2.7x
+            # for aluminium. Observed live: the agent answered "how heavy is
+            # it?" for a 120x80x10 steel bracket with "0.095 kg". The real
+            # answer is 0.755 kg.
+            #
+            # The number is not hidden, because it is what CATIA reports and a
+            # tool must not invent a different one. It is labelled instead, in
+            # terms the model cannot restate as a plain mass.
+            measurement["material_applied"] = False
+            measurement["mass_is_provisional"] = True
+            measurement["mass_warning"] = (
+                f"No material is applied to this part in CATIA, so mass_kg was computed "
+                f"with CATIA's default density of {CATIA_DEFAULT_DENSITY_KG_M3:g} kg/m3 and is "
+                "NOT the real mass. Do not quote it as the part's weight. Quote "
+                "volume_mm3 instead, or multiply it by the density of the material the "
+                "user asked for and say which material you used."
+            )
+        else:
+            measurement["material_applied"] = True
+            measurement["mass_is_provisional"] = False
+        return measurement
+
     def measure(self) -> dict[str, Any]:  # pragma: no cover - Windows only
         summary = self._measure_solid()
         if not summary.get("has_solid"):
             raise CatiaOperationError(
-                "The part has no solid geometry to measure yet. Sketch a profile and "
-                "pad it first."
+                "The part has no solid geometry to measure yet. Sketch a profile and pad it first."
             )
         return {**summary, "features": self._feature_list(), "approximate": False}
 
@@ -832,9 +1129,7 @@ class CatiaCom(CatiaBackend):
             ) from exc
 
         if not path.is_file():
-            raise CatiaOperationError(
-                "CATIA reported a successful STEP export but wrote no file."
-            )
+            raise CatiaOperationError("CATIA reported a successful STEP export but wrote no file.")
         try:
             data = path.read_bytes()
         finally:
@@ -931,20 +1226,56 @@ def _unit_of(parameter: Any) -> str:  # pragma: no cover - Windows only
     return ""
 
 
+def _material_catalogue_dirs() -> list[Path]:
+    """Every `startup/materials` directory a CATIA install might have.
+
+    Discovered by walking the install roots rather than configured, because the
+    version folder changes between releases (`B33` here) and an engineer should
+    not have to put a path in a config file to get a material applied. Localised
+    catalogues sit in subdirectories of the same folder and are searched too --
+    a French install ships `materials/French/Catalog.CATMaterial`.
+    """
+    roots = [
+        Path(r"C:\Program Files\Dassault Systemes"),
+        Path(r"C:\Program Files (x86)\Dassault Systemes"),
+    ]
+    found: list[Path] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        try:
+            for version in sorted(root.iterdir(), reverse=True):
+                materials = version / "win_b64" / "startup" / "materials"
+                if materials.is_dir():
+                    found.append(materials)
+                    found.extend(sorted(d for d in materials.iterdir() if d.is_dir()))
+        except OSError:  # pragma: no cover - unreadable install directory
+            continue
+    return found
+
+
 def _face_point(
     box: tuple[float, float, float, float, float, float],
     face: str,
     position: str,
     diameter_mm: float,
+    inset_mm: float | None = None,
 ) -> tuple[float, float, float]:
     """Turn a named face and position into a point, in millimetres.
 
     This is the coordinate maths the model is deliberately never asked to do.
-    Corner positions are inset by the hole radius plus half again, so a hole
-    named "back_left" lands inside the material rather than breaking the edge.
+    Corner positions are inset from the edge; without `inset_mm` that inset is
+    the hole radius plus half again, which keeps the hole inside the material.
+
+    `inset_mm` exists because "15 mm in from each corner" is how bolt patterns
+    are actually specified, and the tool had no way to say it. Observed live:
+    asked for "four M8 bolt holes, 15 mm in from each corner", the model had
+    nowhere to put the 15 and spent the turn guessing invalid `face` and
+    `position` values until it ran out of steps and answered nothing at all.
+    Three of the four blank answers in a 66-turn run began this way.
     """
     xmin, ymin, zmin, xmax, ymax, zmax = box
-    inset = diameter_mm * 0.75
+    inset = diameter_mm * 0.75 if inset_mm is None else float(inset_mm)
     centre = ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
 
     x_lo, x_hi = xmin + inset, xmax - inset

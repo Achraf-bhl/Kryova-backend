@@ -82,6 +82,10 @@ class MockCatia(CatiaBackend):
         #: Bounding-box extents in mm. None until something is padded.
         self.size: tuple[float, float, float] | None = None
         self.removed_volume_mm3 = 0.0
+        #: None until catia_set_material; the mock then weighs the part with it,
+        #: exactly as the real backend does.
+        self.material: str | None = None
+        self.density_kg_m3 = _DENSITY_KG_PER_MM3 * 1e9
         self.up_to_date = True
         self._counters: dict[str, int] = {}
 
@@ -212,19 +216,33 @@ class MockCatia(CatiaBackend):
         extents[axis] = max(value, 1e-3)
         self.size = (extents[0], extents[1], extents[2])
 
+    # -- material ------------------------------------------------------------
+
+    def set_material(self, *, material: str, density_kg_m3: float) -> dict[str, Any]:
+        self._require_document()
+        self.material = material
+        self.density_kg_m3 = float(density_kg_m3)
+        self._write_document()
+        return {
+            "material": material,
+            "density_kg_m3": round(float(density_kg_m3), 1),
+            # No catalogue here, and saying so beats claiming a CATIA-side
+            # application that never happened -- the mock's whole value is that
+            # it does not lie about what it did.
+            "applied_in_catia": False,
+            "detail": "Mock CATIA: the material is recorded but nothing is attached.",
+            **self._solid_summary(),
+        }
+
     # -- sketches ------------------------------------------------------------
 
-    def sketch_rectangle(
-        self, *, plane: str, width_mm: float, height_mm: float
-    ) -> dict[str, Any]:
+    def sketch_rectangle(self, *, plane: str, width_mm: float, height_mm: float) -> dict[str, Any]:
         return self._add_sketch(plane, "rectangle", (width_mm, height_mm))
 
     def sketch_circle(self, *, plane: str, diameter_mm: float) -> dict[str, Any]:
         return self._add_sketch(plane, "circle", (diameter_mm, diameter_mm))
 
-    def _add_sketch(
-        self, plane: str, shape: str, size: tuple[float, float]
-    ) -> dict[str, Any]:
+    def _add_sketch(self, plane: str, shape: str, size: tuple[float, float]) -> dict[str, Any]:
         self._require_document()
         if plane not in _PLANE_AXES:
             raise CatiaOperationError(f"{plane!r} is not one of the XY, YZ, ZX planes.")
@@ -245,9 +263,7 @@ class MockCatia(CatiaBackend):
         sketch = self.sketches.get(name)
         if sketch is None:
             known = ", ".join(sorted(self.sketches)) or "(none)"
-            raise CatiaOperationError(
-                f"No sketch named {name!r}. Sketches in this part: {known}."
-            )
+            raise CatiaOperationError(f"No sketch named {name!r}. Sketches in this part: {known}.")
         return sketch
 
     # -- features ------------------------------------------------------------
@@ -337,6 +353,7 @@ class MockCatia(CatiaBackend):
         diameter_mm: float,
         depth_mm: float | None = None,
         through_all: bool = True,
+        inset_mm: float | None = None,
     ) -> dict[str, Any]:
         self._require_solid()
         assert self.size is not None  # noqa: S101
@@ -346,7 +363,7 @@ class MockCatia(CatiaBackend):
             raise CatiaOperationError(
                 "catia_hole needs either depth_mm or through_all; neither was given."
             )
-        if diameter_mm >= min(self.size) :
+        if diameter_mm >= min(self.size):
             raise CatiaOperationError(
                 f"A {diameter_mm:g} mm hole does not fit in a part whose smallest "
                 f"dimension is {min(self.size):g} mm."
@@ -469,7 +486,13 @@ class MockCatia(CatiaBackend):
             "has_solid": True,
             # Kilograms, as the rest of the system expects. Nothing converts on
             # the way up; this is already the number the UI shows.
-            "mass_kg": round(volume * _DENSITY_KG_PER_MM3, 6),
+            "mass_kg": round(volume * self.density_kg_m3 * 1e-9, 6),
+            # Reported alongside the mass because the real backend reports it,
+            # and because the mass means nothing without it.
+            "density_kg_m3": round(self.density_kg_m3, 1),
+            "material": self.material,
+            "material_applied": True,
+            "mass_is_provisional": False,
             "volume_mm3": round(volume, 4),
             "bounding_box_mm": {
                 "min": [0.0, 0.0, 0.0],
@@ -485,9 +508,7 @@ class MockCatia(CatiaBackend):
         width, depth, height = self.size
         return {
             **summary,
-            "surface_area_mm2": round(
-                2 * (width * depth + depth * height + width * height), 4
-            ),
+            "surface_area_mm2": round(2 * (width * depth + depth * height + width * height), 4),
             "center_of_gravity_mm": [round(v / 2, 4) for v in self.size],
             "features": self._feature_names(),
             "material": "Steel (mock default)",
@@ -540,9 +561,7 @@ class MockCatia(CatiaBackend):
             "note": note,
         }
 
-    def checkpoint(
-        self, *, label: str, max_inline_bytes: int | None = None
-    ) -> dict[str, Any]:
+    def checkpoint(self, *, label: str, max_inline_bytes: int | None = None) -> dict[str, Any]:
         self._require_document()
         self._write_document()
         assert self.doc_path is not None  # noqa: S101
@@ -675,9 +694,7 @@ _EDGE = (32, 42, 58)
 _AXIS = (196, 202, 212)
 
 
-def _render_box_png(
-    size: tuple[float, float, float], *, view: str, caption: str
-) -> bytes:
+def _render_box_png(size: tuple[float, float, float], *, view: str, caption: str) -> bytes:
     """Draw the part's bounding solid from a standard viewpoint.
 
     A wireframe box with shaded faces, which is genuinely what the part *is* in
@@ -686,12 +703,7 @@ def _render_box_png(
     """
     canvas = Canvas(_VIEW_WIDTH, _VIEW_HEIGHT, _BACKGROUND)
     width, depth, height = size
-    corners = [
-        (x * width, y * depth, z * height)
-        for x in (0, 1)
-        for y in (0, 1)
-        for z in (0, 1)
-    ]
+    corners = [(x * width, y * depth, z * height) for x in (0, 1) for y in (0, 1) for z in (0, 1)]
     projected = [_project(c, view) for c in corners]
 
     span = max(
@@ -728,9 +740,18 @@ def _render_box_png(
 
 
 _BOX_EDGES = [
-    (0, 1), (2, 3), (4, 5), (6, 7),
-    (0, 2), (1, 3), (4, 6), (5, 7),
-    (0, 4), (1, 5), (2, 6), (3, 7),
+    (0, 1),
+    (2, 3),
+    (4, 5),
+    (6, 7),
+    (0, 2),
+    (1, 3),
+    (4, 6),
+    (5, 7),
+    (0, 4),
+    (1, 5),
+    (2, 6),
+    (3, 7),
 ]
 
 #: Orthographic basis per viewpoint: (right vector, up vector) in model space.

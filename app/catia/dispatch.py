@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.rate_limit import RateLimiter
+from app.catia import local_bridge
 from app.catia.approval import ApprovalError, verify_approval
 from app.catia.connection import (
     BridgeBusy,
@@ -69,6 +70,7 @@ from app.models.catia import (
     CatiaDocument,
     CatiaOperation,
 )
+from app.solve.materials import MATERIALS
 
 logger = logging.getLogger(__name__)
 
@@ -135,17 +137,45 @@ def _owned_devices(db: Session, user_id: str) -> list[CatiaDevice]:
     )
 
 
+def _online(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceConnection] | None:
+    for device in _owned_devices(db, user_id):
+        connection = registry.get(device.id)
+        if connection is not None and connection.user_id == user_id:
+            return device, connection
+    return None
+
+
 def _resolve_connection(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceConnection]:
     """The user's online device, or an explanation of why there isn't one.
 
     The database row is re-checked even though the socket is open: revoking a
     device has to take effect on the next call, not whenever the socket happens
     to drop.
+
+    On a single-machine install the daemon is started here, on demand, and this
+    call waits for it. That wait is the whole point: without it the first
+    `catia_*` call of a session fails, the model is told CATIA is unavailable,
+    and it goes back to asking the user to upload a STEP file -- while the
+    daemon it needed finishes connecting a second later.
     """
-    for device in _owned_devices(db, user_id):
-        connection = registry.get(device.id)
-        if connection is not None and connection.user_id == user_id:
-            return device, connection
+    found = _online(db, user_id)
+    if found is not None:
+        return found
+
+    if local_bridge.ensure_started(db, user_id, wait_s=local_bridge.CONNECT_TIMEOUT_S):
+        found = _online(db, user_id)
+        if found is not None:
+            return found
+
+    if local_bridge.is_supported():
+        detail = local_bridge.last_error()
+        raise CatiaUnavailable(
+            "The CATIA bridge on this machine is not connected yet"
+            + (f": {detail}" if detail else ", because CATIA itself is not running")
+            + ". Call open_in_catia to start CATIA -- the bridge attaches to it by "
+            "itself within a few seconds -- then run this tool again. Do not ask "
+            "the user to pair a workstation or to upload a CAD file."
+        )
 
     raise CatiaUnavailable(
         "No CATIA workstation is connected to this account. Ask the user to start "
@@ -156,14 +186,53 @@ def _resolve_connection(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceC
 
 
 def catia_available(db: Session, user_id: str) -> bool:
-    """True when a tool call could be routed right now."""
+    """True when a tool call could be routed right now.
+
+    Called once per agent turn to build the state block, so it also serves as
+    the trigger that gets a local daemon running: it kicks the supervisor
+    without waiting, and by the time the model has read the state block and
+    chosen a tool the socket is usually already up. `ensure_started` is cheap
+    once the daemon is alive and rate-limited when it is not.
+    """
     if not settings.catia_enabled:
         return False
-    return any(registry.get(device.id) is not None for device in _owned_devices(db, user_id))
+    if any(registry.get(device.id) is not None for device in _owned_devices(db, user_id)):
+        return True
+    return local_bridge.ensure_started(db, user_id)
+
+
+def _offline_detail(devices: list[CatiaDevice]) -> str:
+    """Why no device is connected, phrased as what to do about it.
+
+    On a single-machine install the honest answer is almost always "CATIA is not
+    open yet", not "you have not paired anything" -- the daemon is started here
+    and sits waiting for CATIA to appear. Saying the latter sent the assistant
+    off asking for a pairing code that nobody needs.
+    """
+    if local_bridge.is_supported():
+        error = local_bridge.last_error()
+        if error:
+            return error
+        return (
+            "The CATIA bridge on this machine is running but has nothing to attach "
+            "to yet. It connects by itself as soon as CATIA is open; open_in_catia "
+            "starts CATIA."
+        )
+    if devices:
+        return "No workstation is connected."
+    return "No workstation has been paired with this account yet."
 
 
 def status_payload(db: Session, user_id: str, conversation_id: str | None) -> dict[str, Any]:
     """What `catia_status` answers, for the agent and for `GET /catia/status`."""
+    # Asking whether the bridge is up is also the moment to bring it up. The
+    # panel polls this before any message is sent, and on a fresh account there
+    # is no device row until something provisions one -- so the badge read "not
+    # connected" until the user had already asked for something, which is the
+    # wrong way round for the thing they check *before* asking. Non-blocking:
+    # a status call must stay fast, and the supervisor is rate-limited.
+    local_bridge.ensure_started(db, user_id)
+
     devices = _owned_devices(db, user_id)
     online = [(d, c) for d in devices if (c := registry.get(d.id)) is not None]
 
@@ -185,11 +254,7 @@ def status_payload(db: Session, user_id: str, conversation_id: str | None) -> di
             "enabled": settings.catia_enabled,
             "paired_devices": len(devices),
             "document": document,
-            "detail": (
-                "No workstation is connected."
-                if devices
-                else "No workstation has been paired with this account yet."
-            ),
+            "detail": _offline_detail(devices),
         }
 
     device, connection = online[0]
@@ -243,10 +308,13 @@ def call_catia(
             known = ", ".join(sorted(s.name for s in CATIA_TOOL_SPECS))
             raise CatiaError(f"{tool!r} is not a CATIA tool. Available tools: {known}.")
 
+        arguments = _normalise(tool, arguments)
         try:
             validate(arguments, spec.parameters)
         except SchemaError as exc:
             raise CatiaError(f"{tool}: {exc}") from exc
+
+        arguments = _augment(tool, arguments)
 
         if tool in _SERVER_SIDE_TOOLS:
             data = status_payload(db, user_id, conversation_id)
@@ -313,6 +381,50 @@ def call_catia(
 
 
 # -- enforcement -------------------------------------------------------------
+
+
+def _normalise(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Drop a field the model was told to omit, rather than failing the call.
+
+    `depth_mm` is ignored for a through hole, and its schema refuses zero
+    because zero is not a depth. The tool description says to omit it; models
+    send `depth_mm: 0, through_all: true` anyway, and observed live that cost
+    two rejected calls and most of a turn before the model guessed its way to a
+    depth. A zero depth alongside `through_all` is not ambiguous -- the value is
+    unused either way -- so it is dropped here instead of being argued about.
+
+    This only ever removes a field. Anything that could weaken a check belongs
+    in the schema, not in a normaliser that runs before it.
+    """
+    if tool == "catia_hole" and arguments.get("through_all", True):
+        if arguments.get("depth_mm") == 0:
+            return {k: v for k, v in arguments.items() if k != "depth_mm"}
+    return arguments
+
+
+def _augment(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Add the fields the server supplies and the model may not.
+
+    After validation, and that ordering is the whole point. The model-facing
+    schema for `catia_set_material` lists only `material` and sets
+    `additionalProperties: false`, which is what makes "the model does not get
+    to choose the number every mass is computed from" enforceable. Adding the
+    density before that check meant the check rejected the server's own field:
+    every live call came back `unknown field(s): density_kg_m3` and the part
+    kept CATIA's default 1000 kg/m3, while the unit tests passed because they
+    drove the daemon's schema -- which requires the density -- and never this
+    path.
+    """
+    if tool != "catia_set_material":
+        return arguments
+
+    chosen = MATERIALS.get(str(arguments.get("material", "")))
+    if chosen is None:
+        raise CatiaError(
+            f"{arguments.get('material')!r} is not in the material library. "
+            f"Choose one of: {', '.join(sorted(MATERIALS))}."
+        )
+    return {**arguments, "density_kg_m3": chosen.density_kg_m3}
 
 
 def _enforce_rate_limit(device_id: str) -> None:

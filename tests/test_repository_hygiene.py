@@ -12,7 +12,7 @@ import pytest
 
 from app.core.config import BASE_DIR, Settings
 
-GITIGNORE = (BASE_DIR / ".gitignore").read_text()
+GITIGNORE = (BASE_DIR / ".gitignore").read_text(encoding="utf-8")
 ENV_EXAMPLE = BASE_DIR / ".env.example"
 
 
@@ -27,10 +27,10 @@ class TestSecretsHygiene:
     def test_the_real_env_file_is_not_the_example(self) -> None:
         real = BASE_DIR / ".env"
         if real.exists():
-            assert real.read_text() != ENV_EXAMPLE.read_text()
+            assert real.read_text(encoding="utf-8") != ENV_EXAMPLE.read_text(encoding="utf-8")
 
     def test_the_example_carries_no_real_credential(self) -> None:
-        text = ENV_EXAMPLE.read_text()
+        text = ENV_EXAMPLE.read_text(encoding="utf-8")
         assert "neon.tech/neondb" not in text
         assert not re.search(r"\bsk-[A-Za-z0-9_-]{16,}", text), "an API key is in .env.example"
         assert "SECRET_KEY=changeme" in text
@@ -45,7 +45,7 @@ class TestEnvExampleDocumentsEverySetting:
     EXTRA_DOCUMENTED = {"TEST_DATABASE_URL"}
 
     def test_every_settings_field_appears(self) -> None:
-        text = ENV_EXAMPLE.read_text()
+        text = ENV_EXAMPLE.read_text(encoding="utf-8")
         missing = [
             name
             for name in Settings.model_fields
@@ -56,7 +56,9 @@ class TestEnvExampleDocumentsEverySetting:
 
     def test_it_names_no_setting_that_no_longer_exists(self) -> None:
         known = {name.upper() for name in Settings.model_fields} | self.EXTRA_DOCUMENTED
-        declared = set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", ENV_EXAMPLE.read_text(), re.M))
+        declared = set(
+            re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), re.M)
+        )
         assert not declared - known, f"stale keys in .env.example: {sorted(declared - known)}"
 
 
@@ -65,7 +67,7 @@ class TestContinuousIntegration:
 
     @pytest.fixture
     def workflow(self) -> str:
-        return self.WORKFLOW.read_text()
+        return self.WORKFLOW.read_text(encoding="utf-8")
 
     def test_there_is_no_frontend_job(self, workflow: str) -> None:
         # There is no package.json in this repo; the job could only ever fail.
@@ -92,7 +94,7 @@ class TestMigrationChain:
     def _chain() -> dict[str, str | None]:
         chain: dict[str, str | None] = {}
         for path in TestMigrationChain.VERSIONS.glob("*.py"):
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
             revision = re.search(r"^revision: str = ['\"]([^'\"]+)", text, re.M)
             down = re.search(r"^down_revision[^=]*=(.+)$", text, re.M)
             assert revision and down, f"{path.name} is not a migration"
@@ -126,7 +128,9 @@ def test_no_source_file_imports_celery() -> None:
     offenders = [
         path
         for path in (BASE_DIR / "app").rglob("*.py")
-        if re.search(r"^\s*(import|from)\s+celery\b", path.read_text(), re.MULTILINE)
+        if re.search(
+            r"^\s*(import|from)\s+celery\b", path.read_text(encoding="utf-8"), re.MULTILINE
+        )
     ]
     assert offenders == []
 
@@ -134,6 +138,6 @@ def test_no_source_file_imports_celery() -> None:
 def test_there_is_no_async_engine() -> None:
     """`create_async_engine` needed asyncpg, which was never a dependency, so
     importing the app crashed outright. Nothing in this codebase is async-DB."""
-    source = Path(BASE_DIR / "app" / "core" / "database.py").read_text()
+    source = Path(BASE_DIR / "app" / "core" / "database.py").read_text(encoding="utf-8")
     assert "create_async_engine" not in source
     assert "asyncpg" not in source

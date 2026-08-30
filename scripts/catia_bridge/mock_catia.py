@@ -55,6 +55,10 @@ class _Sketch:
     def area_mm2(self) -> float:
         if self.shape == "circle":
             return math.pi * (self.size[0] / 2.0) ** 2
+        if self.shape.startswith("polygon-"):
+            sides = int(self.shape.split("-", 1)[1])
+            radius = self.size[0] / 2.0
+            return 0.5 * sides * radius**2 * math.sin(2 * math.pi / sides)
         return self.size[0] * self.size[1]
 
 
@@ -242,6 +246,12 @@ class MockCatia(CatiaBackend):
     def sketch_circle(self, *, plane: str, diameter_mm: float) -> dict[str, Any]:
         return self._add_sketch(plane, "circle", (diameter_mm, diameter_mm))
 
+    def sketch_polygon(self, *, plane: str, sides: int, diameter_mm: float) -> dict[str, Any]:
+        result = self._add_sketch(plane, f"polygon-{sides}", (diameter_mm, diameter_mm))
+        radius = diameter_mm / 2.0
+        result["area_mm2"] = round(0.5 * sides * radius**2 * math.sin(2 * math.pi / sides), 4)
+        return result
+
     def _add_sketch(self, plane: str, shape: str, size: tuple[float, float]) -> dict[str, Any]:
         self._require_document()
         if plane not in _PLANE_AXES:
@@ -331,7 +341,8 @@ class MockCatia(CatiaBackend):
             raise CatiaOperationError(
                 "catia_pocket needs either depth_mm or through_all; neither was given."
             )
-        self._remove_volume(profile.area_mm2() * depth, "pocket")
+        removed = profile.area_mm2() * depth
+        self._remove_volume(removed, "pocket")
 
         name = self._name("Pocket")
         self.features.append(
@@ -341,6 +352,7 @@ class MockCatia(CatiaBackend):
                 "sketch": sketch,
                 "depth_mm": depth,
                 "through_all": bool(through_all),
+                "removed_mm3": removed,
             }
         )
         return self._mutation_result(name)
@@ -368,7 +380,8 @@ class MockCatia(CatiaBackend):
                 f"A {diameter_mm:g} mm hole does not fit in a part whose smallest "
                 f"dimension is {min(self.size):g} mm."
             )
-        self._remove_volume(math.pi * (diameter_mm / 2) ** 2 * depth, "hole")
+        removed = math.pi * (diameter_mm / 2) ** 2 * depth
+        self._remove_volume(removed, "hole")
 
         name = self._name("Hole")
         self.parameters.setdefault(
@@ -384,6 +397,7 @@ class MockCatia(CatiaBackend):
                 "diameter_mm": diameter_mm,
                 "depth_mm": depth,
                 "through_all": bool(through_all),
+                "removed_mm3": removed,
             }
         )
         return self._mutation_result(name)
@@ -400,9 +414,8 @@ class MockCatia(CatiaBackend):
             )
         # (2 - pi/2) r^2 per unit length is the corner material a round removes.
         count = {"all": 12, "vertical": 4, "horizontal": 8, "top": 4, "bottom": 4}[edges]
-        self._remove_volume(
-            (2 - math.pi / 2) * radius_mm**2 * (sum(self.size) / 3) * count / 12, "fillet"
-        )
+        removed = (2 - math.pi / 2) * radius_mm**2 * (sum(self.size) / 3) * count / 12
+        self._remove_volume(removed, "fillet")
         name = self._name("EdgeFillet")
         self.features.append(
             {
@@ -411,6 +424,7 @@ class MockCatia(CatiaBackend):
                 "radius_mm": radius_mm,
                 "edges": edges,
                 "on_feature": feature,
+                "removed_mm3": removed,
             }
         )
         return self._mutation_result(name)
@@ -427,7 +441,8 @@ class MockCatia(CatiaBackend):
         assert self.size is not None  # noqa: S101
         count = {"all": 12, "vertical": 4, "horizontal": 8, "top": 4, "bottom": 4}[edges]
         area = 0.5 * length_mm**2 * math.tan(math.radians(angle_deg))
-        self._remove_volume(area * (sum(self.size) / 3) * count / 12, "chamfer")
+        removed = area * (sum(self.size) / 3) * count / 12
+        self._remove_volume(removed, "chamfer")
         name = self._name("Chamfer")
         self.features.append(
             {
@@ -437,9 +452,125 @@ class MockCatia(CatiaBackend):
                 "angle_deg": angle_deg,
                 "edges": edges,
                 "on_feature": feature,
+                "removed_mm3": removed,
             }
         )
         return self._mutation_result(name)
+
+    def shaft(self, *, sketch: str, angle_deg: float = 360.0) -> dict[str, Any]:
+        self._require_document()
+        profile = self._sketch(sketch)
+        if profile.consumed:
+            raise CatiaOperationError(f"{sketch} has already been used by another feature.")
+        profile.consumed = True
+
+        # Revolving about the sketch's vertical axis: a rectangle becomes a
+        # cylinder, a circle a sphere. Extents follow from the profile size --
+        # crude, and `catia_measure` already says the mock is approximate.
+        in_a, in_b, normal = _PLANE_AXES[profile.plane]
+        diameter, height = profile.size[0], profile.size[1]
+        extents = [0.0, 0.0, 0.0]
+        extents[in_a] = diameter
+        extents[normal] = diameter
+        extents[in_b] = height
+
+        if profile.shape == "circle":
+            volume = math.pi * diameter**3 / 6.0  # sphere
+            extents[in_b] = diameter
+        else:
+            volume = math.pi * (diameter / 2.0) ** 2 * height  # cylinder
+        volume *= min(max(angle_deg, 0.0), 360.0) / 360.0
+
+        if self.size is None:
+            self.size = (extents[0], extents[1], extents[2])
+        else:
+            self.size = tuple(max(a, b) for a, b in zip(self.size, extents))  # type: ignore[assignment]
+        # Fold the revolve into the box-minus-cuts model: the box grew by the
+        # shaft's extents, so the difference between that growth and the true
+        # swept volume is recorded as removed material.
+        self.removed_volume_mm3 = max(
+            self._gross_volume_mm3() - (self._net_volume_mm3() + volume), 0.0
+        )
+
+        name = self._name("Shaft")
+        self._record_extent_parameters()
+        self.features.append(
+            {"name": name, "type": "Shaft", "sketch": sketch, "angle_deg": float(angle_deg)}
+        )
+        return self._mutation_result(name)
+
+    def groove(self, *, sketch: str, angle_deg: float = 360.0) -> dict[str, Any]:
+        self._require_solid()
+        profile = self._sketch(sketch)
+        if profile.consumed:
+            raise CatiaOperationError(f"{sketch} has already been used by another feature.")
+        profile.consumed = True
+
+        diameter, height = profile.size[0], profile.size[1]
+        volume = math.pi * (diameter / 2.0) ** 2 * height
+        volume *= min(max(angle_deg, 0.0), 360.0) / 360.0
+        self._remove_volume(volume, "groove")
+
+        name = self._name("Groove")
+        self.features.append(
+            {
+                "name": name,
+                "type": "Groove",
+                "sketch": sketch,
+                "angle_deg": float(angle_deg),
+                "removed_mm3": volume,
+            }
+        )
+        return self._mutation_result(name)
+
+    def mirror(self, *, plane: str) -> dict[str, Any]:
+        self._require_solid()
+        assert self.size is not None  # noqa: S101
+        _, _, normal = _PLANE_AXES[plane]
+        extents = list(self.size)
+        extents[normal] *= 2.0
+        self.size = (extents[0], extents[1], extents[2])
+        # Cuts mirror with the material, so removed volume doubles too.
+        self.removed_volume_mm3 *= 2.0
+
+        name = self._name("Mirror")
+        self._record_extent_parameters()
+        self.features.append({"name": name, "type": "Mirror", "plane": plane})
+        return self._mutation_result(name)
+
+    def delete_feature(self, *, feature: str) -> dict[str, Any]:
+        self._require_document()
+        entry = next((f for f in self.features if f["name"] == feature), None)
+        if entry is None:
+            known = ", ".join(f["name"] for f in self.features) or "(none)"
+            raise CatiaOperationError(
+                f"No feature named {feature!r} in this part. Features: {known}."
+            )
+        if entry["type"] in {"Pad", "Shaft", "Mirror"}:
+            # The mock's solid is a box less its cuts; it cannot recompute the
+            # box after losing an additive feature. Being unable is better than
+            # being silently wrong about the part's mass.
+            raise CatiaOperationError(
+                f"The mock backend cannot recompute the solid after deleting the "
+                f"additive feature {feature!r}. Restore the checkpoint taken before "
+                "it instead (real CATIA can delete it directly)."
+            )
+
+        removed = entry.get("removed_mm3")
+        if isinstance(removed, (int, float)):
+            self.removed_volume_mm3 = max(self.removed_volume_mm3 - float(removed), 0.0)
+        self.features = [f for f in self.features if f["name"] != feature]
+        if entry["type"] == "Sketch":
+            self.sketches.pop(feature, None)
+        return {
+            "deleted": feature,
+            "features": self._feature_names(),
+            **self._solid_summary(),
+        }
+
+    def list_features(self) -> dict[str, Any]:
+        self._require_document()
+        return {"features": self._feature_names()}
 
     def update(self) -> dict[str, Any]:
         self._require_document()

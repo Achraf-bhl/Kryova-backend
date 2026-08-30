@@ -275,14 +275,18 @@ def test_status_requires_a_session(client):
 
 def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client):
     tools = auth_client.get(f"{PREFIX}/tools").json()["tools"]
-    # A deliberate count, so adding or losing a tool is never silent. 19 since
-    # catia_set_material.
-    assert len(tools) == 19
+    # A deliberate count, so adding or losing a tool is never silent. 25 since
+    # catia_set_material plus the six additions (polygon/shaft/groove/mirror/
+    # delete_feature/list_features).
+    assert len(tools) == 25
     by_name = {tool["name"]: tool for tool in tools}
     assert by_name["catia_measure"]["tier"] == "read"
     assert by_name["catia_measure"]["mutating"] is False
     assert by_name["catia_restore"]["tier"] == "destructive"
     assert by_name["catia_pad"]["tier"] == "write"
+    assert by_name["catia_list_features"]["tier"] == "read"
+    assert by_name["catia_shaft"]["tier"] == "write"
+    assert by_name["catia_delete_feature"]["tier"] == "write"
 
 
 def _drain(response, count: int, timeout: float = 5.0) -> list[str]:

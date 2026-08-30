@@ -185,6 +185,51 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         ),
         (),
     ),
+    "catia_sketch_polygon": (
+        WRITE,
+        _object(
+            {
+                "plane": {"type": "string", "enum": SKETCH_PLANES},
+                "sides": {"type": "integer", "minimum": 3, "maximum": 12},
+                "diameter_mm": _length(),
+            },
+            ["plane", "sides", "diameter_mm"],
+        ),
+        (),
+    ),
+    "catia_shaft": (
+        WRITE,
+        _object(
+            {
+                "sketch": _NAME,
+                "angle_deg": {"type": "number", "exclusiveMinimum": 0, "maximum": 360.0},
+            },
+            ["sketch"],
+        ),
+        (),
+    ),
+    "catia_groove": (
+        WRITE,
+        _object(
+            {
+                "sketch": _NAME,
+                "angle_deg": {"type": "number", "exclusiveMinimum": 0, "maximum": 360.0},
+            },
+            ["sketch"],
+        ),
+        (),
+    ),
+    "catia_mirror": (
+        WRITE,
+        _object({"plane": {"type": "string", "enum": SKETCH_PLANES}}, ["plane"]),
+        (),
+    ),
+    "catia_delete_feature": (
+        WRITE,
+        _object({"feature": _NAME}, ["feature"]),
+        (),
+    ),
+    "catia_list_features": (READ, _object({}), ()),
     "catia_measure": (READ, _object({}), ()),
     "catia_capture_view": (
         READ,

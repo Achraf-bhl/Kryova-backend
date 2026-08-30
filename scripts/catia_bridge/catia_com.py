@@ -627,6 +627,33 @@ class CatiaCom(CatiaBackend):
             "features": self._feature_list(),
         }
 
+    def sketch_polygon(  # pragma: no cover - Windows only
+        self, *, plane: str, sides: int, diameter_mm: float
+    ) -> dict[str, Any]:
+        radius = diameter_mm / 2.0
+        points = [
+            (
+                radius * math.cos(2 * math.pi * index / sides + math.pi / 2),
+                radius * math.sin(2 * math.pi * index / sides + math.pi / 2),
+            )
+            for index in range(sides)
+        ]
+
+        def draw(factory: Any) -> None:
+            for index in range(sides):
+                start, end = points[index], points[(index + 1) % sides]
+                factory.CreateLine(start[0], start[1], end[0], end[1])
+
+        name = self._sketch(plane, draw)
+        return {
+            "feature": name,
+            "sketch": name,
+            "plane": plane,
+            "shape": f"polygon-{sides}",
+            "area_mm2": round(0.5 * sides * radius**2 * math.sin(2 * math.pi / sides), 4),
+            "features": self._feature_list(),
+        }
+
     def _sketch(self, plane: str, draw: Any) -> str:  # pragma: no cover - Windows only
         part = self._part()
         origin = part.OriginElements
@@ -817,6 +844,120 @@ class CatiaCom(CatiaBackend):
         body = self._body()
         target = body.Shapes.Item(feature) if feature else body
         return part.CreateReferenceFromObject(target)
+
+    def _sketch_with_axis(self, name: str) -> Any:  # pragma: no cover - Windows only
+        """The named sketch, with a revolution axis drawn along its V axis.
+
+        A shaft or groove revolves a profile about an axis *inside the sketch*,
+        and the sketch tools here draw profiles without one -- CATIA refuses the
+        revolve with an unhelpful COM error. So the axis is added on demand: a
+        line along the sketch's vertical axis through the origin, long enough to
+        span any profile this bridge can draw.
+
+        # VERIFY: on a real V5, whether AddNewShaft accepts a plain line as the
+        # axis or requires it to be the sketch's axis element. If it refuses,
+        # record a shaft creation as a VBA macro and mirror what the recorder
+        # emits here (usually the line plus `line.ReportName` bookkeeping).
+        """
+        sketch = self._find_sketch(name)
+        factory = sketch.OpenEdition()
+        try:
+            factory.CreateLine(0.0, -_BBOX_REACH, 0.0, _BBOX_REACH)
+        finally:
+            sketch.CloseEdition()
+        return sketch
+
+    def shaft(  # pragma: no cover - Windows only
+        self, *, sketch: str, angle_deg: float = 360.0
+    ) -> dict[str, Any]:
+        part = self._part()
+        profile = self._sketch_with_axis(sketch)
+        try:
+            shaft = part.ShapeFactory.AddNewShaft(profile)
+            if angle_deg < 360.0:
+                shaft.FirstAngle.Value = float(angle_deg)
+                shaft.SecondAngle.Value = 0.0
+            part.Update()
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA could not revolve {sketch} into a shaft ({exc}). The profile "
+                "must lie entirely on one side of the sketch's vertical axis; redraw "
+                "it offset from the origin, or build the shape with pads instead."
+            ) from exc
+        return self._feature_result(str(shaft.Name))
+
+    def groove(  # pragma: no cover - Windows only
+        self, *, sketch: str, angle_deg: float = 360.0
+    ) -> dict[str, Any]:
+        part = self._part()
+        profile = self._sketch_with_axis(sketch)
+        before = self._solid_volume()
+        try:
+            groove = part.ShapeFactory.AddNewGroove(profile)
+            if angle_deg < 360.0:
+                groove.FirstAngle.Value = float(angle_deg)
+                groove.SecondAngle.Value = 0.0
+            part.Update()
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA could not cut the groove from {sketch} ({exc}). The profile "
+                "must overlap solid material and stay on one side of the sketch's "
+                "vertical axis."
+            ) from exc
+        if self._solid_volume() >= before:
+            raise CatiaOperationError(
+                f"The groove from {sketch} removed no material, so it missed the "
+                "part. Check the profile's position against the bounding box."
+            )
+        return self._feature_result(str(groove.Name))
+
+    def mirror(self, *, plane: str) -> dict[str, Any]:  # pragma: no cover - Windows only
+        part = self._part()
+        origin = part.OriginElements
+        reference = part.CreateReferenceFromObject(getattr(origin, _ORIGIN_PLANE[plane]))
+        try:
+            mirror = part.ShapeFactory.AddNewMirror(reference)
+            part.Update()
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA could not mirror the solid about the {plane} plane ({exc}). "
+                "The part needs solid material on one side of that plane first."
+            ) from exc
+        return self._feature_result(str(mirror.Name))
+
+    def delete_feature(self, *, feature: str) -> dict[str, Any]:  # pragma: no cover
+        part = self._part()
+        document = self._document()
+        body = self._body()
+        try:
+            target = body.Shapes.Item(feature)
+        except Exception as exc:  # noqa: BLE001
+            known = ", ".join(entry["name"] for entry in self._feature_list()) or "(none)"
+            raise CatiaOperationError(
+                f"No feature named {feature!r} in this part. Features: {known}."
+            ) from exc
+
+        selection = document.Selection
+        selection.Clear()
+        selection.Add(target)
+        selection.Delete()
+        try:
+            part.Update()
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"{feature} was deleted but the part no longer rebuilds ({exc}). "
+                "A later feature probably depended on it -- restore the checkpoint "
+                "taken before this deletion."
+            ) from exc
+        return {
+            "deleted": feature,
+            "features": self._feature_list(),
+            **self._measure_solid(),
+        }
+
+    def list_features(self) -> dict[str, Any]:  # pragma: no cover - Windows only
+        self._document()
+        return {"features": self._feature_list()}
 
     def update(self) -> dict[str, Any]:  # pragma: no cover - Windows only
         self._part().Update()

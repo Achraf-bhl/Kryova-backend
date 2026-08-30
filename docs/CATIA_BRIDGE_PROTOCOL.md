@@ -256,9 +256,16 @@ inside the tools.
 | `catia_sketch_circle` | write | Centred circle on a named plane |
 | `catia_pad` | write | Extrude a sketch by a length |
 | `catia_pocket` | write | Cut a sketch through/by a depth |
+| `catia_set_material` | write | Set the part's material (drives the reported mass) |
 | `catia_hole` | write | Hole on a face at a named position |
 | `catia_fillet` | write | Edge fillet by radius |
 | `catia_chamfer` | write | Edge chamfer by length/angle |
+| `catia_sketch_polygon` | write | Centred regular polygon (3–12 sides) on a named plane |
+| `catia_shaft` | write | Revolve a sketch into a solid (turned parts) |
+| `catia_groove` | write | Revolved cut (o-ring glands, relief grooves) |
+| `catia_mirror` | write | Mirror the solid about a named reference plane |
+| `catia_delete_feature` | write | Delete one named feature (auto-checkpointed first) |
+| `catia_list_features` | read | The feature tree, in build order |
 | `catia_measure` | read | Mass, volume, bounding box, centre of gravity |
 | `catia_capture_view` | read | Screenshot the viewport → blob store (the agent looks at its own work) |
 | `catia_export_step` | write | Export STEP → upload → **new Kryova geometry version** |

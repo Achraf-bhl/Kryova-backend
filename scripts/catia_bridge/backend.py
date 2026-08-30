@@ -146,9 +146,27 @@ class CatiaBackend(ABC):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
+    def sketch_polygon(self, *, plane: str, sides: int, diameter_mm: float) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def shaft(self, *, sketch: str, angle_deg: float = 360.0) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def groove(self, *, sketch: str, angle_deg: float = 360.0) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def mirror(self, *, plane: str) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def delete_feature(self, *, feature: str) -> dict[str, Any]: ...
+
+    @abstractmethod
     def update(self) -> dict[str, Any]: ...
 
     # -- inspection ----------------------------------------------------------
+
+    @abstractmethod
+    def list_features(self) -> dict[str, Any]: ...
 
     @abstractmethod
     def measure(self) -> dict[str, Any]: ...
@@ -187,6 +205,12 @@ TOOL_METHODS: dict[str, str] = {
     "catia_hole": "hole",
     "catia_fillet": "fillet",
     "catia_chamfer": "chamfer",
+    "catia_sketch_polygon": "sketch_polygon",
+    "catia_shaft": "shaft",
+    "catia_groove": "groove",
+    "catia_mirror": "mirror",
+    "catia_delete_feature": "delete_feature",
+    "catia_list_features": "list_features",
     "catia_measure": "measure",
     "catia_capture_view": "capture_view",
     "catia_export_step": "export_step",

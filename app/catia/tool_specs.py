@@ -431,6 +431,123 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
         tier=CatiaTier.WRITE,
     ),
     CatiaToolSpec(
+        name="catia_sketch_polygon",
+        description=(
+            "Draw a regular polygon (3 to 12 sides) centred on the origin of a named "
+            "reference plane and leave it as a new sketch. Pad it for a hex boss or "
+            "prismatic body; the diameter is measured across the corners "
+            "(circumscribed circle). Use catia_sketch_rectangle or "
+            "catia_sketch_circle for those shapes rather than a 4- or many-sided "
+            "polygon."
+        ),
+        parameters=_object(
+            {
+                "plane": _enum(SKETCH_PLANES, "Reference plane to sketch on."),
+                "sides": {
+                    "type": "integer",
+                    "minimum": 3,
+                    "maximum": 12,
+                    "description": "Number of sides, e.g. 6 for a hex.",
+                },
+                "diameter_mm": _length("Across-corners diameter of the polygon."),
+            },
+            required=["plane", "sides", "diameter_mm"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_shaft",
+        description=(
+            "Revolve a sketch into a solid around the sketch plane's vertical axis "
+            "through the origin. This is how turned parts are made: a rectangle "
+            "revolved 360 degrees is a cylinder, a profile beside the axis is a "
+            "tube. The profile must sit entirely on one side of the axis. Use "
+            "catia_pad for prismatic shapes instead."
+        ),
+        parameters=_object(
+            {
+                "sketch": _FEATURE_NAME,
+                "angle_deg": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 360.0,
+                    "description": "Revolution angle in degrees. Default 360 (full).",
+                },
+            },
+            required=["sketch"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_groove",
+        description=(
+            "Revolve a sketch around the sketch plane's vertical axis and REMOVE the "
+            "swept material -- the revolved counterpart of catia_pocket. Use it for "
+            "circumferential grooves, o-ring glands and relief cuts on turned parts. "
+            "The part must already have solid material where the groove cuts."
+        ),
+        parameters=_object(
+            {
+                "sketch": _FEATURE_NAME,
+                "angle_deg": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 360.0,
+                    "description": "Revolution angle in degrees. Default 360 (full).",
+                },
+            },
+            required=["sketch"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_mirror",
+        description=(
+            "Mirror the whole solid about a named reference plane, so modelling half "
+            "a symmetric part and mirroring it replaces modelling both halves. Model "
+            "the half on one side of the plane first, then mirror; check the mass "
+            "roughly doubled."
+        ),
+        parameters=_object(
+            {
+                "plane": _enum(
+                    SKETCH_PLANES,
+                    "Reference plane to mirror about, e.g. ZX to mirror left-right "
+                    "across Y.",
+                )
+            },
+            required=["plane"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_delete_feature",
+        description=(
+            "Delete one named feature (and anything CATIA rebuilds away with it). "
+            "This is the recovery move when a feature went in wrong -- a pad of the "
+            "wrong length, a hole in the wrong face -- cheaper than rolling back to a "
+            "checkpoint. It is checkpointed automatically first, so the deletion "
+            "itself can be undone with catia_restore. Name the feature exactly as "
+            "the feature list reports it."
+        ),
+        parameters=_object(
+            {"feature": _FEATURE_NAME},
+            required=["feature"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_list_features",
+        description=(
+            "The part's feature tree -- every sketch, pad, pocket, fillet and so on, "
+            "in build order, with the sketch each feature consumed. Call it when "
+            "resuming work on an existing part or before catia_delete_feature, so "
+            "you name features that really exist."
+        ),
+        parameters=_object({}),
+        tier=CatiaTier.READ,
+    ),
+    CatiaToolSpec(
         name="catia_measure",
         description=(
             "Mass, volume, bounding box and centre of gravity of the current part, "

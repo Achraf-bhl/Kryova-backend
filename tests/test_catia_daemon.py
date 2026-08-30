@@ -13,6 +13,7 @@ decoded rather than merely counted.
 
 import base64
 import json
+import math
 import struct
 import sys
 import zlib
@@ -245,6 +246,73 @@ def test_every_mutating_tool_returns_post_state_not_ok(session):
         assert data["mass_kg"] > 0, tool
         assert data["bounding_box_mm"]["size"], tool
         assert data["features"], tool
+
+
+# -- the six additional tools -------------------------------------------------
+
+
+def test_a_hex_polygon_sketch_reports_its_area(session):
+    assert call(session, "catia_new_part", {"name": "Hex"})["ok"]
+    data = call(
+        session, "catia_sketch_polygon", {"plane": "XY", "sides": 6, "diameter_mm": 20}
+    )["data"]
+    assert data["shape"] == "polygon-6"
+    assert data["area_mm2"] == pytest.approx(0.5 * 6 * 10**2 * math.sin(math.pi / 3), rel=1e-6)
+
+
+def test_a_shaft_revolves_a_circle_into_a_sphere_shaped_solid(session):
+    assert call(session, "catia_new_part", {"name": "Ball"})["ok"]
+    assert call(session, "catia_sketch_circle", {"plane": "XY", "diameter_mm": 10})["ok"]
+    data = call(session, "catia_shaft", {"sketch": "Sketch.1"})["data"]
+    assert data["mass_kg"] > 0
+    assert data["bounding_box_mm"]["size"] == [10, 10, 10]
+
+
+def test_a_groove_removes_material_from_an_existing_solid(session):
+    build_bracket(session)
+    before = call(session, "catia_measure")["data"]["mass_kg"]
+    assert call(session, "catia_sketch_circle", {"plane": "XY", "diameter_mm": 4})["ok"]
+    after = call(session, "catia_groove", {"sketch": "Sketch.2"})["data"]["mass_kg"]
+    assert after < before
+
+
+def test_a_mirror_doubles_the_mass(session):
+    build_bracket(session)
+    before = call(session, "catia_measure")["data"]["mass_kg"]
+    after = call(session, "catia_mirror", {"plane": "ZX"})["data"]["mass_kg"]
+    assert after == pytest.approx(before * 2, rel=1e-6)
+
+
+def test_delete_feature_removes_a_subtractive_feature_and_restores_its_volume(session):
+    build_bracket(session)
+    before = call(session, "catia_measure")["data"]["mass_kg"]
+    hole = call(session, "catia_hole", {"face": "top", "position": "center", "diameter_mm": 4})
+    after_hole = call(session, "catia_measure")["data"]["mass_kg"]
+    assert after_hole < before
+
+    restored = call(session, "catia_delete_feature", {"feature": hole["data"]["feature"]})["data"]
+    assert restored["mass_kg"] == pytest.approx(before, rel=1e-6)
+
+
+def test_delete_feature_refuses_an_unknown_name(session):
+    build_bracket(session)
+    result = call(session, "catia_delete_feature", {"feature": "Pad.99"})
+    assert result["ok"] is False
+    assert "No feature named" in result["error"]
+
+
+def test_delete_feature_refuses_an_additive_feature_the_mock_cannot_recompute(session):
+    build_bracket(session)
+    result = call(session, "catia_delete_feature", {"feature": "Pad.1"})
+    assert result["ok"] is False
+    assert "cannot recompute the solid" in result["error"]
+
+
+def test_list_features_reports_the_build_order(session):
+    build_bracket(session)
+    data = call(session, "catia_list_features")["data"]
+    names = [f["name"] for f in data["features"]]
+    assert names == ["Sketch.1", "Pad.1"]
 
 
 # -- real artefacts ----------------------------------------------------------

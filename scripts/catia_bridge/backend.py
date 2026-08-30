@@ -4,7 +4,7 @@ One abstract base with one method per tool, so `session.py` never branches on
 which backend it is talking to. That is what makes mock mode a genuine test of
 the system rather than a separate code path: the frame handling, the schema
 re-validation, the tier enforcement, the watchdog and the reconnect logic are
-all the same objects either way, and only the eighteen leaves below differ.
+all the same objects either way, and only the leaves below differ.
 
 Every method returns the plain data dictionary that becomes the `data` field of
 a `result` frame. Raising `CatiaOperationError` becomes `{"ok": false, "error":
@@ -21,7 +21,7 @@ class CatiaOperationError(RuntimeError):
 
 
 class CatiaBackend(ABC):
-    """Eighteen operations, minus the one the server answers itself."""
+    """One method per tool, minus the ones the server answers itself."""
 
     #: Reported in the `hello` frame.
     catia_version: str = "unknown"
@@ -80,6 +80,18 @@ class CatiaBackend(ABC):
 
     @abstractmethod
     def set_parameter(self, *, name: str, value: float, unit: str) -> dict[str, Any]: ...
+
+    # -- material ------------------------------------------------------------
+
+    @abstractmethod
+    def set_material(self, *, material: str, density_kg_m3: float) -> dict[str, Any]:
+        """Record the part's material and apply it in CATIA where possible.
+
+        `density_kg_m3` comes from Kryova's material library, not from the
+        model and not from CATIA: it is what every reported mass is computed
+        from, so it must not depend on whether this workstation happens to be
+        licensed for the Material Library.
+        """
 
     # -- sketches and features ----------------------------------------------
 
@@ -167,6 +179,7 @@ TOOL_METHODS: dict[str, str] = {
     "catia_open_document": "open_document",
     "catia_list_parameters": "list_parameters",
     "catia_set_parameter": "set_parameter",
+    "catia_set_material": "set_material",
     "catia_sketch_rectangle": "sketch_rectangle",
     "catia_sketch_circle": "sketch_circle",
     "catia_pad": "pad",

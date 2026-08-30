@@ -81,6 +81,25 @@ _MM_PER_UNIT = 1.0  # CATIA's automation API reports lengths in millimetres.
 #: builds is weighed with until someone does.
 CATIA_DEFAULT_DENSITY_KG_M3 = 1000.0
 
+#: Where CATIA keeps its shipped material catalogues, relative to the install
+#: root. Searched in order; the first that opens wins.
+_CATALOGUE_NAMES = ("Catalog.CATMaterial", "Advanced_Materials.CATMaterial")
+
+#: Kryova's material keys mapped onto the family and material names in CATIA's
+#: shipped catalogue. Only the mapping is guessed -- the density that decides
+#: every reported mass comes from Kryova's own library and is passed in, so a
+#: wrong guess here costs the catalogue application and nothing else.
+_CATIA_MATERIAL = {
+    "aluminium-6061-t6": ("Metal", "Aluminium"),
+    "aluminium-7075-t6": ("Metal", "Aluminium"),
+    "steel-1018": ("Metal", "Steel"),
+    "stainless-304": ("Metal", "Stainless Steel"),
+    "titanium-ti6al4v": ("Metal", "Titanium"),
+    "abs": ("Other", "Plastic"),
+    "pla": ("Other", "Plastic"),
+    "nylon-pa12": ("Other", "Nylon"),
+}
+
 
 class CatiaCom(CatiaBackend):
     is_mock = False
@@ -343,6 +362,103 @@ class CatiaCom(CatiaBackend):
             "features": self._feature_list(),
             **self._measure_solid(),
         }
+
+    # -- material ------------------------------------------------------------
+
+    def set_material(  # pragma: no cover - Windows only
+        self, *, material: str, density_kg_m3: float
+    ) -> dict[str, Any]:
+        """Record the part's material, and apply it in CATIA where possible.
+
+        Two things happen, and only one of them can fail.
+
+        **The density is recorded here, always.** It is what every mass this
+        bridge reports is computed from, and it arrives from Kryova's own
+        material library rather than being read out of CATIA -- so the mass is
+        right whether or not the catalogue below is available. That matters
+        because nothing applied a material before this existed, and CATIA
+        weighed every part at its default 1000 kg/m3: a 120x80x10 steel bracket
+        was reported as 0.095 kg against a real 0.755 kg.
+
+        **The catalogue application is best effort.** `Documents.Open` on a
+        `.CATMaterial` fails outright on an install without the Material
+        Library product -- measured on a live V5-R33, all three shipped
+        catalogues refused with "La methode Open a echoue" in about ten
+        seconds each. That is a licensing fact about the workstation, not
+        something to retry, so it is reported rather than raised: the user
+        still gets correct mass and a part that Kryova knows the material of.
+
+        # VERIFY: the `ApplyMaterialOnPart` path below is written from the V5
+        # automation reference and has never run to completion here, because
+        # this workstation cannot open a catalogue at all. Check it on an
+        # install that has the Material Library before trusting it.
+        """
+        self._density_kg_m3 = float(density_kg_m3)
+        applied, detail = self._apply_catalogue_material(material)
+        try:
+            self._part().Update()
+        except Exception:  # noqa: BLE001 - an update failure must not lose the density
+            logger.warning("Could not update the part after setting the material")
+
+        return {
+            "material": material,
+            "density_kg_m3": round(float(density_kg_m3), 1),
+            "applied_in_catia": applied,
+            "detail": detail,
+            **self._measure_solid(),
+        }
+
+    def _apply_catalogue_material(self, material: str) -> tuple[bool, str]:
+        """Try to attach a real CATIA material. Never raises."""
+        family_name, catia_name = _CATIA_MATERIAL.get(material, ("Metal", "Steel"))
+        catalogue = None
+        try:  # pragma: no cover - Windows only
+            catalogue = self._open_material_catalogue()
+            if catalogue is None:
+                return False, (
+                    "This CATIA install cannot open a material catalogue, so no "
+                    "material was attached to the part in CATIA. Mass is still "
+                    "correct: Kryova computes it from the material you chose."
+                )
+            families = catalogue.Families
+            for index in range(1, int(families.Count) + 1):
+                family = families.Item(index)
+                if str(family.Name) != family_name:
+                    continue
+                materials = family.Materials
+                for position in range(1, int(materials.Count) + 1):
+                    candidate = materials.Item(position)
+                    if str(candidate.Name) != catia_name:
+                        continue
+                    manager = self._document().GetItem("CATMatManagerVBExt")
+                    manager.ApplyMaterialOnPart(self._part(), candidate)
+                    return True, f"Applied CATIA material {catia_name!r}."
+            return False, f"CATIA's catalogue has no material called {catia_name!r}."
+        except Exception as exc:  # noqa: BLE001 - best effort by design
+            logger.info("Could not apply a CATIA material: %s", exc)
+            return False, (
+                f"CATIA would not attach the material ({exc}). Mass is still correct: "
+                "Kryova computes it from the material you chose."
+            )
+        finally:
+            if catalogue is not None:
+                try:
+                    catalogue.Close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _open_material_catalogue(self) -> Any:
+        """The first shipped catalogue that opens, or None if none will."""
+        for directory in _material_catalogue_dirs():
+            for name in _CATALOGUE_NAMES:
+                path = directory / name
+                if not path.is_file():
+                    continue
+                try:  # pragma: no cover - Windows only
+                    return self._app.Documents.Open(str(path))
+                except Exception as exc:  # noqa: BLE001
+                    logger.info("Material catalogue %s would not open: %s", path, exc)
+        return None
 
     # -- parameters ----------------------------------------------------------
 
@@ -805,6 +921,17 @@ class CatiaCom(CatiaBackend):
         # this cannot raise or drift out of step with the mass above it.
         density_kg_m3 = mass_kg / (volume_mm3 * 1e-9)
 
+        # A material chosen through `catia_set_material` overrides CATIA, and has
+        # to: on an install without the Material Library nothing can be attached
+        # to the part, so CATIA goes on weighing it at 1000 kg/m3 however clearly
+        # the user said "steel". The density here came from Kryova's own library,
+        # so the mass is right on every workstation rather than only the licensed
+        # ones. CATIA wins only when it has a real material of its own.
+        chosen = getattr(self, "_density_kg_m3", None)
+        if chosen and abs(density_kg_m3 - CATIA_DEFAULT_DENSITY_KG_M3) <= 5.0:
+            density_kg_m3 = float(chosen)
+            mass_kg = volume_mm3 * 1e-9 * density_kg_m3
+
         measurement: dict[str, Any] = {
             "has_solid": True,
             # Kilograms already. Nothing above this converts, by design.
@@ -1026,6 +1153,34 @@ def _unit_of(parameter: Any) -> str:  # pragma: no cover - Windows only
         if text.strip().endswith(symbol):
             return symbol
     return ""
+
+
+def _material_catalogue_dirs() -> list[Path]:
+    """Every `startup/materials` directory a CATIA install might have.
+
+    Discovered by walking the install roots rather than configured, because the
+    version folder changes between releases (`B33` here) and an engineer should
+    not have to put a path in a config file to get a material applied. Localised
+    catalogues sit in subdirectories of the same folder and are searched too --
+    a French install ships `materials/French/Catalog.CATMaterial`.
+    """
+    roots = [
+        Path(r"C:\Program Files\Dassault Systemes"),
+        Path(r"C:\Program Files (x86)\Dassault Systemes"),
+    ]
+    found: list[Path] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        try:
+            for version in sorted(root.iterdir(), reverse=True):
+                materials = version / "win_b64" / "startup" / "materials"
+                if materials.is_dir():
+                    found.append(materials)
+                    found.extend(sorted(d for d in materials.iterdir() if d.is_dir()))
+        except OSError:  # pragma: no cover - unreadable install directory
+            continue
+    return found
 
 
 def _face_point(

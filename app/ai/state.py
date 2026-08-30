@@ -216,6 +216,22 @@ def _catia_lines(
         "have not opened it in this session, call catia_open_document first"
     )
     state = conversation.catia_state or {}
+    # The material is a decision, not a measurement, and it is the one thing the
+    # transcript held that nothing here reported. Asked "what material did we
+    # pick?" eight turns after "steel gearbox mounting plate", the assistant read
+    # CATIA -- which has no material applied unless the workstation is licensed
+    # for the Material Library -- and answered "none has been assigned, which
+    # grade would you like?", re-asking a question the user had already answered.
+    material = state.get("material")
+    if material:
+        density = state.get("density_kg_m3")
+        suffix = f" ({_clean(density)} kg/m3)" if density else ""
+        lines.append(f"catia_material: {_clean(material)}{suffix} -- already chosen, do not re-ask")
+    else:
+        lines.append(
+            "catia_material: not set yet -- masses are provisional until "
+            "catia_set_material is called"
+        )
     features = state.get("features")
     if isinstance(features, list) and features:
         lines.append(f"catia_features: {', '.join(_clean(f) for f in features[:20])}")

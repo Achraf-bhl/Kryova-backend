@@ -259,7 +259,9 @@ def test_status_requires_a_session(client):
 
 def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client):
     tools = auth_client.get(f"{PREFIX}/tools").json()["tools"]
-    assert len(tools) == 18
+    # A deliberate count, so adding or losing a tool is never silent. 19 since
+    # catia_set_material.
+    assert len(tools) == 19
     by_name = {tool["name"]: tool for tool in tools}
     assert by_name["catia_measure"]["tier"] == "read"
     assert by_name["catia_measure"]["mutating"] is False

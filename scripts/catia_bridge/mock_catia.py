@@ -82,6 +82,10 @@ class MockCatia(CatiaBackend):
         #: Bounding-box extents in mm. None until something is padded.
         self.size: tuple[float, float, float] | None = None
         self.removed_volume_mm3 = 0.0
+        #: None until catia_set_material; the mock then weighs the part with it,
+        #: exactly as the real backend does.
+        self.material: str | None = None
+        self.density_kg_m3 = _DENSITY_KG_PER_MM3 * 1e9
         self.up_to_date = True
         self._counters: dict[str, int] = {}
 
@@ -211,6 +215,24 @@ class MockCatia(CatiaBackend):
         extents = list(self.size)
         extents[axis] = max(value, 1e-3)
         self.size = (extents[0], extents[1], extents[2])
+
+    # -- material ------------------------------------------------------------
+
+    def set_material(self, *, material: str, density_kg_m3: float) -> dict[str, Any]:
+        self._require_document()
+        self.material = material
+        self.density_kg_m3 = float(density_kg_m3)
+        self._write_document()
+        return {
+            "material": material,
+            "density_kg_m3": round(float(density_kg_m3), 1),
+            # No catalogue here, and saying so beats claiming a CATIA-side
+            # application that never happened -- the mock's whole value is that
+            # it does not lie about what it did.
+            "applied_in_catia": False,
+            "detail": "Mock CATIA: the material is recorded but nothing is attached.",
+            **self._solid_summary(),
+        }
 
     # -- sketches ------------------------------------------------------------
 
@@ -464,12 +486,11 @@ class MockCatia(CatiaBackend):
             "has_solid": True,
             # Kilograms, as the rest of the system expects. Nothing converts on
             # the way up; this is already the number the UI shows.
-            "mass_kg": round(volume * _DENSITY_KG_PER_MM3, 6),
+            "mass_kg": round(volume * self.density_kg_m3 * 1e-9, 6),
             # Reported alongside the mass because the real backend reports it,
-            # and because the mass means nothing without it. This mock stands in
-            # for a part that *has* a material, so it is not provisional -- see
-            # `CatiaCom._measure_solid` for the case that is.
-            "density_kg_m3": round(_DENSITY_KG_PER_MM3 * 1e9, 1),
+            # and because the mass means nothing without it.
+            "density_kg_m3": round(self.density_kg_m3, 1),
+            "material": self.material,
             "material_applied": True,
             "mass_is_provisional": False,
             "volume_mm3": round(volume, 4),

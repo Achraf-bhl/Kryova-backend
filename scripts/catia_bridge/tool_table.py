@@ -132,6 +132,19 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         ),
         (),
     ),
+    "catia_set_material": (
+        WRITE,
+        _object(
+            {
+                "material": {"type": "string", "minLength": 1, "maxLength": 60},
+                # Supplied by the server from Kryova's material library, never by
+                # the model -- which is why it is required rather than optional.
+                "density_kg_m3": {"type": "number", "exclusiveMinimum": 0, "maximum": 30_000},
+            },
+            ["material", "density_kg_m3"],
+        ),
+        (),
+    ),
     "catia_hole": (
         WRITE,
         _object(

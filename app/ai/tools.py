@@ -161,6 +161,8 @@ CATIA_NO_DOCUMENT_REQUIRED = frozenset({"catia_status", "catia_new_part", "catia
 CATIA_STATE_KEYS = (
     "features",
     "parameters",
+    "material",
+    "density_kg_m3",
     "mass_kg",
     "volume_mm3",
     "bounding_box_mm",
@@ -1028,6 +1030,21 @@ class ToolBox:
             spec = None
         long_running = bool(getattr(spec, "long_running", False))
         timeout = settings.catia_export_timeout_s if long_running else settings.catia_call_timeout_s
+
+        if name == "catia_set_material":
+            # The model names a material; the server says what it weighs. The
+            # density is never taken from the model -- it decides every mass the
+            # part will ever report, and "never state a physics number you did
+            # not read from a tool result" has to hold for the tools too. The
+            # daemon requires the field, so a call that reached it without one
+            # would be refused rather than silently defaulted.
+            chosen = MATERIALS.get(str(arguments.get("material", "")))
+            if chosen is None:
+                raise ToolError(
+                    f"{arguments.get('material')!r} is not in the material library. "
+                    f"Choose one of: {', '.join(sorted(MATERIALS))}."
+                )
+            arguments = {**arguments, "density_kg_m3": chosen.density_kg_m3}
 
         try:
             result = dispatch.call_catia(

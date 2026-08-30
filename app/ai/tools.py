@@ -24,6 +24,7 @@ Tool descriptions are prompt text: the model reads them to decide what to call,
 so they say *when* to use a tool, not just what it does.
 """
 
+import difflib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -454,53 +455,55 @@ class ToolBox:
         # every `catia_*` name, and `_build_catia` runs after this method, so a
         # second definition here would be built and then immediately shadowed.
         if _catia_dispatch() is not None:
-            tools.extend([
-                Tool(
-                    name="open_in_catia",
-                    description=(
-                        "Start CATIA, bring its window to the screen, and optionally open a "
-                        "fresh empty part for the user to model in. This is how a project "
-                        "gets its geometry in this product: the user models in CATIA rather "
-                        "than hunting for a file to upload. Call it right after creating a "
-                        "project, once the user has said what they are building. Takes up to "
-                        "a few minutes if CATIA is cold."
-                    ),
-                    parameters=_object(
-                        {
-                            "new_part": {
-                                "type": "boolean",
-                                "description": (
-                                    "True to add a new empty CATPart. False to just bring up "
-                                    "CATIA with whatever the user already has open."
-                                ),
+            tools.extend(
+                [
+                    Tool(
+                        name="open_in_catia",
+                        description=(
+                            "Start CATIA, bring its window to the screen, and optionally open a "
+                            "fresh empty part for the user to model in. This is how a project "
+                            "gets its geometry in this product: the user models in CATIA rather "
+                            "than hunting for a file to upload. Call it right after creating a "
+                            "project, once the user has said what they are building. Takes up to "
+                            "a few minutes if CATIA is cold."
+                        ),
+                        parameters=_object(
+                            {
+                                "new_part": {
+                                    "type": "boolean",
+                                    "description": (
+                                        "True to add a new empty CATPart. False to just bring up "
+                                        "CATIA with whatever the user already has open."
+                                    ),
+                                }
                             }
-                        }
+                        ),
+                        handler=self._open_in_catia,
+                        mutating=True,
                     ),
-                    handler=self._open_in_catia,
-                    mutating=True,
-                ),
-                Tool(
-                    name="sync_geometry_from_catia",
-                    description=(
-                        "Pull whatever part is currently active in CATIA into the project as "
-                        "a new geometry version, exporting it to STEP on the way. This "
-                        "replaces uploading a file by hand -- call it once the user says "
-                        "their model is ready, and again after any change they want analysed. "
-                        "Returns the new version number, which run_simulation can then use."
+                    Tool(
+                        name="sync_geometry_from_catia",
+                        description=(
+                            "Pull whatever part is currently active in CATIA into the project as "
+                            "a new geometry version, exporting it to STEP on the way. This "
+                            "replaces uploading a file by hand -- call it once the user says "
+                            "their model is ready, and again after any change they want analysed. "
+                            "Returns the new version number, which run_simulation can then use."
+                        ),
+                        parameters=_object(
+                            {
+                                "project_id": {"type": "string"},
+                                "note": {
+                                    "type": "string",
+                                    "description": "Short note, e.g. 'after adding the fillet'.",
+                                },
+                            }
+                        ),
+                        handler=self._sync_geometry_from_catia,
+                        mutating=True,
                     ),
-                    parameters=_object(
-                        {
-                            "project_id": {"type": "string"},
-                            "note": {
-                                "type": "string",
-                                "description": "Short note, e.g. 'after adding the fillet'.",
-                            },
-                        }
-                    ),
-                    handler=self._sync_geometry_from_catia,
-                    mutating=True,
-                ),
-            ])
+                ]
+            )
         return tools
 
     # -- handlers -----------------------------------------------------------
@@ -520,6 +523,27 @@ class ToolBox:
         # Mirrors ProjectCreate's bound rather than letting the DB truncate.
         if len(name) > 255:
             raise ToolError("That name is too long; keep it under 255 characters.")
+
+        # One project per conversation, enforced rather than merely asked for.
+        # The tool description already says "Do not call it again in the same
+        # conversation", and a weak model ignores it: observed creating "Steel
+        # mounting bracket" on turn one and then "Flat Plate" on turn two, when
+        # the user had only ever described one part. The second project silently
+        # became the conversation's scope, so the geometry, the runs and the
+        # results all landed somewhere the user was not looking.
+        #
+        # An error rather than a silent no-op, because the model has to know
+        # which project it is in to carry on correctly -- and the id is right
+        # here in the message.
+        if self.project_id:
+            existing = self.db.get(Project, self.project_id)
+            if existing is not None and existing.owner_id == self.user.id:
+                raise ToolError(
+                    f"This conversation is already working on project "
+                    f"{existing.name!r} (id {existing.id}). Use it rather than "
+                    "creating another; call update_project to rename it if the "
+                    "user wants a different name."
+                )
 
         project = Project(
             owner_id=self.user.id,
@@ -630,7 +654,8 @@ class ToolBox:
             "name": project.name,
             "description": project.description,
             "updated": [
-                field for field, value in (("name", name), ("description", description))
+                field
+                for field, value in (("name", name), ("description", description))
                 if value is not None
             ],
         }
@@ -1050,6 +1075,7 @@ class ToolBox:
     def _catia_status(self) -> dict[str, Any]:
         try:
             from app.catia.bridge import get_status
+
             status = get_status()
             return {
                 "running": status.running,
@@ -1119,9 +1145,7 @@ class ToolBox:
             except GeometryError as exc:
                 media_service.delete(stored)
                 self.db.commit()
-                raise ToolError(
-                    f"CATIA exported a file Kryova could not read: {exc}"
-                ) from exc
+                raise ToolError(f"CATIA exported a file Kryova could not read: {exc}") from exc
 
         version_number = (
             self.db.scalar(
@@ -1170,8 +1194,17 @@ class ToolBox:
     def call(self, name: str, arguments: dict[str, Any], *, allow_mutations: bool) -> Any:
         tool = self._tools.get(name)
         if tool is None:
+            # The nearest real name first, then the full list. With 26 tools the
+            # bare alphabetical list buries the answer: a model that reached for
+            # `catia_list_projects` gets eight `catia_*` names before
+            # `list_projects`, and observed live it gave up rather than finding
+            # it. A near-miss on the name is the common failure, so answer it
+            # directly.
+            close = difflib.get_close_matches(name, self._tools, n=3, cutoff=0.6)
+            suggestion = f" Did you mean: {', '.join(close)}?" if close else ""
             raise ToolError(
-                f"There is no tool called {name!r}. Available: {', '.join(sorted(self._tools))}."
+                f"There is no tool called {name!r}.{suggestion} "
+                f"Available: {', '.join(sorted(self._tools))}."
             )
         if tool.mutating and not allow_mutations:
             raise ToolError(

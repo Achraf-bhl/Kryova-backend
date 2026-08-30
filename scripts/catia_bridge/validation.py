@@ -46,9 +46,7 @@ def validate(value: Any, schema: dict[str, Any], path: str = "") -> None:
     if expected is not None:
         options = expected if isinstance(expected, list) else [expected]
         if not any(_TYPE_CHECKS[opt](value) for opt in options if opt in _TYPE_CHECKS):
-            raise SchemaError(
-                f"{where} must be {' or '.join(options)}, got {type(value).__name__}"
-            )
+            raise SchemaError(f"{where} must be {' or '.join(options)}, got {type(value).__name__}")
 
     if "enum" in schema and value not in schema["enum"]:
         allowed = ", ".join(repr(option) for option in schema["enum"])
@@ -89,10 +87,15 @@ def _validate_object(value: dict[str, Any], schema: dict[str, Any], path: str) -
     where = path or "arguments"
     properties: dict[str, Any] = schema.get("properties", {})
 
-    for name in schema.get("required", []):
-        if name not in value:
-            raise SchemaError(f"{where}.{name} is required")
-
+    # Unknown fields are reported *before* missing required ones, and the order
+    # is the whole point. A model that means the right call but guesses the key
+    # -- `catia_new_part({"part_name": ...})` instead of `{"name": ...}` -- trips
+    # both rules at once. Answering "arguments.name is required" tells it
+    # nothing about the key it actually sent, so it guesses again: observed live
+    # cycling through `project`, `project_name` and `part_name` and never
+    # recovering. Answering "unknown field part_name, accepted: name" is the
+    # same information the other branch already phrased well, and it ends the
+    # loop in one turn.
     if schema.get("additionalProperties") is False:
         unknown = sorted(set(value) - set(properties))
         if unknown:
@@ -103,6 +106,11 @@ def _validate_object(value: dict[str, Any], schema: dict[str, Any], path: str) -
             raise SchemaError(
                 f"{where} has unknown field(s): {', '.join(unknown)}. Accepted: {allowed}"
             )
+
+    for name in schema.get("required", []):
+        if name not in value:
+            supplied = ", ".join(sorted(value)) or "(nothing)"
+            raise SchemaError(f"{where}.{name} is required; you sent: {supplied}")
 
     for name, subschema in properties.items():
         if name in value:

@@ -197,9 +197,17 @@ def _catia_lines(
         )
 
     if not document:
+        # Phrased so that dropping the qualifier cannot produce a falsehood.
+        # "none bound to this conversation yet" was accurate and got paraphrased
+        # into "there is no document open in CATIA" -- said to a user who had
+        # CATIA in front of them with a part open. The binding is a fact about
+        # this conversation, not about CATIA, and the line has to survive being
+        # compressed into one clause.
         lines.append(
-            "catia_document: none bound to this conversation yet -- call "
-            "catia_new_part before any other geometry operation"
+            "catia_document: this conversation has not created or opened a part yet. "
+            "This says nothing about what CATIA itself has open -- do not tell the "
+            "user their CATIA is empty. Call catia_new_part to start a part this "
+            "conversation owns, before any other geometry operation."
         )
         return lines
 

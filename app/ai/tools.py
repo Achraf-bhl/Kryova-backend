@@ -1031,21 +1031,6 @@ class ToolBox:
         long_running = bool(getattr(spec, "long_running", False))
         timeout = settings.catia_export_timeout_s if long_running else settings.catia_call_timeout_s
 
-        if name == "catia_set_material":
-            # The model names a material; the server says what it weighs. The
-            # density is never taken from the model -- it decides every mass the
-            # part will ever report, and "never state a physics number you did
-            # not read from a tool result" has to hold for the tools too. The
-            # daemon requires the field, so a call that reached it without one
-            # would be refused rather than silently defaulted.
-            chosen = MATERIALS.get(str(arguments.get("material", "")))
-            if chosen is None:
-                raise ToolError(
-                    f"{arguments.get('material')!r} is not in the material library. "
-                    f"Choose one of: {', '.join(sorted(MATERIALS))}."
-                )
-            arguments = {**arguments, "density_kg_m3": chosen.density_kg_m3}
-
         try:
             result = dispatch.call_catia(
                 self.db,
@@ -1115,16 +1100,39 @@ class ToolBox:
         except CATIABridgeError as exc:
             raise ToolError(str(exc)) from exc
 
+        # CATIA is up, which is the one thing the bridge daemon was waiting for.
+        # Attaching it here rather than on the next tool call means the model
+        # gets to read "bridge: connected" in this very result, instead of
+        # discovering it is still unavailable and concluding it has to ask the
+        # user for help. It is bounded and never raises.
+        bridge_ready = self._attach_local_bridge()
+
         return {
             "running": True,
             "version": status.version,
             "created_document": document.name if document else None,
+            "bridge_connected": bridge_ready,
             "note": (
-                "CATIA is open on the user's screen. Tell them to model the part "
-                "there, then say when it is ready so you can call "
-                "sync_geometry_from_catia."
+                "CATIA is open and the Kryova bridge is attached to it. Build the "
+                "part yourself with the catia_* tools -- do not ask the user to "
+                "model it, and do not ask them to upload anything."
+                if bridge_ready
+                else (
+                    "CATIA is open. The bridge is still attaching; call the catia_* "
+                    "tool you need anyway, it waits for the connection. Do not ask "
+                    "the user to model the part or to upload a file."
+                )
             ),
         }
+
+    def _attach_local_bridge(self) -> bool:
+        """Wait, briefly, for this machine's bridge daemon to connect."""
+        try:
+            from app.catia.local_bridge import CONNECT_TIMEOUT_S, ensure_started
+
+            return ensure_started(self.db, self.user.id, wait_s=CONNECT_TIMEOUT_S)
+        except Exception:  # noqa: BLE001 - a convenience must not fail the tool
+            return False
 
     def _sync_geometry_from_catia(
         self, project_id: str | None = None, note: str | None = None

@@ -172,6 +172,15 @@ class Settings(BaseSettings):
     catia_pairing_code_ttl_minutes: int = 10
     # Per-device op ceiling, mirroring the daemon's own limit.
     catia_ops_per_minute: int = 60
+    # Single-machine install: start and pair the bridge daemon here rather than
+    # making the engineer read a pairing code off their own screen and type it
+    # into a terminal on the same machine. Off for a hosted deployment, where
+    # the server is not the user's workstation and has no business spawning
+    # processes for an account. See app/catia/local_bridge.py.
+    catia_local_bridge: bool = True
+    # Where that locally started daemon dials back to. It is this server, so the
+    # only reason to change it is a non-default bind port.
+    catia_local_bridge_server: str = "http://127.0.0.1:8000"
 
     # Uploads
     max_upload_bytes: int = 200 * 1024 * 1024

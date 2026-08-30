@@ -175,7 +175,18 @@ def test_availability_is_false_for_a_user_with_no_device(db_session, wired):
     assert catia_available(db_session, "somebody-else") is False
 
 
-def test_a_call_with_no_device_online_explains_how_to_fix_it(wired):
+def test_a_call_with_no_device_online_explains_how_to_fix_it(wired, monkeypatch):
+    """The remote posture: the daemon really is on somebody else's machine.
+
+    Pinned rather than left to the OS. On a Windows workstation Kryova starts
+    and pairs the bridge itself, and this message correctly becomes "call
+    open_in_catia" instead -- so without the pin the test would fail on a
+    developer machine and pass in CI. The local wording has its own test in
+    test_catia_local_bridge.py.
+    """
+    from app.catia import local_bridge
+
+    monkeypatch.setattr(local_bridge, "is_supported", lambda: False)
     wired["connection"].close()
     with pytest.raises(CatiaUnavailable, match="start the Kryova CATIA bridge"):
         run(wired, "catia_measure")

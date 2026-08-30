@@ -9,6 +9,7 @@ import asyncio
 import json
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.api.rate_limit import auth_limiter
@@ -236,14 +237,29 @@ def test_an_expired_device_token_cannot_connect(client, auth_client, db_session)
 # -- browser-facing surface --------------------------------------------------
 
 
-def test_status_reports_nothing_paired_before_any_device_exists(auth_client):
+@pytest.fixture
+def remote_deployment(monkeypatch):
+    """Pin the posture these two tests are about: the daemon is elsewhere.
+
+    Without this they read differently depending on the OS running them. On a
+    Windows workstation Kryova starts and pairs the bridge itself, and the
+    status detail correctly stops mentioning pairing -- so these assertions
+    would fail on a developer machine and pass in CI, which is worse than either
+    outcome. The local wording is asserted in test_catia_local_bridge.py.
+    """
+    from app.catia import local_bridge
+
+    monkeypatch.setattr(local_bridge, "is_supported", lambda: False)
+
+
+def test_status_reports_nothing_paired_before_any_device_exists(auth_client, remote_deployment):
     status = auth_client.get(f"{PREFIX}/status").json()
     assert status["connected"] is False
     assert status["paired_devices"] == 0
     assert "No workstation has been paired" in status["detail"]
 
 
-def test_status_distinguishes_paired_from_connected(auth_client):
+def test_status_distinguishes_paired_from_connected(auth_client, remote_deployment):
     created = create_device(auth_client)
     pair(auth_client, created["pairing_code"])
     status = auth_client.get(f"{PREFIX}/status").json()

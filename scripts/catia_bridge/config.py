@@ -31,6 +31,19 @@ BRIDGE_VERSION = "1.0.0"
 
 DEFAULT_SERVER = "http://localhost:8000"
 
+#: Credentials handed straight to the daemon by whatever started it, instead
+#: of being read from `bridge.json`. This is the single-machine install: the
+#: Kryova server is on the same box, under the same user, and it minted the
+#: token itself, so the pairing round trip would be the server authenticating
+#: to itself and the file would be a copy of a secret nobody else needs.
+#: An environment variable is at least as private as the file (a 0600 file in
+#: the profile, versus a value only this user's processes can read) and it
+#: dies with the process, so a supervised daemon leaves no credential behind.
+ENV_SERVER = "KRYOVA_BRIDGE_SERVER"
+ENV_TOKEN = "KRYOVA_BRIDGE_TOKEN"
+ENV_DEVICE_ID = "KRYOVA_BRIDGE_DEVICE_ID"
+ENV_DEVICE_NAME = "KRYOVA_BRIDGE_DEVICE_NAME"
+
 
 def config_dir() -> Path:
     if sys.platform == "win32":
@@ -114,7 +127,29 @@ def save(config: BridgeConfig) -> Path:
     return path
 
 
+def load_env() -> BridgeConfig | None:
+    """Credentials from the environment, or None if none were handed over.
+
+    Checked before the file so a supervisor can override a stale pairing --
+    a `bridge.json` left over from a different server is otherwise a config the
+    daemon will keep failing to use, and the user never asked for either.
+    """
+    token = os.environ.get(ENV_TOKEN)
+    if not token:
+        return None
+    return BridgeConfig(
+        server=os.environ.get(ENV_SERVER) or DEFAULT_SERVER,
+        device_token=token,
+        device_id=os.environ.get(ENV_DEVICE_ID) or "",
+        device_name=os.environ.get(ENV_DEVICE_NAME) or "",
+    )
+
+
 def load() -> BridgeConfig:
+    from_env = load_env()
+    if from_env is not None:
+        return from_env
+
     path = config_path()
     if not path.is_file():
         raise ConfigError(

@@ -100,6 +100,18 @@ def _catia_available(db: Session, user_id: str) -> bool | None:
         return None
 
 
+def _local_bridge_supported() -> bool:
+    """Whether this server starts the CATIA daemon itself. Never raises."""
+    try:
+        from app.catia.local_bridge import is_supported
+    except Exception:  # noqa: BLE001 - optional package
+        return False
+    try:
+        return is_supported()
+    except Exception:  # noqa: BLE001 - a state line must not kill the turn
+        return False
+
+
 def _project_lines(db: Session, project: Project) -> list[str]:
     lines = [f"project: {_clean(project.name)} (id {project.id})"]
     if project.description:
@@ -182,19 +194,35 @@ def _catia_lines(
     elif available is False:
         # Two different things used to be collapsed into "no CATIA tool will
         # work", and the difference decides what the assistant should do next.
-        # The `catia_*` design tools do need a paired workstation. `open_in_catia`
-        # does not -- it drives CATIA over COM on the machine running this
-        # server, which on a desktop install is the user's own. Told only that
-        # the bridge was down, the model concluded it had no CATIA at all and
-        # asked the user to upload a STEP file, which is precisely the hand-off
-        # this product exists to remove.
-        lines.append(
-            "catia_bridge: not connected -- the catia_* modelling tools are "
-            "unavailable until a workstation is paired and the Kryova bridge is "
-            "running. open_in_catia still works: it starts CATIA on this machine, "
-            "and the bridge attaches by itself once CATIA is up. Offer that "
-            "before asking the user for a CAD file."
-        )
+        # Told only that the bridge was down, the model concluded it had no
+        # CATIA at all and asked the user to upload a STEP file, which is
+        # precisely the hand-off this product exists to remove.
+        #
+        # On a single-machine install there is nothing for the user to do at
+        # all: Kryova starts and pairs the daemon itself, and the only thing it
+        # is ever waiting for is CATIA being open -- which the assistant can fix
+        # by itself with open_in_catia. Anything about pairing a workstation is
+        # false there, and it was still being said to a user with CATIA on
+        # screen, so the local case gets its own line rather than a qualifier on
+        # the remote one.
+        if _local_bridge_supported():
+            lines.append(
+                "catia_bridge: attaching -- Kryova runs the bridge on this machine "
+                "and pairs it itself, so there is nothing for the user to set up "
+                "and nothing to ask them for. It is waiting for CATIA to be open. "
+                "Call open_in_catia, then go straight on to the catia_* modelling "
+                "tools: the bridge attaches within a few seconds and those tools "
+                "wait for it. Never ask the user to pair a workstation, and never "
+                "ask them to upload or model the part themselves."
+            )
+        else:
+            lines.append(
+                "catia_bridge: not connected -- the catia_* modelling tools are "
+                "unavailable until a workstation is paired and the Kryova bridge is "
+                "running. open_in_catia still works: it starts CATIA on this machine, "
+                "and the bridge attaches by itself once CATIA is up. Offer that "
+                "before asking the user for a CAD file."
+            )
 
     if not document:
         # Phrased so that dropping the qualifier cannot produce a falsehood.

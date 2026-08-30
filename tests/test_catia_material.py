@@ -137,3 +137,168 @@ class TestEveryLibraryMaterialIsUsable:
             {"material": key, "density_kg_m3": material.density_kg_m3},
             approval_token=None,
         )
+
+
+class TestTheDensityActuallyReachesTheDaemon:
+    """The ordering bug this class exists for.
+
+    `catia_set_material` was injecting the density into the arguments *before*
+    they were validated against the model-facing schema -- the schema that lists
+    `material` alone and sets `additionalProperties: false` precisely so the
+    model cannot choose the number every mass is computed from. So the check
+    rejected the server's own field, and every live call came back
+    `catia_set_material: arguments has unknown field(s): density_kg_m3`.
+
+    Nothing above caught it. Those tests drive the daemon's schema, which
+    requires the density, and the mock backend, which is handed one directly.
+    The whole feature was green and had never once worked: run live, a steel
+    shaft came back at CATIA's default 1000 kg/m3, which is the exact bug the
+    feature was written to fix. So this drives `call_catia` itself, and asserts
+    on what leaves for the daemon.
+    """
+
+    @pytest.fixture
+    def sent(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+        from unittest.mock import MagicMock
+
+        from app.catia import dispatch
+
+        captured: list[dict[str, Any]] = []
+
+        def fake_execute(db: Any, **kwargs: Any) -> dict[str, Any]:
+            captured.append(kwargs["arguments"])
+            return {"material": kwargs["arguments"].get("material"), "mass_kg": 0.75552}
+
+        monkeypatch.setattr(
+            dispatch, "_resolve_connection", lambda db, user_id: (MagicMock(id="d"), MagicMock())
+        )
+        monkeypatch.setattr(dispatch, "_enforce_rate_limit", lambda device_id: None)
+        monkeypatch.setattr(dispatch, "_execute", fake_execute)
+        monkeypatch.setattr(dispatch, "_log", lambda db, **kwargs: None)
+        return captured
+
+    def test_the_server_supplied_density_survives_validation(
+        self, db_session: Any, sent: list[dict[str, Any]]
+    ) -> None:
+        from app.catia.dispatch import call_catia
+
+        call_catia(
+            db_session,
+            user_id="u",
+            conversation_id=None,
+            tool="catia_set_material",
+            arguments={"material": "steel-1018"},
+        )
+        assert sent[0]["density_kg_m3"] == pytest.approx(MATERIALS["steel-1018"].density_kg_m3)
+
+    def test_the_model_still_cannot_send_one(
+        self, db_session: Any, sent: list[dict[str, Any]]
+    ) -> None:
+        # The strictness the ordering bug was hiding behind must still be there.
+        from app.catia.dispatch import CatiaError, call_catia
+
+        with pytest.raises(CatiaError):
+            call_catia(
+                db_session,
+                user_id="u",
+                conversation_id=None,
+                tool="catia_set_material",
+                arguments={"material": "steel-1018", "density_kg_m3": 1.0},
+            )
+        assert not sent
+
+    def test_every_library_material_gets_through(
+        self, db_session: Any, sent: list[dict[str, Any]]
+    ) -> None:
+        from app.catia.dispatch import call_catia
+
+        for key, material in sorted(MATERIALS.items()):
+            call_catia(
+                db_session,
+                user_id="u",
+                conversation_id=None,
+                tool="catia_set_material",
+                arguments={"material": key},
+            )
+            assert sent[-1]["density_kg_m3"] == pytest.approx(material.density_kg_m3)
+
+    def test_other_tools_are_left_alone(self, db_session: Any, sent: list[dict[str, Any]]) -> None:
+        from app.catia.dispatch import call_catia
+
+        call_catia(
+            db_session,
+            user_id="u",
+            conversation_id=None,
+            tool="catia_pad",
+            arguments={"sketch": "Sketch.1", "length_mm": 10.0},
+        )
+        assert "density_kg_m3" not in sent[0]
+
+
+class TestAThroughHoleDoesNotArgueAboutDepth:
+    """`depth_mm: 0` with `through_all: true` used to cost most of a turn.
+
+    The schema refuses zero because zero is not a depth, and the tool
+    description says to omit the field entirely for a through hole. Observed
+    live, the model sent it anyway and got `depth_mm must be greater than 0`,
+    then guessed `position: 'corner'` and got a second rejection, before
+    finally producing a call that ran. The value is unused for a through hole,
+    so there is nothing to argue about.
+    """
+
+    @pytest.fixture
+    def hole(self) -> Any:
+        from app.catia.dispatch import _normalise
+
+        return _normalise
+
+    def test_a_zero_depth_is_dropped_for_a_through_hole(self, hole: Any) -> None:
+        cleaned = hole(
+            "catia_hole",
+            {
+                "face": "top",
+                "position": "center",
+                "diameter_mm": 8.0,
+                "depth_mm": 0,
+                "through_all": True,
+            },
+        )
+        assert "depth_mm" not in cleaned
+        validate(cleaned, TOOL_SPECS_BY_NAME["catia_hole"].parameters)
+
+    def test_through_all_defaults_to_true(self, hole: Any) -> None:
+        # The schema's own default, so an omitted `through_all` behaves the same.
+        cleaned = hole(
+            "catia_hole",
+            {"face": "top", "position": "center", "diameter_mm": 8.0, "depth_mm": 0},
+        )
+        assert "depth_mm" not in cleaned
+
+    def test_a_blind_hole_keeps_its_depth(self, hole: Any) -> None:
+        arguments = {
+            "face": "top",
+            "position": "center",
+            "diameter_mm": 8.0,
+            "depth_mm": 5.0,
+            "through_all": False,
+        }
+        assert hole("catia_hole", arguments) == arguments
+
+    def test_a_zero_depth_blind_hole_is_still_refused(self, hole: Any) -> None:
+        # Here the zero really is wrong, and saying so is the right answer.
+        cleaned = hole(
+            "catia_hole",
+            {
+                "face": "top",
+                "position": "center",
+                "diameter_mm": 8.0,
+                "depth_mm": 0,
+                "through_all": False,
+            },
+        )
+        with pytest.raises(SchemaError):
+            validate(cleaned, TOOL_SPECS_BY_NAME["catia_hole"].parameters)
+
+    def test_nothing_else_is_touched(self, hole: Any) -> None:
+        arguments = {"sketch": "Sketch.1", "length_mm": 0}
+        assert hole("catia_pad", arguments) == arguments

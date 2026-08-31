@@ -854,15 +854,17 @@ class CatiaCom(CatiaBackend):
         line along the sketch's vertical axis through the origin, long enough to
         span any profile this bridge can draw.
 
-        # VERIFY: on a real V5, whether AddNewShaft accepts a plain line as the
-        # axis or requires it to be the sketch's axis element. If it refuses,
-        # record a shaft creation as a VBA macro and mirror what the recorder
-        # emits here (usually the line plus `line.ReportName` bookkeeping).
+        Verified on V5-R33: a plain CreateLine is *not* enough -- Update fails
+        with a bare "La méthode Update a échoué", whether the line is a
+        construction element or handed to shaft.RevoluteAxis. The line must be
+        promoted to the sketch's axis element via `CenterLine`, after which
+        AddNewShaft/AddNewGroove need nothing else.
         """
         sketch = self._find_sketch(name)
         factory = sketch.OpenEdition()
         try:
-            factory.CreateLine(0.0, -_BBOX_REACH, 0.0, _BBOX_REACH)
+            line = factory.CreateLine(0.0, -_BBOX_REACH, 0.0, _BBOX_REACH)
+            sketch.CenterLine = line
         finally:
             sketch.CloseEdition()
         return sketch

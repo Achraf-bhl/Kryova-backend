@@ -642,6 +642,105 @@ class MockCatia(CatiaBackend):
         self.features.append({"name": name, "type": "Mirror", "plane": plane})
         return self._mutation_result(name)
 
+    def _repeatable(self, feature: str | None) -> dict[str, Any]:
+        """The feature a pattern will copy, and the volume one copy removes.
+
+        Only a subtractive feature can be modelled here: repeating an additive
+        one would grow the box, which this box-minus-cuts model cannot place.
+        Refusing beats reporting a mass that is quietly wrong.
+        """
+        self._require_solid()
+        target = feature
+        if target is None:
+            shapes = [f for f in self.features if f["type"] != "Sketch"]
+            if not shapes:
+                raise CatiaOperationError(
+                    "This part has no features yet, so there is nothing to repeat."
+                )
+            target = shapes[-1]["name"]
+        entry = next((f for f in self.features if f["name"] == target), None)
+        if entry is None:
+            known = ", ".join(f["name"] for f in self.features) or "(none)"
+            raise CatiaOperationError(
+                f"No feature named {target!r} in this part. Features: {known}."
+            )
+        removed = entry.get("removed_mm3")
+        if not isinstance(removed, (int, float)):
+            raise CatiaOperationError(
+                f"The mock backend can only repeat a subtractive feature, and "
+                f"{target!r} is a {entry['type']}. Real CATIA repeats either."
+            )
+        return {"name": target, "removed_mm3": float(removed)}
+
+    def pattern_rectangular(
+        self,
+        *,
+        plane: str,
+        count: int,
+        spacing_mm: float,
+        second_count: int = 1,
+        second_spacing_mm: float | None = None,
+        feature: str | None = None,
+    ) -> dict[str, Any]:
+        if plane not in _PLANE_AXES:
+            raise CatiaOperationError(f"{plane!r} is not one of the XY, YZ, ZX planes.")
+        second = int(second_count or 1)
+        if second > 1 and not second_spacing_mm:
+            raise CatiaOperationError(
+                "second_spacing_mm is needed whenever second_count is more than 1."
+            )
+        seed = self._repeatable(feature)
+        # Counts are totals including the seed, so only the extras remove more.
+        copies = int(count) * second - 1
+        self._remove_volume(seed["removed_mm3"] * copies, "pattern")
+
+        name = self._name("RectPattern")
+        self.features.append(
+            {
+                "name": name,
+                "type": "RectPattern",
+                "plane": plane,
+                "count": int(count),
+                "spacing_mm": float(spacing_mm),
+                "second_count": second,
+                "on_feature": seed["name"],
+                "removed_mm3": seed["removed_mm3"] * copies,
+            }
+        )
+        result = self._mutation_result(name)
+        result["instances_requested"] = int(count) * second
+        return result
+
+    def pattern_circular(
+        self,
+        *,
+        count: int,
+        plane: str = "XY",
+        total_angle_deg: float = 360.0,
+        feature: str | None = None,
+    ) -> dict[str, Any]:
+        if plane not in _PLANE_AXES:
+            raise CatiaOperationError(f"{plane!r} is not one of the XY, YZ, ZX planes.")
+        seed = self._repeatable(feature)
+        copies = int(count) - 1
+        self._remove_volume(seed["removed_mm3"] * copies, "pattern")
+
+        name = self._name("CircPattern")
+        self.features.append(
+            {
+                "name": name,
+                "type": "CircPattern",
+                "plane": plane,
+                "count": int(count),
+                "total_angle_deg": float(total_angle_deg),
+                "on_feature": seed["name"],
+                "removed_mm3": seed["removed_mm3"] * copies,
+            }
+        )
+        result = self._mutation_result(name)
+        result["instances_requested"] = int(count)
+        return result
+
     def shell(self, *, thickness_mm: float) -> dict[str, Any]:
         self._require_solid()
         assert self.size is not None  # noqa: S101

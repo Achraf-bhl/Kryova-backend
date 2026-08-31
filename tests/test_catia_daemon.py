@@ -382,12 +382,91 @@ def test_a_groove_deeper_than_the_shaft_radius_is_refused(session):
     assert "through the centre" in result["error"]
 
 
-def test_there_is_no_pattern_tool_while_its_direction_cannot_be_controlled(session):
-    # Removed rather than shipped: on a live V5-R33 the only direction reference
-    # AddNewRectPattern accepts steps the copies diagonally, so a `direction`
-    # argument would quietly build the wrong part. See the note in catia_com.py.
+def test_a_rectangular_pattern_counts_the_original_among_its_instances(session):
+    # count is a total, not a number of extra copies: the seed sits at grid
+    # position (1, 1). Getting this wrong on the real backend produced six holes
+    # for a five-hole request.
+    build_bracket(session)
+    solid = call(session, "catia_measure")["data"]["volume_mm3"]
+    hole = call(session, "catia_hole", {"face": "top", "position": "center", "diameter_mm": 4})
+    one_hole = solid - hole["data"]["volume_mm3"]
+
+    data = call(
+        session,
+        "catia_pattern_rectangular",
+        {"plane": "XY", "count": 5, "spacing_mm": 8},
+    )["data"]
+    assert solid - data["volume_mm3"] == pytest.approx(one_hole * 5, rel=1e-6)
+
+
+def test_a_rectangular_grid_multiplies_both_counts(session):
+    build_bracket(session)
+    solid = call(session, "catia_measure")["data"]["volume_mm3"]
+    hole = call(session, "catia_hole", {"face": "top", "position": "center", "diameter_mm": 3})
+    one_hole = solid - hole["data"]["volume_mm3"]
+
+    data = call(
+        session,
+        "catia_pattern_rectangular",
+        {
+            "plane": "XY",
+            "count": 3,
+            "spacing_mm": 6,
+            "second_count": 2,
+            "second_spacing_mm": 6,
+        },
+    )["data"]
+    assert solid - data["volume_mm3"] == pytest.approx(one_hole * 6, rel=1e-6)
+
+
+def test_a_grid_without_a_second_spacing_is_refused(session):
+    # Without it the second row lands on top of the first and the mass is a lie.
+    build_bracket(session)
+    call(session, "catia_hole", {"face": "top", "position": "center", "diameter_mm": 3})
     result = call(
-        session, "catia_pattern_rectangular", {"direction": "x", "count": 5, "spacing_mm": 8}
+        session,
+        "catia_pattern_rectangular",
+        {"plane": "XY", "count": 2, "spacing_mm": 6, "second_count": 2},
+    )
+    assert result["ok"] is False
+    assert "second_spacing_mm" in result["error"]
+
+
+def test_a_circular_pattern_counts_the_original_among_its_instances(session):
+    build_bracket(session)
+    solid = call(session, "catia_measure")["data"]["volume_mm3"]
+    hole = call(
+        session,
+        "catia_hole",
+        {"face": "top", "position": "front_left", "diameter_mm": 3},
+    )
+    one_hole = solid - hole["data"]["volume_mm3"]
+
+    data = call(session, "catia_pattern_circular", {"count": 6})["data"]
+    assert solid - data["volume_mm3"] == pytest.approx(one_hole * 6, rel=1e-6)
+
+
+def test_a_pattern_says_how_many_instances_were_asked_for(session):
+    # A pattern is trimmed silently where it overruns the part, so the count the
+    # caller asked for has to travel with the volume that resulted -- otherwise
+    # the only honest number is missing from the reply.
+    build_bracket(session)
+    call(session, "catia_hole", {"face": "top", "position": "center", "diameter_mm": 3})
+    data = call(
+        session,
+        "catia_pattern_rectangular",
+        {"plane": "XY", "count": 3, "spacing_mm": 6, "second_count": 2, "second_spacing_mm": 6},
+    )["data"]
+    assert data["instances_requested"] == 6
+
+    circ = call(session, "catia_pattern_circular", {"count": 4})["data"]
+    assert circ["instances_requested"] == 4
+
+
+def test_a_pattern_with_nothing_to_repeat_is_refused(session):
+    assert call(session, "catia_new_part", {"name": "Empty"})["ok"]
+    result = call(
+        session, "catia_pattern_rectangular", {"plane": "XY", "count": 3, "spacing_mm": 5}
     )
     assert result["ok"] is False
 

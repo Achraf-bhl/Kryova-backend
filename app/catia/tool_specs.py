@@ -53,11 +53,11 @@ FACE_POSITIONS = ("center", "front_left", "front_right", "back_left", "back_righ
 #: Which edges of a feature an operation applies to.
 EDGE_SELECTORS = ("all", "vertical", "horizontal", "top", "bottom")
 
-#: There is no pattern tool: on a live V5-R33 the only direction reference
-#: CATIA's pattern factory accepts (an origin plane) steps the instances
-#: diagonally rather than along that plane's normal, and a `direction`
-#: argument that silently produces a diagonal breaks this module's first rule.
-#: The full measurement is recorded in `scripts/catia_bridge/catia_com.py`.
+#: Which part axes a pattern runs along when it is drawn in a named plane.
+#: A pattern takes both its directions from one plane -- the first in-plane
+#: axis, then the second -- so naming the plane names the directions, and the
+#: model never handles a vector. Measured on a live V5-R33.
+PATTERN_PLANE_AXES = {"XY": ("X", "Y"), "YZ": ("Y", "Z"), "ZX": ("Z", "X")}
 
 #: Standard viewpoints for a screenshot.
 VIEWPOINTS = ("iso", "front", "back", "top", "bottom", "left", "right")
@@ -535,6 +535,104 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
                 "depth_mm",
                 "distance_from_end_mm",
             ],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_pattern_rectangular",
+        description=(
+            "Repeat a feature on an evenly spaced straight line or grid -- a row of "
+            "bolt holes, a rack of slots, a field of cooling holes. Much better than "
+            "calling catia_hole once per hole: it is a single feature the user can "
+            "edit afterwards and the count stays a parameter. Both directions come "
+            "from the plane you name: XY repeats along X then Y, YZ along Y then Z, "
+            "ZX along Z then X. Counts are TOTALS including the feature already "
+            "there, so count=5 leaves five holes in all. Repeats the last feature "
+            "built unless you name another. The pattern grows from the seed feature "
+            "outwards, and CATIA does NOT refuse copies that reach past the edge of "
+            "the part -- it cuts them short or drops them and reports success, so a "
+            "grid that does not fit comes back looking fine with fewer holes in it. "
+            "Work out where the seed sits and keep count x spacing inside the part, "
+            "then check volume_mm3 against what you expected before telling the user "
+            "how many holes there are."
+        ),
+        parameters=_object(
+            {
+                "plane": _enum(
+                    SKETCH_PLANES,
+                    "Plane the pattern lies in. XY repeats along X (then Y for a "
+                    "grid) -- the usual choice for features on the top of a plate.",
+                ),
+                "count": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 100,
+                    "description": (
+                        "Total instances along the plane's first axis, including "
+                        "the original."
+                    ),
+                },
+                "spacing_mm": _length("Centre-to-centre distance along the first axis."),
+                "second_count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": (
+                        "Total instances along the plane's second axis, for a grid. "
+                        "Leave at 1 (the default) for a single row."
+                    ),
+                },
+                "second_spacing_mm": _length(
+                    "Centre-to-centre distance along the second axis. Required "
+                    "whenever second_count is more than 1."
+                ),
+                "feature": _FEATURE_NAME,
+            },
+            required=["plane", "count", "spacing_mm"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_pattern_circular",
+        description=(
+            "Repeat a feature evenly around the centre of the part -- a bolt circle, "
+            "a ring of lightening holes, splines round a hub. The feature must "
+            "already be OFF-CENTRE: rotating something that sits on the axis puts "
+            "every copy back on top of it, and this tool refuses that rather than "
+            "reporting a bolt circle that is not there. Place the seed hole with "
+            "catia_hole's inset_mm to set the bolt-circle radius, then repeat it. "
+            "Copies that swing off the edge of the part are cut short or dropped "
+            "without an error, so keep the bolt-circle radius inside the material "
+            "and check volume_mm3 before quoting a hole count."
+        ),
+        parameters=_object(
+            {
+                "count": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 100,
+                    "description": (
+                        "Total instances including the original, spread evenly over "
+                        "total_angle_deg. 6 over the default 360 gives holes every 60 degrees."
+                    ),
+                },
+                "plane": _enum(
+                    SKETCH_PLANES,
+                    "Plane the ring lies in; the copies turn about this plane's "
+                    "normal. XY for features on the top of a plate. Default XY.",
+                ),
+                "total_angle_deg": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 360.0,
+                    "description": (
+                        "Angle the instances are spread over. Default 360 for a full "
+                        "circle; use less for an arc of holes."
+                    ),
+                },
+                "feature": _FEATURE_NAME,
+            },
+            required=["count"],
         ),
         tier=CatiaTier.WRITE,
     ),

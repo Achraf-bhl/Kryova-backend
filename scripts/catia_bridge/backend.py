@@ -179,6 +179,28 @@ class CatiaBackend(ABC):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
+    def pattern_rectangular(
+        self,
+        *,
+        plane: str,
+        count: int,
+        spacing_mm: float,
+        second_count: int = 1,
+        second_spacing_mm: float | None = None,
+        feature: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def pattern_circular(
+        self,
+        *,
+        count: int,
+        plane: str = "XY",
+        total_angle_deg: float = 360.0,
+        feature: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
     def shell(self, *, thickness_mm: float) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -235,6 +257,8 @@ TOOL_METHODS: dict[str, str] = {
     "catia_mirror": "mirror",
     "catia_sketch_revolve_profile": "sketch_revolve_profile",
     "catia_sketch_groove_profile": "sketch_groove_profile",
+    "catia_pattern_rectangular": "pattern_rectangular",
+    "catia_pattern_circular": "pattern_circular",
     "catia_shell": "shell",
     "catia_delete_feature": "delete_feature",
     "catia_list_features": "list_features",

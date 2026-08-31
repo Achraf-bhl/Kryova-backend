@@ -43,26 +43,18 @@ logger = logging.getLogger("kryova.catia.com")
 #: CATIA's reference planes, in the order `Part.OriginElements` exposes them.
 _ORIGIN_PLANE = {"XY": "PlaneXY", "YZ": "PlaneYZ", "ZX": "PlaneZX"}
 
-# There is deliberately no rectangular/circular pattern here yet, and the
-# reason is recorded so the next attempt starts from evidence rather than from
-# the same dead ends. All of this was measured on a live V5-R33:
-#
-# * `AddNewRectPattern` takes 12 positional arguments. Fewer raises "Nombre de
-#   paramètres non valide"; more is refused by pywin32.
-# * Its direction arguments refuse a HybridShape line, a HybridShape Direction
-#   and an AxisSystem -- each a bare "AddNewRectPattern a échoué". A reference
-#   to an origin *plane* is the only thing it accepts.
-# * But a plane reference does not mean "step along that plane's normal": the
-#   instances march off diagonally, advancing in two axes at once. On a 100x60
-#   plate a 5-instance pattern put three holes on the part, hung the fourth
-#   half off the edge and missed the plate entirely with the fifth.
-# * `AddNewCircPattern` behaves worse: with a plane it builds a feature that
-#   produces no copies at all, and with any line/direction/axis it fails.
-#
-# A `direction: x|y|z` argument that silently produces a diagonal is exactly
-# the "quietly builds the wrong part" failure this module's tool table exists
-# to prevent, so no pattern tool is exposed until a direction can actually be
-# controlled. A square test plate hides the bug -- test on a rectangle.
+#: A pattern's two directions both come from one origin plane: CATIA steps
+#: along that plane's *first* in-plane axis for direction 1 and its second for
+#: direction 2. Not along its normal, which is the reading that produced
+#: diagonal rows until it was measured properly on a live V5-R33.
+#:
+#: The other thing worth knowing, because it costs an afternoon otherwise:
+#: arguments 6 and 7 of `AddNewRectPattern`/`AddNewCircPattern` are the
+#: **1-based grid position of the original**, not repartition lengths. Passing
+#: 0.0 there leaves the seed outside the grid, so CATIA builds n*m copies and
+#: keeps the original as an extra -- five requested holes came out as six.
+#: Passing 1, 1 makes the seed instance (1,1) and the counts exact.
+_PATTERN_PLANE_AXES = {"XY": ("x", "y"), "YZ": ("y", "z"), "ZX": ("z", "x")}
 
 #: Which origin plane to sketch on for a hole in each named face, and which two
 #: components of a 3D point become the sketch's horizontal and vertical
@@ -765,12 +757,33 @@ class CatiaCom(CatiaBackend):
             raise CatiaOperationError(
                 "catia_pocket needs either depth_mm or through_all; neither was given."
             )
-        factory = self._part().ShapeFactory
+        part = self._part()
+        factory = part.ShapeFactory
+        before = self._solid_volume()
         pocket = factory.AddNewPocket(self._find_sketch(sketch), float(depth_mm or 1.0))
         if through_all:
             # 1 = catUpToLast in CATIA's length-type enumeration.
             pocket.FirstLimit.LimitMode = 1
-        self._part().Update()
+        part.Update()
+
+        # A sketch on an origin plane can sit on the far side of the solid, in
+        # which case the cut goes away from the material and takes nothing with
+        # it -- CATIA builds the feature and reports success either way. Do it
+        # and look, exactly as `hole` does; this is the same defect, and it was
+        # live here: the agent pocketed a 4x3 hole grid into a 140x100x8 plate
+        # and the part came back at 112000 mm3, its full solid volume, with the
+        # assistant reporting the holes as cut.
+        if before and self._solid_volume() >= before:
+            pocket.DirectionOrientation = 1
+            part.Update()
+
+        if before and self._solid_volume() >= before:
+            raise CatiaOperationError(
+                f"The pocket from {sketch} removed no material, so it missed the "
+                "solid entirely. Check that the sketch overlaps the part -- a profile "
+                "drawn on an origin plane the solid does not straddle cuts into empty "
+                "space."
+            )
         return self._feature_result(str(pocket.Name))
 
     def hole(  # pragma: no cover - Windows only
@@ -1099,6 +1112,156 @@ class CatiaCom(CatiaBackend):
             "area_mm2": round(float(depth_mm) * float(width_mm), 4),
             "features": self._feature_list(),
         }
+
+    def pattern_rectangular(  # pragma: no cover - Windows only
+        self,
+        *,
+        plane: str,
+        count: int,
+        spacing_mm: float,
+        second_count: int = 1,
+        second_spacing_mm: float | None = None,
+        feature: str | None = None,
+    ) -> dict[str, Any]:
+        """Repeat a feature on a grid lying in one of the origin planes.
+
+        `count` and `second_count` are totals *including* the feature already
+        there, because the seed is placed at grid position (1, 1) -- see
+        `_PATTERN_PLANE_AXES`. Both directions come from the one plane: for XY
+        that is X then Y.
+        """
+        part = self._part()
+        target = self._shape_or_last(feature)
+        reference = part.CreateReferenceFromObject(getattr(part.OriginElements, _ORIGIN_PLANE[plane]))
+        second = int(second_count or 1)
+        step2 = float(second_spacing_mm if second_spacing_mm is not None else 0.0)
+        if second > 1 and step2 <= 0.0:
+            raise CatiaOperationError(
+                "second_spacing_mm is needed whenever second_count is more than 1, "
+                "or the second row lands on top of the first."
+            )
+
+        try:
+            pattern = part.ShapeFactory.AddNewRectPattern(
+                target, int(count), second, float(spacing_mm), step2, 1, 1,
+                reference, reference, True, True, 0.0,
+            )
+            part.Update()
+        except Exception as exc:  # noqa: BLE001
+            first_axis, second_axis = _PATTERN_PLANE_AXES[plane]
+            raise CatiaOperationError(
+                f"CATIA could not repeat {target.Name} {count} times along "
+                f"{first_axis} ({exc}). Check the count and spacing against the "
+                f"part's size along {first_axis}"
+                + (f" and {second_axis}" if second > 1 else "")
+                + "."
+            ) from exc
+        return self._pattern_result(pattern, int(count) * second)
+
+    def _pattern_result(self, pattern: Any, instances: int) -> dict[str, Any]:
+        """A pattern's post-state, saying plainly how many instances were asked for.
+
+        A pattern is laid out from the seed outwards, so copies can fall past
+        the edge of the part -- and CATIA does not refuse that. It builds the
+        feature and silently cuts only the copies that meet material, leaving
+        partial holes at the boundary. Measured live: a 4x3 grid at 25 mm on a
+        140x100 plate with the seed at the origin removed 7.5 holes' worth of
+        material, not 12, and nothing in the result said so.
+
+        The count cannot be recovered from the volume without knowing what one
+        instance removes, so this does not guess. It states the number
+        requested and leaves the reported volume beside it, which is what lets
+        a caller notice the two disagree.
+        """
+        result = self._feature_result(str(pattern.Name))
+        result["instances_requested"] = instances
+        result["instance_note"] = (
+            f"{instances} instances were requested, counting the original. Copies "
+            "that reach past the edge of the part are cut short or dropped without "
+            "an error, so confirm volume_mm3 against the shape you expected before "
+            "telling the user how many features there are."
+        )
+        return result
+
+    def pattern_circular(  # pragma: no cover - Windows only
+        self,
+        *,
+        count: int,
+        plane: str = "XY",
+        total_angle_deg: float = 360.0,
+        feature: str | None = None,
+    ) -> dict[str, Any]:
+        """Repeat a feature evenly around the origin, in the named plane.
+
+        The seed must sit *off* the axis: rotating something already centred
+        produces copies on top of it and changes nothing, which is what this
+        looked like before the arguments were right.
+
+        CATIA wants a point for the centre of rotation and this bridge has no
+        vocabulary for one, so a sketch holding a single point at the origin is
+        made on demand -- the same on-demand trick `_sketch_with_axis` uses for
+        the revolution axis.
+        """
+        part = self._part()
+        target = self._shape_or_last(feature)
+
+        sketch = self._body().Sketches.Add(getattr(part.OriginElements, _ORIGIN_PLANE[plane]))
+        factory = sketch.OpenEdition()
+        try:
+            factory.CreatePoint(0.0, 0.0)
+        finally:
+            sketch.CloseEdition()
+        part.Update()
+
+        centre = part.CreateReferenceFromObject(sketch)
+        axis = part.CreateReferenceFromObject(getattr(part.OriginElements, _ORIGIN_PLANE[plane]))
+        step_deg = float(total_angle_deg) / int(count)
+
+        before = self._solid_volume()
+        try:
+            pattern = part.ShapeFactory.AddNewCircPattern(
+                target, 1, int(count), 0.0, step_deg, 1, 1, centre, axis, True, 0.0, False
+            )
+            part.Update()
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA could not repeat {target.Name} {count} times around the "
+                f"{plane} plane ({exc}). Two things cause this: the feature sits on "
+                "the axis, so every copy lands on top of it -- give it an off-centre "
+                "position first, with catia_hole's inset_mm -- or the copies swing "
+                "off the edge of the material, which fails rather than trimming."
+            ) from exc
+
+        result = self._pattern_result(pattern, int(count))
+        if isinstance(result.get("volume_mm3"), (int, float)) and before and count > 1:
+            # A centred seed rotates onto itself: the feature builds, nothing
+            # changes, and the caller is told a bolt circle exists that does not.
+            if abs(float(result["volume_mm3"]) - before) < 1e-6:
+                raise CatiaOperationError(
+                    f"Repeating {target.Name} around the {plane} plane changed nothing, "
+                    "so the copies landed on top of the original. A circular pattern "
+                    "needs a feature that is off-centre; move it away from the axis first."
+                )
+        return result
+
+    def _shape_or_last(self, feature: str | None) -> Any:  # pragma: no cover
+        """The named shape, or the most recently built one when none is named."""
+        body = self._body()
+        if feature:
+            try:
+                return body.Shapes.Item(feature)
+            except Exception as exc:  # noqa: BLE001
+                known = ", ".join(entry["name"] for entry in self._feature_list()) or "(none)"
+                raise CatiaOperationError(
+                    f"No feature named {feature!r} in this part. Features: {known}."
+                ) from exc
+        shapes = body.Shapes
+        if int(shapes.Count) == 0:
+            raise CatiaOperationError(
+                "This part has no features yet, so there is nothing to repeat. Build "
+                "one with catia_pad, catia_pocket or catia_hole first."
+            )
+        return shapes.Item(int(shapes.Count))
 
     def shell(self, *, thickness_mm: float) -> dict[str, Any]:  # pragma: no cover
         """Hollow the solid out, leaving walls of `thickness_mm`.

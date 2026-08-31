@@ -630,3 +630,69 @@ class TestAChosenDensityStaysWithItsDocument:
         assert measured["material_applied"] is False
         assert measured["mass_is_provisional"] is True
         assert "NOT the real mass" in measured["mass_warning"]
+
+
+class TestAPocketThatCutsNothingIsRefused:
+    """A pocket aimed away from the solid builds happily and removes nothing.
+
+    `hole` has guarded against this since it was written -- it cuts, looks at
+    the volume, flips the direction and looks again. `pocket` did neither, so a
+    profile sketched on an origin plane the solid does not straddle produced a
+    feature, a success frame and an unchanged part. Measured live: the agent
+    pocketed a 4x3 grid of 6.5 mm holes into a 140x100x8 plate and it came back
+    at 112000 mm3 -- its full solid volume -- while the reply described the
+    holes as cut.
+    """
+
+    @staticmethod
+    def _com_with_pocket(tmp_path: Path, volumes: list[float]) -> tuple[CatiaCom, dict]:
+        com = _com(tmp_path)
+        state: dict = {"flipped": False, "updates": 0}
+
+        class _Limit:
+            LimitMode = 0
+
+        class _Pocket:
+            Name = "Poche.1"
+            FirstLimit = _Limit()
+
+            def __setattr__(self, key, value):
+                if key == "DirectionOrientation":
+                    state["flipped"] = True
+                object.__setattr__(self, key, value)
+
+        class _Factory:
+            @staticmethod
+            def AddNewPocket(_sketch, _depth):
+                return _Pocket()
+
+        class _PartWithFactory:
+            ShapeFactory = _Factory()
+
+            @staticmethod
+            def Update():
+                state["updates"] += 1
+
+        com._part = lambda: _PartWithFactory()  # type: ignore[method-assign]
+        com._find_sketch = lambda _name: object()  # type: ignore[method-assign]
+        com._feature_result = lambda name: {"feature": name}  # type: ignore[method-assign]
+        readings = iter(volumes)
+        com._solid_volume = lambda: next(readings)  # type: ignore[method-assign]
+        return com, state
+
+    def test_it_flips_the_direction_before_giving_up(self, tmp_path: Path) -> None:
+        # before=1000, still 1000 after the first cut, 900 once reversed.
+        com, state = self._com_with_pocket(tmp_path, [1000.0, 1000.0, 900.0])
+        result = com.pocket(sketch="Sketch.1", through_all=True)
+        assert result["feature"] == "Poche.1"
+        assert state["flipped"], "a pocket that removed nothing must try the other direction"
+
+    def test_it_refuses_when_neither_direction_cuts(self, tmp_path: Path) -> None:
+        com, _ = self._com_with_pocket(tmp_path, [1000.0, 1000.0, 1000.0])
+        with pytest.raises(CatiaOperationError, match="removed no material"):
+            com.pocket(sketch="Sketch.1", through_all=True)
+
+    def test_a_pocket_that_cuts_straight_away_is_left_alone(self, tmp_path: Path) -> None:
+        com, state = self._com_with_pocket(tmp_path, [1000.0, 800.0, 800.0])
+        com.pocket(sketch="Sketch.1", through_all=True)
+        assert not state["flipped"], "a working pocket must not be reversed"

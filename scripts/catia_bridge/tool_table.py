@@ -212,6 +212,34 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         ),
         (),
     ),
+    "catia_pattern_rectangular": (
+        WRITE,
+        _object(
+            {
+                "plane": {"type": "string", "enum": SKETCH_PLANES},
+                "count": {"type": "integer", "minimum": 2, "maximum": 100},
+                "spacing_mm": _length(),
+                "second_count": {"type": "integer", "minimum": 1, "maximum": 100},
+                "second_spacing_mm": _length(),
+                "feature": _NAME,
+            },
+            ["plane", "count", "spacing_mm"],
+        ),
+        (),
+    ),
+    "catia_pattern_circular": (
+        WRITE,
+        _object(
+            {
+                "count": {"type": "integer", "minimum": 2, "maximum": 100},
+                "plane": {"type": "string", "enum": SKETCH_PLANES},
+                "total_angle_deg": {"type": "number", "exclusiveMinimum": 0, "maximum": 360.0},
+                "feature": _NAME,
+            },
+            ["count"],
+        ),
+        (),
+    ),
     "catia_shell": (
         WRITE,
         _object({"thickness_mm": _length(1_000.0)}, ["thickness_mm"]),

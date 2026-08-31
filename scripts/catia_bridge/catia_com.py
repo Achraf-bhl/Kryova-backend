@@ -348,6 +348,20 @@ class CatiaCom(CatiaBackend):
         part = self._part()
         return part.MainBody
 
+    def _document_key(self) -> str | None:  # pragma: no cover - Windows only
+        """Identity of the active document, for state that must not outlive it.
+
+        The full path where there is one; a new document that has not been
+        saved yet has only a name. None when nothing is open, which never
+        matches a recorded key -- the safe direction, since a density that
+        cannot be tied to a document must not be applied to one.
+        """
+        try:
+            document = self._app.ActiveDocument
+            return str(getattr(document, "FullName", "") or document.Name)
+        except Exception:  # noqa: BLE001 - "no document" is a legitimate answer
+            return None
+
     # -- documents -----------------------------------------------------------
 
     def new_part(self, *, name: str) -> dict[str, Any]:  # pragma: no cover - Windows only
@@ -459,7 +473,17 @@ class CatiaCom(CatiaBackend):
         material is attached, so the mass Kryova quotes and the mass the CATPart
         itself reports are the same number.
         """
+        # Tagged with the document it belongs to. The daemon outlives any one
+        # part, so an untagged density silently followed the engineer into the
+        # next one: after any part had a material set, every later part -- a
+        # brand new one included -- was measured at that density, and because
+        # the override moved the number away from CATIA's 1000 kg/m3 default it
+        # also suppressed the `mass_is_provisional` warning below. Observed
+        # live: a fresh 10 mm cube with no material reported 2700 kg/m3 and
+        # "material_applied": true, inherited from an aluminium plate built in
+        # an earlier conversation, and the agent quoted the mass as fact.
         self._density_kg_m3 = float(density_kg_m3)
+        self._density_document = self._document_key()
         applied, detail = self._apply_catalogue_material(material)
         try:
             self._part().Update()
@@ -1317,8 +1341,10 @@ class CatiaCom(CatiaBackend):
         # the user said "steel". The density here came from Kryova's own library,
         # so the mass is right on every workstation rather than only the licensed
         # ones. CATIA wins only when it has a real material of its own.
+        # ...but only for the document it was chosen for. See `set_material`.
         chosen = getattr(self, "_density_kg_m3", None)
-        if chosen and abs(density_kg_m3 - CATIA_DEFAULT_DENSITY_KG_M3) <= 5.0:
+        belongs_here = getattr(self, "_density_document", None) == self._document_key()
+        if chosen and belongs_here and abs(density_kg_m3 - CATIA_DEFAULT_DENSITY_KG_M3) <= 5.0:
             density_kg_m3 = float(chosen)
             mass_kg = volume_mm3 * 1e-9 * density_kg_m3
 

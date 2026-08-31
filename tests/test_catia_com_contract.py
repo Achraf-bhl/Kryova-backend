@@ -592,3 +592,41 @@ class TestABoltPatternCanStateItsInset:
         }
         validate(arguments, TOOL_SPECS_BY_NAME["catia_hole"].parameters)
         check_call("catia_hole", arguments, approval_token=None)
+
+
+class TestAChosenDensityStaysWithItsDocument:
+    """A material set on one part must not weigh the next one.
+
+    `CatiaCom` lives as long as the daemon does, so state kept on it outlives
+    any single document. The chosen density was kept that way, and followed the
+    engineer into every part built afterwards: a brand new 10 mm cube with no
+    material reported 2700 kg/m3 inherited from an aluminium plate built in an
+    earlier conversation. Worse than the wrong number, the override moved the
+    density away from CATIA's 1000 kg/m3 default, which is the very test
+    `_measure_solid` uses to decide whether to warn -- so the wrong mass came
+    back as authoritative with `mass_is_provisional: false`.
+    """
+
+    def test_the_density_applies_to_the_document_it_was_set_on(self, tmp_path: Path) -> None:
+        com = _com(tmp_path)
+        com.set_material(material="aluminium-6061-t6", density_kg_m3=2700.0)
+
+        measured = com._measure_solid()
+        assert measured["density_kg_m3"] == pytest.approx(2700.0)
+        assert measured["material_applied"] is True
+        assert measured["mass_is_provisional"] is False
+
+    def test_a_different_document_is_not_weighed_with_it(self, tmp_path: Path) -> None:
+        com = _com(tmp_path)
+        com.set_material(material="aluminium-6061-t6", density_kg_m3=2700.0)
+
+        # The engineer moves on to a new part. The stub's solid is unchanged, so
+        # any difference here is the leak and nothing else.
+        com._app.document = _Document()
+        com._app.document.Name = "Something-else.CATPart"
+
+        measured = com._measure_solid()
+        assert measured["density_kg_m3"] == pytest.approx(1000.0)
+        assert measured["material_applied"] is False
+        assert measured["mass_is_provisional"] is True
+        assert "NOT the real mass" in measured["mass_warning"]

@@ -276,9 +276,9 @@ def test_status_requires_a_session(client):
 def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client):
     tools = auth_client.get(f"{PREFIX}/tools").json()["tools"]
     # A deliberate count, so adding or losing a tool is never silent. 30 since
-    # the five additions (sketch_revolve_profile, sketch_groove_profile, shell,
-    # pattern_rectangular, pattern_circular) joined the 25.
-    assert len(tools) == 30
+    # the six additions (sketch_revolve_profile, sketch_groove_profile, shell,
+    # pattern_rectangular, pattern_circular, sketch_gear_profile) joined the 25.
+    assert len(tools) == 31
     by_name = {tool["name"]: tool for tool in tools}
     assert by_name["catia_measure"]["tier"] == "read"
     assert by_name["catia_measure"]["mutating"] is False

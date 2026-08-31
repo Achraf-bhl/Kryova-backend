@@ -376,10 +376,15 @@ class TestFrozenScriptLibrary:
     def test_the_library_is_small_and_named(self) -> None:
         from catia_bridge import vba
 
-        # Every entry is a hand-written constant in that module. If this number
+        # Every entry is a hand-written constant in that module. If this set
         # grows, someone added a script -- which is exactly when a human should
-        # be looking at it.
-        assert set(vba._ALLOWED.values()) == {"KryovaCentreOfGravity"}
+        # be looking at it. KryovaPointsOnCurve was reviewed in: it measures an
+        # edge's start/middle/end so fillet and chamfer can pick edges by
+        # meaning, and takes only (part, reference).
+        assert set(vba._ALLOWED.values()) == {
+            "KryovaCentreOfGravity",
+            "KryovaPointsOnCurve",
+        }
 
     def test_no_script_interpolates_anything(self) -> None:
         from catia_bridge import vba

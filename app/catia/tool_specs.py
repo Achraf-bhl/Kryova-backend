@@ -395,14 +395,16 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
     CatiaToolSpec(
         name="catia_fillet",
         description=(
-            "Round edges by a radius. On real CATIA this bridge cannot yet target "
-            "a specific edge or face -- there is no version-independent way to "
-            "reference one over automation -- so it always tries to fillet the "
-            "whole body's edge set at once (the `edges` parameter is accepted but "
-            "not honoured) and a real solid usually refuses that outright, whatever "
-            "the radius. Expect this to fail on anything but the simplest body; do "
-            "not retry with a different radius or length after a failure here, and "
-            "tell the user the fillet was not applied rather than claiming it was."
+            "Round edges by a radius. Reach for this when a result interpretation "
+            "blames a stress concentration on a sharp internal corner -- a fillet "
+            "is usually the cheapest fix available, and re-running the simulation "
+            "afterwards is how you show it worked. `edges` picks which edges by "
+            "their geometry: 'top' and 'bottom' are the highest and lowest edge "
+            "loops, 'vertical' the edges running straight up, 'horizontal' every "
+            "level edge, 'all' everything. Name a `feature` to round only that "
+            "feature's own edges (a groove's rim, a boss's crown). If CATIA "
+            "refuses, the radius is too large for the adjacent faces -- try a "
+            "smaller one before giving up, and the part is left exactly as it was."
         ),
         parameters=_object(
             {
@@ -420,12 +422,13 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
     CatiaToolSpec(
         name="catia_chamfer",
         description=(
-            "Break edges with a chamfer of a given length and angle. Use for "
-            "assembly lead-ins and deburring callouts; use catia_fillet instead when "
-            "the goal is to reduce stress. Shares catia_fillet's real-CATIA "
-            "limitation: it cannot target a specific edge or face, always acts on "
-            "the whole body, and a real solid usually refuses that -- do not retry "
-            "with a different length or angle after a failure here."
+            "Break edges with a chamfer of a given leg length and angle. Use for "
+            "assembly lead-ins and deburring callouts; use catia_fillet instead "
+            "when the goal is to reduce stress. Targets edges exactly the way "
+            "catia_fillet does: `edges` selects by geometry (top / bottom / "
+            "vertical / horizontal / all) and `feature` narrows to one feature's "
+            "edges. A refusal leaves the part unchanged; a smaller leg usually "
+            "fixes it."
         ),
         parameters=_object(
             {
@@ -535,6 +538,50 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
                 "depth_mm",
                 "distance_from_end_mm",
             ],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_sketch_gear_profile",
+        description=(
+            "Draw the closed outline of an involute spur gear, centred on the "
+            "origin, ready to turn into a solid. This is how gears are made here: "
+            "for an EXTERNAL gear, draw this profile and catia_pad it to the face "
+            "width. For an INTERNAL (ring) gear, first pad a plain disc larger than "
+            "the gear's tip diameter, then draw this profile and catia_pocket it "
+            "through -- the teeth then point inward. Give the module and tooth "
+            "count; pitch, tip and root diameters come back so you can size the "
+            "blank. The involute flanks are drawn as fine line segments -- correct "
+            "for CAD models and FEA meshing, not a manufacturing-grade flank -- and "
+            "the root has no trochoidal fillet, so add a small catia_fillet on the "
+            "gear feature if a result interpretation flags root stress."
+        ),
+        parameters=_object(
+            {
+                "plane": _enum(SKETCH_PLANES, "Plane to draw on; XY then pad along Z."),
+                "module_mm": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 50.0,
+                    "description": (
+                        "Gear module in millimetres (pitch diameter = module x teeth). "
+                        "Meshing gears must share it."
+                    ),
+                },
+                "teeth": {
+                    "type": "integer",
+                    "minimum": 6,
+                    "maximum": 100,
+                    "description": "Number of teeth.",
+                },
+                "pressure_angle_deg": {
+                    "type": "number",
+                    "minimum": 10.0,
+                    "maximum": 30.0,
+                    "description": "Pressure angle in degrees. Default 20, the ISO standard.",
+                },
+            },
+            required=["plane", "module_mm", "teeth"],
         ),
         tier=CatiaTier.WRITE,
     ),

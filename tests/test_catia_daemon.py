@@ -463,6 +463,66 @@ def test_a_pattern_says_how_many_instances_were_asked_for(session):
     assert circ["instances_requested"] == 4
 
 
+def test_a_gear_profile_pads_to_its_own_shoelace_area(session):
+    # Every face of the padded gear is planar, so volume = outline area x
+    # length exactly -- the same identity the live-CATIA verification uses.
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from catia_bridge import gear
+
+    assert call(session, "catia_new_part", {"name": "Gear"})["ok"]
+    profile = call(
+        session,
+        "catia_sketch_gear_profile",
+        {"plane": "XY", "module_mm": 2, "teeth": 20},
+    )["data"]
+    expected_area = gear.area_mm2(gear.outline(2, 20))
+    assert profile["area_mm2"] == pytest.approx(expected_area, rel=1e-6)
+    assert profile["pitch_diameter_mm"] == pytest.approx(40.0)
+    assert profile["tip_diameter_mm"] == pytest.approx(44.0)
+
+    padded = call(session, "catia_pad", {"sketch": profile["sketch"], "length_mm": 10})["data"]
+    assert padded["volume_mm3"] == pytest.approx(expected_area * 10, rel=1e-6)
+
+
+def test_an_internal_gear_is_a_disc_minus_the_gear_outline(session):
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from catia_bridge import gear
+
+    assert call(session, "catia_new_part", {"name": "Ring gear"})["ok"]
+    assert call(session, "catia_sketch_circle", {"plane": "XY", "diameter_mm": 60})["ok"]
+    disc = call(session, "catia_pad", {"sketch": "Sketch.1", "length_mm": 8})["data"]
+
+    profile = call(
+        session,
+        "catia_sketch_gear_profile",
+        {"plane": "XY", "module_mm": 2, "teeth": 20},
+    )["data"]
+    cut = call(
+        session, "catia_pocket", {"sketch": profile["sketch"], "through_all": True}
+    )["data"]
+    gear_area = gear.area_mm2(gear.outline(2, 20))
+    assert disc["volume_mm3"] - cut["volume_mm3"] == pytest.approx(gear_area * 8, rel=1e-6)
+
+
+def test_a_gear_with_too_few_teeth_is_refused(session):
+    assert call(session, "catia_new_part", {"name": "Bad gear"})["ok"]
+    result = call(
+        session, "catia_sketch_gear_profile", {"plane": "XY", "module_mm": 2, "teeth": 6}
+    )
+    # 6 is the schema minimum and builds; 5 must be refused by the schema.
+    assert result["ok"] is True
+    refused = call(
+        session, "catia_sketch_gear_profile", {"plane": "XY", "module_mm": 2, "teeth": 5}
+    )
+    assert refused["ok"] is False
+
+
 def test_a_pattern_with_nothing_to_repeat_is_refused(session):
     assert call(session, "catia_new_part", {"name": "Empty"})["ok"]
     result = call(

@@ -212,6 +212,19 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         ),
         (),
     ),
+    "catia_sketch_gear_profile": (
+        WRITE,
+        _object(
+            {
+                "plane": {"type": "string", "enum": SKETCH_PLANES},
+                "module_mm": {"type": "number", "exclusiveMinimum": 0, "maximum": 50.0},
+                "teeth": {"type": "integer", "minimum": 6, "maximum": 100},
+                "pressure_angle_deg": {"type": "number", "minimum": 10.0, "maximum": 30.0},
+            },
+            ["plane", "module_mm", "teeth"],
+        ),
+        (),
+    ),
     "catia_pattern_rectangular": (
         WRITE,
         _object(

@@ -66,10 +66,33 @@ Function KryovaCentreOfGravity(part, element)
 End Function
 """
 
+#: Start, middle and end of an edge, nine numbers in millimetres.
+#:
+#: This is what makes edges *selectable by meaning*: an edge reference from
+#: `Selection.Search` is anonymous, and the only way to say "the top edges" is
+#: to measure where each one actually is. `GetPointsOnCurve` fills a 9-slot
+#: SAFEARRAY -- exactly the out-parameter shape pywin32 cannot marshal -- so it
+#: goes through here like `GetCOG` does. Millimetres, measured live.
+POINTS_ON_CURVE = """\
+Function KryovaPointsOnCurve(part, ref)
+    Dim spa, measurable, pts(8), out, i
+    Set spa = part.Parent.GetWorkbench("SPAWorkbench")
+    Set measurable = spa.GetMeasurable(ref)
+    measurable.GetPointsOnCurve pts
+    out = ""
+    For i = 0 To 8
+        If i > 0 Then out = out & ";"
+        out = out & CStr(pts(i))
+    Next
+    KryovaPointsOnCurve = out
+End Function
+"""
+
 #: Every script this module will run, and the function each one exposes.
 #: `run` checks membership, so nothing outside this mapping can be evaluated.
 _ALLOWED: dict[str, str] = {
     CENTRE_OF_GRAVITY: "KryovaCentreOfGravity",
+    POINTS_ON_CURVE: "KryovaPointsOnCurve",
 }
 
 
@@ -119,3 +142,24 @@ def centre_of_gravity(app: Any, part: Any, element: Any) -> tuple[float, float, 
     Also the way to read a point's position -- see `CENTRE_OF_GRAVITY`.
     """
     return _triple(run(app, CENTRE_OF_GRAVITY, [part, element]))
+
+
+Point = tuple[float, float, float]
+
+
+def points_on_curve(app: Any, part: Any, reference: Any) -> tuple[Point, Point, Point]:
+    """(start, middle, end) of an edge, each (x, y, z) in millimetres.
+
+    Unlike `centre_of_gravity` this takes a *Reference*, not an element: edge
+    references arrive from `Selection.Search` already wrapped, and re-wrapping
+    one with `CreateReferenceFromObject` is refused by CATIA.
+    """
+    raw = str(run(app, POINTS_ON_CURVE, [part, reference]))
+    parts = raw.split(";")
+    if len(parts) != 9:
+        raise VbaUnavailable(f"Expected nine coordinates from CATIA, got {raw!r}.")
+    try:
+        values = [float(part.strip().replace(",", ".")) for part in parts]
+    except ValueError as exc:
+        raise VbaUnavailable(f"CATIA returned unparseable coordinates {raw!r}.") from exc
+    return tuple(values[0:3]), tuple(values[3:6]), tuple(values[6:9])  # type: ignore[return-value]

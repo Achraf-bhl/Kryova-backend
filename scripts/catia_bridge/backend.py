@@ -179,6 +179,16 @@ class CatiaBackend(ABC):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
+    def sketch_gear_profile(
+        self,
+        *,
+        plane: str,
+        module_mm: float,
+        teeth: int,
+        pressure_angle_deg: float = 20.0,
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
     def pattern_rectangular(
         self,
         *,
@@ -257,6 +267,7 @@ TOOL_METHODS: dict[str, str] = {
     "catia_mirror": "mirror",
     "catia_sketch_revolve_profile": "sketch_revolve_profile",
     "catia_sketch_groove_profile": "sketch_groove_profile",
+    "catia_sketch_gear_profile": "sketch_gear_profile",
     "catia_pattern_rectangular": "pattern_rectangular",
     "catia_pattern_circular": "pattern_circular",
     "catia_shell": "shell",

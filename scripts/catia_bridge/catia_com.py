@@ -35,7 +35,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from . import vba
+from . import gear, vba
 from .backend import CatiaBackend, CatiaOperationError
 
 logger = logging.getLogger("kryova.catia.com")
@@ -80,18 +80,14 @@ _SKETCH_FRAME = {
 #: subtracting it from a distance does not lose precision in a double.
 _BBOX_REACH = 10_000.0
 
-#: fillet()/chamfer() error text. `edges` (the tool's own targeting parameter,
-#: e.g. "top") is never honoured -- see `_edge_reference` -- so the message
-#: says that up front instead of blaming the radius or length, which the
-#: previous wording did and which sent a caller retrying smaller values
-#: forever against a request that could never succeed.
-_EDGE_OPERATION_UNSUPPORTED = (
-    "CATIA refused this {op}: {exc}. This bridge cannot yet target specific "
-    "edges or faces on a real CATIA part (no reliable, version-independent way "
-    "to reference one is exposed to automation) -- {op} always acts on the "
-    "whole body's edge set, and a real CATIA solid usually rejects that as a "
-    "single constant-radius/length operation. Retrying with a different "
-    "radius or length will not fix this."
+#: `Selection.Search` grammars, one per CATIA UI language. The query keywords
+#: are LOCALIZED -- a French CATIA answers "La méthode Search a échoué" to
+#: "Topology.Edge,all" and 16 edges to "Topologie.Arête,tout" -- which is why
+#: every earlier attempt here concluded Search was broken. `_edge_search`
+#: detects which grammar this session speaks once and remembers it.
+_SEARCH_GRAMMARS: tuple[tuple[str, str], ...] = (
+    ("Topologie.Arête,tout", "fr"),
+    ("Topology.Edge,all", "en"),
 )
 
 #: `CatCaptureFormat`'s JPEG member. The full enumeration is CGM(0), EMF(1),
@@ -705,6 +701,46 @@ class CatiaCom(CatiaBackend):
             "features": self._feature_list(),
         }
 
+    def sketch_gear_profile(  # pragma: no cover - Windows only
+        self,
+        *,
+        plane: str,
+        module_mm: float,
+        teeth: int,
+        pressure_angle_deg: float = 20.0,
+    ) -> dict[str, Any]:
+        """The closed outline of an involute spur gear, ready to pad or pocket.
+
+        The geometry comes from `gear.outline` -- pure math shared with the
+        mock -- and is drawn as one closed chain of lines. Every face of the
+        padded result is planar, so the padded volume equals the outline's
+        shoelace area times the pad length exactly, which is what the tests
+        check against live CATIA.
+        """
+        try:
+            points = gear.outline(float(module_mm), int(teeth), float(pressure_angle_deg))
+        except ValueError as exc:
+            raise CatiaOperationError(str(exc)) from exc
+
+        def draw(factory: Any) -> None:
+            for index, (x0, y0) in enumerate(points):
+                x1, y1 = points[(index + 1) % len(points)]
+                factory.CreateLine(x0, y0, x1, y1)
+
+        name = self._sketch(plane, draw)
+        return {
+            "feature": name,
+            "sketch": name,
+            "plane": plane,
+            "shape": f"gear-{teeth}",
+            "module_mm": float(module_mm),
+            "teeth": int(teeth),
+            "pressure_angle_deg": float(pressure_angle_deg),
+            "area_mm2": round(gear.area_mm2(points), 4),
+            **{k: round(v, 4) for k, v in gear.dimensions(module_mm, teeth).items()},
+            "features": self._feature_list(),
+        }
+
     def _sketch(self, plane: str, draw: Any) -> str:  # pragma: no cover - Windows only
         part = self._part()
         origin = part.OriginElements
@@ -876,17 +912,47 @@ class CatiaCom(CatiaBackend):
         self, *, radius_mm: float, feature: str | None = None, edges: str = "all"
     ) -> dict[str, Any]:
         part = self._part()
-        target = self._edge_reference(feature)
+        selected = self._select_edges(edges, feature)
+        edge_fillet = None
         try:
             # 1 = catTangencyFilletEdgePropagation, which follows a chain of
             # tangent edges -- the behaviour a user means by "round that corner".
             edge_fillet = part.ShapeFactory.AddNewEdgeFilletWithConstantRadius(
-                target, 1, float(radius_mm)
+                selected[0], 1, float(radius_mm)
             )
+            for reference in selected[1:]:
+                edge_fillet.AddObjectToFillet(reference)
+            part.Update()
         except Exception as exc:  # noqa: BLE001
-            raise CatiaOperationError(_EDGE_OPERATION_UNSUPPORTED.format(op="fillet", exc=exc)) from exc
-        part.Update()
+            self._discard_failed_feature(edge_fillet)
+            raise CatiaOperationError(
+                f"CATIA refused a {radius_mm:g} mm fillet on the {edges} edges "
+                f"({exc}). The radius is usually too large for the adjacent faces "
+                "-- try a smaller one -- or two of the selected edges meet in a "
+                "corner the fillet cannot resolve; fillet fewer edges at once."
+            ) from exc
         return self._feature_result(str(edge_fillet.Name))
+
+    def _discard_failed_feature(self, shape: Any) -> None:  # pragma: no cover
+        """Remove a feature whose Update failed, so the part stays buildable.
+
+        A refused fillet is not a no-op: `AddNew...` already put the feature in
+        the tree, and after the failed Update it sits there in an error state
+        that makes every LATER Update fail too. Observed live: a 200 mm fillet
+        was refused with a clean message, and a perfectly reasonable 1 mm
+        fillet on the same part then failed with the same bare COM error. The
+        refusal must take its wreckage with it.
+        """
+        if shape is None:
+            return
+        try:
+            selection = self._document().Selection
+            selection.Clear()
+            selection.Add(shape)
+            selection.Delete()
+            self._part().Update()
+        except Exception:  # noqa: BLE001 - cleanup must never mask the real error
+            logger.warning("Could not remove a failed feature from the tree", exc_info=True)
 
     def chamfer(  # pragma: no cover - Windows only
         self,
@@ -897,41 +963,150 @@ class CatiaCom(CatiaBackend):
         edges: str = "all",
     ) -> dict[str, Any]:
         part = self._part()
-        target = self._edge_reference(feature)
+        selected = self._select_edges(edges, feature)
+        chamfer = None
         try:
-            # (propagation=1 tangency, mode=0 length/angle)
+            # (propagation=1 tangency, mode=1 length+angle, orientation=0).
+            # Mode 0 is TWO LENGTHS: it reads the 45.0 default as a 45 mm
+            # second leg, which cost one live part 1800 mm3 from a single edge
+            # before the enum was swept. Verified: mode=1 with leg 4 at 45deg
+            # removes exactly 0.5 * 4^2 * h per edge.
             chamfer = part.ShapeFactory.AddNewChamfer(
-                target, 1, 0, 1, float(length_mm), float(angle_deg)
+                selected[0], 1, 1, 0, float(length_mm), float(angle_deg)
             )
+            for reference in selected[1:]:
+                chamfer.AddElementToChamfer(reference)
+            part.Update()
         except Exception as exc:  # noqa: BLE001
-            raise CatiaOperationError(_EDGE_OPERATION_UNSUPPORTED.format(op="chamfer", exc=exc)) from exc
-        part.Update()
+            self._discard_failed_feature(chamfer)
+            raise CatiaOperationError(
+                f"CATIA refused a {length_mm:g} mm chamfer on the {edges} edges "
+                f"({exc}). The leg length is usually too large for the adjacent "
+                "faces; try a smaller one, or chamfer fewer edges at once."
+            ) from exc
         return self._feature_result(str(chamfer.Name))
 
-    def _edge_reference(self, feature: str | None) -> Any:  # pragma: no cover
-        """A reference for AddNewEdgeFilletWithConstantRadius/AddNewChamfer.
+    def _edge_search(self, feature: str | None = None) -> list[Any]:  # pragma: no cover - Windows only
+        """Every solid edge of the part, as SelectedElement objects.
 
-        This is wrong on purpose, documented rather than hidden: both methods
-        want a reference to an actual Edge (or Face), and a Body or a whole
-        Shape is neither, so this always fails on real CATIA -- verified on
-        V5-R33, not simulated. It is not a smaller problem than it looks: the
-        `Shape` object returned by `body.Shapes.Item(...)` exposes no
-        `Faces`/`Edges` collection over COM, and `Selection.Search` -- the
-        other documented route to a topological reference -- fails outright
-        for every query tried (including a plain by-name search with no
-        topology in it at all), on a document created headless via
-        `Documents.Add` with no open window. The one mechanism that reliably
-        names a face or edge in CATIA V5 automation is
-        `CreateReferenceFromBRepName`, and this bridge has already rejected
-        that path once, for `AddNewHoleFromPoint`, as "fragile, release-
-        specific" (see `hole()` above) -- introducing it here for fillet/
-        chamfer would be the same trade-off repeated, not a fix, so it is left
-        for a deliberate decision rather than snuck in.
+        `Selection.Search` is the one automation route to real topological
+        references, and its query keywords are **localized to the UI
+        language** -- which is why this bridge spent two sessions believing
+        Search was broken: a French V5-R33 refuses "Topology.Edge,all" with the
+        same bare COM error it gives genuinely malformed queries, and answers
+        "Topologie.Arête,tout" with every edge in the part. The working grammar
+        is detected once and cached for the daemon's lifetime.
+
+        Sketch lines come back too, typed `...MonoDimFeatEdge`; solid edges are
+        `...TriDimFeatEdge`. Only the solid ones are returned.
         """
-        part = self._part()
-        body = self._body()
-        target = body.Shapes.Item(feature) if feature else body
-        return part.CreateReferenceFromObject(target)
+        selection = self._document().Selection
+        scope_shape = None
+        if feature is not None:
+            try:
+                scope_shape = self._body().Shapes.Item(feature)
+            except Exception as exc:  # noqa: BLE001
+                known = ", ".join(entry["name"] for entry in self._feature_list()) or "(none)"
+                raise CatiaOperationError(
+                    f"No feature named {feature!r} in this part. Features: {known}."
+                ) from exc
+
+        grammar = getattr(self, "_search_grammar", None)
+        errors: list[str] = []
+        for query, language in _SEARCH_GRAMMARS:
+            if grammar is not None and grammar != language:
+                continue
+            selection.Clear()
+            if scope_shape is not None:
+                selection.Add(scope_shape)
+                # ",sel" scopes the search to the current selection; unlike the
+                # type keywords, the scope word is accepted untranslated.
+                query = query.rsplit(",", 1)[0] + ",sel"
+            try:
+                selection.Search(query)
+            except Exception as exc:  # noqa: BLE001 - wrong language, try the next
+                errors.append(f"{language}: {exc}")
+                continue
+            self._search_grammar = language
+            found = [selection.Item2(i) for i in range(1, int(selection.Count2) + 1)]
+            return [item for item in found if "TriDim" in str(item.Type)]
+        raise CatiaOperationError(
+            "CATIA refused every edge-search grammar this bridge knows "
+            f"({'; '.join(errors)}). Its UI language may be one the bridge has no "
+            "query vocabulary for yet -- see _SEARCH_GRAMMARS in catia_com.py."
+        )
+
+    def _select_edges(self, edges: str, feature: str | None = None) -> list[Any]:  # pragma: no cover
+        """References for the edges the caller means by "top", "vertical", ...
+
+        Selection hands back anonymous references; what makes them nameable is
+        measuring each one (`vba.points_on_curve`) and classifying it against
+        the part's bounding box. Tolerance is 1e-6 mm -- these are exact
+        machine coordinates, not floating measurements.
+        """
+        found = self._edge_search(feature)
+        if not found:
+            raise CatiaOperationError(
+                "This part has no solid edges yet. Pad or revolve something first."
+            )
+
+        measured: list[tuple[Any, tuple, tuple, tuple]] = []
+        for item in found:
+            reference = item.Reference
+            try:
+                start, middle, end = vba.points_on_curve(self._app, self._part(), reference)
+            except vba.VbaUnavailable:
+                # An edge that cannot be measured cannot be classified; for
+                # "all" it still counts, for anything narrower it is skipped.
+                measured.append((reference, None, None, None))  # type: ignore[arg-type]
+                continue
+            measured.append((reference, start, middle, end))
+
+        if edges == "all":
+            return [reference for reference, *_ in measured]
+
+        z_values = [
+            p[2]
+            for _, start, middle, end in measured
+            if start is not None
+            for p in (start, middle, end)
+        ]
+        if not z_values:
+            raise CatiaOperationError(
+                f"No edge of this part could be measured, so {edges!r} cannot be "
+                "resolved. Use edges='all' instead."
+            )
+        z_top, z_bottom = max(z_values), min(z_values)
+        tolerance = 1e-6
+
+        def classify(start: tuple, middle: tuple, end: tuple) -> set[str]:
+            kinds: set[str] = set()
+            points = (start, middle, end)
+            if all(abs(p[2] - z_top) < tolerance for p in points):
+                kinds.add("top")
+            if all(abs(p[2] - z_bottom) < tolerance for p in points):
+                kinds.add("bottom")
+            if abs(start[2] - end[2]) < tolerance and abs(start[2] - middle[2]) < tolerance:
+                kinds.add("horizontal")
+            if (
+                abs(start[0] - end[0]) < tolerance
+                and abs(start[1] - end[1]) < tolerance
+                and abs(start[2] - end[2]) > tolerance
+            ):
+                kinds.add("vertical")
+            return kinds
+
+        chosen = [
+            reference
+            for reference, start, middle, end in measured
+            if start is not None and edges in classify(start, middle, end)
+        ]
+        if not chosen:
+            raise CatiaOperationError(
+                f"No {edges} edges on this part. It has {len(measured)} solid "
+                "edges; try edges='all', or a different selector."
+            )
+        return chosen
 
     def _sketch_with_axis(self, name: str) -> Any:  # pragma: no cover - Windows only
         """The named sketch, with a revolution axis drawn along its V axis.

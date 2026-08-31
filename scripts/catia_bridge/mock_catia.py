@@ -34,6 +34,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from . import gear
 from .backend import CatiaBackend, CatiaOperationError
 from .png_writer import Canvas
 from .step_writer import write_box_step
@@ -63,6 +64,9 @@ class _Sketch:
         self.consumed = False
 
     def area_mm2(self) -> float:
+        if "area_mm2" in self.meta:
+            # Shapes with computed outlines (gears) carry their exact area.
+            return self.meta["area_mm2"]
         if self.shape == "circle":
             return math.pi * (self.size[0] / 2.0) ** 2
         if self.shape.startswith("polygon-"):
@@ -268,6 +272,36 @@ class MockCatia(CatiaBackend):
         result["area_mm2"] = round(0.5 * sides * radius**2 * math.sin(2 * math.pi / sides), 4)
         return result
 
+    def sketch_gear_profile(
+        self,
+        *,
+        plane: str,
+        module_mm: float,
+        teeth: int,
+        pressure_angle_deg: float = 20.0,
+    ) -> dict[str, Any]:
+        try:
+            points = gear.outline(float(module_mm), int(teeth), float(pressure_angle_deg))
+        except ValueError as exc:
+            raise CatiaOperationError(str(exc)) from exc
+        area = gear.area_mm2(points)
+        sizes = gear.dimensions(module_mm, teeth)
+        tip = sizes["tip_diameter_mm"]
+        result = self._add_sketch(
+            plane,
+            f"gear-{teeth}",
+            (tip, tip),
+            meta={"area_mm2": area},
+        )
+        result.update(
+            module_mm=float(module_mm),
+            teeth=int(teeth),
+            pressure_angle_deg=float(pressure_angle_deg),
+            area_mm2=round(area, 4),
+            **{k: round(v, 4) for k, v in sizes.items()},
+        )
+        return result
+
     def sketch_revolve_profile(
         self,
         *,
@@ -385,11 +419,19 @@ class MockCatia(CatiaBackend):
         extents[in_a], extents[in_b] = profile.size[0], profile.size[1]
         extents[normal] = length_mm
 
+        was_empty = self.size is None
         if self.size is None:
             self.size = (extents[0], extents[1], extents[2])
         else:
             # Padding onto an existing solid grows the bounding box.
             self.size = tuple(max(a, b) for a, b in zip(self.size, extents))  # type: ignore[assignment]
+
+        if was_empty and "area_mm2" in profile.meta:
+            # A profile with a computed outline (a gear) is thinner than its
+            # bounding box; fold the difference into the box-minus-cuts model
+            # so the reported volume is the outline's exact area x length.
+            box_area = profile.size[0] * profile.size[1]
+            self.removed_volume_mm3 += (box_area - profile.meta["area_mm2"]) * float(length_mm)
 
         name = self._name("Pad")
         self.parameters.setdefault(

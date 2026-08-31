@@ -389,10 +389,14 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
     CatiaToolSpec(
         name="catia_fillet",
         description=(
-            "Round edges by a radius. Reach for this when a result interpretation "
-            "blames a stress concentration on a sharp internal corner -- a fillet is "
-            "usually the cheapest fix available, and re-running the simulation "
-            "afterwards is how you show it worked."
+            "Round edges by a radius. On real CATIA this bridge cannot yet target "
+            "a specific edge or face -- there is no version-independent way to "
+            "reference one over automation -- so it always tries to fillet the "
+            "whole body's edge set at once (the `edges` parameter is accepted but "
+            "not honoured) and a real solid usually refuses that outright, whatever "
+            "the radius. Expect this to fail on anything but the simplest body; do "
+            "not retry with a different radius or length after a failure here, and "
+            "tell the user the fillet was not applied rather than claiming it was."
         ),
         parameters=_object(
             {
@@ -412,7 +416,10 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
         description=(
             "Break edges with a chamfer of a given length and angle. Use for "
             "assembly lead-ins and deburring callouts; use catia_fillet instead when "
-            "the goal is to reduce stress."
+            "the goal is to reduce stress. Shares catia_fillet's real-CATIA "
+            "limitation: it cannot target a specific edge or face, always acts on "
+            "the whole body, and a real solid usually refuses that -- do not retry "
+            "with a different length or angle after a failure here."
         ),
         parameters=_object(
             {

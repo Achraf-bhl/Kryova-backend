@@ -67,6 +67,20 @@ _SKETCH_FRAME = {
 #: subtracting it from a distance does not lose precision in a double.
 _BBOX_REACH = 10_000.0
 
+#: fillet()/chamfer() error text. `edges` (the tool's own targeting parameter,
+#: e.g. "top") is never honoured -- see `_edge_reference` -- so the message
+#: says that up front instead of blaming the radius or length, which the
+#: previous wording did and which sent a caller retrying smaller values
+#: forever against a request that could never succeed.
+_EDGE_OPERATION_UNSUPPORTED = (
+    "CATIA refused this {op}: {exc}. This bridge cannot yet target specific "
+    "edges or faces on a real CATIA part (no reliable, version-independent way "
+    "to reference one is exposed to automation) -- {op} always acts on the "
+    "whole body's edge set, and a real CATIA solid usually rejects that as a "
+    "single constant-radius/length operation. Retrying with a different "
+    "radius or length will not fix this."
+)
+
 #: `CatCaptureFormat`'s JPEG member. The full enumeration is CGM(0), EMF(1),
 #: TIFF(2), TIFFGreyScale(3), BMP(4), JPEG(5) -- there is no PNG in CATIA V5,
 #: which is why `capture_view` writes a `.jpg`.
@@ -812,10 +826,7 @@ class CatiaCom(CatiaBackend):
                 target, 1, float(radius_mm)
             )
         except Exception as exc:  # noqa: BLE001
-            raise CatiaOperationError(
-                f"CATIA refused a {radius_mm:g} mm fillet ({exc}). It is usually too "
-                "large for the adjacent faces; try a smaller radius."
-            ) from exc
+            raise CatiaOperationError(_EDGE_OPERATION_UNSUPPORTED.format(op="fillet", exc=exc)) from exc
         part.Update()
         return self._feature_result(str(edge_fillet.Name))
 
@@ -835,11 +846,30 @@ class CatiaCom(CatiaBackend):
                 target, 1, 0, 1, float(length_mm), float(angle_deg)
             )
         except Exception as exc:  # noqa: BLE001
-            raise CatiaOperationError(f"CATIA refused a {length_mm:g} mm chamfer ({exc}).") from exc
+            raise CatiaOperationError(_EDGE_OPERATION_UNSUPPORTED.format(op="chamfer", exc=exc)) from exc
         part.Update()
         return self._feature_result(str(chamfer.Name))
 
     def _edge_reference(self, feature: str | None) -> Any:  # pragma: no cover
+        """A reference for AddNewEdgeFilletWithConstantRadius/AddNewChamfer.
+
+        This is wrong on purpose, documented rather than hidden: both methods
+        want a reference to an actual Edge (or Face), and a Body or a whole
+        Shape is neither, so this always fails on real CATIA -- verified on
+        V5-R33, not simulated. It is not a smaller problem than it looks: the
+        `Shape` object returned by `body.Shapes.Item(...)` exposes no
+        `Faces`/`Edges` collection over COM, and `Selection.Search` -- the
+        other documented route to a topological reference -- fails outright
+        for every query tried (including a plain by-name search with no
+        topology in it at all), on a document created headless via
+        `Documents.Add` with no open window. The one mechanism that reliably
+        names a face or edge in CATIA V5 automation is
+        `CreateReferenceFromBRepName`, and this bridge has already rejected
+        that path once, for `AddNewHoleFromPoint`, as "fragile, release-
+        specific" (see `hole()` above) -- introducing it here for fillet/
+        chamfer would be the same trade-off repeated, not a fix, so it is left
+        for a deliberate decision rather than snuck in.
+        """
         part = self._part()
         body = self._body()
         target = body.Shapes.Item(feature) if feature else body

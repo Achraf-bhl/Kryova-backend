@@ -294,6 +294,118 @@ def test_delete_feature_removes_a_subtractive_feature_and_restores_its_volume(se
     assert restored["mass_kg"] == pytest.approx(before, rel=1e-6)
 
 
+def test_a_revolve_profile_sweeps_a_rod_of_the_stated_diameter(session):
+    # The profile sits beside the axis, so revolving it gives pi r^2 L -- the
+    # closed form the real CATIA path was verified against on V5-R33.
+    assert call(session, "catia_new_part", {"name": "Rod"})["ok"]
+    profile = call(
+        session,
+        "catia_sketch_revolve_profile",
+        {"plane": "ZX", "outer_diameter_mm": 15, "length_mm": 60},
+    )["data"]
+    assert profile["shape"] == "revolve-profile"
+
+    data = call(session, "catia_shaft", {"sketch": profile["sketch"]})["data"]
+    expected = math.pi * 7.5**2 * 60
+    assert data["volume_mm3"] == pytest.approx(expected, rel=1e-6)
+
+
+def test_a_revolve_profile_with_a_bore_sweeps_a_tube(session):
+    assert call(session, "catia_new_part", {"name": "Tube"})["ok"]
+    profile = call(
+        session,
+        "catia_sketch_revolve_profile",
+        {
+            "plane": "ZX",
+            "outer_diameter_mm": 15,
+            "inner_diameter_mm": 11,
+            "length_mm": 60,
+        },
+    )["data"]
+    data = call(session, "catia_shaft", {"sketch": profile["sketch"]})["data"]
+    expected = math.pi * (7.5**2 - 5.5**2) * 60
+    assert data["volume_mm3"] == pytest.approx(expected, rel=1e-6)
+
+
+def test_a_bore_wider_than_the_outside_is_refused(session):
+    assert call(session, "catia_new_part", {"name": "Impossible"})["ok"]
+    result = call(
+        session,
+        "catia_sketch_revolve_profile",
+        {"plane": "ZX", "outer_diameter_mm": 10, "inner_diameter_mm": 12, "length_mm": 20},
+    )
+    assert result["ok"] is False
+    assert "smaller than" in result["error"]
+
+
+def test_a_groove_profile_removes_exactly_the_ring_it_describes(session):
+    assert call(session, "catia_new_part", {"name": "Grooved shaft"})["ok"]
+    profile = call(
+        session,
+        "catia_sketch_revolve_profile",
+        {"plane": "ZX", "outer_diameter_mm": 15, "length_mm": 60},
+    )["data"]
+    assert call(session, "catia_shaft", {"sketch": profile["sketch"]})["ok"]
+    before = call(session, "catia_measure")["data"]["volume_mm3"]
+
+    ring = call(
+        session,
+        "catia_sketch_groove_profile",
+        {
+            "plane": "ZX",
+            "shaft_diameter_mm": 15,
+            "width_mm": 3,
+            "depth_mm": 2,
+            "distance_from_end_mm": 20,
+        },
+    )["data"]
+    after = call(session, "catia_groove", {"sketch": ring["sketch"]})["data"]["volume_mm3"]
+
+    expected = math.pi * (7.5**2 - 5.5**2) * 3
+    assert before - after == pytest.approx(expected, rel=1e-6)
+
+
+def test_a_groove_deeper_than_the_shaft_radius_is_refused(session):
+    assert call(session, "catia_new_part", {"name": "Cut through"})["ok"]
+    result = call(
+        session,
+        "catia_sketch_groove_profile",
+        {
+            "plane": "ZX",
+            "shaft_diameter_mm": 10,
+            "width_mm": 2,
+            "depth_mm": 6,
+            "distance_from_end_mm": 5,
+        },
+    )
+    assert result["ok"] is False
+    assert "through the centre" in result["error"]
+
+
+def test_there_is_no_pattern_tool_while_its_direction_cannot_be_controlled(session):
+    # Removed rather than shipped: on a live V5-R33 the only direction reference
+    # AddNewRectPattern accepts steps the copies diagonally, so a `direction`
+    # argument would quietly build the wrong part. See the note in catia_com.py.
+    result = call(
+        session, "catia_pattern_rectangular", {"direction": "x", "count": 5, "spacing_mm": 8}
+    )
+    assert result["ok"] is False
+
+
+def test_shelling_hollows_the_part_and_keeps_its_outside_size(session):
+    build_bracket(session)
+    before = call(session, "catia_measure")["data"]
+    data = call(session, "catia_shell", {"thickness_mm": 2})["data"]
+    assert data["volume_mm3"] < before["volume_mm3"]
+    assert data["bounding_box_mm"]["size"] == before["bounding_box_mm"]["size"]
+
+
+def test_a_wall_thicker_than_the_part_is_refused(session):
+    build_bracket(session)
+    result = call(session, "catia_shell", {"thickness_mm": 40})
+    assert result["ok"] is False
+
+
 def test_delete_feature_refuses_an_unknown_name(session):
     build_bracket(session)
     result = call(session, "catia_delete_feature", {"feature": "Pad.99"})

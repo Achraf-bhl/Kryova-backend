@@ -45,11 +45,21 @@ _PLANE_AXES = {"XY": (0, 1, 2), "YZ": (1, 2, 0), "ZX": (2, 0, 1)}
 
 
 class _Sketch:
-    def __init__(self, name: str, plane: str, shape: str, size: tuple[float, float]) -> None:
+    def __init__(
+        self,
+        name: str,
+        plane: str,
+        shape: str,
+        size: tuple[float, float],
+        meta: dict[str, float] | None = None,
+    ) -> None:
         self.name = name
         self.plane = plane
         self.shape = shape
         self.size = size
+        #: Dimensions a revolve profile needs that a bounding size cannot carry
+        #: (a bore diameter, a groove's depth and position).
+        self.meta = meta or {}
         self.consumed = False
 
     def area_mm2(self) -> float:
@@ -59,6 +69,12 @@ class _Sketch:
             sides = int(self.shape.split("-", 1)[1])
             radius = self.size[0] / 2.0
             return 0.5 * sides * radius**2 * math.sin(2 * math.pi / sides)
+        if self.shape == "revolve-profile":
+            outer_r = self.size[0] / 2.0
+            inner_r = self.meta.get("inner_diameter_mm", 0.0) / 2.0
+            return (outer_r - inner_r) * self.size[1]
+        if self.shape == "groove-profile":
+            return self.meta.get("depth_mm", 0.0) * self.meta.get("width_mm", 0.0)
         return self.size[0] * self.size[1]
 
 
@@ -252,11 +268,78 @@ class MockCatia(CatiaBackend):
         result["area_mm2"] = round(0.5 * sides * radius**2 * math.sin(2 * math.pi / sides), 4)
         return result
 
-    def _add_sketch(self, plane: str, shape: str, size: tuple[float, float]) -> dict[str, Any]:
+    def sketch_revolve_profile(
+        self,
+        *,
+        plane: str,
+        outer_diameter_mm: float,
+        length_mm: float,
+        inner_diameter_mm: float | None = None,
+    ) -> dict[str, Any]:
+        if (inner_diameter_mm or 0.0) >= outer_diameter_mm:
+            raise CatiaOperationError(
+                f"inner_diameter_mm ({inner_diameter_mm:g}) must be smaller than "
+                f"outer_diameter_mm ({outer_diameter_mm:g})."
+            )
+        result = self._add_sketch(
+            plane,
+            "revolve-profile",
+            (outer_diameter_mm, length_mm),
+            meta={
+                "inner_diameter_mm": float(inner_diameter_mm or 0.0),
+                "outer_diameter_mm": float(outer_diameter_mm),
+                "length_mm": float(length_mm),
+            },
+        )
+        result["outer_diameter_mm"] = float(outer_diameter_mm)
+        result["inner_diameter_mm"] = float(inner_diameter_mm or 0.0)
+        result["length_mm"] = float(length_mm)
+        return result
+
+    def sketch_groove_profile(
+        self,
+        *,
+        plane: str,
+        shaft_diameter_mm: float,
+        width_mm: float,
+        depth_mm: float,
+        distance_from_end_mm: float,
+    ) -> dict[str, Any]:
+        if depth_mm >= shaft_diameter_mm / 2.0:
+            raise CatiaOperationError(
+                f"A {depth_mm:g} mm deep groove cuts through the centre of a "
+                f"{shaft_diameter_mm:g} mm shaft."
+            )
+        result = self._add_sketch(
+            plane,
+            "groove-profile",
+            (shaft_diameter_mm, width_mm),
+            meta={
+                "shaft_diameter_mm": float(shaft_diameter_mm),
+                "width_mm": float(width_mm),
+                "depth_mm": float(depth_mm),
+                "distance_from_end_mm": float(distance_from_end_mm),
+            },
+        )
+        result.update(
+            shaft_diameter_mm=float(shaft_diameter_mm),
+            width_mm=float(width_mm),
+            depth_mm=float(depth_mm),
+            distance_from_end_mm=float(distance_from_end_mm),
+        )
+        return result
+
+    def _add_sketch(
+        self,
+        plane: str,
+        shape: str,
+        size: tuple[float, float],
+        meta: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
         self._require_document()
         if plane not in _PLANE_AXES:
             raise CatiaOperationError(f"{plane!r} is not one of the XY, YZ, ZX planes.")
-        sketch = _Sketch(self._name("Sketch"), plane, shape, size)
+        sketch = _Sketch(self._name("Sketch"), plane, shape, size, meta)
         self.sketches[sketch.name] = sketch
         self.features.append({"name": sketch.name, "type": "Sketch", "plane": plane})
         self._write_document()
@@ -477,10 +560,24 @@ class MockCatia(CatiaBackend):
         if profile.shape == "circle":
             volume = math.pi * diameter**3 / 6.0  # sphere
             extents[in_b] = diameter
+        elif profile.shape == "revolve-profile":
+            # A profile placed beside the axis: an annulus swept round, which is
+            # a solid rod when the bore is zero.
+            outer_r = diameter / 2.0
+            inner_r = profile.meta.get("inner_diameter_mm", 0.0) / 2.0
+            volume = math.pi * (outer_r**2 - inner_r**2) * height
         else:
             volume = math.pi * (diameter / 2.0) ** 2 * height  # cylinder
         volume *= min(max(angle_deg, 0.0), 360.0) / 360.0
 
+        # Read the solid's volume *before* the box grows. `_net_volume_mm3` is
+        # derived from `self.size`, so measuring it after the assignment below
+        # returns the new gross box less the old cuts -- which made the
+        # subtraction cancel itself out and left a revolve reporting its
+        # bounding box as its volume (a 15 x 60 rod measured 13500 mm3 instead
+        # of 4901). Nothing caught it because the only shaft test asserted a
+        # positive mass and a bounding box, never the volume.
+        previous_net = self._net_volume_mm3()
         if self.size is None:
             self.size = (extents[0], extents[1], extents[2])
         else:
@@ -489,7 +586,7 @@ class MockCatia(CatiaBackend):
         # shaft's extents, so the difference between that growth and the true
         # swept volume is recorded as removed material.
         self.removed_volume_mm3 = max(
-            self._gross_volume_mm3() - (self._net_volume_mm3() + volume), 0.0
+            self._gross_volume_mm3() - (previous_net + volume), 0.0
         )
 
         name = self._name("Shaft")
@@ -507,7 +604,14 @@ class MockCatia(CatiaBackend):
         profile.consumed = True
 
         diameter, height = profile.size[0], profile.size[1]
-        volume = math.pi * (diameter / 2.0) ** 2 * height
+        if profile.shape == "groove-profile":
+            # A ring cut: the material between the shaft surface and the groove
+            # floor, over the groove's width.
+            outer_r = diameter / 2.0
+            inner_r = outer_r - profile.meta.get("depth_mm", 0.0)
+            volume = math.pi * (outer_r**2 - inner_r**2) * profile.meta.get("width_mm", height)
+        else:
+            volume = math.pi * (diameter / 2.0) ** 2 * height
         volume *= min(max(angle_deg, 0.0), 360.0) / 360.0
         self._remove_volume(volume, "groove")
 
@@ -536,6 +640,29 @@ class MockCatia(CatiaBackend):
         name = self._name("Mirror")
         self._record_extent_parameters()
         self.features.append({"name": name, "type": "Mirror", "plane": plane})
+        return self._mutation_result(name)
+
+    def shell(self, *, thickness_mm: float) -> dict[str, Any]:
+        self._require_solid()
+        assert self.size is not None  # noqa: S101
+        if thickness_mm >= min(self.size) / 2.0:
+            raise CatiaOperationError(
+                f"A {thickness_mm:g} mm wall is thicker than half the part's smallest "
+                f"dimension ({min(self.size):g} mm), so nothing would be hollowed out."
+            )
+        inner = [side - 2.0 * thickness_mm for side in self.size]
+        cavity = inner[0] * inner[1] * inner[2]
+        self._remove_volume(cavity, "shell")
+
+        name = self._name("Shell")
+        self.features.append(
+            {
+                "name": name,
+                "type": "Shell",
+                "thickness_mm": float(thickness_mm),
+                "removed_mm3": cavity,
+            }
+        )
         return self._mutation_result(name)
 
     def delete_feature(self, *, feature: str) -> dict[str, Any]:

@@ -158,6 +158,30 @@ class CatiaBackend(ABC):
     def mirror(self, *, plane: str) -> dict[str, Any]: ...
 
     @abstractmethod
+    def sketch_revolve_profile(
+        self,
+        *,
+        plane: str,
+        outer_diameter_mm: float,
+        length_mm: float,
+        inner_diameter_mm: float | None = None,
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def sketch_groove_profile(
+        self,
+        *,
+        plane: str,
+        shaft_diameter_mm: float,
+        width_mm: float,
+        depth_mm: float,
+        distance_from_end_mm: float,
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def shell(self, *, thickness_mm: float) -> dict[str, Any]: ...
+
+    @abstractmethod
     def delete_feature(self, *, feature: str) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -209,6 +233,9 @@ TOOL_METHODS: dict[str, str] = {
     "catia_shaft": "shaft",
     "catia_groove": "groove",
     "catia_mirror": "mirror",
+    "catia_sketch_revolve_profile": "sketch_revolve_profile",
+    "catia_sketch_groove_profile": "sketch_groove_profile",
+    "catia_shell": "shell",
     "catia_delete_feature": "delete_feature",
     "catia_list_features": "list_features",
     "catia_measure": "measure",

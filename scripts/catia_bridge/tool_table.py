@@ -185,6 +185,38 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         ),
         (),
     ),
+    "catia_sketch_revolve_profile": (
+        WRITE,
+        _object(
+            {
+                "plane": {"type": "string", "enum": SKETCH_PLANES},
+                "outer_diameter_mm": _length(),
+                "length_mm": _length(),
+                "inner_diameter_mm": _length(),
+            },
+            ["plane", "outer_diameter_mm", "length_mm"],
+        ),
+        (),
+    ),
+    "catia_sketch_groove_profile": (
+        WRITE,
+        _object(
+            {
+                "plane": {"type": "string", "enum": SKETCH_PLANES},
+                "shaft_diameter_mm": _length(),
+                "width_mm": _length(),
+                "depth_mm": _length(),
+                "distance_from_end_mm": {"type": "number", "minimum": 0, "maximum": 10_000.0},
+            },
+            ["plane", "shaft_diameter_mm", "width_mm", "depth_mm", "distance_from_end_mm"],
+        ),
+        (),
+    ),
+    "catia_shell": (
+        WRITE,
+        _object({"thickness_mm": _length(1_000.0)}, ["thickness_mm"]),
+        (),
+    ),
     "catia_sketch_polygon": (
         WRITE,
         _object(

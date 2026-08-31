@@ -43,6 +43,27 @@ logger = logging.getLogger("kryova.catia.com")
 #: CATIA's reference planes, in the order `Part.OriginElements` exposes them.
 _ORIGIN_PLANE = {"XY": "PlaneXY", "YZ": "PlaneYZ", "ZX": "PlaneZX"}
 
+# There is deliberately no rectangular/circular pattern here yet, and the
+# reason is recorded so the next attempt starts from evidence rather than from
+# the same dead ends. All of this was measured on a live V5-R33:
+#
+# * `AddNewRectPattern` takes 12 positional arguments. Fewer raises "Nombre de
+#   paramètres non valide"; more is refused by pywin32.
+# * Its direction arguments refuse a HybridShape line, a HybridShape Direction
+#   and an AxisSystem -- each a bare "AddNewRectPattern a échoué". A reference
+#   to an origin *plane* is the only thing it accepts.
+# * But a plane reference does not mean "step along that plane's normal": the
+#   instances march off diagonally, advancing in two axes at once. On a 100x60
+#   plate a 5-instance pattern put three holes on the part, hung the fourth
+#   half off the edge and missed the plate entirely with the fifth.
+# * `AddNewCircPattern` behaves worse: with a plane it builds a feature that
+#   produces no copies at all, and with any line/direction/axis it fails.
+#
+# A `direction: x|y|z` argument that silently produces a diagonal is exactly
+# the "quietly builds the wrong part" failure this module's tool table exists
+# to prevent, so no pattern tool is exposed until a direction can actually be
+# controlled. A square test plate hides the bug -- test on a rectangle.
+
 #: Which origin plane to sketch on for a hole in each named face, and which two
 #: components of a 3D point become the sketch's horizontal and vertical
 #: coordinates. A sketch's 2D frame is not the same as the plane's name suggests
@@ -956,6 +977,131 @@ class CatiaCom(CatiaBackend):
                 "The part needs solid material on one side of that plane first."
             ) from exc
         return self._feature_result(str(mirror.Name))
+
+    def sketch_revolve_profile(  # pragma: no cover - Windows only
+        self,
+        *,
+        plane: str,
+        outer_diameter_mm: float,
+        length_mm: float,
+        inner_diameter_mm: float | None = None,
+    ) -> dict[str, Any]:
+        """A rod/tube profile placed beside the revolution axis, ready for a shaft.
+
+        This exists because the other sketch tools draw on the origin, and a
+        profile that straddles the revolution axis is refused by CATIA -- which
+        left `catia_shaft` and `catia_groove` with no profile in the vocabulary
+        they could actually consume. The caller still names only diameters and a
+        length; the offset from the axis is computed here, which is exactly the
+        split this module's tool table asks for.
+        """
+        outer_r = float(outer_diameter_mm) / 2.0
+        inner_r = float(inner_diameter_mm or 0.0) / 2.0
+        if inner_r >= outer_r:
+            raise CatiaOperationError(
+                f"inner_diameter_mm ({inner_diameter_mm:g}) must be smaller than "
+                f"outer_diameter_mm ({outer_diameter_mm:g}); a tube's bore cannot reach "
+                "its outside surface."
+            )
+
+        corners = [
+            (inner_r, 0.0),
+            (outer_r, 0.0),
+            (outer_r, float(length_mm)),
+            (inner_r, float(length_mm)),
+        ]
+
+        def draw(factory: Any) -> None:
+            for index in range(4):
+                start, end = corners[index], corners[(index + 1) % 4]
+                factory.CreateLine(start[0], start[1], end[0], end[1])
+
+        name = self._sketch(plane, draw)
+        return {
+            "feature": name,
+            "sketch": name,
+            "plane": plane,
+            "shape": "revolve-profile",
+            "outer_diameter_mm": float(outer_diameter_mm),
+            "inner_diameter_mm": float(inner_diameter_mm or 0.0),
+            "length_mm": float(length_mm),
+            "area_mm2": round((outer_r - inner_r) * float(length_mm), 4),
+            "features": self._feature_list(),
+        }
+
+    def sketch_groove_profile(  # pragma: no cover - Windows only
+        self,
+        *,
+        plane: str,
+        shaft_diameter_mm: float,
+        width_mm: float,
+        depth_mm: float,
+        distance_from_end_mm: float,
+    ) -> dict[str, Any]:
+        """The ring-cut profile for `catia_groove`, placed against the shaft wall.
+
+        The profile spans from `depth_mm` below the shaft's outside surface out
+        to the surface itself, so revolving it removes exactly the ring the
+        caller described and nothing else.
+        """
+        outer_r = float(shaft_diameter_mm) / 2.0
+        inner_r = outer_r - float(depth_mm)
+        if inner_r <= 0.0:
+            raise CatiaOperationError(
+                f"A {depth_mm:g} mm deep groove cuts through the centre of a "
+                f"{shaft_diameter_mm:g} mm shaft. Reduce depth_mm below "
+                f"{outer_r:g} mm."
+            )
+
+        near = float(distance_from_end_mm)
+        far = near + float(width_mm)
+        corners = [(inner_r, near), (outer_r, near), (outer_r, far), (inner_r, far)]
+
+        def draw(factory: Any) -> None:
+            for index in range(4):
+                start, end = corners[index], corners[(index + 1) % 4]
+                factory.CreateLine(start[0], start[1], end[0], end[1])
+
+        name = self._sketch(plane, draw)
+        return {
+            "feature": name,
+            "sketch": name,
+            "plane": plane,
+            "shape": "groove-profile",
+            "shaft_diameter_mm": float(shaft_diameter_mm),
+            "width_mm": float(width_mm),
+            "depth_mm": float(depth_mm),
+            "distance_from_end_mm": near,
+            "area_mm2": round(float(depth_mm) * float(width_mm), 4),
+            "features": self._feature_list(),
+        }
+
+    def shell(self, *, thickness_mm: float) -> dict[str, Any]:  # pragma: no cover
+        """Hollow the solid out, leaving walls of `thickness_mm`.
+
+        The wall is grown inwards, which is what "make it 2 mm walled" means to
+        a caller reasoning about an outside dimension they already fixed. No
+        face is opened: naming a face to remove needs an edge/face reference
+        this bridge cannot form (see `_edge_reference`), so this produces a
+        closed hollow rather than quietly opening the wrong side.
+        """
+        part = self._part()
+        before = self._solid_volume()
+        try:
+            feature = part.ShapeFactory.AddNewShell(None, float(thickness_mm), 0.0)
+            part.Update()
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA could not hollow the part to a {thickness_mm:g} mm wall ({exc}). "
+                "The wall is usually thicker than half the part's smallest dimension; "
+                "try a thinner wall."
+            ) from exc
+        if self._solid_volume() >= before:
+            raise CatiaOperationError(
+                f"A {thickness_mm:g} mm wall removed no material, so the part was "
+                "already thinner than the wall requested."
+            )
+        return self._feature_result(str(feature.Name))
 
     def delete_feature(self, *, feature: str) -> dict[str, Any]:  # pragma: no cover
         part = self._part()

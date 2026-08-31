@@ -275,10 +275,10 @@ def test_status_requires_a_session(client):
 
 def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client):
     tools = auth_client.get(f"{PREFIX}/tools").json()["tools"]
-    # A deliberate count, so adding or losing a tool is never silent. 25 since
-    # catia_set_material plus the six additions (polygon/shaft/groove/mirror/
-    # delete_feature/list_features).
-    assert len(tools) == 25
+    # A deliberate count, so adding or losing a tool is never silent. 28 since
+    # the three turned-part additions (sketch_revolve_profile,
+    # sketch_groove_profile, shell) joined the 25.
+    assert len(tools) == 28
     by_name = {tool["name"]: tool for tool in tools}
     assert by_name["catia_measure"]["tier"] == "read"
     assert by_name["catia_measure"]["mutating"] is False

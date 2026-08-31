@@ -53,6 +53,12 @@ FACE_POSITIONS = ("center", "front_left", "front_right", "back_left", "back_righ
 #: Which edges of a feature an operation applies to.
 EDGE_SELECTORS = ("all", "vertical", "horizontal", "top", "bottom")
 
+#: There is no pattern tool: on a live V5-R33 the only direction reference
+#: CATIA's pattern factory accepts (an origin plane) steps the instances
+#: diagonally rather than along that plane's normal, and a `direction`
+#: argument that silently produces a diagonal breaks this module's first rule.
+#: The full measurement is recorded in `scripts/catia_bridge/catia_com.py`.
+
 #: Standard viewpoints for a screenshot.
 VIEWPOINTS = ("iso", "front", "back", "top", "bottom", "left", "right")
 
@@ -459,6 +465,92 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
                 "diameter_mm": _length("Across-corners diameter of the polygon."),
             },
             required=["plane", "sides", "diameter_mm"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_sketch_revolve_profile",
+        description=(
+            "Draw the profile of a round part -- a rod, a shaft or a tube -- placed "
+            "beside the revolution axis, ready for catia_shaft. THIS is how turned "
+            "parts are made: the other sketch tools draw on the origin, and a profile "
+            "sitting on the axis cannot be revolved, so catia_shaft needs this one. "
+            "Give the finished diameters and length and the placement is worked out "
+            "for you; leave inner_diameter_mm out for a solid rod, or give it for a "
+            "tube's bore. Follow with catia_shaft."
+        ),
+        parameters=_object(
+            {
+                "plane": _enum(
+                    SKETCH_PLANES,
+                    "Plane to draw on. The part is revolved about this plane's "
+                    "vertical axis, and grows along it -- ZX gives a shaft lying "
+                    "along Z.",
+                ),
+                "outer_diameter_mm": _length("Outside diameter of the finished part."),
+                "length_mm": _length("Length along the revolution axis."),
+                "inner_diameter_mm": _length(
+                    "Bore diameter, for a tube. Omit for a solid rod."
+                ),
+            },
+            required=["plane", "outer_diameter_mm", "length_mm"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_sketch_groove_profile",
+        description=(
+            "Draw the profile of a circumferential groove -- an o-ring gland, a "
+            "circlip seat, a relief cut -- on an existing round part, ready for "
+            "catia_groove. Give the diameter of the shaft it is being cut into and "
+            "where along the shaft it sits; the profile is placed against the shaft "
+            "wall for you. Use the same plane the shaft was made on, then call "
+            "catia_groove."
+        ),
+        parameters=_object(
+            {
+                "plane": _enum(
+                    SKETCH_PLANES,
+                    "Plane to draw on. Use the same one the shaft's own profile used.",
+                ),
+                "shaft_diameter_mm": _length(
+                    "Outside diameter of the shaft the groove is cut into."
+                ),
+                "width_mm": _length("Groove width, along the shaft."),
+                "depth_mm": _length("Groove depth, measured in from the shaft surface."),
+                "distance_from_end_mm": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 10_000.0,
+                    "description": (
+                        "Distance from the shaft's starting end to the near wall of "
+                        "the groove. Millimetres."
+                    ),
+                },
+            },
+            required=[
+                "plane",
+                "shaft_diameter_mm",
+                "width_mm",
+                "depth_mm",
+                "distance_from_end_mm",
+            ],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_shell",
+        description=(
+            "Hollow the part out, leaving walls of a given thickness -- how a cast "
+            "housing, a cover or an enclosure is made light without losing its "
+            "outside shape. The wall grows inwards, so every outside dimension "
+            "already built stays exactly as it is. This bridge cannot open a face "
+            "while hollowing, so the result is a closed shell; say so rather than "
+            "describing an open box."
+        ),
+        parameters=_object(
+            {"thickness_mm": _length("Wall thickness.", maximum=1_000.0)},
+            required=["thickness_mm"],
         ),
         tier=CatiaTier.WRITE,
     ),

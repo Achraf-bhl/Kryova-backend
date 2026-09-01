@@ -50,6 +50,7 @@ from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
 from app.ai.tools import ToolBox, ToolError
 from app.core.config import settings
 from app.models import Conversation, ConversationMessage, MessageRole, User
+from app.retrieval import knowledge_service
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ TOOL_LABELS: dict[str, str] = {
     "create_project": "Creating the project",
     "list_projects": "Looking up your projects",
     "list_materials": "Checking the material library",
+    "search_documentation": "Checking the documentation",
     "list_geometry": "Checking geometry versions",
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
@@ -111,11 +113,25 @@ TOOL_LABELS: dict[str, str] = {
 def system_prompt() -> str:
     """The frozen prefix for this deployment.
 
-    Two constants rather than one prompt with an optional section: a prefix that
-    grows a paragraph when a feature flag flips is a different cache key, and
-    the whole point of freezing these strings is that the prefix is stable.
+    Four whole constants rather than one prompt assembled from optional
+    sections. The point of freezing these strings is that a given deployment
+    sends byte-identical prefix text on every turn, which is what a provider's
+    prompt cache keys on; building the prompt by concatenation at call time
+    would work equally well right up until someone made a section depend on
+    something that varies per turn, and then the cache would silently never hit.
+
+    The two axes are independent -- CATIA on or off, reference manuals present
+    or not -- so there are four, chosen once here.
+
+    The documentation axis is decided by whether an index actually exists, not
+    by the setting alone: `_build_knowledge` withholds the tool on the same
+    condition, and a prompt that describes a tool the model has not been given
+    is a prompt that teaches it to hallucinate a call.
     """
-    return prompts.AGENT_SYSTEM_CATIA if settings.catia_enabled else prompts.AGENT_SYSTEM
+    has_docs = settings.knowledge_enabled and knowledge_service().available
+    if settings.catia_enabled:
+        return prompts.AGENT_SYSTEM_CATIA_DOCS if has_docs else prompts.AGENT_SYSTEM_CATIA
+    return prompts.AGENT_SYSTEM_DOCS if has_docs else prompts.AGENT_SYSTEM
 
 
 def summarise_step(tool: str, result: Any, ok: bool) -> str:
@@ -135,6 +151,17 @@ def summarise_step(tool: str, result: Any, ok: bool) -> str:
         return f"Found {len(result.get('projects', []))} project(s)"
     if tool == "list_materials":
         return f"{len(result.get('materials', []))} materials available"
+    if tool == "search_documentation":
+        passages = result.get("passages", [])
+        if not passages:
+            return "Nothing in the manuals on that"
+        # Name the document rather than counting passages. "3 passages" tells
+        # the user nothing they can act on; "Part Design, p. 147" is a place
+        # they can go and read for themselves.
+        first = passages[0]
+        where = f"{first.get('source', 'the manuals')}, p. {first.get('page', '?')}"
+        extra = f" (+{len(passages) - 1} more)" if len(passages) > 1 else ""
+        return f"Found {where}{extra}"
     if tool == "list_geometry":
         versions = result.get("geometry_versions", [])
         latest = versions[0]["filename"] if versions else "none"

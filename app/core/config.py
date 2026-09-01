@@ -153,6 +153,16 @@ class Settings(BaseSettings):
     # summarisation happens before anything would be dropped outright.
     ai_summarise_after_messages: int = 30
 
+    # Reference material the assistant can consult -- CATIA and FEA manuals,
+    # indexed on this machine. Off removes the lookup tool from the agent's
+    # vocabulary entirely, rather than leaving it to call something that will
+    # always come back empty.
+    knowledge_enabled: bool = True
+    knowledge_root: Path = BASE_DIR / "data" / "bm25"
+    # Passages returned per lookup. More crowds the transcript out of the
+    # context window; fewer and a broad question misses the paragraph it needed.
+    knowledge_max_passages: int = 5
+
     # CATIA desktop bridge. The daemon dials out to this service over a
     # WebSocket; see docs/CATIA_BRIDGE_PROTOCOL.md for the wire format.
     # Off switches the tools out of the agent's vocabulary entirely rather than
@@ -321,6 +331,27 @@ class Settings(BaseSettings):
     def media_staging_dir(self) -> Path:
         """Where in-progress chunked uploads accumulate before assembly."""
         return self.media_root / "_staging"
+
+    @property
+    def knowledge_index_dir(self) -> Path:
+        """Where the built reference index lives. Rebuildable, never edited."""
+        return self.knowledge_root / "index"
+
+    @property
+    def knowledge_source_dirs(self) -> list[Path]:
+        """Directories scanned for reference documents, in priority order.
+
+        Two roots rather than one. `data/bm25/sources/` is the documented home
+        and is walked recursively -- that is where new material goes. `data/`
+        itself is also scanned, non-recursively via `rglob` on a directory that
+        contains the sources tree, so a corpus that was already sitting in
+        `data/` before this existed is picked up without anyone having to move
+        several hundred megabytes of PDFs around.
+
+        Duplicates are impossible: `discover_sources` de-duplicates on the
+        resolved path, so a file under both roots is indexed once.
+        """
+        return [self.knowledge_root / "sources", self.knowledge_root.parent]
 
 
 @lru_cache

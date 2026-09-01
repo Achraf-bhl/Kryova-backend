@@ -46,6 +46,7 @@ from app.models import (
     SimulationJob,
     User,
 )
+from app.retrieval import knowledge_service
 from app.simulation.runner import SessionScope, run_simulation
 from app.solve.linear_static import LinearStaticSolver
 from app.solve.materials import MATERIALS
@@ -89,6 +90,11 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     "update_project": "Renaming the project",
     "delete_project": "Deleting the project",
     "list_materials": "Checking the material library",
+    # Deliberately says what the assistant is doing, not how it does it. A user
+    # watching the step list should read "it went and checked the manuals",
+    # which is the true and useful description; the retrieval mechanism behind
+    # it is an implementation detail and naming it here would be noise.
+    "search_documentation": "Checking the documentation",
     "list_geometry": "Checking geometry versions",
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
@@ -210,7 +216,7 @@ class ToolBox:
     _tools: dict[str, Tool] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
-        for tool in [*self._build(), *self._build_catia()]:
+        for tool in [*self._build(), *self._build_catia(), *self._build_knowledge()]:
             self._tools[tool.name] = tool
 
     # -- lookup helpers -----------------------------------------------------
@@ -949,6 +955,116 @@ class ToolBox:
         return {"deleted": deleted, "note": "This run is gone and cannot be recovered."}
 
     # -- CATIA --------------------------------------------------------------
+
+    def _build_knowledge(self) -> list[Tool]:
+        """The documentation lookup, or nothing when there is no material to look in.
+
+        Gated on the index actually existing rather than merely being enabled.
+        A tool that is always in the model's vocabulary and always returns
+        nothing is worse than an absent one: the model calls it, reads an empty
+        result, and either calls it again with a reworded query or tells the
+        user their documentation is empty. Neither is true, and both cost a step.
+        """
+        if not settings.knowledge_enabled:
+            return []
+        service = knowledge_service()
+        if not service.available:
+            return []
+
+        return [
+            Tool(
+                name="search_documentation",
+                description=(
+                    "Search the CATIA and FEA reference manuals available on this "
+                    "machine and get back the most relevant passages, each with the "
+                    "document and page it came from. Use it whenever the answer "
+                    "depends on how CATIA actually behaves -- which workbench a "
+                    "command lives in, what a dialog field means, what a feature "
+                    "requires before it can be created, how an analysis case is set "
+                    "up -- rather than answering from memory. Search with the "
+                    "technical terms themselves ('edge fillet radius', 'depouille "
+                    "angle', 'shell thickness'); the manuals are in English and "
+                    "French and either works. Cite the document and page when you "
+                    "use what it returns."
+                ),
+                parameters=_object(
+                    {
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "What to look up, in the vocabulary the manuals use. "
+                                "A few precise terms beat a full sentence."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": (
+                                "How many passages to return. Defaults to "
+                                f"{settings.knowledge_max_passages}; raise it only for "
+                                "a genuinely broad question."
+                            ),
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": (
+                                "Two-letter code for the language to prefer, when you "
+                                "know it: the language CATIA's interface is running in, "
+                                "or the one the user is writing to you in. 'fr' or 'en'. "
+                                "It only reorders results -- the other language is still "
+                                "returned when it is the better match -- so pass it "
+                                "whenever you have it, and leave it out when you do not."
+                            ),
+                        },
+                    },
+                    required=["query"],
+                ),
+                handler=self._search_documentation,
+            )
+        ]
+
+    def _search_documentation(
+        self, query: str, limit: int | None = None, language: str | None = None
+    ) -> dict[str, Any]:
+        """Look `query` up in the reference corpus.
+
+        Never raises on a retrieval failure -- `KnowledgeService.search` already
+        guarantees that -- so the only error this can produce is a rejected
+        argument, which the model can correct.
+
+        An empty result is returned as an explicit, self-describing payload
+        rather than a bare empty list. A model handed `{"passages": []}` tends to
+        report that the documentation is missing; told in words that the manuals
+        were searched and had nothing on this term, it moves on and answers from
+        what it knows, which is the behaviour wanted.
+        """
+        if not isinstance(query, str) or not query.strip():
+            raise ToolError("search_documentation needs a non-empty query.")
+
+        ceiling = max(1, min(int(limit or settings.knowledge_max_passages), 10))
+        passages = knowledge_service().search(query, limit=ceiling, language=language)
+        if not passages:
+            return {
+                "query": query,
+                "passages": [],
+                "note": (
+                    "The reference manuals contain nothing matching those terms. "
+                    "Answer from your own knowledge, or try the term the manuals "
+                    "would use instead."
+                ),
+            }
+        return {
+            "query": query,
+            "passages": [
+                {
+                    "source": passage.source,
+                    "page": passage.page,
+                    "section": passage.heading,
+                    "language": passage.language,
+                    "text": passage.text,
+                }
+                for passage in passages
+            ],
+        }
 
     def _build_catia(self) -> list[Tool]:
         """One agent tool per bridge spec, or nothing when CATIA is unavailable."""

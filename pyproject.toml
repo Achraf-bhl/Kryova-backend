@@ -30,6 +30,12 @@ module = [
   # for its submodules.
   "anthropic",
   "anthropic.*",
+  # `pdfminer.six` is the last-resort PDF extractor in app/retrieval/extract.py
+  # and is deliberately absent from requirements: poppler and pypdf cover the
+  # corpus, and pdfminer is an order of magnitude slower. The import is guarded
+  # and falls through when it is missing.
+  "pdfminer",
+  "pdfminer.*",
   "bcrypt.*",
   # pywin32, which `app/catia/bridge.py` imports to drive CATIA over COM. It is
   # installed only on Windows (see the marker in requirements.txt), so CI --

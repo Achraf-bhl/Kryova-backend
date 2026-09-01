@@ -27,9 +27,18 @@ New revision: alembic revision --autogenerate -m "..."
 dependencies** — create one before claiming any backend test result. `numpy 1.26 / scipy 1.11
 / SQLAlchemy 1.4` in the system site-packages are the wrong versions and are not the project's.
 
-**There is no linter, formatter, type checker, or CI.** No `pyproject.toml`, no ruff/black/mypy
-config, no `.github/`. Do not tell the user "lint passes" — there is nothing to run. Adding
-these is tracked as a priority in the state-of-the-project doc.
+**Lint and type-check exist now** (this section used to say they did not):
+`pyproject.toml` configures ruff (`E,F,I`, line length 100) and mypy (`python_version = "3.12"`,
+`mypy_path = "scripts"`), and `.github/` has workflows. Run
+`venv/bin/python -m ruff check app/ tests/` and `venv/bin/python -m mypy app/` before finishing.
+Two **pre-existing** mypy errors in `app/catia/local_bridge.py` (lines 307/309, `Popen | None`
+union-attr) are not yours — leave them or fix them deliberately, but do not be surprised by them.
+
+**Setup and update are one script**, `scripts/setup.sh` (bash) and `scripts/setup.ps1`
+(PowerShell — **the product ships on Windows**, so that one is the path that matters). Every
+step is idempotent, so re-running *is* the update: the venv is reused, pip installs only what
+changed, Alembic applies only new migrations, and the reference index rebuilds only when the
+documents actually changed. There is deliberately no separate update script.
 
 ## Architecture
 
@@ -49,6 +58,7 @@ app/
   solve/          Solver interface, linear-static tet4 FEA, materials, region selectors
   simulation/     runner.py — the geometry → mesh → solve job pipeline
   jobs/           JobQueue interface; ThreadPoolJobQueue today, Celery/RQ later
+  retrieval/      the reference manuals the agent consults (see below)
 migrations/       Alembic (versions/ is the only migration path)
 tests/            pytest, mirrors app/
 ```
@@ -62,6 +72,60 @@ tests/            pytest, mirrors app/
   S3 store is a swap, not a rewrite.
 
 Never reach around a seam. If a route needs to know which solver ran, put it on the job row.
+
+## Reference manuals (`app/retrieval/`)
+
+The agent can consult the CATIA and FEA documentation held on this machine instead of
+answering about CATIA from memory, via one tool: `search_documentation`.
+
+**It is lexical (BM25), not embeddings, and that was a decision rather than a shortcut.**
+Three things about this deployment force it, all pointing the same way. The provider is
+pluggable and defaults to local Ollama with no key — and **Anthropic publishes no embedding
+model at all**, so a dense index would either drag a second vendor into a deployment that
+deliberately chose one, or force an extra model pull onto an install whose point is that it
+runs offline. The corpus is technical manuals, which is the regime where lexical retrieval is
+strongest: what discriminates between passages here is exact terms (`M6`, `Ø12`, `tet4`,
+`V5R21`, `Multi-sections Solid`) — precisely what embeddings blur. And the manuals are
+bilingual, where accent folding does for free what no embedding quality gives you.
+The honest caveat, worth keeping in mind before anyone "upgrades" this: on open-domain prose
+hybrid lexical+dense beats either alone. `Corpus.search` sits behind a small surface so a
+dense stage can be fused in later without the agent or tool layer knowing.
+
+Layers, each testable alone: `analyze` (bilingual, jargon-preserving tokenizer) → `extract`
+(PDF→pages, fallback chain poppler → pypdf → pdfminer) → `chunking` (pages→passages, headings
+carried) → `bm25` (scorer over flat numpy arrays) → `corpus` (build/load/search) → `service`
+(process-wide handle) → `language` (per-passage detection + preference).
+
+Things that will bite you:
+
+- **`KnowledgeService.search` cannot raise.** Missing index, corrupt index, wrong format
+  version, disk gone — all return `[]`, logged once. Consulting the manuals improves an
+  answer and must never be why there is not one. Keep it that way.
+- **The tool and the prompt are gated on the index actually existing**, not on the setting.
+  `_build_knowledge` withholds the tool and `system_prompt()` picks a variant without the
+  documentation section. A prompt describing a tool the model was not given teaches it to
+  hallucinate a call. There are **four** frozen system prompts for this reason (CATIA × docs).
+- **Never name the mechanism in user-facing text.** The step label is "Checking the
+  documentation"; the prompt tells the model to cite the document and page and *not* to
+  narrate the lookup. `tests/test_retrieval.py` and the prompt-cleanliness check exist because
+  "I searched my knowledge base" is a worse answer than the answer.
+- **Heading detection is the most tuned code in `chunking.py`.** These manuals are almost
+  entirely numbered procedures, so a bare `\d+\.` pattern labels thousands of instruction
+  steps as section titles. Only keyword (`Chapter 4`) or multi-level (`3.2`) numbers count,
+  and the terminal-punctuation test runs *before* the numbered test. Both orderings are
+  load-bearing and both have already been got wrong once.
+- **Language is a boost, never a filter** (`LANGUAGE_PREFERENCE_BOOST`). CATIA's menus are
+  translated, so a French user needs the French page — but a workbench documented only in
+  English must still answer them. A clearly better match in the other language still wins.
+- **Every considered file is fingerprinted, including skipped ones.** Recording only successes
+  makes `is_stale` permanently true on any corpus containing one unreadable PDF.
+- Builds are atomic (staging directory, swapped in), so rebuilding under a live server is safe.
+
+```
+python -m app.retrieval.build            # build or rebuild
+python -m app.retrieval.build --check    # exits non-zero when a rebuild is needed
+python -m app.retrieval.build --query X  # see what the agent would find
+```
 
 ## Non-negotiable rules
 
@@ -140,9 +204,15 @@ Read these before touching the relevant file — they are live defects, not styl
   SQLite branch. Fix the docs or the code, but do not trust either in isolation.
 - **`/health` returns `{"status":"ok"}` unconditionally** — it does not check the database, so
   it cannot be used as a readiness probe.
-- **`data/` holds 266 MB of committed Dassault Systèmes / CATIA training PDFs.** They bloat
-  every clone and are third-party copyrighted material in a repo carrying its own LICENSE.
-  Do not add more; raise removal with the user before shipping publicly.
+- **`data/` holds ~270 MB of Dassault Systèmes / CATIA training PDFs, and they are tracked
+  again on purpose** (2026-09-01) so the corpus syncs to the Windows test workstation with a
+  plain `git pull`. They are third-party copyrighted material in a repo carrying its own
+  LICENSE, and a later `.gitignore` cannot undo it — removing them needs a history rewrite.
+  Raise this before the repository is published or cloned widely. `data/bm25/index/` is *not*
+  tracked: it is derived, rewritten whole on every build, and would conflict between machines.
+- **Four of the 21 PDFs are scans with no text layer** (the large French `Formation-*` files,
+  42–66 MB each) and cannot be indexed without OCR. The build reports them as
+  `scanned, no text layer` and carries on; this is expected, not a regression.
 
 ## Testing
 

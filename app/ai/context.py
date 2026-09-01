@@ -118,9 +118,21 @@ def window(conversation: Conversation) -> list[ConversationMessage]:
         None,
     )
     if anchor is None:
-        # No user turn at all: nothing coherent to replay. The caller's state
-        # block still carries the situation.
-        return []
+        # No user turn survives the fold boundary. Rather than replaying
+        # nothing, drop the tool exchanges -- which are what cannot be replayed
+        # without their assistant turn -- and keep the assistant's own words.
+        #
+        # Returning [] here was losing real continuity: the summary covers
+        # everything up to the boundary and the state block covers what is true
+        # now, but neither carries what the assistant just *said*, so the next
+        # turn could contradict its own last answer with nothing to notice.
+        # Assistant turns replay standalone; a `tool_result` without its call
+        # is what providers reject, and those are exactly what is filtered.
+        return [
+            message
+            for message in eligible[start:]
+            if message.role is MessageRole.ASSISTANT and not message.tool_calls
+        ]
     if anchor < start:
         return eligible[anchor:]
 
@@ -222,10 +234,53 @@ def maybe_summarise(db: Session, provider: LLMProvider, conversation: Conversati
         logger.warning("Summariser returned nothing for conversation %s", conversation.id)
         return turn.usage
 
+    if _collapses_history(conversation.summary, text):
+        # The summariser was asked to merge the previous record with new
+        # material, so the result should grow or hold steady. A result that is a
+        # fraction of what went in means it summarised the summary instead --
+        # the one failure mode the prompt explicitly forbids, and the one that
+        # is invisible afterwards, because what was dropped is gone and nothing
+        # records that it ever existed.
+        #
+        # Refusing leaves the previous summary and the previous boundary in
+        # place, so the folded messages are still eligible and the fold is
+        # simply retried next turn. The cost of being wrong here is one wasted
+        # summarisation call; the cost of accepting a collapse is a conversation
+        # that has quietly forgotten which material the user chose.
+        logger.warning(
+            "Discarding a summary for conversation %s that dropped %d%% of the "
+            "previous record; keeping the previous one",
+            conversation.id,
+            round(100 * (1 - len(text) / max(1, len(conversation.summary or "")))),
+        )
+        return turn.usage
+
     conversation.summary = text
     conversation.summary_through_sequence = boundary
     db.flush()
     return turn.usage
+
+
+#: A merged summary shorter than this fraction of the one it replaces is
+#: treated as a collapse rather than a compression. Deliberately low: a genuine
+#: merge can legitimately tighten wording, drop threads the transcript shows
+#: were closed, and lose a little length. Halving is not tightening.
+MIN_SUMMARY_RETENTION: float = 0.5
+
+
+def _collapses_history(previous: str | None, replacement: str) -> bool:
+    """Whether a new summary has lost most of what the old one held.
+
+    Length is a crude proxy for information and is used here only because the
+    alternative -- asking a model whether a summary preserved the facts -- costs
+    another call on every fold and can itself be wrong. It is a floor, not a
+    quality check: it catches the collapse, and says nothing about a summary
+    that stayed long and got worse.
+    """
+    if not previous:
+        # Nothing to lose on the first fold.
+        return False
+    return len(replacement) < len(previous) * MIN_SUMMARY_RETENTION
 
 
 def _summary_message(conversation: Conversation) -> dict[str, Any] | None:

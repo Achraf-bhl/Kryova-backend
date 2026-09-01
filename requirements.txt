@@ -28,6 +28,13 @@ gmsh==4.15.2
 # Local vector indexes
 faiss-cpu==1.15.0
 
+# Reading the reference manuals (app/retrieval/). Pure Python, so it installs
+# anywhere with no system package -- which is the point: `pdftotext` from
+# poppler is preferred when present because it is far faster and better on
+# multi-column pages, but it cannot be assumed, and an install that cannot read
+# a PDF silently indexes nothing.
+pypdf==6.4.0
+
 # CATIA V5 COM bridge (app/catia/). The marker keeps Linux/macOS installs
 # working -- the bridge imports everywhere and refuses at call time off Windows.
 pywin32==312; sys_platform == "win32"

@@ -576,6 +576,44 @@ class TestPrecision:
             assert word not in AMBIGUOUS_WORDS
             assert recognise(f"how do I make a {word}"), word
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "la poche ne marche pas",
+            "le conge ne fonctionne pas apres la depouille",
+            "die Tasche wird nicht erzeugt und der Block auch nicht",
+            "il raccordo non riesce con una superficie",
+        ],
+    )
+    def test_grammar_in_an_interface_language_is_not_a_command(self, text):
+        # `pas` is the French for a thread pitch *and* the negation particle,
+        # and `le` is Leading Edge *and* the definite article, so every French
+        # sentence used to drag both into the brief. The real terms in the
+        # sentence must still come through.
+        keys = _keys(text)
+        assert "aero.pitch" not in keys, f"false positive on {text!r}"
+        assert "aero.leading_edge" not in keys, f"false positive on {text!r}"
+        assert recognise(text), f"lost the real terms in {text!r}"
+
+    def test_the_guard_is_case_sensitive_so_codes_survive(self):
+        # Lower-case `est` is the French verb; upper-case `EST` is the ELFINI
+        # trigram, and blocking the first must not cost the second.
+        assert "trigram.est" in _keys("we have an EST licence")
+        assert "trigram.est" not in _keys("le raccord est trop grand")
+
+    @pytest.mark.parametrize(
+        "text,key",
+        [
+            ("quel est le pas de vis", "aero.pitch"),
+            ("le pas des rivets", "aero.pitch"),
+            ("the leading edge skin", "aero.leading_edge"),
+        ],
+    )
+    def test_a_blocked_word_stays_reachable_as_a_phrase(self, text, key):
+        # Blocking a bare word must never make the concept unfindable: the
+        # phrase a user actually writes still resolves.
+        assert key in _keys(text)
+
     def test_assume_catia_lowers_the_bar_but_never_raises_it(self):
         plain = _keys("the web is too thin")
         assumed = _keys("the web is too thin", assume_catia=True)

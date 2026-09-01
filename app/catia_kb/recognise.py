@@ -61,6 +61,31 @@ NEVER_BARE: Final[frozenset[str]] = frozenset(
     """.split()
 )
 
+#: The same problem one language over, and it only appeared once the alias table
+#: went multilingual: `pas` is the French for a thread pitch *and* the French
+#: negation particle, so "la poche ne marche pas" recognised Pitch and put it in
+#: the brief. Every French sentence in the negative would have done it.
+#:
+#: Listed for the four languages whose command vocabulary this package carries,
+#: including words that do not collide with any current alias -- the point is to
+#: be already correct when the next translation is added, not to patch the one
+#: collision that exists today. A user who genuinely means thread pitch in
+#: French writes `pas de vis` or `pas du filetage`, and the phrase still matches.
+#:
+#: Checked *after* the product-code test and only against lower case, so an
+#: uppercase trigram (`MAS`, `PAS`) is still recognised as a product.
+FOREIGN_FUNCTION_WORDS: Final[frozenset[str]] = frozenset(
+    """
+    pas plus tout tous toute une des les aux ses son sur par pour dans avec
+    sans mais donc alors chaque cette celui le la un du de ce et ou si ne en
+    au il on se qui que quel quelle est sont
+    und der die das den dem ein eine oder aber auch nur bei aus vor nach mit
+    ist sind wie wo
+    non con per una uno del dello della delle come solo piu sono anche che
+    los las unos unas para por sin como mas pero cada que como
+    """.split()
+)
+
 #: `AMBIGUOUS_WORDS` is the middle tier: words that are genuinely CATIA terms
 #: *and* genuinely ordinary. `web` is an ASL feature and a thing on the
 #: internet; `frame` is a fuselage member and a picture frame. These are held
@@ -311,6 +336,9 @@ def recognise(
                 continue
             if surface in codes and not raw_tokens[start].isupper():
                 # `pip`, `fit`, `gas` in lower case are English, not products.
+                continue
+            if surface in FOREIGN_FUNCTION_WORDS and not raw_tokens[start].isupper():
+                # Grammar in one of the interface languages, not a command.
                 continue
             if surface in AMBIGUOUS_WORDS:
                 # Hold it back: something later in the message may corroborate

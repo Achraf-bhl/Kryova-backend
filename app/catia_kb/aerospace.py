@@ -110,7 +110,7 @@ Hi-Lite | hi-lite, hilite
 Lockbolt | lockbolt, lock bolt
 Blind Fastener | blind fastener, blind rivet, cherrymax, one side access
 Edge Margin | edge margin, edge distance, e/d, marge au bord | Minimum distance from a hole centre to the part edge; a structural rule, usually 2D minimum
-Pitch | fastener pitch, hole pitch, spacing, pas | Distance between adjacent fastener centres along a row
+Pitch | fastener pitch, hole pitch, spacing, pas de vis, pas du filetage, pas de rivets, pas des rivets, entraxe | Distance between adjacent fastener centres along a row
 Hole Class | hole class, fit class, interference fit, clearance fit
 Wet Install | wet install, sealant install, wet assembly
 Fastener Pattern | fastener pattern, rivet pattern, hole pattern, fastener row

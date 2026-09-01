@@ -279,9 +279,13 @@ def ensure_started(db: Session, user_id: str, *, wait_s: float = 0.0) -> bool:
                 _last_error.pop(user_id, None)
                 return True
 
-            alive = _process is not None and _process.poll() is None
+            # Bound to a local rather than tested through the global: a module
+            # global cannot be narrowed by a plain `alive` flag, so every use of
+            # `_process` below would still be `Popen | None` to a type checker.
+            running = _process if _process is not None and _process.poll() is None else None
+            alive = running is not None
             handover = False
-            if alive and _process_user_id != user_id:
+            if running is not None and _process_user_id != user_id:
                 now = time.monotonic()
                 if now - _last_handover < HANDOVER_HOLD_S:
                     # Two accounts fighting over one workstation. The holder
@@ -304,9 +308,9 @@ def ensure_started(db: Session, user_id: str, *, wait_s: float = 0.0) -> bool:
                 logger.info(
                     "Handing the local CATIA bridge over to another account "
                     "(pid %s served a different user)",
-                    _process.pid,
+                    running.pid,
                 )
-                _terminate(_process)
+                _terminate(running)
                 _process = None
                 _process_user_id = None
                 _last_handover = now

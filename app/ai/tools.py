@@ -34,6 +34,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai.state import bound_document_name
+from app.catia_kb import catia_knowledge
 from app.core.config import settings
 from app.geometry.formats import GEOMETRY_FORMATS
 from app.jobs import JobQueue
@@ -95,6 +96,9 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     # which is the true and useful description; the retrieval mechanism behind
     # it is an implementation detail and naming it here would be noise.
     "search_documentation": "Checking the documentation",
+    # Same register as the line above: the user is told what is being
+    # consulted, not which of two lookup mechanisms answered.
+    "explain_catia_term": "Checking the CATIA reference",
     "list_geometry": "Checking geometry versions",
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
@@ -216,7 +220,12 @@ class ToolBox:
     _tools: dict[str, Tool] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
-        for tool in [*self._build(), *self._build_catia(), *self._build_knowledge()]:
+        for tool in [
+            *self._build(),
+            *self._build_catia(),
+            *self._build_knowledge(),
+            *self._build_catia_reference(),
+        ]:
             self._tools[tool.name] = tool
 
     # -- lookup helpers -----------------------------------------------------
@@ -1065,6 +1074,97 @@ class ToolBox:
                 for passage in passages
             ],
         }
+
+    # -- the structured CATIA reference -------------------------------------
+
+    def _build_catia_reference(self) -> list[Tool]:
+        """The structured CATIA lookup. Always present when the data is.
+
+        Distinct from `search_documentation` on purpose, and the difference is
+        worth the second tool: that one returns manual *prose*, which is deep
+        but has to be read and interpreted; this one returns *fields* -- the
+        workbench, the exact menu path, the dialog options, the licence tier,
+        the known failure modes, the localised name. A model asked "which
+        workbench is Joggle in" gets an answer it can state verbatim rather than
+        a page it has to summarise, and it cannot hallucinate a menu path it was
+        handed.
+        """
+        service = catia_knowledge()
+        if not service.available:
+            return []
+
+        return [
+            Tool(
+                name="explain_catia_term",
+                description=(
+                    "Look up any CATIA V5 term in the structured reference and get "
+                    "back exactly what it is: which workbench and toolbar it lives "
+                    "in, the full menu path, the dialog fields and their options, "
+                    "what must exist before it can run, the licence tier it needs, "
+                    "how it typically fails and what to do about that, and the "
+                    "command's name in other interface languages. Works on command "
+                    "names, workbench names, product codes (PDG, ASL, GSD), file "
+                    "formats, Tools>Options settings, error message text, and "
+                    "aerospace vocabulary (joggle, stringer, STA/BL/WL, ply drop-off). "
+                    "Understands misnames, abbreviations and the French, German, "
+                    "Italian and Spanish interface names, so pass the user's own "
+                    "words. Call this BEFORE stating any menu path, toolbar or "
+                    "workbench -- those are precisely the details that are "
+                    "confidently wrong from memory."
+                ),
+                parameters=_object(
+                    {
+                        "term": {
+                            "type": "string",
+                            "description": (
+                                "What to look up, in the user's own words. "
+                                "'edge fillet', 'Kantenverrundung', 'joggle', "
+                                "'ASL', 'the profile is open and not limited'."
+                            ),
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": (
+                                "Two-letter code for the language the user's CATIA "
+                                "interface is running in, when you know it: 'fr', "
+                                "'de', 'it', 'es'. The reply then names the command "
+                                "as their menus actually show it, or says plainly "
+                                "that the translation is not recorded."
+                            ),
+                        },
+                    },
+                    required=["term"],
+                ),
+                handler=self._explain_catia_term,
+            )
+        ]
+
+    def _explain_catia_term(self, term: str, language: str | None = None) -> dict[str, Any]:
+        """Resolve `term` against the structured reference.
+
+        An empty result is returned as a self-describing payload for the same
+        reason `_search_documentation` does it: handed a bare empty list, a model
+        reports that CATIA has no such command, which is a much stronger claim
+        than "this reference does not carry it".
+        """
+        if not isinstance(term, str) or not term.strip():
+            raise ToolError("explain_catia_term needs a non-empty term.")
+
+        service = catia_knowledge()
+        matches = service.lookup(term, language=language)
+        payload: dict[str, Any] = {"term": term, "matches": matches}
+
+        fork = service.disambiguation(term)
+        if fork is not None:
+            payload["ambiguous"] = fork
+
+        if not matches:
+            payload["note"] = (
+                "The structured reference has no entry under that name. It may still "
+                "be a real CATIA term -- try search_documentation, or the term the "
+                "manuals would use. Do not tell the user the command does not exist."
+            )
+        return payload
 
     def _build_catia(self) -> list[Tool]:
         """One agent tool per bridge spec, or nothing when CATIA is unavailable."""

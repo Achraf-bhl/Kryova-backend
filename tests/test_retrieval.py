@@ -776,6 +776,26 @@ class TestKnowledgeService:
         assert service.available
         assert service.search("bend radius")[0].source == "sheet_metal.md"
 
+    def test_expansion_does_not_raise_the_coverage_floor(self, tmp_path: Path):
+        """A widened query must never return fewer results than the plain one.
+
+        Query expansion adds *synonyms*, and a passage matches the English name
+        or the French one, never both. Measuring the coverage floor over the
+        expanded query therefore demands a breadth of match no passage can have:
+        widening `bend radius` to a dozen cross-language terms took the floor
+        from one term to eight and turned one good hit into none at all. The
+        floor is measured against `coverage_query` for exactly this reason.
+        """
+        service = self._built(tmp_path)
+        plain = service.search("bend radius")
+        assert plain, "the unexpanded query should match the fixture corpus"
+
+        corpus = Corpus.open(service.index_dir)
+        assert corpus is not None
+        widened = "bend radius pli Biegung Piegatura Plegado Edge Fillet Kantenverrundung"
+        assert corpus.search(widened) == [], "the bug this guards against"
+        assert corpus.search(widened, coverage_query="bend radius")
+
     def test_reports_unavailable_rather_than_failing_with_no_index(self, tmp_path: Path):
         service = KnowledgeService(index_dir=tmp_path / "nothing", source_dirs=[tmp_path])
         assert service.available is False

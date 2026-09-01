@@ -1,0 +1,390 @@
+"""Multi-step processes, so a description of the goal reaches the right sequence.
+
+A user rarely names a workflow. They describe an outcome -- "I need the flat
+pattern for this bracket", "how do I get this into Nastran", "we need to check
+nothing hits the frame when the gear retracts" -- and the useful answer is the
+whole sequence with the step that actually costs time called out, not just the
+one command they happened to ask about.
+
+Each workflow records its steps in order and its usual failure: the step people
+skip, or the one they do in the wrong order and have to redo.
+"""
+
+from __future__ import annotations
+
+from app.catia_kb.types import Kind, Section, entry
+
+_W = Kind.WORKFLOW
+
+
+def _flow(
+    key: str,
+    name: str,
+    aliases: tuple[str, ...],
+    summary: str,
+    steps: tuple[str, ...],
+    *,
+    failures: tuple[str, ...] = (),
+    fixes: tuple[str, ...] = (),
+    aerospace: str = "",
+    see_also: tuple[str, ...] = (),
+):
+    return entry(
+        f"workflow.{key}",
+        name,
+        _W,
+        aliases=aliases,
+        summary=summary,
+        fields=steps,
+        failures=failures,
+        fixes=fixes,
+        aerospace=aerospace,
+        see_also=see_also,
+    )
+
+
+ENTRIES = [
+    _flow(
+        "basic_part",
+        "Sketch to drawing (the basic part loop)",
+        ("basic part", "how do i model a part", "make a part", "part workflow", "first part"),
+        "The loop every CATIA part follows: sketch, feature, dress-up, drawing.",
+        (
+            "1. Sketch a fully constrained profile on an origin plane",
+            "2. Pad, Pocket or Shaft it",
+            "3. Add dress-up -- draft before fillets, shell before internal fillets",
+            "4. Apply a material, and check Measure Inertia against expectation",
+            "5. Create the .CATDrawing, generate views and dimension them",
+        ),
+        failures=("Sketching on a model face rather than a datum plane, which makes the whole part fragile",),
+        see_also=("practice.feature_order", "practice.fully_constrain"),
+    ),
+    _flow(
+        "top_down",
+        "Top-down design with a skeleton",
+        ("top down", "top-down design", "skeleton", "master geometry", "contextual design", "conception descendante"),
+        "One part owns the driving geometry; every other part references it through publications.",
+        (
+            "1. Build a skeleton part holding only datums: planes, axes, curves, interface surfaces",
+            "2. Publish each element other parts will need, with a meaningful name",
+            "3. Insert the skeleton into the assembly and fix it",
+            "4. Create each detail part in context, picking *only* published elements",
+            "5. Update the skeleton; every part follows",
+        ),
+        failures=(
+            "Parts pick each other's faces directly instead of the skeleton's publications, producing a web of links that breaks on the first edit",
+            "The skeleton itself depends on a detail part, creating an update loop",
+        ),
+        fixes=("The skeleton must depend on nothing. That is the whole discipline.",),
+        aerospace="This is how station, buttock and water planes stay authoritative across a work-share boundary: the partner receives the skeleton, not the neighbouring parts.",
+        see_also=("practice.skeleton", "assembly_design.publication", "aero.station_coordinates"),
+    ),
+    _flow(
+        "bottom_up",
+        "Bottom-up assembly",
+        ("bottom up", "bottom-up assembly", "assemble parts", "put an assembly together"),
+        "Parts exist first; the assembly positions them with constraints.",
+        (
+            "1. Insert the components",
+            "2. Fix one -- the assembly needs a ground",
+            "3. Constrain the rest; watch the remaining degrees of freedom",
+            "4. Update, then check clash",
+            "5. Set part numbers and generate the Bill of Material",
+            "6. Create the assembly drawing with balloons",
+        ),
+        failures=("Nothing fixed, so the whole assembly floats and constraints resolve to arbitrary positions",),
+        see_also=("assembly_design.coincidence_constraint", "assembly_design.bill_of_material"),
+    ),
+    _flow(
+        "surfacing",
+        "Surface modelling to a solid",
+        ("surfacing workflow", "surface to solid", "how do i make a solid from surfaces", "close a surface"),
+        "Build the shape as surfaces, verify it, then give it thickness or close it.",
+        (
+            "1. Build the profile curves -- and build them well; everything downstream inherits their quality",
+            "2. Loft, sweep or fill to surfaces",
+            "3. Join into one skin, with Check connexity and Check tangency on",
+            "4. Connect Checker across every internal boundary",
+            "5. Thick Surface, or Close Surface for a fully enclosed skin",
+        ),
+        failures=(
+            "Joining before checking, so a G0 break is buried inside one joined element and only surfaces when Close Surface refuses",
+        ),
+        see_also=("gsd.join", "gsd.connect_checker", "part_design.close_surface"),
+    ),
+    _flow(
+        "oml_loft",
+        "Outer mould line to structural profiles",
+        ("oml", "loft the oml", "wing loft", "fuselage loft", "aerodynamic surface", "station cuts"),
+        "The airframe master-geometry sequence: loft the aerodynamic surface, then cut it to get structure.",
+        (
+            "1. Aerofoil or cross-section curves at each station, in aircraft coordinates",
+            "2. Multi-sections Surface with leading- and trailing-edge guides and an explicit spine",
+            "3. Connect Checker across every patch boundary -- G2 is the target on a visible skin",
+            "4. Station, buttock and water planes as a published set",
+            "5. Intersect the planes with the OML to get rib, frame and stringer profiles",
+            "6. Publish the profiles; the detail parts reference them",
+        ),
+        failures=(
+            "No explicit spine, so adding a station later re-parameterises the loft and every downstream intersection moves",
+        ),
+        aerospace="The OML is the single master. Everything structural is derived from it, which is what makes a late aerodynamic change survivable.",
+        see_also=("gsd.multi_sections_surface", "aero.station_coordinates", "workflow.airframe_structure"),
+    ),
+    _flow(
+        "airframe_structure",
+        "Airframe detail part from the OML",
+        ("airframe part", "make a rib", "make a frame", "structural part", "detail part"),
+        "How a rib, frame, clip or doubler is built so an OML change re-lofts it instead of breaking it.",
+        (
+            "1. Reference the published station plane and the OML from the skeleton",
+            "2. Aerospace Sheet Metal Parameters, then a Web on the station plane",
+            "3. Flanges along the web edges, following the OML",
+            "4. Joggles where the part laps under another, at the process runout length",
+            "5. Lightening holes, cutbacks and bend reliefs",
+            "6. Flattening, and the manufacturing view",
+            "7. Fastener pattern from the published hole centres, respecting edge margin and pitch",
+        ),
+        failures=(
+            "Modelled in Generative Sheetmetal Design, so the flange cannot follow the curved edge and the joggle has to be faked",
+        ),
+        aerospace="The reason ASL exists. If the flange is curved or there is a joggle, this is the route.",
+        see_also=("aerospace_sheet_metal.web", "aerospace_sheet_metal.joggle", "aero.edge_margin"),
+    ),
+    _flow(
+        "sheet_metal",
+        "Sheet metal to a flat pattern",
+        ("sheet metal workflow", "flat pattern", "unfold a part", "nesting", "get the blank"),
+        "From solid or surface to the DXF the laser cuts.",
+        (
+            "1. Sheet Metal Parameters -- thickness, bend radius, and the shop's bend table",
+            "2. Wall, then Wall On Edge / Flange for each bend; or Recognize on an imported solid",
+            "3. Cutouts, stamps, reliefs",
+            "4. Unfold, and check the blank length against the bend table",
+            "5. Flat-pattern view on a drawing",
+            "6. DXF export for nesting",
+        ),
+        failures=("A K factor left at the default, so the blank is the wrong length and nobody finds out until the first part",),
+        see_also=("sheet_metal_design.sheet_metal_parameters", "sheet_metal_design.unfold", "format.dxf"),
+    ),
+    _flow(
+        "composite",
+        "Composite part, design to ply export",
+        ("composite workflow", "layup workflow", "composite part", "ply export", "how do i design a composite part"),
+        "Support surface to ply book, through the producibility gate.",
+        (
+            "1. Support surface (usually the OML) and Composites Parameters with the material catalogue",
+            "2. Rosettes -- one per region on a curved part",
+            "3. Preliminary design: zones, transition zones, stacking, laminate -- this settles the thickness map",
+            "4. Detailed design: plies from zones, cores, cut pieces, EOP contours, drop-offs and ramps",
+            "5. Producibility on every ply; add darts, splices or re-orient the rosette where it fails",
+            "6. Flattening and flat-pattern export",
+            "7. Ply data export (XML) to the analysis code, laser projection files to the shop",
+        ),
+        failures=(
+            "Going straight to plies without preliminary design, so the thickness map and the drop-off ratios were never agreed",
+            "Treating a producibility failure as a modelling problem and moving the ply boundary, which does not fix the fibre deviation",
+        ),
+        aerospace="The producibility step is the one that is skipped and the one that costs most when it is: a laminate that cannot be draped is discovered at layup, after the tool exists.",
+        see_also=("composites_manufacturing.producibility", "composites_design.rosette", "aero.ply_drop_off"),
+    ),
+    _flow(
+        "systems_installation",
+        "Systems installation to formboard",
+        ("systems installation", "harness workflow", "route a harness", "formboard", "wiring workflow"),
+        "Diagram, 3D route, clash, flatten.",
+        (
+            "1. Connectivity diagram, or the piping/tubing specification and catalogues",
+            "2. Place the equipment and connectors in the mockup",
+            "3. Route bundle segments or runs, respecting bend radius and supports",
+            "4. Route the wires; the bundle diameter follows",
+            "5. Clash and segregation checks against the mockup",
+            "6. Harness Flattening to the formboard, and the nailboard drawing",
+        ),
+        failures=("Routing before the equipment is positioned, so every route is redone when a box moves",),
+        see_also=("electrical_harness_installation.bundle_segment", "electrical_harness_flattening"),
+    ),
+    _flow(
+        "dmu_review",
+        "Digital mockup review",
+        ("dmu review", "mockup review", "design review", "review the assembly", "revue de maquette"),
+        "Load big, look, measure, mark up, publish.",
+        (
+            "1. Open in visualisation mode with the cache on",
+            "2. Section through the region of interest",
+            "3. Interference check -- clash, contact, clearance",
+            "4. Measure what looks wrong",
+            "5. Mark up and save annotated views",
+            "6. Publish the review",
+        ),
+        failures=("Signing off a clash campaign run entirely on coarse CGRs",),
+        see_also=("setting.cache_management", "dmu_space_analysis.interference"),
+    ),
+    _flow(
+        "kinematics",
+        "Kinematics simulation",
+        ("kinematics workflow", "simulate a mechanism", "make it move", "motion study"),
+        "Fix, joint, command, drive, check.",
+        (
+            "1. Create the mechanism and fix one part",
+            "2. Add joints -- choosing the joint that matches the real freedom, not the easiest one",
+            "3. Make as many joints commanded as there are degrees of freedom",
+            "4. Simulate with commands, or with laws for time-based motion",
+            "5. Swept volume for the envelope, trace for a point's path",
+            "6. Clash detection during simulation",
+        ),
+        failures=("\"Cannot be simulated\" -- commands do not equal degrees of freedom; the mechanism dialog states both",),
+        aerospace="Landing gear retraction, control surface travel and door kinematics all end with a swept volume that becomes a space reservation.",
+        see_also=("dmu_kinematics.revolute_joint", "dmu_kinematics.swept_volume"),
+    ),
+    _flow(
+        "fea",
+        "Finite element analysis in CATIA",
+        ("fea workflow", "analysis workflow", "run an analysis", "stress analysis workflow", "how do i analyse this"),
+        "Simplify, mesh, restrain, load, connect, solve, judge.",
+        (
+            "1. Simplify the geometry -- remove the fillets and holes that are not the subject",
+            "2. Apply the material",
+            "3. Mesh: shells for thin walls, tetras only where 3D stress genuinely matters",
+            "4. Restraints -- the honest ones, not a clamp on everything",
+            "5. Loads",
+            "6. Connections, if there is more than one part",
+            "7. Compute, then read the *error estimate* before reading the stress",
+            "8. Refine where the local error is high and check the peak converges",
+        ),
+        failures=(
+            "Reading the peak stress before checking whether it is at a sharp internal corner, where it is a singularity and refines to infinity",
+            "Tetra-meshing a thin skin, which under-predicts bending stiffness badly",
+        ),
+        see_also=("gps.precision_error_estimate", "diagnostic.stress_singularity", "fem_surface"),
+    ),
+    _flow(
+        "cam",
+        "CAM programming",
+        ("cam workflow", "machining workflow", "programme a part", "nc programming", "make g code"),
+        "Setup, programme, verify, post.",
+        (
+            "1. Part Operation: machine, machining axis system, design part, stock, fixture",
+            "2. Programme, with operations in machining order",
+            "3. Tools, feeds and speeds, and the approach/retract macros",
+            "4. Tool Path Replay, then material removal simulation",
+            "5. Remaining material analysis",
+            "6. Post-process to NC code, and generate the shop floor documentation",
+        ),
+        failures=("Posting before simulating, so a collision is discovered on the machine",),
+        see_also=("nc_manufacturing_infrastructure.part_operation", "nc_manufacturing_infrastructure.post_processor"),
+    ),
+    _flow(
+        "knowledgeware",
+        "Automating a design with knowledge",
+        ("knowledgeware workflow", "automate a design", "parametric family", "design automation", "template workflow"),
+        "Parameters, then relations, then reuse.",
+        (
+            "1. Name the driving parameters explicitly rather than using feature dimensions",
+            "2. Formulas for derived values",
+            "3. A design table when the variants are a known set",
+            "4. Rules and checks for anything conditional",
+            "5. Package as a Power Copy or User Feature",
+            "6. Put it in a catalogue so it can be instantiated",
+        ),
+        failures=("Building the template before the naming is settled, so every instantiation asks for `Plane.3`",),
+        see_also=("knowledge_advisor.formula", "product_knowledge_template.power_copy"),
+    ),
+    _flow(
+        "drawing_production",
+        "Drawing production and release",
+        ("drawing workflow", "make a drawing", "produce a drawing", "release a drawing", "detail drawing"),
+        "Views, dimensions, GD&T, title block, out.",
+        (
+            "1. Sheet setup: format, scale, projection method, standard",
+            "2. Views -- front first, then projections, sections and details",
+            "3. Dimensions, generated or placed",
+            "4. GD&T, datums and notes",
+            "5. Title block and, for an assembly, the BOM and balloons",
+            "6. Check against the standard, then export PDF and DXF",
+        ),
+        failures=("Hidden lines and 3D specifications left on during layout, so every view regeneration takes minutes",),
+        see_also=("drafting.front_view", "drafting.generative_view_style"),
+    ),
+    _flow(
+        "mbd",
+        "3D master (model-based definition) release",
+        ("mbd", "3d master", "model based definition", "drawingless", "pmi release", "no drawing"),
+        "Put the definition on the model and ship it as data.",
+        (
+            "1. FTA annotation planes and a capture per view",
+            "2. Semantic datums, geometric tolerances and dimensions -- semantic, not free text",
+            "3. Tolerancing Advisor to validate the scheme",
+            "4. Captures organised so a reader can navigate them",
+            "5. Export STEP AP242, and a 3D PDF for anyone without a CAD seat",
+        ),
+        failures=("Exporting AP214, which silently discards every annotation",),
+        aerospace="AS9102 first-article inspection and CMM programming read the semantic PMI directly. Non-semantic annotation puts a human back in the loop transcribing characteristics.",
+        see_also=("fta.geometrical_tolerance", "format.step"),
+    ),
+    _flow(
+        "large_assembly",
+        "Working with a large assembly",
+        ("large assembly", "big assembly", "assembly is slow", "huge product", "performance assembly"),
+        "Make it openable before making it fast.",
+        (
+            "1. Turn the cache on, with the local cache on local disk",
+            "2. Open in visualisation mode; switch only what is being edited to design mode",
+            "3. Selective load, or deactivate the nodes not in play",
+            "4. DMU Optimizer for simplified stand-ins of heavy components",
+            "5. Loosen 3D accuracy and enable occlusion/pixel culling for navigation",
+        ),
+        failures=("A cache on a network share, which is slower than no cache at all",),
+        see_also=("setting.cache_management", "setting.3d_accuracy", "dmu_optimizer.simplification"),
+    ),
+    _flow(
+        "change_release",
+        "Change and release",
+        ("change process", "eco", "ecn", "release process", "revision", "where used", "impact analysis"),
+        "Revision, effectivity, impact, check-in.",
+        (
+            "1. Where-used and impact analysis before touching anything",
+            "2. Revise the affected documents",
+            "3. Make the change, and update everything that depends on it",
+            "4. Re-run the quality gates: clash, mass, link integrity, standard conformance",
+            "5. Check in against the ECO/ECN with the effectivity recorded",
+        ),
+        failures=("Changing a part without where-used, and discovering the second programme that used it after release",),
+        see_also=("enovia_vpm", "practice.quality_gates"),
+    ),
+    _flow(
+        "import_repair",
+        "Repairing imported geometry",
+        ("import repair", "fix imported geometry", "dumb solid", "imported step is not a solid", "heal an import"),
+        "Diagnose before repairing; most imports need less work than they look like they do.",
+        (
+            "1. Run CATDUA on the document if it behaves oddly at all",
+            "2. Show free edges, and run Connect Checker to size the real gaps",
+            "3. Join with a merging distance matched to those gaps -- not larger",
+            "4. Healing for what the join could not close, freezing surfaces that must not move",
+            "5. Close Surface to get a solid",
+            "6. Feature Recognition if an editable history is needed",
+        ),
+        failures=("Raising the merging distance until the join succeeds, which closes gaps that were real openings",),
+        see_also=("gsd.join", "gsd.healing", "catdua", "diagnostic.import_not_solid"),
+    ),
+    _flow(
+        "cfd_handoff",
+        "Handing geometry to CFD",
+        ("cfd", "fluent", "star ccm", "openfoam", "cfd handoff", "watertight", "flow analysis geometry"),
+        "CFD needs a watertight fluid domain, which is not the same shape as the part.",
+        (
+            "1. Simplify: remove fasteners, small fillets and internal detail the flow cannot see",
+            "2. Close every opening so the wetted surface is watertight",
+            "3. Build the fluid volume, by Close Surface on the negative or by a wrapping",
+            "4. Verify watertightness -- free edges must be empty",
+            "5. Export STEP or Parasolid; STL only if the mesher wants a tessellation",
+        ),
+        failures=("Exporting the part rather than the fluid domain, and a surface wrap that leaks through a gap left by a removed fillet",),
+        see_also=("format.step", "gsd.join"),
+    ),
+]
+
+SECTION = Section("workflows", ENTRIES)
+
+__all__ = ["ENTRIES", "SECTION"]

@@ -127,6 +127,68 @@ python -m app.retrieval.build --check    # exits non-zero when a rebuild is need
 python -m app.retrieval.build --query X  # see what the agent would find
 ```
 
+## CATIA V5 reference (`app/catia_kb/`)
+
+The other half of the CATIA answer, and it does a different job from the corpus above. The
+corpus knows what page 147 of the Part Design manual *says*; this knows that Edge Fillet is
+in Part Design's Dress-Up Features toolbar at `Insert > Dress-Up Features > Edge Fillet`,
+that it needs P1, that the French interface calls it `Congé d'arête` and the German one
+`Kantenverrundung`, that it fails when the radius exceeds the narrowest adjacent face *on the
+propagated tangent chain* rather than the edge you clicked, and that Tritangent Fillet is the
+alternative when a whole face should disappear. ~1,600 entries: workbenches, commands, dialog
+fields, file formats, `Tools > Options` settings, error messages, aerospace vocabulary,
+workflows, methodology, the automation object model, and the V5R19 product trigram table.
+
+It ships **in the code, not in an index**, so unlike the manuals it is always present. That is
+why there are still four frozen system prompts and not eight — the domain section is
+unconditional.
+
+Three consumers, in order of how much they earn:
+
+1. **Query expansion** (`recognise.expand_query`, wired into `KnowledgeService.search`). Half
+   the corpus is French; without this, half of it is unreachable from an English question. A
+   query for "draft angle" gets `dépouille` added before it hits BM25.
+2. **`explain_catia_term`** — the lookup tool. Returns *fields*, where `search_documentation`
+   returns prose, so the model states a menu path it was handed rather than one it recalls.
+3. **The per-turn brief** (`state.py`) — a few lines beside the user's message naming what
+   their words refer to. This is what makes a small local model get the workbench right
+   without having to decide to call a tool.
+
+Things that will bite you:
+
+- **Precision is the hard half, not recall.** This vocabulary contains `fit`, `add`, `part`,
+  `box`, `web` and `pip`. Two disjoint tiers in `recognise.py` keep them from firing:
+  `NEVER_BARE` never matches alone (ordinary English that collides with a CATIA name);
+  `AMBIGUOUS_WORDS` needs corroboration from something unmistakable elsewhere in the message.
+  Distinctive words — `pocket`, `fillet`, `joggle`, `sketch` — are in **neither**, because
+  "how do I make a pocket" carries no other signal and must still work. `TestPrecision` is the
+  set of sentences that must produce nothing; add to it before widening any alias.
+- **Product codes need their capitals when they collide** (`PIP`/`pip`, `FIT`, `GAS`, `EST`,
+  `CUT`). Codes with no collision (`GSD`, `ASL`, `CPD`) match either way.
+- **Fuzzy matching only fires once something matched exactly.** Otherwise `document` scores
+  0.94 against `Documents` and every English sentence with a long word produces a hit.
+- **Expansion and the coverage floor are in direct conflict** — this shipped as a bug once.
+  Expansion adds *synonyms*, and a passage matches the English name or the French one, never
+  both, so a floor computed over the expanded query demands breadth no passage can have.
+  `Corpus.search(..., coverage_query=)` measures the floor against the user's original query.
+  Never remove that argument.
+- **A missing translation is reported as missing.** `localised()` returns `None` and the tool
+  payload says so in words. Never fall back to the English name presented as the localised
+  one — an engineer can work with "I don't have the German name, it's here in the menu", and
+  cannot recover from being sent to a menu item that does not exist. Same rule for the
+  informal trigrams (`WSF`, `AMT`), which say they are informal.
+- **The COM automation API is not localised** (`api.localisation`). `AddNewPad` is
+  `AddNewPad` on every language install; only user-typed data (feature names, materials)
+  translates. This is why the CATIA bridge works on any seat, and why a macro that looks up
+  `"Pad.1"` by string is the one that breaks abroad.
+- **`CatiaKnowledge` cannot raise**, same contract as `KnowledgeService`. Every method returns
+  empty/unchanged on failure, logged once.
+- **Ambiguity is named, not resolved.** SMD vs ASL, GSD vs WSF, GPS vs GAS, generative vs
+  interactive Drafting, Geometrical Set vs Body — the `Disambiguation` table forks these and
+  the brief prints the fork. Picking a side is how an airframe engineer loses a day.
+- Duplicate entry keys raise at import; `missing_cross_references()` and `untranslated()` are
+  asserted empty by the tests, which is what catches a rename orphaning a German name.
+
 ## Non-negotiable rules
 
 These are facts that cannot be inferred by reading a single file.

@@ -127,6 +127,19 @@ class KnowledgeService:
         catches the common case of a user typing French at an assistant that
         was never told what language they work in. Short queries are usually
         undetectable and correctly yield no preference at all.
+
+        **The query is widened before it is run.** A lexical index matches
+        terms, and half these manuals are French, so an English question for
+        "draft angle" cannot reach the pages that call it `dépouille` however
+        good the scorer is. `app.catia_kb` recognises the CATIA entity behind
+        the words and adds its name in the other languages, which is what makes
+        a bilingual corpus searchable from one language. The preference above
+        then decides which of the now-reachable pages ranks first -- widening
+        and preferring do different jobs and both are wanted.
+
+        Expansion is additive and capped, and it can only fail closed: on any
+        error the original query is used, so the worst case is the behaviour
+        this method had before.
         """
         if not query or not query.strip():
             return []
@@ -135,12 +148,33 @@ class KnowledgeService:
             return []
         try:
             prefer = detect_query(query, fallback=normalise(language))
+            widened = self._widen(query, language=prefer or language)
             return merge_adjacent(
-                corpus.search(query, limit=limit, prefer_language=prefer)
+                corpus.search(
+                    widened,
+                    limit=limit,
+                    prefer_language=prefer,
+                    # The floor stays measured against what the user asked for.
+                    # Synonyms are additive to the score and must not raise the
+                    # bar for breadth of match -- see `Corpus.search`.
+                    coverage_query=query if widened != query else None,
+                )
             )[:limit]
         except Exception:  # noqa: BLE001 - see the module docstring
             logger.exception("Reference lookup failed for %r", query[:120])
             return []
+
+    @staticmethod
+    def _widen(query: str, *, language: str | None) -> str:
+        """`query` plus its cross-language synonyms, or `query` unchanged."""
+        if not settings.catia_knowledge_expand_queries:
+            return query
+        # Imported here rather than at module scope: the retrieval package is
+        # usable on its own, and a hard dependency on the CATIA reference would
+        # make the layering a lie.
+        from app.catia_kb import catia_knowledge
+
+        return catia_knowledge().expand(query, language=language)
 
     def stats(self) -> dict[str, Any]:
         """Index statistics for the health endpoint, or a reason there are none."""

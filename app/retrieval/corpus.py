@@ -426,6 +426,7 @@ class Corpus:
         *,
         limit: int = DEFAULT_LIMIT,
         prefer_language: str | None = None,
+        coverage_query: str | None = None,
     ) -> list[Passage]:
         """The best `limit` passages for `query`, best first.
 
@@ -439,6 +440,17 @@ class Corpus:
         record rather than in the BM25 arrays -- which is why the over-fetch
         below has to be generous enough that a preferred-language passage
         sitting just outside `limit` can still be promoted into it.
+
+        `coverage_query` is what the coverage floor is measured against, when
+        that differs from what is scored. It exists because query expansion and
+        a coverage floor are otherwise in direct conflict: expansion adds
+        *synonyms*, and a passage matches the English name or the French one,
+        never both, so a floor computed over the expanded query demands a
+        breadth of match that no passage can have. Widening `bend radius` to a
+        dozen cross-language terms raised the floor from one term to eight and
+        turned a good hit into no hits at all. Passing the user's original query
+        here keeps the floor measuring what they actually asked for while the
+        synonyms stay purely additive to the score.
         """
         terms = analyze_query(query)
         if not terms:
@@ -448,7 +460,8 @@ class Corpus:
         # sometimes return fewer than `limit` results when good ones existed
         # just below it.
         hits = self._index.search(terms, limit=limit * 4)
-        distinct = len(set(terms))
+        floor_terms = analyze_query(coverage_query) if coverage_query else terms
+        distinct = len(set(floor_terms)) or len(set(terms))
         floor = 1 if distinct == 1 else max(1, int(distinct * MIN_COVERAGE_RATIO))
         kept = [hit for hit in hits if hit.matched_terms >= floor]
 

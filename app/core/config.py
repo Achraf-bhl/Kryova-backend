@@ -163,6 +163,23 @@ class Settings(BaseSettings):
     # context window; fewer and a broad question misses the paragraph it needed.
     knowledge_max_passages: int = 5
 
+    # The structured CATIA V5 reference (`app.catia_kb`): workbenches, commands,
+    # dialog fields, error messages, aerospace vocabulary, and the localised
+    # command names for every interface language the manuals cover. It ships in
+    # the code rather than in an index, so unlike the corpus above it is always
+    # present -- this switch exists for measuring its effect, not for deployments
+    # that lack the data.
+    catia_knowledge_enabled: bool = True
+    # Whether a turn carries a few lines naming the CATIA terms found in the
+    # user's message. Costs tokens on the turns it fires and is what lets a
+    # small local model get the workbench and menu path right without having to
+    # decide to call a tool first.
+    catia_knowledge_brief_enabled: bool = True
+    # Whether a documentation search is widened with the same term in the other
+    # languages the manuals are written in. Half this corpus is French; without
+    # it, half of it is unreachable from an English question.
+    catia_knowledge_expand_queries: bool = True
+
     # CATIA desktop bridge. The daemon dials out to this service over a
     # WebSocket; see docs/CATIA_BRIDGE_PROTOCOL.md for the wire format.
     # Off switches the tools out of the agent's vocabulary entirely rather than

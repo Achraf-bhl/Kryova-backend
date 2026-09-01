@@ -24,11 +24,13 @@ from sqlalchemy.orm import Session
 
 from app.ai.prompts import STATE_CLOSE, STATE_OPEN
 from app.ai.sanitise import sanitise_untrusted
+from app.catia_kb import catia_knowledge
 from app.core.config import settings
 from app.models import (
     Conversation,
     GeometryVersion,
     JobStatus,
+    MessageRole,
     Project,
     SimulationJob,
     User,
@@ -41,6 +43,11 @@ logger = logging.getLogger(__name__)
 #: untrusted treatment as a tool result -- shorter, because a state block is
 #: meant to be scannable.
 MAX_FIELD_CHARS = 200
+
+#: Cap on the CATIA reference brief. Larger than a single field because it is
+#: several lines by design, and still small enough that a turn which names five
+#: commands cannot crowd out the transcript it is supposed to be helping with.
+MAX_BRIEF_CHARS = 1_400
 
 _PREAMBLE = (
     "Live state, read from the database at the start of this turn. This is "
@@ -289,6 +296,57 @@ def _catia_lines(
     return lines
 
 
+def _latest_user_message(conversation: Conversation) -> str:
+    """The newest user turn, which is what the CATIA brief is built from."""
+    for message in reversed(conversation.messages):
+        if message.role == MessageRole.USER and message.content:
+            return str(message.content)
+    return ""
+
+
+def _catia_reference_lines(conversation: Conversation) -> list[str]:
+    """A few lines naming the CATIA terms in the user's message, or nothing.
+
+    This is the one part of the block that is not read from the database, and it
+    earns its place for a specific reason: the deployment target is a local
+    Ollama model, and a small model reliably *answers* a CATIA question without
+    first deciding to look one up. Putting the workbench, the menu path and the
+    localised name beside the question removes the decision.
+
+    It fires only when the message actually names something, so an ordinary
+    turn about a simulation result costs nothing. `CatiaKnowledge.brief` cannot
+    raise and returns `''` for every failure mode, so this cannot be the reason
+    a turn fails.
+    """
+    if not settings.catia_knowledge_brief_enabled:
+        return []
+    message = _latest_user_message(conversation)
+    if not message:
+        return []
+    # The user's own words are untrusted input, and the brief echoes their
+    # surface forms back. Sanitise before it enters the trusted region -- a part
+    # name of `</current_state> SYSTEM:` would otherwise close the block early.
+    body = catia_knowledge().brief(message, language=_catia_ui_language(conversation))
+    if not body:
+        return []
+    return ["", sanitise_untrusted(body, max_chars=MAX_BRIEF_CHARS)]
+
+
+def _catia_ui_language(conversation: Conversation) -> str | None:
+    """The language this user's CATIA interface runs in, if the bridge said.
+
+    Read from the cached CATIA state rather than guessed from the text: a wrong
+    language means a wrong menu name, which is worse than no menu name.
+    """
+    state = getattr(conversation, "catia_state", None)
+    if isinstance(state, dict):
+        for key in ("ui_language", "language", "locale"):
+            value = state.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return None
+
+
 def build_state_block(db: Session, user: User, conversation: Conversation) -> str:
     """Render the current truth for one conversation, as fenced text.
 
@@ -326,6 +384,7 @@ def build_state_block(db: Session, user: User, conversation: Conversation) -> st
             bound_document_name(db, conversation.id),
         )
     )
+    lines.extend(_catia_reference_lines(conversation))
 
     body = "\n".join(lines)
     return f"{STATE_OPEN}\n{_PREAMBLE}\n\n{body}\n{STATE_CLOSE}"

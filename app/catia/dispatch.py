@@ -168,7 +168,7 @@ def _resolve_connection(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceC
             return found
 
     if local_bridge.is_supported():
-        detail = local_bridge.last_error()
+        detail = local_bridge.last_error(user_id)
         raise CatiaUnavailable(
             "The CATIA bridge on this machine is not connected yet"
             + (f": {detail}" if detail else ", because CATIA itself is not running")
@@ -201,7 +201,7 @@ def catia_available(db: Session, user_id: str) -> bool:
     return local_bridge.ensure_started(db, user_id)
 
 
-def _offline_detail(devices: list[CatiaDevice]) -> str:
+def _offline_detail(devices: list[CatiaDevice], user_id: str | None = None) -> str:
     """Why no device is connected, phrased as what to do about it.
 
     On a single-machine install the honest answer is almost always "CATIA is not
@@ -210,7 +210,7 @@ def _offline_detail(devices: list[CatiaDevice]) -> str:
     off asking for a pairing code that nobody needs.
     """
     if local_bridge.is_supported():
-        error = local_bridge.last_error()
+        error = local_bridge.last_error(user_id)
         if error:
             return error
         return (
@@ -254,7 +254,7 @@ def status_payload(db: Session, user_id: str, conversation_id: str | None) -> di
             "enabled": settings.catia_enabled,
             "paired_devices": len(devices),
             "document": document,
-            "detail": _offline_detail(devices),
+            "detail": _offline_detail(devices, user_id),
         }
 
     device, connection = online[0]

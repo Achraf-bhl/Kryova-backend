@@ -78,10 +78,27 @@ CONNECT_POLL_S = 0.25
 #: Not retried more often than this after a failure.
 RETRY_COOLDOWN_S = 60.0
 
+#: Minimum time the bridge stays with an account after being handed over.
+#: Without it, two accounts whose requests interleave -- one engineer working,
+#: another session polling -- kill each other's daemon every couple of seconds
+#: and neither ever holds a connection long enough to use it. Observed live as
+#: an attach/connect/respawn loop in the bridge log.
+HANDOVER_HOLD_S = 30.0
+
 _lock = threading.Lock()
 _process: subprocess.Popen[bytes] | None = None
+#: Whose device the running daemon is paired as. One daemon serves one device
+#: row, and a device row belongs to one account -- so a daemon alive for any
+#: OTHER account is not "the bridge is up", it is the bridge being held by
+#: someone else. See the handover in `ensure_started`.
+_process_user_id: str | None = None
+_last_handover: float = 0.0
 _last_attempt: float = 0.0
-_last_error: str | None = None
+#: Why the bridge is not up, per account. Not one global string: the reasons
+#: are now per-user ("another account holds it"), and a single slot showed one
+#: account the message meant for another -- including telling the account that
+#: actually owned the daemon that someone else had it.
+_last_error: dict[str, str] = {}
 
 
 def _device_token(device_id: str) -> str:
@@ -126,9 +143,11 @@ def is_supported() -> bool:
     )
 
 
-def last_error() -> str | None:
-    """Why the last start attempt failed, for a status payload to explain."""
-    return _last_error
+def last_error(user_id: str | None = None) -> str | None:
+    """Why the bridge is not up for this account, for a status payload to explain."""
+    if user_id is None:
+        return None
+    return _last_error.get(user_id)
 
 
 def _log_path() -> Path:
@@ -236,42 +255,91 @@ def ensure_started(db: Session, user_id: str, *, wait_s: float = 0.0) -> bool:
     Returns whether a connection is up by the time it gives up. Never raises:
     every caller is already on a path that copes with "no CATIA", and a
     convenience that can break the turn is not a convenience.
+
+    A signed-in user asking anything about CATIA is that person using this
+    workstation, so the daemon follows them -- there is no caller that has to
+    settle for someone else's daemon. `HANDOVER_HOLD_S` is what stops two
+    accounts polling at once from killing each other's daemon every couple of
+    seconds; whoever takes it keeps it long enough to actually model something.
     """
-    global _process, _last_attempt, _last_error
+    global _process, _process_user_id, _last_handover, _last_attempt
 
     if not is_supported():
         return False
 
     try:
         if _connected(db, user_id):
+            _last_error.pop(user_id, None)
             return True
 
         with _lock:
             # Re-checked under the lock: two agent turns arriving together must
             # not both spawn a daemon.
             if _connected(db, user_id):
+                _last_error.pop(user_id, None)
                 return True
 
             alive = _process is not None and _process.poll() is None
+            handover = False
+            if alive and _process_user_id != user_id:
+                now = time.monotonic()
+                if now - _last_handover < HANDOVER_HOLD_S:
+                    # Two accounts fighting over one workstation. The holder
+                    # keeps it for a beat; better one of them works than
+                    # neither.
+                    _last_error[user_id] = (
+                        "The CATIA bridge on this machine is serving another "
+                        "signed-in account; it becomes available again shortly."
+                    )
+                    return False
+                # The machine's one daemon is paired as ANOTHER account's
+                # device, so for this caller it is worse than no daemon: the
+                # old logic saw "a process is alive", spawned nothing, waited
+                # the full CONNECT_TIMEOUT_S for a connection on this user's
+                # device that could never arrive, and the assistant reported
+                # "no CATIA bridge is connected" on every turn. Observed live:
+                # the test account's daemon held the slot, and the engineer's
+                # own account was locked out of its own workstation. A desktop
+                # machine follows whoever is using it -- hand the bridge over.
+                logger.info(
+                    "Handing the local CATIA bridge over to another account "
+                    "(pid %s served a different user)",
+                    _process.pid,
+                )
+                _terminate(_process)
+                _process = None
+                _process_user_id = None
+                _last_handover = now
+                alive = False
+                handover = True
+
             if not alive:
                 now = time.monotonic()
-                if _last_attempt and now - _last_attempt < RETRY_COOLDOWN_S:
+                # The cooldown exists so a machine that CANNOT start a daemon
+                # (no pywin32, broken venv) does not spawn a doomed process on
+                # every agent turn. A handover is the opposite case -- the
+                # previous spawn succeeded and is being replaced on purpose --
+                # so it must not sit out the other account's cooldown.
+                if not handover and _last_attempt and now - _last_attempt < RETRY_COOLDOWN_S:
                     return False
                 _last_attempt = now
 
                 provisioned = _provision(db, user_id)
                 if provisioned is None:
-                    _last_error = "The local CATIA bridge has been revoked for this account."
+                    _last_error[user_id] = (
+                        "The local CATIA bridge has been revoked for this account."
+                    )
                     return False
                 device, token = provisioned
                 _process = _spawn(device, token)
                 if _process is None:
-                    _last_error = (
+                    _last_error[user_id] = (
                         "Kryova could not start the CATIA bridge process on this machine. "
                         f"See {_log_path()}."
                     )
                     return False
-                _last_error = None
+                _process_user_id = user_id
+                _last_error.pop(user_id, None)
                 logger.info("Started the local CATIA bridge (pid %s)", _process.pid)
 
         if wait_s <= 0:
@@ -282,7 +350,7 @@ def ensure_started(db: Session, user_id: str, *, wait_s: float = 0.0) -> bool:
             if _connected(db, user_id):
                 return True
             if _process is not None and _process.poll() is not None:
-                _last_error = (
+                _last_error[user_id] = (
                     "The CATIA bridge exited immediately after starting. "
                     f"See {_log_path()} for why."
                 )
@@ -294,15 +362,23 @@ def ensure_started(db: Session, user_id: str, *, wait_s: float = 0.0) -> bool:
         return False
 
 
-def stop() -> None:
-    """Stop a daemon this process started, on shutdown."""
-    global _process
-    with _lock:
-        process, _process = _process, None
-    if process is None or process.poll() is not None:
+def _terminate(process: subprocess.Popen[bytes]) -> None:
+    """End a daemon process, escalating from terminate to kill."""
+    if process.poll() is not None:
         return
     process.terminate()
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
+
+
+def stop() -> None:
+    """Stop a daemon this process started, on shutdown."""
+    global _process, _process_user_id
+    with _lock:
+        process, _process = _process, None
+        _process_user_id = None
+    if process is None:
+        return
+    _terminate(process)

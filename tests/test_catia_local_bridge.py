@@ -46,12 +46,16 @@ from app.models.catia import CatiaDevice, CatiaDeviceStatus
 def _reset_supervisor() -> Any:
     """Module state is global; a test must not inherit the previous one's."""
     local_bridge._process = None
+    local_bridge._process_user_id = None
+    local_bridge._last_handover = 0.0
     local_bridge._last_attempt = 0.0
-    local_bridge._last_error = None
+    local_bridge._last_error = {}
     yield
     local_bridge._process = None
+    local_bridge._process_user_id = None
+    local_bridge._last_handover = 0.0
     local_bridge._last_attempt = 0.0
-    local_bridge._last_error = None
+    local_bridge._last_error = {}
 
 
 @pytest.fixture
@@ -224,7 +228,7 @@ class TestConsent:
         assert not spawned
         db_session.refresh(device)
         assert device.status is CatiaDeviceStatus.REVOKED
-        assert "revoked" in (local_bridge.last_error() or "").lower()
+        assert "revoked" in (local_bridge.last_error(user.id) or "").lower()
 
 
 class TestFailingCheaply:
@@ -243,7 +247,7 @@ class TestFailingCheaply:
         for _ in range(5):
             assert local_bridge.ensure_started(db_session, user.id) is False
         assert len(attempts) == 1
-        assert local_bridge.last_error()
+        assert local_bridge.last_error(user.id)
 
     def test_a_daemon_that_exits_immediately_is_reported_not_awaited(
         self, db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
@@ -257,7 +261,7 @@ class TestFailingCheaply:
 
         assert local_bridge.ensure_started(db_session, user.id, wait_s=5.0) is False
         # Told where to look, rather than "unavailable".
-        assert "local-bridge.log" in (local_bridge.last_error() or "")
+        assert "local-bridge.log" in (local_bridge.last_error(user.id) or "")
 
     def test_a_broken_database_does_not_break_the_turn(
         self, db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
@@ -309,7 +313,7 @@ class TestNothingAsksTheUserToPair:
         from app.catia.dispatch import _offline_detail
 
         monkeypatch.setattr(local_bridge, "is_supported", lambda: True)
-        monkeypatch.setattr(local_bridge, "last_error", lambda: None)
+        monkeypatch.setattr(local_bridge, "last_error", lambda *a: None)
 
         detail = _offline_detail([]).lower()
         assert "pair" not in detail
@@ -576,3 +580,139 @@ class TestTheStatusPanelBringsTheBridgeUp:
         monkeypatch.setattr(dispatch.local_bridge, "ensure_started", record)
         dispatch.status_payload(db_session, user.id, None)
         assert waits == [0.0]
+
+
+class TestTheBridgeFollowsThePersonUsingTheMachine:
+    """One daemon per machine, and it belongs to whoever is using the machine.
+
+    The bug this pins, observed live: an automated test account's daemon held
+    the machine's single daemon slot, and the engineer's own account -- in the
+    actual Kryova UI -- was told "no CATIA bridge is connected" on every turn.
+    `ensure_started` saw a live process, spawned nothing, and waited the full
+    connect timeout for a connection on a device that process was never paired
+    as. A desktop workstation has one person at it; the daemon follows them.
+    """
+
+    @pytest.fixture
+    def second_user(self, db_session: Session) -> User:
+        from app.core.security import hash_password
+
+        account = User(
+            email="the-actual-engineer@kryova.dev",
+            hashed_password=hash_password("another-long-password"),
+        )
+        db_session.add(account)
+        db_session.commit()
+        return account
+
+    def test_a_daemon_held_by_another_account_is_handed_over(
+        self,
+        db_session: Session,
+        user: User,
+        second_user: User,
+        spawned: list[dict[str, Any]],
+    ) -> None:
+        local_bridge.ensure_started(db_session, user.id)
+        first_process = local_bridge._process
+        assert first_process is not None
+
+        local_bridge.ensure_started(db_session, second_user.id)
+
+        assert first_process.terminated, "the old account's daemon must be stopped"
+        assert len(spawned) == 2, "a daemon must be spawned for the new account"
+        second_device = local_bridge._local_device(db_session, second_user.id)
+        assert second_device is not None
+        assert spawned[1]["env"]["KRYOVA_BRIDGE_DEVICE_ID"] == second_device.id
+
+    def test_the_handover_is_not_blocked_by_the_other_accounts_cooldown(
+        self,
+        db_session: Session,
+        user: User,
+        second_user: User,
+        spawned: list[dict[str, Any]],
+    ) -> None:
+        # The first account's spawn SUCCEEDED, so its cooldown timestamp is
+        # fresh -- and must not make the second account sit out a minute with
+        # "no bridge" while a healthy daemon for the wrong device runs.
+        local_bridge.ensure_started(db_session, user.id)
+        local_bridge.ensure_started(db_session, second_user.id)
+        assert len(spawned) == 2
+
+    def test_a_fresh_handover_is_held_against_the_next_taker(
+        self,
+        db_session: Session,
+        user: User,
+        second_user: User,
+        spawned: list[dict[str, Any]],
+    ) -> None:
+        # Two accounts polling at once must not kill each other's daemon every
+        # couple of seconds -- observed live as an attach/connect/respawn loop
+        # in which neither account ever held a usable connection.
+        local_bridge.ensure_started(db_session, user.id)
+        local_bridge.ensure_started(db_session, second_user.id)
+        taken = local_bridge._process
+        assert taken is not None
+
+        assert local_bridge.ensure_started(db_session, user.id) is False
+        assert local_bridge._process is taken
+        assert not taken.terminated
+        assert len(spawned) == 2, "the hold must stop a third spawn"
+
+    def test_the_hold_expires_so_the_machine_can_change_hands(
+        self,
+        db_session: Session,
+        user: User,
+        second_user: User,
+        spawned: list[dict[str, Any]],
+    ) -> None:
+        local_bridge.ensure_started(db_session, user.id)
+        local_bridge.ensure_started(db_session, second_user.id)
+        # Walk the hold clock back rather than sleeping through it.
+        local_bridge._last_handover -= local_bridge.HANDOVER_HOLD_S + 1
+
+        local_bridge.ensure_started(db_session, user.id)
+        assert len(spawned) == 3
+        device = local_bridge._local_device(db_session, user.id)
+        assert device is not None
+        assert spawned[2]["env"]["KRYOVA_BRIDGE_DEVICE_ID"] == device.id
+
+    def test_the_same_account_keeps_its_daemon(
+        self, db_session: Session, user: User, spawned: list[dict[str, Any]]
+    ) -> None:
+        local_bridge.ensure_started(db_session, user.id)
+        local_bridge.ensure_started(db_session, user.id)
+        assert len(spawned) == 1, "a live daemon for the same account is left alone"
+        assert local_bridge._process is not None
+        assert not local_bridge._process.terminated
+
+    def test_one_accounts_reason_is_never_shown_to_another(
+        self,
+        db_session: Session,
+        user: User,
+        second_user: User,
+        spawned: list[dict[str, Any]],
+    ) -> None:
+        # A single global error string told the account that actually OWNED the
+        # daemon that somebody else had it.
+        local_bridge.ensure_started(db_session, user.id)
+        local_bridge.ensure_started(db_session, second_user.id)
+        local_bridge.ensure_started(db_session, user.id)  # refused by the hold
+
+        assert "another signed-in account" in (local_bridge.last_error(user.id) or "")
+        assert local_bridge.last_error(second_user.id) is None
+
+    def test_each_account_gets_its_own_device_row(
+        self,
+        db_session: Session,
+        user: User,
+        second_user: User,
+        spawned: list[dict[str, Any]],
+    ) -> None:
+        local_bridge.ensure_started(db_session, user.id)
+        local_bridge.ensure_started(db_session, second_user.id)
+        first = local_bridge._local_device(db_session, user.id)
+        second = local_bridge._local_device(db_session, second_user.id)
+        assert first is not None and second is not None
+        assert first.id != second.id
+        assert first.owner_id == user.id
+        assert second.owner_id == second_user.id

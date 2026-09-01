@@ -293,11 +293,22 @@ class MockCatia(CatiaBackend):
             (tip, tip),
             meta={"area_mm2": area},
         )
+        had_solid = self.size is not None
         result.update(
             module_mm=float(module_mm),
             teeth=int(teeth),
             pressure_angle_deg=float(pressure_angle_deg),
             area_mm2=round(area, 4),
+            next_step=(
+                "catia_pad this sketch for an EXTERNAL gear. "
+                + (
+                    "catia_pocket it through the existing solid for an INTERNAL ring gear."
+                    if had_solid
+                    else "For an INTERNAL ring gear this part needs its disc FIRST: "
+                    "the part is still empty, so pad a circle larger than "
+                    "tip_diameter_mm before drawing the gear profile, then pocket."
+                )
+            ),
             **{k: round(v, 4) for k, v in sizes.items()},
         )
         return result

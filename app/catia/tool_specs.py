@@ -412,7 +412,12 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
                 "feature": _FEATURE_NAME,
                 "edges": _enum(
                     EDGE_SELECTORS,
-                    "Which edges of the feature to round. Default 'all'.",
+                    "Which edges to round, classified against the part's Z axis: "
+                    "'top'/'bottom' are the highest/lowest edge loops, 'vertical' "
+                    "runs along Z, 'horizontal' is any level edge. On a turned "
+                    "part made with catia_shaft the axis lies along X, so these "
+                    "names lose their meaning -- use 'all' with a `feature` "
+                    "scope there instead. Default 'all'.",
                 ),
             },
             required=["radius_mm"],
@@ -440,7 +445,11 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
                     "description": "Chamfer angle in degrees. Default 45.",
                 },
                 "feature": _FEATURE_NAME,
-                "edges": _enum(EDGE_SELECTORS, "Which edges to chamfer. Default 'all'."),
+                "edges": _enum(
+                    EDGE_SELECTORS,
+                    "Which edges to chamfer -- same Z-axis classification as "
+                    "catia_fillet, same caveat on turned parts. Default 'all'.",
+                ),
             },
             required=["length_mm"],
         ),

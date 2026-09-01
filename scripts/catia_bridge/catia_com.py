@@ -90,6 +90,13 @@ _SEARCH_GRAMMARS: tuple[tuple[str, str], ...] = (
     ("Topology.Edge,all", "en"),
 )
 
+#: How many solid edges a top/bottom/vertical/horizontal selector will
+#: classify. Classification measures every candidate, the cost is CATIA's own
+#: measurable construction (~0.1 s per edge, in-process or over COM alike),
+#: and the daemon kills any call at 30 s -- a padded gear's thousand edges
+#: took 138 s live. edges='all' has no such limit because it measures nothing.
+_EDGE_CLASSIFY_LIMIT = 150
+
 #: `CatCaptureFormat`'s JPEG member. The full enumeration is CGM(0), EMF(1),
 #: TIFF(2), TIFFGreyScale(3), BMP(4), JPEG(5) -- there is no PNG in CATIA V5,
 #: which is why `capture_view` writes a `.jpg`.
@@ -727,6 +734,7 @@ class CatiaCom(CatiaBackend):
                 x1, y1 = points[(index + 1) % len(points)]
                 factory.CreateLine(x0, y0, x1, y1)
 
+        had_solid = self._solid_volume() > 0.0
         name = self._sketch(plane, draw)
         return {
             "feature": name,
@@ -738,6 +746,20 @@ class CatiaCom(CatiaBackend):
             "pressure_angle_deg": float(pressure_angle_deg),
             "area_mm2": round(gear.area_mm2(points), 4),
             **{k: round(v, 4) for k, v in gear.dimensions(module_mm, teeth).items()},
+            # Said here, at the moment of use, because the tool description
+            # alone was not enough: asked for a ring gear, a live agent skipped
+            # the disc, padded this profile directly and reported the external
+            # gear it got as a 70 mm ring.
+            "next_step": (
+                "catia_pad this sketch for an EXTERNAL gear. "
+                + (
+                    "catia_pocket it through the existing solid for an INTERNAL ring gear."
+                    if had_solid
+                    else "For an INTERNAL ring gear this part needs its disc FIRST: "
+                    "the part is still empty, so pad a circle larger than "
+                    "tip_diameter_mm before drawing the gear profile, then pocket."
+                )
+            ),
             "features": self._feature_list(),
         }
 
@@ -986,22 +1008,27 @@ class CatiaCom(CatiaBackend):
             ) from exc
         return self._feature_result(str(chamfer.Name))
 
-    def _edge_search(self, feature: str | None = None) -> list[Any]:  # pragma: no cover - Windows only
-        """Every solid edge of the part, as SelectedElement objects.
+    def _select_edges(self, edges: str, feature: str | None = None) -> list[Any]:  # pragma: no cover
+        """References for the edges the caller means by "top", "vertical", ...
 
         `Selection.Search` is the one automation route to real topological
-        references, and its query keywords are **localized to the UI
-        language** -- which is why this bridge spent two sessions believing
-        Search was broken: a French V5-R33 refuses "Topology.Edge,all" with the
-        same bare COM error it gives genuinely malformed queries, and answers
-        "Topologie.Arête,tout" with every edge in the part. The working grammar
-        is detected once and cached for the daemon's lifetime.
+        references, and two things about it shaped this method:
 
-        Sketch lines come back too, typed `...MonoDimFeatEdge`; solid edges are
-        `...TriDimFeatEdge`. Only the solid ones are returned.
+        * Its query keywords are **localized to the UI language** -- a French
+          V5-R33 refuses "Topology.Edge,all" with the same bare COM error it
+          gives malformed queries, and answers "Topologie.Arête,tout" with
+          every edge in the part. Two sessions concluded Search was broken;
+          it was the grammar. The working one is detected once and cached.
+        * Measuring the found edges one Evaluate call at a time is O(edges)
+          COM round trips, and a padded gear has a thousand solid edges --
+          classifying it that way blew through the daemon's 30 s watchdog on a
+          live request. `vba.edge_map` searches AND measures in one Evaluate,
+          then this method pulls references only for the edges it keeps.
+
+        Classification is against the part's Z axis with a 1e-6 mm tolerance --
+        these are exact machine coordinates, not floating measurements.
         """
         selection = self._document().Selection
-        scope_shape = None
         if feature is not None:
             try:
                 scope_shape = self._body().Shapes.Item(feature)
@@ -1010,103 +1037,103 @@ class CatiaCom(CatiaBackend):
                 raise CatiaOperationError(
                     f"No feature named {feature!r} in this part. Features: {known}."
                 ) from exc
+        else:
+            # An unscoped request scopes to the whole body: the query is then
+            # always the ",sel" form, and the edge-map script needs a scope
+            # object regardless (it clears the selection itself).
+            scope_shape = self._body()
 
         grammar = getattr(self, "_search_grammar", None)
         errors: list[str] = []
+        found = None
         for query, language in _SEARCH_GRAMMARS:
             if grammar is not None and grammar != language:
                 continue
+            query = query.rsplit(",", 1)[0] + ",sel"
             selection.Clear()
-            if scope_shape is not None:
-                selection.Add(scope_shape)
-                # ",sel" scopes the search to the current selection; unlike the
-                # type keywords, the scope word is accepted untranslated.
-                query = query.rsplit(",", 1)[0] + ",sel"
+            selection.Add(scope_shape)
             try:
                 selection.Search(query)
             except Exception as exc:  # noqa: BLE001 - wrong language, try the next
                 errors.append(f"{language}: {exc}")
                 continue
             self._search_grammar = language
-            found = [selection.Item2(i) for i in range(1, int(selection.Count2) + 1)]
-            return [item for item in found if "TriDim" in str(item.Type)]
-        raise CatiaOperationError(
-            "CATIA refused every edge-search grammar this bridge knows "
-            f"({'; '.join(errors)}). Its UI language may be one the bridge has no "
-            "query vocabulary for yet -- see _SEARCH_GRAMMARS in catia_com.py."
-        )
-
-    def _select_edges(self, edges: str, feature: str | None = None) -> list[Any]:  # pragma: no cover
-        """References for the edges the caller means by "top", "vertical", ...
-
-        Selection hands back anonymous references; what makes them nameable is
-        measuring each one (`vba.points_on_curve`) and classifying it against
-        the part's bounding box. Tolerance is 1e-6 mm -- these are exact
-        machine coordinates, not floating measurements.
-        """
-        found = self._edge_search(feature)
+            found = [
+                index
+                for index in range(1, int(selection.Count2) + 1)
+                if "TriDim" in str(selection.Item2(index).Type)
+            ]
+            scoped_query = query
+            break
+        if found is None:
+            raise CatiaOperationError(
+                "CATIA refused every edge-search grammar this bridge knows "
+                f"({'; '.join(errors)}). Its UI language may be one the bridge has "
+                "no query vocabulary for yet -- see _SEARCH_GRAMMARS in catia_com.py."
+            )
         if not found:
             raise CatiaOperationError(
                 "This part has no solid edges yet. Pad or revolve something first."
             )
 
-        measured: list[tuple[Any, tuple, tuple, tuple]] = []
-        for item in found:
-            reference = item.Reference
-            try:
-                start, middle, end = vba.points_on_curve(self._app, self._part(), reference)
-            except vba.VbaUnavailable:
-                # An edge that cannot be measured cannot be classified; for
-                # "all" it still counts, for anything narrower it is skipped.
-                measured.append((reference, None, None, None))  # type: ignore[arg-type]
-                continue
-            measured.append((reference, start, middle, end))
-
         if edges == "all":
-            return [reference for reference, *_ in measured]
+            # No classification, so no measurement: references come straight
+            # off the live selection, whatever the edge count.
+            return [selection.Item2(index).Reference for index in found]
 
-        z_values = [
-            p[2]
-            for _, start, middle, end in measured
-            if start is not None
-            for p in (start, middle, end)
-        ]
-        if not z_values:
+        # Classifying means measuring, and the cost is CATIA's measurable
+        # construction itself (~0.1 s per edge, in-process or not), so it is
+        # capped where the daemon's 30 s call budget still holds. A padded
+        # gear has over a thousand solid edges; classifying it took 138 s
+        # live, well past the watchdog.
+        if len(found) > _EDGE_CLASSIFY_LIMIT:
+            raise CatiaOperationError(
+                f"This selection has {len(found)} solid edges, and working out "
+                f"which are {edges!r} means measuring each one -- too slow for a "
+                "part this detailed. Use edges='all', or narrow the selection "
+                "with feature=<name> first."
+            )
+
+        measured = vba.edge_map(self._app, self._part(), scoped_query, scope_shape)
+        if not measured:
             raise CatiaOperationError(
                 f"No edge of this part could be measured, so {edges!r} cannot be "
                 "resolved. Use edges='all' instead."
             )
+
+        z_values = [p[2] for triple in measured.values() for p in triple]
         z_top, z_bottom = max(z_values), min(z_values)
         tolerance = 1e-6
 
-        def classify(start: tuple, middle: tuple, end: tuple) -> set[str]:
-            kinds: set[str] = set()
+        def matches(triple: tuple) -> bool:
+            start, middle, end = triple
             points = (start, middle, end)
-            if all(abs(p[2] - z_top) < tolerance for p in points):
-                kinds.add("top")
-            if all(abs(p[2] - z_bottom) < tolerance for p in points):
-                kinds.add("bottom")
-            if abs(start[2] - end[2]) < tolerance and abs(start[2] - middle[2]) < tolerance:
-                kinds.add("horizontal")
-            if (
-                abs(start[0] - end[0]) < tolerance
-                and abs(start[1] - end[1]) < tolerance
-                and abs(start[2] - end[2]) > tolerance
-            ):
-                kinds.add("vertical")
-            return kinds
+            if edges == "top":
+                return all(abs(p[2] - z_top) < tolerance for p in points)
+            if edges == "bottom":
+                return all(abs(p[2] - z_bottom) < tolerance for p in points)
+            if edges == "horizontal":
+                return (
+                    abs(start[2] - end[2]) < tolerance
+                    and abs(start[2] - middle[2]) < tolerance
+                )
+            if edges == "vertical":
+                return (
+                    abs(start[0] - end[0]) < tolerance
+                    and abs(start[1] - end[1]) < tolerance
+                    and abs(start[2] - end[2]) > tolerance
+                )
+            return False
 
-        chosen = [
-            reference
-            for reference, start, middle, end in measured
-            if start is not None and edges in classify(start, middle, end)
-        ]
+        chosen = {index: triple for index, triple in measured.items() if matches(triple)}
         if not chosen:
             raise CatiaOperationError(
-                f"No {edges} edges on this part. It has {len(measured)} solid "
-                "edges; try edges='all', or a different selector."
+                f"No {edges} edges on this part. Try edges='all', or a "
+                "different selector."
             )
-        return chosen
+        # The selection still holds the edge-map's search result; indices are
+        # stable because the script ran the same scoped query.
+        return [selection.Item2(index).Reference for index in sorted(chosen)]
 
     def _sketch_with_axis(self, name: str) -> Any:  # pragma: no cover - Windows only
         """The named sketch, with a revolution axis drawn along its V axis.

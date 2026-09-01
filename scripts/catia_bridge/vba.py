@@ -88,11 +88,53 @@ Function KryovaPointsOnCurve(part, ref)
 End Function
 """
 
+#: Every solid edge of the part in ONE round trip: search, measure, report.
+#:
+#: The per-edge variant above is correct but O(edges) Evaluate calls, and a
+#: padded gear has a thousand solid edges -- measured live, classifying its
+#: edges one call at a time blew straight through the daemon's 30 s watchdog.
+#: This does the whole sweep inside CATIA and returns one line per solid edge:
+#: `<selection index>;<9 coordinates>`. The search QUERY is a parameter, not
+#: script text -- the caller picks the localized grammar. Edges that refuse to
+#: be measured are skipped rather than failing the batch.
+EDGE_MAP = """\
+Function KryovaEdgeMap(part, query, scopeShape)
+    Dim doc, sel, spa, i, j, out, ref, m, pts(8), line
+    Set doc = part.Parent
+    Set sel = doc.Selection
+    sel.Clear
+    sel.Add scopeShape
+    sel.Search query
+    Set spa = doc.GetWorkbench("SPAWorkbench")
+    out = ""
+    For i = 1 To sel.Count2
+        If InStr(sel.Item2(i).Type, "TriDim") > 0 Then
+            On Error Resume Next
+            Err.Clear
+            line = ""
+            Set ref = sel.Item2(i).Reference
+            Set m = spa.GetMeasurable(ref)
+            m.GetPointsOnCurve pts
+            If Err.Number = 0 Then
+                line = CStr(i)
+                For j = 0 To 8
+                    line = line & ";" & CStr(pts(j))
+                Next
+                out = out & line & vbLf
+            End If
+            On Error GoTo 0
+        End If
+    Next
+    KryovaEdgeMap = out
+End Function
+"""
+
 #: Every script this module will run, and the function each one exposes.
 #: `run` checks membership, so nothing outside this mapping can be evaluated.
 _ALLOWED: dict[str, str] = {
     CENTRE_OF_GRAVITY: "KryovaCentreOfGravity",
     POINTS_ON_CURVE: "KryovaPointsOnCurve",
+    EDGE_MAP: "KryovaEdgeMap",
 }
 
 
@@ -145,6 +187,35 @@ def centre_of_gravity(app: Any, part: Any, element: Any) -> tuple[float, float, 
 
 
 Point = tuple[float, float, float]
+
+
+def edge_map(
+    app: Any, part: Any, query: str, scope_shape: Any
+) -> dict[int, tuple[Point, Point, Point]]:
+    """Selection index -> (start, middle, end) for every measurable solid edge.
+
+    Runs `EDGE_MAP` -- search plus measurement in one Evaluate -- and leaves
+    the document's Selection holding the search result, so the caller can pull
+    `Selection.Item2(index).Reference` for the indices it keeps.
+
+    `scope_shape` is always required and the search query must use the ",sel"
+    scope: the script clears the selection before adding it, so a scope set up
+    by the caller beforehand would be wiped -- which is exactly the bug that
+    made every feature-scoped fillet report "no solid edges".
+    """
+    raw = str(run(app, EDGE_MAP, [part, query, scope_shape]))
+    edges: dict[int, tuple[Point, Point, Point]] = {}
+    for line in raw.splitlines():
+        parts = line.split(";")
+        if len(parts) != 10:
+            continue
+        try:
+            index = int(parts[0])
+            values = [float(v.strip().replace(",", ".")) for v in parts[1:]]
+        except ValueError:
+            continue
+        edges[index] = (tuple(values[0:3]), tuple(values[3:6]), tuple(values[6:9]))  # type: ignore[assignment]
+    return edges
 
 
 def points_on_curve(app: Any, part: Any, reference: Any) -> tuple[Point, Point, Point]:

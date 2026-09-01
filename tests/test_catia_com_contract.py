@@ -384,6 +384,7 @@ class TestFrozenScriptLibrary:
         assert set(vba._ALLOWED.values()) == {
             "KryovaCentreOfGravity",
             "KryovaPointsOnCurve",
+            "KryovaEdgeMap",
         }
 
     def test_no_script_interpolates_anything(self) -> None:

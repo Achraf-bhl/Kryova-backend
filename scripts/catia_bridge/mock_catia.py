@@ -34,10 +34,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from . import gear
+from . import gear, ui_policy
 from .backend import CatiaBackend, CatiaOperationError
+from .mock_ui import MockUi
 from .png_writer import Canvas
 from .step_writer import write_box_step
+from .ui_automation import UiUnavailable
 
 #: Steel, matching the solver's library so a mock mass is at least plausible.
 _DENSITY_KG_PER_MM3 = 7850e-9
@@ -87,13 +89,18 @@ class MockCatia(CatiaBackend):
     is_mock = True
     capabilities = ("part", "sketch", "measure", "export", "capture", "checkpoint")
 
-    def __init__(self, workdir: Path) -> None:
+    def __init__(self, workdir: Path, *, language: str = "en") -> None:
         self.workdir = Path(workdir)
         self.documents = self.workdir / "documents"
         self.snapshots = self.workdir / "snapshots"
         for directory in (self.documents, self.snapshots):
             directory.mkdir(parents=True, exist_ok=True)
+        # The interface outlives the part: closing a document does not change
+        # what language CATIA is installed in, and `_reset` runs per document.
+        self.ui = MockUi(language=language)
+        self.ui_language = self.ui.language
         self._reset()
+        self._wire_ui()
 
     # -- internal state ------------------------------------------------------
 
@@ -111,6 +118,9 @@ class MockCatia(CatiaBackend):
         self.material: str | None = None
         self.density_kg_m3 = _DENSITY_KG_PER_MM3 * 1e9
         self.up_to_date = True
+        #: What CATIA would have highlighted. Most commands act on it, so a
+        #: dialog with an empty Profile field reads it rather than failing.
+        self.selection: list[str] = []
         self._counters: dict[str, int] = {}
 
     def _name(self, prefix: str) -> str:
@@ -1020,6 +1030,219 @@ class MockCatia(CatiaBackend):
             **self._solid_summary(),
         }
 
+    # -- driving the interface -----------------------------------------------
+    #
+    # The mock interface (`mock_ui.py`) is wired to this part model, so pressing
+    # OK on a Pad dialog really does add a Pad. That is what makes the whole
+    # interactive loop -- run a command, read its dialog, fill a field, confirm
+    # -- testable on a machine with no CATIA and no Windows.
+
+    def list_commands(self, *, search: str = "", menu: str = "") -> dict[str, Any]:
+        items = self.ui.read_menu()
+        wanted = search.strip().casefold()
+        top = menu.strip().casefold()
+        found: list[dict[str, Any]] = []
+        for root in items:
+            if top and root.label.casefold() != top:
+                continue
+            for item in root.walk():
+                if item.is_submenu:
+                    continue
+                path = " > ".join(item.path)
+                if wanted and wanted not in path.casefold():
+                    continue
+                found.append(
+                    {"command": item.label, "menu": path, "available": item.enabled}
+                )
+        return {
+            "language": self.ui.language,
+            "workbench": self.ui.workbench,
+            "commands": found[:200],
+            "truncated": len(found) > 200,
+        }
+
+    def run_command(
+        self,
+        *,
+        command: str,
+        candidates: list[str] | None = None,
+        command_name: str = "",
+        command_key: str = "",
+        menu_hint: list[str] | None = None,
+    ) -> dict[str, Any]:
+        ui_policy.check([command, command_name, *(candidates or [])])
+        if self.ui.dialog_open:
+            raise CatiaOperationError(
+                "A CATIA dialog is already open and is waiting for input. Finish it "
+                "with catia_dialog_action before starting another command."
+            )
+        tried: list[str] = []
+        for candidate in [*(candidates or []), command]:
+            if not candidate or candidate in tried:
+                continue
+            tried.append(candidate)
+            if self.ui.start_command(candidate):
+                dialog = self.ui.active_dialog()
+                return {
+                    "command": command_name or command,
+                    "matched_label": candidate,
+                    "started": True,
+                    "dialog_open": dialog is not None,
+                    "dialog": dialog.describe() if dialog else None,
+                    "next": (
+                        "Fill the dialog and press OK; nothing is built until you do."
+                        if dialog
+                        else "The command ran without a dialog."
+                    ),
+                }
+        raise CatiaOperationError(
+            f"CATIA did not recognise {command_name or command!r} under any of the "
+            f"names tried ({', '.join(repr(t) for t in tried)}). Call "
+            "catia_list_commands to see what this interface actually calls it."
+        )
+
+    def describe_dialog(self) -> dict[str, Any]:
+        dialog = self.ui.active_dialog()
+        if dialog is None:
+            return {
+                "dialog_open": False,
+                "note": "CATIA is not showing a dialog; nothing is waiting for input.",
+            }
+        return {"dialog_open": True, **dialog.describe()}
+
+    def fill_dialog(self, *, fields: list[dict[str, Any]]) -> dict[str, Any]:
+        if not self.ui.dialog_open:
+            raise CatiaOperationError(
+                "No CATIA dialog is open, so there is nothing to fill in. Run the "
+                "command first with catia_run_command."
+            )
+        filled: list[str] = []
+        for item in fields:
+            try:
+                filled.append(self.ui.fill(str(item.get("name", "")), str(item.get("value", ""))))
+            except UiUnavailable as exc:
+                raise CatiaOperationError(str(exc)) from exc
+        dialog = self.ui.active_dialog()
+        return {
+            "filled": filled,
+            "dialog": dialog.describe() if dialog else None,
+            "next": "Press OK with catia_dialog_action to apply it.",
+        }
+
+    def dialog_action(
+        self, *, action: str, button: str = "", labels: list[str] | None = None
+    ) -> dict[str, Any]:
+        if not self.ui.dialog_open:
+            raise CatiaOperationError(
+                "No CATIA dialog is open, so there is no button to press."
+            )
+        wanted = [button] if button else [*(labels or []), action]
+        last: Exception | None = None
+        for candidate in wanted:
+            if not candidate:
+                continue
+            try:
+                role, outcome = self.ui.press(candidate)
+            except UiUnavailable as exc:
+                last = exc
+                continue
+            return {
+                "pressed": candidate,
+                "action": role,
+                "dialog_open": self.ui.dialog_open,
+                **outcome,
+            }
+        raise CatiaOperationError(str(last) if last else f"No {action!r} button on this dialog.")
+
+    def press_key(self, *, key: str) -> dict[str, Any]:
+        role, outcome = self.ui.press_key(key)
+        return {"key": key, "action": role, "dialog_open": self.ui.dialog_open, **outcome}
+
+    def switch_workbench(
+        self,
+        *,
+        workbench: str,
+        workbench_id: str = "",
+        workbench_name: str = "",
+        menu_path: list[str] | None = None,
+        licence: str = "",
+    ) -> dict[str, Any]:
+        name = workbench_name or workbench
+        self.ui.workbench = name
+        return {
+            "workbench": name,
+            "reached_by": "identifier" if workbench_id else "Start menu",
+            "licence": licence,
+            "displayed_as": (menu_path or [name])[-1],
+        }
+
+    def select(self, *, features: list[str], add: bool = False) -> dict[str, Any]:
+        self._require_document()
+        if not features:
+            self.selection = []
+            return {"selected": [], "count": 0, "note": "Selection cleared."}
+        known = {f["name"] for f in self.features} | set(self.sketches)
+        missing = [name for name in features if name not in known]
+        if missing:
+            raise CatiaOperationError(
+                f"Not in this part: {', '.join(missing)}. Call catia_list_features to "
+                "see what is there; names are case-sensitive and end in a number."
+            )
+        self.selection = ([*self.selection, *features] if add else list(features))
+        return {"selected": list(self.selection), "count": len(self.selection)}
+
+    # -- what the mock dialogs actually do -----------------------------------
+
+    def _wire_ui(self) -> None:
+        """Point the mock interface at this part, so OK builds real features."""
+        self.ui.has_document = lambda: self.doc_name is not None
+        self.ui.has_solid = lambda: self.size is not None
+        self.ui.commits = {
+            "Pad": self._commit_pad,
+            "Pocket": self._commit_pocket,
+            "Edge Fillet": self._commit_fillet,
+            "Chamfer": self._commit_chamfer,
+        }
+
+    def _commit_pad(self, values: dict[str, str]) -> dict[str, Any]:
+        sketch = self._dialog_sketch(values.get("Profile", ""))
+        return self.pad(
+            sketch=sketch,
+            length_mm=_dimension(values.get("Length"), "Length", default=10.0),
+            symmetric=values.get("Mirrored extent") == "true",
+            reversed=values.get("Reverse Direction") == "true",
+        )
+
+    def _commit_pocket(self, values: dict[str, str]) -> dict[str, Any]:
+        sketch = self._dialog_sketch(values.get("Profile", ""))
+        return self.pocket(
+            sketch=sketch, depth_mm=_dimension(values.get("Depth"), "Depth", default=10.0)
+        )
+
+    def _commit_fillet(self, values: dict[str, str]) -> dict[str, Any]:
+        return self.fillet(radius_mm=_dimension(values.get("Radius"), "Radius", default=5.0))
+
+    def _commit_chamfer(self, values: dict[str, str]) -> dict[str, Any]:
+        return self.chamfer(length_mm=_dimension(values.get("Length"), "Length", default=2.0))
+
+    def _dialog_sketch(self, named: str) -> str:
+        """The profile the dialog names, the current selection, or the last one.
+
+        CATIA fills a Pad dialog's Profile field from whatever was selected when
+        the command started, and an engineer who selected first never types in
+        that box. Reproducing that is what makes `catia_select` + Pad a real
+        test of the flow rather than two unrelated calls.
+        """
+        candidate = named.strip() or (self.selection[0] if self.selection else "")
+        if not candidate:
+            if not self.sketches:
+                raise CatiaOperationError(
+                    "The Pad dialog has no profile. Select a sketch with catia_select "
+                    "before running the command, or name it in the Profile field."
+                )
+            candidate = list(self.sketches)[-1]
+        return candidate
+
     # -- persistence ---------------------------------------------------------
 
     def _feature_names(self) -> list[dict[str, Any]]:
@@ -1080,6 +1303,29 @@ class MockCatia(CatiaBackend):
         self.removed_volume_mm3 = float(state.get("removed_volume_mm3") or 0.0)
         self._counters = state.get("counters") or {}
         self.up_to_date = True
+
+
+def _dimension(raw: str | None, field: str, *, default: float) -> float:
+    """Read `25mm`, `25 mm`, `25` or a comma decimal out of a dialog field.
+
+    A CATIA dimension box holds a value *and* a unit, and an engineer types
+    either. An empty box means the dialog's default was left alone, which is a
+    valid thing to do and not an error.
+    """
+    text = (raw or "").strip().replace(",", ".")
+    if not text:
+        return default
+    digits = "".join(ch for ch in text if ch.isdigit() or ch in ".-")
+    try:
+        value = float(digits)
+    except ValueError as exc:
+        raise CatiaOperationError(
+            f"{field} reads {raw!r}, which is not a dimension. Type a number and a "
+            "unit, like '25mm'."
+        ) from exc
+    if value <= 0:
+        raise CatiaOperationError(f"{field} must be greater than zero; the dialog holds {raw!r}.")
+    return value
 
 
 def _restore_sketch(name: str, entry: dict[str, Any]) -> _Sketch:

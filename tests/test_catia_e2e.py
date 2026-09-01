@@ -508,3 +508,93 @@ def test_base64_transfers_survive_the_round_trip_unchanged(bridge, db_session, p
     # so a chunked-base64 bug cannot hide behind "the file opened".
     direct = bridge["backend"].export_step(max_inline_bytes=10**8)
     assert len(stored) == len(base64.b64decode(direct["content_b64"]))
+
+
+# -- driving CATIA's interface, over the real wire ---------------------------
+
+
+def test_the_interactive_loop_builds_a_part_end_to_end(bridge, db_session):
+    """Press a command, read its dialog, fill it, press OK -- and get geometry.
+
+    Everything the interactive tools depend on that only exists on the server
+    runs here for real: `_resolve_ui` turning the English name into candidates,
+    the daemon's own refusal check, the auto-checkpoint before the command, the
+    one-call-at-a-time queue, and the operation log.
+    """
+    run(bridge, "catia_new_part", {"name": "Bracket"})
+    run(bridge, "catia_sketch_rectangle", {"plane": "XY", "width_mm": 60, "height_mm": 40})
+
+    started = run(bridge, "catia_run_command", {"command": "Pad"})
+    assert started["dialog_open"] is True
+    # The command has not run. Nothing is built until OK.
+    assert len(run(bridge, "catia_list_features")["features"]) == 1
+
+    described = run(bridge, "catia_describe_dialog")
+    assert described["dialog_open"] is True
+    assert "Length" in [field["label"] for field in described["fields"]]
+
+    run(bridge, "catia_fill_dialog", {"fields": [{"name": "Length", "value": "25mm"}]})
+    confirmed = run(bridge, "catia_dialog_action", {"action": "ok"})
+    assert confirmed["dialog_open"] is False
+
+    measured = run(bridge, "catia_measure")
+    assert measured["bounding_box_mm"]["size"] == [60, 40, 25]
+
+
+def test_running_a_command_is_checkpointed_first(bridge, db_session):
+    """An arbitrary command is the one most worth being able to undo.
+
+    It is also the only member of the interactive family that is
+    checkpointed -- the dialog tools cannot be, because a checkpoint is a COM
+    save and COM is blocked while their dialog is open.
+    """
+    run(bridge, "catia_new_part", {"name": "Bracket"})
+    run(bridge, "catia_sketch_rectangle", {"plane": "XY", "width_mm": 60, "height_mm": 40})
+    run(bridge, "catia_run_command", {"command": "Pad"})
+
+    labels = [c.label for c in db_session.scalars(select(CatiaCheckpoint))]
+    assert "before catia_run_command" in labels
+
+    run(bridge, "catia_dialog_action", {"action": "cancel"})
+    # And the dialog tools add none of their own.
+    assert [c.label for c in db_session.scalars(select(CatiaCheckpoint))] == labels
+
+
+def test_the_daemon_refuses_a_command_no_checkpoint_could_undo(bridge):
+    """The refusal is enforced on the workstation, not by the server's resolver."""
+    from app.catia.dispatch import CatiaError
+
+    run(bridge, "catia_new_part", {"name": "Bracket"})
+    with pytest.raises(CatiaError, match="does not drive"):
+        run(bridge, "catia_run_command", {"command": "Options"})
+
+
+def test_the_live_menu_is_readable_and_reports_availability(bridge):
+    run(bridge, "catia_new_part", {"name": "Bracket"})
+    listed = run(bridge, "catia_list_commands", {"search": "Pad"})
+    entry = next(item for item in listed["commands"] if item["command"] == "Pad")
+    assert entry["menu"].startswith("Insert")
+    assert entry["available"] is True
+
+    # Edge Fillet needs a solid, and there is none yet: greyed out, not absent.
+    fillet = run(bridge, "catia_list_commands", {"search": "Edge Fillet"})["commands"][0]
+    assert fillet["available"] is False
+
+
+def test_selecting_a_feature_crosses_the_wire(bridge):
+    run(bridge, "catia_new_part", {"name": "Bracket"})
+    run(bridge, "catia_sketch_rectangle", {"plane": "XY", "width_mm": 60, "height_mm": 40})
+    assert run(bridge, "catia_select", {"features": ["Sketch.1"]})["count"] == 1
+    assert bridge["backend"].selection == ["Sketch.1"]
+
+
+def test_every_interactive_call_is_written_to_the_operation_log(bridge, db_session):
+    """The audit trail has to include the open-ended tool most of all."""
+    run(bridge, "catia_new_part", {"name": "Bracket"})
+    run(bridge, "catia_sketch_rectangle", {"plane": "XY", "width_mm": 60, "height_mm": 40})
+    run(bridge, "catia_run_command", {"command": "Pad"})
+    run(bridge, "catia_dialog_action", {"action": "cancel"})
+
+    logged = [op.tool for op in db_session.scalars(select(CatiaOperation))]
+    assert "catia_run_command" in logged
+    assert "catia_dialog_action" in logged

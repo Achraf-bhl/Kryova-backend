@@ -28,7 +28,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .backend import TOOL_METHODS, CatiaBackend, CatiaOperationError
+from .backend import OUT_OF_BAND_TOOLS, TOOL_METHODS, CatiaBackend, CatiaOperationError
 from .tool_table import ToolRefused, check_call, tier_of
 
 logger = logging.getLogger("kryova.catia.session")
@@ -70,6 +70,11 @@ class BridgeSession:
             "mock": self.backend.is_mock,
             "hostname": self.hostname,
             "capabilities": list(self.backend.capabilities),
+            # Which language this CATIA's menus are in. The server needs it to
+            # send a command under the name this seat answers to; empty means
+            # "could not tell", which the server handles by falling back to
+            # reading the live menu rather than by assuming English.
+            "ui_language": self.backend.ui_language,
         }
 
     def handle_frame(self, raw: str) -> None:
@@ -164,6 +169,13 @@ class BridgeSession:
     def _ensure_alive(self, tool: str) -> None:
         """Two checks, on two threads, because they answer different questions.
 
+        Unless the tool is one that reads or drives the interface. Those never
+        touch COM -- they post window messages, which a modal dialog's own
+        message loop delivers -- and a modal dialog is exactly when the probe
+        below reports CATIA as dead. Gating them on it would mean the tools
+        whose entire purpose is dismissing a stuck dialog could only run when no
+        dialog was stuck. See `backend.OUT_OF_BAND_TOOLS`.
+
         `_check_alive` runs on a watchdog thread and asks "is CATIA responding
         at all, or is it wedged behind a modal dialog?" -- a question worth
         asking off-thread precisely because the answer can be "it never
@@ -175,6 +187,8 @@ class BridgeSession:
         acquired it, so the watchdog holds a different handle from the worker
         and reports a healthy CATIA while the worker's pointer is stale.
         """
+        if tool in OUT_OF_BAND_TOOLS:
+            return
         self._check_alive(tool)
         try:
             self.backend.ensure_connected()

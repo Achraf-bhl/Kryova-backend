@@ -148,6 +148,35 @@ Add `-v` to any command for debug logging.
 - **The daemon re-validates everything.** Tool name, tier and argument schema
   are checked against the daemon's own copy of the table, not the server's. It
   refuses what it does not recognise.
+- **The assistant can press CATIA's own buttons, and some it will not.**
+  `catia_run_command` reaches any command on the seat, and the interface tools
+  read and fill the dialog it opens. Everything they do goes through window
+  messages, so no pointer moves and no window is brought to the front — an
+  engineer working in another application is not interrupted. Every such command
+  is auto-checkpointed first, so it is recoverable.
+
+  Four classes are refused outright, because no checkpoint undoes them, and the
+  refusal is enforced on the workstation rather than on the server
+  (`scripts/catia_bridge/ui_policy.py`):
+
+  - **macros and the Visual Basic editor** — arbitrary code, which is the hole
+    the point above exists to keep shut;
+  - **`Tools > Options` and `Customize`** — settings that persist into every
+    future CATIA session on the seat, including work unrelated to Kryova;
+  - **`Save As` and `Save Management`** — files the daemon did not name;
+  - **`Exit`** — closes CATIA, discards unsaved work, and disconnects the bridge.
+
+  These are refused rather than put behind a confirmation on purpose: "may I
+  open the macro editor?" is a prompt people click through. If the assistant
+  should do one of these, it tells the user where the command is and they do it.
+
+  The refusal matches whole labels and leading phrases, in every language the
+  reference carries — `Optionen`, `Speichern unter` and `Personnaliser` are
+  refused like their English forms. On a seat in a language the reference does
+  not cover, only the English and internal forms are recognised: a Japanese
+  engineer could, in principle, get the assistant to open the Options dialog by
+  asking for it in Japanese. That is a real gap, and it is bounded by the fact
+  that the command still has to be one the *user* asked for.
 - **The model never supplies a path.** Every file the daemon touches is resolved
   under `%LOCALAPPDATA%\Kryova\catia\`.
 - **CATIA-derived text is untrusted.** Part names and parameter comments were
@@ -190,6 +219,7 @@ Connected:
   "device_id": "…", "device_name": "Office desktop", "hostname": "WS-ENG-04",
   "catia_version": "V5-6R2021", "bridge_version": "1.0.0", "mock": false,
   "capabilities": ["part","sketch","measure","export","capture"],
+  "ui_language": "de",
   "queue_depth": 0, "connected_since": "2026-08-29T09:12:44+00:00",
   "document": { "doc_name": "Bracket",
                 "latest_checkpoint_id": "…", "bound_at": "2026-08-29T09:13:02+00:00" } }
@@ -200,6 +230,13 @@ paired yet" (show the pairing flow) from "paired but offline" (show "start the
 bridge"). **`mock: true` must be visible in the UI** — a simulated part must
 never be presented as a real one. `document` is null unless
 `conversation_id` is supplied *and* that conversation has a bound document.
+
+`ui_language` is the language **CATIA's interface** runs in on that workstation,
+as a two-letter code, or `""` when the daemon could not tell. It is not the
+user's language and not a setting anyone chose in Kryova. Empty is normal and
+means the assistant will name commands in English and read the seat's real
+labels off its live menus — worth showing if the panel lists connection details,
+not worth an error state.
 
 ### `POST /catia/devices` → 201
 

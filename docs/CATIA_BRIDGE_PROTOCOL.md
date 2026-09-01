@@ -40,8 +40,22 @@ All frames are JSON text frames.
 ### daemon → server (first frame after connect)
 ```json
 {"type":"hello","catia_version":"V5-6R2021","bridge_version":"1.0.0","mock":false,
- "hostname":"WS-ENG-04","capabilities":["part","sketch","measure","export","capture"]}
+ "hostname":"WS-ENG-04","capabilities":["part","sketch","measure","export","capture"],
+ "ui_language":"de"}
 ```
+
+`ui_language` is the language **CATIA's own interface** is running in, read off
+its menu bar at startup, as a two-letter code. It is not the user's language and
+not a Kryova setting: it is chosen when CATIA is installed, and the daemon is the
+only thing that can see it. The server uses it to send a command under the name
+this seat answers to.
+
+Absent or empty is normal and handled: commands then go out under their English
+names and the daemon finds the seat's real label by reading the live menu. That
+costs a round trip and works in every language, including the ones no
+translation table covers. A *guessed* language would cost a silent no-op
+instead — `StartCommand` ignores a name it does not recognise without raising —
+so the daemon reports nothing rather than its best guess.
 
 ### server → daemon (first frame after `hello`)
 ```json
@@ -80,6 +94,9 @@ fields the daemon accepts alongside the schema:
 | `catia_open_document` | `doc_name`, `remote_path`, `fallback_checkpoint` |
 | `catia_restore` | `checkpoint` (replaces the model's `checkpoint_id`) |
 | `catia_checkpoint`, `catia_export_step`, `catia_capture_view` | `max_inline_bytes` |
+| `catia_run_command` | `candidates`, `command_name`, `command_key`, `menu_hint` |
+| `catia_dialog_action` | `labels` |
+| `catia_switch_workbench` | `workbench_id`, `workbench_name`, `menu_path`, `licence` |
 
 Anything else is rejected by the daemon's schema check.
 
@@ -194,8 +211,14 @@ user granted for one rollback cannot be replayed against another. TTL 5 minutes.
 ## Security invariants
 
 1. **No arbitrary code execution tool.** `SystemService.Evaluate` (arbitrary
-   VBScript) is never exposed. The tool vocabulary is a fixed allowlist,
-   re-validated at the daemon against a JSON Schema per tool.
+   VBScript) is never exposed to the model. The tool *names* are a fixed
+   allowlist, re-validated at the daemon against a JSON Schema per tool.
+   The command *vocabulary* inside `catia_run_command` is open — see "Driving
+   the interface" above — and is bounded instead by the daemon's refusal list
+   and by auto-checkpointing. The frozen-snippet exception in
+   `scripts/catia_bridge/vba.py` is script text written by hand in this
+   repository, with arguments passed as COM values; nothing builds a script
+   from a string at run time.
 2. **CATIA-derived text is untrusted input.** Part names, parameter comments and
    file metadata are sanitised before entering the prompt (control characters
    stripped, length-capped, wrapped in a delimiter that the system prompt
@@ -281,6 +304,85 @@ and mass — not `"ok"`. The agent is prompted to `catia_measure` and
 **chat → CATIA geometry → STEP → geometry version → mesh → solve → interpret →
 propose change → apply in CATIA → re-run.**
 
+## Driving the interface (v2) — every other command
+
+The vocabulary above is thirty semantic operations with the CATIA calls hidden
+inside them. That is the right shape for what Kryova does often and it does not
+scale to the product: CATIA has thousands of commands, nearly all of them behind
+a dialog, and one tool each is neither possible nor useful.
+
+These eight give the agent the interface itself. It reads the live menus, presses
+a command, reads the dialog that opened, fills it in and presses OK — which is
+what an engineer does, reaches every command on the seat, and needs no tool
+written in advance for commands nobody anticipated.
+
+| Tool | Tier | Purpose |
+|---|---|---|
+| `catia_list_commands` | read | The live menus: every command, this seat's own label, and whether it is available right now |
+| `catia_run_command` | write | Press any command by its English name; the bridge translates |
+| `catia_describe_dialog` | read | The open dialog: title, fields with values, buttons |
+| `catia_fill_dialog` | write | Type into fields by their displayed label |
+| `catia_dialog_action` | write | Press OK/Apply/Cancel/Close/Preview/Yes/No **by role**, not by label |
+| `catia_press_key` | write | One keystroke from a closed list (enter, escape, tab, delete, …) |
+| `catia_switch_workbench` | write | Activate a workbench; reports the licence it needs |
+| `catia_select` | write | Put named features into CATIA's selection, or clear it |
+
+### It is Win32, not COM, and that is the point
+
+`scripts/catia_bridge/ui_automation.py` uses `GetMenu`, `EnumChildWindows` and
+`SendMessageTimeoutW` — never COM. Three consequences:
+
+1. **It works in any language**, because it reads what the seat displays rather
+   than matching a table. A Japanese installation has no translation table here
+   and is still fully drivable.
+2. **It works while COM is blocked.** A modal dialog stops CATIA's automation
+   server answering — that is the daemon's existing "CATIA is not responding,
+   dismiss the dialog" error, whose only cure was a human hand. Window messages
+   are delivered by the dialog's own message loop, so these tools are precisely
+   the ones that still work. `backend.OUT_OF_BAND_TOOLS` lists the five that
+   skip `session._check_alive` for that reason, and they are also in
+   `dispatch._NO_AUTO_CHECKPOINT` — a checkpoint is a COM save, so requiring one
+   would refuse the call and leave the session wedged.
+3. **Nothing touches the pointer or the foreground.** No `SetCursorPos`, no
+   `SendInput`, no `SetForegroundWindow`. An engineer typing in another window
+   is not interrupted.
+
+### Resolving a command name
+
+The model names a command in English. The server turns that into an ordered
+candidate list via `app/catia_kb/ui.resolve_command` — internal id if one is
+known, then the seat-language label, then English — and the daemon tries the
+**live menu first**, because a menu item either exists on this seat or does not.
+`StartCommand` is the fallback for toolbar-only commands, and its silence is
+reported as `verified: false` rather than as success.
+
+Greyed-out is reported as greyed-out, with the menu path. "Pocket is there but
+disabled because nothing is selected" is actionable; "Pocket was not found" is
+not, and would be the wrong answer to the same situation.
+
+### Commands the bridge refuses
+
+`app/catia_kb/ui.py` `FORBIDDEN_EXACT` / `FORBIDDEN_PREFIX`, mirrored in
+`scripts/catia_bridge/ui_policy.py` and enforced **on the daemon**, against
+every candidate rather than only the one that works:
+
+* macros and the VB editor — arbitrary code, the `SystemService.Evaluate` hole
+  by another route;
+* `Tools > Options` and `Customize` — settings that outlive the session;
+* `Save As`, `Save Management` — files the daemon did not name;
+* `Exit` — closes CATIA and takes the bridge with it.
+
+Refused outright, not approval-gated: an approval prompt for "may I open the
+macro editor" is one a user clicks through. The rule is exact-label or
+leading-phrase, never substring — `Exit Sketcher Workbench`, `Copy Options` and
+`Optional Rib` are ordinary commands and must not be refused.
+
+**This narrows security invariant 1 below and does not remove it.** There is
+still no tool that takes model-supplied code. What changed is that the command
+*vocabulary* is now open where it was a fixed allowlist, guarded by the refusal
+list above and by `catia_run_command` being auto-checkpointed like any other
+mutation.
+
 ## Mock mode (how this is testable on Linux today)
 
 The daemon runs with `--mock` when `pywin32`/CATIA are absent. Mock mode
@@ -289,3 +391,24 @@ features, a synthetic bounding box and mass, a real (tiny) STEP export and a
 generated PNG for `catia_capture_view`. Every server-side path, every agent
 tool, every UI state and the full test suite therefore run on Linux; only the
 COM calls themselves are unverified until a Windows session.
+
+Mock mode simulates the **interface** too (`scripts/catia_bridge/mock_ui.py`):
+a menu tree with real CATIA menu paths, commands greyed out until their
+preconditions are met, dialogs with fields and defaults, and an OK that commits
+to the mock part — so `catia_run_command "Pad"` really does produce a `Pad.1`
+whose mass reflects the number typed into the dialog.
+
+It also runs **in a language**: `kryova-catia-bridge run --mock --mock-language de`
+labels every menu, dialog and button in German. That is not decoration. "Works
+whatever language CATIA is installed in" is the requirement most easily broken by
+an English-only test, and every interactive test runs against both seats.
+
+What mock mode cannot tell you, and what a Windows session is for:
+
+* whether CATIA's dialogs answer `WM_GETTEXT` and `WM_SETTEXT` (they are native
+  windows, so they should, but "should" is not "do");
+* whether `EN_CHANGE` is really needed for a dialog to notice a typed value;
+* what window classes CATIA's own widgets use — `catia_describe_dialog` reports
+  unrecognised controls with their class name for exactly this, so the first
+  session that meets one produces the answer rather than a shrug;
+* whether `StartCommand` accepts the labels `resolve_command` produces.

@@ -55,7 +55,7 @@ def _configure_logging(verbose: bool) -> None:
     )
 
 
-def _open_backend(mock: bool, workdir: Path) -> CatiaBackend:
+def _open_backend(mock: bool, workdir: Path, language: str = "en") -> CatiaBackend:
     """The mock backend, or the real one -- never a silent fallback between them.
 
     An earlier version of this bridge fell back to mock mode when pywin32 was
@@ -68,7 +68,9 @@ def _open_backend(mock: bool, workdir: Path) -> CatiaBackend:
 
     if mock:
         logger.warning("Running in MOCK mode: no CATIA is involved and every result is simulated.")
-        return MockCatia(workdir)
+        # `language` is a mock-only knob. The real backend reads the interface
+        # language off CATIA's own menu bar; there is nothing to choose.
+        return MockCatia(workdir, language=language)
 
     from .catia_com import CatiaCom
 
@@ -138,7 +140,7 @@ def _hostname() -> str:
 CATIA_POLL_S = 5.0
 
 
-def _wait_for_backend(mock: bool, workdir: Path, wait: bool) -> CatiaBackend:
+def _wait_for_backend(mock: bool, workdir: Path, wait: bool, language: str = "en") -> CatiaBackend:
     """Open the backend, optionally waiting for CATIA to be started.
 
     Without `--wait-for-catia` this is the original behaviour: no CATIA, no
@@ -158,7 +160,7 @@ def _wait_for_backend(mock: bool, workdir: Path, wait: bool) -> CatiaBackend:
     """
     while True:
         try:
-            return _open_backend(mock, workdir)
+            return _open_backend(mock, workdir, language)
         except CatiaOperationError as exc:
             if not wait:
                 raise
@@ -192,7 +194,9 @@ def command_run(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        backend = _wait_for_backend(args.mock, workdir, args.wait_for_catia)
+        backend = _wait_for_backend(
+            args.mock, workdir, args.wait_for_catia, getattr(args, "mock_language", "en")
+        )
     except CatiaOperationError as exc:
         print(f"{exc}", file=sys.stderr)
         return 1
@@ -234,7 +238,7 @@ def command_status(args: argparse.Namespace) -> int:
     # Deliberately does not connect to the server: the point is to isolate a
     # local CATIA problem from a network one.
     try:
-        backend = _open_backend(args.mock, work_dir())
+        backend = _open_backend(args.mock, work_dir(), getattr(args, "mock_language", "en"))
     except CatiaOperationError as exc:
         print(f"  CATIA     unavailable -- {exc}")
         return 1
@@ -277,6 +281,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--mock",
         action="store_true",
         help="Simulate CATIA in memory. For testing without a CATIA licence.",
+    )
+    run.add_argument(
+        "--mock-language",
+        default="en",
+        choices=("en", "fr", "de"),
+        help=(
+            "Which language the simulated CATIA's menus and dialogs are in. Mock "
+            "mode only -- a real seat's language is read from its menu bar. Use it "
+            "to check that a workflow does not depend on English labels."
+        ),
     )
     run.add_argument(
         "--wait-for-catia",

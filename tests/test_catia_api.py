@@ -275,10 +275,11 @@ def test_status_requires_a_session(client):
 
 def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client):
     tools = auth_client.get(f"{PREFIX}/tools").json()["tools"]
-    # A deliberate count, so adding or losing a tool is never silent. 30 since
-    # the six additions (sketch_revolve_profile, sketch_groove_profile, shell,
-    # pattern_rectangular, pattern_circular, sketch_gear_profile) joined the 25.
-    assert len(tools) == 31
+    # A deliberate count, so adding or losing a tool is never silent. 39 since
+    # the eight interactive tools (list_commands, run_command, describe_dialog,
+    # fill_dialog, dialog_action, press_key, switch_workbench, select) joined
+    # the 31 semantic ones.
+    assert len(tools) == 39
     by_name = {tool["name"]: tool for tool in tools}
     assert by_name["catia_measure"]["tier"] == "read"
     assert by_name["catia_measure"]["mutating"] is False
@@ -287,6 +288,12 @@ def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client
     assert by_name["catia_list_features"]["tier"] == "read"
     assert by_name["catia_shaft"]["tier"] == "write"
     assert by_name["catia_delete_feature"]["tier"] == "write"
+    # Reading the interface is a read; driving it is a write, because pressing
+    # OK on a dialog builds geometry exactly as catia_pad does.
+    assert by_name["catia_describe_dialog"]["tier"] == "read"
+    assert by_name["catia_list_commands"]["tier"] == "read"
+    assert by_name["catia_run_command"]["tier"] == "write"
+    assert by_name["catia_dialog_action"]["mutating"] is True
 
 
 def _drain(response, count: int, timeout: float = 5.0) -> list[str]:

@@ -925,6 +925,278 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
         parameters=_object({}),
         tier=CatiaTier.WRITE,
     ),
+    # -- driving the interface itself ---------------------------------------
+    #
+    # Everything above is a semantic operation with the CATIA calls hidden
+    # inside it, and that is the right shape for the operations Kryova performs
+    # often. It is not a shape that scales to the whole of CATIA: there are
+    # thousands of commands, most of them behind a dialog, and hand-writing a
+    # tool for each is neither possible nor useful.
+    #
+    # These eight give the agent the interface itself -- read what is on the
+    # menu, press it, read the dialog it opened, fill it in, press OK. That is
+    # what an engineer does, and it reaches every command on the seat including
+    # ones nobody anticipated, in whatever language the seat is installed in.
+    #
+    # Two properties make it safe enough to expose. The daemon refuses a short
+    # list of commands no checkpoint can undo (see `app/catia_kb/ui.py`
+    # `FORBIDDEN_COMMAND_TOKENS`), and `catia_run_command` is auto-checkpointed
+    # like every other mutation, so "the agent pressed something unexpected" is
+    # recoverable rather than final.
+    CatiaToolSpec(
+        name="catia_list_commands",
+        description=(
+            "Read CATIA's live menus: every command on this workstation right now, "
+            "with the exact label this seat displays and whether it is available. "
+            "Use it whenever you are unsure what a command is called here -- the "
+            "interface may be in French, German, Japanese or anything else, and this "
+            "reports what is really on the menu rather than a translation. A greyed "
+            "command is reported with 'available': false, which is the answer to "
+            "'why did nothing happen': CATIA disables a command whose preconditions "
+            "are unmet, usually because nothing is selected or the wrong workbench is "
+            "active. Filter with `search` rather than reading hundreds of entries."
+        ),
+        parameters=_object(
+            {
+                "search": {
+                    "type": "string",
+                    "maxLength": 60,
+                    "description": (
+                        "Only commands whose label or menu path contains this. Matched "
+                        "without regard to case or accents, so 'fillet' finds 'Congé "
+                        "d'arête' only if you search the local word -- prefer a short "
+                        "fragment, and omit it entirely to see the whole menu."
+                    ),
+                },
+                "menu": {
+                    "type": "string",
+                    "maxLength": 60,
+                    "description": (
+                        "Restrict to one top-level menu by its displayed name (e.g. "
+                        "'Insert', 'Insertion', 'Einfügen'). Omit for all of them."
+                    ),
+                },
+            }
+        ),
+        tier=CatiaTier.READ,
+    ),
+    CatiaToolSpec(
+        name="catia_run_command",
+        description=(
+            "Press any CATIA command, by its English name -- the bridge translates it "
+            "to whatever this seat calls it. This is how you reach the whole of CATIA: "
+            "anything with a toolbar button or a menu entry, in any workbench. "
+            "Prefer a purpose-built tool (catia_pad, catia_hole, catia_fillet) when "
+            "one exists; they take dimensions directly and need no dialog. Use this "
+            "for everything else.\n"
+            "Most CATIA commands open a dialog and wait. The result tells you whether "
+            "one opened and what is in it; when it did, the command has NOT run yet -- "
+            "fill the dialog with catia_fill_dialog and confirm it with "
+            "catia_dialog_action. Nothing is built until you press OK.\n"
+            "Many commands need a selection first (Pad needs a profile, Edge Fillet "
+            "needs edges). Select with catia_select, then run the command. If the "
+            "result says the command was greyed out, that is the reason."
+        ),
+        parameters=_object(
+            {
+                "command": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": (
+                        "The command's English name as CATIA V5 documents it: 'Pad', "
+                        "'Edge Fillet', 'Rectangular Pattern', 'Isolate'. Do not "
+                        "translate it yourself and do not guess an internal id."
+                    ),
+                },
+            },
+            required=["command"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_describe_dialog",
+        description=(
+            "Read the dialog CATIA is currently showing: its title, every field with "
+            "its current value, and every button. Call it after catia_run_command to "
+            "see what the command is asking for, and again after filling a field when "
+            "a dialog enables or disables others in response.\n"
+            "It answers 'no dialog is open' rather than failing, which is also how you "
+            "check whether a command completed on its own. This tool keeps working "
+            "when the others report CATIA as unresponsive -- an open dialog is exactly "
+            "what makes CATIA unresponsive, and reading it is how you get out."
+        ),
+        parameters=_object({}),
+        tier=CatiaTier.READ,
+    ),
+    CatiaToolSpec(
+        name="catia_fill_dialog",
+        description=(
+            "Type into the open dialog's fields, by the label shown beside each one. "
+            "Give the label exactly as catia_describe_dialog reported it -- it is in "
+            "the seat's language, and that is the string the dialog knows.\n"
+            "Values go in as text, the way you would type them: '25mm', '4deg', "
+            "'true' for a checkbox, or the exact option text for a dropdown. Filling "
+            "a field does not run the command; catia_dialog_action does."
+        ),
+        parameters=_object(
+            {
+                "fields": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "description": "One entry per field to set.",
+                    "items": _object(
+                        {
+                            "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                                "description": "The field's label, as the dialog shows it.",
+                            },
+                            "value": {
+                                "type": "string",
+                                "maxLength": 200,
+                                "description": (
+                                    "What to type. Include the unit for a dimension "
+                                    "('25mm'); CATIA reads a bare number in the "
+                                    "document's unit, which may not be millimetres."
+                                ),
+                            },
+                        },
+                        required=["name", "value"],
+                    ),
+                }
+            },
+            required=["fields"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_dialog_action",
+        description=(
+            "Press a button on the open dialog. 'ok' commits the command and closes "
+            "the dialog; 'apply' commits and leaves it open; 'preview' shows the "
+            "result without committing; 'cancel' abandons it and changes nothing.\n"
+            "Ask for the action, not the label: this seat's OK button may read "
+            "'Aceptar' and its Cancel 'Abbrechen', and the bridge knows which is "
+            "which. For a button that is none of these -- 'Reverse Direction', "
+            "'More>>' -- pass its exact label in `button` instead.\n"
+            "Cancel is always safe and is the right move when a dialog is not what "
+            "you expected. Never leave a dialog open at the end of a turn: it blocks "
+            "every other CATIA operation until someone closes it."
+        ),
+        parameters=_object(
+            {
+                "action": _enum(
+                    ("ok", "apply", "cancel", "close", "preview", "yes", "no"),
+                    "What the button should do.",
+                ),
+                "button": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": (
+                        "Exact label of a button that is not one of the standard "
+                        "actions. When given, `action` is ignored."
+                    ),
+                },
+            },
+            required=["action"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_press_key",
+        description=(
+            "Send one keystroke to CATIA. A few commands take no dialog and end on a "
+            "keypress -- Enter to confirm a chain of picks, Escape to abandon a "
+            "command that is waiting for input, Delete to remove what is selected. "
+            "Escape is the way out of a command that has left CATIA waiting."
+        ),
+        parameters=_object(
+            {
+                "key": _enum(
+                    (
+                        "enter",
+                        "escape",
+                        "tab",
+                        "delete",
+                        "space",
+                        "up",
+                        "down",
+                        "left",
+                        "right",
+                        "home",
+                        "end",
+                    ),
+                    "Which key to press.",
+                )
+            },
+            required=["key"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_switch_workbench",
+        description=(
+            "Change the active workbench. A CATIA command only exists while its "
+            "workbench is active: Pad is unreachable from Assembly Design and Fillet "
+            "on a surface needs Generative Shape Design. When catia_list_commands "
+            "cannot find a command you know exists, the workbench is the first thing "
+            "to check.\n"
+            "The result reports the licence the workbench needs. A seat without that "
+            "licence cannot open it however the menu looks, and that is worth telling "
+            "the user plainly rather than retrying."
+        ),
+        parameters=_object(
+            {
+                "workbench": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": (
+                        "The workbench's English name: 'Part Design', 'Generative "
+                        "Shape Design', 'Aerospace Sheet Metal Design'."
+                    ),
+                }
+            },
+            required=["workbench"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_select",
+        description=(
+            "Put things into CATIA's selection, which is what most commands act on. "
+            "Select a sketch then run Pad; select a face then run Pocket. Name "
+            "features exactly as catia_list_features reported them.\n"
+            "Selecting changes nothing on its own and is always safe. Call it with an "
+            "empty list to clear the selection, which is how you recover when a "
+            "command reports the wrong input."
+        ),
+        parameters=_object(
+            {
+                "features": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "description": (
+                        "Feature or sketch names to select. An empty array clears the "
+                        "selection."
+                    ),
+                    "items": {"type": "string", "minLength": 1, "maxLength": 120},
+                },
+                "add": {
+                    "type": "boolean",
+                    "description": (
+                        "Add to what is already selected instead of replacing it. "
+                        "Default false."
+                    ),
+                },
+            },
+            required=["features"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
 ]
 
 TOOL_SPECS_BY_NAME: dict[str, CatiaToolSpec] = {spec.name: spec for spec in CATIA_TOOL_SPECS}

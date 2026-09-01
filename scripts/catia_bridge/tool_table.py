@@ -333,6 +333,110 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         ("checkpoint",),
     ),
     "catia_update": (WRITE, _object({}), ()),
+    # -- driving the interface ----------------------------------------------
+    #
+    # These reach commands the tools above do not implement, which is most of
+    # CATIA. The server resolves an English command name into the labels this
+    # seat might use and sends them as `candidates`; `ui_policy.check` refuses
+    # the ones no checkpoint could undo, using this side's own table.
+    "catia_list_commands": (
+        READ,
+        _object(
+            {
+                "search": {"type": "string", "maxLength": 60},
+                "menu": {"type": "string", "maxLength": 60},
+            }
+        ),
+        (),
+    ),
+    "catia_run_command": (
+        WRITE,
+        _object({"command": {"type": "string", "minLength": 1, "maxLength": 120}}, ["command"]),
+        ("candidates", "command_name", "command_key", "menu_hint"),
+    ),
+    "catia_describe_dialog": (READ, _object({}), ()),
+    "catia_fill_dialog": (
+        WRITE,
+        _object(
+            {
+                "fields": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": _object(
+                        {
+                            "name": {"type": "string", "minLength": 1, "maxLength": 120},
+                            "value": {"type": "string", "maxLength": 200},
+                        },
+                        ["name", "value"],
+                    ),
+                }
+            },
+            ["fields"],
+        ),
+        (),
+    ),
+    "catia_dialog_action": (
+        WRITE,
+        _object(
+            {
+                "action": {
+                    "type": "string",
+                    "enum": ["ok", "apply", "cancel", "close", "preview", "yes", "no"],
+                },
+                "button": {"type": "string", "maxLength": 120},
+            },
+            ["action"],
+        ),
+        # The labels that action wears in this seat's language. Resolved on the
+        # server, where the translation table lives; the daemon walks them.
+        ("labels",),
+    ),
+    "catia_press_key": (
+        WRITE,
+        _object(
+            {
+                "key": {
+                    "type": "string",
+                    "enum": [
+                        "enter",
+                        "escape",
+                        "tab",
+                        "delete",
+                        "space",
+                        "up",
+                        "down",
+                        "left",
+                        "right",
+                        "home",
+                        "end",
+                    ],
+                }
+            },
+            ["key"],
+        ),
+        (),
+    ),
+    "catia_switch_workbench": (
+        WRITE,
+        _object({"workbench": {"type": "string", "minLength": 1, "maxLength": 120}}, ["workbench"]),
+        ("workbench_id", "workbench_name", "menu_path", "licence"),
+    ),
+    "catia_select": (
+        WRITE,
+        _object(
+            {
+                "features": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 120},
+                },
+                "add": {"type": "boolean"},
+            },
+            ["features"],
+        ),
+        (),
+    ),
 }
 
 #: `catia_status` is answered by the server and never reaches a device. If one

@@ -25,6 +25,7 @@ required, and the daemon runs without it.
 from __future__ import annotations
 
 import base64
+import ctypes
 import hashlib
 import logging
 import math
@@ -35,7 +36,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from . import gear, vba
+from . import gear, ui_policy, vba
+from . import ui_automation as ui
 from .backend import CatiaBackend, CatiaOperationError
 
 logger = logging.getLogger("kryova.catia.com")
@@ -176,6 +178,25 @@ class CatiaCom(CatiaBackend):
         self._local = threading.local()
         self._connect()
         self.catia_version = self._read_version()
+        self.ui_language = self._detect_ui_language()
+
+    def _detect_ui_language(self) -> str:  # pragma: no cover - Windows only
+        """Read the menu bar and say which language it is in, or nothing.
+
+        Done once at startup and reported in the `hello` frame, because the
+        interface language cannot change without restarting CATIA -- and if
+        CATIA restarts, so does this connection.
+
+        Failure is not an error. An empty answer means the server sends command
+        names in English and the daemon finds this seat's real label by reading
+        the same menu, which works in every language including the ones the
+        table above has never heard of.
+        """
+        try:
+            return ui.detect_language(ui.read_menu(self._main_window(), max_depth=1))
+        except Exception:  # noqa: BLE001 - a language we cannot read is not a failure
+            logger.info("Could not determine CATIA's interface language; using English names")
+            return ""
 
     # -- connection ----------------------------------------------------------
 
@@ -1920,8 +1941,448 @@ class CatiaCom(CatiaBackend):
             **self._measure_solid(),
         }
 
+    # -- driving the interface -----------------------------------------------
+    #
+    # Everything above this line goes through COM and stops working the moment
+    # CATIA puts up a modal dialog. Everything below goes through the window
+    # tree instead (`ui_automation.py`), which is exactly why it keeps working
+    # then -- and why these are the tools that get CATIA unstuck.
+    #
+    # The main window handle is cached for the same reason. Finding it needs
+    # `Application.Caption`, which is a COM read; if the handle were looked up
+    # per call, the first thing a blocked CATIA would break is the tool meant
+    # to unblock it.
+
+    def _main_window(self) -> int:  # pragma: no cover - Windows only
+        cached = getattr(self, "_hwnd", 0)
+        if cached and ui.AVAILABLE:
+            try:
+                if ctypes.WinDLL("user32").IsWindow(cached):  # type: ignore[attr-defined]
+                    return int(cached)
+            except Exception:  # noqa: BLE001 - fall through to a fresh lookup
+                pass
+        caption = ""
+        try:
+            caption = str(self._app.Caption)
+        except Exception:  # noqa: BLE001 - COM may be blocked; that is survivable
+            caption = ""
+        handle = 0
+        if caption:
+            handle = ui.window_titled(caption)
+        if not handle:
+            handle = ui.main_window()
+        self._hwnd = handle
+        return handle
+
+    def list_commands(  # pragma: no cover - Windows only
+        self, *, search: str = "", menu: str = ""
+    ) -> dict[str, Any]:
+        window = self._main_window()
+        try:
+            items = ui.read_menu(window)
+        except ui.UiUnavailable as exc:
+            raise CatiaOperationError(str(exc)) from exc
+        wanted = ui_policy.fold(search)
+        top = ui_policy.fold(menu)
+        found: list[dict[str, Any]] = []
+        for root in items:
+            if top and ui_policy.fold(root.label) != top:
+                continue
+            for item in root.walk():
+                if item.is_submenu:
+                    continue
+                path = " > ".join(item.path)
+                if wanted and wanted not in ui_policy.fold(path):
+                    continue
+                found.append({"command": item.label, "menu": path, "available": item.enabled})
+        return {
+            "workbench": self._workbench_name(),
+            "commands": found[:200],
+            "truncated": len(found) > 200,
+            "note": (
+                "These are this seat's own labels, read from its live menus. Use them "
+                "verbatim; they are in the interface's language."
+            ),
+        }
+
+    def _workbench_name(self) -> str:  # pragma: no cover - Windows only
+        try:
+            return str(self._app.ActiveDocument.GetWorkbench("").Name)
+        except Exception:  # noqa: BLE001 - there is no reliable "current workbench"
+            # CATIA exposes no property for the active workbench, and guessing
+            # from the window title is wrong as often as it is right. Empty is
+            # the honest answer.
+            return ""
+
+    def run_command(  # pragma: no cover - Windows only
+        self,
+        *,
+        command: str,
+        candidates: list[str] | None = None,
+        command_name: str = "",
+        command_key: str = "",
+        menu_hint: list[str] | None = None,
+    ) -> dict[str, Any]:
+        ui_policy.check([command, command_name, *(candidates or [])])
+        window = self._main_window()
+        if ui.active_dialog(window) is not None:
+            raise CatiaOperationError(
+                "A CATIA dialog is already open and waiting for input. Read it with "
+                "catia_describe_dialog and finish or cancel it first."
+            )
+
+        wanted = [c for c in [*(candidates or []), command] if c]
+        folded = {ui_policy.fold(c) for c in wanted}
+
+        # The menu first, because it is verifiable. `StartCommand` accepts any
+        # string and silently ignores the ones it does not know, so a wrong
+        # translation reports success and builds nothing. A menu item either
+        # exists on this seat or it does not, and if it exists but is greyed
+        # out we can say *that* instead of "it did not work".
+        try:
+            items = ui.read_menu(window)
+        except ui.UiUnavailable:
+            items = []
+        match = ui.find_menu_item(
+            items, lambda item: not item.is_submenu and ui_policy.fold(item.label) in folded
+        )
+        if match is not None:
+            reason = ui_policy.refusal(match.label)
+            if reason is not None:
+                raise CatiaOperationError(
+                    f"The bridge does not drive {match.label!r}: it {reason}."
+                )
+            if not match.enabled:
+                raise CatiaOperationError(
+                    f"{match.label!r} is on the menu at {' > '.join(match.path)} but is "
+                    "greyed out, so CATIA will not run it. Its preconditions are not "
+                    "met -- usually nothing is selected, or another workbench owns it. "
+                    "Select the input with catia_select, or switch workbench."
+                )
+            try:
+                ui.invoke_menu(window, match)
+            except ui.UiUnavailable as exc:
+                raise CatiaOperationError(str(exc)) from exc
+            return self._after_command(
+                window, command_name or command, match.label, "menu", " > ".join(match.path)
+            )
+
+        # Not on a menu: a toolbar-only command, or a label this seat words
+        # differently. `StartCommand` is the fallback and its silence is
+        # reported honestly rather than dressed up as success.
+        for candidate in wanted:
+            try:
+                self._app.StartCommand(candidate)
+            except Exception:  # noqa: BLE001 - an unknown name is not an error to CATIA
+                continue
+            result = self._after_command(window, command_name or command, candidate, "command", "")
+            if result["dialog_open"]:
+                return result
+        return self._after_command(
+            window, command_name or command, wanted[0] if wanted else command, "command", ""
+        ) | {
+            "verified": False,
+            "note": (
+                "CATIA was asked to start this command but reports nothing back, and no "
+                "dialog opened. It may have run, or it may not recognise the name on "
+                "this interface. Check with catia_list_features, or find the seat's own "
+                "label with catia_list_commands."
+            ),
+        }
+
+    def _after_command(  # pragma: no cover - Windows only
+        self, window: int, command: str, label: str, how: str, path: str
+    ) -> dict[str, Any]:
+        """Let the dialog appear, then report what is on screen."""
+        dialog = None
+        deadline = time.monotonic() + _DIALOG_WAIT_S
+        while time.monotonic() < deadline:
+            try:
+                dialog = ui.active_dialog(window)
+            except ui.UiUnavailable:
+                dialog = None
+            if dialog is not None:
+                break
+            time.sleep(_DIALOG_POLL_S)
+        return {
+            "command": command,
+            "matched_label": label,
+            "started_via": how,
+            "menu": path,
+            "started": True,
+            "verified": True,
+            "dialog_open": dialog is not None,
+            "dialog": dialog.describe() if dialog else None,
+            "next": (
+                "Fill the dialog and press OK; nothing is built until you do."
+                if dialog
+                else "No dialog opened, so the command either finished or is waiting "
+                "for a selection in the viewport."
+            ),
+        }
+
+    def describe_dialog(self) -> dict[str, Any]:  # pragma: no cover - Windows only
+        window = self._main_window()
+        try:
+            dialog = ui.active_dialog(window)
+        except ui.UiUnavailable as exc:
+            raise CatiaOperationError(str(exc)) from exc
+        if dialog is None:
+            return {
+                "dialog_open": False,
+                "note": "CATIA is not showing a dialog; nothing is waiting for input.",
+            }
+        described = dialog.describe()
+        unknown = [c for c in dialog.controls if c.kind == "other" and c.value]
+        if not described["fields"] and unknown:
+            # Self-diagnosing rather than silently empty: CATIA draws some of
+            # its own widgets, and on a seat where none of them classify, this
+            # is the line that says which window classes to teach `_classify`.
+            described["unrecognised_controls"] = [
+                {"class": c.window_class, "text": c.value[:80]} for c in unknown[:20]
+            ]
+            described["note"] = (
+                "This dialog's fields are drawn with widgets the bridge does not "
+                "recognise, so they cannot be filled in. Press Cancel and use a "
+                "purpose-built tool, or ask the user to complete it."
+            )
+        return {"dialog_open": True, **described}
+
+    def fill_dialog(  # pragma: no cover - Windows only
+        self, *, fields: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        window = self._main_window()
+        dialog = ui.active_dialog(window)
+        if dialog is None:
+            raise CatiaOperationError(
+                "No CATIA dialog is open, so there is nothing to fill in. Run the "
+                "command first with catia_run_command."
+            )
+        filled: list[str] = []
+        for item in fields:
+            name = str(item.get("name", ""))
+            value = str(item.get("value", ""))
+            control = _match_control(dialog, name)
+            try:
+                if control.kind == "choice":
+                    ui.set_choice(control, value)
+                elif control.kind in {"checkbox", "radio"}:
+                    ui.set_checked(control, value.strip().lower() in _TRUTHY)
+                else:
+                    ui.set_text(control, value)
+            except ui.UiUnavailable as exc:
+                raise CatiaOperationError(str(exc)) from exc
+            filled.append(control.label or name)
+        after = ui.active_dialog(window)
+        return {
+            "filled": filled,
+            "dialog": after.describe() if after else None,
+            "next": "Press OK with catia_dialog_action to apply it.",
+        }
+
+    def dialog_action(  # pragma: no cover - Windows only
+        self, *, action: str, button: str = "", labels: list[str] | None = None
+    ) -> dict[str, Any]:
+        window = self._main_window()
+        dialog = ui.active_dialog(window)
+        if dialog is None:
+            raise CatiaOperationError("No CATIA dialog is open, so there is no button to press.")
+
+        wanted = [button] if button else list(labels or [])
+        target = None
+        for candidate in wanted:
+            folded = ui_policy.fold(candidate)
+            target = next(
+                (b for b in dialog.buttons() if ui_policy.fold(b.label) == folded), None
+            )
+            if target is not None:
+                break
+        if target is None and not button:
+            # Nothing matched by label. A dialog built on the common controls
+            # still numbers OK 1 and Cancel 2 whatever they read, which is the
+            # language-proof second chance.
+            control_id = _STANDARD_IDS.get(action)
+            if control_id is not None:
+                target = next(
+                    (b for b in dialog.buttons() if b.control_id == control_id), None
+                )
+        if target is None:
+            offered = ", ".join(b.label for b in dialog.buttons() if b.label) or "none it can read"
+            raise CatiaOperationError(
+                f"The {dialog.title!r} dialog has no {button or action!r} button. "
+                f"It offers: {offered}."
+            )
+        try:
+            ui.click(dialog.handle, target)
+        except ui.UiUnavailable as exc:
+            raise CatiaOperationError(str(exc)) from exc
+        time.sleep(_DIALOG_POLL_S)
+        still = ui.active_dialog(window)
+        return {
+            "pressed": target.label,
+            "action": action,
+            "dialog_open": still is not None,
+            "dialog": still.describe() if still else None,
+        }
+
+    def press_key(self, *, key: str) -> dict[str, Any]:  # pragma: no cover - Windows only
+        window = self._main_window()
+        dialog = ui.active_dialog(window)
+        try:
+            ui.press_key(dialog.handle if dialog else window, key)
+        except ui.UiUnavailable as exc:
+            raise CatiaOperationError(str(exc)) from exc
+        time.sleep(_DIALOG_POLL_S)
+        still = ui.active_dialog(window)
+        return {"key": key, "dialog_open": still is not None}
+
+    def switch_workbench(  # pragma: no cover - Windows only
+        self,
+        *,
+        workbench: str,
+        workbench_id: str = "",
+        workbench_name: str = "",
+        menu_path: list[str] | None = None,
+        licence: str = "",
+    ) -> dict[str, Any]:
+        name = workbench_name or workbench
+        if workbench_id:
+            try:
+                self._app.StartWorkbench(workbench_id)
+                return {
+                    "workbench": name,
+                    "reached_by": "identifier",
+                    "identifier": workbench_id,
+                    "licence": licence,
+                }
+            except Exception:  # noqa: BLE001 - fall back to the Start menu
+                pass
+
+        window = self._main_window()
+        try:
+            items = ui.read_menu(window)
+        except ui.UiUnavailable as exc:
+            raise CatiaOperationError(str(exc)) from exc
+        # The Start menu is the first item on every V5 menu bar whatever it is
+        # called, which is the one property of a menu that survives translation.
+        start = items[0] if items else None
+        wanted = ui_policy.fold((menu_path or [name])[-1])
+        match = (
+            ui.find_menu_item(
+                [start], lambda item: not item.is_submenu and ui_policy.fold(item.label) == wanted
+            )
+            if start
+            else None
+        )
+        if match is None:
+            raise CatiaOperationError(
+                f"{name} is not on this seat's Start menu. Either it is not installed "
+                f"or the licence for it is missing ({licence or 'licence unknown'}). "
+                "catia_list_commands shows what the Start menu really offers."
+            )
+        if not match.enabled:
+            raise CatiaOperationError(
+                f"{name} is on the Start menu but greyed out, which on a workbench "
+                f"means the licence is not available ({licence or 'licence unknown'})."
+            )
+        ui.invoke_menu(window, match)
+        return {
+            "workbench": name,
+            "reached_by": "Start menu",
+            "displayed_as": match.label,
+            "licence": licence,
+        }
+
+    def select(  # pragma: no cover - Windows only
+        self, *, features: list[str], add: bool = False
+    ) -> dict[str, Any]:
+        document = self._document()
+        selection = document.Selection
+        if not features:
+            selection.Clear()
+            return {"selected": [], "count": 0, "note": "Selection cleared."}
+        if not add:
+            selection.Clear()
+        part = self._part()
+        missing: list[str] = []
+        selected: list[str] = []
+        for name in features:
+            element = _find_named(part, name)
+            if element is None:
+                missing.append(name)
+                continue
+            selection.Add(element)
+            selected.append(name)
+        if missing:
+            raise CatiaOperationError(
+                f"Not in this part: {', '.join(missing)}. Call catia_list_features to "
+                "see what is there; names are case-sensitive and end in a number."
+            )
+        return {"selected": selected, "count": _selection_count(selection, len(selected))}
+
 
 # -- helpers -----------------------------------------------------------------
+
+#: How long to wait for a command's dialog to appear before reporting that none
+#: did. CATIA opens one in well under a second on a warm session; the ceiling is
+#: for a cold one that is still loading the workbench's resources.
+_DIALOG_WAIT_S = 3.0
+_DIALOG_POLL_S = 0.15
+
+_TRUTHY = {"true", "1", "yes", "on", "checked"}
+
+#: Win32 standard dialog control ids, for the fallback in `dialog_action`.
+_STANDARD_IDS = {"ok": 1, "cancel": 2, "yes": 6, "no": 7, "close": 8}
+
+
+def _match_control(dialog: Any, name: str) -> Any:  # pragma: no cover - Windows only
+    """The field a label names, matched the way a human reads the dialog."""
+    folded = ui_policy.fold(name)
+    for control in dialog.fields():
+        if ui_policy.fold(control.label) == folded:
+            return control
+    # Prefix, because a dialog labels a box `Length:` and the agent asks for
+    # `Length` -- and because `First limit` is what `Length` sits under.
+    for control in dialog.fields():
+        if folded and ui_policy.fold(control.label).startswith(folded):
+            return control
+    offered = ", ".join(c.label for c in dialog.fields() if c.label) or "none it can read"
+    raise CatiaOperationError(
+        f"{name!r} is not a field of the {dialog.title!r} dialog. It has: {offered}."
+    )
+
+
+def _selection_count(selection: Any, fallback: int) -> int:
+    """How many things are selected, or how many we just added.
+
+    `Count2` is the current interface and `Count` the older one, and this is a
+    cosmetic number on a successful result. Letting a property read fail the
+    whole call would mean the selection was made and the agent was told it was
+    not -- which is the one outcome worth ruling out here.
+    """
+    for attribute in ("Count2", "Count"):
+        try:
+            return int(getattr(selection, attribute))
+        except Exception:  # noqa: BLE001 - try the next one, then give up
+            continue
+    return fallback
+
+
+def _find_named(part: Any, name: str) -> Any:  # pragma: no cover - Windows only
+    """A feature, sketch or body by the name shown in the specification tree."""
+    for collection in ("Bodies", "Sketches", "HybridBodies"):
+        try:
+            group = getattr(part, collection)
+        except Exception:  # noqa: BLE001 - not every document has every collection
+            continue
+        try:
+            return group.Item(name)
+        except Exception:  # noqa: BLE001 - Item raises rather than returning None
+            pass
+    try:
+        return part.FindObjectByName(name)
+    except Exception:  # noqa: BLE001 - the name is simply not in this part
+        return None
 
 
 def _unit_of(parameter: Any) -> str:  # pragma: no cover - Windows only

@@ -59,6 +59,7 @@ from app.catia.transfer import (
     receive_inline_file,
 )
 from app.catia.validation import SchemaError, validate
+from app.catia_kb.ui import ButtonRole, button_labels, resolve_command, resolve_workbench
 from app.core.config import settings
 from app.media import MediaService, get_media_store
 from app.models import Conversation, MediaKind
@@ -109,6 +110,23 @@ _NO_AUTO_CHECKPOINT = frozenset(
         "catia_open_document",  # nothing is open yet either
         "catia_checkpoint",  # it is the checkpoint
         "catia_export_step",  # reads the model out; does not change it
+        # The interactive tools, for one reason that applies to all four: a
+        # checkpoint is a COM save, and these run precisely when a modal dialog
+        # has COM blocked. Requiring one would mean the tools that dismiss a
+        # stuck dialog can only run when no dialog is stuck -- and since a
+        # failed checkpoint refuses the call, the session would be wedged with
+        # no way out but a human hand.
+        #
+        # The safety they lose is smaller than it looks. `catia_run_command` is
+        # checkpointed and it is the only one of the family that starts
+        # anything; by the time a dialog is open, the snapshot from before the
+        # command that opened it is already recorded, and pressing OK is
+        # covered by it.
+        "catia_fill_dialog",
+        "catia_dialog_action",
+        "catia_press_key",
+        "catia_select",  # selecting changes nothing
+        "catia_switch_workbench",  # nor does changing workbench
     }
 )
 
@@ -183,6 +201,21 @@ def _resolve_connection(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceC
         "outbound; nothing needs to be opened on their network). Until then, work "
         "from uploaded geometry instead."
     )
+
+
+def connected_ui_language(db: Session, user_id: str) -> str | None:
+    """Which language this user's connected CATIA is running in, if any.
+
+    The seat's interface language is not a Kryova setting and is not stored: it
+    is chosen when CATIA is installed, and the only thing that knows it is the
+    daemon sitting beside it. This is the one place that answer is available to
+    the rest of the server, and `None` -- no bridge, or a bridge that could not
+    tell -- is a normal answer, not a failure.
+    """
+    found = _online(db, user_id)
+    if found is None:
+        return None
+    return found[1].hello.ui_language or None
 
 
 def catia_available(db: Session, user_id: str) -> bool:
@@ -269,6 +302,11 @@ def status_payload(db: Session, user_id: str, conversation_id: str | None) -> di
         "bridge_version": clean_text(connection.hello.bridge_version, 32),
         "mock": connection.hello.mock,
         "capabilities": list(connection.hello.capabilities),
+        # Which language that CATIA's menus are in, or empty when the daemon
+        # could not tell. Reported rather than hidden because it is what decides
+        # whether the assistant can name a menu item in the words the user is
+        # actually looking at.
+        "ui_language": connection.hello.ui_language,
         "queue_depth": connection.queue_depth,
         "connected_since": connection.connected_at.isoformat(),
         "document": document,
@@ -415,16 +453,72 @@ def _augment(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     drove the daemon's schema -- which requires the density -- and never this
     path.
     """
-    if tool != "catia_set_material":
-        return arguments
+    if tool == "catia_set_material":
+        chosen = MATERIALS.get(str(arguments.get("material", "")))
+        if chosen is None:
+            raise CatiaError(
+                f"{arguments.get('material')!r} is not in the material library. "
+                f"Choose one of: {', '.join(sorted(MATERIALS))}."
+            )
+        return {**arguments, "density_kg_m3": chosen.density_kg_m3}
 
-    chosen = MATERIALS.get(str(arguments.get("material", "")))
-    if chosen is None:
-        raise CatiaError(
-            f"{arguments.get('material')!r} is not in the material library. "
-            f"Choose one of: {', '.join(sorted(MATERIALS))}."
-        )
-    return {**arguments, "density_kg_m3": chosen.density_kg_m3}
+    return arguments
+
+
+#: The interactive tools whose arguments the server resolves against the CATIA
+#: reference before they go on the wire.
+_UI_TOOLS = frozenset({"catia_run_command", "catia_dialog_action", "catia_switch_workbench"})
+
+
+def _resolve_ui(tool: str, arguments: dict[str, Any], language: str | None) -> dict[str, Any]:
+    """Translate the model's English intent into this seat's own words.
+
+    The model names commands, workbenches and button roles in English, because
+    that is the vocabulary it and the user share. The workstation is running in
+    whatever language it was installed in. This is the seam between the two, and
+    it lives here rather than in the daemon for two reasons: the translation
+    table is part of the CATIA reference and shipping it to every workstation
+    would mean updating them to fix a translation, and the daemon must be able
+    to refuse a command on its own terms without trusting anything the server
+    resolved (`ui_policy.check` re-checks every candidate).
+
+    The seat's language is not guessed. When the bridge has not reported one,
+    `language` is None, the resolver returns the English name alone, and the
+    daemon falls back to reading the live menu -- which is correct on every
+    installation and merely one round trip slower.
+    """
+    if tool == "catia_run_command":
+        target = resolve_command(str(arguments.get("command", "")), language=language)
+        payload = {
+            **arguments,
+            "candidates": list(target.candidates),
+            "command_name": target.name,
+            "command_key": target.key or "",
+        }
+        if target.menu:
+            payload["menu_hint"] = [part.strip() for part in target.menu.split(">") if part.strip()]
+        return payload
+
+    if tool == "catia_dialog_action":
+        # A named button is the model's own string and is passed through
+        # untranslated: it read that label off `catia_describe_dialog`, which
+        # reported what the dialog really says.
+        if arguments.get("button"):
+            return arguments
+        try:
+            role = ButtonRole(str(arguments.get("action", "")))
+        except ValueError:  # pragma: no cover - the schema enumerates these
+            return arguments
+        return {**arguments, "labels": list(button_labels(role, language))}
+
+    target_wb = resolve_workbench(str(arguments.get("workbench", "")), language=language)
+    return {
+        **arguments,
+        "workbench_id": target_wb.workbench_id,
+        "workbench_name": target_wb.name,
+        "menu_path": list(target_wb.menu_path),
+        "licence": target_wb.licence,
+    }
 
 
 def _enforce_rate_limit(device_id: str) -> None:
@@ -494,7 +588,16 @@ def _execute(
             label=f"before {spec.name}",
         )
 
-    payload = _enrich(db, spec=spec, document=document, arguments=arguments)
+    payload = _enrich(
+        db,
+        spec=spec,
+        document=document,
+        arguments=arguments,
+        # The daemon tells us what language its CATIA is running in, and it is
+        # the only thing that knows: the seat's interface language is chosen at
+        # install time on the workstation and appears nowhere on the server.
+        language=connection.hello.ui_language or None,
+    )
     raw = _send(
         connection,
         spec=spec,
@@ -562,14 +665,20 @@ def _enrich(
     spec: CatiaToolSpec,
     document: CatiaDocument | None,
     arguments: dict[str, Any],
+    language: str | None = None,
 ) -> dict[str, Any]:
     """Add the server-held context a tool needs, which the model never supplies.
 
     The model names documents and checkpoints; paths and file bytes are resolved
     here. That is what makes "no filesystem paths from the model" enforceable
-    rather than aspirational.
+    rather than aspirational. The interactive tools are resolved here too, for
+    the same reason and one more: their answer depends on the connected device's
+    interface language, which is not known until a device has been chosen.
     """
     payload = {k: v for k, v in arguments.items() if k != "approval_token"}
+
+    if spec.name in _UI_TOOLS:
+        return _resolve_ui(spec.name, payload, language)
 
     if spec.name == "catia_open_document":
         if document is None:

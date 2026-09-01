@@ -702,3 +702,121 @@ class TestAPocketThatCutsNothingIsRefused:
         com, state = self._com_with_pocket(tmp_path, [1000.0, 800.0, 800.0])
         com.pocket(sketch="Sketch.1", through_all=True)
         assert not state["flipped"], "a working pocket must not be reversed"
+
+
+# ---------------------------------------------------------------------------
+# Driving the interface
+# ---------------------------------------------------------------------------
+
+
+class TestInterfaceDriving:
+    """The COM half of the interactive tools, against the stub.
+
+    The Win32 half needs Windows and a live CATIA and is left to a real session
+    -- mocking `user32` would only prove the mock agrees with itself. What is
+    checkable here is what these methods do *through COM*: which workbench
+    identifier they pass, what they put in the selection, and how they answer
+    when the name is not in the part.
+    """
+
+    def test_a_known_workbench_goes_through_start_workbench(self, tmp_path: Path) -> None:
+        """The one-call path. The Start-menu walk is the fallback, not the norm."""
+        com = _com(tmp_path)
+        started: list[str] = []
+        com._app.StartWorkbench = started.append  # type: ignore[attr-defined]
+
+        result = com.switch_workbench(
+            workbench="Part Design",
+            workbench_id="PrtCfg",
+            workbench_name="Part Design",
+            licence="P1 -- Part Design 1 (PD1)",
+        )
+        assert started == ["PrtCfg"]
+        assert result["reached_by"] == "identifier"
+        # The licence rides along because a seat without it cannot open the
+        # workbench however the menu looks, and that is worth saying once
+        # rather than retrying.
+        assert "PD1" in result["licence"]
+
+    def test_selecting_by_name_adds_the_element_catia_found(self, tmp_path: Path) -> None:
+        com = _com(tmp_path)
+        sketch = object()
+        com._part = lambda: object()  # type: ignore[method-assign]
+        com._document = lambda: com._app.ActiveDocument  # type: ignore[method-assign]
+        import catia_bridge.catia_com as module
+
+        original = module._find_named
+        module._find_named = lambda _part, name: sketch if name == "Sketch.1" else None
+        try:
+            result = com.select(features=["Sketch.1"])
+        finally:
+            module._find_named = original
+        assert result["selected"] == ["Sketch.1"]
+
+    def test_a_name_that_is_not_in_the_part_names_the_tool_that_lists_them(
+        self, tmp_path: Path
+    ) -> None:
+        com = _com(tmp_path)
+        com._part = lambda: object()  # type: ignore[method-assign]
+        com._document = lambda: com._app.ActiveDocument  # type: ignore[method-assign]
+        import catia_bridge.catia_com as module
+
+        original = module._find_named
+        module._find_named = lambda _part, _name: None
+        try:
+            with pytest.raises(CatiaOperationError, match="catia_list_features"):
+                com.select(features=["Sketch.9"])
+        finally:
+            module._find_named = original
+
+    def test_an_empty_selection_clears_rather_than_failing(self, tmp_path: Path) -> None:
+        com = _com(tmp_path)
+        com._document = lambda: com._app.ActiveDocument  # type: ignore[method-assign]
+        assert com.select(features=[])["count"] == 0
+
+
+class TestDialogFieldMatching:
+    """`_match_control` is how a label the agent types finds the real box."""
+
+    @staticmethod
+    def _dialog():
+        from catia_bridge.ui_automation import Control, Dialog
+
+        return Dialog(
+            title="Pad Definition",
+            handle=1,
+            controls=(
+                Control(kind="text", label="Length", value="10mm", handle=2),
+                Control(kind="choice", label="Type", options=("Dimension",), handle=3),
+                Control(kind="button", label="OK", control_id=1, handle=4),
+            ),
+        )
+
+    def test_an_exact_label_matches(self) -> None:
+        from catia_bridge.catia_com import _match_control
+
+        assert _match_control(self._dialog(), "Length").handle == 2
+
+    def test_case_and_accents_do_not_matter(self) -> None:
+        """The agent echoes a label back; it should not have to echo it byte for byte."""
+        from catia_bridge.catia_com import _match_control
+
+        assert _match_control(self._dialog(), "length").handle == 2
+
+    def test_a_trailing_colon_in_the_dialog_is_tolerated(self) -> None:
+        from catia_bridge.catia_com import _match_control
+
+        assert _match_control(self._dialog(), "Len").handle == 2
+
+    def test_an_unknown_field_lists_the_real_ones(self) -> None:
+        from catia_bridge.catia_com import _match_control
+
+        with pytest.raises(CatiaOperationError, match="Length"):
+            _match_control(self._dialog(), "Thickness")
+
+    def test_a_button_is_not_offered_as_a_field(self) -> None:
+        """Filling `OK` with a number is a mistake worth refusing outright."""
+        from catia_bridge.catia_com import _match_control
+
+        with pytest.raises(CatiaOperationError):
+            _match_control(self._dialog(), "OK")

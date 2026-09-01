@@ -159,6 +159,16 @@ class BridgeHello:
     hostname: str
     mock: bool
     capabilities: tuple[str, ...]
+    #: Which language CATIA's interface is running in on that workstation, as a
+    #: two-letter code, or empty when the daemon could not tell.
+    #:
+    #: Only the daemon can know this: the interface language is chosen when
+    #: CATIA is installed and appears nowhere on the server. It decides which
+    #: label `catia_run_command` sends, so an empty value is not a detail --
+    #: it means commands resolve to their English names and the daemon has to
+    #: read the live menu to find the real one. Empty is the honest report and
+    #: costs a round trip; a guessed language would cost a silent no-op.
+    ui_language: str = ""
 
     @classmethod
     def parse(cls, frame: dict[str, Any]) -> "BridgeHello":
@@ -176,7 +186,18 @@ class BridgeHello:
             hostname=str(frame.get("hostname") or "")[:255],
             mock=bool(frame.get("mock")),
             capabilities=tuple(str(c)[:32] for c in capabilities[:32]),
+            # Normalised rather than trusted: this is peer-supplied and is used
+            # to look up a translation table, so anything that is not a plain
+            # language code becomes "unknown" instead of a lookup key.
+            ui_language=_language_code(frame.get("ui_language")),
         )
+
+
+def _language_code(raw: Any) -> str:
+    """A two-letter language code, or empty. Never anything else."""
+    text = str(raw or "").strip().lower()[:8]
+    head = text.split("-")[0].split("_")[0]
+    return head if len(head) == 2 and head.isalpha() else ""
 
 
 class DeviceConnection:

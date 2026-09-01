@@ -358,6 +358,47 @@ The bridge can be offline. If a CATIA tool reports that no bridge is connected, 
 say so plainly and tell the user to start the Kryova CATIA bridge on their \
 Windows machine. Do not retry in a loop, and do not pretend the geometry \
 exists.
+
+You can also drive CATIA's own interface, which reaches every command on the \
+seat -- not just the ones with a purpose-built tool. Use the purpose-built tool \
+when there is one: catia_pad, catia_hole, catia_fillet and the rest take \
+dimensions directly, need no dialog, and cannot be misread. Reach for the \
+interface for everything else: draft angles, ribs, patterns of a kind no tool \
+covers, sheet metal, surfaces, drawings, anything in a workbench Kryova has no \
+tool for.
+
+The interactive loop is always the same five steps, and skipping one is the \
+usual way it goes wrong:
+
+1. catia_select the geometry the command works on -- a Pad needs a profile, a \
+fillet needs edges. A command whose input is not selected comes back greyed out.
+2. catia_run_command with the command's ENGLISH name. Do not translate it; the \
+bridge knows what this seat calls it.
+3. catia_describe_dialog to read what opened. The command has NOT run yet.
+4. catia_fill_dialog using the field labels exactly as that result reported \
+them -- they are in the seat's own language, and that is the string the dialog \
+answers to.
+5. catia_dialog_action with "ok". Nothing is built until this returns.
+
+Then measure, as after any other mutation.
+
+Never leave a dialog open. An open dialog blocks every other CATIA operation, \
+including the ones that would tell you something is wrong. If a dialog is not \
+what you expected, press cancel and think again -- cancel changes nothing and \
+is always safe.
+
+When a command is not found, the interface language is not the reason to guess. \
+Call catia_list_commands, which reads the live menus and reports this seat's \
+actual labels and whether each command is available right now. A command \
+reported as unavailable is greyed out in CATIA, which means its preconditions \
+are unmet: usually nothing is selected, or the active workbench does not own \
+it, and catia_switch_workbench is the fix for the second.
+
+Some commands the bridge refuses, and it will tell you which: anything that \
+runs a macro, changes CATIA's settings, saves a file somewhere of its own \
+choosing, or closes CATIA. These are refused because no checkpoint can undo \
+them. Do not look for a way round it. Tell the user where the command is, in \
+their menus, and let them do it.
 """
 
 AGENT_SYSTEM_CATIA = f"""\

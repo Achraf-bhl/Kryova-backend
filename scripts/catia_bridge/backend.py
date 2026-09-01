@@ -27,6 +27,10 @@ class CatiaBackend(ABC):
     catia_version: str = "unknown"
     is_mock: bool = False
     capabilities: tuple[str, ...] = ("part", "sketch", "measure", "export", "capture")
+    #: The language CATIA's own interface is running in, as a two-letter code,
+    #: or empty when the backend could not determine it. Empty is a legitimate
+    #: answer and the server is written to expect it -- see `BridgeHello`.
+    ui_language: str = ""
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -245,6 +249,94 @@ class CatiaBackend(ABC):
     @abstractmethod
     def restore(self, *, checkpoint: dict[str, Any]) -> dict[str, Any]: ...
 
+    # -- driving the interface ----------------------------------------------
+    #
+    # The methods above go through COM and describe geometry. These go through
+    # the window tree and describe the interface, which is a different surface
+    # with a different failure mode: it keeps working while a modal dialog has
+    # COM blocked, which is the only time it is needed most.
+    #
+    # A backend that cannot drive the interface at all -- no Windows, no CATIA
+    # window -- raises `CatiaOperationError` from each of these rather than
+    # implementing them as no-ops. Silence would be reported to the user as
+    # success.
+
+    @abstractmethod
+    def list_commands(self, *, search: str = "", menu: str = "") -> dict[str, Any]:
+        """Every command on the live menus, with this seat's own labels."""
+
+    @abstractmethod
+    def run_command(
+        self,
+        *,
+        command: str,
+        candidates: list[str] | None = None,
+        command_name: str = "",
+        command_key: str = "",
+        menu_hint: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Press one command, and report the dialog it opened if it opened one.
+
+        `candidates` is the server's ordered resolution of `command` into labels
+        this seat might use -- internal id, seat language, English. The daemon
+        re-checks every one of them against its own refusal list before trying
+        any (`ui_policy.check`).
+        """
+
+    @abstractmethod
+    def describe_dialog(self) -> dict[str, Any]:
+        """The open dialog's title, fields and buttons, or that none is open."""
+
+    @abstractmethod
+    def fill_dialog(self, *, fields: list[dict[str, Any]]) -> dict[str, Any]:
+        """Set the open dialog's fields by their displayed labels."""
+
+    @abstractmethod
+    def dialog_action(
+        self, *, action: str, button: str = "", labels: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Press a button by role, or by exact label when `button` is given."""
+
+    @abstractmethod
+    def press_key(self, *, key: str) -> dict[str, Any]:
+        """Send one keystroke to whatever CATIA is currently showing."""
+
+    @abstractmethod
+    def switch_workbench(
+        self,
+        *,
+        workbench: str,
+        workbench_id: str = "",
+        workbench_name: str = "",
+        menu_path: list[str] | None = None,
+        licence: str = "",
+    ) -> dict[str, Any]:
+        """Activate a workbench, by id when there is one and by menu when not."""
+
+    @abstractmethod
+    def select(self, *, features: list[str], add: bool = False) -> dict[str, Any]:
+        """Put named features into CATIA's selection, or clear it."""
+
+
+#: Tools that must not be routed through the COM liveness probe.
+#:
+#: `session._check_alive` asks CATIA's automation server whether it is
+#: responding, and a modal dialog is precisely when it is not. For every other
+#: tool that check is right: the operation would hang, and failing fast with
+#: "dismiss the dialog" is better. For these it is exactly backwards -- they are
+#: the tools that *dismiss* the dialog, they do not use COM to do it, and gating
+#: them on COM would mean the only way out of a stuck dialog is a human hand,
+#: which is the situation they exist to remove.
+OUT_OF_BAND_TOOLS: frozenset[str] = frozenset(
+    {
+        "catia_describe_dialog",
+        "catia_fill_dialog",
+        "catia_dialog_action",
+        "catia_press_key",
+        "catia_list_commands",
+    }
+)
+
 
 #: Tool name -> backend method. Kept as data so `session.py` cannot reach a
 #: method that is not on this list, whatever arrives on the wire.
@@ -279,4 +371,12 @@ TOOL_METHODS: dict[str, str] = {
     "catia_checkpoint": "checkpoint",
     "catia_restore": "restore",
     "catia_update": "update",
+    "catia_list_commands": "list_commands",
+    "catia_run_command": "run_command",
+    "catia_describe_dialog": "describe_dialog",
+    "catia_fill_dialog": "fill_dialog",
+    "catia_dialog_action": "dialog_action",
+    "catia_press_key": "press_key",
+    "catia_switch_workbench": "switch_workbench",
+    "catia_select": "select",
 }

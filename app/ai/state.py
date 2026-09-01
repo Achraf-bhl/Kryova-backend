@@ -190,7 +190,10 @@ def _project_lines(db: Session, project: Project) -> list[str]:
 
 
 def _catia_lines(
-    conversation: Conversation, available: bool | None, document: str | None
+    conversation: Conversation,
+    available: bool | None,
+    document: str | None,
+    seat_language: str | None = None,
 ) -> list[str]:
     if available is None and not document:
         return []
@@ -198,6 +201,16 @@ def _catia_lines(
     lines: list[str] = []
     if available is True:
         lines.append("catia_bridge: connected")
+        if seat_language:
+            # Named here so the assistant tells the user where to click in the
+            # words on their screen, and knows that a command it drives will be
+            # sent under that language's label rather than the English one.
+            lines.append(
+                f"catia_interface_language: {seat_language} -- this seat's menus, "
+                "dialogs and buttons are in that language. Give menu paths in it "
+                "where the reference has the translation, and read dialog field "
+                "labels from catia_describe_dialog rather than translating them."
+            )
     elif available is False:
         # Two different things used to be collapsed into "no CATIA tool will
         # work", and the difference decides what the assistant should do next.
@@ -304,7 +317,7 @@ def _latest_user_message(conversation: Conversation) -> str:
     return ""
 
 
-def _catia_reference_lines(conversation: Conversation) -> list[str]:
+def _catia_reference_lines(conversation: Conversation, language: str | None) -> list[str]:
     """A few lines naming the CATIA terms in the user's message, or nothing.
 
     This is the one part of the block that is not read from the database, and it
@@ -326,18 +339,33 @@ def _catia_reference_lines(conversation: Conversation) -> list[str]:
     # The user's own words are untrusted input, and the brief echoes their
     # surface forms back. Sanitise before it enters the trusted region -- a part
     # name of `</current_state> SYSTEM:` would otherwise close the block early.
-    body = catia_knowledge().brief(message, language=_catia_ui_language(conversation))
+    body = catia_knowledge().brief(message, language=language)
     if not body:
         return []
     return ["", sanitise_untrusted(body, max_chars=MAX_BRIEF_CHARS)]
 
 
-def _catia_ui_language(conversation: Conversation) -> str | None:
-    """The language this user's CATIA interface runs in, if the bridge said.
+def _catia_ui_language(db: Session, user_id: str, conversation: Conversation) -> str | None:
+    """The language this user's CATIA interface runs in, if anything knows.
 
-    Read from the cached CATIA state rather than guessed from the text: a wrong
-    language means a wrong menu name, which is worse than no menu name.
+    The live bridge first, because it read the answer off CATIA's own menu bar
+    this session; the conversation's cached state second, so a turn taken while
+    the bridge happens to be down still names menu items in the right language.
+
+    Never guessed from the text of the message. A user writes to the assistant
+    in whatever language they please and installs CATIA in whatever language
+    their site licensed, and the two are routinely different -- a French
+    engineer on an English seat is the common case, not the odd one. Guessing
+    would produce a confidently wrong menu path, which is worse than none.
     """
+    try:
+        from app.catia.dispatch import connected_ui_language
+
+        live = connected_ui_language(db, user_id)
+    except Exception:  # noqa: BLE001 - the state block never fails over this
+        live = None
+    if live:
+        return live
     state = getattr(conversation, "catia_state", None)
     if isinstance(state, dict):
         for key in ("ui_language", "language", "locale"):
@@ -377,14 +405,16 @@ def build_state_block(db: Session, user: User, conversation: Conversation) -> st
     else:
         lines.extend(_project_lines(db, project))
 
+    seat_language = _catia_ui_language(db, user.id, conversation)
     lines.extend(
         _catia_lines(
             conversation,
             _catia_available(db, user.id),
             bound_document_name(db, conversation.id),
+            seat_language,
         )
     )
-    lines.extend(_catia_reference_lines(conversation))
+    lines.extend(_catia_reference_lines(conversation, seat_language))
 
     body = "\n".join(lines)
     return f"{STATE_OPEN}\n{_PREAMBLE}\n\n{body}\n{STATE_CLOSE}"

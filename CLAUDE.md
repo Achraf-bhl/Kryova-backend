@@ -189,6 +189,49 @@ Things that will bite you:
 - Duplicate entry keys raise at import; `missing_cross_references()` and `untranslated()` are
   asserted empty by the tests, which is what catches a rename orphaning a German name.
 
+## Driving CATIA's interface (`catia_run_command` and the dialog tools)
+
+Eight tools reach every command on the seat rather than the thirty Kryova implements
+directly: `catia_list_commands`, `catia_run_command`, `catia_describe_dialog`,
+`catia_fill_dialog`, `catia_dialog_action`, `catia_press_key`, `catia_switch_workbench`,
+`catia_select`. Server specs in `app/catia/tool_specs.py`, resolution in
+`app/catia_kb/ui.py`, daemon in `scripts/catia_bridge/{ui_automation,ui_policy,mock_ui}.py`.
+Full contract in `docs/CATIA_BRIDGE_PROTOCOL.md` ("Driving the interface").
+
+- **It is Win32, never COM.** `GetMenu`, `EnumChildWindows`, `SendMessageTimeoutW`. Two
+  consequences you must not undo: it reads the seat's *actual* labels so it works in a
+  language nobody wrote a table for, and it keeps working while a modal dialog has COM
+  blocked — which is the only time it matters most.
+- **`OUT_OF_BAND_TOOLS` (`backend.py`) skip the COM liveness probe**, and the same tools are
+  in `dispatch._NO_AUTO_CHECKPOINT`. Both for one reason: a checkpoint is a COM save, and a
+  failed checkpoint refuses the call. Gate these on COM and the tools that dismiss a stuck
+  dialog can only run when no dialog is stuck. `catia_run_command` is the deliberate
+  exception — it starts things, COM is alive by definition when it does, and it stays
+  checkpointed.
+- **`StartCommand` fails silently.** Hand it a name CATIA does not know and it does nothing,
+  raises nothing, and returns nothing. So the daemon tries the **live menu first** (an item
+  either exists or does not, and a greyed one can be reported as greyed) and falls back to
+  `StartCommand` with `verified: false`. Never report an unverified `StartCommand` as success.
+- **Command labels are localised; internal command ids are not, and are undocumented.**
+  `COMMAND_IDS` holds only ids with a published source. Do not add one from memory: a wrong
+  id fails the same silent way and burns the candidate that would have worked.
+- **Buttons are pressed by role, never by label.** `ButtonRole` + `BUTTON_LABELS` resolve
+  OK/Cancel/Apply per language on the server; `STANDARD_CONTROL_IDS` (IDOK=1, IDCANCEL=2) is
+  the language-proof fallback when label matching finds nothing. A Spanish seat's accept
+  button reads `Aceptar`.
+- **Refusals are exact-label or leading-phrase, never substring.** `FORBIDDEN_EXACT` /
+  `FORBIDDEN_PREFIX`, mirrored in `ui_policy.py` and enforced on the daemon against *every*
+  candidate. The split exists because a leading-word rule refused `Exit Sketcher Workbench`;
+  a substring rule refuses `Copy Options`. An over-refusal is not safe — the agent's recovery
+  from a refusal is to try something else, so it becomes a wrongly built part.
+- **Mock mode simulates the interface** (`mock_ui.py`) and runs in a language:
+  `--mock-language de`. Pressing OK on the mock Pad dialog builds a real mock Pad, so tests
+  assert the outcome. Every interactive test runs against `en` and `de`.
+- **What Linux cannot verify** is listed in the protocol doc's mock section: whether CATIA's
+  dialogs answer `WM_GETTEXT`, whether `EN_CHANGE` is needed, what its window classes are.
+  `describe_dialog` reports unrecognised controls with their class name so the first Windows
+  session produces the answer instead of a shrug.
+
 ## Non-negotiable rules
 
 These are facts that cannot be inferred by reading a single file.

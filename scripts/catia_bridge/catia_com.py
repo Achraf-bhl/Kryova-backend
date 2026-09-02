@@ -1995,7 +1995,7 @@ class CatiaCom(CatiaBackend):
                 if wanted and wanted not in ui_policy.fold(path):
                     continue
                 found.append({"command": item.label, "menu": path, "available": item.enabled})
-        return {
+        result = {
             "workbench": self._workbench_name(),
             "commands": found[:200],
             "truncated": len(found) > 200,
@@ -2004,6 +2004,34 @@ class CatiaCom(CatiaBackend):
                 "verbatim; they are in the interface's language."
             ),
         }
+        if found:
+            return result
+
+        # Nothing to show. Say which of the two reasons it is, because they need
+        # opposite responses from the agent, and an unqualified empty list reads
+        # as "this seat has no such commands" -- which sent it off inventing
+        # names. On a seat with owner-drawn menus the labels genuinely are not
+        # readable (see `ui_automation._msaa_menu_labels`), and the honest answer
+        # is to stop asking and use the reference package instead.
+        menus = [item.label for item in items if item.label]
+        unnamed = sum(1 for root in items for node in root.walk() if not node.label)
+        if unnamed or not menus:
+            result["note"] = (
+                "This seat's menus are drawn by CATIA itself, so Windows keeps no "
+                "text for the items inside them and they cannot be listed. Only the "
+                "menu bar can be named"
+                + (f" ({', '.join(menus)})" if menus else "")
+                + ". Do not guess a label from this: use the CATIA reference for the "
+                "command's name and run it with catia_run_command, which asks CATIA "
+                "directly and does not need the menu."
+            )
+            result["labels_readable"] = False
+        else:
+            result["note"] = (
+                f"No command in this seat's menus matched. Menus available: "
+                f"{', '.join(menus)}."
+            )
+        return result
 
     def _workbench_name(self) -> str:  # pragma: no cover - Windows only
         try:

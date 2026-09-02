@@ -268,6 +268,155 @@ def _user32() -> Any:
     return ctypes.WinDLL("user32", use_last_error=True)  # type: ignore[attr-defined]
 
 
+# ---------------------------------------------------------------------------
+# Owner-drawn menus: reading the labels Windows does not keep
+# ---------------------------------------------------------------------------
+#
+# CATIA draws its own menus. Every item on a V5-R33 seat comes back from
+# `GetMenuItemInfoW` with `fType = MFT_OWNERDRAW` and `cch = 0`, and
+# `GetMenuStringW` returns nothing: for an owner-drawn item Windows stores no
+# string at all, because the application paints the text itself and keeps it in
+# its own structure. `dwItemData` points at that structure, in CATIA's address
+# space, so it is not ours to read either.
+#
+# Measured on a real V5-R33, French seat: 13 menu-bar items, all
+# `fType = 0x100`, all `cch = 0`. That is why the whole menu came back with
+# blank labels and why the interface language could not be detected -- not a
+# missing window, not a permissions problem, and not something a longer buffer
+# fixes.
+#
+# What Windows *does* keep is the accessibility tree. CATIA answers
+# `WM_GETOBJECT` for `OBJID_MENU`, so MSAA hands back the same menu bar with
+# every label populated, in the seat's own language. It costs one COM call per
+# menu bar, needs no extra dependency (oleacc ships with Windows), and -- proven
+# on this machine -- moves no cursor and changes no foreground window.
+#
+# The limit is real and worth stating: this recovers the *menu bar* only. An
+# unopened popup has no accessibility object, because Windows creates one only
+# when the menu is actually dropped down, so submenu items stay unnamed. Their
+# structure (command id, submenu, greyed state) still reads correctly from the
+# HMENU -- it is only the text that is missing.
+
+OBJID_MENU = 0xFFFFFFFD
+STATE_SYSTEM_GRAYED = 0x8
+VT_I4 = 3
+
+
+class _VARIANT(ctypes.Structure):
+    """Enough of a VARIANT to carry a VT_I4 child id (24 bytes on x64)."""
+
+    _fields_ = [
+        ("vt", ctypes.c_ushort),
+        ("_r1", ctypes.c_ushort),
+        ("_r2", ctypes.c_ushort),
+        ("_r3", ctypes.c_ushort),
+        ("value", ctypes.c_longlong),
+        ("_pad", ctypes.c_longlong),
+    ]
+
+
+class _GUID(ctypes.Structure):
+    _fields_ = [
+        ("Data1", ctypes.c_uint32),
+        ("Data2", ctypes.c_uint16),
+        ("Data3", ctypes.c_uint16),
+        ("Data4", ctypes.c_ubyte * 8),
+    ]
+
+
+#: IID_IAccessible {618736E0-3C3D-11CF-810C-00AA00389B71}
+_IID_IACCESSIBLE = _GUID(
+    0x618736E0,
+    0x3C3D,
+    0x11CF,
+    (ctypes.c_ubyte * 8)(0x81, 0x0C, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71),
+)
+
+#: IAccessible vtable slots: IUnknown holds 0-2, IDispatch 3-6, IAccessible
+#: starts at 7 (get_accParent). Called through the vtable rather than through
+#: comtypes so the daemon keeps shipping with no dependency beyond pywin32.
+_SLOT_RELEASE = 2
+_SLOT_CHILD_COUNT = 8
+_SLOT_NAME = 10
+_SLOT_STATE = 14
+
+
+def _child_id(index: int) -> _VARIANT:
+    var = _VARIANT()
+    var.vt = VT_I4
+    var.value = index
+    return var
+
+
+def _msaa_menu_labels(hwnd: int, expected: int) -> dict[int, str]:
+    """Menu-bar labels by HMENU position, or `{}` if they cannot be trusted.
+
+    MSAA numbers the bar's children from 1 in the same order as the HMENU, so
+    child *i* is position *i - 1*. That mapping is only safe while the two agree
+    on how many items there are, so a mismatch returns nothing rather than
+    labelling the wrong commands -- naming the wrong menu item is worse than
+    naming none, because the caller would go on to press it.
+    """
+    if not AVAILABLE:  # pragma: no cover - Windows only
+        return {}
+    try:
+        oleacc = ctypes.windll.oleacc  # type: ignore[attr-defined]
+        oleaut32 = ctypes.windll.oleaut32  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - no accessibility layer is not an error
+        return {}
+
+    acc = ctypes.c_void_p()
+    try:
+        hr = oleacc.AccessibleObjectFromWindow(
+            wintypes.HWND(hwnd),
+            ctypes.c_ulong(OBJID_MENU),
+            ctypes.byref(_IID_IACCESSIBLE),
+            ctypes.byref(acc),
+        )
+    except Exception:  # noqa: BLE001
+        return {}
+    if hr != 0 or not acc:
+        return {}
+
+    try:
+        vtable = ctypes.cast(acc, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)))[0]
+        get_count = ctypes.WINFUNCTYPE(
+            ctypes.c_long, ctypes.c_void_p, ctypes.POINTER(ctypes.c_long)
+        )(vtable[_SLOT_CHILD_COUNT])
+        get_name = ctypes.WINFUNCTYPE(
+            ctypes.c_long, ctypes.c_void_p, _VARIANT, ctypes.POINTER(ctypes.c_void_p)
+        )(vtable[_SLOT_NAME])
+
+        count = ctypes.c_long()
+        if get_count(acc, ctypes.byref(count)) != 0:
+            return {}
+        if count.value != expected:
+            return {}
+
+        labels: dict[int, str] = {}
+        for index in range(1, count.value + 1):
+            text = ctypes.c_void_p()
+            if get_name(acc, _child_id(index), ctypes.byref(text)) != 0 or not text:
+                continue
+            try:
+                labels[index - 1] = ctypes.wstring_at(text)
+            finally:
+                oleaut32.SysFreeString(text)
+        return labels
+    except Exception:  # noqa: BLE001 - a seat we cannot read is not a failure
+        return {}
+    finally:
+        try:
+            release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(
+                ctypes.cast(acc, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)))[0][
+                    _SLOT_RELEASE
+                ]
+            )
+            release(acc)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _send(hwnd: int, message: int, wparam: int, lparam: Any) -> int:
     """`SendMessageTimeoutW`, always. See the module docstring."""
     user32 = _user32()
@@ -745,11 +894,18 @@ def read_menu(main_hwnd: int, *, max_depth: int = MAX_MENU_DEPTH) -> list[MenuIt
             "viewer, or the frame window found is not the main one."
         )
     budget = [MAX_MENU_ITEMS]
-    return _read_menu_level(bar, (), max_depth, budget)
+    # CATIA's menus are owner-drawn, so USER32 has no text for them. MSAA does,
+    # for the bar; see `_msaa_menu_labels`.
+    labels = _msaa_menu_labels(main_hwnd, int(user32.GetMenuItemCount(bar)))
+    return _read_menu_level(bar, (), max_depth, budget, labels)
 
 
 def _read_menu_level(
-    hmenu: Any, path: tuple[str, ...], depth: int, budget: list[int]
+    hmenu: Any,
+    path: tuple[str, ...],
+    depth: int,
+    budget: list[int],
+    labels: dict[int, str] | None = None,
 ) -> list[MenuItem]:
     if depth <= 0 or budget[0] <= 0:
         return []
@@ -769,9 +925,13 @@ def _read_menu_level(
         info.cch = 0
         if not user32.GetMenuItemInfoW(hmenu, index, True, ctypes.byref(info)):
             continue
+        # Only for real menus. The bar's trailing entries -- minimise, restore,
+        # close -- are window buttons that MSAA also names, and promoting those
+        # into the command list would offer the agent a "Fermer" to press.
+        supplied = (labels or {}).get(index, "") if info.hSubMenu else ""
         if info.cch == 0 and not info.hSubMenu:
             continue  # separator, or an item drawn by the owner with no text
-        label = ""
+        label = supplied
         if info.cch:
             size = min(int(info.cch), MAX_TEXT) + 1
             buffer = ctypes.create_unicode_buffer(size)

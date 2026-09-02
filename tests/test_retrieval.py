@@ -84,6 +84,30 @@ class TestAnalyzer:
         assert "120x80x10" in terms, "the exact dimension must still match exactly"
         assert {"120", "80", "10"} <= set(terms), "and each component on its own"
 
+    def test_a_dimension_with_a_thread_designation_keeps_the_thread(self):
+        # `M6x20` used to fall past the dimension pattern -- which required an
+        # all-numeric first component -- into the alphanumeric split, which
+        # yields `m`, `6`, `x`, `20` and drops everything below the length
+        # floor. The effect was that a passage specifying `M6x20` could not be
+        # found by a query for `M6`, the single term most likely to be searched.
+        terms = analyze("an M6x20 socket screw")
+        assert "m6x20" in terms
+        assert "m6" in terms, "the thread designation must be reachable on its own"
+        assert "20" in terms
+
+    @pytest.mark.parametrize("written", ["Ø12", "⌀12", "ø12"])
+    def test_the_diameter_sign_survives_however_it_was_typed(self, written: str):
+        # `fold` lowercases before tokenising and `Ø` lowercases to `ø`, which
+        # the token pattern did not accept -- so the diameter sign this module
+        # exists to protect was silently reduced to the bare number, which is
+        # exactly the loss its docstring claims to prevent.
+        terms = analyze(f"a {written} through hole")
+        assert "⌀12" in terms, "the diameter is a term in its own right"
+        assert "12" in terms, "and the bare number still reaches it"
+
+    def test_every_spelling_of_the_diameter_sign_is_one_term(self):
+        assert analyze("Ø12") == analyze("⌀12") == analyze("ø12")
+
     def test_stemming_joins_plurals_without_colliding_technical_terms(self):
         assert stem("pockets") == stem("pocket")
         # The whole reason the never-stem list exists: `stress` must not become
@@ -273,6 +297,62 @@ class TestChunking:
         # next line, so the punctuation test alone cannot save it -- which is
         # why a bare single-level number is not accepted at all.
         assert not _is_heading("7. Set the value of the draft angle in the Angle spinner")
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # The French half of the corpus, and the reason this file grew a
+            # companion that runs against the real manuals. A wrapped French
+            # instruction is title-case *by the letter of the rule*: `sur` and
+            # `pour` are minor words, `Cliquez` and `OK` are capitalised, and
+            # the sentence continues on the next line so there is no full stop
+            # to disqualify it. Declining to accept it as a numbered heading was
+            # never enough -- that only passed it to the title-case test, which
+            # took it. This labelled 1,143 of 5,003 real passages.
+            "6. Cliquez sur OK pour",
+            "4. Modifiez les",
+            "1. Sélectionnez Démarrer -> Analyse & Simulation ->",
+            "2. Sélectionnez Insertion -> Outils de",
+            "2) Select the face",
+            # No enumerator at all, same cut sentence.
+            "Cliquez sur",
+            # A title does not end on a preposition or an article.
+            "Sélectionnez la face et cliquez sur",
+        ],
+    )
+    def test_a_cut_instruction_is_not_a_heading(self, line: str):
+        assert not _is_heading(line)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Not section titles either, and useless in a citation.
+            r"C:\Program Files\intel\plsuite\bin",
+            "EN: /$OS/Startup/Components/MechanicalStandardParts/EN_Standards",
+            "Outils ->",
+            "http://www.3ds.com/support",
+        ],
+    )
+    def test_a_path_fragment_is_not_a_heading(self, line: str):
+        assert not _is_heading(line)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # A multi-level number is a section, not a step: the rejection above
+            # must not take these with it.
+            "3.2 Creating a Pad",
+            "15.3 Define Mesh",
+            # A single slash is ordinary in these manuals' own headings, so the
+            # path rule cannot key on one.
+            "Stratégie GPS/FMS",
+            "NonVu/Vu Permanent",
+            # `>` belongs inside a toolbar path; only a trailing one is a cut.
+            "Toolbar: Dress-Up Features > Fillets",
+        ],
+    )
+    def test_the_rejections_do_not_take_real_headings_with_them(self, line: str):
+        assert _is_heading(line)
 
     def test_headings_are_carried_into_the_passage_and_the_citation(self):
         page = Page(number=3, text="Creating a Pocket\n" + "word " * 60)

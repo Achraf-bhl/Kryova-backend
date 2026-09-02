@@ -85,6 +85,36 @@ _NUMBERED_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: A line that opens with a step number -- `6.`, `15.`, `2)`. Never a heading,
+#: whatever the rest of it looks like.
+#:
+#: This is the *rejecting* half of the numbered-heading logic, and it is not
+#: redundant with `_NUMBERED_HEADING_RE` below: that expression decides what to
+#: *accept*, and declining to accept a line only sends it on to the title-case
+#: test, which is where the damage was done. A French procedure step wrapped
+#: across a line break -- `6. Cliquez sur OK pour` -- has no terminal
+#: punctuation to disqualify it, and it is title-case by the letter of the rule,
+#: because `sur` and `pour` are both minor words and `Cliquez` and `OK` are both
+#: capitalised. On the real corpus that labelled 1,143 of 5,003 passages with a
+#: step number, which put "6. Cliquez sur OK pour" in the citation the model
+#: shows the user and pointed the heading boost at `cliquez`.
+#:
+#: The negative lookahead is what keeps `3.2 Creating a Pad` a heading: a
+#: multi-level number is a section, a single-level one is a step.
+_ENUMERATOR_RE = re.compile(r"^\d+\s*[.)](?!\d)")
+
+#: A fragment of a path rather than a section title: an install directory
+#: (`C:\Program Files\intel\plsuite\bin`), a resource path
+#: (`EN: /$OS/Startup/Components/MechanicalStandardParts`), or a menu path the
+#: extractor cut at a line break (`Outils ->`). All three are short, unpunctuated
+#: and title-cased, so they pass every other test, and all three are useless in
+#: the citation the model shows the user.
+#:
+#: A single slash is deliberately allowed: `Stratégie GPS/FMS` and `NonVu/Vu
+#: Permanent` are real headings in these manuals, and a rule that rejected one
+#: slash would take them with it.
+_PATH_FRAGMENT_RE = re.compile(r"\\|://|(?:/[^/\s]*){2,}|-?>\s*$")
+
 #: Boilerplate that opens a line: page numbers, copyright notices, vendor
 #: banners. Every page of every manual carries several.
 _BOILERPLATE_PREFIX_RE = re.compile(
@@ -153,11 +183,25 @@ def _is_heading(line: str) -> bool:
         return False
     if stripped[-1] in ".,;:!?":
         return False
+    if _ENUMERATOR_RE.match(stripped):
+        return False
+    if _PATH_FRAGMENT_RE.search(stripped):
+        return False
     if _NUMBERED_HEADING_RE.match(stripped):
         return True
 
     words = stripped.split()
     if not (1 < len(words) <= 12):
+        return False
+
+    # A title does not end on a preposition or an article. `Creating a Pocket`
+    # ends on `Pocket`; `Cliquez sur`, `Sélectionnez Insertion -> Outils de` and
+    # `4. Modifiez les` are sentences the extractor cut at a line break, and they
+    # pass every other test on their merits -- a capitalised first word and
+    # nothing but minor words after it is precisely the shape of a wrapped
+    # French instruction. Costs the occasional real title ("What to Look For");
+    # that is one mislabelled passage against several hundred poisoned ones.
+    if words[-1].lower().strip(".,") in _TITLE_MINOR_WORDS:
         return False
 
     letters = [char for char in stripped if char.isalpha()]

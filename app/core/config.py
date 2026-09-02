@@ -358,12 +358,19 @@ class Settings(BaseSettings):
     def knowledge_source_dirs(self) -> list[Path]:
         """Directories scanned for reference documents, in priority order.
 
-        Two roots rather than one. `data/bm25/sources/` is the documented home
-        and is walked recursively -- that is where new material goes. `data/`
-        itself is also scanned, non-recursively via `rglob` on a directory that
-        contains the sources tree, so a corpus that was already sitting in
-        `data/` before this existed is picked up without anyone having to move
-        several hundred megabytes of PDFs around.
+        Both roots are walked recursively (`discover_sources` uses `rglob`), and
+        between them they cover every layout this corpus has had. The manuals
+        currently sit directly in `data/bm25/`, which is reached through the
+        second root; `data/bm25/sources/` is the tidier home for anything added
+        later, and organising it by workbench or language is fine because it is
+        walked too. Either location works and nothing has to be moved.
+
+        Scanning the parent means a stray `.md` or `.txt` dropped anywhere under
+        `data/` is reference material as far as the index is concerned. That is
+        deliberate -- the corpus is meant to be extended by copying a file in --
+        but it is why `index/` and the corpus README are excluded explicitly:
+        the first is the build's own output and the second is a note about the
+        manuals rather than one of them.
 
         Duplicates are impossible: `discover_sources` de-duplicates on the
         resolved path, so a file under both roots is indexed once.

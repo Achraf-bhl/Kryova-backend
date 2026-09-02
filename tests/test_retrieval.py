@@ -84,6 +84,30 @@ class TestAnalyzer:
         assert "120x80x10" in terms, "the exact dimension must still match exactly"
         assert {"120", "80", "10"} <= set(terms), "and each component on its own"
 
+    def test_a_dimension_with_a_thread_designation_keeps_the_thread(self):
+        # `M6x20` used to fall past the dimension pattern -- which required an
+        # all-numeric first component -- into the alphanumeric split, which
+        # yields `m`, `6`, `x`, `20` and drops everything below the length
+        # floor. The effect was that a passage specifying `M6x20` could not be
+        # found by a query for `M6`, the single term most likely to be searched.
+        terms = analyze("an M6x20 socket screw")
+        assert "m6x20" in terms
+        assert "m6" in terms, "the thread designation must be reachable on its own"
+        assert "20" in terms
+
+    @pytest.mark.parametrize("written", ["Ø12", "⌀12", "ø12"])
+    def test_the_diameter_sign_survives_however_it_was_typed(self, written: str):
+        # `fold` lowercases before tokenising and `Ø` lowercases to `ø`, which
+        # the token pattern did not accept -- so the diameter sign this module
+        # exists to protect was silently reduced to the bare number, which is
+        # exactly the loss its docstring claims to prevent.
+        terms = analyze(f"a {written} through hole")
+        assert "⌀12" in terms, "the diameter is a term in its own right"
+        assert "12" in terms, "and the bare number still reaches it"
+
+    def test_every_spelling_of_the_diameter_sign_is_one_term(self):
+        assert analyze("Ø12") == analyze("⌀12") == analyze("ø12")
+
     def test_stemming_joins_plurals_without_colliding_technical_terms(self):
         assert stem("pockets") == stem("pocket")
         # The whole reason the never-stem list exists: `stress` must not become
@@ -112,6 +136,41 @@ class TestAnalyzer:
         # PDF extraction produces these from tables with no spaces; indexing
         # them inflates the vocabulary with terms no query can ever produce.
         assert analyze("x" * 200) == []
+
+    def test_no_analyzed_term_exceeds_max_length(self):
+        # Tokenizer must never produce a term longer than the cap, even when
+        # the raw token itself is within the alphanumeric split path.
+        from app.retrieval.analyze import MAX_TERM_LENGTH
+
+        terms = analyze("a" * 35 + "1" * 10)
+        assert all(len(t) <= MAX_TERM_LENGTH for t in terms)
+
+    def test_single_digit_diameter_oe_is_preserved(self):
+        # Ø8 is a very common drawing notation; the tokeniser must not strip
+        # the diameter sign when the number is one character.
+        terms = analyze("Ø8 through hole")
+        assert "⌀8" in terms
+        assert "8" in terms
+
+    def test_tet4_is_kept_whole_and_also_split(self):
+        # `tet4` is an FEA element type; the bare `tet` prefix is also worth
+        # having so a query for `tet` reaches it.
+        terms = analyze("tet4 elements")
+        assert "tet4" in terms
+        assert "tet" in terms
+
+    def test_stemmer_floor_keeps_short_technical_words_intact(self):
+        # `stem` must never strip a word below 4 characters (len - len(suffix) >= 4),
+        # so short CAD terms like `pad` or `pads` stay intact.
+        assert stem("pad") == "pad"
+        assert stem("pads") == "pads"  # stem length 3 < 4 floor, kept intact
+
+    def test_never_stem_entries_are_returned_unchanged(self):
+        # These have ambiguous suffixes that would produce wrong stems, and the
+        # never-stem list is what keeps them intact.
+        assert stem("stress") == "stress"
+        assert stem("radius") == "radius"
+        assert stem("analysis") == "analysis"
 
     def test_fold_is_idempotent(self):
         once = fold("Créer une Poche — Épaisseur")
@@ -226,6 +285,28 @@ class TestBM25:
         self._corpus().save(second)
         assert first.read_bytes() == second.read_bytes()
 
+    def test_empty_boosts_list_does_not_raise(self):
+        # BM25Index.build with an explicit boosts=[] should handle zero
+        # documents without an IndexError.
+        index = BM25Index.build([], boosts=[])
+        assert index.num_documents == 0
+        assert index.search(["pad"]) == []
+
+    def test_boosts_scale_scores_relative_to_unweighted(self):
+        # A document with a 2× boost on identical content must outscore the
+        # unboosted version, which is the mechanism behind field weighting.
+        docs = [
+            analyze("pocket sketch depth"),
+            analyze("pocket sketch depth"),
+        ]
+        boosted = BM25Index.build(docs, boosts=[1.0, 2.0])
+        hits = boosted.search(analyze_query("pocket sketch depth"))
+        order = [hit.doc_id for hit in hits]
+        assert order[0] == 1, "higher boost must rank first"
+
+    def test_zero_limit_returns_empty_without_error(self):
+        assert self._corpus().search(analyze_query("pad"), limit=0) == []
+
 
 # ---------------------------------------------------------------------------
 # Chunking, and the heading heuristics that decide citation quality.
@@ -273,6 +354,62 @@ class TestChunking:
         # next line, so the punctuation test alone cannot save it -- which is
         # why a bare single-level number is not accepted at all.
         assert not _is_heading("7. Set the value of the draft angle in the Angle spinner")
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # The French half of the corpus, and the reason this file grew a
+            # companion that runs against the real manuals. A wrapped French
+            # instruction is title-case *by the letter of the rule*: `sur` and
+            # `pour` are minor words, `Cliquez` and `OK` are capitalised, and
+            # the sentence continues on the next line so there is no full stop
+            # to disqualify it. Declining to accept it as a numbered heading was
+            # never enough -- that only passed it to the title-case test, which
+            # took it. This labelled 1,143 of 5,003 real passages.
+            "6. Cliquez sur OK pour",
+            "4. Modifiez les",
+            "1. Sélectionnez Démarrer -> Analyse & Simulation ->",
+            "2. Sélectionnez Insertion -> Outils de",
+            "2) Select the face",
+            # No enumerator at all, same cut sentence.
+            "Cliquez sur",
+            # A title does not end on a preposition or an article.
+            "Sélectionnez la face et cliquez sur",
+        ],
+    )
+    def test_a_cut_instruction_is_not_a_heading(self, line: str):
+        assert not _is_heading(line)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Not section titles either, and useless in a citation.
+            r"C:\Program Files\intel\plsuite\bin",
+            "EN: /$OS/Startup/Components/MechanicalStandardParts/EN_Standards",
+            "Outils ->",
+            "http://www.3ds.com/support",
+        ],
+    )
+    def test_a_path_fragment_is_not_a_heading(self, line: str):
+        assert not _is_heading(line)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # A multi-level number is a section, not a step: the rejection above
+            # must not take these with it.
+            "3.2 Creating a Pad",
+            "15.3 Define Mesh",
+            # A single slash is ordinary in these manuals' own headings, so the
+            # path rule cannot key on one.
+            "Stratégie GPS/FMS",
+            "NonVu/Vu Permanent",
+            # `>` belongs inside a toolbar path; only a trailing one is a cut.
+            "Toolbar: Dress-Up Features > Fillets",
+        ],
+    )
+    def test_the_rejections_do_not_take_real_headings_with_them(self, line: str):
+        assert _is_heading(line)
 
     def test_headings_are_carried_into_the_passage_and_the_citation(self):
         page = Page(number=3, text="Creating a Pocket\n" + "word " * 60)
@@ -515,6 +652,15 @@ class TestCorpus:
     def test_a_missing_index_is_absent_not_an_exception(self, tmp_path: Path):
         assert Corpus.open(tmp_path / "never-built") is None
 
+    def test_search_with_limit_zero_returns_empty(self, tmp_path: Path):
+        sources, index_dir = tmp_path / "src", tmp_path / "index"
+        sources.mkdir()
+        _write_corpus(sources)
+        build(sources=[sources], destination=index_dir)
+        corpus = Corpus.open(index_dir)
+        assert corpus is not None
+        assert corpus.search("pad definition", limit=0) == []
+
     def test_a_truncated_index_is_ignored_rather_than_half_read(self, tmp_path: Path):
         sources, index_dir = tmp_path / "src", tmp_path / "index"
         sources.mkdir()
@@ -585,6 +731,13 @@ class TestMergeAdjacent:
         assert [passage.score for passage in merged] == sorted(
             (passage.score for passage in merged), reverse=True
         )
+
+    def test_a_single_passage_is_returned_unchanged(self):
+        p = Passage(text="solo", source="x.pdf", page=1, heading=None, score=3.0, matched_terms=1)
+        assert merge_adjacent([p]) == [p]
+
+    def test_an_empty_list_is_returned_unchanged(self):
+        assert merge_adjacent([]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -858,6 +1011,25 @@ class TestFormatPassages:
 
     def test_nothing_in_nothing_out(self):
         assert format_passages([]) == ""
+
+    def test_a_passage_with_no_heading_still_renders_a_citation(self):
+        # When heading is None the citation must omit that field gracefully
+        # rather than printing "None" in the formatted output.
+        rendered = format_passages(
+            [
+                Passage(
+                    text="The pad command extrudes a sketch.",
+                    source="part_design.pdf",
+                    page=42,
+                    heading=None,
+                    score=8.0,
+                    matched_terms=2,
+                )
+            ]
+        )
+        assert "part_design.pdf" in rendered
+        assert "p. 42" in rendered
+        assert "None" not in rendered
 
     def test_an_oversized_passage_is_truncated_at_the_prompt_boundary(self):
         rendered = format_passages(

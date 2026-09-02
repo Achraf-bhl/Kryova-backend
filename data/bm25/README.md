@@ -4,28 +4,47 @@ This is where the CATIA and FEA documentation the assistant consults lives.
 
 ```
 data/bm25/
-  sources/   <- put PDFs here
+  *.pdf      <- the manuals themselves
+  sources/   <- or here; both are scanned
   index/     <- built artifacts, rebuildable, never edited by hand
   README.md  <- this file
 ```
 
-Nothing in here is committed except this README. The manuals are vendor
-copyrighted material and hundreds of megabytes; the index is derived from them
-and can always be rebuilt.
+**The manuals are committed; the index is not.** They are tracked on purpose, so
+that a `git pull` on the Windows test workstation brings the corpus with it
+rather than requiring several hundred megabytes to be copied by hand. They are
+third-party Dassault Systèmes material in a repository carrying its own
+licence, which is a thing to settle before this repository is published or
+cloned widely -- and a later `.gitignore` cannot undo it, only a history
+rewrite can. `index/` is ignored: it is derived, it is rewritten whole on every
+build, and it would conflict between machines.
 
 ## Adding documents
 
-Drop them in `sources/` and rebuild:
+Drop them in this directory (or in `sources/`, if you would rather keep the
+top level tidy) and rebuild:
 
 ```bash
 python -m app.retrieval.build
 ```
 
-`data/` itself is also scanned, so manuals that were already sitting there
-before this directory existed are picked up without moving anything.
-
 Accepted: `.pdf`, `.txt`, `.md`, `.markdown`, `.rst`. Sub-directories are
-walked, so organising `sources/` by workbench or language is fine.
+walked, so organising by workbench or language is fine. `data/` above this
+directory is scanned too, so a manual that predates this layout is picked up
+without moving anything.
+
+## Measuring it
+
+`tests/test_retrieval_corpus.py` runs the retriever against whatever is
+actually indexed here -- a set of real engineering questions and the manual
+that ought to answer each one -- and reports precision@1, precision@3 and MRR.
+It skips entirely when no index has been built, so it costs a fresh clone
+nothing, and it skips any individual question whose subject matter is not in
+the corpus, so curating these files does not turn the suite red.
+
+```bash
+pytest tests/test_retrieval_corpus.py -q
+```
 
 ## Checking it
 

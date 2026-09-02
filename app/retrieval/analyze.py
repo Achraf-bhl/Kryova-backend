@@ -79,14 +79,31 @@ STOPWORDS: Final[frozenset[str]] = frozenset(
     """.split()
 )
 
+#: The diameter sign, in every form a drawing or a keyboard produces it, folded
+#: onto one character.
+#:
+#: `fold` lowercases before tokenising, and `Ø` lowercases to `ø` -- which the
+#: token pattern below did not accept, so `Ø12` tokenised to the bare `12`,
+#: exactly the loss this module's docstring says it prevents. Normalising here
+#: rather than widening the character class also makes `Ø12`, `ø12` and `⌀12`
+#: one term instead of three, which is what a user typing any of them expects.
+_DIAMETER_SIGNS: Final = str.maketrans({"ø": "⌀", "Ø": "⌀", "⌀": "⌀"})
+
 #: Tokens are runs of letters, digits and the few symbols that belong *inside* a
 #: technical term. The diameter sign is one of them: `Ø12` is a term, and a
 #: split on non-alphanumerics would leave the bare `12`.
-_TOKEN_RE: Final = re.compile(r"[0-9Ø⌀]?[a-z0-9Ø⌀]*[a-z0-9]|[a-z]+", re.UNICODE)
+_TOKEN_RE: Final = re.compile(r"[0-9⌀]?[a-z0-9⌀]*[a-z0-9]|[a-z]+", re.UNICODE)
 
 #: A dimension written the way a drawing writes it: `120x80`, `120x80x10`,
 #: `M6x20`. Split into components so a query naming one number still reaches it.
-_DIMENSION_RE: Final = re.compile(r"^(\d+(?:\.\d+)?)(?:x(\d+(?:\.\d+)?))+$")
+#:
+#: The optional letter prefix on each component is what admits `M6x20`. Without
+#: it the expression matched only all-numeric dimensions, `M6x20` fell through
+#: to the alphanumeric split below, and that yields `m`, `6`, `x`, `20` -- every
+#: part but `20` below the length floor. The result was that a passage
+#: specifying `M6x20` could not be found by a query for `M6`, which is the one
+#: term most likely to be searched for.
+_DIMENSION_RE: Final = re.compile(r"^([a-z]*\d+(?:\.\d+)?)(?:x([a-z]*\d+(?:\.\d+)?))+$")
 
 #: A term that is a letter prefix followed by digits -- `M6`, `R18`, `V5R21`,
 #: `tet4`. Indexed whole *and* split, so `tet4` is reachable by `tet` too.
@@ -124,7 +141,7 @@ def fold(text: str) -> str:
     inconsistently accented after PDF extraction, and users routinely type
     French without accents.
     """
-    lowered = text.lower()
+    lowered = text.lower().translate(_DIAMETER_SIGNS)
     decomposed = unicodedata.normalize("NFKD", lowered)
     return "".join(char for char in decomposed if not unicodedata.combining(char))
 
@@ -157,6 +174,13 @@ def _expand(token: str) -> list[str]:
     dimension = _DIMENSION_RE.match(token)
     if dimension:
         terms.extend(part for part in re.split(r"x", token) if part)
+        return terms
+
+    # `⌀12` is the term, and `12` is also worth having: a drawing writes the
+    # diameter sign and an engineer asking about it usually does not, so without
+    # this the two can never meet. Same reasoning as the dimension split above.
+    if token.startswith("⌀") and len(token) > 1:
+        terms.append(token[1:])
         return terms
 
     if any(char.isdigit() for char in token) and any(char.isalpha() for char in token):

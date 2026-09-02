@@ -114,9 +114,22 @@ Things that will bite you:
   steps as section titles. Only keyword (`Chapter 4`) or multi-level (`3.2`) numbers count,
   and the terminal-punctuation test runs *before* the numbered test. Both orderings are
   load-bearing and both have already been got wrong once.
+  **Refusing to *accept* a line is not the same as *rejecting* it** — that was the third
+  time. Declining a bare `6.` only passed the line to the title-case fallback, which took
+  it, because a wrapped French step (`6. Cliquez sur OK pour`) has no terminal full stop and
+  is title-case by the letter of the rule: `sur`/`pour` are minor words, `Cliquez`/`OK` are
+  capitalised. That labelled 1,143 of 5,003 real passages, tripling `cliquez` in the term
+  stream and putting a step number in the citation the user reads. `_ENUMERATOR_RE`,
+  `_PATH_FRAGMENT_RE` and the minor-word-ending test are the explicit rejections; all three
+  run before the title-case fallback and all three are asserted against the real corpus.
 - **Language is a boost, never a filter** (`LANGUAGE_PREFERENCE_BOOST`). CATIA's menus are
   translated, so a French user needs the French page — but a workbench documented only in
   English must still answer them. A clearly better match in the other language still wins.
+  The value (1.35) is measured, not chosen: Photo Studio is English-only here and FreeStyle
+  French-only, so for those the boost is not breaking a tie but demoting the only answer
+  there is. Swept over the corpus eval set, 1.6 lost both (MRR 0.934) and 1.35 finds every
+  case (P@3 100%, MRR 0.974); above ~1.45 it stops breaking ties and starts overriding
+  relevance. Re-sweep before changing it — `tests/test_retrieval_corpus.py` is the harness.
 - **Every considered file is fingerprinted, including skipped ones.** Recording only successes
   makes `is_stale` permanently true on any corpus containing one unreadable PDF.
 - Builds are atomic (staging directory, swapped in), so rebuilding under a live server is safe.
@@ -309,15 +322,20 @@ Read these before touching the relevant file — they are live defects, not styl
   SQLite branch. Fix the docs or the code, but do not trust either in isolation.
 - **`/health` returns `{"status":"ok"}` unconditionally** — it does not check the database, so
   it cannot be used as a readiness probe.
-- **`data/` holds ~270 MB of Dassault Systèmes / CATIA training PDFs, and they are tracked
+- **`data/bm25/` holds ~450 MB of Dassault Systèmes / CATIA training PDFs, and they are tracked
   again on purpose** (2026-09-01) so the corpus syncs to the Windows test workstation with a
   plain `git pull`. They are third-party copyrighted material in a repo carrying its own
   LICENSE, and a later `.gitignore` cannot undo it — removing them needs a history rewrite.
   Raise this before the repository is published or cloned widely. `data/bm25/index/` is *not*
   tracked: it is derived, rewritten whole on every build, and would conflict between machines.
-- **Four of the 21 PDFs are scans with no text layer** (the large French `Formation-*` files,
+  The manuals sit directly in `data/bm25/`, not in `data/bm25/sources/`; both are scanned
+  (`knowledge_source_dirs` walks `data/bm25/sources` **and** `data/`), so either works and
+  nothing needs moving — but it does mean any `.md`/`.txt` dropped anywhere under `data/` is
+  indexed as reference material.
+- **Four of the 25 PDFs are scans with no text layer** (the large French `Formation-*` files,
   42–66 MB each) and cannot be indexed without OCR. The build reports them as
-  `scanned, no text layer` and carries on; this is expected, not a regression.
+  `scanned, no text layer` and carries on; this is expected, not a regression. The other 21
+  index in ~7s to ~4,900 passages.
 
 ## Testing
 
@@ -337,6 +355,15 @@ Read these before touching the relevant file — they are live defects, not styl
 - The solver is verified against **closed-form solutions**, not recorded output: a bar in pure
   tension reproduces σ = F/A and δ = FL/AE to 1e-6, including through a real gmsh mesh.
   Any new solver work must be verified the same way.
+- Retrieval is verified twice, and the split matters. `test_retrieval.py` proves the machinery
+  on synthetic fixtures (fast, always runs). `test_retrieval_corpus.py` measures the *real*
+  index over `data/bm25` — 38 engineering questions against the manual that ought to answer
+  each, scored precision@1 / precision@3 / MRR, plus corpus and citation health. Every test
+  in it passed on synthetic input while the shipped index was labelling 23% of its passages
+  with a procedure step, which is the whole argument for having it. It **skips** when no
+  index is built (fresh clone, CI) and skips any individual case whose subject matter is not
+  indexed, so curating the manuals cannot turn it red. Thresholds are floors with headroom,
+  not the measured numbers pinned — currently P@1 94.7%, P@3 100%, MRR 0.974.
 
 ## Conventions
 

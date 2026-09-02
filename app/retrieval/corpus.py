@@ -80,9 +80,20 @@ MIN_COVERAGE_RATIO: float = 0.4
 #: A multiplier rather than a filter, and that is the whole design. Filtering to
 #: one language means a French user asking about a workbench documented only in
 #: the English manual gets nothing at all, which is strictly worse than getting
-#: the English page. At 1.6 a same-language passage wins every close contest and
-#: still loses to a much better match in the other language.
-LANGUAGE_PREFERENCE_BOOST: float = 1.6
+#: the English page. A same-language passage wins every close contest and still
+#: loses to a much better match in the other language.
+#:
+#: 1.35 rather than a rounder number because it was measured. This corpus has
+#: workbenches documented in one language only -- Photo Studio in English,
+#: FreeStyle in French -- and they are the case that decides this constant: a
+#: French question about rendering has no French page to find, so the boost is
+#: not breaking a tie, it is demoting the only answer there is. Swept against
+#: the corpus eval set, 1.6 lost both of those and scored MRR 0.934; 1.35 finds
+#: every case (P@3 100%, MRR 0.974) and still carries every genuine near-tie,
+#: because two translations of one page score close enough that any multiplier
+#: above 1 separates them. Above ~1.45 the number stops breaking ties and starts
+#: overriding relevance.
+LANGUAGE_PREFERENCE_BOOST: float = 1.35
 
 
 @dataclass(frozen=True)

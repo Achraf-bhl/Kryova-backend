@@ -36,17 +36,9 @@ htmlcov/
 # Local heavy-file store (CAD, meshes, result fields, vector indexes)
 media_data/
 
-# Reference manuals ARE tracked, deliberately and temporarily, so the corpus
-# syncs to the Windows test workstation with a plain `git pull` instead of a
-# manual copy. That is ~270 MB of vendor PDFs in the history, and it cannot be
-# undone by a later .gitignore -- removing them needs a history rewrite. Revisit
-# before this repository is published or cloned widely.
-#
-# The built index is NOT tracked. It is derived from the PDFs, it is rewritten
-# whole on every build, and committing it would grow the repository on each
-# rebuild while guaranteeing a binary conflict between any two machines that
-# both ran setup. `scripts/setup.sh` / `setup.ps1` builds it on the target
-# machine, which is the intended flow.
+# Reference manuals and PDFs
+*.pdf
+data/bm25/*.pdf
 data/bm25/index/
 
 # Logs

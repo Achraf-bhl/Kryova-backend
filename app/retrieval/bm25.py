@@ -247,7 +247,7 @@ class BM25Index:
         sentence read -- and scoring it twice would let a stray repetition
         dominate the ranking.
         """
-        if self.num_documents == 0 or not terms:
+        if limit <= 0 or self.num_documents == 0 or not terms:
             return []
 
         unique = list(dict.fromkeys(terms))

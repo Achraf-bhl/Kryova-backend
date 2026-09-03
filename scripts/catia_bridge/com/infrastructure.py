@@ -133,50 +133,59 @@ class InfrastructureMixin:
         self: ComContext,
         *,
         file: str,
-        remote_path: str = "",
+        content_b64: str = "",
         content_hash: str = "",
+        filename: str = "",
         format: str = "",  # noqa: A002 - the schema's name
         import_as: str = "solid",
         heal: bool | None = None,
         scale: float | None = None,
     ) -> dict[str, Any]:
-        """Read a CAD file into CATIA and bring its geometry into the document.
+        """Read an uploaded CAD file into CATIA and bring its geometry in.
 
-        `remote_path` is filled in by the server from `file`; the model names an
-        upload and never a location. A path arriving empty means the server did
-        not resolve the name, and that is refused rather than guessed at — the
-        alternative is reading whatever a made-up name happens to point at.
+        The bytes arrive with the call. The model names an upload and never a
+        location, and there is no path that would mean the same thing on the
+        server and on this workstation anyway — so the file is written to the
+        bridge's own working directory, opened, and deleted. Empty bytes mean
+        the server could not resolve the name, which is refused rather than
+        guessed at: the alternative is opening whatever a made-up name hits.
         """
-        if not remote_path:
+        if not content_b64:
             raise CatiaOperationError(
                 f"The server did not resolve {file!r} to an uploaded file. Upload the "
                 "file to Kryova first, then name it exactly as it appears there."
             )
-        path = Path(remote_path)
-        if not path.is_file():
-            raise CatiaOperationError(
-                f"{file!r} is not on this workstation. It may still be transferring; "
-                "try again in a moment."
-            )
 
-        detected = format or _format_from_suffix(path.suffix)
+        stem = filename or file
+        detected = format or _format_from_suffix(Path(stem).suffix)
         if detected is None:
             raise CatiaOperationError(
-                f"Cannot tell what kind of file {file!r} is from its name. Say which "
+                f"Cannot tell what kind of file {stem!r} is from its name. Say which "
                 f"format it is: {', '.join(sorted(_FORMAT_TOKENS))}."
             )
-        if content_hash:
-            _verify_hash(path, content_hash)
 
+        data = base64.b64decode(content_b64)
+        if content_hash:
+            _verify_transfer(data, content_hash)
+
+        # Written under the file's real name, not a random one: CATIA picks its
+        # translator from the extension, and the imported document inherits the
+        # name the engineer will see in the tree.
+        path = self.workdir / f"import-{uuid.uuid4().hex[:8]}-{_safe_name(stem)}"
+        path.write_bytes(data)
         try:
             document = self._app.Documents.Open(str(path))
         except Exception as error:  # noqa: BLE001
             licence = _FORMAT_LICENCE.get(detected, detected)
             raise CatiaOperationError(
-                f"CATIA could not read {file!r} as {detected}. This needs the "
+                f"CATIA could not read {stem!r} as {detected}. This needs the "
                 f"{licence} Data Exchange licence on this workstation — ask for that "
                 f"licence rather than retrying. ({error})"
             ) from error
+        finally:
+            # CATIA has loaded it into memory by now; leaving the temp file
+            # behind would accumulate a copy of every import ever run.
+            path.unlink(missing_ok=True)
 
         imported = _describe_import(document)
         if scale is not None and scale != 1.0:
@@ -418,19 +427,27 @@ def _format_from_suffix(suffix: str) -> str | None:
     return aliases.get(cleaned)
 
 
-def _verify_hash(path: Path, expected: str) -> None:
-    """Refuse a file that is not the one the server sent.
+def _verify_transfer(data: bytes, expected: str) -> None:
+    """Refuse bytes that are not the ones the server sent.
 
-    The transfer is the thing being checked, not the file's contents: a
-    truncated upload produces a CATIA import failure that reads like a corrupt
-    STEP file, and this turns it back into "the transfer did not finish".
+    The transfer is what is being checked, not the file's contents: a truncated
+    one produces a CATIA import failure that reads exactly like a corrupt STEP
+    file, and this turns it back into "the transfer did not finish".
     """
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256(data).hexdigest()
     if digest != expected:
         raise CatiaOperationError(
-            "The file on this workstation does not match the one uploaded — the "
-            "transfer was incomplete. Upload it again."
+            "The file that arrived does not match the one uploaded — the transfer was "
+            "incomplete. Try the import again."
         )
+
+
+def _safe_name(name: str) -> str:
+    """A filename safe to write, keeping the extension CATIA dispatches on."""
+    cleaned = Path(name).name
+    return "".join(
+        character for character in cleaned if character.isalnum() or character in "-_."
+    ) or "import.stp"
 
 
 def _describe_import(document: Any) -> dict[str, Any]:  # pragma: no cover - Windows only

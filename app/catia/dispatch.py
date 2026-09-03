@@ -71,6 +71,7 @@ from app.models.catia import (
     CatiaDocument,
     CatiaOperation,
 )
+from app.models.geometry import GeometryVersion
 from app.solve.materials import MATERIALS
 
 logger = logging.getLogger(__name__)
@@ -626,6 +627,9 @@ def _execute(
         # the only thing that knows: the seat's interface language is chosen at
         # install time on the workstation and appears nowhere on the server.
         language=connection.hello.ui_language or None,
+        # Only `catia_import` needs it, to scope an uploaded file to this
+        # conversation's project rather than to every project the user owns.
+        conversation_id=conversation_id,
     )
     raw = _send(
         connection,
@@ -695,6 +699,7 @@ def _enrich(
     document: CatiaDocument | None,
     arguments: dict[str, Any],
     language: str | None = None,
+    conversation_id: str | None = None,
 ) -> dict[str, Any]:
     """Add the server-held context a tool needs, which the model never supplies.
 
@@ -734,10 +739,84 @@ def _enrich(
             )
         payload = {"checkpoint": _checkpoint_payload(db, checkpoint)}
 
-    elif spec.name in {"catia_checkpoint", "catia_export_step", "catia_capture_view"}:
+    elif spec.name == "catia_import":
+        payload.update(_uploaded_file(db, conversation_id, str(arguments.get("file", ""))))
+
+    elif spec.name in {
+        "catia_checkpoint",
+        "catia_export",
+        "catia_export_step",
+        "catia_capture_view",
+    }:
         payload["max_inline_bytes"] = INLINE_TRANSFER_MAX_BYTES
 
     return payload
+
+
+def _uploaded_file(
+    db: Session, conversation_id: str | None, name: str
+) -> dict[str, Any]:
+    """Resolve a named upload to the bytes the daemon will import.
+
+    Scoped to the conversation's own project, which is the access control: a
+    model that names another project's file gets "no file called that", the same
+    answer it gets for a name that never existed. Anything looser would let one
+    prompt read across projects.
+
+    The bytes travel with the call rather than a path, because the daemon runs
+    on the engineer's workstation and the upload lives here.
+    """
+    if not conversation_id:
+        raise CatiaError(
+            "This conversation is not attached to a project, so it has no uploaded "
+            "files to import from."
+        )
+    conversation = db.get(Conversation, conversation_id)
+    project_id = getattr(conversation, "project_id", None)
+    if project_id is None:
+        raise CatiaError(
+            "This conversation is not attached to a project, so it has no uploaded "
+            "files to import from."
+        )
+
+    versions = list(
+        db.scalars(
+            select(GeometryVersion)
+            .where(GeometryVersion.project_id == project_id)
+            .order_by(GeometryVersion.version_number.desc())
+        )
+    )
+    wanted = name.strip().lower()
+    match = next(
+        (
+            version
+            for version in versions
+            # Both spellings, because the model has seen the name in a file list
+            # and may quote it with or without its extension.
+            if wanted in {version.filename.lower(), Path(version.filename).stem.lower()}
+        ),
+        None,
+    )
+    if match is None:
+        available = ", ".join(version.filename for version in versions[:10]) or "(none)"
+        raise CatiaError(
+            f"This project has no uploaded file called {name!r}. It has: {available}."
+        )
+
+    media = _media_service(db)
+    try:
+        content = encode_inline_file(media.local_path(match.media))
+    except (TransferError, OSError) as exc:
+        raise CatiaError(
+            f"{match.filename} could not be read back from storage to send to the "
+            f"workstation. ({exc})"
+        ) from exc
+
+    return {
+        "content_b64": content,
+        "content_hash": match.checksum_sha256,
+        "filename": match.filename,
+    }
 
 
 def _latest_checkpoint(db: Session, document: CatiaDocument) -> CatiaCheckpoint | None:

@@ -112,7 +112,11 @@ OPERATIONS: tuple[Operation, ...] = (
             optional("heal", flag("Run healing on import to close small gaps. Default true for surfaces.")),
             optional("scale", bounded_number("Scale the geometry on import.", minimum=0.001, maximum=1000.0)),
         ),
-        server_fields=("remote_path", "content_hash"),
+        # The bytes travel, not a path. The daemon runs on the engineer's own
+        # Windows box and the upload lives on the server, so there is no path
+        # that means the same thing on both — the same reason a checkpoint is
+        # restored from `content_b64` rather than from a filename.
+        server_fields=("content_b64", "content_hash", "filename"),
         long_running=True,
     ),
     Operation(

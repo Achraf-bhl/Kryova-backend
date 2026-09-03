@@ -101,7 +101,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
             "required": ["file"],
             "additionalProperties": False,
         },
-        ("remote_path", "content_hash"),
+        ("content_b64", "content_hash", "filename"),
     ),
     "catia_export": (
         WRITE,

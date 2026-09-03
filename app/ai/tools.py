@@ -163,7 +163,32 @@ def _object(properties: dict[str, Any], required: list[str] | None = None) -> di
 #: binding rule from prompt guidance into something the model cannot skip -- and
 #: does it without a round trip to a workstation that would only answer "no
 #: active document".
-CATIA_NO_DOCUMENT_REQUIRED = frozenset({"catia_status", "catia_new_part", "catia_open_document"})
+def _component_slug(name: str) -> str:
+    """Fold a document or component name for comparison.
+
+    `catia_save_part` sanitises the name it is given before using it as a
+    filename, so the component comes back as `Ring_gear` where the document is
+    still called `Ring gear`. Comparing the raw strings would decide the part
+    had never been saved and refuse the next `catia_new_part`.
+    """
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+CATIA_NO_DOCUMENT_REQUIRED = frozenset(
+    {
+        "catia_status",
+        "catia_new_part",
+        "catia_open_document",
+        # The assembly tools act on the product CATIA has open, not on the part
+        # this conversation is bound to. Requiring a bound *part* would refuse
+        # every one of them the moment the conversation moved on to assembling,
+        # which is precisely when they are wanted.
+        "catia_new_product",
+        "catia_add_component",
+        "catia_constrain",
+        "catia_list_constraints",
+    }
+)
 
 #: Result keys worth caching on the conversation for the next turn's state
 #: block. Everything else a tool returns is either transient or already in the
@@ -1204,6 +1229,44 @@ class ToolBox:
             return None
         return bound_document_name(self.db, self.conversation.id)
 
+    def _is_saved_component(self, doc_name: str) -> bool:
+        """Has this conversation already saved that document as a component?
+
+        One document per conversation exists so a second `catia_new_part` cannot
+        silently abandon modelled work. Saving the part as a component is the
+        case where it does not: the geometry is on disk, it is about to be
+        placed in a product, and the conversation legitimately needs the next
+        part. An assembly is several parts by definition, so without this the
+        binding makes assembling impossible -- which is exactly how it failed
+        when the tools were first wired up.
+
+        Read back from the operation log rather than tracked separately: that is
+        the same "never keep a second copy of which document this is" rule that
+        `bound_document_name` follows.
+        """
+        if self.conversation is None:
+            return False
+        try:
+            from app.models.catia import CatiaOperation
+        except Exception:  # noqa: BLE001 - optional package
+            return False
+        from sqlalchemy import select as _select
+
+        rows = self.db.scalars(
+            _select(CatiaOperation).where(
+                CatiaOperation.conversation_id == self.conversation.id,
+                CatiaOperation.tool == "catia_save_part",
+                CatiaOperation.ok.is_(True),
+            )
+        ).all()
+        wanted = _component_slug(doc_name)
+        for row in rows:
+            result = row.result if isinstance(row.result, dict) else {}
+            saved = str(result.get("part") or "")
+            if saved and _component_slug(saved) == wanted:
+                return True
+        return False
+
     def _call_catia(self, name: str, arguments: dict[str, Any]) -> Any:
         """Run one bridge tool, enforcing the conversation-document binding first.
 
@@ -1221,11 +1284,13 @@ class ToolBox:
         conversation = self.conversation
         bound = self._bound_document()
 
-        if name == "catia_new_part" and bound:
+        if name == "catia_new_part" and bound and not self._is_saved_component(bound):
             raise ToolError(
                 f"This conversation already owns the CATIA document {bound!r}. Call "
                 "catia_open_document to work on it; creating a new part here would "
-                "abandon everything already modelled."
+                "abandon everything already modelled. If you are building an "
+                "assembly and have finished with it, call catia_save_part first -- "
+                "that keeps it as a component and frees you to start the next part."
             )
         if name == "catia_open_document" and not bound:
             raise ToolError(

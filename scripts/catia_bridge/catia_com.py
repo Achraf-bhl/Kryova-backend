@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import ctypes
 import hashlib
+import json
 import logging
 import math
 import shutil
@@ -44,6 +45,54 @@ logger = logging.getLogger("kryova.catia.com")
 
 #: CATIA's reference planes, in the order `Part.OriginElements` exposes them.
 _ORIGIN_PLANE = {"XY": "PlaneXY", "YZ": "PlaneYZ", "ZX": "PlaneZX"}
+
+def _is_part_document(document: Any) -> bool:
+    """Whether this document is a CATPart, asked by trying rather than by name.
+
+    `.Part` exists on a part document and raises on a product one, and that is a
+    more reliable test than the file extension, which a document that has never
+    been saved does not necessarily have.
+    """
+    try:
+        document.Part
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
+#: How an origin plane is *named* inside an assembly reference, per language.
+#: `CreateReferenceFromName` takes the seat's own tree label and nothing else --
+#: `!PlaneXY` is refused on every seat. Measured on V5-R33: French says
+#: `Plan xy`, English says `xy plane`. Seat language is tried first.
+_ORIGIN_PLANE_LABELS: dict[str, tuple[str, ...]] = {
+    "XY": ("Plan xy", "xy plane"),
+    "YZ": ("Plan yz", "yz plane"),
+    "ZX": ("Plan zx", "zx plane"),
+}
+
+#: `AddBiEltCst`'s first argument. Verified against a live V5-R33 by reading
+#: back the name CATIA gave each constraint: 1 Décalage, 2 Coïncidence,
+#: 4 Tangence, 6 Angle, 8 Parallélisme, 11 Perpendicularité. The integers CATIA
+#: refuses for two planes (0, 3, 5, 7, 9, 10, 12-15) are deliberately absent.
+_CONSTRAINT_KINDS: dict[str, int] = {
+    "offset": 1,
+    "coincidence": 2,
+    "tangency": 4,
+    "angle": 6,
+    "parallel": 8,
+    "perpendicular": 11,
+}
+
+#: `AddMonoEltCst`'s argument for a Fix. Applied to an origin plane rather than
+#: to the component, because a bare component reference does not resolve.
+_CST_FIX = 0
+
+_CONSTRAINT_NAMES: dict[int, str] = {v: k for k, v in _CONSTRAINT_KINDS.items()}
+_CONSTRAINT_NAMES[_CST_FIX] = "fix"
+
+#: The constraints that carry a number. Setting `Dimension.Value` on any other
+#: kind raises, so it is only attempted for these.
+_DIMENSIONED_CONSTRAINTS = frozenset({"offset", "angle"})
 
 #: A pattern's two directions both come from one origin plane: CATIA steps
 #: along that plane's *first* in-plane axis for direction 1 and its second for
@@ -1548,11 +1597,68 @@ class CatiaCom(CatiaBackend):
         return {"features": self._feature_list()}
 
     def update(self) -> dict[str, Any]:  # pragma: no cover - Windows only
+        # A product updates too, and updating one is how its constraints get
+        # resolved -- so this dispatches on what is actually open rather than
+        # assuming a part and failing on the document the assembly tools create.
+        document = self._document()
+        if not _is_part_document(document):
+            root = document.Product
+            try:
+                root.Update()
+            except Exception as exc:  # noqa: BLE001
+                raise CatiaOperationError(
+                    f"CATIA could not resolve this assembly ({exc}). A constraint is "
+                    "probably impossible to satisfy -- list them with "
+                    "catia_list_constraints and check the values."
+                ) from exc
+            return {
+                "updated": True,
+                "product": str(root.PartNumber),
+                "components": [
+                    str(root.Products.Item(i).Name)
+                    for i in range(1, int(root.Products.Count) + 1)
+                ],
+                **self._measure_product(root),
+            }
         self._part().Update()
         return {
             "updated": True,
             "features": self._feature_list(),
             **self._measure_solid(),
+        }
+
+    def _measure_product(self, root: Any) -> dict[str, Any]:  # pragma: no cover
+        """Mass and volume rolled up over the whole assembly, where CATIA offers it.
+
+        `Product.Analyze` gives both directly and accounts for every instance,
+        which is the number an engineer means by "what does it weigh". It needs
+        every component to carry a material; without one CATIA reports zero
+        rather than failing, so a zero is reported as unknown instead of quoted
+        as a mass.
+        """
+        try:
+            analyze = root.Analyze
+            mass = float(analyze.Mass)
+            volume = float(analyze.Volume)
+        except Exception:  # noqa: BLE001 - not every seat exposes Analyze
+            return {"mass_kg": None, "mass_is_provisional": True}
+        if mass <= 0.0:
+            return {
+                "mass_kg": None,
+                "mass_is_provisional": True,
+                "mass_warning": (
+                    "CATIA reports no mass for this assembly, which normally means at "
+                    "least one component has no material. Set materials on the parts "
+                    "before quoting a weight."
+                ),
+            }
+        # `Analyze` already reports millimetre units, and Mass in kilogrammes --
+        # see `_measure_solid` for why that distinction matters here. Scaling
+        # this would reproduce the 1e9 error that made every mass read 0.0 kg.
+        return {
+            "mass_kg": round(mass, 6),
+            "volume_mm3": round(volume, 4),
+            "mass_is_provisional": False,
         }
 
     def _feature_result(self, name: str) -> dict[str, Any]:  # pragma: no cover
@@ -2347,6 +2453,327 @@ class CatiaCom(CatiaBackend):
                 "see what is there; names are case-sensitive and end in a number."
             )
         return {"selected": selected, "count": _selection_count(selection, len(selected))}
+
+    # -- assembly ------------------------------------------------------------
+
+    def _components_dir(self) -> Path:  # pragma: no cover - Windows only
+        directory = self.workdir / "components"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def _component_index_path(self) -> Path:  # pragma: no cover - Windows only
+        return self._components_dir() / "index.json"
+
+    def _component_index(self) -> dict[str, str]:  # pragma: no cover - Windows only
+        """Logical component name -> the file actually holding it.
+
+        The indirection exists because CATIA will not let a path be reused while
+        the *session* still has that document loaded, and a component placed in
+        an open product is loaded by definition. Saving `Sun` a second time
+        therefore cannot write `Sun.CATPart` again: CATIA answers "le fichier
+        existe déjà dans la session, entrez un autre nom" -- a modal dialog that
+        blocks COM -- and if the file is deleted first it warns about multiple
+        editors for one model and clears the undo log instead.
+
+        So each save writes a *new* file and this index remembers which one is
+        current. The model keeps saying `Sun`; the filename is the daemon's
+        business, which is the same division as everywhere else here.
+        """
+        try:
+            raw = json.loads(self._component_index_path().read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - a missing or corrupt index is not fatal
+            return {}
+        return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+
+    def _write_component_index(self, index: dict[str, str]) -> None:  # pragma: no cover
+        try:
+            self._component_index_path().write_text(
+                json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except OSError:
+            logger.warning("Could not write the component index")
+
+    def _free_component_file(self, slug: str) -> Path:  # pragma: no cover
+        """A path for `slug` that is free on disk *and* absent from the session."""
+        directory = self._components_dir()
+        try:
+            documents = self._app.Documents
+            open_paths = set()
+            for index in range(1, int(documents.Count) + 1):
+                try:
+                    open_paths.add(str(documents.Item(index).FullName).lower())
+                except Exception:  # noqa: BLE001 - unsaved documents have no path
+                    continue
+        except Exception:  # noqa: BLE001
+            open_paths = set()
+
+        for attempt in range(1, 200):
+            name = f"{slug}.CATPart" if attempt == 1 else f"{slug}__{attempt}.CATPart"
+            candidate = directory / name
+            if not candidate.exists() and str(candidate).lower() not in open_paths:
+                return candidate
+        raise CatiaOperationError(
+            f"There are already 200 saved revisions of {slug!r} in this session. "
+            "Restart CATIA to clear them."
+        )
+
+    def _component_path(self, part: str) -> Path:  # pragma: no cover - Windows only
+        """Turn a saved-part *name* into a file inside the daemon's own directory.
+
+        The model never supplies a filesystem path -- it supplies the name
+        `catia_save_part` gave back, and that name is resolved here, under a
+        directory this bridge owns. A component added from an arbitrary path
+        would be the "no filesystem paths from the model" rule broken by the one
+        tool that needs files, so the name is sanitised and the directory is
+        fixed rather than trusting either.
+        """
+        slug = _safe_filename(part)
+        index = self._component_index()
+        path = self._components_dir() / index.get(slug, f"{slug}.CATPart")
+        if not path.is_file():
+            saved = sorted(index) or sorted(
+                p.stem for p in self._components_dir().glob("*.CATPart")
+            )
+            raise CatiaOperationError(
+                f"No saved part called {part!r}. Build it, then call catia_save_part "
+                "to make it available as a component. "
+                + (f"Saved so far: {', '.join(saved)}." if saved else "Nothing saved yet.")
+            )
+        return path
+
+    def save_part(self, *, name: str = "") -> dict[str, Any]:  # pragma: no cover
+        """Write the active part to disk so it can be used as a component.
+
+        Assembly components are added *from files*: `AddComponentsFromFiles` is
+        the only route CATIA offers, and it takes paths. Nothing else in this
+        bridge ever needs a part on disk, which is why this did not exist -- and
+        why no assembly was possible without it.
+        """
+        document = self._document()
+        self._part()  # refuses politely if the active document is not a part
+        stem = name or str(document.Name).rsplit(".", 1)[0]
+        # `_safe_filename` also neutralises traversal -- '../../etc/passwd'
+        # comes back as 'etc-passwd' -- and falls back to 'part' rather than
+        # returning nothing, so the name is always usable and always inside the
+        # component directory. It is returned to the caller so a name that got
+        # rewritten is visible rather than surprising later.
+        slug = _safe_filename(stem)
+        # Never reuse a path CATIA still has loaded; see `_component_index` for
+        # why overwriting is not an option and deleting first is worse.
+        path = self._free_component_file(slug)
+        try:
+            document.SaveAs(str(path))
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA could not save this part ({exc}). It may be read-only or still "
+                "have a dialog open."
+            ) from exc
+        index = self._component_index()
+        index[slug] = path.name
+        self._write_component_index(index)
+        return {
+            "part": slug,
+            "doc_name": str(document.Name),
+            "size_bytes": path.stat().st_size,
+            "next": "Use this `part` name with catia_add_component to place it in a product.",
+        }
+
+    def _product(self) -> Any:  # pragma: no cover - Windows only
+        document = self._document()
+        try:
+            return document.Product
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                "The active CATIA document is not a product, so there is nothing to "
+                "assemble into. Call catia_new_product first, or activate the "
+                "CATProduct in CATIA."
+            ) from exc
+
+    def new_product(self, *, name: str) -> dict[str, Any]:  # pragma: no cover
+        try:
+            document = self._app.Documents.Add("Product")
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA would not open a new product ({exc}). Assembly Design may not "
+                "be licensed on this seat."
+            ) from exc
+        root = document.Product
+        try:
+            root.PartNumber = name
+        except Exception:  # noqa: BLE001 - the name is cosmetic, the product is not
+            logger.info("Could not set the product's part number to %r", name)
+        return {
+            "product": str(root.PartNumber),
+            "doc_name": str(document.Name),
+            "components": [],
+            "next": "Add saved parts with catia_add_component, then constrain them.",
+        }
+
+    def add_component(  # pragma: no cover - Windows only
+        self, *, part: str, count: int = 1, name: str = ""
+    ) -> dict[str, Any]:
+        root = self._product()
+        path = self._component_path(part)
+        how_many = max(1, int(count))
+        before = int(root.Products.Count)
+        for _ in range(how_many):
+            try:
+                # A tuple crosses as the SAFEARRAY in-param; a bare string does not.
+                root.Products.AddComponentsFromFiles((str(path),), "All")
+            except Exception as exc:  # noqa: BLE001
+                raise CatiaOperationError(
+                    f"CATIA refused to add {part!r} as a component ({exc})."
+                ) from exc
+        names = [str(root.Products.Item(i).Name) for i in range(1, int(root.Products.Count) + 1)]
+        added = names[before:]
+        if name and len(added) == 1:
+            try:
+                root.Products.Item(before + 1).Name = name
+                added = [name]
+                names[before] = name
+            except Exception:  # noqa: BLE001 - a rename failing is not a failure
+                logger.info("Could not rename the new component to %r", name)
+        return {
+            "added": added,
+            "components": names,
+            "count": len(names),
+            "note": (
+                "Component names are what catia_constrain expects -- use them "
+                "verbatim, not the part name."
+            ),
+        }
+
+    def _plane_reference(  # pragma: no cover - Windows only
+        self, root: Any, component: str, plane: str
+    ) -> Any:
+        """A reference to one origin plane of one component.
+
+        Only the three origin planes can be reached by name at all, and only
+        under the label the seat's own language uses -- `!Plan xy` on this
+        French install, `!xy plane` on an English one. `!PlaneXY`, `!Axe Z` and
+        a bare component reference are all refused by CATIA. That is the same
+        localisation trap as `Selection.Search`, so it is handled the same way:
+        try the seat's language first and fall back.
+        """
+        labels = _ORIGIN_PLANE_LABELS[plane.upper()]
+        ordered = labels if self.ui_language != "en" else tuple(reversed(labels))
+        problem: Exception | None = None
+        for label in ordered:
+            try:
+                return root.CreateReferenceFromName(
+                    f"{root.PartNumber}/{component}/!{label}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                problem = exc
+        raise CatiaOperationError(
+            f"CATIA would not resolve the {plane.upper()} plane of {component!r} "
+            f"(tried {', '.join(ordered)}). Check the component name against "
+            f"catia_add_component's `components` list. ({problem})"
+        )
+
+    def constrain(  # pragma: no cover - Windows only
+        self,
+        *,
+        kind: str,
+        component: str,
+        to_component: str = "",
+        plane: str = "XY",
+        value: float = 0.0,
+    ) -> dict[str, Any]:
+        root = self._product()
+        constraints = root.Connections("CATIAConstraints")
+        wanted = kind.strip().lower()
+
+        # Checked here rather than left to CATIA, because CATIA does not check.
+        # `CreateReferenceFromName` hands back an object for a component that
+        # does not exist and only fails when the reference is *used*, so the
+        # error an agent saw was "CATIA refused a coincidence constraint"
+        # pointing at the constraint rather than at the typo in the name.
+        placed = {
+            str(root.Products.Item(i).Name) for i in range(1, int(root.Products.Count) + 1)
+        }
+        for who in (component, to_component):
+            if who and who not in placed:
+                raise CatiaOperationError(
+                    f"No component called {who!r} in this product. Use the names "
+                    "catia_add_component reported: "
+                    + (", ".join(sorted(placed)) if placed else "none have been added yet.")
+                )
+
+        if wanted == "fix":
+            reference = self._plane_reference(root, component, plane)
+            try:
+                created = constraints.AddMonoEltCst(_CST_FIX, reference)
+            except Exception as exc:  # noqa: BLE001
+                raise CatiaOperationError(
+                    f"CATIA refused to fix {component!r} ({exc})."
+                ) from exc
+        else:
+            code = _CONSTRAINT_KINDS.get(wanted)
+            if code is None:
+                raise CatiaOperationError(
+                    f"{kind!r} is not a constraint this bridge makes. Use one of: "
+                    f"{', '.join(sorted(_CONSTRAINT_KINDS))}, fix."
+                )
+            if not to_component:
+                raise CatiaOperationError(
+                    f"A {wanted} constraint joins two components, so `to_component` "
+                    "is required. Only `fix` takes one."
+                )
+            first = self._plane_reference(root, component, plane)
+            second = self._plane_reference(root, to_component, plane)
+            try:
+                created = constraints.AddBiEltCst(code, first, second)
+            except Exception as exc:  # noqa: BLE001
+                raise CatiaOperationError(
+                    f"CATIA refused a {wanted} constraint between {component!r} and "
+                    f"{to_component!r} on {plane.upper()} ({exc})."
+                ) from exc
+            if wanted in _DIMENSIONED_CONSTRAINTS:
+                try:
+                    created.Dimension.Value = float(value)
+                except Exception as exc:  # noqa: BLE001
+                    raise CatiaOperationError(
+                        f"The {wanted} constraint was created but CATIA would not take "
+                        f"{value} as its value ({exc}). It is in the tree with a default "
+                        "and needs correcting by hand."
+                    ) from exc
+
+        return {
+            "constraint": str(created.Name),
+            "kind": wanted,
+            "component": component,
+            "to_component": to_component or None,
+            "plane": plane.upper(),
+            "value_mm": float(value) if wanted in _DIMENSIONED_CONSTRAINTS else None,
+            "total": int(constraints.Count),
+            "next": "Call catia_update to let CATIA resolve the assembly.",
+        }
+
+    def list_constraints(self) -> dict[str, Any]:  # pragma: no cover - Windows only
+        root = self._product()
+        constraints = root.Connections("CATIAConstraints")
+        listed: list[dict[str, Any]] = []
+        for index in range(1, int(constraints.Count) + 1):
+            item = constraints.Item(index)
+            entry: dict[str, Any] = {
+                "name": str(item.Name),
+                "kind": _CONSTRAINT_NAMES.get(int(item.Type), str(item.Type)),
+            }
+            try:
+                entry["value_mm"] = round(float(item.Dimension.Value), 4)
+            except Exception:  # noqa: BLE001 - most constraints carry no dimension
+                pass
+            listed.append(entry)
+        components = [
+            str(root.Products.Item(i).Name) for i in range(1, int(root.Products.Count) + 1)
+        ]
+        return {
+            "product": str(root.PartNumber),
+            "components": components,
+            "constraints": listed,
+            "count": len(listed),
+        }
 
 
 # -- helpers -----------------------------------------------------------------

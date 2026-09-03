@@ -40,6 +40,20 @@ from app.solve.materials import MATERIALS
 #: placed on in v1. Named rather than numbered so the model cannot invent one.
 SKETCH_PLANES = ("XY", "YZ", "ZX")
 
+#: Assembly constraints the bridge makes. Deliberately a short list: these are
+#: the ones that can be built from origin planes, which is the only geometry
+#: CATIA will resolve by name (`CreateReferenceFromName` refuses axes, faces and
+#: bare components). Kept in step with `scripts/catia_bridge/tool_table.py`.
+CONSTRAINT_KINDS = (
+    "coincidence",
+    "offset",
+    "angle",
+    "parallel",
+    "perpendicular",
+    "tangency",
+    "fix",
+)
+
 #: Semantic faces of the part's bounding box, in the part's own frame. The
 #: daemon resolves these to real topological faces; the model never sees a face
 #: id, which would be meaningless across a rebuild anyway.
@@ -1163,6 +1177,169 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
             required=["workbench"],
         ),
         tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_save_part",
+        description=(
+            "Save the part you have just finished so it can be used as a component in "
+            "an assembly. Call it once per part, when the part is complete.\n"
+            "This is the first step of every assembly: components are placed from "
+            "saved parts, so a part that was never saved cannot be assembled. It "
+            "returns a short `part` name -- pass that name to catia_add_component. You "
+            "never handle a file path."
+        ),
+        parameters=_object(
+            {
+                "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": (
+                        "What to call the saved part, e.g. 'Sun' or 'Ring gear'. "
+                        "Defaults to the part's own document name."
+                    ),
+                },
+            },
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_new_product",
+        description=(
+            "Start a new CATIA assembly (a CATProduct) and make it the active "
+            "document. Everything after this -- adding components, constraining them "
+            "-- acts on it.\n"
+            "Save every part you need with catia_save_part BEFORE calling this: once "
+            "the product is active, the part tools no longer have a part to act on. "
+            "To go back to modelling a part, call catia_new_part."
+        ),
+        parameters=_object(
+            {
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "A name for the assembly, e.g. 'Planetary stage'.",
+                },
+            },
+            required=["name"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_add_component",
+        description=(
+            "Place a saved part into the active assembly, optionally several times. "
+            "Use `count` for repeated parts -- three planet gears is one call with "
+            "count 3, not three calls.\n"
+            "It returns `components`: the instance names CATIA gave them, like "
+            "'Planet.1', 'Planet.2'. Those instance names -- not the part name -- are "
+            "what catia_constrain expects, so read them back before constraining."
+        ),
+        parameters=_object(
+            {
+                "part": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "The `part` name that catia_save_part returned.",
+                },
+                "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "description": "How many instances to place. Default 1.",
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": (
+                        "Rename the placed instance. Only applies when count is 1."
+                    ),
+                },
+            },
+            required=["part"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_constrain",
+        description=(
+            "Constrain one component against another, the way an engineer mates parts. "
+            "Constraints are applied between the components' origin planes, which is "
+            "the only geometry CATIA lets this bridge reference by name.\n"
+            "The vocabulary and what each is for:\n"
+            "- 'fix' pins one component in place. Do this first, to one component, so "
+            "the assembly has something to be built around.\n"
+            "- 'coincidence' makes the two components' chosen planes lie on each "
+            "other. Two coincidences on different planes make parts coaxial; a third "
+            "aligns them axially.\n"
+            "- 'offset' holds the planes a set distance apart -- this is how you place "
+            "a component *off* centre. `value` is in millimetres and may be negative.\n"
+            "- 'angle' sets an angle between planes, in degrees.\n"
+            "- 'parallel', 'perpendicular', 'tangency' are the usual mates.\n"
+            "Every kind except 'fix' needs `to_component`. Call catia_update when you "
+            "are done to let CATIA resolve the assembly, and read the result: an "
+            "assembly that will not update has contradictory constraints.\n"
+            "Note this constrains *position*, not the rotation of a gear about its own "
+            "axis. Gear teeth will not be meshed by these constraints -- say so rather "
+            "than implying a working mechanism."
+        ),
+        parameters=_object(
+            {
+                "kind": {
+                    "type": "string",
+                    "enum": list(CONSTRAINT_KINDS),
+                    "description": "Which constraint to apply.",
+                },
+                "component": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": (
+                        "The component to constrain, named exactly as "
+                        "catia_add_component reported it."
+                    ),
+                },
+                "to_component": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": (
+                        "The component to constrain it against. Required for every "
+                        "kind except 'fix'."
+                    ),
+                },
+                "plane": {
+                    "type": "string",
+                    "enum": list(SKETCH_PLANES),
+                    "description": (
+                        "Which pair of origin planes to constrain. XY is the plane the "
+                        "parts were sketched on, so XY controls axial position and "
+                        "YZ/ZX control the two sideways directions. Default XY."
+                    ),
+                },
+                "value": {
+                    "type": "number",
+                    "minimum": -10000.0,
+                    "maximum": 10000.0,
+                    "description": (
+                        "Millimetres for 'offset', degrees for 'angle'. Ignored by the "
+                        "other kinds. May be negative."
+                    ),
+                },
+            },
+            required=["kind", "component"],
+        ),
+        tier=CatiaTier.WRITE,
+    ),
+    CatiaToolSpec(
+        name="catia_list_constraints",
+        description=(
+            "The assembly's components and every constraint on them, with the value of "
+            "each dimensioned one. Call it when an update fails, to see which "
+            "constraint is wrong, and before adding more so you do not duplicate one."
+        ),
+        parameters=_object({}),
+        tier=CatiaTier.READ,
     ),
     CatiaToolSpec(
         name="catia_select",

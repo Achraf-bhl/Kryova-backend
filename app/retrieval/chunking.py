@@ -115,6 +115,50 @@ _ENUMERATOR_RE = re.compile(r"^\d+\s*[.)](?!\d)")
 #: slash would take them with it.
 _PATH_FRAGMENT_RE = re.compile(r"\\|://|(?:/[^/\s]*){2,}|-?>\s*$")
 
+#: An instruction, recognised by the verb it opens with.
+#:
+#: The enumerator and terminal-punctuation rules catch a numbered step that the
+#: extractor left whole. They do not catch one whose number was on the previous
+#: line and whose full stop was on the next, and that residue is not small:
+#: `Cliquez sur OK` alone headed 262 of 4,912 passages -- the single most common
+#: "section title" in the corpus -- because it ends on `OK` rather than on a
+#: preposition. Measured over the built index, 422 passages (8.6%) open with one
+#: of these verbs, and every one of them is a step rather than a section.
+#:
+#: Deliberately imperatives only. `type`, `open` and `close` are excluded even
+#: though they appear here as verbs, because they are also ordinary nouns and
+#: adjectives in real titles -- `Type of Constraint`, `Open Body` -- and a rule
+#: that took those would cost more than it saves. These manuals title their
+#: sections with gerunds (`Creating a Pocket`, `Selecting the Edges to Keep`),
+#: so no legitimate heading starts with an imperative.
+_INSTRUCTION_VERBS = frozenset(
+    {
+        "cliquez",
+        "sélectionnez",
+        "selectionnez",
+        "choisissez",
+        "entrez",
+        "saisissez",
+        "appuyez",
+        "activez",
+        "déplacez",
+        "deplacez",
+        "click",
+        "select",
+        "choose",
+        "enter",
+        "press",
+        "drag",
+    }
+)
+
+#: A sentence boundary inside the line. `Sélectionnez Plan.1. CATIA` is two
+#: sentences the extractor ran together, and it passes title case on its merits
+#: because every word happens to be capitalised. A real title does not contain a
+#: full stop followed by a space; a multi-level section number (`15.3`) has no
+#: space after its period and so is untouched.
+_INNER_SENTENCE_RE = re.compile(r"[.!?]\s")
+
 #: Boilerplate that opens a line: page numbers, copyright notices, vendor
 #: banners. Every page of every manual carries several.
 _BOILERPLATE_PREFIX_RE = re.compile(
@@ -186,6 +230,17 @@ def _is_heading(line: str) -> bool:
     if _ENUMERATOR_RE.match(stripped):
         return False
     if _PATH_FRAGMENT_RE.search(stripped):
+        return False
+    # A title starts on a word or a number, never on punctuation. `. Vous` and
+    # `(Ref. No. ISO 10209-2:1993)` reached the citation because the title-case
+    # test skips any word whose first character is not a letter -- so the lone
+    # `.` was ignored and the capitalised word behind it carried the line.
+    # 349 passages (7.1%) were headed this way.
+    if not stripped[0].isalnum():
+        return False
+    if _INNER_SENTENCE_RE.search(stripped):
+        return False
+    if stripped.split()[0].lower().strip(".,") in _INSTRUCTION_VERBS:
         return False
     if _NUMBERED_HEADING_RE.match(stripped):
         return True

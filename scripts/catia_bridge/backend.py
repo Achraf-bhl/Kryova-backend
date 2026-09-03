@@ -317,6 +317,44 @@ class CatiaBackend(ABC):
     def select(self, *, features: list[str], add: bool = False) -> dict[str, Any]:
         """Put named features into CATIA's selection, or clear it."""
 
+    # -- assembly ------------------------------------------------------------
+    #
+    # Components are added to a product *from files*, which is the whole reason
+    # `save_part` exists: without a part on disk there is no assembly, whatever
+    # else is implemented. The model never handles a path -- `save_part` returns
+    # a name and `add_component` takes that name, resolved inside the daemon's
+    # own directory.
+
+    @abstractmethod
+    def save_part(self, *, name: str = "") -> dict[str, Any]:
+        """Write the active part to the daemon's component directory."""
+
+    @abstractmethod
+    def new_product(self, *, name: str) -> dict[str, Any]:
+        """Open a new CATProduct and make it the active document."""
+
+    @abstractmethod
+    def add_component(
+        self, *, part: str, count: int = 1, name: str = ""
+    ) -> dict[str, Any]:
+        """Place `count` instances of a saved part into the active product."""
+
+    @abstractmethod
+    def constrain(
+        self,
+        *,
+        kind: str,
+        component: str,
+        to_component: str = "",
+        plane: str = "XY",
+        value: float = 0.0,
+    ) -> dict[str, Any]:
+        """Constrain a component against another, or fix it in place."""
+
+    @abstractmethod
+    def list_constraints(self) -> dict[str, Any]:
+        """The product's components and every constraint on them."""
+
 
 #: Tools that must not be routed through the COM liveness probe.
 #:
@@ -379,4 +417,9 @@ TOOL_METHODS: dict[str, str] = {
     "catia_press_key": "press_key",
     "catia_switch_workbench": "switch_workbench",
     "catia_select": "select",
+    "catia_save_part": "save_part",
+    "catia_new_product": "new_product",
+    "catia_add_component": "add_component",
+    "catia_constrain": "constrain",
+    "catia_list_constraints": "list_constraints",
 }

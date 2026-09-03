@@ -275,11 +275,12 @@ def test_status_requires_a_session(client):
 
 def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client):
     tools = auth_client.get(f"{PREFIX}/tools").json()["tools"]
-    # A deliberate count, so adding or losing a tool is never silent. 39 since
-    # the eight interactive tools (list_commands, run_command, describe_dialog,
-    # fill_dialog, dialog_action, press_key, switch_workbench, select) joined
-    # the 31 semantic ones.
-    assert len(tools) == 39
+    # A deliberate count, so adding or losing a tool is never silent. 44 since
+    # the five assembly tools (save_part, new_product, add_component, constrain,
+    # list_constraints) joined the eight interactive ones (list_commands,
+    # run_command, describe_dialog, fill_dialog, dialog_action, press_key,
+    # switch_workbench, select) and the 31 semantic ones.
+    assert len(tools) == 44
     by_name = {tool["name"]: tool for tool in tools}
     assert by_name["catia_measure"]["tier"] == "read"
     assert by_name["catia_measure"]["mutating"] is False
@@ -294,6 +295,15 @@ def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client
     assert by_name["catia_list_commands"]["tier"] == "read"
     assert by_name["catia_run_command"]["tier"] == "write"
     assert by_name["catia_dialog_action"]["mutating"] is True
+    # Assembling is writing: placing a component and constraining it change the
+    # product exactly as padding changes a part. Only listing is a read.
+    assert by_name["catia_save_part"]["tier"] == "write"
+    assert by_name["catia_new_product"]["tier"] == "write"
+    assert by_name["catia_add_component"]["tier"] == "write"
+    assert by_name["catia_constrain"]["tier"] == "write"
+    assert by_name["catia_constrain"]["mutating"] is True
+    assert by_name["catia_list_constraints"]["tier"] == "read"
+    assert by_name["catia_list_constraints"]["mutating"] is False
 
 
 def _drain(response, count: int, timeout: float = 5.0) -> list[str]:

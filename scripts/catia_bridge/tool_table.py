@@ -38,6 +38,18 @@ FACE_POSITIONS = ["center", "front_left", "front_right", "back_left", "back_righ
 EDGE_SELECTORS = ["all", "vertical", "horizontal", "top", "bottom"]
 VIEWPOINTS = ["iso", "front", "back", "top", "bottom", "left", "right"]
 PARAMETER_UNITS = ["mm", "deg", "kg"]
+#: Assembly constraints the bridge makes. `offset` and `angle` carry a value;
+#: `fix` takes one component and the rest take two. Kept in step with
+#: `catia_com._CONSTRAINT_KINDS`, which holds CATIA's integers for them.
+CONSTRAINT_KINDS = [
+    "coincidence",
+    "offset",
+    "angle",
+    "parallel",
+    "perpendicular",
+    "tangency",
+    "fix",
+]
 
 
 class ToolRefused(Exception):
@@ -71,6 +83,42 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         _object({}),
         ("doc_name", "remote_path", "fallback_checkpoint"),
     ),
+    # -- assembly -------------------------------------------------------------
+    # `catia_save_part` takes a name, never a path, and `catia_add_component`
+    # takes that same name back. Nothing here accepts a filesystem location.
+    "catia_save_part": (WRITE, _object({"name": _NAME}), ()),
+    "catia_new_product": (
+        WRITE,
+        _object({"name": {"type": "string", "minLength": 1, "maxLength": 120}}, ["name"]),
+        (),
+    ),
+    "catia_add_component": (
+        WRITE,
+        _object(
+            {
+                "part": {"type": "string", "minLength": 1, "maxLength": 120},
+                "count": {"type": "integer", "minimum": 1, "maximum": 50},
+                "name": _NAME,
+            },
+            ["part"],
+        ),
+        (),
+    ),
+    "catia_constrain": (
+        WRITE,
+        _object(
+            {
+                "kind": {"type": "string", "enum": CONSTRAINT_KINDS},
+                "component": {"type": "string", "minLength": 1, "maxLength": 120},
+                "to_component": {"type": "string", "maxLength": 120},
+                "plane": {"type": "string", "enum": SKETCH_PLANES},
+                "value": {"type": "number", "minimum": -10_000.0, "maximum": 10_000.0},
+            },
+            ["kind", "component"],
+        ),
+        (),
+    ),
+    "catia_list_constraints": (READ, _object({}), ()),
     "catia_list_parameters": (READ, _object({}), ()),
     "catia_set_parameter": (
         WRITE,

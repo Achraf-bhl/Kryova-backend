@@ -1,29 +1,4 @@
-"""Test fixtures.
 
-**Tests never run against `DATABASE_URL`.** They used to: the session fixture
-created and then `DROP SCHEMA ... CASCADE`-ed a schema inside whatever database
-the application was configured for, which on a developer machine pointed at the
-production Neon project. The target is now `TEST_DATABASE_URL`, and if that is
-unset the suite builds an in-memory SQLite database instead. A `TEST_DATABASE_URL`
-that resolves to the same host and database as `DATABASE_URL` is refused
-outright -- see `_resolve_test_database_url`.
-
-The trade is real and worth naming: SQLite is not Postgres, so JSONB, enum and
-cascade behaviour are exercised less faithfully than they were. Point
-`TEST_DATABASE_URL` at a local Postgres (or a scratch Neon branch) to get that
-fidelity back; the fixtures below adapt to either.
-
-The rest of the design is unchanged, and matters most when the target is remote:
-
-* one physical connection for the entire session, not one per test;
-* isolation by transaction rollback, not by rebuilding the schema per test;
-* no application lifespan per test -- startup behaviour is tested directly in
-  `test_startup.py` rather than paid for a hundred times over.
-
-The physics tests (`test_solver.py`, `test_mesh.py`) never request a database
-fixture, so they never open a connection at all and run offline in under a
-second.
-"""
 
 import os
 import struct

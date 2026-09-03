@@ -349,6 +349,48 @@ class TestChunking:
     def test_rejects_what_only_looks_like_a_heading(self, line: str):
         assert not _is_heading(line)
 
+    @pytest.mark.parametrize(
+        ("line", "why"),
+        [
+            # Measured on the built index: the residue the enumerator and
+            # terminal-punctuation rules leave behind, because the step's number
+            # was on the previous line and its full stop on the next.
+            ("Cliquez sur OK", "262 passages -- the corpus's commonest 'heading'"),
+            ("Cliquez sur Appliquer", "36 passages"),
+            ("Sélectionnez Sketch 9", "22 passages"),
+            ("Click the Simulation", "10 passages"),
+            ("Select Parameters > Instance(s) & Length", "an instruction, not a title"),
+            # A sentence boundary inside the line: two sentences run together,
+            # capitalised throughout, so title case accepts it on its merits.
+            ("Sélectionnez Plan.1. CATIA", "16 passages"),
+            # Starts on punctuation. The title-case test skips any word whose
+            # first character is not a letter, so the lone '.' was ignored.
+            (". Vous", "349 passages started with punctuation"),
+            ("(Ref. No. ISO 10209-2:1993)", "a reference note, not a section"),
+        ],
+    )
+    def test_rejects_instructions_that_survived_the_earlier_rules(
+        self, line: str, why: str
+    ):
+        assert not _is_heading(line), f"{line!r} should be rejected: {why}"
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # The cost of the rules above has to stay bounded. These manuals
+            # title their sections with gerunds and nouns, and all of these must
+            # survive: "type" and "open" are nouns here, not the verbs they also
+            # are, which is why neither is in the instruction list.
+            "Type of Constraint",
+            "Open Body",
+            "Selecting the Edges to Keep",
+            "Creating Variable Radius Fillets",
+            "15.3 Adaptive Meshing",
+        ],
+    )
+    def test_the_new_rules_do_not_take_real_headings_with_them(self, line: str):
+        assert _is_heading(line)
+
     def test_a_wrapped_numbered_step_is_not_a_heading(self):
         # It has no terminal punctuation because the sentence continues on the
         # next line, so the punctuation test alone cannot save it -- which is
@@ -896,8 +938,14 @@ class TestLanguagePreference:
             record.pop("language", None)
             stripped.append(json.dumps(record, ensure_ascii=False))
         # Byte offsets must stay valid, so rewrite them alongside the text.
+        #
+        # `newline=""` is load-bearing on Windows. The offsets below count one
+        # byte per line ending, and the default translates "\n" to "\r\n" -- so
+        # every seek after the first landed mid-record and the reader logged
+        # "Passage N is malformed" for the whole file. The bug was in the test,
+        # not the corpus, and it only ever showed on Windows.
         payload = "\n".join(stripped) + "\n"
-        passages_path.write_text(payload, encoding="utf-8")
+        passages_path.write_text(payload, encoding="utf-8", newline="")
         offsets, position = [], 0
         for line in stripped:
             offsets.append(position)

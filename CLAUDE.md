@@ -67,6 +67,39 @@ tests/            pytest, mirrors app/
 
 - **`solve.Solver`** (ABC) — mesh in, load case in, fields out. A surrogate/neural solver must
   drop in without the API, job, or (future) AI layer knowing which ran.
+- **`solve.ModalSolver`** (ABC) — a sibling, not a method on `Solver`: natural frequencies come
+  from a different input (`ModalCase`, no loads, fixtures optional) and return a different
+  output, so folding them into `solve()` would make every caller branch on what it got back.
+  `solve/modal.py` implements it. The mass matrix is integrated **analytically** in barycentric
+  coordinates, not with the stiffness assembly's four-point Gauss rule — that rule is exact only
+  to degree 2 and tet10's `N^T N` is quartic, so reusing it would be wrong by a few percent:
+  plausible-looking, and wrong.
+
+### Analyses available
+
+All three verified against closed-form solutions, not recorded output.
+
+| Analysis | Module | Case | Checked against |
+|---|---|---|---|
+| Linear static | `solve/linear_static.py` | `LoadCase` | σ = F/A, δ = FL/AE |
+| Modal | `solve/modal.py` | `ModalCase` | bar `f=(2n−1)/4L·√(E/ρ)`, cantilever Euler-Bernoulli modes 1–3, six rigid-body modes free-free |
+| Buckling | `solve/buckling.py` | `BucklingCase` | Euler `P=π²EI/(KL)²` |
+| Thermal stress | `solve/thermal.py` (via `LoadCase.delta_t_k`) | `LoadCase` | restrained bar `σ = −EαΔT` |
+
+Three things about these that are easy to get wrong and are pinned by tests:
+
+- **Thermal strain must be subtracted during stress recovery**, not only added as a load.
+  Leaving it out reports the stress of a freely-expanding part — wrong sign and wrong size.
+- **Buckling is posed as `−Kg φ = μ K φ`**, not the natural way round: `Kg` is indefinite and
+  the generalised symmetric eigensolver needs the positive-definite matrix on the right.
+  `λ = 1/μ`.
+- **Eigenvalue tolerances must be relative.** Eigenvalues are ω² — order 1e10 for steel, 1e4
+  for rubber — so any absolute threshold is simultaneously too tight for one and too loose for
+  the other.
+
+A bar in tension still returns a finite positive buckling factor (measured ~68,000×), because a
+3D bar has small compressive pockets at the load introduction. That is correct, not a bug; the
+meaningful statement is the ratio to the compressive case.
 - **`jobs.JobQueue`** (ABC) — one method, `submit`. Moving to Celery must not touch routes.
 - **`media.LocalMediaStore`** — content addressing + chunked IO behind a small surface, so an
   S3 store is a swap, not a rewrite.
@@ -303,13 +336,11 @@ model change.
 
 Read these before touching the relevant file — they are live defects, not style opinions.
 
-- **`solve/linear_static.py` tet10 support is dead and broken.** The module docstring claims
-  tet10 elements "are selected automatically when the mesh provides midside nodes". They are
-  not: `LinearStaticSolver.solve` only ever calls `assemble_stiffness` (tet4), and
-  `_recover_stress` is tet4-only. `assemble_stiffness_tet10` has no callers and would raise on
-  the leftover `# placeholder` einsum at line 172 (`"ni,nik->nki"` requires `n_elem == 10`).
-  Either wire it up properly with tests, or delete it — do not leave the docstring claiming a
-  capability the solver does not have.
+- ~~**tet10 support is dead and broken.**~~ **Fixed and verified 2026-09-02.**
+  `assemble_stiffness` dispatches on `mesh.midside`, `assemble_stiffness_tet10` integrates at
+  four Gauss points, `_recover_stress` has a tet10 branch, and `TestQuadraticElements` checks
+  quadratic beats linear against the closed-form cantilever at equal element count. The
+  docstring now describes what the code does.
 - **`SECRET_KEY` defaults to `"changeme"`** (`core/config.py`) and nothing refuses to start on
   it. Any deployment that forgets the env var signs JWTs with a public constant.
 - **The rate limiter trusts `X-Forwarded-For` unconditionally** (`api/routes/auth.py::_client_ip`).

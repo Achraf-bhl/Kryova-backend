@@ -127,6 +127,22 @@ _NO_AUTO_CHECKPOINT = frozenset(
         "catia_press_key",
         "catia_select",  # selecting changes nothing
         "catia_switch_workbench",  # nor does changing workbench
+        # The assembly tools, for a reason particular to products: a checkpoint
+        # is `document.Save()` followed by reading `FullName`, and a product
+        # that has never been saved has no path to read. Worse, asking CATIA to
+        # Save a document it has no filename for opens a modal Save As dialog --
+        # which blocks COM and wedges the session, the exact failure the
+        # interactive tools above are exempted to avoid.
+        #
+        # What is lost is smaller than it looks: these change an assembly, not
+        # the parts in it, and every part was already saved to disk by
+        # `catia_save_part` before it could be added as a component. The
+        # geometry an engineer would grieve over is on disk and untouched; only
+        # the arrangement is at risk, and it is cheap to rebuild.
+        "catia_new_product",  # there is nothing yet to snapshot
+        "catia_add_component",
+        "catia_constrain",
+        "catia_save_part",  # writes a file out; does not change the model
     }
 )
 

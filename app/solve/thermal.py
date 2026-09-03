@@ -25,8 +25,6 @@ says so, rather than accepting a field it would have to invent.
 
 from __future__ import annotations
 
-import time
-
 import numpy as np
 from numpy.typing import NDArray
 

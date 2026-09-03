@@ -21,7 +21,7 @@ from app.solve.modal import (
     bar_axial_hz,
     beam_bending_hz,
 )
-from app.solve.types import Fixture, FaceSelector, ModalCase, SolverError
+from app.solve.types import FaceSelector, Fixture, ModalCase, SolverError
 
 STEEL = MATERIALS["steel-1018"]
 ALUMINIUM = MATERIALS["aluminium-6061-t6"]

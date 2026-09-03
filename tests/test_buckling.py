@@ -23,7 +23,7 @@ from app.solve.types import (
     BucklingCase,
     FaceSelector,
     Fixture,
-    Load,
+    ForceLoad,
     LoadCase,
 )
 
@@ -45,7 +45,7 @@ def compressive_case(newtons: float, modes: int = 4) -> BucklingCase:
     return BucklingCase(
         material=STEEL,
         fixtures=[Fixture(where=FaceSelector(axis="x", side="min"))],
-        loads=[Load(where=FaceSelector(axis="x", side="max"), force_n=(-newtons, 0.0, 0.0))],
+        loads=[ForceLoad(where=FaceSelector(axis="x", side="max"), force_n=(-newtons, 0.0, 0.0))],
         modes=modes,
     )
 
@@ -81,7 +81,7 @@ class TestGeometricStiffness:
                 material=STEEL,
                 fixtures=[Fixture(where=FaceSelector(axis="x", side="min"))],
                 loads=[
-                    Load(
+                    ForceLoad(
                         where=FaceSelector(axis="x", side="max"),
                         force_n=(newtons, 0.0, 0.0),
                     )
@@ -162,7 +162,7 @@ class TestEulerColumn:
         pulled = BucklingCase(
             material=STEEL,
             fixtures=[Fixture(where=FaceSelector(axis="x", side="min"))],
-            loads=[Load(where=FaceSelector(axis="x", side="max"), force_n=(50.0, 0.0, 0.0))],
+            loads=[ForceLoad(where=FaceSelector(axis="x", side="max"), force_n=(50.0, 0.0, 0.0))],
             modes=3,
         )
 

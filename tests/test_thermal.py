@@ -27,7 +27,7 @@ from app.solve.types import (
     BoxSelector,
     FaceSelector,
     Fixture,
-    Load,
+    ForceLoad,
     LoadCase,
     SolverError,
 )
@@ -38,7 +38,7 @@ ALUMINIUM = MATERIALS["aluminium-6061-t6"]
 # A load the schema requires but the physics does not want. Thermal stress is a
 # restrained-expansion effect, so these tests need no mechanical load at all --
 # this is a token one, small enough to be negligible beside the thermal stress.
-NEGLIGIBLE = Load(where=FaceSelector(axis="x", side="max"), force_n=(0.0, 0.0, 1e-9))
+NEGLIGIBLE = ForceLoad(where=FaceSelector(axis="x", side="max"), force_n=(0.0, 0.0, 1e-9))
 
 
 def axially_restrained(delta_t_k: float, material=STEEL) -> LoadCase:
@@ -182,7 +182,7 @@ class TestNoRegression:
         case = LoadCase(
             material=STEEL,
             fixtures=[Fixture(where=FaceSelector(axis="x", side="min"))],
-            loads=[Load(where=FaceSelector(axis="x", side="max"), force_n=(0.0, -500.0, 0.0))],
+            loads=[ForceLoad(where=FaceSelector(axis="x", side="max"), force_n=(0.0, -500.0, 0.0))],
         )
         explicit = case.model_copy(update={"delta_t_k": None})
 
@@ -198,7 +198,7 @@ class TestNoRegression:
         base = LoadCase(
             material=STEEL,
             fixtures=[Fixture(where=FaceSelector(axis="x", side="min"))],
-            loads=[Load(where=FaceSelector(axis="x", side="max"), force_n=(0.0, -500.0, 0.0))],
+            loads=[ForceLoad(where=FaceSelector(axis="x", side="max"), force_n=(0.0, -500.0, 0.0))],
         )
 
         solver = LinearStaticSolver()
@@ -215,7 +215,7 @@ class TestNoRegression:
         to the load vector rather than replacing it."""
         mesh = box_mesh((120.0, 20.0, 20.0), (6, 2, 2))
         fixtures = axial_fixtures()
-        pull = Load(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 800.0))
+        pull = ForceLoad(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 800.0))
         solver = LinearStaticSolver()
 
         mechanical = solver.solve(

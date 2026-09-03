@@ -37,9 +37,9 @@ from numpy.typing import NDArray
 from app.mesh.types import TetMesh
 from app.solve.base import SolveOutput
 from app.solve.linear_static import (
-    _CENTROID,
     _TET_GAUSS_POINTS,
     _TET_GAUSS_WEIGHT,
+    LinearStaticSolver,
     _dof_indices,
     _element_dofs,
     _mapped_gradients,
@@ -50,7 +50,6 @@ from app.solve.linear_static import (
     assemble_stiffness,
     constitutive_matrix,
 )
-from app.solve.linear_static import LinearStaticSolver
 from app.solve.selection import select_nodes
 from app.solve.types import BucklingCase, BucklingResult, LoadCase, Material, SolverError
 

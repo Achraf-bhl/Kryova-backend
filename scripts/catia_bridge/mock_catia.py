@@ -102,17 +102,13 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         self.workdir = Path(workdir)
         self.documents = self.workdir / "documents"
         self.snapshots = self.workdir / "snapshots"
-        self.components = self.workdir / "components"
-        for directory in (self.documents, self.snapshots, self.components):
+        for directory in (self.documents, self.snapshots):
             directory.mkdir(parents=True, exist_ok=True)
-        # Assembly state lives outside `_reset`: saved components and the open
-        # product survive `catia_new_part`, exactly as they do in CATIA, and a
-        # reset that cleared them would let the mock pass a sequence the real
-        # bridge fails.
-        self.saved_parts: dict[str, dict[str, Any]] = {}
+        # Assembly state lives outside `_reset`: the open product survives
+        # `catia_new_part`, exactly as it does in CATIA, and a reset that
+        # cleared it would let the mock pass a sequence the real bridge fails.
         self.product: str | None = None
         self.components_placed: list[dict[str, Any]] = []
-        self.constraints: list[dict[str, Any]] = []
         # The interface outlives the part: closing a document does not change
         # what language CATIA is installed in, and `_reset` runs per document.
         self.ui = MockUi(language=language)
@@ -1271,135 +1267,6 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
             )
         self.selection = ([*self.selection, *features] if add else list(features))
         return {"selected": list(self.selection), "count": len(self.selection)}
-
-    # -- assembly ------------------------------------------------------------
-    #
-    # Modelled as bookkeeping rather than geometry: the mock exists to exercise
-    # the wire format, the tiers and the argument validation, and the geometry
-    # it would otherwise have to fake (where a constrained component ends up)
-    # is exactly the part that only a real CATIA can answer. What it does check
-    # is the sequencing an agent gets wrong -- adding a component with no
-    # product open, constraining a component that was never added, naming a
-    # part that was never saved.
-
-    def save_part(self, *, name: str = "") -> dict[str, Any]:
-        self._require_document()
-        slug = _safe_filename(name or self.doc_name or "Part")
-        if not slug:
-            raise CatiaOperationError(
-                "That part name has no characters this bridge can use in a filename. "
-                "Give it a plain name like 'Sun' or 'Ring gear'."
-            )
-        path = self.components / f"{slug}.CATPart"
-        path.write_bytes(b"mock-catpart")
-        self.saved_parts[slug] = {"features": [dict(f) for f in self.features]}
-        return {
-            "part": slug,
-            "doc_name": self.doc_name,
-            "size_bytes": path.stat().st_size,
-            "next": "Use this `part` name with catia_add_component to place it in a product.",
-        }
-
-    def new_product(self, *, name: str) -> dict[str, Any]:
-        self.product = str(name)
-        self.components_placed = []
-        self.constraints = []
-        self.doc_name = str(name)
-        return {
-            "product": self.product,
-            "doc_name": f"{_safe_filename(name)}.CATProduct",
-            "components": [],
-            "next": "Add saved parts with catia_add_component, then constrain them.",
-        }
-
-    def _require_product(self) -> str:
-        if not self.product:
-            raise CatiaOperationError(
-                "The active CATIA document is not a product, so there is nothing to "
-                "assemble into. Call catia_new_product first, or activate the "
-                "CATProduct in CATIA."
-            )
-        return self.product
-
-    def add_component(
-        self, *, part: str, count: int = 1, name: str = ""
-    ) -> dict[str, Any]:
-        self._require_product()
-        slug = _safe_filename(part)
-        if slug not in self.saved_parts:
-            saved = ", ".join(sorted(self.saved_parts))
-            raise CatiaOperationError(
-                f"No saved part called {part!r}. Build it, then call catia_save_part "
-                "to make it available as a component. "
-                + (f"Saved so far: {saved}." if saved else "Nothing saved yet.")
-            )
-        added: list[str] = []
-        for _ in range(max(1, int(count))):
-            instance = sum(1 for c in self.components_placed if c["part"] == slug) + 1
-            label = name if (name and count == 1) else f"{slug}.{instance}"
-            self.components_placed.append({"part": slug, "name": label})
-            added.append(label)
-        names = [c["name"] for c in self.components_placed]
-        return {
-            "added": added,
-            "components": names,
-            "count": len(names),
-            "note": (
-                "Component names are what catia_constrain expects -- use them "
-                "verbatim, not the part name."
-            ),
-        }
-
-    def constrain(
-        self,
-        *,
-        kind: str,
-        component: str,
-        to_component: str = "",
-        plane: str = "XY",
-        value: float = 0.0,
-    ) -> dict[str, Any]:
-        self._require_product()
-        placed = {c["name"] for c in self.components_placed}
-        wanted = kind.strip().lower()
-        for who in (component, to_component):
-            if who and who not in placed:
-                raise CatiaOperationError(
-                    f"No component called {who!r} in this product. Use the names "
-                    f"catia_add_component returned: {', '.join(sorted(placed)) or 'none yet'}."
-                )
-        if wanted != "fix" and not to_component:
-            raise CatiaOperationError(
-                f"A {wanted} constraint joins two components, so `to_component` "
-                "is required. Only `fix` takes one."
-            )
-        dimensioned = wanted in {"offset", "angle"}
-        record = {
-            "name": f"{wanted.title()}.{len(self.constraints) + 1}",
-            "kind": wanted,
-            "component": component,
-            "to_component": to_component or None,
-            "plane": plane.upper(),
-            "value_mm": float(value) if dimensioned else None,
-        }
-        self.constraints.append(record)
-        return {
-            **record,
-            "constraint": record["name"],
-            "total": len(self.constraints),
-            "next": "Call catia_update to let CATIA resolve the assembly.",
-        }
-
-    def list_constraints(self) -> dict[str, Any]:
-        self._require_product()
-        return {
-            "product": self.product,
-            "components": [c["name"] for c in self.components_placed],
-            "constraints": [
-                {k: v for k, v in c.items() if v is not None} for c in self.constraints
-            ],
-            "count": len(self.constraints),
-        }
 
     # -- what the mock dialogs actually do -----------------------------------
 

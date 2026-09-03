@@ -15,7 +15,7 @@ from app.solve.types import (
     BoxSelector,
     FaceSelector,
     Fixture,
-    Load,
+    ForceLoad,
     LoadCase,
     Material,
     SolverError,
@@ -41,7 +41,7 @@ def uniaxial_case(material: Material, force_n: float) -> LoadCase:
             Fixture(where=FaceSelector(axis="x", side="min"), dofs=["x"]),
             Fixture(where=FaceSelector(axis="y", side="min"), dofs=["y"]),
         ],
-        loads=[Load(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, force_n))],
+        loads=[ForceLoad(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, force_n))],
     )
 
 
@@ -211,7 +211,7 @@ class TestBadlyPosedModels:
             material=STEEL,
             # A single node fixed leaves the part free to rotate about it.
             fixtures=[Fixture(where=BoxSelector(min=(-0.1, -0.1, -0.1), max=(0.1, 0.1, 0.1)))],
-            loads=[Load(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 100.0))],
+            loads=[ForceLoad(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 100.0))],
         )
         with pytest.raises(SolverError, match="under-constrained"):
             LinearStaticSolver().solve(mesh, case)
@@ -222,7 +222,7 @@ class TestBadlyPosedModels:
             material=STEEL,
             fixtures=[Fixture(where=FaceSelector(axis="z", side="min"))],
             loads=[
-                Load(
+                ForceLoad(
                     where=BoxSelector(min=(500.0, 500.0, 500.0), max=(600.0, 600.0, 600.0)),
                     force_n=(0.0, 0.0, 100.0),
                 )
@@ -236,7 +236,7 @@ class TestBadlyPosedModels:
         case = LoadCase(
             material=STEEL,
             fixtures=[Fixture(where=BoxSelector(min=(-1, -1, -1), max=(11, 11, 11)))],
-            loads=[Load(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 1.0))],
+            loads=[ForceLoad(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 1.0))],
         )
         with pytest.raises(SolverError, match="nothing to solve"):
             LinearStaticSolver().solve(mesh, case)
@@ -247,7 +247,7 @@ class TestBadlyPosedModels:
             material=STEEL,
             fixtures=[Fixture(where=FaceSelector(axis="z", side="min"))],
             loads=[
-                Load(
+                ForceLoad(
                     where=BoxSelector(min=(4.0, 4.0, 4.0), max=(6.0, 6.0, 6.0)),
                     force_n=(0.0, 0.0, 100.0),
                     name="Interior pull",
@@ -286,7 +286,7 @@ class TestQuadraticElements:
             material=STEEL,
             fixtures=[Fixture(where=FaceSelector(axis="z", side="min"))],
             loads=[
-                Load(
+                ForceLoad(
                     where=FaceSelector(axis="z", side="max"),
                     force_n=(self.force, 0.0, 0.0),
                 )
@@ -378,7 +378,7 @@ class TestQuadraticElements:
         case = LoadCase(
             material=STEEL,
             fixtures=[Fixture(where=BoxSelector(min=(-0.1, -0.1, -0.1), max=(0.1, 0.1, 0.1)))],
-            loads=[Load(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 100.0))],
+            loads=[ForceLoad(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 100.0))],
         )
         with pytest.raises(SolverError, match="under-constrained"):
             LinearStaticSolver().solve(mesh, case)

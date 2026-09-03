@@ -1,12 +1,24 @@
 """Load case definition and result types.
 
 Units are the self-consistent mm-N-MPa system: lengths in mm, forces in N,
-moduli and stresses in MPa. Displacements come back in mm.
+moduli and stresses in MPa. Displacements come back in mm. Nothing in this
+codebase converts, and nothing should start.
+
+**Backwards compatibility is deliberate here.** `Load` was a single shape —
+a region and a force vector — and is now a discriminated union of six. A stored
+load case written before that change has no `type` field, so `_tagged_force`
+supplies one: an untagged load is a force load, which is what it was when it was
+written. Saved simulations must keep re-solving to the same answer, and a
+migration that silently reinterpreted them would be the worst possible way to
+find out otherwise.
 """
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+
+#: Standard gravity in this codebase's units: mm/s².
+STANDARD_GRAVITY_MM_S2 = 9806.65
 
 
 class Material(BaseModel):
@@ -17,6 +29,13 @@ class Material(BaseModel):
     poissons_ratio: float = Field(gt=-1.0, lt=0.5)
     yield_strength_mpa: float = Field(gt=0)
     density_kg_m3: float = Field(gt=0)
+
+
+# -- selectors ---------------------------------------------------------------
+#
+# How a load or restraint names the region it applies to. Every one of these
+# resolves to a set of node indices; what differs is how the region is described
+# to someone who cannot see the mesh.
 
 
 class FaceSelector(BaseModel):
@@ -38,7 +57,50 @@ class BoxSelector(BaseModel):
     max: tuple[float, float, float]
 
 
-Selector = Annotated[FaceSelector | BoxSelector, Field(discriminator="type")]
+class CylinderSelector(BaseModel):
+    """Every node within a hollow cylinder — the wall of a hole, or a shaft.
+
+    This is what a bolt hole or a bearing seat actually is, and picking one with
+    a box catches the material around it as well. `radius_tolerance` is a band
+    either side of `radius`, so a hole of nominally 5 mm radius is selected with
+    `radius=5` rather than by finding its exact meshed radius.
+    """
+
+    type: Literal["cylinder"] = "cylinder"
+    axis_point: tuple[float, float, float]
+    axis_direction: tuple[float, float, float]
+    radius: float = Field(gt=0)
+    radius_tolerance: float = Field(default=0.5, gt=0)
+    #: Extent along the axis from `axis_point`, in mm. None selects the full length.
+    length: float | None = Field(default=None, gt=0)
+
+
+class SphereSelector(BaseModel):
+    """Every node within a sphere. Useful for a point-ish load or support."""
+
+    type: Literal["sphere"] = "sphere"
+    centre: tuple[float, float, float]
+    radius: float = Field(gt=0)
+
+
+class BodySelector(BaseModel):
+    """Every node in the mesh.
+
+    Only meaningful for the body loads — gravity and centrifugal — which act on
+    all the material rather than on a surface. Using it for a surface force
+    would spread the load through the interior, which is not a load anyone means.
+    """
+
+    type: Literal["body"] = "body"
+
+
+Selector = Annotated[
+    FaceSelector | BoxSelector | CylinderSelector | SphereSelector | BodySelector,
+    Field(discriminator="type"),
+]
+
+
+# -- restraints --------------------------------------------------------------
 
 
 class Fixture(BaseModel):
@@ -49,23 +111,187 @@ class Fixture(BaseModel):
     face lets the part slide in that plane while holding it out of plane, which
     is how a real support usually behaves and how symmetry is exploited to cut
     a model down.
+
+    `kind` is a name for the common combinations. It sets `dofs` when `dofs` is
+    not given explicitly, so the two can never contradict each other: naming
+    both is refused rather than silently preferring one.
     """
 
     where: Selector
-    dofs: list[Literal["x", "y", "z"]] = Field(default=["x", "y", "z"], min_length=1)
+    dofs: list[Literal["x", "y", "z"]] | None = Field(default=None, min_length=1)
+    kind: Literal["clamp", "roller", "slider", "symmetry", "custom"] = "custom"
+    #: Which axis a roller, slider or symmetry restraint is normal to.
+    normal: Literal["x", "y", "z"] | None = None
     name: str | None = None
 
+    @model_validator(mode="after")
+    def _resolve_dofs(self) -> "Fixture":
+        """Fill `dofs` from `kind`, and refuse a `dofs` that contradicts it.
 
-class Load(BaseModel):
+        Written to be **idempotent**: validating an already-validated Fixture
+        must succeed and change nothing. Pydantic re-validates a model instance
+        in some nesting configurations, and by then this validator has itself
+        filled `dofs` in — so a rule phrased as "kind and dofs may not both be
+        present" rejects the fixture it just built. Phrasing it as "they may not
+        *disagree*" catches the real mistake and survives revalidation.
+        """
+        implied = self._implied_dofs()
+        if implied is None:
+            # kind == "custom": dofs as given, or all three.
+            if self.dofs is None:
+                object.__setattr__(self, "dofs", ["x", "y", "z"])
+            return self
+
+        if self.dofs is not None and sorted(self.dofs) != sorted(implied):
+            raise ValueError(
+                f"A {self.kind!r} fixture holds {implied}, but dofs={self.dofs} was "
+                "given as well. Give `kind` or `dofs`, not two answers that disagree."
+            )
+        object.__setattr__(self, "dofs", implied)
+        return self
+
+    def _implied_dofs(self) -> list[str] | None:
+        """The degrees of freedom `kind` implies, or None when it implies none."""
+        if self.kind == "custom":
+            return None
+        if self.kind == "clamp":
+            return ["x", "y", "z"]
+        if self.normal is None:
+            raise ValueError(
+                f"A {self.kind!r} fixture needs `normal` — the axis it holds. A roller "
+                "on the bottom face is normal to z."
+            )
+        if self.kind in {"roller", "symmetry"}:
+            # Holds only the out-of-plane translation; the face may slide freely
+            # within its own plane. Symmetry is the same restraint, named for
+            # what it means rather than for what it does.
+            return [self.normal]
+        # slider: free along `normal`, held in the other two.
+        return [axis for axis in ("x", "y", "z") if axis != self.normal]
+
+
+# -- loads -------------------------------------------------------------------
+
+
+class ForceLoad(BaseModel):
     """A force spread over a region, given as a total force vector in N.
 
     The total is distributed over the selected surface by tributary area, so
     refining the mesh does not change the applied load.
     """
 
+    type: Literal["force"] = "force"
     where: Selector
     force_n: tuple[float, float, float]
     name: str | None = None
+
+
+class PressureLoad(BaseModel):
+    """A uniform pressure on a surface, acting along its own outward normal.
+
+    Different from a force in the way that matters: a force is a fixed total
+    however large the face is, a pressure scales with the area it acts on. A
+    hydraulic seat, a vacuum, a wind load are all pressures, and modelling them
+    as a force means the answer changes when the face is resized.
+
+    Positive pushes inward (compressive, the usual sense); negative pulls.
+    """
+
+    type: Literal["pressure"] = "pressure"
+    where: Selector
+    pressure_mpa: float
+    name: str | None = None
+
+
+class MomentLoad(BaseModel):
+    """A moment about an axis through the region's centroid, in N·mm.
+
+    Applied as a statically equivalent set of nodal forces — each node gets a
+    tangential force proportional to its distance from the axis. That is the
+    correct resultant and it is *not* the same as a rigid coupling: the surface
+    is free to deform, so stresses very close to the loaded region are softer
+    than a real bolted joint would give. Away from it, Saint-Venant applies and
+    the answer is right.
+    """
+
+    type: Literal["moment"] = "moment"
+    where: Selector
+    moment_n_mm: tuple[float, float, float]
+    name: str | None = None
+
+
+class BearingLoad(BaseModel):
+    """A force on a cylindrical face, distributed as a bearing pressure.
+
+    A pin in a hole does not push uniformly: it bears on the half of the bore
+    facing the load, with a roughly cosine distribution that peaks where the
+    load points and falls to zero at 90°. Modelling it as a uniform force on the
+    whole bore understates the peak stress at the contact, which is exactly
+    where a lug fails.
+    """
+
+    type: Literal["bearing"] = "bearing"
+    where: Selector
+    force_n: tuple[float, float, float]
+    #: Cosine exponent. 1.0 is the classical distribution; higher concentrates it.
+    distribution: float = Field(default=1.0, ge=0.5, le=3.0)
+    name: str | None = None
+
+
+class GravityLoad(BaseModel):
+    """Self-weight, or any uniform acceleration of the whole body.
+
+    `direction` need not be normalised. The default magnitude is standard
+    gravity, so a part that only has to hold itself up needs nothing but a
+    direction.
+    """
+
+    type: Literal["gravity"] = "gravity"
+    direction: tuple[float, float, float] = (0.0, 0.0, -1.0)
+    magnitude_mm_s2: float = Field(default=STANDARD_GRAVITY_MM_S2, gt=0)
+    name: str | None = None
+
+
+class CentrifugalLoad(BaseModel):
+    """Rotation about an axis, as a body load.
+
+    The force on each element is ρ·ω²·r away from the axis. This is what sizes
+    a rotor, an impeller or a flywheel, and it is quadratic in speed — doubling
+    the rpm quadruples the load, which is the thing people get wrong when
+    scaling a design up.
+    """
+
+    type: Literal["centrifugal"] = "centrifugal"
+    axis_point: tuple[float, float, float]
+    axis_direction: tuple[float, float, float]
+    rpm: float = Field(gt=0)
+    name: str | None = None
+
+
+def _tagged_force(value: Any) -> Any:
+    """Treat an untagged load as a force load.
+
+    Load cases stored before `Load` became a union have `{where, force_n}` and
+    no `type`. They were force loads then and must stay force loads now: a saved
+    simulation that re-solves to a different answer after a deploy is a far
+    worse outcome than a slightly less tidy schema.
+    """
+    if isinstance(value, dict) and "type" not in value:
+        return {**value, "type": "force"}
+    return value
+
+
+Load = Annotated[
+    Annotated[
+        ForceLoad | PressureLoad | MomentLoad | BearingLoad | GravityLoad | CentrifugalLoad,
+        Field(discriminator="type"),
+    ],
+    BeforeValidator(_tagged_force),
+]
+
+#: Loads that act on the whole body rather than on a selected region. They carry
+#: no `where`, and the solver integrates them over every element.
+BODY_LOADS = (GravityLoad, CentrifugalLoad)
 
 
 class LoadCase(BaseModel):

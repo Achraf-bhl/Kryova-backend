@@ -2,7 +2,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.mesh.types import TetMesh
-from app.solve.types import BoxSelector, FaceSelector, Selector, SolverError
+from app.solve.types import (
+    BodySelector,
+    BoxSelector,
+    CylinderSelector,
+    FaceSelector,
+    Selector,
+    SolverError,
+    SphereSelector,
+)
 
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
@@ -15,6 +23,19 @@ def select_nodes(mesh: TetMesh, selector: Selector) -> NDArray[np.int64]:
     elif isinstance(selector, BoxSelector):
         nodes = _select_box(mesh, selector)
         description = f"box {selector.min} to {selector.max}"
+    elif isinstance(selector, CylinderSelector):
+        nodes = _select_cylinder(mesh, selector)
+        description = (
+            f"cylinder r={selector.radius} about {selector.axis_point} "
+            f"along {selector.axis_direction}"
+        )
+    elif isinstance(selector, SphereSelector):
+        nodes = _select_sphere(mesh, selector)
+        description = f"sphere r={selector.radius} at {selector.centre}"
+    elif isinstance(selector, BodySelector):
+        # The whole mesh. Cannot be empty for a mesh that exists, so it skips
+        # the emptiness check below by construction rather than by exception.
+        return np.arange(mesh.node_count, dtype=np.int64)
     else:  # pragma: no cover - the discriminated union makes this unreachable
         raise SolverError(f"unknown selector: {selector!r}")
 
@@ -45,6 +66,62 @@ def _select_box(mesh: TetMesh, selector: BoxSelector) -> NDArray[np.int64]:
     if np.any(hi < lo):
         raise SolverError("Box selector has a max corner below its min corner")
     inside = np.all((mesh.nodes >= lo) & (mesh.nodes <= hi), axis=1)
+    return np.flatnonzero(inside)
+
+
+def _axis_frame(
+    point: tuple[float, float, float], direction: tuple[float, float, float]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """A point on an axis and its unit direction. Refuses a zero direction."""
+    origin = np.asarray(point, dtype=np.float64)
+    axis = np.asarray(direction, dtype=np.float64)
+    norm = float(np.linalg.norm(axis))
+    if norm <= 0.0:
+        raise SolverError(
+            "An axis direction of (0, 0, 0) has no direction. Give a vector with at "
+            "least one non-zero component."
+        )
+    return origin, axis / norm
+
+
+def radial_offsets(
+    nodes: NDArray[np.float64],
+    point: tuple[float, float, float],
+    direction: tuple[float, float, float],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Each node's perpendicular offset from an axis, and its distance along it.
+
+    Shared by the cylinder selector, the moment load and the centrifugal load,
+    all of which need the same decomposition: the component of (node - origin)
+    perpendicular to the axis, and the component along it.
+    """
+    origin, unit = _axis_frame(point, direction)
+    relative = nodes - origin
+    along = relative @ unit
+    perpendicular = relative - along[:, None] * unit[None, :]
+    return perpendicular, along
+
+
+def _select_cylinder(mesh: TetMesh, selector: CylinderSelector) -> NDArray[np.int64]:
+    """Nodes in the wall of a cylinder -- a bore, a boss, a shaft seat.
+
+    A band rather than a solid disc: a bolt hole is selected by naming its
+    radius, and the material outside it must not come along. `length` clips the
+    selection along the axis so one hole in a stack of them can be named.
+    """
+    perpendicular, along = radial_offsets(
+        mesh.nodes, selector.axis_point, selector.axis_direction
+    )
+    radius = np.linalg.norm(perpendicular, axis=1)
+    inside = np.abs(radius - selector.radius) <= selector.radius_tolerance
+    if selector.length is not None:
+        inside &= (along >= 0.0) & (along <= selector.length)
+    return np.flatnonzero(inside)
+
+
+def _select_sphere(mesh: TetMesh, selector: SphereSelector) -> NDArray[np.int64]:
+    centre = np.asarray(selector.centre, dtype=np.float64)
+    inside = np.linalg.norm(mesh.nodes - centre, axis=1) <= selector.radius
     return np.flatnonzero(inside)
 
 

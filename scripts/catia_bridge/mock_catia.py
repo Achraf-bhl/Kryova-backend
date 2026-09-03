@@ -36,6 +36,7 @@ from typing import Any
 
 from . import gear, ui_policy
 from .backend import CatiaBackend, CatiaOperationError
+from .mock import MockKnowledgeMixin
 from .mock_ui import MockUi
 from .png_writer import Canvas
 from .step_writer import write_box_step
@@ -84,10 +85,18 @@ class _Sketch:
         return self.size[0] * self.size[1]
 
 
-class MockCatia(CatiaBackend):
+class MockCatia(MockKnowledgeMixin, CatiaBackend):
     catia_version = "V5-6R2021 (mock)"
     is_mock = True
-    capabilities = ("part", "sketch", "measure", "export", "capture", "checkpoint")
+    capabilities = (
+        "part",
+        "sketch",
+        "measure",
+        "export",
+        "capture",
+        "checkpoint",
+        "knowledge",
+    )
 
     def __init__(self, workdir: Path, *, language: str = "en") -> None:
         self.workdir = Path(workdir)
@@ -223,9 +232,24 @@ class MockCatia(CatiaBackend):
                 f"Parameter {name!r} is in {existing['unit']}, not {unit}. CATIA "
                 "parameters are typed and setting the wrong unit does nothing."
             )
+        driven = (getattr(self, "_knowledge", None) or {}).get("formulas", {}).get(name)
+        if driven is not None and driven["active"]:
+            # CATIA refuses this too, and for the same reason: the formula would
+            # overwrite the value on the next solve, so accepting it would mean
+            # reporting a change that silently does not stick.
+            raise CatiaOperationError(
+                f"{name!r} is driven by the formula {driven['expression']!r}, so its "
+                "value cannot be set directly. Change one of the parameters the "
+                "formula reads, or deactivate the formula."
+            )
+
         previous = existing["value"]
         existing["value"] = float(value)
         self._apply_driving_parameter(name, float(value))
+        # Anything computed from this parameter has to follow it. A formula that
+        # is stored but never recomputed is the failure mode formulas exist to
+        # prevent -- it looks correct in the tree and stops propagating.
+        self._solve_formulas()
         self._write_document()
         return {
             "parameter": {"name": name, "value": float(value), "unit": unit},
@@ -1279,6 +1303,11 @@ class MockCatia(CatiaBackend):
                     "size": list(self.size) if self.size else None,
                     "removed_volume_mm3": self.removed_volume_mm3,
                     "counters": self._counters,
+                    # Formulas, design tables and checks are part of the
+                    # document in CATIA, so a checkpoint has to carry them --
+                    # restoring a part whose formulas had vanished would leave
+                    # its parameters frozen at whatever they last evaluated to.
+                    "knowledge": getattr(self, "_knowledge", None),
                 },
                 indent=1,
             ),
@@ -1302,6 +1331,9 @@ class MockCatia(CatiaBackend):
         self.size = tuple(size) if size else None  # type: ignore[assignment]
         self.removed_volume_mm3 = float(state.get("removed_volume_mm3") or 0.0)
         self._counters = state.get("counters") or {}
+        # Absent in documents written before knowledge was modelled, which read
+        # back as a part with no formulas rather than failing to open.
+        self._knowledge = state.get("knowledge") or None
         self.up_to_date = True
 
 

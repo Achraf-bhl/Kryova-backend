@@ -155,6 +155,51 @@ def find_written_tool_calls(text: str, known: set[str]) -> list[str]:
     return ordered
 
 
+#: What a model emits when it has nothing to say but still has to say something.
+#: `{}` is the one seen live -- the agent accepted it as the final answer and the
+#: user's chat ended with a two-character bubble -- but the family is the same:
+#: a JSON husk with no content in it.
+_EMPTY_JSON = frozenset({"{}", "[]", "null", '""', "''", "{ }", "[ ]"})
+
+
+def is_contentless(text: str) -> bool:
+    """Is this text an answer, or only the shape of one?
+
+    `not text.strip()` is the obvious check and it misses the case that actually
+    reached a user: a turn whose entire body was `{}`. That is not whitespace,
+    so the agent read it as the model's considered reply, wrote it to the
+    transcript and closed the turn -- and the conversation ended with an empty
+    JSON object where the answer should have been.
+
+    Treated as blank rather than as a written tool call, because it names no
+    tool and describes no work: the right correction is "you said nothing, say
+    something", which is exactly what the empty-turn path already sends.
+
+    Deliberately a small closed set and not "does this parse as JSON". A real
+    answer can legitimately contain JSON -- a model quoting the arguments it
+    used, or a result it is explaining -- and treating every JSON-shaped reply
+    as empty would retry good answers.
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return True
+    if stripped in _EMPTY_JSON:
+        return True
+    # The same husk inside a code fence, which is how a model that has been told
+    # to answer in JSON most often emits it.
+    return _unfenced(stripped) in _EMPTY_JSON
+
+
+def _unfenced(text: str) -> str:
+    """The body of a single ``` fence, or the text unchanged."""
+    if not text.startswith("```") or not text.endswith("```"):
+        return text
+    body = text[3:-3]
+    if body[:4].lower().startswith("json"):
+        body = body[4:]
+    return body.strip()
+
+
 def correction_for(names: list[str]) -> str:
     """What to send back so the next step lands on the validated path.
 

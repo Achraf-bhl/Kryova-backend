@@ -71,12 +71,14 @@ from app.models.catia import (
     CatiaDocument,
     CatiaOperation,
 )
+from app.models.geometry import GeometryVersion
 from app.solve.materials import MATERIALS
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "CATIA_TOOL_SPECS",
+    "offered_tool_specs",
     "CatiaError",
     "CatiaUnavailable",
     "call_catia",
@@ -143,6 +145,39 @@ _NO_AUTO_CHECKPOINT = frozenset(
         "catia_add_component",
         "catia_constrain",
         "catia_save_part",  # writes a file out; does not change the model
+    }
+)
+
+#: Tools whose call frame does *not* carry the conversation's document, and why.
+#: Everything else is scoped: the daemon activates the bound document -- reopening
+#: it if CATIA was restarted -- before the operation runs, so a conversation
+#: resumed a week later modelling into the part it owns is a property of the
+#: system rather than something the model has to remember to arrange.
+_UNSCOPED_TOOLS = frozenset(
+    {
+        "catia_new_part",  # creates the binding; there is nothing to return to
+        "catia_open_document",  # restores it, and is the only path that carries
+        # the stored checkpoint to rebuild a lost file from
+        # Opens the imported file, which is not the bound one. Note what that
+        # leaves unresolved: nothing rebinds the conversation to the imported
+        # document, so the next scoped call reattaches to the part that was
+        # already bound and the import sits open beside it. That is at least
+        # coherent -- before scoping existed, the mutation landed on the
+        # imported document while its checkpoint and its log row named the
+        # bound one. Deciding whether an import should rebind is a product
+        # question, and it is still open.
+        "catia_import",
+        # The interactive family, for the reason that gets them out of the
+        # auto-checkpoint too: they run precisely when a modal dialog has COM
+        # blocked, and activating a document is a COM call. Scoping them would
+        # mean the tools whose job is to clear a stuck dialog can only run when
+        # no dialog is stuck. `session._ensure_document` skips them as well --
+        # this is the braces to that belt.
+        "catia_describe_dialog",
+        "catia_fill_dialog",
+        "catia_dialog_action",
+        "catia_press_key",
+        "catia_list_commands",
     }
 )
 
@@ -232,6 +267,34 @@ def connected_ui_language(db: Session, user_id: str) -> str | None:
     if found is None:
         return None
     return found[1].hello.ui_language or None
+
+
+def offered_tool_specs(db: Session, user_id: str) -> list[CatiaToolSpec]:
+    """The tools worth offering the agent, given the bridge actually connected.
+
+    The registry describes what Kryova knows how to ask for. A given daemon
+    implements some subset of that — it may be an older build, or a mock, or
+    running against a seat whose licences do not reach every workbench. Handing
+    the model the full registry regardless would mean it picks a tool, waits for
+    a round trip, and gets "this bridge does not implement it", which costs a
+    turn and teaches it nothing about what to do instead.
+
+    So the offered list is the intersection. Two deliberate fallbacks:
+
+    * **No device connected.** Offer everything. The tool has to exist for the
+      model to be told *why* it cannot be used, and the dispatcher's own offline
+      message ("connect the bridge") is far more useful than the tool silently
+      not being there.
+    * **A daemon that reported no tool list.** Also offer everything: it
+      predates the field, which means it is an older build implementing the
+      original vocabulary, and offering it nothing would be a worse guess than
+      offering it too much.
+    """
+    found = _online(db, user_id)
+    if found is None:
+        return list(CATIA_TOOL_SPECS)
+    hello = found[1].hello
+    return [spec for spec in CATIA_TOOL_SPECS if hello.offers(spec.name)]
 
 
 def catia_available(db: Session, user_id: str) -> bool:
@@ -613,6 +676,9 @@ def _execute(
         # the only thing that knows: the seat's interface language is chosen at
         # install time on the workstation and appears nowhere on the server.
         language=connection.hello.ui_language or None,
+        # Only `catia_import` needs it, to scope an uploaded file to this
+        # conversation's project rather than to every project the user owns.
+        conversation_id=conversation_id,
     )
     raw = _send(
         connection,
@@ -620,6 +686,9 @@ def _execute(
         conversation_id=conversation_id,
         arguments=payload,
         timeout_s=_timeout_for(spec, timeout_s),
+        # Which document this call is for, so the daemon acts on the
+        # conversation's own part rather than on whatever CATIA has in front.
+        document=_document_scope(spec, document),
         # Forwarded, not re-derived: the daemon refuses a destructive call that
         # arrives without one, and only the server can supply it.
         approval_token=(
@@ -650,6 +719,7 @@ def _send(
     arguments: dict[str, Any],
     timeout_s: float,
     approval_token: str | None = None,
+    document: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One round trip, with the transport's failures translated for the model."""
     try:
@@ -660,6 +730,7 @@ def _send(
             timeout_s=timeout_s,
             queue_timeout_s=timeout_s,
             approval_token=approval_token,
+            document=document,
         )
     except BridgeGone as exc:
         raise CatiaUnavailable(str(exc)) from exc
@@ -675,6 +746,20 @@ def _bound_document(db: Session, conversation_id: str | None) -> CatiaDocument |
     return db.scalar(select(CatiaDocument).where(CatiaDocument.conversation_id == conversation_id))
 
 
+def _document_scope(
+    spec: CatiaToolSpec, document: CatiaDocument | None
+) -> dict[str, Any] | None:
+    """The document envelope for one call, or None to leave the call unscoped.
+
+    Note what is *not* here: the model. It never names a document and never sees
+    a path, so this is read straight off the binding row -- which is the only
+    thing that knows which part this conversation has been building.
+    """
+    if document is None or spec.name in _UNSCOPED_TOOLS:
+        return None
+    return {"doc_name": document.doc_name, "remote_path": document.remote_path}
+
+
 def _enrich(
     db: Session,
     *,
@@ -682,6 +767,7 @@ def _enrich(
     document: CatiaDocument | None,
     arguments: dict[str, Any],
     language: str | None = None,
+    conversation_id: str | None = None,
 ) -> dict[str, Any]:
     """Add the server-held context a tool needs, which the model never supplies.
 
@@ -721,10 +807,84 @@ def _enrich(
             )
         payload = {"checkpoint": _checkpoint_payload(db, checkpoint)}
 
-    elif spec.name in {"catia_checkpoint", "catia_export_step", "catia_capture_view"}:
+    elif spec.name == "catia_import":
+        payload.update(_uploaded_file(db, conversation_id, str(arguments.get("file", ""))))
+
+    elif spec.name in {
+        "catia_checkpoint",
+        "catia_export",
+        "catia_export_step",
+        "catia_capture_view",
+    }:
         payload["max_inline_bytes"] = INLINE_TRANSFER_MAX_BYTES
 
     return payload
+
+
+def _uploaded_file(
+    db: Session, conversation_id: str | None, name: str
+) -> dict[str, Any]:
+    """Resolve a named upload to the bytes the daemon will import.
+
+    Scoped to the conversation's own project, which is the access control: a
+    model that names another project's file gets "no file called that", the same
+    answer it gets for a name that never existed. Anything looser would let one
+    prompt read across projects.
+
+    The bytes travel with the call rather than a path, because the daemon runs
+    on the engineer's workstation and the upload lives here.
+    """
+    if not conversation_id:
+        raise CatiaError(
+            "This conversation is not attached to a project, so it has no uploaded "
+            "files to import from."
+        )
+    conversation = db.get(Conversation, conversation_id)
+    project_id = getattr(conversation, "project_id", None)
+    if project_id is None:
+        raise CatiaError(
+            "This conversation is not attached to a project, so it has no uploaded "
+            "files to import from."
+        )
+
+    versions = list(
+        db.scalars(
+            select(GeometryVersion)
+            .where(GeometryVersion.project_id == project_id)
+            .order_by(GeometryVersion.version_number.desc())
+        )
+    )
+    wanted = name.strip().lower()
+    match = next(
+        (
+            version
+            for version in versions
+            # Both spellings, because the model has seen the name in a file list
+            # and may quote it with or without its extension.
+            if wanted in {version.filename.lower(), Path(version.filename).stem.lower()}
+        ),
+        None,
+    )
+    if match is None:
+        available = ", ".join(version.filename for version in versions[:10]) or "(none)"
+        raise CatiaError(
+            f"This project has no uploaded file called {name!r}. It has: {available}."
+        )
+
+    media = _media_service(db)
+    try:
+        content = encode_inline_file(media.local_path(match.media))
+    except (TransferError, OSError) as exc:
+        raise CatiaError(
+            f"{match.filename} could not be read back from storage to send to the "
+            f"workstation. ({exc})"
+        ) from exc
+
+    return {
+        "content_b64": content,
+        "content_hash": match.checksum_sha256,
+        "filename": match.filename,
+    }
 
 
 def _latest_checkpoint(db: Session, document: CatiaDocument) -> CatiaCheckpoint | None:
@@ -775,6 +935,13 @@ def _auto_checkpoint(
             conversation_id=document.conversation_id,
             arguments={"label": label, "max_inline_bytes": INLINE_TRANSFER_MAX_BYTES},
             timeout_s=settings.catia_call_timeout_s,
+            # Scoped to the same document as the mutation it is protecting, and
+            # this is the call where getting it wrong is worst. An unscoped
+            # checkpoint snapshots whatever CATIA has active; the mutation then
+            # reattaches and changes the right part -- leaving a checkpoint of
+            # some *other* part filed as this one's undo, so restoring it would
+            # overwrite the work rather than recover it.
+            document=_document_scope(spec, document),
         )
     except (CatiaError, CatiaUnavailable) as exc:
         raise CatiaError(

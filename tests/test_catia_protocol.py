@@ -471,12 +471,29 @@ def test_exactly_one_destructive_tool_and_it_requires_approval():
     assert "approval_token" in destructive[0].parameters["required"]
 
 
+#: Tool names that contain a forbidden substring and have been reviewed as
+#: harmless. The check below is a deliberately blunt substring match, because a
+#: precise one would be a check that can be argued around. The cost of blunt is
+#: that an innocent name occasionally trips it, and the fix for that is a line
+#: here — a human looked at it — rather than loosening the pattern for everyone.
+#:
+#: `catia_axis_system` is reference geometry: it creates a local coordinate
+#: frame via HybridShapeFactory. The collision is with "system", and it has
+#: nothing to do with `SystemService.Evaluate`, the arbitrary-VBScript hatch
+#: this test exists to keep out.
+_REVIEWED_NAME_COLLISIONS = frozenset({"catia_axis_system"})
+
+
 def test_there_is_no_arbitrary_execution_tool():
     """The invariant that must never regress."""
     forbidden = ("eval", "script", "vba", "vbscript", "exec", "macro", "system")
     for spec in CATIA_TOOL_SPECS:
-        assert not any(word in spec.name.lower() for word in forbidden)
-        # And nothing takes a path from the model.
+        if spec.name not in _REVIEWED_NAME_COLLISIONS:
+            assert not any(word in spec.name.lower() for word in forbidden), (
+                f"{spec.name} names a forbidden capability. If it is genuinely "
+                "harmless, review it and add it to _REVIEWED_NAME_COLLISIONS."
+            )
+        # And nothing takes a path from the model, reviewed or not.
         assert "path" not in spec.parameters["properties"]
 
 

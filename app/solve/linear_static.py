@@ -30,7 +30,8 @@ from numpy.typing import NDArray
 
 from app.mesh.types import TET10_EDGES, TetMesh
 from app.solve.base import SolveOutput, Solver
-from app.solve.selection import distribute_force, select_nodes
+from app.solve.loads import assemble_loads
+from app.solve.selection import select_nodes
 from app.solve.types import LoadCase, Material, SolverError, StaticResult
 
 # Derivatives of the tet4 shape functions with respect to natural coordinates.
@@ -264,15 +265,14 @@ class LinearStaticSolver(Solver):
         warnings: list[str] = []
 
         n_dof = 3 * mesh.node_count
-        forces = np.zeros(n_dof, dtype=np.float64)
-        for load in case.loads:
-            nodes = select_nodes(mesh, load.where)
-            nodal, warning = distribute_force(
-                mesh, nodes, np.asarray(load.force_n, dtype=np.float64)
-            )
-            if warning:
-                warnings.append(f"{load.name or 'Load'}: {warning}")
-            np.add.at(forces, _dof_indices(nodes), nodal.ravel())
+        # Every load type -- force, pressure, moment, bearing, gravity,
+        # centrifugal -- resolves to a nodal force vector in `app.solve.loads`.
+        # The density comes from the case's material because the body loads need
+        # it and nothing else in the assembly does.
+        forces, load_warnings = assemble_loads(
+            mesh, case.loads, case.material.density_kg_m3
+        )
+        warnings.extend(load_warnings)
 
         # Restrained thermal expansion is a load like any other, so it is added
         # here rather than solved separately: a part that is both heated and

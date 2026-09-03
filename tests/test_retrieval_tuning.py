@@ -8,10 +8,11 @@ for the actual manual dataset.
 from __future__ import annotations
 
 from pathlib import Path
+
 import pytest
 
-from app.retrieval.bm25 import BM25Index, DEFAULT_K1, DEFAULT_B, DEFAULT_COVERAGE_WEIGHT
 from app.retrieval.analyze import analyze_query
+from app.retrieval.bm25 import DEFAULT_B, DEFAULT_COVERAGE_WEIGHT, DEFAULT_K1, BM25Index
 
 INDEX_DIR = Path("data/bm25/index")
 REAL_INDEX_EXISTS = (INDEX_DIR / "index.npz").exists() and (INDEX_DIR / "manifest.json").exists()

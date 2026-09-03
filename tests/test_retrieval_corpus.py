@@ -7,6 +7,7 @@ Guarded by `pytest.mark.skipif` so that these tests run when the real index exis
 from __future__ import annotations
 
 from pathlib import Path
+
 import pytest
 
 from app.retrieval.corpus import Corpus

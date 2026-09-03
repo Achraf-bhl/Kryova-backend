@@ -28,8 +28,15 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .backend import OUT_OF_BAND_TOOLS, TOOL_METHODS, CatiaBackend, CatiaOperationError
-from .tool_table import ToolRefused, check_call, tier_of
+from .backend import (
+    OUT_OF_BAND_TOOLS,
+    TOOL_METHODS,
+    CatiaBackend,
+    CatiaOperationError,
+    implemented_tools,
+    unsupported,
+)
+from .tool_table import LONG_RUNNING, ToolRefused, check_call, tier_of
 
 logger = logging.getLogger("kryova.catia.session")
 
@@ -40,7 +47,11 @@ logger = logging.getLogger("kryova.catia.session")
 DEFAULT_OP_TIMEOUT_S = 25.0
 EXPORT_OP_TIMEOUT_S = 170.0
 
-_LONG_RUNNING = frozenset({"catia_export_step"})
+#: Tools the watchdog gives the longer budget to. Generated from each
+#: operation's own `long_running` flag rather than restated as a literal here,
+#: so a newly-added slow tool cannot time out on this side for want of someone
+#: remembering to add its name.
+_LONG_RUNNING = LONG_RUNNING
 
 
 class BridgeSession:
@@ -75,6 +86,13 @@ class BridgeSession:
             # "could not tell", which the server handles by falling back to
             # reading the live menu rather than by assuming English.
             "ui_language": self.backend.ui_language,
+            # Exactly which tools this backend can execute, derived structurally
+            # from the methods it defines. The server offers the agent this list
+            # rather than the whole registry, so a model is never handed a tool
+            # that would fail on the workstation it is actually connected to --
+            # and an older daemon connecting to a newer server degrades to
+            # "fewer tools" instead of "some tools mysteriously error".
+            "tools": list(implemented_tools(self.backend)),
         }
 
     def handle_frame(self, raw: str) -> None:
@@ -152,6 +170,16 @@ class BridgeSession:
         if method is None:  # pragma: no cover - tool_table and this list agree
             raise ToolRefused(f"{tool!r} has no implementation in this bridge.")
 
+        # The registry is wider than any one backend. The server normally filters
+        # the offered tools down to what this bridge reported in `hello`, so a
+        # call landing here for a method the backend lacks means the two have
+        # drifted -- an older daemon, or a call queued across a reconnect. Say so
+        # plainly instead of raising AttributeError from `getattr` below, which
+        # would surface as an unhandled internal error rather than as the
+        # actionable "this bridge cannot do that".
+        if not callable(getattr(self.backend, method, None)):
+            raise unsupported(tool, self.backend)
+
         # One call at a time here too. The server already serialises per device,
         # but a daemon that assumed so would corrupt CATIA the first time that
         # assumption stopped holding -- a second server process, a retry, a bug.
@@ -162,9 +190,47 @@ class BridgeSession:
             )
         try:
             self._ensure_alive(tool)
+            self._ensure_document(tool, frame.get("document"))
             return getattr(self.backend, method)(**arguments)
         finally:
             self._lock.release()
+
+    def _ensure_document(self, tool: str, document: Any) -> None:
+        """Point the backend at the document the server says this call is for.
+
+        The `document` envelope field is advisory in shape and mandatory in
+        effect: when the server sends one, the operation runs against that
+        document or it does not run. The server omits it for the tools that
+        define the binding (`catia_new_part`, `catia_open_document`) and for the
+        ones that are not about a document at all, so "no field" means "the
+        server did not scope this call", never "act on whatever is in front of
+        you by choice".
+
+        Deliberately inside the lock and after `_ensure_alive`: switching
+        documents is a COM operation like any other, and it must not race a call
+        still finishing, nor run against a handle that has gone stale.
+
+        The field is read defensively rather than trusted, for the same reason
+        the tier is taken from the daemon's own table and never from the frame.
+        A malformed one is ignored -- the operation then behaves exactly as it
+        did before this existed, which is the honest failure mode for a field
+        that only ever narrows what a call may touch.
+        """
+        if tool in OUT_OF_BAND_TOOLS or not isinstance(document, dict):
+            return
+        doc_name = document.get("doc_name")
+        if not isinstance(doc_name, str) or not doc_name:
+            return
+        remote_path = document.get("remote_path")
+        switched = self.backend.ensure_document(
+            doc_name=doc_name,
+            remote_path=remote_path if isinstance(remote_path, str) else None,
+        )
+        if switched:
+            # Worth a log line: it means CATIA was showing something other than
+            # what the conversation is about, which is the moment an engineer
+            # would otherwise watch their screen change with no explanation.
+            logger.info("Reattached to %s before %s", doc_name, tool)
 
     def _ensure_alive(self, tool: str) -> None:
         """Two checks, on two threads, because they answer different questions.

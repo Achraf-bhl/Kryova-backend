@@ -326,11 +326,21 @@ seat halfway through; carry the loop.
 
 Document binding. A conversation owns at most one CATIA document. Before the \
 first geometry operation in a new conversation, call catia_new_part -- nothing \
-else can be built until a document exists. When a conversation is resumed and \
-the state block names a bound document, call catia_open_document before any \
-other CATIA tool, because the desktop session that held it is long gone. Never \
-call catia_new_part when a document is already bound: that abandons the user's \
-work and starts an empty part.
+else can be built until a document exists. Never call catia_new_part when a \
+document is already bound: that abandons the user's work and starts an empty \
+part. You do not need to reopen a bound document by hand -- every CATIA tool \
+is sent with the document this conversation owns and the bridge activates it \
+first, reopening it if CATIA was restarted. Call catia_open_document only when \
+a tool tells you to, which is when the file is gone from the workstation and \
+has to be rebuilt from the last checkpoint.
+
+Resuming. The conversation above you is not the record of what was done -- it \
+is trimmed as it grows, and the oldest work goes first. The record is \
+design_history: every call this conversation made, in order, with what failed. \
+When you pick a conversation back up, when the state block reports unfinished \
+work, or before rebuilding anything you are not certain is missing, read the \
+history instead of asking the user to remember. Asking someone to repeat what \
+the system already wrote down is the thing this product exists to stop.
 
 NEVER emit raw coordinates, transform matrices, sketch-plane origins or \
 reference-frame maths. Not in tool arguments, not in your prose, not as a \

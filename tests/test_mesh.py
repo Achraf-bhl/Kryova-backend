@@ -14,7 +14,7 @@ from app.mesh.gmsh_mesher import generate_tet_mesh
 from app.mesh.types import MeshError
 from app.solve.linear_static import LinearStaticSolver
 from app.solve.materials import MATERIALS
-from app.solve.types import FaceSelector, Fixture, Load, LoadCase
+from app.solve.types import FaceSelector, Fixture, ForceLoad, LoadCase
 
 # Outward-wound triangulation of an axis-aligned box, as index pairs into its
 # eight corners (bit i of the index selects the high side of axis i).
@@ -158,7 +158,7 @@ class TestMeshedGeometrySolves:
                 Fixture(where=FaceSelector(axis="x", side="min"), dofs=["x"]),
                 Fixture(where=FaceSelector(axis="y", side="min"), dofs=["y"]),
             ],
-            loads=[Load(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, force))],
+            loads=[ForceLoad(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, force))],
         )
         output = LinearStaticSolver().solve(mesh, case)
 

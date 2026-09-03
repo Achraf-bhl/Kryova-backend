@@ -178,6 +178,16 @@ def summarise_step(tool: str, result: Any, ok: bool) -> str:
         )
     if tool == "delete_simulation":
         return "Run deleted"
+    if tool == "design_history":
+        # Says how much of the record was read and how much was left, because
+        # this is the one tool whose answer is deliberately partial -- a user
+        # watching the step list should be able to see that it paged.
+        unresolved = len(result.get("unresolved") or [])
+        older = result.get("older_not_shown") or 0
+        summary = f"{result.get('returned', 0)} of {result.get('total', 0)} operation(s)"
+        if older:
+            summary += f", {older} older not shown"
+        return summary + (f", {unresolved} unfinished" if unresolved else "")
     if tool == "catia_status":
         if not result.get("running", result.get("connected")):
             return "CATIA is not running"

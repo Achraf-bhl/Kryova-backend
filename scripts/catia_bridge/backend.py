@@ -15,6 +15,8 @@ so a COM exception cannot take the daemon down.
 from abc import ABC, abstractmethod
 from typing import Any
 
+from .generated_tools import TOOL_METHODS
+
 
 class CatiaOperationError(RuntimeError):
     """The operation failed in a way worth telling the agent about verbatim."""
@@ -62,6 +64,31 @@ class CatiaBackend(ABC):
         never on the watchdog: a COM proxy belongs to the apartment of the
         thread that acquired it, so only this thread can repair its own.
         """
+
+    def ensure_document(self, *, doc_name: str, remote_path: str | None) -> bool:
+        """Make the named document the one the next operation will act on.
+
+        Returns True when the backend had to switch or reopen, False when it was
+        already there. Raises `CatiaOperationError` when it cannot get to that
+        document at all, which is the safe direction: refusing is recoverable,
+        and modelling into the wrong part is not.
+
+        This is what makes a conversation's binding real rather than advisory.
+        The server records which document a conversation owns, but the operations
+        themselves have always acted on whatever CATIA had active -- so an
+        engineer who clicked another part between two messages, or a second
+        conversation open in another tab, silently redirected every subsequent
+        pad and pocket into a part nobody was talking about. Nothing failed;
+        the wrong file just quietly grew features.
+
+        Called on the operation thread immediately before the operation, with
+        the document the *server* says this conversation owns. Every backend
+        that can hold more than one document at a time must override it. The
+        default is a no-op for a backend that cannot -- there is no document to
+        get wrong -- and `tests/test_document_binding.py` asserts that both real
+        backends override it rather than inheriting this.
+        """
+        return False
 
     # -- documents -----------------------------------------------------------
 
@@ -317,44 +344,6 @@ class CatiaBackend(ABC):
     def select(self, *, features: list[str], add: bool = False) -> dict[str, Any]:
         """Put named features into CATIA's selection, or clear it."""
 
-    # -- assembly ------------------------------------------------------------
-    #
-    # Components are added to a product *from files*, which is the whole reason
-    # `save_part` exists: without a part on disk there is no assembly, whatever
-    # else is implemented. The model never handles a path -- `save_part` returns
-    # a name and `add_component` takes that name, resolved inside the daemon's
-    # own directory.
-
-    @abstractmethod
-    def save_part(self, *, name: str = "") -> dict[str, Any]:
-        """Write the active part to the daemon's component directory."""
-
-    @abstractmethod
-    def new_product(self, *, name: str) -> dict[str, Any]:
-        """Open a new CATProduct and make it the active document."""
-
-    @abstractmethod
-    def add_component(
-        self, *, part: str, count: int = 1, name: str = ""
-    ) -> dict[str, Any]:
-        """Place `count` instances of a saved part into the active product."""
-
-    @abstractmethod
-    def constrain(
-        self,
-        *,
-        kind: str,
-        component: str,
-        to_component: str = "",
-        plane: str = "XY",
-        value: float = 0.0,
-    ) -> dict[str, Any]:
-        """Constrain a component against another, or fix it in place."""
-
-    @abstractmethod
-    def list_constraints(self) -> dict[str, Any]:
-        """The product's components and every constraint on them."""
-
 
 #: Tools that must not be routed through the COM liveness probe.
 #:
@@ -376,50 +365,65 @@ OUT_OF_BAND_TOOLS: frozenset[str] = frozenset(
 )
 
 
-#: Tool name -> backend method. Kept as data so `session.py` cannot reach a
-#: method that is not on this list, whatever arrives on the wire.
-TOOL_METHODS: dict[str, str] = {
-    "catia_new_part": "new_part",
-    "catia_open_document": "open_document",
-    "catia_list_parameters": "list_parameters",
-    "catia_set_parameter": "set_parameter",
-    "catia_set_material": "set_material",
-    "catia_sketch_rectangle": "sketch_rectangle",
-    "catia_sketch_circle": "sketch_circle",
-    "catia_pad": "pad",
-    "catia_pocket": "pocket",
-    "catia_hole": "hole",
-    "catia_fillet": "fillet",
-    "catia_chamfer": "chamfer",
-    "catia_sketch_polygon": "sketch_polygon",
-    "catia_shaft": "shaft",
-    "catia_groove": "groove",
-    "catia_mirror": "mirror",
-    "catia_sketch_revolve_profile": "sketch_revolve_profile",
-    "catia_sketch_groove_profile": "sketch_groove_profile",
-    "catia_sketch_gear_profile": "sketch_gear_profile",
-    "catia_pattern_rectangular": "pattern_rectangular",
-    "catia_pattern_circular": "pattern_circular",
-    "catia_shell": "shell",
-    "catia_delete_feature": "delete_feature",
-    "catia_list_features": "list_features",
-    "catia_measure": "measure",
-    "catia_capture_view": "capture_view",
-    "catia_export_step": "export_step",
-    "catia_checkpoint": "checkpoint",
-    "catia_restore": "restore",
-    "catia_update": "update",
-    "catia_list_commands": "list_commands",
-    "catia_run_command": "run_command",
-    "catia_describe_dialog": "describe_dialog",
-    "catia_fill_dialog": "fill_dialog",
-    "catia_dialog_action": "dialog_action",
-    "catia_press_key": "press_key",
-    "catia_switch_workbench": "switch_workbench",
-    "catia_select": "select",
-    "catia_save_part": "save_part",
-    "catia_new_product": "new_product",
-    "catia_add_component": "add_component",
-    "catia_constrain": "constrain",
-    "catia_list_constraints": "list_constraints",
-}
+# -- what a backend actually implements --------------------------------------
+#
+# The abstract methods above are the *core* contract: documents, sketches, the
+# original solid features, transfer and the interface. Both backends implement
+# all of them, and a backend that does not is a bug at import time.
+#
+# The registry is far wider than that core -- surfaces, assemblies, drawings,
+# knowledge -- and it grows. Making all of those abstract would force ~160
+# stubs into every backend, and defaulting them to a silent no-op would report
+# success for work that never happened, which is the worst option available.
+#
+# So they are simply absent, and absence is reported honestly:
+#
+#   * `implemented_tools()` tells the server what this bridge can really do, and
+#     travels in the `hello` frame. The server offers the agent that list rather
+#     than the full registry, so the model is never handed a tool that will fail.
+#   * `unsupported()` builds the message for the case that slips through anyway
+#     -- an older bridge, a race between reconnect and a queued call.
+
+
+def _core_methods() -> frozenset[str]:
+    """Backend methods every backend must define, taken from the ABC itself.
+
+    Read off `__abstractmethods__` rather than restated, so this cannot claim a
+    method is mandatory after someone has stopped making it abstract.
+    """
+    return frozenset(CatiaBackend.__abstractmethods__)
+
+
+CORE_METHODS: frozenset[str] = _core_methods()
+
+
+def implemented_tools(backend: CatiaBackend) -> tuple[str, ...]:
+    """The tool names this backend can actually execute, sorted.
+
+    A method counts as implemented when the concrete class defines it and it is
+    not the `unsupported` placeholder. That is deliberately structural: it
+    cannot drift from reality the way a hand-maintained capability list does,
+    because it *is* reality.
+    """
+    return tuple(
+        sorted(
+            tool
+            for tool, method in TOOL_METHODS.items()
+            if callable(getattr(backend, method, None))
+        )
+    )
+
+
+def unsupported(tool: str, backend: CatiaBackend) -> CatiaOperationError:
+    """The error for a tool this bridge does not implement.
+
+    Names the tool and says where the gap is, because "it failed" sends the
+    agent into a retry loop and "this bridge does not implement it" sends it to
+    a different approach.
+    """
+    kind = "mock bridge" if backend.is_mock else "bridge"
+    return CatiaOperationError(
+        f"{tool} is not implemented by this {kind}. Nothing was changed. "
+        "Either use a tool that is, or reach the command through "
+        "catia_run_command, which drives CATIA's own menus."
+    )

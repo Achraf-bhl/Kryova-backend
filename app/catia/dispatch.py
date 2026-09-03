@@ -77,6 +77,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CATIA_TOOL_SPECS",
+    "offered_tool_specs",
     "CatiaError",
     "CatiaUnavailable",
     "call_catia",
@@ -216,6 +217,34 @@ def connected_ui_language(db: Session, user_id: str) -> str | None:
     if found is None:
         return None
     return found[1].hello.ui_language or None
+
+
+def offered_tool_specs(db: Session, user_id: str) -> list[CatiaToolSpec]:
+    """The tools worth offering the agent, given the bridge actually connected.
+
+    The registry describes what Kryova knows how to ask for. A given daemon
+    implements some subset of that — it may be an older build, or a mock, or
+    running against a seat whose licences do not reach every workbench. Handing
+    the model the full registry regardless would mean it picks a tool, waits for
+    a round trip, and gets "this bridge does not implement it", which costs a
+    turn and teaches it nothing about what to do instead.
+
+    So the offered list is the intersection. Two deliberate fallbacks:
+
+    * **No device connected.** Offer everything. The tool has to exist for the
+      model to be told *why* it cannot be used, and the dispatcher's own offline
+      message ("connect the bridge") is far more useful than the tool silently
+      not being there.
+    * **A daemon that reported no tool list.** Also offer everything: it
+      predates the field, which means it is an older build implementing the
+      original vocabulary, and offering it nothing would be a worse guess than
+      offering it too much.
+    """
+    found = _online(db, user_id)
+    if found is None:
+        return list(CATIA_TOOL_SPECS)
+    hello = found[1].hello
+    return [spec for spec in CATIA_TOOL_SPECS if hello.offers(spec.name)]
 
 
 def catia_available(db: Session, user_id: str) -> bool:

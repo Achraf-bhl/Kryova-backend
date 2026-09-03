@@ -15,6 +15,8 @@ so a COM exception cannot take the daemon down.
 from abc import ABC, abstractmethod
 from typing import Any
 
+from .generated_tools import TOOL_METHODS
+
 
 class CatiaOperationError(RuntimeError):
     """The operation failed in a way worth telling the agent about verbatim."""
@@ -338,45 +340,65 @@ OUT_OF_BAND_TOOLS: frozenset[str] = frozenset(
 )
 
 
-#: Tool name -> backend method. Kept as data so `session.py` cannot reach a
-#: method that is not on this list, whatever arrives on the wire.
-TOOL_METHODS: dict[str, str] = {
-    "catia_new_part": "new_part",
-    "catia_open_document": "open_document",
-    "catia_list_parameters": "list_parameters",
-    "catia_set_parameter": "set_parameter",
-    "catia_set_material": "set_material",
-    "catia_sketch_rectangle": "sketch_rectangle",
-    "catia_sketch_circle": "sketch_circle",
-    "catia_pad": "pad",
-    "catia_pocket": "pocket",
-    "catia_hole": "hole",
-    "catia_fillet": "fillet",
-    "catia_chamfer": "chamfer",
-    "catia_sketch_polygon": "sketch_polygon",
-    "catia_shaft": "shaft",
-    "catia_groove": "groove",
-    "catia_mirror": "mirror",
-    "catia_sketch_revolve_profile": "sketch_revolve_profile",
-    "catia_sketch_groove_profile": "sketch_groove_profile",
-    "catia_sketch_gear_profile": "sketch_gear_profile",
-    "catia_pattern_rectangular": "pattern_rectangular",
-    "catia_pattern_circular": "pattern_circular",
-    "catia_shell": "shell",
-    "catia_delete_feature": "delete_feature",
-    "catia_list_features": "list_features",
-    "catia_measure": "measure",
-    "catia_capture_view": "capture_view",
-    "catia_export_step": "export_step",
-    "catia_checkpoint": "checkpoint",
-    "catia_restore": "restore",
-    "catia_update": "update",
-    "catia_list_commands": "list_commands",
-    "catia_run_command": "run_command",
-    "catia_describe_dialog": "describe_dialog",
-    "catia_fill_dialog": "fill_dialog",
-    "catia_dialog_action": "dialog_action",
-    "catia_press_key": "press_key",
-    "catia_switch_workbench": "switch_workbench",
-    "catia_select": "select",
-}
+# -- what a backend actually implements --------------------------------------
+#
+# The abstract methods above are the *core* contract: documents, sketches, the
+# original solid features, transfer and the interface. Both backends implement
+# all of them, and a backend that does not is a bug at import time.
+#
+# The registry is far wider than that core -- surfaces, assemblies, drawings,
+# knowledge -- and it grows. Making all of those abstract would force ~160
+# stubs into every backend, and defaulting them to a silent no-op would report
+# success for work that never happened, which is the worst option available.
+#
+# So they are simply absent, and absence is reported honestly:
+#
+#   * `implemented_tools()` tells the server what this bridge can really do, and
+#     travels in the `hello` frame. The server offers the agent that list rather
+#     than the full registry, so the model is never handed a tool that will fail.
+#   * `unsupported()` builds the message for the case that slips through anyway
+#     -- an older bridge, a race between reconnect and a queued call.
+
+
+def _core_methods() -> frozenset[str]:
+    """Backend methods every backend must define, taken from the ABC itself.
+
+    Read off `__abstractmethods__` rather than restated, so this cannot claim a
+    method is mandatory after someone has stopped making it abstract.
+    """
+    return frozenset(CatiaBackend.__abstractmethods__)
+
+
+CORE_METHODS: frozenset[str] = _core_methods()
+
+
+def implemented_tools(backend: CatiaBackend) -> tuple[str, ...]:
+    """The tool names this backend can actually execute, sorted.
+
+    A method counts as implemented when the concrete class defines it and it is
+    not the `unsupported` placeholder. That is deliberately structural: it
+    cannot drift from reality the way a hand-maintained capability list does,
+    because it *is* reality.
+    """
+    return tuple(
+        sorted(
+            tool
+            for tool, method in TOOL_METHODS.items()
+            if callable(getattr(backend, method, None))
+        )
+    )
+
+
+def unsupported(tool: str, backend: CatiaBackend) -> CatiaOperationError:
+    """The error for a tool this bridge does not implement.
+
+    Names the tool and says where the gap is, because "it failed" sends the
+    agent into a retry loop and "this bridge does not implement it" sends it to
+    a different approach.
+    """
+    kind = "mock bridge" if backend.is_mock else "bridge"
+    return CatiaOperationError(
+        f"{tool} is not implemented by this {kind}. Nothing was changed. "
+        "Either use a tool that is, or reach the command through "
+        "catia_run_command, which drives CATIA's own menus."
+    )

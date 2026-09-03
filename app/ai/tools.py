@@ -1171,10 +1171,30 @@ class ToolBox:
         dispatch = _catia_dispatch()
         if dispatch is None:
             return []
-        try:
+        # What the *connected* bridge can run, not the whole registry. A daemon
+        # older than the server, or a mock, implements a subset; a model offered
+        # a tool that comes back "not implemented by this bridge" has spent a
+        # turn to learn nothing actionable.
+        #
+        # Resolved with an explicit `getattr` rather than a try/except around
+        # the call. Wrapping the call would also swallow an AttributeError
+        # raised *inside* it, and the symptom of that is an empty tool list --
+        # the agent silently loses every CATIA capability and reports that no
+        # such tool exists, which reads as a missing feature rather than a bug.
+        offered = getattr(dispatch, "offered_tool_specs", None)
+        user = getattr(self, "user", None)
+        if offered is None:  # pragma: no cover - protocol not implemented yet
+            logger.warning("app.catia.dispatch exposes no offered_tool_specs")
+            specs = list(getattr(dispatch, "CATIA_TOOL_SPECS", []))
+        elif user is None:
+            # A toolbox built without a user — the introspection paths that
+            # enumerate the vocabulary do this. There is no device to intersect
+            # against, so the answer is the same as for a user with none
+            # connected: offer the whole registry.
             specs = list(dispatch.CATIA_TOOL_SPECS)
-        except AttributeError:  # pragma: no cover - protocol not implemented yet
-            logger.warning("app.catia.dispatch exposes no CATIA_TOOL_SPECS")
+        else:
+            specs = list(offered(self.db, user.id))
+        if not specs:
             return []
 
         tools: list[Tool] = []

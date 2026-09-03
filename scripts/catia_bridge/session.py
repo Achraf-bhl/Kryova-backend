@@ -28,8 +28,15 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .backend import OUT_OF_BAND_TOOLS, TOOL_METHODS, CatiaBackend, CatiaOperationError
-from .tool_table import ToolRefused, check_call, tier_of
+from .backend import (
+    OUT_OF_BAND_TOOLS,
+    TOOL_METHODS,
+    CatiaBackend,
+    CatiaOperationError,
+    implemented_tools,
+    unsupported,
+)
+from .tool_table import LONG_RUNNING, ToolRefused, check_call, tier_of
 
 logger = logging.getLogger("kryova.catia.session")
 
@@ -40,7 +47,11 @@ logger = logging.getLogger("kryova.catia.session")
 DEFAULT_OP_TIMEOUT_S = 25.0
 EXPORT_OP_TIMEOUT_S = 170.0
 
-_LONG_RUNNING = frozenset({"catia_export_step"})
+#: Tools the watchdog gives the longer budget to. Generated from each
+#: operation's own `long_running` flag rather than restated as a literal here,
+#: so a newly-added slow tool cannot time out on this side for want of someone
+#: remembering to add its name.
+_LONG_RUNNING = LONG_RUNNING
 
 
 class BridgeSession:
@@ -75,6 +86,13 @@ class BridgeSession:
             # "could not tell", which the server handles by falling back to
             # reading the live menu rather than by assuming English.
             "ui_language": self.backend.ui_language,
+            # Exactly which tools this backend can execute, derived structurally
+            # from the methods it defines. The server offers the agent this list
+            # rather than the whole registry, so a model is never handed a tool
+            # that would fail on the workstation it is actually connected to --
+            # and an older daemon connecting to a newer server degrades to
+            # "fewer tools" instead of "some tools mysteriously error".
+            "tools": list(implemented_tools(self.backend)),
         }
 
     def handle_frame(self, raw: str) -> None:
@@ -151,6 +169,16 @@ class BridgeSession:
         method = TOOL_METHODS.get(tool)
         if method is None:  # pragma: no cover - tool_table and this list agree
             raise ToolRefused(f"{tool!r} has no implementation in this bridge.")
+
+        # The registry is wider than any one backend. The server normally filters
+        # the offered tools down to what this bridge reported in `hello`, so a
+        # call landing here for a method the backend lacks means the two have
+        # drifted -- an older daemon, or a call queued across a reconnect. Say so
+        # plainly instead of raising AttributeError from `getattr` below, which
+        # would surface as an unhandled internal error rather than as the
+        # actionable "this bridge cannot do that".
+        if not callable(getattr(self.backend, method, None)):
+            raise unsupported(tool, self.backend)
 
         # One call at a time here too. The server already serialises per device,
         # but a daemon that assumed so would corrupt CATIA the first time that

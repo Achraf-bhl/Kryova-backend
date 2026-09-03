@@ -39,6 +39,15 @@ from typing import Any
 from . import gear, ui_policy, vba
 from . import ui_automation as ui
 from .backend import CatiaBackend, CatiaOperationError
+from .com import (
+    InspectionMixin,
+    KnowledgeMixin,
+    PartDesignMixin,
+    ReferenceMixin,
+    SketcherMixin,
+    SurfacesMixin,
+    WireframeMixin,
+)
 
 logger = logging.getLogger("kryova.catia.com")
 
@@ -163,7 +172,26 @@ def _find_catalogue_material(catalogue: Any, names: tuple[str, ...]) -> Any:
     return None
 
 
-class CatiaCom(CatiaBackend):
+class CatiaCom(
+    SketcherMixin,
+    ReferenceMixin,
+    PartDesignMixin,
+    SurfacesMixin,
+    WireframeMixin,
+    KnowledgeMixin,
+    InspectionMixin,
+    CatiaBackend,
+):
+    """The real backend, assembled from one mixin per workbench.
+
+    `CatiaBackend` sits last so the mixins' concrete methods satisfy its
+    abstract ones; the methods defined in this class body come first in
+    resolution order and stay authoritative for the tools they already cover.
+
+    `SketcherMixin` leads because it owns `_require_closed`, which the feature
+    mixins call before building anything from a profile.
+    """
+
     is_mock = False
     capabilities = ("part", "sketch", "measure", "export", "capture", "checkpoint")
 

@@ -218,6 +218,15 @@ class _StubDispatch(types.ModuleType):
     def catia_available(self, db: Any, user_id: str) -> bool:
         return True
 
+    def offered_tool_specs(self, db: Any, user_id: str) -> list[Any]:
+        """What the connected bridge can run.
+
+        The real one intersects the registry with the tool list the daemon sent
+        in its `hello`. The stub has no daemon, so it offers everything — which
+        is also what the real one does when nothing is connected.
+        """
+        return list(self.CATIA_TOOL_SPECS)
+
     def get_spec(self, name: str) -> Any:
         return next((s for s in self.CATIA_TOOL_SPECS if s.name == name), None)
 

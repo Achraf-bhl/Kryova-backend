@@ -15,433 +15,75 @@ Two consequences worth stating plainly:
 * A tool the server knows about and this table does not is refused. When the
   two versions drift, the daemon fails closed and says so.
 
-`SERVER_FIELDS` is the one concession: the server legitimately adds context the
-model never supplies -- the document path to reopen, the checkpoint bytes to
-restore, the inline-transfer ceiling. Those keys are enumerated per tool and
-everything else is rejected, so "the server may add fields" does not become "any
-field is accepted".
+The per-tool server fields are the one concession: the server legitimately adds
+context the model never supplies -- the document path to reopen, the checkpoint
+bytes to restore, the inline-transfer ceiling. Those keys are enumerated per
+tool and everything else is rejected, so "the server may add fields" does not
+become "any field is accepted".
 
-Keep in step with `app/catia/tool_specs.py`.
+**Where the table comes from.** `TOOLS` is no longer written here by hand. It is
+generated from the server's operation registry into `generated_tools.py` by
+`scripts/gen_bridge_tools.py`, and this module imports it. That keeps the
+security property -- the daemon still validates against a table it ships and
+loads offline, never against anything on the wire -- while removing the failure
+mode the hand-written copy actually had: drifting from the server, and then
+failing closed on a tool it should accept, which reaches the user as a broken
+product rather than as a caught mistake.
+
+The logic below is what stays hand-written, because it is the part that has to
+be *read* to be trusted: the tier lookup, the approval check, and the refusal
+messages.
 """
 
 from typing import Any
 
+from .generated_tools import LONG_RUNNING, SERVER_ONLY, TOOL_METHODS, TOOLS
 from .validation import SchemaError, validate
 
 READ = "read"
 WRITE = "write"
 DESTRUCTIVE = "destructive"
 
-SKETCH_PLANES = ["XY", "YZ", "ZX"]
-NAMED_FACES = ["top", "bottom", "front", "back", "left", "right"]
-FACE_POSITIONS = ["center", "front_left", "front_right", "back_left", "back_right"]
-EDGE_SELECTORS = ["all", "vertical", "horizontal", "top", "bottom"]
-VIEWPOINTS = ["iso", "front", "back", "top", "bottom", "left", "right"]
-PARAMETER_UNITS = ["mm", "deg", "kg"]
+__all__ = [
+    "DESTRUCTIVE",
+    "EDGE_SELECTORS",
+    "FACE_POSITIONS",
+    "LONG_RUNNING",
+    "NAMED_FACES",
+    "PARAMETER_UNITS",
+    "READ",
+    "SERVER_ONLY",
+    "SKETCH_PLANES",
+    "TOOLS",
+    "TOOL_METHODS",
+    "VIEWPOINTS",
+    "WRITE",
+    "ToolRefused",
+    "check_call",
+    "tier_of",
+]
+
+#: Value vocabularies the daemon's own COM code reads -- `catia_com` maps a
+#: named face onto a sketch plane, and the contract test asserts the two agree.
+#: Derived from the generated schemas rather than restated, so they cannot drift
+#: from what the daemon actually accepts.
+def _enum_of(tool: str, field: str) -> list[str]:
+    """The accepted values of one enum field, read off the generated schema."""
+    return list(TOOLS[tool][1]["properties"][field]["enum"])
+
+
+SKETCH_PLANES = _enum_of("catia_pattern_rectangular", "plane")
+NAMED_FACES = _enum_of("catia_hole", "face")
+FACE_POSITIONS = _enum_of("catia_hole", "position")
+EDGE_SELECTORS = _enum_of("catia_fillet", "edges")
+VIEWPOINTS = _enum_of("catia_capture_view", "view")
+PARAMETER_UNITS = _enum_of("catia_set_parameter", "unit")
 
 
 class ToolRefused(Exception):
     """The daemon will not run this call. The message goes back as the error."""
 
 
-def _object(properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": required or [],
-        "additionalProperties": False,
-    }
-
-
-def _length(maximum: float = 10_000.0) -> dict[str, Any]:
-    return {"type": "number", "exclusiveMinimum": 0, "maximum": maximum}
-
-
-_NAME = {"type": "string", "maxLength": 120}
-
-#: tool -> (tier, schema for the model-supplied arguments, server-added keys)
-TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
-    "catia_new_part": (
-        WRITE,
-        _object({"name": {"type": "string", "minLength": 1, "maxLength": 120}}, ["name"]),
-        (),
-    ),
-    "catia_open_document": (
-        WRITE,
-        _object({}),
-        ("doc_name", "remote_path", "fallback_checkpoint"),
-    ),
-    "catia_list_parameters": (READ, _object({}), ()),
-    "catia_set_parameter": (
-        WRITE,
-        _object(
-            {
-                "name": {"type": "string", "minLength": 1, "maxLength": 120},
-                "value": {"type": "number"},
-                "unit": {"type": "string", "enum": PARAMETER_UNITS},
-            },
-            ["name", "value", "unit"],
-        ),
-        (),
-    ),
-    "catia_sketch_rectangle": (
-        WRITE,
-        _object(
-            {
-                "plane": {"type": "string", "enum": SKETCH_PLANES},
-                "width_mm": _length(),
-                "height_mm": _length(),
-            },
-            ["plane", "width_mm", "height_mm"],
-        ),
-        (),
-    ),
-    "catia_sketch_circle": (
-        WRITE,
-        _object(
-            {
-                "plane": {"type": "string", "enum": SKETCH_PLANES},
-                "diameter_mm": _length(),
-            },
-            ["plane", "diameter_mm"],
-        ),
-        (),
-    ),
-    "catia_pad": (
-        WRITE,
-        _object(
-            {
-                "sketch": _NAME,
-                "length_mm": _length(),
-                "symmetric": {"type": "boolean"},
-                "reversed": {"type": "boolean"},
-            },
-            ["sketch", "length_mm"],
-        ),
-        (),
-    ),
-    "catia_pocket": (
-        WRITE,
-        _object(
-            {
-                "sketch": _NAME,
-                "depth_mm": _length(),
-                "through_all": {"type": "boolean"},
-            },
-            ["sketch"],
-        ),
-        (),
-    ),
-    "catia_set_material": (
-        WRITE,
-        _object(
-            {
-                "material": {"type": "string", "minLength": 1, "maxLength": 60},
-                # Supplied by the server from Kryova's material library, never by
-                # the model -- which is why it is required rather than optional.
-                "density_kg_m3": {"type": "number", "exclusiveMinimum": 0, "maximum": 30_000},
-            },
-            ["material", "density_kg_m3"],
-        ),
-        (),
-    ),
-    "catia_hole": (
-        WRITE,
-        _object(
-            {
-                "face": {"type": "string", "enum": NAMED_FACES},
-                "position": {"type": "string", "enum": FACE_POSITIONS},
-                "diameter_mm": _length(1_000.0),
-                "depth_mm": _length(),
-                "through_all": {"type": "boolean"},
-                "inset_mm": _length(),
-            },
-            ["face", "position", "diameter_mm"],
-        ),
-        (),
-    ),
-    "catia_fillet": (
-        WRITE,
-        _object(
-            {
-                "radius_mm": _length(1_000.0),
-                "feature": _NAME,
-                "edges": {"type": "string", "enum": EDGE_SELECTORS},
-            },
-            ["radius_mm"],
-        ),
-        (),
-    ),
-    "catia_chamfer": (
-        WRITE,
-        _object(
-            {
-                "length_mm": _length(1_000.0),
-                "angle_deg": {"type": "number", "exclusiveMinimum": 0, "maximum": 89.0},
-                "feature": _NAME,
-                "edges": {"type": "string", "enum": EDGE_SELECTORS},
-            },
-            ["length_mm"],
-        ),
-        (),
-    ),
-    "catia_sketch_revolve_profile": (
-        WRITE,
-        _object(
-            {
-                "plane": {"type": "string", "enum": SKETCH_PLANES},
-                "outer_diameter_mm": _length(),
-                "length_mm": _length(),
-                "inner_diameter_mm": _length(),
-            },
-            ["plane", "outer_diameter_mm", "length_mm"],
-        ),
-        (),
-    ),
-    "catia_sketch_groove_profile": (
-        WRITE,
-        _object(
-            {
-                "plane": {"type": "string", "enum": SKETCH_PLANES},
-                "shaft_diameter_mm": _length(),
-                "width_mm": _length(),
-                "depth_mm": _length(),
-                "distance_from_end_mm": {"type": "number", "minimum": 0, "maximum": 10_000.0},
-            },
-            ["plane", "shaft_diameter_mm", "width_mm", "depth_mm", "distance_from_end_mm"],
-        ),
-        (),
-    ),
-    "catia_sketch_gear_profile": (
-        WRITE,
-        _object(
-            {
-                "plane": {"type": "string", "enum": SKETCH_PLANES},
-                "module_mm": {"type": "number", "exclusiveMinimum": 0, "maximum": 50.0},
-                "teeth": {"type": "integer", "minimum": 6, "maximum": 100},
-                "pressure_angle_deg": {"type": "number", "minimum": 10.0, "maximum": 30.0},
-            },
-            ["plane", "module_mm", "teeth"],
-        ),
-        (),
-    ),
-    "catia_pattern_rectangular": (
-        WRITE,
-        _object(
-            {
-                "plane": {"type": "string", "enum": SKETCH_PLANES},
-                "count": {"type": "integer", "minimum": 2, "maximum": 100},
-                "spacing_mm": _length(),
-                "second_count": {"type": "integer", "minimum": 1, "maximum": 100},
-                "second_spacing_mm": _length(),
-                "feature": _NAME,
-            },
-            ["plane", "count", "spacing_mm"],
-        ),
-        (),
-    ),
-    "catia_pattern_circular": (
-        WRITE,
-        _object(
-            {
-                "count": {"type": "integer", "minimum": 2, "maximum": 100},
-                "plane": {"type": "string", "enum": SKETCH_PLANES},
-                "total_angle_deg": {"type": "number", "exclusiveMinimum": 0, "maximum": 360.0},
-                "feature": _NAME,
-            },
-            ["count"],
-        ),
-        (),
-    ),
-    "catia_shell": (
-        WRITE,
-        _object({"thickness_mm": _length(1_000.0)}, ["thickness_mm"]),
-        (),
-    ),
-    "catia_sketch_polygon": (
-        WRITE,
-        _object(
-            {
-                "plane": {"type": "string", "enum": SKETCH_PLANES},
-                "sides": {"type": "integer", "minimum": 3, "maximum": 12},
-                "diameter_mm": _length(),
-            },
-            ["plane", "sides", "diameter_mm"],
-        ),
-        (),
-    ),
-    "catia_shaft": (
-        WRITE,
-        _object(
-            {
-                "sketch": _NAME,
-                "angle_deg": {"type": "number", "exclusiveMinimum": 0, "maximum": 360.0},
-            },
-            ["sketch"],
-        ),
-        (),
-    ),
-    "catia_groove": (
-        WRITE,
-        _object(
-            {
-                "sketch": _NAME,
-                "angle_deg": {"type": "number", "exclusiveMinimum": 0, "maximum": 360.0},
-            },
-            ["sketch"],
-        ),
-        (),
-    ),
-    "catia_mirror": (
-        WRITE,
-        _object({"plane": {"type": "string", "enum": SKETCH_PLANES}}, ["plane"]),
-        (),
-    ),
-    "catia_delete_feature": (
-        WRITE,
-        _object({"feature": _NAME}, ["feature"]),
-        (),
-    ),
-    "catia_list_features": (READ, _object({}), ()),
-    "catia_measure": (READ, _object({}), ()),
-    "catia_capture_view": (
-        READ,
-        _object(
-            {
-                "view": {"type": "string", "enum": VIEWPOINTS},
-                "label": {"type": "string", "maxLength": 120},
-            }
-        ),
-        ("max_inline_bytes",),
-    ),
-    "catia_export_step": (
-        WRITE,
-        _object({"note": {"type": "string", "maxLength": 500}}),
-        ("max_inline_bytes",),
-    ),
-    "catia_checkpoint": (
-        WRITE,
-        _object({"label": {"type": "string", "minLength": 1, "maxLength": 200}}, ["label"]),
-        ("max_inline_bytes",),
-    ),
-    "catia_restore": (
-        DESTRUCTIVE,
-        # The model's own arguments are replaced by the server with a resolved
-        # checkpoint, so there is nothing model-supplied left to validate here;
-        # `checkpoint` is checked as a server field below.
-        _object({}),
-        ("checkpoint",),
-    ),
-    "catia_update": (WRITE, _object({}), ()),
-    # -- driving the interface ----------------------------------------------
-    #
-    # These reach commands the tools above do not implement, which is most of
-    # CATIA. The server resolves an English command name into the labels this
-    # seat might use and sends them as `candidates`; `ui_policy.check` refuses
-    # the ones no checkpoint could undo, using this side's own table.
-    "catia_list_commands": (
-        READ,
-        _object(
-            {
-                "search": {"type": "string", "maxLength": 60},
-                "menu": {"type": "string", "maxLength": 60},
-            }
-        ),
-        (),
-    ),
-    "catia_run_command": (
-        WRITE,
-        _object({"command": {"type": "string", "minLength": 1, "maxLength": 120}}, ["command"]),
-        ("candidates", "command_name", "command_key", "menu_hint"),
-    ),
-    "catia_describe_dialog": (READ, _object({}), ()),
-    "catia_fill_dialog": (
-        WRITE,
-        _object(
-            {
-                "fields": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 20,
-                    "items": _object(
-                        {
-                            "name": {"type": "string", "minLength": 1, "maxLength": 120},
-                            "value": {"type": "string", "maxLength": 200},
-                        },
-                        ["name", "value"],
-                    ),
-                }
-            },
-            ["fields"],
-        ),
-        (),
-    ),
-    "catia_dialog_action": (
-        WRITE,
-        _object(
-            {
-                "action": {
-                    "type": "string",
-                    "enum": ["ok", "apply", "cancel", "close", "preview", "yes", "no"],
-                },
-                "button": {"type": "string", "maxLength": 120},
-            },
-            ["action"],
-        ),
-        # The labels that action wears in this seat's language. Resolved on the
-        # server, where the translation table lives; the daemon walks them.
-        ("labels",),
-    ),
-    "catia_press_key": (
-        WRITE,
-        _object(
-            {
-                "key": {
-                    "type": "string",
-                    "enum": [
-                        "enter",
-                        "escape",
-                        "tab",
-                        "delete",
-                        "space",
-                        "up",
-                        "down",
-                        "left",
-                        "right",
-                        "home",
-                        "end",
-                    ],
-                }
-            },
-            ["key"],
-        ),
-        (),
-    ),
-    "catia_switch_workbench": (
-        WRITE,
-        _object({"workbench": {"type": "string", "minLength": 1, "maxLength": 120}}, ["workbench"]),
-        ("workbench_id", "workbench_name", "menu_path", "licence"),
-    ),
-    "catia_select": (
-        WRITE,
-        _object(
-            {
-                "features": {
-                    "type": "array",
-                    "maxItems": 50,
-                    "items": {"type": "string", "minLength": 1, "maxLength": 120},
-                },
-                "add": {"type": "boolean"},
-            },
-            ["features"],
-        ),
-        (),
-    ),
-}
-
-#: `catia_status` is answered by the server and never reaches a device. If one
-#: arrives, something is wrong upstream and it is refused rather than guessed at.
-SERVER_ONLY = frozenset({"catia_status"})
 
 
 def tier_of(tool: str) -> str:

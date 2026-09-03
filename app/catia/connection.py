@@ -170,6 +170,21 @@ class BridgeHello:
     #: costs a round trip; a guessed language would cost a silent no-op.
     ui_language: str = ""
 
+    #: Exactly which tools this daemon can execute. The registry is wider than
+    #: any one daemon build, and a daemon in the field is often older than the
+    #: server it dials into, so the server offers the agent the intersection
+    #: rather than the whole registry.
+    #:
+    #: Empty means the daemon predates this field. That is read as "everything
+    #: the server knows about", which is the only backwards-compatible reading:
+    #: an old daemon implements the original vocabulary and would otherwise be
+    #: offered nothing at all.
+    tools: tuple[str, ...] = ()
+
+    def offers(self, tool: str) -> bool:
+        """Whether this daemon can run `tool`. Permissive when it did not say."""
+        return not self.tools or tool in self.tools
+
     @classmethod
     def parse(cls, frame: dict[str, Any]) -> "BridgeHello":
         if frame.get("type") != "hello":
@@ -177,6 +192,9 @@ class BridgeHello:
         capabilities = frame.get("capabilities") or []
         if not isinstance(capabilities, list):
             raise BridgeError("hello.capabilities must be a list of strings")
+        tools = frame.get("tools") or []
+        if not isinstance(tools, list):
+            raise BridgeError("hello.tools must be a list of strings")
         return cls(
             # Everything here is peer-supplied and lands in the UI and in
             # prompts, so it is truncated at the door. Full sanitising happens
@@ -190,6 +208,11 @@ class BridgeHello:
             # to look up a translation table, so anything that is not a plain
             # language code becomes "unknown" instead of a lookup key.
             ui_language=_language_code(frame.get("ui_language")),
+            # Bounded like everything else peer-supplied. The ceiling is above
+            # the registry's own size so a current daemon is never truncated,
+            # and a peer claiming tens of thousands of tools is cut off rather
+            # than believed.
+            tools=tuple(str(t)[:120] for t in tools[:1024]),
         )
 
 

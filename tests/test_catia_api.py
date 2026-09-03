@@ -273,14 +273,38 @@ def test_status_requires_a_session(client):
     assert client.get(f"{PREFIX}/status").status_code == 401
 
 
+#: The tool names that existed before the declarative registry. Frozen on
+#: purpose: these are the names in saved conversations and in the frontend, so
+#: losing one is a breaking change however many new tools arrive alongside it.
+_TOOLS_BEFORE_THE_REGISTRY = (
+    "catia_status", "catia_new_part", "catia_open_document", "catia_list_parameters",
+    "catia_set_parameter", "catia_sketch_rectangle", "catia_sketch_circle", "catia_pad",
+    "catia_pocket", "catia_set_material", "catia_hole", "catia_fillet", "catia_chamfer",
+    "catia_sketch_polygon", "catia_sketch_revolve_profile", "catia_sketch_groove_profile",
+    "catia_sketch_gear_profile", "catia_pattern_rectangular", "catia_pattern_circular",
+    "catia_shell", "catia_shaft", "catia_groove", "catia_mirror", "catia_delete_feature",
+    "catia_list_features", "catia_measure", "catia_capture_view", "catia_export_step",
+    "catia_checkpoint", "catia_restore", "catia_update", "catia_list_commands",
+    "catia_run_command", "catia_describe_dialog", "catia_fill_dialog", "catia_dialog_action",
+    "catia_press_key", "catia_switch_workbench", "catia_select",
+)
+
+
 def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client):
     tools = auth_client.get(f"{PREFIX}/tools").json()["tools"]
-    # A deliberate count, so adding or losing a tool is never silent. 39 since
-    # the eight interactive tools (list_commands, run_command, describe_dialog,
-    # fill_dialog, dialog_action, press_key, switch_workbench, select) joined
-    # the 31 semantic ones.
-    assert len(tools) == 39
+    # A deliberate count, so adding or losing a tool is never silent. 201 since
+    # the vocabulary moved into the declarative registry (`app/catia/ops/`),
+    # which took it from 39 to the sketcher, reference-geometry, surface,
+    # assembly, drafting and knowledge operations the manuals document.
+    assert len(tools) == 201
     by_name = {tool["name"]: tool for tool in tools}
+
+    # The original 39 by name, not just by count. The registry rewrite could
+    # have preserved the total while quietly renaming something the frontend or
+    # a saved conversation still calls, and a count alone would not notice.
+    for legacy in _TOOLS_BEFORE_THE_REGISTRY:
+        assert legacy in by_name, f"{legacy} disappeared from the tool list"
+
     assert by_name["catia_measure"]["tier"] == "read"
     assert by_name["catia_measure"]["mutating"] is False
     assert by_name["catia_restore"]["tier"] == "destructive"

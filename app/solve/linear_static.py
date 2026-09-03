@@ -274,6 +274,14 @@ class LinearStaticSolver(Solver):
         )
         warnings.extend(load_warnings)
 
+        # Restrained thermal expansion is a load like any other, so it is added
+        # here rather than solved separately: a part that is both heated and
+        # pushed has one displacement field, not two to superpose by hand.
+        if case.delta_t_k:
+            from app.solve.thermal import thermal_load
+
+            forces += thermal_load(mesh, case.material, case.delta_t_k)
+
         fixed = np.unique(
             np.concatenate(
                 [
@@ -302,7 +310,9 @@ class LinearStaticSolver(Solver):
             raise _under_constrained("the solution does not satisfy equilibrium")
         displacements[free] = solution
 
-        mises = self._recover_stress(mesh, case.material, displacements)
+        mises = self._recover_stress(
+            mesh, case.material, displacements, delta_t_k=case.delta_t_k
+        )
         result = self._summarise(
             mesh, case, displacements, mises, warnings, time.perf_counter() - started
         )
@@ -365,7 +375,11 @@ class LinearStaticSolver(Solver):
         return solution
 
     def _recover_stress(
-        self, mesh: TetMesh, material: Material, displacements: NDArray[np.float64]
+        self,
+        mesh: TetMesh,
+        material: Material,
+        displacements: NDArray[np.float64],
+        delta_t_k: float | None = None,
     ) -> NDArray[np.float64]:
         if mesh.midside is None:
             grads, _ = _shape_gradients(mesh)
@@ -382,6 +396,14 @@ class LinearStaticSolver(Solver):
         element_u = displacements[_element_dofs(mesh.connectivity)]
         strain = np.einsum("eij,ej->ei", b, element_u)
         stress = strain @ constitutive_matrix(material).T
+        if delta_t_k:
+            # Only the *mechanical* part of the strain carries stress. Skipping
+            # this subtraction reports the stress of a part that was free to
+            # expand, which for a restrained bar is the wrong sign as well as
+            # the wrong size -- see app/solve/thermal.py.
+            from app.solve.thermal import thermal_stress_correction
+
+            stress = stress - thermal_stress_correction(material, delta_t_k)
         return von_mises(stress)
 
     def _summarise(

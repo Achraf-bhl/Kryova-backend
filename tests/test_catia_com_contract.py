@@ -820,3 +820,77 @@ class TestDialogFieldMatching:
 
         with pytest.raises(CatiaOperationError):
             _match_control(self._dialog(), "OK")
+
+
+class _ProductAnalyze:
+    Volume = 1_000_000.0
+    Mass = 0.0
+
+
+class _EmptyProducts:
+    Count = 0
+
+    def Item(self, index: int):  # pragma: no cover - nothing to index, by design
+        raise IndexError(index)
+
+
+class _ProductRoot:
+    PartNumber = "Stage"
+
+    def __init__(self) -> None:
+        self.Analyze = _ProductAnalyze()
+        self.Products = _EmptyProducts()
+
+    def Update(self) -> None:
+        return None
+
+
+class _ProductDocument:
+    """A CATProduct, distinguished from a part by raising on `.Part`."""
+
+    Name = "Stage.CATProduct"
+
+    def __init__(self) -> None:
+        self.Product = _ProductRoot()
+
+    def __getattr__(self, item: str):
+        if item == "Part":
+            raise AttributeError("a product has no Part")
+        raise AttributeError(item)
+
+
+def _com_for_document(tmp_path: Path, document) -> CatiaCom:
+    com = object.__new__(CatiaCom)
+    com.workdir = tmp_path
+    com._document = lambda: document  # type: ignore[method-assign]
+    return com
+
+
+class TestUpdateOnAProduct:
+    """`catia_update` dispatches to a product's `Analyze` rather than a part's
+    solid, the same distinction `_is_part_document` draws everywhere else."""
+
+    def test_it_resolves_and_reports_mass_in_mm_units(self, tmp_path: Path) -> None:
+        """`Analyze` reports mm3 and kg; scaling it would repeat the 1e9 bug."""
+        document = _ProductDocument()
+        document.Product.Analyze.Mass = 7.86
+        com = _com_for_document(tmp_path, document)
+
+        result = com.update()
+
+        assert result["updated"] is True
+        assert result["volume_mm3"] == 1_000_000.0
+        assert result["mass_kg"] == 7.86
+        assert result["mass_is_provisional"] is False
+
+    def test_an_assembly_with_no_materials_reports_no_mass_rather_than_zero(
+        self, tmp_path: Path
+    ) -> None:
+        document = _ProductDocument()
+        com = _com_for_document(tmp_path, document)
+
+        result = com.update()
+
+        assert result["mass_kg"] is None
+        assert result["mass_is_provisional"] is True
+        assert "material" in result["mass_warning"]

@@ -34,6 +34,7 @@ from .backend import (
     CatiaBackend,
     CatiaOperationError,
     implemented_tools,
+    unimplemented_options,
     unsupported,
 )
 from .tool_table import LONG_RUNNING, ToolRefused, check_call, tier_of
@@ -179,6 +180,13 @@ class BridgeSession:
         # actionable "this bridge cannot do that".
         if not callable(getattr(self.backend, method, None)):
             raise unsupported(tool, self.backend)
+
+        # The same drift one level down: the method exists but is narrower than
+        # the schema the model was offered. Caught here so it reads as a limit
+        # rather than as a TypeError from the call below.
+        narrower = unimplemented_options(tool, method, self.backend, arguments)
+        if narrower is not None:
+            raise narrower
 
         # One call at a time here too. The server already serialises per device,
         # but a daemon that assumed so would corrupt CATIA the first time that

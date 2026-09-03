@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import prompts
 from app.ai.context import build_messages, maybe_summarise
-from app.ai.malformed import correction_for, find_written_tool_calls
+from app.ai.malformed import correction_for, find_written_tool_calls, is_contentless
 from app.ai.provider import LLMError, LLMProvider, TokenUsage
 from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
 from app.ai.tools import ToolBox, ToolError
@@ -332,7 +332,7 @@ def stream_agent(
             # whatever it wrote becomes the answer. Two ways that is a lie, and
             # both reach the user as a normal reply unless they are caught here.
             written = find_written_tool_calls(turn.text, known)
-            blank = not turn.text.strip()
+            blank = is_contentless(turn.text)
             if (written or blank) and corrections < MAX_CORRECTIONS:
                 corrections += 1
                 # The model's own words go in first: it has to see what it

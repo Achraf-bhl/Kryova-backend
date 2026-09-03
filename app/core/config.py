@@ -131,6 +131,7 @@ class Settings(BaseSettings):
     # endpoints report themselves unavailable; it never stops the app booting.
     #   ollama            -> local, no key, offline (default)
     #   anthropic         -> hosted Claude, needs AI_API_KEY
+    #   nvidia            -> NVIDIA NIM (build.nvidia.com), needs AI_API_KEY
     #   openai_compatible -> OpenAI / LM Studio / vLLM / llama.cpp / Groq /
     #                        OpenRouter, needs AI_BASE_URL
     ai_provider: str = "ollama"
@@ -147,6 +148,14 @@ class Settings(BaseSettings):
     # How many past turns of a conversation are replayed to the model. Beyond
     # this the oldest turns are dropped, so a long session cannot grow the
     # prompt (and its cost) without limit.
+    # NVIDIA only. Nemotron models reason by default and put the chain of
+    # thought in a separate field; these two say how much of that to buy.
+    # Turning it off makes every turn faster and cheaper and measurably worse at
+    # picking the right CATIA operation, which is the one judgement that matters.
+    ai_nvidia_thinking: bool = True
+    # Reasoning tokens per call, billed as output. A Nemotron model will spend
+    # three thousand deliberating over a trivial question if nothing stops it.
+    ai_nvidia_reasoning_budget: int = 4_096
     ai_max_context_messages: int = 40
     # Once a conversation passes this many messages the older ones are folded
     # into a running summary. Deliberately below `ai_max_context_messages`, so

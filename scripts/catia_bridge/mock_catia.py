@@ -104,6 +104,11 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         self.snapshots = self.workdir / "snapshots"
         for directory in (self.documents, self.snapshots):
             directory.mkdir(parents=True, exist_ok=True)
+        # Assembly state lives outside `_reset`: the open product survives
+        # `catia_new_part`, exactly as it does in CATIA, and a reset that
+        # cleared it would let the mock pass a sequence the real bridge fails.
+        self.product: str | None = None
+        self.components_placed: list[dict[str, Any]] = []
         # The interface outlives the part: closing a document does not change
         # what language CATIA is installed in, and `_reset` runs per document.
         self.ui = MockUi(language=language)
@@ -157,6 +162,9 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
 
     def new_part(self, *, name: str) -> dict[str, Any]:
         self._reset()
+        # A new part becomes the active document, so the product is no longer
+        # what the assembly tools would act on. Saved components survive.
+        self.product = None
         self.doc_name = name
         self.doc_path = self.documents / f"{_safe_filename(name)}.CATPart"
         self._write_document()
@@ -921,6 +929,16 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         return {"features": self._feature_names()}
 
     def update(self) -> dict[str, Any]:
+        # A product resolves its constraints on update, so this dispatches the
+        # same way the COM backend does rather than always answering about a part.
+        if self.product is not None:
+            return {
+                "updated": True,
+                "product": self.product,
+                "components": [c["name"] for c in self.components_placed],
+                "mass_kg": None,
+                "mass_is_provisional": True,
+            }
         self._require_document()
         self.up_to_date = True
         self._write_document()

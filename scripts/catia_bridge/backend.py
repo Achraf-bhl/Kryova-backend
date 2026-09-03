@@ -12,6 +12,7 @@ a `result` frame. Raising `CatiaOperationError` becomes `{"ok": false, "error":
 so a COM exception cannot take the daemon down.
 """
 
+import inspect
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -411,6 +412,61 @@ def implemented_tools(backend: CatiaBackend) -> tuple[str, ...]:
             for tool, method in TOOL_METHODS.items()
             if callable(getattr(backend, method, None))
         )
+    )
+
+
+def unimplemented_options(
+    tool: str, method: str, backend: CatiaBackend, arguments: dict[str, Any]
+) -> CatiaOperationError | None:
+    """The error for an *option* this bridge's method cannot take, or None.
+
+    The registry is one declaration read by four consumers, and three of them
+    are generated from it -- the model's schema, the daemon's validation table,
+    the docs. The fourth, the backend method, is hand-written, so it is the only
+    one that can fall behind. It did: the registry rewrite widened `catia_pad`
+    with `limit`/`up_to`/`thin` and the rest, and the COM method behind it still
+    takes the four arguments it shipped with.
+
+    What that looked like from the outside was a raw Python error reaching the
+    engineer mid-build --
+
+        TypeError while running catia_sketch_polygon:
+        CatiaCom.sketch_polygon() got an unexpected keyword argument 'sketch'
+
+    -- which says nothing about what to do and reads as a crash rather than as a
+    limit. The agent's recovery from a crash is to retry the same call.
+
+    So the gap is reported the way `unsupported` reports a missing tool: name
+    the options, say they are not implemented *here*, and say the operation is
+    still available without them. Checked before the call, so nothing has run
+    and nothing needs undoing.
+
+    Returns None when the method can take everything it is being sent, which is
+    the answer for all but the operations listed in
+    `tests/test_backend_signatures.py`.
+    """
+    try:
+        parameters = inspect.signature(getattr(backend, method)).parameters
+    except (TypeError, ValueError):  # pragma: no cover - a builtin or a C method
+        return None
+    if any(p.kind is p.VAR_KEYWORD for p in parameters.values()):
+        return None
+    accepted = {
+        name
+        for name, p in parameters.items()
+        if p.kind in (p.KEYWORD_ONLY, p.POSITIONAL_OR_KEYWORD)
+    }
+    unknown = sorted(set(arguments) - accepted)
+    if not unknown:
+        return None
+    kind = "mock bridge" if backend.is_mock else "bridge"
+    options = ", ".join(repr(name) for name in unknown)
+    return CatiaOperationError(
+        f"{tool} accepts {options} in its schema, but this {kind} does not implement "
+        f"{'that option' if len(unknown) == 1 else 'those options'} yet. Nothing was "
+        f"changed. Call {tool} again without "
+        f"{'it' if len(unknown) == 1 else 'them'}, or reach the full command through "
+        "catia_run_command, which drives CATIA's own menus."
     )
 
 

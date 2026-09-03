@@ -130,6 +130,20 @@ class OpenAICompatibleProvider(LLMProvider):
         # Learned on first use, then remembered: see `_structured_payload`.
         self._json_schema_supported = True
 
+    def _extra_body(self) -> dict[str, Any]:
+        """Vendor fields to merge into every request. Empty for a plain endpoint.
+
+        A subclass overrides this to reach a feature its vendor exposes outside
+        the OpenAI schema -- NVIDIA's reasoning controls are the case it exists
+        for. It is a hook rather than a config knob because the fields are not
+        interchangeable: this endpoint family *rejects* what it does not know.
+        NVIDIA answers `400 Validation: Unsupported parameter(s)`, so a field
+        that is right for one server takes another one down entirely, and
+        "merge whatever the operator put in the env" would be a way to break
+        every call with a typo.
+        """
+        return {}
+
     def _headers(self) -> dict[str, str]:
         headers = {"content-type": "application/json"}
         # Local servers (LM Studio, llama.cpp, vLLM) usually need no key.
@@ -164,6 +178,7 @@ class OpenAICompatibleProvider(LLMProvider):
         """
         json_schema = strictify(schema.model_json_schema())
         payload: dict[str, Any] = {
+            **self._extra_body(),
             "model": self._model,
             "max_completion_tokens": max_tokens,
             "messages": [
@@ -255,15 +270,15 @@ class OpenAICompatibleProvider(LLMProvider):
                 f"The model returned output that does not match the expected schema: {exc}"
             ) from exc
 
-    def chat(
+    def _chat_payload(
         self,
-        *,
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         max_tokens: int,
-    ) -> AssistantTurn:
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
+            **self._extra_body(),
             "model": self._model,
             "max_completion_tokens": max_tokens,
             "messages": [
@@ -274,27 +289,16 @@ class OpenAICompatibleProvider(LLMProvider):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        return payload
 
-        try:
-            response = httpx.post(
-                f"{self._base_url}/chat/completions",
-                json=payload,
-                headers=self._headers(),
-                timeout=self._timeout,
-            )
-            response.raise_for_status()
-        except httpx.TimeoutException as exc:
-            raise LLMError(f"The model did not respond within {self._timeout:g}s.") from exc
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (401, 403):
-                raise LLMUnavailable("The API key was rejected.") from exc
-            raise LLMError(
-                f"Chat failed ({exc.response.status_code}): {exc.response.text[:200]}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise LLMError(f"Chat request failed: {exc}") from exc
+    def _parse_turn(self, body: dict[str, Any]) -> AssistantTurn:
+        """Read one chat response into the agent's normal form.
 
-        body = response.json()
+        Its own method so a vendor subclass can reinterpret the response without
+        also owning the request. NVIDIA needs exactly that: it returns the
+        model's reasoning in a second field, and what belongs in `text` depends
+        on it.
+        """
         choices = body.get("choices") or []
         if not choices:
             raise LLMError("The model returned no choices.")
@@ -325,3 +329,13 @@ class OpenAICompatibleProvider(LLMProvider):
             usage=_usage(body),
             truncated=choice.get("finish_reason") == "length",
         )
+
+    def chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> AssistantTurn:
+        return self._parse_turn(self._post(self._chat_payload(system, messages, tools, max_tokens)))

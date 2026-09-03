@@ -51,3 +51,8 @@ data/bm25/index/
 # OS
 .DS_Store
 Thumbs.db
+
+# Ad-hoc latency probe written at the repo root with a live API key pasted in.
+# Same class of accident as the `.env` note at the top of this file: an
+# untracked scratch file one `git add -A` away from being a published secret.
+test _api_latancy.py

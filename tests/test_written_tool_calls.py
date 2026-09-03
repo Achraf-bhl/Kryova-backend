@@ -23,7 +23,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.ai.agent import MAX_CORRECTIONS, run_agent
-from app.ai.malformed import correction_for, find_written_tool_calls
+from app.ai.malformed import correction_for, find_written_tool_calls, is_contentless
 from app.ai.provider import AssistantTurn, TokenUsage, ToolCall
 from app.ai.tools import ToolBox
 from app.models import Conversation, MessageRole, Project, User
@@ -327,3 +327,94 @@ class TestAnEmptyTurnIsNotAnAnswer:
             if message.role is MessageRole.ASSISTANT and not message.tool_calls
         ]
         assert final[-1].content == "10 mm."
+
+
+class TestAnEmptyJsonHuskIsNotAnAnswerEither:
+    """Observed live, and it is the last line the user actually saw.
+
+    A CATIA session ended with the assistant's final reply being the two
+    characters `{}`. `not text.strip()` is true for whitespace and false for
+    that, so the loop read it as the model's considered answer, wrote it to the
+    transcript and closed the turn. The user's chat ends with an empty JSON
+    object where the explanation of what was built should have been.
+
+    It is handled as *blank* rather than as a written tool call because it names
+    no tool and describes no work -- the right correction is "you said nothing,
+    say something", which the empty-turn path already sends.
+    """
+
+    def _run(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        turns: list[AssistantTurn],
+    ) -> Any:
+        return run_agent(
+            db=db_session,
+            provider=ScriptedProvider(turns),
+            conversation=conversation,
+            toolbox=_toolbox(db_session, user, project),
+            user_message="Design an M8 50 mm hex bolt.",
+            user=user,
+            allow_mutations=True,
+        )
+
+    def test_a_bare_empty_object_is_retried_rather_than_shown(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        reply = self._run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [
+                AssistantTurn(text="{}", usage=TokenUsage(1, 1)),
+                AssistantTurn(text="The bolt is modelled.", usage=TokenUsage(1, 1)),
+            ],
+        )
+        assert reply.text == "The bolt is modelled."
+
+    def test_a_model_that_only_ever_emits_a_husk_says_so_plainly(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        reply = self._run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [AssistantTurn(text="{}", usage=TokenUsage(1, 1))] * (MAX_CORRECTIONS + 1),
+        )
+        assert "{}" not in reply.text
+        assert "did not manage to produce an answer" in reply.text
+
+
+class TestContentlessDetection:
+    """The predicate on its own. A false positive here retries a good answer."""
+
+    @pytest.mark.parametrize(
+        "text",
+        ["", "   ", "\n\n", "{}", "[]", "null", "{ }", '""', "```json\n{}\n```", "```\n{}\n```"],
+    )
+    def test_a_husk_is_contentless(self, text: str) -> None:
+        assert is_contentless(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "10 mm.",
+            "The bolt is modelled.",
+            'I used {"name": "Bracket"} for the part.',
+            "{} is an empty object in JSON, which is what your file contains.",
+            '{"doc_name": "Bolt.CATPart"}',
+            "0",
+        ],
+    )
+    def test_a_real_answer_is_not(self, text: str) -> None:
+        """Including one that merely *contains* JSON, or explains a `{}`.
+
+        Treating every JSON-shaped reply as empty would retry good answers, so
+        the rule is a small closed set of whole-body husks, not "does this parse".
+        """
+        assert not is_contentless(text)

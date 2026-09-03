@@ -28,7 +28,6 @@ import base64
 import ctypes
 import hashlib
 import logging
-import math
 import shutil
 import threading
 import time
@@ -58,6 +57,21 @@ logger = logging.getLogger("kryova.catia.com")
 
 #: CATIA's reference planes, in the order `Part.OriginElements` exposes them.
 _ORIGIN_PLANE = {"XY": "PlaneXY", "YZ": "PlaneYZ", "ZX": "PlaneZX"}
+
+def _is_part_document(document: Any) -> bool:
+    """Whether this document is a CATPart, asked by trying rather than by name.
+
+    `.Part` exists on a part document and raises on a product one, and that is a
+    more reliable test than the file extension, which a document that has never
+    been saved does not necessarily have.
+    """
+    try:
+        document.Part
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
 
 #: A pattern's two directions both come from one origin plane: CATIA steps
 #: along that plane's *first* in-plane axis for direction 1 and its second for
@@ -772,75 +786,6 @@ class CatiaCom(
         }
 
     # -- sketches ------------------------------------------------------------
-
-    def sketch_rectangle(  # pragma: no cover - Windows only
-        self, *, plane: str, width_mm: float, height_mm: float
-    ) -> dict[str, Any]:
-        half_w, half_h = width_mm / 2.0, height_mm / 2.0
-        corners = [
-            (-half_w, -half_h),
-            (half_w, -half_h),
-            (half_w, half_h),
-            (-half_w, half_h),
-        ]
-
-        def draw(factory: Any) -> None:
-            for index in range(4):
-                start, end = corners[index], corners[(index + 1) % 4]
-                factory.CreateLine(start[0], start[1], end[0], end[1])
-
-        name = self._sketch(plane, draw)
-        return {
-            "feature": name,
-            "sketch": name,
-            "plane": plane,
-            "shape": "rectangle",
-            "area_mm2": round(width_mm * height_mm, 4),
-            "features": self._feature_list(),
-        }
-
-    def sketch_circle(  # pragma: no cover - Windows only
-        self, *, plane: str, diameter_mm: float
-    ) -> dict[str, Any]:
-        def draw(factory: Any) -> None:
-            factory.CreateClosedCircle(0.0, 0.0, diameter_mm / 2.0)
-
-        name = self._sketch(plane, draw)
-        return {
-            "feature": name,
-            "sketch": name,
-            "plane": plane,
-            "shape": "circle",
-            "area_mm2": round(math.pi * (diameter_mm / 2) ** 2, 4),
-            "features": self._feature_list(),
-        }
-
-    def sketch_polygon(  # pragma: no cover - Windows only
-        self, *, plane: str, sides: int, diameter_mm: float
-    ) -> dict[str, Any]:
-        radius = diameter_mm / 2.0
-        points = [
-            (
-                radius * math.cos(2 * math.pi * index / sides + math.pi / 2),
-                radius * math.sin(2 * math.pi * index / sides + math.pi / 2),
-            )
-            for index in range(sides)
-        ]
-
-        def draw(factory: Any) -> None:
-            for index in range(sides):
-                start, end = points[index], points[(index + 1) % sides]
-                factory.CreateLine(start[0], start[1], end[0], end[1])
-
-        name = self._sketch(plane, draw)
-        return {
-            "feature": name,
-            "sketch": name,
-            "plane": plane,
-            "shape": f"polygon-{sides}",
-            "area_mm2": round(0.5 * sides * radius**2 * math.sin(2 * math.pi / sides), 4),
-            "features": self._feature_list(),
-        }
 
     def sketch_gear_profile(  # pragma: no cover - Windows only
         self,
@@ -1661,11 +1606,68 @@ class CatiaCom(
         return {"features": self._feature_list()}
 
     def update(self) -> dict[str, Any]:  # pragma: no cover - Windows only
+        # A product updates too, and updating one is how its constraints get
+        # resolved -- so this dispatches on what is actually open rather than
+        # assuming a part and failing on the document the assembly tools create.
+        document = self._document()
+        if not _is_part_document(document):
+            root = document.Product
+            try:
+                root.Update()
+            except Exception as exc:  # noqa: BLE001
+                raise CatiaOperationError(
+                    f"CATIA could not resolve this assembly ({exc}). A constraint is "
+                    "probably impossible to satisfy -- catia_assembly_analysis reports "
+                    "which ones conflict."
+                ) from exc
+            return {
+                "updated": True,
+                "product": str(root.PartNumber),
+                "components": [
+                    str(root.Products.Item(i).Name)
+                    for i in range(1, int(root.Products.Count) + 1)
+                ],
+                **self._measure_product(root),
+            }
         self._part().Update()
         return {
             "updated": True,
             "features": self._feature_list(),
             **self._measure_solid(),
+        }
+
+    def _measure_product(self, root: Any) -> dict[str, Any]:  # pragma: no cover
+        """Mass and volume rolled up over the whole assembly, where CATIA offers it.
+
+        `Product.Analyze` gives both directly and accounts for every instance,
+        which is the number an engineer means by "what does it weigh". It needs
+        every component to carry a material; without one CATIA reports zero
+        rather than failing, so a zero is reported as unknown instead of quoted
+        as a mass.
+        """
+        try:
+            analyze = root.Analyze
+            mass = float(analyze.Mass)
+            volume = float(analyze.Volume)
+        except Exception:  # noqa: BLE001 - not every seat exposes Analyze
+            return {"mass_kg": None, "mass_is_provisional": True}
+        if mass <= 0.0:
+            return {
+                "mass_kg": None,
+                "mass_is_provisional": True,
+                "mass_warning": (
+                    "CATIA reports no mass for this assembly, which normally means at "
+                    "least one component has no material. Set materials on the parts "
+                    "before quoting a weight."
+                ),
+            }
+        # `Analyze` already reports millimetre units, and Mass in kilogrammes --
+        # see `_measure_solid` for why that distinction matters here. Scaling
+        # this would reproduce the 1e9 error that made every mass read 0.0 kg.
+        return {
+            "mass_kg": round(mass, 6),
+            "volume_mm3": round(volume, 4),
+            "mass_is_provisional": False,
         }
 
     def _feature_result(self, name: str) -> dict[str, Any]:  # pragma: no cover

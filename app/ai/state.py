@@ -23,6 +23,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.ai.prompts import STATE_CLOSE, STATE_OPEN
+from app.ai.resume import resume_lines
 from app.ai.sanitise import sanitise_untrusted
 from app.catia_kb import catia_knowledge
 from app.core.config import settings
@@ -260,8 +261,11 @@ def _catia_lines(
         return lines
 
     lines.append(
-        f"catia_document: {_clean(document)} -- bound to this conversation; if you "
-        "have not opened it in this session, call catia_open_document first"
+        f"catia_document: {_clean(document)} -- bound to this conversation. Every "
+        "CATIA tool is sent scoped to it and the bridge activates it first, "
+        "reopening it if CATIA was restarted, so there is nothing to reopen by "
+        "hand. Only call catia_open_document if a tool tells you the file is gone "
+        "from the workstation."
     )
     state = conversation.catia_state or {}
     # The material is a decision, not a measurement, and it is the one thing the
@@ -414,6 +418,11 @@ def build_state_block(db: Session, user: User, conversation: Conversation) -> st
             seat_language,
         )
     )
+    # What this conversation already did, read from the operation log rather
+    # than from the transcript -- the transcript is what the window and the
+    # summariser have been trimming, and the loose ends are exactly what they
+    # trim first. See `resume.py`.
+    lines.extend(resume_lines(db, conversation.id))
     lines.extend(_catia_reference_lines(conversation, seat_language))
 
     body = "\n".join(lines)

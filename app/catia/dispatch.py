@@ -132,6 +132,39 @@ _NO_AUTO_CHECKPOINT = frozenset(
     }
 )
 
+#: Tools whose call frame does *not* carry the conversation's document, and why.
+#: Everything else is scoped: the daemon activates the bound document -- reopening
+#: it if CATIA was restarted -- before the operation runs, so a conversation
+#: resumed a week later modelling into the part it owns is a property of the
+#: system rather than something the model has to remember to arrange.
+_UNSCOPED_TOOLS = frozenset(
+    {
+        "catia_new_part",  # creates the binding; there is nothing to return to
+        "catia_open_document",  # restores it, and is the only path that carries
+        # the stored checkpoint to rebuild a lost file from
+        # Opens the imported file, which is not the bound one. Note what that
+        # leaves unresolved: nothing rebinds the conversation to the imported
+        # document, so the next scoped call reattaches to the part that was
+        # already bound and the import sits open beside it. That is at least
+        # coherent -- before scoping existed, the mutation landed on the
+        # imported document while its checkpoint and its log row named the
+        # bound one. Deciding whether an import should rebind is a product
+        # question, and it is still open.
+        "catia_import",
+        # The interactive family, for the reason that gets them out of the
+        # auto-checkpoint too: they run precisely when a modal dialog has COM
+        # blocked, and activating a document is a COM call. Scoping them would
+        # mean the tools whose job is to clear a stuck dialog can only run when
+        # no dialog is stuck. `session._ensure_document` skips them as well --
+        # this is the braces to that belt.
+        "catia_describe_dialog",
+        "catia_fill_dialog",
+        "catia_dialog_action",
+        "catia_press_key",
+        "catia_list_commands",
+    }
+)
+
 # Per-device ceilings, mirroring the daemon's own. Both windows exist because
 # they catch different things: the minute window catches a runaway agent loop,
 # the hour window catches a slow drip that would never trip it.
@@ -637,6 +670,9 @@ def _execute(
         conversation_id=conversation_id,
         arguments=payload,
         timeout_s=_timeout_for(spec, timeout_s),
+        # Which document this call is for, so the daemon acts on the
+        # conversation's own part rather than on whatever CATIA has in front.
+        document=_document_scope(spec, document),
         # Forwarded, not re-derived: the daemon refuses a destructive call that
         # arrives without one, and only the server can supply it.
         approval_token=(
@@ -667,6 +703,7 @@ def _send(
     arguments: dict[str, Any],
     timeout_s: float,
     approval_token: str | None = None,
+    document: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One round trip, with the transport's failures translated for the model."""
     try:
@@ -677,6 +714,7 @@ def _send(
             timeout_s=timeout_s,
             queue_timeout_s=timeout_s,
             approval_token=approval_token,
+            document=document,
         )
     except BridgeGone as exc:
         raise CatiaUnavailable(str(exc)) from exc
@@ -690,6 +728,20 @@ def _bound_document(db: Session, conversation_id: str | None) -> CatiaDocument |
     if not conversation_id:
         return None
     return db.scalar(select(CatiaDocument).where(CatiaDocument.conversation_id == conversation_id))
+
+
+def _document_scope(
+    spec: CatiaToolSpec, document: CatiaDocument | None
+) -> dict[str, Any] | None:
+    """The document envelope for one call, or None to leave the call unscoped.
+
+    Note what is *not* here: the model. It never names a document and never sees
+    a path, so this is read straight off the binding row -- which is the only
+    thing that knows which part this conversation has been building.
+    """
+    if document is None or spec.name in _UNSCOPED_TOOLS:
+        return None
+    return {"doc_name": document.doc_name, "remote_path": document.remote_path}
 
 
 def _enrich(
@@ -867,6 +919,13 @@ def _auto_checkpoint(
             conversation_id=document.conversation_id,
             arguments={"label": label, "max_inline_bytes": INLINE_TRANSFER_MAX_BYTES},
             timeout_s=settings.catia_call_timeout_s,
+            # Scoped to the same document as the mutation it is protecting, and
+            # this is the call where getting it wrong is worst. An unscoped
+            # checkpoint snapshots whatever CATIA has active; the mutation then
+            # reattaches and changes the right part -- leaving a checkpoint of
+            # some *other* part filed as this one's undo, so restoring it would
+            # overwrite the work rather than recover it.
+            document=_document_scope(spec, document),
         )
     except (CatiaError, CatiaUnavailable) as exc:
         raise CatiaError(

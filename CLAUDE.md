@@ -299,6 +299,26 @@ which drops the file only once nothing references it. Small metadata rows go to 
 **Migrations** live only in `migrations/versions/`. Run `alembic check` before finishing any
 model change.
 
+**A conversation acts on the document it owns, not on CATIA's `ActiveDocument`.** Every
+document-scoped call frame carries `document: {doc_name, remote_path}` from the conversation's
+`CatiaDocument` row, and `backend.ensure_document` activates it — reopening it from disk if
+CATIA was restarted — before the operation runs. Without it, an engineer clicking another part
+between two messages silently redirected the work; nothing errored, the wrong file just grew
+features. The unscoped tools are enumerated with their reasons in `dispatch._UNSCOPED_TOOLS`
+(the three that *establish* a binding, plus the interactive family, which runs when a modal
+dialog has COM blocked and cannot afford a COM call). A backend that holds documents must
+override `ensure_document`; `tests/test_document_binding.py` fails if one inherits the no-op.
+
+**The transcript is not the record of what was done — `CatiaOperation` is.** The window trims
+the oldest messages and the summary is an LLM paraphrase of what it trimmed, so neither can be
+trusted about work from last week. `app/ai/resume.py` reads the log instead: a few lines in the
+per-turn state block (how much ran, how long ago, and **which attempts failed and were never
+made to work**) plus the `design_history` tool for the full paged account. Loose ends are keyed
+on the tool alone and cleared by any later success of that tool — keying on arguments would
+leave every superseded retry in the list forever. It carries no `catia_` prefix on purpose:
+that prefix means "goes to the workstation", and this answers with CATIA closed
+(`tests/test_tool_registry.py` enforces it).
+
 ## Known landmines in the current code
 
 Read these before touching the relevant file — they are live defects, not style opinions.

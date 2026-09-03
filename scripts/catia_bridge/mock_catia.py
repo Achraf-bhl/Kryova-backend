@@ -167,6 +167,41 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
             "up_to_date": True,
         }
 
+    def ensure_document(self, *, doc_name: str, remote_path: str | None) -> bool:
+        """Load this conversation's part if it is not the one in hand.
+
+        The mock holds one document at a time, exactly as a single CATIA session
+        effectively does, so "switch to it" is "read its file". That makes the
+        two backends fail and succeed in the same places: a document whose file
+        is gone refuses here for the same reason it refuses on Windows, and the
+        refusal names the same tool.
+        """
+        wanted = Path(remote_path) if remote_path else None
+        if wanted is not None and self.doc_path is not None:
+            if str(self.doc_path).lower() == str(wanted).lower():
+                return False
+        elif wanted is None and self.doc_name is not None:
+            # No path was ever recorded -- a row written before paths were
+            # stored. The name is all there is to compare.
+            if self.doc_name.lower() == doc_name.lower():
+                return False
+
+        if wanted is None:
+            raise CatiaOperationError(
+                f"The document {doc_name!r} this conversation owns is not open, and "
+                "no path was recorded for it. Call catia_open_document to reopen it "
+                "before changing anything."
+            )
+        if not wanted.is_file():
+            raise CatiaOperationError(
+                f"The document {doc_name!r} this conversation owns is not open and is "
+                "no longer on this workstation. Call catia_open_document, which "
+                "restores it from the last checkpoint."
+            )
+        self._reset()
+        self._load_document(wanted)
+        return True
+
     def open_document(
         self,
         *,
@@ -1303,6 +1338,14 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
                     "size": list(self.size) if self.size else None,
                     "removed_volume_mm3": self.removed_volume_mm3,
                     "counters": self._counters,
+                    # The material is applied to the document in CATIA, so it
+                    # has to survive a reopen here too. Without it, closing and
+                    # reopening a steel part silently reverted it to the default
+                    # density and every mass reported afterwards was wrong by
+                    # the ratio of the two -- the same class of error the
+                    # density was introduced to fix, reintroduced by a restore.
+                    "material": self.material,
+                    "density_kg_m3": self.density_kg_m3,
                     # Formulas, design tables and checks are part of the
                     # document in CATIA, so a checkpoint has to carry them --
                     # restoring a part whose formulas had vanished would leave
@@ -1331,6 +1374,13 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         self.size = tuple(size) if size else None  # type: ignore[assignment]
         self.removed_volume_mm3 = float(state.get("removed_volume_mm3") or 0.0)
         self._counters = state.get("counters") or {}
+        self.material = state.get("material")
+        # Absent in a document written before the material was persisted, which
+        # reads back at the default density rather than at zero -- a part that
+        # weighs nothing is a worse answer than a part that weighs the default.
+        self.density_kg_m3 = float(
+            state.get("density_kg_m3") or (_DENSITY_KG_PER_MM3 * 1e9)
+        )
         # Absent in documents written before knowledge was modelled, which read
         # back as a part with no formulas rather than failing to open.
         self._knowledge = state.get("knowledge") or None

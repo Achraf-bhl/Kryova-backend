@@ -33,6 +33,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.ai.resume import HISTORY_PAGE_LIMIT, build_history
 from app.ai.state import bound_document_name
 from app.catia_kb import catia_knowledge
 from app.core.config import settings
@@ -91,6 +92,10 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     "update_project": "Renaming the project",
     "delete_project": "Deleting the project",
     "list_materials": "Checking the material library",
+    # Reads the server's own log of CATIA calls, so it deliberately carries no
+    # `catia_` prefix: that prefix means "goes to the workstation", and this one
+    # answers with CATIA closed. `tests/test_tool_registry.py` enforces it.
+    "design_history": "Reading what was already built",
     # Deliberately says what the assistant is doing, not how it does it. A user
     # watching the step list should read "it went and checked the manuals",
     # which is the true and useful description; the retrieval mechanism behind
@@ -274,6 +279,41 @@ class ToolBox:
                     required=["name"],
                 ),
                 handler=self._create_project,
+            ),
+            Tool(
+                name="design_history",
+                description=(
+                    "Everything this conversation has already done in CATIA, in the "
+                    "order it happened: which tool ran, what it acted on, whether it "
+                    "worked and what it said when it did not. Read from the server's "
+                    "own log of the calls, so it is complete even for work that "
+                    "happened days ago and is no longer in the conversation above you. "
+                    "Call this when you are picking a conversation back up, when the "
+                    "state block says an operation is unfinished, or before redoing "
+                    "anything -- it is how you find out whether a feature was already "
+                    "built rather than asking the user to remember. Needs no "
+                    "workstation: it answers even when CATIA is closed."
+                ),
+                parameters=_object(
+                    {
+                        "failures_only": {
+                            "type": "boolean",
+                            "description": (
+                                "Only the calls that failed. Use this to pick up loose "
+                                "ends without reading the whole build order."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": (
+                                f"How many operations to return, newest kept, "
+                                f"1-{HISTORY_PAGE_LIMIT}. Defaults to "
+                                f"{HISTORY_PAGE_LIMIT}."
+                            ),
+                        },
+                    }
+                ),
+                handler=self._design_history,
             ),
             Tool(
                 name="list_projects",
@@ -583,6 +623,23 @@ class ToolBox:
                 "or you build it with the CATIA tools if they are available to you."
             ),
         }
+
+    def _design_history(
+        self, failures_only: bool = False, limit: int = HISTORY_PAGE_LIMIT
+    ) -> dict[str, Any]:
+        """Read this conversation's CATIA operation log.
+
+        Scoped to the conversation and nothing else, which is also the access
+        control: the log is keyed on `conversation_id`, and a conversation
+        belongs to one user. There is no argument that could widen it.
+        """
+        conversation = self.conversation
+        return build_history(
+            self.db,
+            conversation.id if conversation is not None else None,
+            limit=limit,
+            failures_only=bool(failures_only),
+        )
 
     def _list_projects(self) -> dict[str, Any]:
         rows = self.db.scalars(

@@ -481,6 +481,58 @@ class CatiaCom(
             "catia_new_part or catia_product_create first."
         )
 
+    def ensure_document(  # pragma: no cover - Windows only
+        self, *, doc_name: str, remote_path: str | None
+    ) -> bool:
+        """Activate this conversation's document, opening it if CATIA closed it.
+
+        Runs before every document-scoped operation, so the ordinary case has to
+        be cheap: one `ActiveDocument.FullName` read and a string compare. It
+        only does work when the answer is wrong.
+
+        Three ways it can be wrong, in increasing cost:
+
+        * **Open but not active** -- the engineer clicked another window, or a
+          second conversation opened its own part. `Activate()` on the handle
+          CATIA already holds; no file is read.
+        * **Not open at all** -- CATIA was restarted since the last message, so
+          the session is gone but the file is not. Reopen it from disk.
+        * **Not on the workstation** -- a cleaned temp directory, a reimaged
+          laptop. Nothing here can fix that, so it refuses and names
+          `catia_open_document`, which is the one path that carries the stored
+          checkpoint to restore from. Refusing is the point: the alternative is
+          padding the part that happens to be on screen.
+        """
+        wanted = Path(remote_path) if remote_path else None
+
+        for index in range(1, int(self._app.Documents.Count) + 1):
+            existing = self._app.Documents.Item(index)
+            if not _same_document(existing, doc_name, wanted):
+                continue
+            # `is_active` is read off the same handle rather than compared to
+            # `ActiveDocument` by name: two documents can share a name when one
+            # of them has never been saved, and the comparison that matters here
+            # is identity, not text.
+            if _is_active(self._app, existing):
+                return False
+            existing.Activate()
+            return True
+
+        if wanted is None:
+            raise CatiaOperationError(
+                f"The document {doc_name!r} this conversation owns is not open in "
+                "CATIA, and no path was recorded for it. Call catia_open_document "
+                "to reopen it before changing anything."
+            )
+        if not wanted.is_file():
+            raise CatiaOperationError(
+                f"The document {doc_name!r} this conversation owns is not open in "
+                "CATIA and is no longer on this workstation. Call "
+                "catia_open_document, which restores it from the last checkpoint."
+            )
+        self._app.Documents.Open(str(wanted))
+        return True
+
     def open_document(  # pragma: no cover - Windows only
         self,
         *,
@@ -2558,3 +2610,54 @@ def _face_point(
 def _safe_filename(name: str) -> str:
     kept = "".join(c if (c.isalnum() or c in "-_") else "-" for c in name).strip("-")
     return kept[:64] or "part"
+
+
+def _same_document(  # pragma: no cover - Windows only
+    document: Any, doc_name: str, path: Path | None
+) -> bool:
+    """Whether an open CATIA document is the one the server named.
+
+    By path when there is one, because a path is unambiguous and a name is not:
+    `Bracket.CATPart` in two directories is two parts, and CATIA is happy to
+    hold both open at once. Only when no path was ever recorded does this fall
+    back to the stem, which is the best available answer for a row written
+    before paths were stored.
+
+    Every attribute read is guarded. `Documents.Item(i)` can hand back a
+    document that is mid-close, and a COM error while *deciding* which document
+    to use must read as "not this one" rather than take the daemon down.
+    """
+    try:
+        full_name = str(getattr(document, "FullName", "") or "")
+    except Exception:  # noqa: BLE001 - a document closing under us is not a match
+        return False
+    if path is not None:
+        return bool(full_name) and full_name.lower() == str(path).lower()
+    try:
+        name = str(getattr(document, "Name", "") or "")
+    except Exception:  # noqa: BLE001
+        return False
+    return Path(name).stem.lower() == Path(doc_name).stem.lower()
+
+
+def _is_active(app: Any, document: Any) -> bool:  # pragma: no cover - Windows only
+    """Whether `document` is the one CATIA would act on right now.
+
+    Compared by `FullName` rather than by object identity: `ActiveDocument` and
+    `Documents.Item(i)` return separate COM proxies onto the same document, so
+    `is` is always False and `==` is a COM equality nobody should rely on.
+    A document with no path yet compares by name, which is enough — an unsaved
+    document is one this daemon just created and has not lost track of.
+    """
+    try:
+        active = app.ActiveDocument
+    except Exception:  # noqa: BLE001 - nothing active is a legitimate answer
+        return False
+    if active is None:
+        return False
+    try:
+        left = str(getattr(active, "FullName", "") or getattr(active, "Name", ""))
+        right = str(getattr(document, "FullName", "") or getattr(document, "Name", ""))
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(left) and left.lower() == right.lower()

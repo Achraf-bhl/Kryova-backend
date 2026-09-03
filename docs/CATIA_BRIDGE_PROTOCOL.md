@@ -84,6 +84,27 @@ wire, so a confused or compromised agent stream cannot manufacture a destructive
 call the server never signed. The token stays out of `arguments` so it never has
 to appear in a tool's parameter schema, which is the model's interface.
 
+Document-scoped tools additionally carry **which document the call is for**, on
+the frame rather than in `arguments`:
+```json
+{"type":"call","id":"<uuid4>","tool":"catia_pad","conversation_id":"<uuid>",
+ "document":{"doc_name":"Bracket","remote_path":"C:\\…\\Bracket.CATPart"},
+ "arguments":{"sketch":"Sketch.1","length_mm":12.0}}
+```
+The daemon activates that document before running the operation — reopening it
+from disk if CATIA has been restarted since the last message — and refuses the
+call if it cannot (`backend.ensure_document`). Without it every operation acted
+on `ActiveDocument`, so an engineer who clicked another part between two
+messages, or a second conversation open in another tab, silently redirected the
+work into a part nobody was talking about. Nothing failed; the wrong file grew
+features.
+
+It is omitted for `catia_new_part` and `catia_open_document` (they *establish*
+the binding), for `catia_import` (it opens the imported file, which is not the
+bound one), and for the interactive family — those run when a modal dialog has
+COM blocked, and activating a document is a COM call. Server list:
+`dispatch._UNSCOPED_TOOLS`; the daemon skips `OUT_OF_BAND_TOOLS` independently.
+
 `arguments` as sent is not always `arguments` as the model wrote them. The
 server resolves what the model is deliberately never given (see "No filesystem
 paths from the model" below) and adds a small, per-tool, enumerated set of
@@ -138,6 +159,14 @@ Each conversation owns at most one CATIA document.
   the latest checkpoint blob if the local file is gone).
 
 This is what makes "come back tomorrow and keep building" work.
+
+The binding is **enforced on every call, not just at the reopen**: each
+document-scoped frame carries the bound document (see "invoke a tool" above) and
+the daemon activates it first. So resuming does not actually depend on the model
+remembering to call `catia_open_document` — the first modelling tool it reaches
+for reattaches by itself. `catia_open_document` remains the path that can
+*rebuild* a document the workstation has lost, because it is the only one
+carrying the checkpoint bytes, and the reattach failure message says so.
 
 ## File transfer: inline, with a ceiling
 

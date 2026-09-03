@@ -75,6 +75,7 @@ class ScriptedDevice(DeviceConnection):
         timeout_s: float,
         queue_timeout_s: float,
         approval_token: str | None = None,
+        document: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
             {
@@ -82,6 +83,7 @@ class ScriptedDevice(DeviceConnection):
                 "arguments": arguments,
                 "timeout_s": timeout_s,
                 "approval_token": approval_token,
+                "document": document,
             }
         )
         if self.raises is not None and tool != "catia_checkpoint":
@@ -488,6 +490,61 @@ def test_reopening_sends_the_stored_path_the_model_never_supplied(wired):
     # The model names documents; the server resolves paths. That is what makes
     # "no filesystem paths from the model" enforceable rather than aspirational.
     assert sent["remote_path"] == "C:\\work\\Bracket.CATPart"
+
+
+def test_every_modelling_call_names_the_document_it_is_for(wired):
+    # The daemon acts on `ActiveDocument`, which is a property of the screen and
+    # not of the conversation. Naming the bound document on the frame is what
+    # stops a pad landing in whichever part the engineer clicked on between two
+    # messages -- and what makes resuming work without the model having to
+    # remember to reopen anything.
+    run(wired, "catia_new_part", {"name": "Bracket"})
+    wired["connection"].calls.clear()
+
+    run(wired, "catia_pad", {"sketch": "Sketch.1", "length_mm": 10})
+
+    assert wired["connection"].calls[-1]["document"] == {
+        "doc_name": "Bracket",
+        "remote_path": "C:\\work\\Bracket.CATPart",
+    }
+
+
+@pytest.mark.parametrize("tool", ["catia_new_part", "catia_open_document"])
+def test_the_tools_that_establish_the_binding_are_not_scoped_by_it(wired, tool):
+    # Scoping `catia_open_document` would be circular -- it is the tool that
+    # reopens a document the workstation has lost, and it carries the checkpoint
+    # bytes to rebuild it from. Scoping `catia_new_part` would refuse to create
+    # a second part because the first one is not open.
+    run(wired, "catia_new_part", {"name": "Bracket"})
+    wired["connection"].replies["catia_open_document"] = {"doc_name": "Bracket"}
+    wired["connection"].calls.clear()
+
+    run(wired, tool, {"name": "Housing"} if tool == "catia_new_part" else {})
+
+    assert wired["connection"].calls[-1]["document"] is None
+
+
+def test_the_auto_checkpoint_is_scoped_to_the_part_it_is_protecting(wired):
+    # The call where getting this wrong is worst. An unscoped checkpoint
+    # snapshots whatever CATIA has active; the mutation then reattaches and
+    # changes the right part, leaving a snapshot of some *other* part filed as
+    # this one's undo. Restoring it would overwrite the work, not recover it.
+    run(wired, "catia_new_part", {"name": "Bracket"})
+    wired["connection"].calls.clear()
+
+    run(wired, "catia_pad", {"sketch": "Sketch.1", "length_mm": 10})
+
+    checkpoint = next(c for c in wired["connection"].calls if c["tool"] == "catia_checkpoint")
+    pad = next(c for c in wired["connection"].calls if c["tool"] == "catia_pad")
+    assert checkpoint["document"] == pad["document"] is not None
+
+
+def test_a_conversation_with_no_document_scopes_nothing(wired):
+    # There is nothing to scope to, and sending an empty envelope would have the
+    # daemon refuse a call that should simply run.
+    run(wired, "catia_status")
+    run(wired, "catia_new_part", {"name": "Bracket"})
+    assert wired["connection"].calls[0]["document"] is None
 
 
 def test_reopening_ships_the_latest_checkpoint_as_a_fallback(wired):

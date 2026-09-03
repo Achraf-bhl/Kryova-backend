@@ -190,9 +190,47 @@ class BridgeSession:
             )
         try:
             self._ensure_alive(tool)
+            self._ensure_document(tool, frame.get("document"))
             return getattr(self.backend, method)(**arguments)
         finally:
             self._lock.release()
+
+    def _ensure_document(self, tool: str, document: Any) -> None:
+        """Point the backend at the document the server says this call is for.
+
+        The `document` envelope field is advisory in shape and mandatory in
+        effect: when the server sends one, the operation runs against that
+        document or it does not run. The server omits it for the tools that
+        define the binding (`catia_new_part`, `catia_open_document`) and for the
+        ones that are not about a document at all, so "no field" means "the
+        server did not scope this call", never "act on whatever is in front of
+        you by choice".
+
+        Deliberately inside the lock and after `_ensure_alive`: switching
+        documents is a COM operation like any other, and it must not race a call
+        still finishing, nor run against a handle that has gone stale.
+
+        The field is read defensively rather than trusted, for the same reason
+        the tier is taken from the daemon's own table and never from the frame.
+        A malformed one is ignored -- the operation then behaves exactly as it
+        did before this existed, which is the honest failure mode for a field
+        that only ever narrows what a call may touch.
+        """
+        if tool in OUT_OF_BAND_TOOLS or not isinstance(document, dict):
+            return
+        doc_name = document.get("doc_name")
+        if not isinstance(doc_name, str) or not doc_name:
+            return
+        remote_path = document.get("remote_path")
+        switched = self.backend.ensure_document(
+            doc_name=doc_name,
+            remote_path=remote_path if isinstance(remote_path, str) else None,
+        )
+        if switched:
+            # Worth a log line: it means CATIA was showing something other than
+            # what the conversation is about, which is the moment an engineer
+            # would otherwise watch their screen change with no explanation.
+            logger.info("Reattached to %s before %s", doc_name, tool)
 
     def _ensure_alive(self, tool: str) -> None:
         """Two checks, on two threads, because they answer different questions.

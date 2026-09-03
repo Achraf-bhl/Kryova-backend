@@ -295,8 +295,17 @@ class DeviceConnection:
         timeout_s: float,
         queue_timeout_s: float,
         approval_token: str | None = None,
+        document: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run one tool on the device and return its data, blocking the caller.
+
+        `document` scopes the call to the document this conversation owns. It
+        rides on the frame rather than in `arguments` for the same reason the
+        approval token does: it is server authority about the call, not a
+        parameter the model has any business seeing or supplying. The daemon
+        activates that document -- reopening it if CATIA was restarted -- before
+        the operation runs, which is what stops a pad landing in whichever part
+        the engineer happened to click on between two messages.
 
         `approval_token` is forwarded on the frame for destructive tools. The
         daemon cannot verify the signature -- it holds no server secret -- but
@@ -336,6 +345,8 @@ class DeviceConnection:
             }
             if approval_token:
                 frame["approval_token"] = approval_token
+            if document:
+                frame["document"] = document
             self._send(frame)
 
             if not pending.done.wait(timeout_s):

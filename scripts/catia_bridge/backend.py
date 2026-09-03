@@ -65,6 +65,31 @@ class CatiaBackend(ABC):
         thread that acquired it, so only this thread can repair its own.
         """
 
+    def ensure_document(self, *, doc_name: str, remote_path: str | None) -> bool:
+        """Make the named document the one the next operation will act on.
+
+        Returns True when the backend had to switch or reopen, False when it was
+        already there. Raises `CatiaOperationError` when it cannot get to that
+        document at all, which is the safe direction: refusing is recoverable,
+        and modelling into the wrong part is not.
+
+        This is what makes a conversation's binding real rather than advisory.
+        The server records which document a conversation owns, but the operations
+        themselves have always acted on whatever CATIA had active -- so an
+        engineer who clicked another part between two messages, or a second
+        conversation open in another tab, silently redirected every subsequent
+        pad and pocket into a part nobody was talking about. Nothing failed;
+        the wrong file just quietly grew features.
+
+        Called on the operation thread immediately before the operation, with
+        the document the *server* says this conversation owns. Every backend
+        that can hold more than one document at a time must override it. The
+        default is a no-op for a backend that cannot -- there is no document to
+        get wrong -- and `tests/test_document_binding.py` asserts that both real
+        backends override it rather than inheriting this.
+        """
+        return False
+
     # -- documents -----------------------------------------------------------
 
     @abstractmethod

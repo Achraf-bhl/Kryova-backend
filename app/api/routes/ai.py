@@ -40,6 +40,7 @@ from app.ai import usage as token_usage
 from app.ai.agent import AgentReply, run_agent, stream_agent, summarise_step
 from app.ai.prompts import UNTRUSTED_CLOSE, UNTRUSTED_OPEN
 from app.ai.provider import TokenUsage
+from app.ai.resume import catia_activity
 from app.ai.state import bound_document_name
 from app.ai.tools import ToolBox, tool_label
 from app.api.deps import (
@@ -655,6 +656,31 @@ class ConversationMessageRead(BaseModel):
     created_at: str
 
 
+class UnfinishedOperationRead(BaseModel):
+    """A CATIA call whose most recent attempt in this conversation failed."""
+
+    tool: str
+    label: str = Field(description="The same human label the step list uses.")
+    error: str
+    attempts: int = Field(ge=1)
+
+
+class ConversationResumeRead(BaseModel):
+    """What this conversation already did, for someone returning to it.
+
+    The same facts the agent is given in its state block, read from the same
+    operation log -- so the human and the model come back to the identical
+    account of where the work got to. Two different answers to "what did we do"
+    on the same screen is worse than one of them being absent.
+    """
+
+    operations: int = Field(ge=0, description="CATIA calls made in this conversation.")
+    last_activity_at: str | None = Field(
+        default=None, description="ISO timestamp of the most recent CATIA call."
+    )
+    unfinished: list[UnfinishedOperationRead] = Field(default_factory=list)
+
+
 class ConversationRead(BaseModel):
     conversation_id: str
     title: str
@@ -663,6 +689,7 @@ class ConversationRead(BaseModel):
     updated_at: str
     has_catia_document: bool
     catia_document: str | None
+    resume: ConversationResumeRead
     prompt_tokens: int
     completion_tokens: int
     messages: list[ConversationMessageRead]
@@ -830,6 +857,7 @@ def read_conversation(
         )
 
     document = bound_document_name(db, conversation.id)
+    activity = catia_activity(db, conversation.id)
     return ConversationRead(
         conversation_id=conversation.id,
         title=conversation.title,
@@ -838,6 +866,21 @@ def read_conversation(
         updated_at=conversation.updated_at.isoformat(),
         has_catia_document=document is not None,
         catia_document=document,
+        resume=ConversationResumeRead(
+            operations=activity.operations,
+            last_activity_at=(
+                activity.last_at.isoformat() if activity.last_at is not None else None
+            ),
+            unfinished=[
+                UnfinishedOperationRead(
+                    tool=item.tool,
+                    label=tool_label(item.tool),
+                    error=item.error,
+                    attempts=item.attempts,
+                )
+                for item in activity.unresolved
+            ],
+        ),
         prompt_tokens=conversation.prompt_tokens,
         completion_tokens=conversation.completion_tokens,
         messages=messages,

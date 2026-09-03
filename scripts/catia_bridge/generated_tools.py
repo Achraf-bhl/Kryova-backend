@@ -1512,11 +1512,12 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
                     "maximum": 10000.0,
                     "description": "Gap along the second direction. Millimetres.",
                 },
-                "radius_mm": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                    "maximum": 10000.0,
-                    "description": "Radius of the circle, for a circular grid. Millimetres.",
+                "centre": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {"type": "number", "minimum": -10000.0, "maximum": 10000.0},
+                    "description": "Point to repeat around, for a circular grid. Default the sketch origin. [u, v] in millimetres, in the sketch's own 2D frame — u is the sketch's horizontal axis, v its vertical.",
                 },
                 "total_angle_deg": {
                     "type": "number",
@@ -7035,7 +7036,7 @@ SERVER_ONLY: frozenset[str] = frozenset(["catia_status"])
 TOOL_METHODS: dict[str, str] = {
     "catia_new_part": "new_part",
     "catia_open_document": "open_document",
-    "catia_import": "import",
+    "catia_import": "import_file",
     "catia_export": "export",
     "catia_export_step": "export_step",
     "catia_set_material": "set_material",

@@ -40,10 +40,15 @@ from . import gear, ui_policy, vba
 from . import ui_automation as ui
 from .backend import CatiaBackend, CatiaOperationError
 from .com import (
+    AssemblyMixin,
+    AssemblyReviewMixin,
+    DraftingMixin,
+    InfrastructureMixin,
     InspectionMixin,
     KnowledgeMixin,
     PartDesignMixin,
     ReferenceMixin,
+    SketchEditMixin,
     SketcherMixin,
     SurfacesMixin,
     WireframeMixin,
@@ -174,10 +179,15 @@ def _find_catalogue_material(catalogue: Any, names: tuple[str, ...]) -> Any:
 
 class CatiaCom(
     SketcherMixin,
+    SketchEditMixin,
     ReferenceMixin,
     PartDesignMixin,
     SurfacesMixin,
     WireframeMixin,
+    AssemblyMixin,
+    AssemblyReviewMixin,
+    DraftingMixin,
+    InfrastructureMixin,
     KnowledgeMixin,
     InspectionMixin,
     CatiaBackend,
@@ -424,7 +434,7 @@ class CatiaCom(
             "up_to_date": True,
         }
 
-    def _free_document_path(self, name: str) -> Path:
+    def _free_document_path(self, name: str, suffix: str = ".CATPart") -> Path:
         """A path under `documents/` that no file is using yet.
 
         `SaveAs` onto an existing file does not overwrite it: CATIA puts up the
@@ -441,12 +451,35 @@ class CatiaCom(
         path, which is what `open_document` and every checkpoint use.
         """
         stem = _safe_filename(name)
-        candidate = self.documents / f"{stem}.CATPart"
+        candidate = self.documents / f"{stem}{suffix}"
         counter = 2
         while candidate.exists():
-            candidate = self.documents / f"{stem}-{counter}.CATPart"
+            candidate = self.documents / f"{stem}-{counter}{suffix}"
             counter += 1
         return candidate
+
+    def _resolve_document_path(self, name: str) -> Path:
+        """The file a document name refers to, for the tools that need a path.
+
+        Accepts a bare stem, a stem with its extension, or a full path, and
+        checks both document types — an assembly component is as likely to be a
+        sub-assembly as a part, and making the caller know which is asking them
+        to track something CATIA already knows.
+        """
+        given = Path(name)
+        if given.is_absolute() and given.is_file():
+            return given
+        for candidate in (
+            self.documents / name,
+            self.documents / f"{name}.CATPart",
+            self.documents / f"{name}.CATProduct",
+        ):
+            if candidate.is_file():
+                return candidate
+        raise CatiaOperationError(
+            f"No document named {name!r} is saved on this workstation. Create it with "
+            "catia_new_part or catia_product_create first."
+        )
 
     def open_document(  # pragma: no cover - Windows only
         self,

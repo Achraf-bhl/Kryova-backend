@@ -95,6 +95,10 @@ OPERATIONS: tuple[Operation, ...] = (
         ),
         tier=Tier.WRITE,
         workbench=_WB,
+        # `import` is a Python keyword, so the derived name would be a method no
+        # backend could define. This is the one operation where the convention
+        # has to be overridden rather than followed.
+        method="import_file",
         params=(
             required("file", vocab.element_reference("The uploaded file to import, by name.")),
             optional("format", one_of(IMPORT_FORMATS, "Format, when the extension does not say.")),

@@ -568,7 +568,13 @@ OPERATIONS: tuple[Operation, ...] = (
             optional("spacing_mm", length("Gap between instances, for a rectangular grid.")),
             optional("second_count", count("Instances along the second direction. Default 1.")),
             optional("second_spacing_mm", length("Gap along the second direction.")),
-            optional("radius_mm", length("Radius of the circle, for a circular grid.")),
+            # A circular grid turns the elements about a point; their distance
+            # from it is already fixed by where they were drawn, so the centre is
+            # what this needs and a radius is a number it could not honour.
+            optional(
+                "centre",
+                point2("Point to repeat around, for a circular grid. Default the sketch origin."),
+            ),
             optional("total_angle_deg", angle("Angle the circular grid spans. Default 360.")),
             *_sketch_target(),
         ),

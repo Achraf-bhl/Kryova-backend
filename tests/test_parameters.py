@@ -299,14 +299,17 @@ class TestItRefusesWhatItCannotDo:
             runner("catia_set_parameter",
                    {"name": "Pad.1\\depth_mm", "value": 5.0, "unit": "mm"})
 
-    def test_a_name_with_no_separator_says_how_one_is_written(self) -> None:
+    def test_a_name_that_matches_nothing_lists_what_there_is(self) -> None:
+        """A bare *unambiguous* dimension is accepted — see
+        `TestEverySpellingAModelCanProduceIsAccepted`. A name that matches
+        nothing at all still has to say what the part actually has."""
         from app.kernel import OcctRunner
 
         runner = _plate(OcctRunner())
 
-        with pytest.raises(GeometryError, match="does not name a parameter"):
+        with pytest.raises(GeometryError, match="No parameter named"):
             runner("catia_set_parameter",
-                   {"name": "length_mm", "value": 5.0, "unit": "mm"})
+                   {"name": "wall_thickness_mm", "value": 5.0, "unit": "mm"})
 
     def test_the_wrong_unit_is_refused_rather_than_ignored(self) -> None:
         """CATIA's own reason: a parameter is typed, and setting a length in
@@ -367,3 +370,91 @@ class TestTheUnitComesFromTheArgumentName:
         from app.kernel.occt.operations.parameters import unit_of
 
         assert unit_of("volume_mm3") != "mm"
+
+
+class TestEverySpellingAModelCanProduceIsAccepted:
+    """A backslash does not survive the round trip to a model and back.
+
+    The tool payload is JSON, so a name containing a backslash is *shown* to the
+    model with that backslash escaped — and it types back what it read. Measured
+    on 2026-09-05: rung 3's agent called `catia_list_parameters`, copied the name
+    it was handed, and had all four of its `catia_set_parameter` calls refused for
+    punctuation. It then abandoned the parameter loop and padded a second slab
+    over the part, which reached the target mass with the bore and the corner
+    holes filled in — a part that weighed exactly what was asked and was not the
+    part that was asked for.
+
+    So no spelling a model can produce from what it was shown is refused.
+    """
+
+    SEPARATOR = chr(92)
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "Pad.1" + chr(92) + "length_mm",
+            "Pad.1" + chr(92) * 2 + "length_mm",  # what JSON showed it
+            "Pad.1/length_mm",
+            "Pad.1.length_mm",
+            "pad.1" + chr(92) + "LENGTH_MM",
+            "  Pad.1" + chr(92) + "length_mm  ",
+        ],
+    )
+    def test_each_reaches_the_same_parameter(self, spelling: str) -> None:
+        from app.kernel import OcctRunner
+
+        runner = _plate(OcctRunner())
+
+        out = runner("catia_set_parameter",
+                     {"name": spelling, "value": 16.0, "unit": "mm"})
+
+        assert out["previous_value"] == 10.0
+        assert out["bounding_box_mm"]["size"][2] == pytest.approx(16.0, abs=1e-6)
+
+    def test_the_doubled_backslash_is_the_one_that_was_measured_failing(self) -> None:
+        """Named on its own so the regression cannot be quietly dropped."""
+        from app.kernel import OcctRunner
+
+        runner = _plate(OcctRunner())
+
+        out = runner(
+            "catia_set_parameter",
+            {"name": "Pad.1" + chr(92) * 2 + "length_mm", "value": 11.5, "unit": "mm"},
+        )
+
+        assert out["parameter"]["value"] == 11.5
+
+    def test_a_bare_dimension_name_works_when_it_is_unambiguous(self) -> None:
+        """An agent that has lost the prefix is not wrong about what it wants,
+        and refusing an unambiguous request teaches it to stop asking."""
+        from app.kernel import OcctRunner
+
+        runner = _plate(OcctRunner())
+
+        out = runner("catia_set_parameter",
+                     {"name": "length_mm", "value": 18.0, "unit": "mm"})
+
+        assert out["bounding_box_mm"]["size"][2] == pytest.approx(18.0, abs=1e-6)
+
+    def test_an_ambiguous_bare_name_is_refused_rather_than_guessed(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = _plate(OcctRunner())
+        runner("catia_sketch_create", {"support": "XY", "name": "second"})
+        runner("catia_sketch_rectangle",
+               {"sketch": "second", "width_mm": 50.0, "height_mm": 50.0})
+        runner("catia_pad", {"sketch": "second", "length_mm": 30.0})
+
+        with pytest.raises(GeometryError, match="No parameter named"):
+            runner("catia_set_parameter",
+                   {"name": "length_mm", "value": 5.0, "unit": "mm"})
+
+    def test_the_refusal_lists_names_in_the_spelling_it_accepts(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = _plate(OcctRunner())
+
+        with pytest.raises(GeometryError, match=r"Pad\.1.length_mm"):
+            runner("catia_set_parameter",
+                   {"name": "Pad.1" + chr(92) + "nonsense_mm", "value": 1.0,
+                    "unit": "mm"})

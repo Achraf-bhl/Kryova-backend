@@ -46,6 +46,7 @@ written in and so cannot drift from it.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any, Final
 
@@ -55,11 +56,12 @@ from app.kernel.occt.operations.context import BuildContext
 LIST = "catia_list_parameters"
 SET = "catia_set_parameter"
 
-#: What separates a feature from one of its dimensions. CATIA writes
-#: `Pad.1\FirstLimit\Length`, so a backslash is what a model that has seen a real
-#: seat will type. A forward slash is accepted because it is what a model that
-#: has not will type, and refusing it teaches nothing.
-_SEPARATORS: Final = ("\\", "/")
+#: Any run of these separates a feature from one of its dimensions. CATIA writes
+#: `Pad.1\FirstLimit\Length`; a model that has never seen a seat writes a slash;
+#: a model reading a JSON payload writes a doubled backslash, because that is what
+#: the payload showed it. All of them mean the same thing and all of them are
+#: accepted — see `_canonical`.
+_SEPARATOR_RUN: Final = re.compile(r"[\\/.]+")
 
 #: Argument suffix → the unit that argument is in. The registry names every
 #: quantity with its unit (`length_mm`, `angle_deg`, `mass_kg`), so this reads the
@@ -169,43 +171,67 @@ def _dimensions_of(entry: Any) -> list[tuple[str, float]]:
     return out
 
 
+def _canonical(text: str) -> str:
+    r"""One spelling of a parameter name that every real spelling maps onto.
+
+    **A backslash cannot survive the round trip to a model and back.** The tool
+    payload is JSON, so `Pad.1\length_mm` is *shown* to the model as
+    `Pad.1\\length_mm`, and it types back exactly what it read — a literal
+    double backslash. Measured on 2026-09-05: rung 3's agent called
+    `catia_list_parameters`, copied the name it was given, and had all four of its
+    `catia_set_parameter` calls refused. It then gave up on the parameter loop
+    entirely and padded a second slab over the part instead, which reached the
+    target mass with the bore and the holes filled in.
+
+    So every separator is the same separator here: runs of backslash, forward
+    slash and dot all fold to one, and the comparison is case-folded. A feature
+    name contains a dot, which is why the *whole* name is normalised rather than
+    split — `Pad.1\length_mm` and `Pad.1.length_mm` and `pad.1//length_mm` are
+    one key, and no spelling a model can produce from what it was shown is
+    refused for punctuation.
+    """
+    folded = _SEPARATOR_RUN.sub("|", text.strip().lower())
+    return folded.strip("|")
+
+
+def _table(context: BuildContext) -> list[tuple[int, str, str, float]]:
+    """Every settable dimension as `(journal index, owner, argument, value)`."""
+    out: list[tuple[int, str, str, float]] = []
+    for index, entry in enumerate(context.journal):
+        owner = entry.feature or entry.tool.removeprefix("catia_")
+        for key, value in entry.arguments.items():
+            if key in _NOT_A_DIMENSION or isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                out.append((index, owner, key, float(value)))
+    return out
+
+
 def _locate(context: BuildContext, name: str) -> tuple[int, str, float]:
     """Which recorded call owns this parameter, and what it is set to now."""
-    owner, _, argument = _split(name)
-    for index, entry in enumerate(context.journal):
-        entry_owner = entry.feature or entry.tool.removeprefix("catia_")
-        if entry_owner != owner:
-            continue
-        if argument not in entry.arguments:
-            continue
-        current = entry.arguments[argument]
-        if isinstance(current, bool) or not isinstance(current, (int, float)):
-            break
-        return index, argument, float(current)
+    table = _table(context)
+    wanted = _canonical(name)
 
-    known = [item["name"] for item in list_parameters(context, {})["parameters"]]
-    listed = ", ".join(known) if known else "none — this part has no dimensions yet"
+    for index, owner, argument, value in table:
+        if _canonical(f"{owner}|{argument}") == wanted:
+            return index, argument, value
+
+    # A bare dimension name, when only one feature has one by that name. An agent
+    # that has lost track of the prefix is not wrong about what it wants, and
+    # refusing an unambiguous request teaches it to stop using the tool.
+    bare = [item for item in table if _canonical(item[2]) == wanted]
+    if len(bare) == 1:
+        index, _, argument, value = bare[0]
+        return index, argument, value
+
+    separator = chr(92)
+    listed = ", ".join(
+        f"{owner}{separator}{argument}" for _, owner, argument, _ in table
+    )
     raise GeometryError(
         f"No parameter named {name!r} in this part. This part's parameters are: "
-        f"{listed}. Call {LIST} for their current values."
-    )
-
-
-def _split(name: str) -> tuple[str, str, str]:
-    """`Pad.1\\length_mm` → the feature, the separator, the argument.
-
-    Split on the *last* separator, because a feature name contains a dot and an
-    argument name never contains a slash — so the rightmost one is always the
-    boundary however deep CATIA's own naming goes.
-    """
-    for separator in _SEPARATORS:
-        if separator in name:
-            owner, _, argument = name.rpartition(separator)
-            return owner.strip(), separator, argument.strip()
-    raise GeometryError(
-        f"{name!r} does not name a parameter. A parameter is written "
-        f"'<feature>\\\\<dimension>', for example 'Pad.1\\\\length_mm'. Call {LIST} "
-        "to see the ones this part has."
+        f"{listed or 'none — this part has no dimensions yet'}. Call {LIST} for "
+        "their current values."
     )
 
 

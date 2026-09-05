@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.agent import DEFAULT_MAX_STEPS, max_steps, run_agent
 from app.ai.provider import AssistantTurn, Completion, LLMProvider, TokenUsage, ToolCall
+from app.ai.state import bound_document_name
 from app.ai.tools import ToolBox, ToolError
 from app.core.config import settings
 from app.jobs import InlineJobQueue
@@ -1170,3 +1171,105 @@ class TestProjectManagementTools:
         assert db_session.get(Project, project_id) is None
         # The conversation's scope pointed at the row that just vanished.
         assert box.project_id is None
+
+
+class TestTheOpenKernelBindingSurvivesTheAgentLayer:
+    """`GEOMETRY_BACKEND=occt` through the tool layer, not through the dispatcher.
+
+    `tests/test_geometry_backends.py` drives `dispatch.call_catia` directly and
+    proved the kernel builds. The refusals that gate it live one layer up, here,
+    and nothing exercised the two together — so on the Windows seat on
+    2026-09-05 the real chat endpoint could create a part and then do nothing
+    whatever to it, and a `uvicorn` restart left the conversation unusable for
+    good. Both are pinned below.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _occt(self, monkeypatch: pytest.MonkeyPatch) -> Any:
+        from app.geometry import backends
+
+        monkeypatch.setattr(settings, "geometry_backend", "occt")
+        for key in list(backends._sessions):
+            backends.forget(key)
+        yield
+        for key in list(backends._sessions):
+            backends.forget(key)
+
+    @staticmethod
+    def _bind(db_session: Session, conversation: Conversation, name: str = "Part") -> None:
+        """The row `catia_new_part` writes, without needing the kernel installed."""
+        from app.models.catia import CatiaDocument
+
+        db_session.add(
+            CatiaDocument(conversation_id=conversation.id, device_id=None, doc_name=name)
+        )
+        db_session.flush()
+
+    def test_a_local_document_binds_with_no_device(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        """`device_id` is NULL for the open kernel: there is no seat to name.
+
+        The column has been nullable since revoking a laptop had to leave the
+        record of what was built on it behind, so this needs no migration — but
+        nothing wrote such a row until the local branch learned to.
+        """
+        from app.models.catia import CatiaDocument
+
+        self._bind(db_session, conversation, "Bracket")
+        row = db_session.scalar(
+            select(CatiaDocument).where(CatiaDocument.conversation_id == conversation.id)
+        )
+        assert row is not None and row.device_id is None
+        assert bound_document_name(db_session, conversation.id) == "Bracket"
+
+    def test_a_bound_part_with_no_live_session_may_be_rebuilt(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        """The deadlock: a durable row naming a document that no longer exists.
+
+        The binding is in Postgres and survives a restart; the kernel document
+        is live OCAF state in this process and does not. Gating `catia_new_part`
+        on the row alone meant every scoped tool answered "No document is open"
+        from the runner while the only tool that could open one was refused from
+        the database — with no way out of the conversation.
+        """
+        from app.geometry import backends
+
+        self._bind(db_session, conversation, "Bracket")
+        assert backends.peek_session(conversation.id) is None
+
+        box = ToolBox(db=db_session, user=user, conversation=conversation)
+        with pytest.raises(ToolError) as refused:
+            box._call_catia("catia_pad", {"sketch": "profile", "length_mm": 20.0})
+        # A scoped tool is still refused -- there is genuinely nothing to act on.
+        assert "no live" not in str(refused.value).lower()
+
+        # ...but starting again must not be refused, and must not name a tool
+        # the open kernel never offers.
+        message = ""
+        try:
+            box._call_catia("catia_new_part", {"name": "Bracket"})
+        except ToolError as exc:  # the kernel may be absent; the *guard* is the subject
+            message = str(exc)
+        assert "already owns" not in message, message
+        assert "catia_open_document" not in message, message
+
+    def test_no_refusal_here_names_a_tool_the_open_kernel_does_not_offer(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        """`catia_open_document` reopens a file from disk; the kernel has none.
+
+        It is not in `backends.local_tool_names()`, so a refusal that tells the
+        model to call it sends it after a tool it was never given a schema for.
+        Observed live: the model called it, was told no such tool exists, retried
+        `catia_new_part`, and looped.
+        """
+        from app.geometry import backends
+
+        assert "catia_open_document" not in backends.local_tool_names()
+
+        box = ToolBox(db=db_session, user=user, conversation=conversation)
+        with pytest.raises(ToolError) as refused:
+            box._call_catia("catia_pad", {"sketch": "profile", "length_mm": 20.0})
+        assert "catia_open_document" not in str(refused.value)

@@ -37,6 +37,7 @@ from app.ai.resume import HISTORY_PAGE_LIMIT, build_history
 from app.ai.state import bound_document_name
 from app.catia_kb import catia_knowledge
 from app.core.config import settings
+from app.geometry import backends
 from app.geometry.formats import GEOMETRY_FORMATS
 from app.jobs import JobQueue
 from app.media import LocalMediaStore, MediaService
@@ -1299,17 +1300,72 @@ class ToolBox:
         bound = self._bound_document()
 
         if name == "catia_new_part" and bound:
-            raise ToolError(
-                f"This conversation already owns the CATIA document {bound!r}. Call "
-                "catia_open_document to work on it; creating a new part here would "
-                "abandon everything already modelled."
-            )
+            # `catia_open_document` is a seat operation -- it reopens a file from
+            # disk -- and the open kernel has no disk copy to reopen: the
+            # document is the live object already sitting in this process. It is
+            # never offered to the model on `GEOMETRY_BACKEND=occt` (it is not in
+            # `backends.local_tool_names()`), so telling the model to call it
+            # anyway sent it looking for a tool that does not exist, getting
+            # "there is no tool called...", and retrying `catia_new_part` forever
+            # -- a dead end with no way out of the same conversation. Measured
+            # live on 2026-09-05 driving the real chat endpoint against the
+            # occt backend.
+            if backends.is_local():
+                # **The binding outlives the document it names.** The row is in
+                # Postgres and survives anything; the open kernel's document is
+                # live OCAF state in this process and does not survive a restart,
+                # a worker recycle, or an LRU eviction. Refusing `catia_new_part`
+                # on the strength of the row alone deadlocked the conversation
+                # for good: every scoped tool answered "No document is open"
+                # from the runner, and the one tool that could open one was
+                # refused from the database. No way out without abandoning the
+                # conversation -- and a plain `uvicorn` restart was enough to do
+                # it. It also broke the eviction recovery the runner itself
+                # advertises, which says in as many words to start again with
+                # catia_new_part.
+                #
+                # So the guard asks the kernel, not the row. `_bind_document`
+                # updates the existing row rather than inserting a second one,
+                # so rebuilding rebinds cleanly.
+                # A *session* is not a document. `session_for` builds a runner on
+                # demand, so a scoped call that failed for any other reason
+                # leaves an empty one behind -- and gating on the session alone
+                # would call that empty runner a part and re-deadlock the
+                # conversation. `dispatch._local_document` states the rule this
+                # follows: on this backend the row is not the truth, the live
+                # document is.
+                live = backends.peek_session(conversation.id if conversation else None)
+                if live is not None and getattr(live, "document", None) is not None:
+                    raise ToolError(
+                        f"This conversation already owns the part {bound!r}, and it is "
+                        "still open in memory -- there is nothing to reopen. Continue "
+                        "building on it directly; call catia_list_features first if "
+                        "you need to see what already exists."
+                    )
+                # No live document: the row names something that is gone, so
+                # building it again is the recovery, not a mistake to refuse.
+            else:
+                raise ToolError(
+                    f"This conversation already owns the CATIA document {bound!r}. Call "
+                    "catia_open_document to work on it; creating a new part here would "
+                    "abandon everything already modelled."
+                )
         if name == "catia_open_document" and not bound:
             raise ToolError(
                 "This conversation has no CATIA document yet, so there is nothing to "
                 "open. Call catia_new_part to start one."
             )
         if name not in CATIA_NO_DOCUMENT_REQUIRED and not bound:
+            # Same reason as the branch above: `catia_open_document` reopens a
+            # file from disk, which only means something for a seat. A local
+            # document with no DB row simply never existed -- there is nothing
+            # for "resuming" to name -- so the only recovery offered here is
+            # the one tool the open kernel actually has.
+            if backends.is_local():
+                raise ToolError(
+                    f"No part is bound to this conversation, so {name} has nothing "
+                    "to act on. Call catia_new_part to start one."
+                )
             raise ToolError(
                 f"No CATIA document is bound to this conversation, so {name} has "
                 "nothing to act on. Call catia_new_part to start one, or "

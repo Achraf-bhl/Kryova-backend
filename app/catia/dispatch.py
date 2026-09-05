@@ -508,6 +508,35 @@ def call_catia(
                 conversation_id=conversation_id,
                 arguments=arguments,
             )
+            # The binding belongs to the conversation, not to the seat, so the
+            # local backend owes the same `CatiaDocument` row `_post_process`
+            # writes for a remote one. It never reached that function -- this
+            # branch returns first -- so on GEOMETRY_BACKEND=occt
+            # `catia_new_part` built the document, reported success, recorded
+            # nothing, and every document-scoped tool after it was refused one
+            # layer up with "No CATIA document is bound to this conversation".
+            # The agent could create a part and then do nothing whatever to it,
+            # which is the whole of the open-kernel product path. Measured on
+            # the Windows seat, 2026-09-05, driving the real chat endpoint;
+            # `tests/test_geometry_backends.py` could not see it because it
+            # calls this dispatcher directly and the refusal lives in
+            # `app/ai/tools.py`.
+            #
+            # `device_id` stays NULL. There is no seat to name, and the column
+            # has been nullable since revoking a laptop had to leave the record
+            # of what was built on it behind.
+            if spec.name == "catia_new_part":
+                document = _bind_document(
+                    db,
+                    conversation_id=conversation_id,
+                    device=None,
+                    doc_name=str(
+                        data.get("document") or data.get("doc_name") or arguments.get("name") or "Part"
+                    ),
+                    remote_path=None,
+                    existing=_bound_document(db, conversation_id),
+                )
+                data = data | {"document_id": document.id}
             _log(
                 db,
                 user_id=user_id,
@@ -1212,11 +1241,16 @@ def _bind_document(
     db: Session,
     *,
     conversation_id: str | None,
-    device: CatiaDevice,
+    device: CatiaDevice | None,
     doc_name: str,
     remote_path: Any,
     existing: CatiaDocument | None,
 ) -> CatiaDocument:
+    """Record which document a conversation owns.
+
+    `device` is None for the open kernel, which holds its documents in this
+    process and has no seat to point at.
+    """
     if conversation_id is None:
         raise CatiaError(
             "A CATIA document has to belong to a conversation, and this call was made outside one."
@@ -1226,13 +1260,13 @@ def _bind_document(
         # an update, never a second row.
         existing.doc_name = clean_text(doc_name, 255)
         existing.remote_path = str(remote_path) if remote_path else None
-        existing.device_id = device.id
+        existing.device_id = device.id if device is not None else None
         db.flush()
         return existing
 
     document = CatiaDocument(
         conversation_id=conversation_id,
-        device_id=device.id,
+        device_id=device.id if device is not None else None,
         doc_name=clean_text(doc_name, 255),
         remote_path=str(remote_path) if remote_path else None,
     )

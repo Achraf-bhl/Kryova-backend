@@ -32,12 +32,14 @@ def get_provider() -> LLMProvider:
             base_url=settings.ai_base_url or "http://localhost:11434",
             model=settings.ai_model,
             timeout_seconds=settings.ai_timeout_seconds,
+            vision_model=settings.ai_vision_model,
         )
     if choice == "anthropic":
         return AnthropicProvider(
             api_key=settings.ai_api_key or "",
             model=settings.ai_model,
             timeout_seconds=settings.ai_timeout_seconds,
+            vision_model=settings.ai_vision_model,
         )
     if choice == "nvidia":
         if not settings.ai_api_key:
@@ -54,6 +56,7 @@ def get_provider() -> LLMProvider:
             base_url=settings.ai_base_url,
             thinking=settings.ai_nvidia_thinking,
             reasoning_budget=settings.ai_nvidia_reasoning_budget,
+            vision_model=settings.ai_vision_model,
         )
     if choice == "openai_compatible":
         if not settings.ai_base_url:
@@ -66,6 +69,7 @@ def get_provider() -> LLMProvider:
             api_key=settings.ai_api_key,
             model=settings.ai_model,
             timeout_seconds=settings.ai_timeout_seconds,
+            vision_model=settings.ai_vision_model,
         )
 
     raise LLMUnavailable(

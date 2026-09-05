@@ -78,6 +78,69 @@ class ResultInterpretation(BaseModel):
     )
 
 
+class Discrepancy(BaseModel):
+    """One thing in the picture that does not agree with what was asked for."""
+
+    what: str = Field(
+        description=(
+            "The disagreement, in one sentence: what the request asked for and what "
+            "the drawing shows instead."
+        )
+    )
+    view: str = Field(
+        description=(
+            "Which of the named views you saw it in. Use the names given in the "
+            "message; if it shows in several, name the clearest one."
+        )
+    )
+    severity: Literal["gross", "minor"] = Field(
+        description=(
+            "'gross' for something anyone would see at a glance -- a missing feature, "
+            "a wrong overall shape, a part built the wrong way round. 'minor' for a "
+            "proportion that looks off. If you are weighing which, it is minor."
+        )
+    )
+
+
+class VisualCheck(BaseModel):
+    """A vision model's read of one or more renders of a part.
+
+    Field order is deliberate and is the one prompt-level thing that reliably
+    improves this answer: `describes` is first, so a decoder constrained to this
+    schema must state what it can see *before* it reaches the verdict field.
+    Asked the other way round, a vision model produces the judgement first and
+    then narrates in support of it. It also leaves a reviewer something to check
+    the verdict against -- a description of the wrong part is obvious to a human
+    in a way that a bare "matches" never is.
+    """
+
+    describes: str = Field(
+        description=(
+            "What you actually see, in two or three sentences, before judging anything. "
+            "Overall shape, then the features you can make out and roughly where. "
+            "Describe the drawing in front of you, not the part you were told to expect."
+        )
+    )
+    verdict: Literal["matches", "differs", "unsure"] = Field(
+        description=(
+            "'differs' only when you can name a specific disagreement and say which view "
+            "shows it. 'unsure' when these views do not show what the request is about, "
+            "or the drawing is too coarse to tell -- that is a useful answer, not a "
+            "failure, and it is much better than a guess either way."
+        )
+    )
+    discrepancies: list[Discrepancy] = Field(
+        max_length=6,
+        description="Empty unless the verdict is 'differs'. One entry per distinct problem.",
+    )
+    confidence: Confidence = Field(
+        description=(
+            "How sure you are of the verdict. 'low' whenever the feature in question is "
+            "small in the drawing, hidden behind material, or only visible in one view."
+        )
+    )
+
+
 class LoadCaseDraft(BaseModel):
     """A load case parsed out of a natural-language description."""
 

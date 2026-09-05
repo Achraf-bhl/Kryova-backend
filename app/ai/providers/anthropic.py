@@ -24,6 +24,8 @@ the first into an IndexError and the second into a truncated turn presented as
 a finished one.
 """
 
+import base64
+from collections.abc import Sequence
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -138,9 +140,19 @@ def _to_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any
 class AnthropicProvider(LLMProvider):
     name = "anthropic"
 
-    def __init__(self, api_key: str, model: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        timeout_seconds: float,
+        vision_model: str | None = None,
+    ) -> None:
         self._api_key = api_key
         self.model = (model or "").strip() or DEFAULT_MODEL
+        #: Every Claude model this provider will accept can already read an
+        #: image, so this exists to *pin* one — a cheaper model for a check that
+        #: runs after every build — rather than to enable the capability.
+        self._vision_model = (vision_model or "").strip() or None
         self._timeout = timeout_seconds
         self._client: Any = None
         self._sdk: Any = None
@@ -215,6 +227,73 @@ class AnthropicProvider(LLMProvider):
         system, so one breakpoint on the last system block caches both.
         """
         return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+
+    def look(
+        self,
+        *,
+        system: str,
+        user: str,
+        images: Sequence[bytes],
+        schema: type[T],
+        effort: str,
+        max_tokens: int,
+    ) -> Completion[T]:
+        """`complete`, with the renders as image blocks ahead of the text.
+
+        Images first, then the words: the order inside one content list is the
+        order the model reads, and a question asked before the pictures have
+        been seen is a question about nothing. It also matches the order the
+        caller's prompt describes them in.
+        """
+        if not images:
+            raise LLMError("A visual check needs at least one image.")
+        client = self._get_client()
+        blocks: list[dict[str, Any]] = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": base64.b64encode(one).decode("ascii"),
+                },
+            }
+            for one in images
+        ]
+        blocks.append({"type": "text", "text": user})
+
+        try:
+            response = client.messages.create(
+                model=self._vision_model or self.model,
+                max_tokens=max_tokens,
+                system=self._system_blocks(system),
+                output_config={
+                    "format": {
+                        "type": "json_schema",
+                        "schema": strictify(schema.model_json_schema()),
+                    },
+                    "effort": _effort(effort),
+                },
+                messages=[{"role": "user", "content": blocks}],
+            )
+        except Exception as exc:  # noqa: BLE001 - re-raised or translated below
+            self._raise_for_sdk_error(exc)
+            raise  # unreachable; _raise_for_sdk_error never returns
+
+        if response.stop_reason == "refusal":
+            raise LLMRefusal("The model declined to describe this render.")
+        if response.stop_reason == "max_tokens":
+            raise LLMError("The model hit the output limit before finishing. Raise AI_MAX_TOKENS.")
+
+        text = next((block.text for block in response.content if block.type == "text"), "")
+        if not text.strip():
+            raise LLMError("Anthropic returned an empty response.")
+        try:
+            value = schema.model_validate_json(text)
+        except ValidationError as exc:
+            raise LLMError(
+                f"Anthropic returned output that does not match the expected schema: {exc}"
+            ) from exc
+        return Completion(value=value, usage=_usage(response))
 
     def complete(
         self,

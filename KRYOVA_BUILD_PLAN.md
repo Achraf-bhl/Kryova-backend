@@ -15,19 +15,16 @@ happened.
 
 ## Now
 
-**E4 — Visual verification.** **4.1 and 4.3 landed 2026-09-05.** `app/render/` renders
-eight canonical views deterministically and diffs two of them. What is left:
+**E4 — Visual verification.** **4.1, 4.2 and 4.3 landed 2026-09-05.** `app/render/`
+renders eight canonical views deterministically and diffs two of them; `app/ai/vision.py`
+asks a vision model whether the part matches the request. What is left:
 
-- **4.2 — the vision-model check.** Render, then ask a VLM whether the result matches the
-  request. The provider layer is already pluggable and defaults to local Ollama with no
-  key, so this is a prompt, a schema for the answer, and a place to put it — not new
-  infrastructure. It is a **filter, never a sign-off**: a VLM will confidently approve a
-  subtly wrong part, and the phase says so.
-- **4.4 — renders into the conversation**, so the user sees what the agent sees. Product
-  Track P5 owns the surface, so this waits on it rather than growing its own.
-- Section cuts, named in 4.1 alongside the eight views and not yet built: a cut is a
+- **Section cuts**, named in 4.1 alongside the eight views and not yet built: a cut is a
   boolean against a half-space and then the same projection, so the work is the vocabulary
   for saying *where* to cut, not the rendering.
+- **4.4 — renders into the conversation**, so the user sees what the agent sees. Product
+  Track P5 owns the surface, so this waits on it rather than growing its own. It is the
+  only part of E4 that is blocked on something outside E4.
 
 **E2 closed on 2026-09-05** — `*E2`, Proof green. Its capability list and its Proof are
 both done; what remains under it are refusals with stated reasons, each raised where it
@@ -62,25 +59,45 @@ never could do — the CATIA-seat halves of E1's and E3's conformance runs.
 
 ## Next
 
-**E4 — Visual verification.** **4.1 and 4.3 landed 2026-09-05.** `app/render/` renders
-eight canonical views deterministically and diffs two of them. What is left:
+**E5 — Assertions and self-correction.** The foundation shipped 2026-09-04
+(`assertions.py`, `diff.py`, `correct.py`); 5.1–5.4 are open. 5.1 is the one E4 has just
+made reachable: an assertion library **for machines rather than parts** — interference-free
+through a motion range, stack-up within tolerance, first natural frequency above a
+threshold, minimum wall, mass and cost budgets, factor of safety against a named load case.
+Everything it needs to measure exists (E3's interrogation, the four solvers, and now a
+visual check that can be one more assertion among them).
 
-- **4.2 — the vision-model check.** Render, then ask a VLM whether the result matches the
-  request. The provider layer is already pluggable and defaults to local Ollama with no
-  key, so this is a prompt, a schema for the answer, and a place to put it — not new
-  infrastructure. It is a **filter, never a sign-off**: a VLM will confidently approve a
-  subtly wrong part, and the phase says so.
-- **4.4 — renders into the conversation**, so the user sees what the agent sees. Product
-  Track P5 owns the surface, so this waits on it rather than growing its own.
-- Section cuts, named in 4.1 alongside the eight views and not yet built: a cut is a
-  boolean against a half-space and then the same projection, so the work is the vocabulary
-  for saying *where* to cut, not the rendering.
+This file's Now section was duplicated verbatim into Next between 2026-09-05 commits; the
+duplicate is removed here rather than left to read as two separate pieces of work.
 
 ---
 
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E4 → **4.2: the model looks at the model.** `app/ai/vision.py`, plus
+  `LLMProvider.look` and the three providers that can implement it. Written around the
+  phase's own stated limitation rather than in spite of it: a VLM will confidently approve
+  a subtly wrong part, so `VisualReview` offers **no** `approved` or `passed` property for
+  anyone to gate a release on — the flag that exists is `objected`, and a test asserts the
+  others are absent. Three outcomes, and **`unchecked` is never a pass**: no vision model,
+  an unreachable provider, nothing drawn, a model that says "unsure", and a model that says
+  "differs" while naming nothing specific all land there with the reason in words. Nothing
+  raises, on `KnowledgeService.search`'s contract — a visual check improves an answer and
+  must never be why there is not one. **The trap is Ollama**, which does not refuse an image
+  handed to a text-only model: it drops it and answers anyway, so the shipping default
+  (`qwen2.5-coder`, no eyes) would have returned a confident description of nothing, with no
+  error and no flag — a check that manufactures agreement. `_sees()` refuses on two
+  structural signals and no name list: `/api/show` publishes `capabilities`, and only a
+  multimodal model has a `projector_info` block at all. `AI_VISION_MODEL` names the model
+  that looks, since locally it is a second pull. Images are unlabelled on the wire, so order
+  is the only thing tying one to what it is a picture of — the prompt names the order and
+  the code sends them in it. `num_ctx` is sized for the pictures too, because Ollama
+  truncates from the front in silence. The schema puts `describes` before `verdict`, so a
+  constrained decoder must say what it sees before it judges. 30 offline tests; four guards
+  verified by breaking them (the blind-model refusal, the unsure fold, the blank-render
+  short circuit, the unlocatable-complaint fold).
 
 - **2026-09-05** — E4 → **4.1 and 4.3: the system can look at the model.** `app/render/`,
   five modules, no new dependency. **Hidden-line removal rather than OpenGL**, and that is

@@ -72,12 +72,14 @@ class NvidiaProvider(OpenAICompatibleProvider):
         *,
         thinking: bool = True,
         reasoning_budget: int = DEFAULT_REASONING_BUDGET,
+        vision_model: str | None = None,
     ) -> None:
         super().__init__(
             base_url=base_url or DEFAULT_BASE_URL,
             api_key=api_key,
             model=model or DEFAULT_MODEL,
             timeout_seconds=timeout_seconds,
+            vision_model=vision_model,
         )
         self._thinking = thinking
         self._reasoning_budget = reasoning_budget

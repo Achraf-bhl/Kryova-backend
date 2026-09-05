@@ -19,6 +19,7 @@ caller can tell "free" from "unknown" by asking which provider answered.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
@@ -107,6 +108,18 @@ class LLMRefusal(LLMError):
     """The provider declined the request on safety grounds."""
 
 
+class VisionUnsupported(LLMUnavailable):
+    """This provider, or the model it is configured with, cannot look at an image.
+
+    Its own error rather than a bare `LLMUnavailable` because the caller does
+    something different with it. "Ollama is not running" is a fault to report;
+    "this model has no eyes" is a *capability* answer, and Phase 4.2's whole
+    discipline is that it must come back as `unchecked` rather than as a pass or
+    a failure. Folding the two together would make a missing vision model look
+    like a broken install.
+    """
+
+
 class LLMProvider(ABC):
     """Turns a prompt into a validated instance of a Pydantic schema."""
 
@@ -157,6 +170,39 @@ class LLMProvider(ABC):
         `AssistantTurn`; a provider that cannot do tool calling raises
         `LLMUnavailable` rather than silently answering without them.
         """
+
+    def look(
+        self,
+        *,
+        system: str,
+        user: str,
+        images: Sequence[bytes],
+        schema: type[T],
+        effort: str,
+        max_tokens: int,
+    ) -> Completion[T]:
+        """Same contract as `complete`, with pictures attached. PNG bytes, in order.
+
+        **Not abstract, and that is the decision.** Sight is a capability some
+        providers and most models do not have, so an abstract method would force
+        every provider to grow a stub and would say nothing about whether a call
+        will work. The default refuses by name; a provider that can see
+        overrides it.
+
+        The images are unlabelled on the wire — Ollama attaches them to the
+        message and has nowhere to put a caption — so the *order* is the only
+        thing tying an image to what it is a picture of, and the caller names
+        that order in `user`. Providers must not reorder them.
+
+        Raises `VisionUnsupported` when the model cannot see, which is a
+        different answer from failing: see Phase 4.2, where a check that could
+        not run is `unchecked` and never a pass.
+        """
+        raise VisionUnsupported(
+            f"The {self.name} provider cannot show an image to a model, so the "
+            "visual check cannot run. Configure a provider and model that can "
+            "see, or rely on the measured checks alone."
+        )
 
     @abstractmethod
     def health(self) -> None:

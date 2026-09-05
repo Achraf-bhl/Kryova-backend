@@ -10,9 +10,11 @@ structured-output contract in `provider.py` holds here the same as it does for
 a hosted API.
 """
 
+import base64
 import json
 import logging
 import time
+from collections.abc import Sequence
 from typing import Any, TypeVar
 
 import httpx
@@ -26,6 +28,7 @@ from app.ai.provider import (
     LLMUnavailable,
     TokenUsage,
     ToolCall,
+    VisionUnsupported,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +75,15 @@ MIN_CONTEXT_WINDOW = 8_192
 #: already waiting on.
 CHAT_ATTEMPTS = 2
 
+#: Prompt tokens one 1024x768 render is assumed to cost, for sizing `num_ctx`
+#: on a vision call. An estimate and deliberately a generous one: a vision model
+#: tiles an image and the count depends on the projector, and getting this *low*
+#: has the one consequence this file exists to prevent — Ollama truncates the
+#: prompt from the front, silently, and the model answers about an image it was
+#: never shown. Over-allocating costs KV cache; under-allocating costs the
+#: truth.
+IMAGE_PROMPT_TOKENS = 1_600
+
 #: Pause before the retry. Short -- Ollama is a local process, so this is not
 #: backing off a rate limit, just not hammering a server mid-hiccup.
 RETRY_BACKOFF_S = 0.5
@@ -107,14 +119,28 @@ def _refuse_if_truncated(body: dict[str, Any], num_ctx: int) -> None:
 class OllamaProvider(LLMProvider):
     name = "ollama"
 
-    def __init__(self, base_url: str, model: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        timeout_seconds: float,
+        vision_model: str | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
         self.model = model
+        #: Which model the visual check runs against. Separate because it
+        #: usually *is* separate: the shipping default (`qwen2.5-coder`) writes
+        #: CAD operations and has no eyes at all, and the model that can see is
+        #: a second pull. None means "try the main model", which is right for a
+        #: hosted provider and answered honestly below when it is wrong.
+        self._vision_model = vision_model
         self._timeout = timeout_seconds
         #: Resolved lazily from /api/show and cached: one HTTP round trip per
         #: process, not one per agent step.
         self._num_ctx: int | None = None
+        #: Same, for the vision capability of `_vision_model or _model`.
+        self._can_see: bool | None = None
 
     def health(self) -> None:
         try:
@@ -251,6 +277,121 @@ class OllamaProvider(LLMProvider):
         except ValidationError as exc:
             # Schema-constrained decoding makes this rare, but a small quantised
             # model can still stop early and truncate the JSON.
+            raise LLMError(
+                f"Ollama returned output that does not match the expected schema: {exc}"
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise LLMError("Ollama returned malformed JSON.") from exc
+
+    def _sees(self) -> bool:
+        """Whether the model a visual check would run against can take an image.
+
+        **This is the guard the whole vision path is built around.** Ollama does
+        not refuse an image handed to a text-only model — it drops it and
+        answers anyway, so the reply is a confident description of nothing,
+        arriving with no error and no flag. Against a check whose entire job is
+        to say whether a part looks right, that is worse than having no check:
+        it manufactures agreement.
+
+        Two structural signals, no list of model names to go stale. `/api/show`
+        publishes `capabilities` for exactly this question, and a multimodal
+        model is the only kind that has a `projector_info` block at all — the
+        projector *is* the vision encoder. Either one is a yes; neither is a no.
+        """
+        if self._can_see is not None:
+            return self._can_see
+
+        model = self._vision_model or self._model
+        try:
+            response = httpx.post(
+                f"{self._base_url}/api/show", json={"model": model}, timeout=10.0
+            )
+            response.raise_for_status()
+            body = response.json()
+        except httpx.HTTPError as exc:
+            raise LLMUnavailable(
+                f"Ollama could not describe the model '{model}' at {self._base_url}. "
+                f"Check that it is running and that the model is installed "
+                f"(`ollama pull {model}`)."
+            ) from exc
+
+        capabilities = {str(one).lower() for one in (body.get("capabilities") or [])}
+        self._can_see = "vision" in capabilities or bool(body.get("projector_info"))
+        return self._can_see
+
+    def look(
+        self,
+        *,
+        system: str,
+        user: str,
+        images: Sequence[bytes],
+        schema: type[T],
+        effort: str,
+        max_tokens: int,
+    ) -> Completion[T]:
+        """A schema-constrained answer about one or more PNGs, locally.
+
+        Ollama attaches images to the *message* as base64 strings, in order, and
+        offers nowhere to caption one — so the order is load-bearing and the
+        caller has named it in `user`.
+        """
+        model = self._vision_model or self._model
+        if not images:
+            raise LLMError("A visual check needs at least one image.")
+        if not self._sees():
+            raise VisionUnsupported(
+                f"Ollama's model '{model}' reports no vision capability, so it cannot "
+                "look at a render — and Ollama would drop the image and answer anyway "
+                "rather than refuse. Pull a model that can see (for example "
+                "`ollama pull llava`) and set AI_VISION_MODEL to it."
+            )
+
+        # Room for the pictures as well as the words. `num_ctx` covers the whole
+        # prompt, and a render is worth far more tokens than the sentence
+        # describing it — sizing this from the text alone is how the images get
+        # cut off the front of a prompt that reports no error.
+        window = max(
+            self._context_window(),
+            _EFFORT_PREDICT.get(effort, 4_096)
+            + max_tokens
+            + IMAGE_PROMPT_TOKENS * len(images),
+        )
+        payload: dict[str, Any] = {
+            "model": model,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": user,
+                    "images": [base64.b64encode(one).decode("ascii") for one in images],
+                },
+            ],
+            "format": schema.model_json_schema(),
+            "options": {"num_predict": max_tokens, "num_ctx": window},
+        }
+
+        try:
+            response = httpx.post(f"{self._base_url}/api/chat", json=payload, timeout=self._timeout)
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise LLMError(
+                f"Ollama did not respond within {self._timeout:g}s. A vision model "
+                "reading several renders on CPU can exceed this -- raise "
+                "AI_TIMEOUT_SECONDS or review fewer views."
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Ollama request failed: {exc}") from exc
+
+        body = response.json()
+        _refuse_if_truncated(body, window)
+        content = body.get("message", {}).get("content", "")
+        if not content.strip():
+            raise LLMError("Ollama returned an empty response.")
+
+        try:
+            return Completion(value=schema.model_validate_json(content), usage=_usage(body))
+        except ValidationError as exc:
             raise LLMError(
                 f"Ollama returned output that does not match the expected schema: {exc}"
             ) from exc

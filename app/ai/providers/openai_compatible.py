@@ -9,7 +9,9 @@ Kept deliberately SDK-free: the wire format is small and stable, and adding the
 `openai` package to reach a local llama.cpp would be a dependency for nothing.
 """
 
+import base64
 import json
+from collections.abc import Sequence
 from typing import Any, TypeVar
 
 import httpx
@@ -120,12 +122,22 @@ class OpenAICompatibleProvider(LLMProvider):
     name = "openai_compatible"
 
     def __init__(
-        self, base_url: str, api_key: str | None, model: str, timeout_seconds: float
+        self,
+        base_url: str,
+        api_key: str | None,
+        model: str,
+        timeout_seconds: float,
+        vision_model: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self.model = model
+        #: Which model a visual check runs against, when it is not the one doing
+        #: the engineering. Unlike Ollama there is nothing to probe here — this
+        #: endpoint family publishes no capability list — so a model that cannot
+        #: see answers with a 400, which `look` reports rather than swallowing.
+        self._vision_model = (vision_model or "").strip() or None
         self._timeout = timeout_seconds
         # Learned on first use, then remembered: see `_structured_payload`.
         self._json_schema_supported = True
@@ -263,6 +275,71 @@ class OpenAICompatibleProvider(LLMProvider):
         if not content.strip():
             raise LLMError("The model returned an empty response.")
 
+        try:
+            return Completion(value=schema.model_validate_json(content), usage=_usage(body))
+        except ValidationError as exc:
+            raise LLMError(
+                f"The model returned output that does not match the expected schema: {exc}"
+            ) from exc
+
+    def look(
+        self,
+        *,
+        system: str,
+        user: str,
+        images: Sequence[bytes],
+        schema: type[T],
+        effort: str,
+        max_tokens: int,
+    ) -> Completion[T]:
+        """`complete`, with the renders as `image_url` parts carrying data URIs.
+
+        A data URI rather than a link, and that is not merely convenient: the
+        renders exist in memory and have no URL, and giving one would mean this
+        service publishing an engineering drawing at a fetchable address for a
+        third party to pull. The bytes go in the request and nowhere else.
+        """
+        if not images:
+            raise LLMError("A visual check needs at least one image.")
+        payload = self._structured_payload(system, user, schema, max_tokens)
+        payload["model"] = self._vision_model or self._model
+        payload["messages"][-1]["content"] = [
+            *(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/png;base64,"
+                        + base64.b64encode(one).decode("ascii")
+                    },
+                }
+                for one in images
+            ),
+            # The question after the pictures: the parts are read in order, and
+            # one asked first is asked about nothing.
+            {"type": "text", "text": payload["messages"][-1]["content"]},
+        ]
+
+        try:
+            body = self._post(payload)
+        except _ResponseFormatUnsupported:
+            self._json_schema_supported = False
+            retry = self._structured_payload(system, user, schema, max_tokens)
+            retry["model"] = payload["model"]
+            retry["messages"][-1]["content"] = payload["messages"][-1]["content"]
+            body = self._post(retry)
+
+        choices = body.get("choices") or []
+        if not choices:
+            raise LLMError("The model returned no choices.")
+        choice = choices[0]
+        if choice.get("finish_reason") == "content_filter":
+            raise LLMRefusal("The provider's content filter rejected this render.")
+        if choice.get("finish_reason") == "length":
+            raise LLMError("The model hit the output limit before finishing. Raise AI_MAX_TOKENS.")
+
+        content = _unfence((choice.get("message") or {}).get("content") or "")
+        if not content.strip():
+            raise LLMError("The model returned an empty response.")
         try:
             return Completion(value=schema.model_validate_json(content), usage=_usage(body))
         except ValidationError as exc:

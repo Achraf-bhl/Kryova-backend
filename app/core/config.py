@@ -142,6 +142,13 @@ class Settings(BaseSettings):
     # parsing a sentence into a load case, which is near-mechanical.
     ai_effort_interpret: str = "high"
     ai_effort_parse: str = "low"
+    # Which model looks at a render (Phase 4.2). Separate from `ai_model`
+    # because locally it usually is separate: the shipping default writes CAD
+    # operations and cannot see at all, and a vision model is a second pull.
+    # Unset means "use ai_model", which is right for a hosted provider whose
+    # every model reads images. Ollama refuses honestly when the model cannot
+    # see, rather than dropping the picture and answering anyway.
+    ai_vision_model: str | None = None
     ai_max_tokens: int = 8_000
     # A 7B model on CPU can take a minute; the default is generous on purpose.
     ai_timeout_seconds: float = 120.0

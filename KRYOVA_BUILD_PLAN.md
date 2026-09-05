@@ -56,9 +56,12 @@ never could do — the CATIA-seat halves of E1's and E3's conformance runs.
 
 ## Next
 
-**E5 — Assertions and self-correction.** The foundation shipped 2026-09-04
-(`assertions.py`, `diff.py`, `correct.py`); 5.1–5.4 are open. 5.1 is the one E4 has just
-made reachable: an assertion library **for machines rather than parts** — interference-free
+**E5 — Assertions and self-correction.** The foundation shipped 2026-09-04 and **5.1
+landed 2026-09-05**. What remains: **5.3 diagnosis quality** — sensitivity by finite
+difference over the free geometry, so a repair is aimed rather than guessed, which the plan
+calls nearly free now that geometry is free and which is the difference between a validator
+and a retry counter. **5.4** the mission ladder as a permanent regression suite. **5.2** is
+blocked on Phase 11 (requirements). The now-closed 5.1 was: an assertion library **for machines rather than parts** — interference-free
 through a motion range, stack-up within tolerance, first natural frequency above a
 threshold, minimum wall, mass and cost budgets, factor of safety against a named load case.
 Everything it needs to measure exists (E3's interrogation, the four solvers, and now a
@@ -72,6 +75,23 @@ duplicate is removed here rather than left to read as two separate pieces of wor
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E5 → **5.1: assertions for machines, not parts.**
+  `app/design/machine_checks.py`. The reason it needs to exist: `assertions.py` checks a claim
+  about a number already in a payload, which is right for a part and cannot express whether an
+  arm clears its frame through travel or whether six tolerances still fit — **those claims must
+  be produced, not read.** So a machine check is a *measurement source* that files a number
+  under a path with its provenance, and the existing assertion machinery compares it. No second
+  comparison language; `UNMEASURED`, `gap` and the report all come free. **Tools are injected,
+  never imported**, keeping the package offline with no kernel and no solver, and a missing tool
+  is `unavailable` with a reason naming what is missing — which is how 5.1 lands complete while
+  the solver-backed half honestly waits on Phase 6. Eight checks. Clearance through motion is
+  **sampled and says so** (a collision between two adjacent poses is invisible to it, stated in
+  the note; under three samples refused as not a sweep). Stack-up carries **both** methods with
+  neither silent, because worst case and RSS answer different questions and picking one quietly
+  means designing to a case that never occurs or failing on the tails. A cost budget is declared
+  and honestly `UNMEASURED` — Phase 13 owns cost — rather than left out of the library 5.1
+  describes. 33 tests written; per the standing arrangement they run on the Windows seat.
 
 - **2026-09-05** — E4 → **section cuts, and the upside-down renderer they found.**
   `app/render/section.py`. The vocabulary is the work: `mid_section` / `offset_section` /

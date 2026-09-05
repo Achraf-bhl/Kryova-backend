@@ -85,7 +85,7 @@ never could do — the CATIA-seat halves of E1's and E3's conformance runs.
 
 ## Next
 
-**E6 — The solver federation**, and it is the largest single thing left standing. CalculiX
+**E6 — The solver federation** is now *in progress* rather than next: the deck writer landed 2026-09-05. What is left of it is the largest single thing standing. CalculiX
 across a subprocess boundary (Decision 4: GPL solvers are invoked as separate processes,
 never linked), with the `Solver` ABC unchanged and the existing `loads.py`/`selection.py`
 vocabulary mapped onto CalculiX sets rather than rewritten — that surface is what the agent
@@ -97,6 +97,31 @@ and what 5.3's sensitivity can then be run over.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E6 → **started: the CalculiX deck**. `app/solve/calculix/deck.py`.
+  Decision 2 says physics is federated rather than re-implemented and Decision 4 says how —
+  GPL, so a separate process across a file/CLI boundary, never linked. The deck is the whole
+  interface, and this writes it. **The loads are deliberately not re-derived**: `assemble_loads`
+  already spreads a force over its region by tributary area, and the deck emits that same
+  vector as `*CLOAD`. Re-deriving would duplicate the load vocabulary the master plan calls
+  the real asset — and worse, it would break 6.5, where the hand-written solver is the
+  *oracle*: a disagreement between two solvers only localises if both were given identical
+  loads. Four traps, every one of which yields a deck CalculiX accepts and solves, each
+  pinned by a test verified by breaking it. Numbering is 1-based, and an off-by-one does not
+  crash — it shifts every load and restraint onto the neighbouring node and returns a
+  perfectly reasonable-looking field. A C3D10's midside nodes are **not** in our order:
+  `TET10_EDGES` is gmsh's type-11 ordering, Abaqus swaps the last two, so the permutation is
+  `[0,1,2,3,5,4]` and the wrong one gives a valid, solvable, differently-shaped element. The
+  test checks what the permutation must *achieve* against both edge tables, because asserting
+  the constant equals its own literal would agree with any typo in it. Density leaves the
+  mm-N-MPa system here — the one sanctioned conversion, at the boundary where the numbers
+  stop being ours — into tonne/mm³, and steel's 7870 becoming 7.87e-9 is the check that it is
+  right. And numbers go out at `repr` precision, since a deck rounding coordinates to six
+  figures has silently re-meshed the part. Writing it also found a redundant guard: the empty
+  selection was already refused by `select_nodes`, with a better message than the new one, so
+  the guard became a re-raise that adds the one thing the lower layer cannot know — *which*
+  fixture asked. 29 tests, 129 green across the solver suites, ruff and mypy clean. Still to
+  come in 6.1: the `ccx` subprocess, the `.frd`/`.dat` parser, and the oracle comparison.
 
 - **2026-09-05** — E5 → **5.4: the ladder becomes a suite that runs**, and E18 gets its
   harness. `app/design/missions.py`. Decision 5 lists nine machines and calls each rung a

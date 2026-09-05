@@ -89,4 +89,71 @@ def list_features(context: BuildContext, arguments: Mapping[str, Any]) -> Mappin
     }
 
 
-__all__ = ["feature_rename", "list_features", "new_part", "set_material"]
+def body_create(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Create a new body and, by default, make it the one features go into.
+
+    Multi-body is what makes a boolean between two shapes expressible: `catia_boolean`
+    takes a `tool_body`, and before this there was only ever one body to name. The
+    pattern a design uses is *create a body, build the tool inside it, activate the
+    first again, subtract* — which is exactly how it reads in CATIA.
+    """
+    document = context.require_document()
+    name = str(arguments.get("name") or f"Body.{len(document.body_names()) + 1}")
+    activate = arguments.get("activate")
+    document.add_body(name, activate=True if activate is None else bool(activate))
+    return {
+        "body": name,
+        "bodies": document.body_names(),
+        "active_body": document.active_body,
+    }
+
+
+def body_activate(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Choose which body new features are added to — CATIA's Define In Work Object."""
+    document = context.require_document()
+    document.activate_body(str(arguments["body"]))
+    return {
+        "active_body": document.active_body,
+        "bodies": document.body_names(),
+        **document.measure(),
+    }
+
+
+def geometrical_set(
+    context: BuildContext, arguments: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Create a geometrical set — a folder for construction geometry.
+
+    **A geometrical set is organisation, not geometry**, and this backend says so rather
+    than pretending otherwise. In CATIA it is a tree node that construction elements are
+    filed under; here, planes, points and axis systems already live in their own
+    namespaces on the document and are addressed by name, so a set changes where a thing
+    appears in a tree and nothing about what it is or how it resolves.
+
+    It is implemented rather than refused because a design that files its datums tidily
+    must not fail on a backend that has no tree to file them in — and because the CATIA
+    backend, which does, will make the same call mean something visible there.
+    """
+    document = context.require_document()
+    name = str(arguments.get("name") or f"Geometrical Set.{len(document.sets) + 1}")
+    document.add_set(name, ordered=bool(arguments.get("ordered")))
+    return {
+        "geometrical_set": name,
+        "geometrical_sets": document.set_names(),
+        "note": (
+            "Construction geometry in this backend is addressed by name, not by tree "
+            "position, so the set records the grouping and does not change how anything "
+            "resolves."
+        ),
+    }
+
+
+__all__ = [
+    "body_activate",
+    "body_create",
+    "feature_rename",
+    "geometrical_set",
+    "list_features",
+    "new_part",
+    "set_material",
+]

@@ -42,6 +42,9 @@ HANDLERS: Final[dict[str, Handler]] = {
     "catia_set_material": document_ops.set_material,
     "catia_feature_rename": document_ops.feature_rename,
     "catia_list_features": document_ops.list_features,
+    "catia_body_create": document_ops.body_create,
+    "catia_body_activate": document_ops.body_activate,
+    "catia_geometrical_set": document_ops.geometrical_set,
     # reference geometry
     reference_ops.POINT_AT: reference_ops.point_at,
     reference_ops.POINT_BETWEEN: reference_ops.point_between,
@@ -63,6 +66,7 @@ HANDLERS: Final[dict[str, Handler]] = {
     features.POCKET: features.pocket,
     features.SHAFT: features.shaft,
     features.GROOVE: features.groove,
+    features.SOLID_COMBINE: features.solid_combine,
     holes.HOLE: holes.hole,
     holes.HOLE_AT: holes.hole_at,
     # primitives and dress-up
@@ -92,6 +96,8 @@ HANDLERS: Final[dict[str, Handler]] = {
     inspection.MEASURE_BETWEEN: inspection.measure_between,
     inspection.MEASURE_ITEM: inspection.measure_item,
     inspection.ANALYSIS: inspection.analysis_part,
+    inspection.LIST_FACES: inspection.list_faces,
+    inspection.LIST_EDGES: inspection.list_edges,
 }
 
 

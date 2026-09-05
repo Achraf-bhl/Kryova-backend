@@ -36,12 +36,37 @@ from app.kernel.measurement import Detail
 from app.kernel.occt import classify, elements, metrology
 from app.kernel.occt.binding import symbol
 from app.kernel.occt.operations.context import BuildContext
+from app.kernel.occt.selectors import select_faces
 from app.kernel.occt.topology import edges, faces
 
 MEASURE = "catia_measure"
 MEASURE_BETWEEN = "catia_measure_between"
 MEASURE_ITEM = "catia_measure_item"
 ANALYSIS = "catia_analysis_part"
+LIST_FACES = "catia_list_faces"
+LIST_EDGES = "catia_list_edges"
+
+#: Face-kind words that name one surface classification, mapped to OCCT's spelling.
+#: `all` and `other` are deliberately absent: they are not surface types, and putting
+#: them here with an empty string would make the complement test in `_face_matches`
+#: compare against a surface no face can have.
+_FACE_KINDS: Final[dict[str, str]] = {
+    "planar": "Plane",
+    "cylindrical": "Cylinder",
+    "conical": "Cone",
+    "spherical": "Sphere",
+}
+
+#: Every face-kind word the registry's enum allows, which is the four above plus the two
+#: that are not surface types.
+_FACE_KIND_WORDS: Final[frozenset[str]] = frozenset({*_FACE_KINDS, "all", "other"})
+
+#: Edge-kind words from the registry's own enum. Unlike faces these are not all surface
+#: classifications — `convex`/`concave` are adjacency facts — so the filter is a chain of
+#: tests rather than a lookup.
+_EDGE_KINDS: Final[frozenset[str]] = frozenset(
+    {"all", "linear", "circular", "convex", "concave"}
+)
 
 #: What `catia_measure_between` can be asked for, in the registry's own spelling.
 #: `minimum_distance` and `closest_points` come from one search and differ only in which
@@ -234,6 +259,147 @@ def _add_circle_size(payload: dict[str, Any], found: list[Any]) -> None:
     provenance.attach(
         payload, "diameter_mm", provenance.measured("exact circular edge")
     )
+
+
+def list_faces(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Every face of the part, or of one feature, with area, centre and outward normal.
+
+    **This is what turns a guess into a selector.** Its whole job is to be read before an
+    operation that acts on a face, so the design can name what it wants — and the payload
+    carries the *predicate* that would select each face, not just a number, because an
+    index into this list is exactly the fragility `app.kernel.selection` exists to remove.
+    """
+    document = context.require_document()
+    shape = _shape_to_list(context, document, arguments, LIST_FACES)
+
+    kind = str(arguments.get("kind") or "all").lower()
+    if kind not in _FACE_KIND_WORDS:
+        allowed = ", ".join(sorted(_FACE_KIND_WORDS))
+        raise OperationNotSupported(
+            subject=LIST_FACES,
+            reason=f"{kind!r} is not a face kind. Supported: {allowed}",
+            backend="occt",
+        )
+
+    minimum = float(arguments.get("min_area_mm2") or 0.0)
+    listed = []
+    for face in faces(shape):
+        surface = classify.face_surface_type(face)
+        if not _face_matches(kind, surface):
+            continue
+        area = classify.face_area_mm2(face)
+        if area < minimum:
+            continue
+
+        entry: dict[str, Any] = {
+            "surface": surface,
+            "area_mm2": area,
+            "centre_mm": list(elements.face_centre(face)),
+        }
+        normal = classify.face_normal(face)
+        if normal is not None:
+            entry["normal"] = list(normal)
+            entry["selector"] = {"normal": list(normal), "planar": surface == "Plane"}
+        diameter = classify.cylinder_diameter_mm(face)
+        if diameter is not None:
+            entry["diameter_mm"] = diameter
+            entry["selector"] = {"cylindrical": True, "diameter_mm": diameter}
+        listed.append(entry)
+
+    return {"faces": listed, "count": len(listed), "of": arguments.get("feature") or "part"}
+
+
+def list_edges(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Every edge, with length, midpoint and whether it is convex or concave.
+
+    Convexity is the reason this is not just a length list: an outside corner takes a
+    round and an inside corner takes a different radius and often a different intent.
+    An edge with fewer than two faces, or a tangent join, is **neither** and says so
+    rather than defaulting to one — which is what stops a selector from filleting a face
+    that is already round.
+    """
+    document = context.require_document()
+    shape = _shape_to_list(context, document, arguments, LIST_EDGES)
+
+    kind = str(arguments.get("kind") or "all").lower()
+    if kind not in _EDGE_KINDS:
+        allowed = ", ".join(sorted(_EDGE_KINDS))
+        raise OperationNotSupported(
+            subject=LIST_EDGES,
+            reason=f"{kind!r} is not an edge kind. Supported: {allowed}",
+            backend="occt",
+        )
+
+    candidates = edges(shape)
+    if arguments.get("face"):
+        wanted = select_faces(
+            document.shape, arguments["face"], tool=LIST_EDGES, document=document
+        )
+        bounding = [edge for face in wanted for edge in edges(face)]
+        candidates = [
+            edge for edge in candidates if any(edge.IsSame(other) for other in bounding)
+        ]
+
+    # Always built, and always from the **whole part**: convexity is a fact about the two
+    # faces meeting at an edge, so a feature-restricted compound of edges alone would
+    # report every edge as neither convex nor concave. Same trap `resolve._resolve_edges`
+    # documents, reached by a different route.
+    mapping = classify.faces_by_edge(document.shape)
+
+    minimum = float(arguments.get("min_length_mm") or 0.0)
+    listed = []
+    for edge in candidates:
+        curve = classify.edge_curve_type(edge)
+        if kind == "linear" and curve != "Line":
+            continue
+        if kind == "circular" and curve not in {"Circle", "Ellipse"}:
+            continue
+
+        convex = classify.edge_is_convex(edge, classify.adjoining_faces(mapping, edge))
+        if kind == "convex" and convex is not True:
+            continue
+        if kind == "concave" and convex is not False:
+            continue
+
+        length = classify.edge_length_mm(edge)
+        if length < minimum:
+            continue
+
+        listed.append(
+            {
+                "curve": curve,
+                "length_mm": length,
+                "midpoint_mm": list(elements.edge_midpoint(edge)),
+                "convex": convex,
+            }
+        )
+
+    return {"edges": listed, "count": len(listed), "of": arguments.get("feature") or "part"}
+
+
+def _shape_to_list(
+    context: BuildContext, document: Any, arguments: Mapping[str, Any], tool: str
+) -> Any:
+    """The whole part, or one feature's own entities as a compound."""
+    part = context.require_shape(tool)
+    named = arguments.get("feature")
+    if not named:
+        return part
+    return elements.resolve_element(document, f"{named}#all", tool=tool).require_shape()
+
+
+def _face_matches(kind: str, surface: str) -> bool:
+    """Does a face of this surface type belong in a listing filtered by `kind`?
+
+    `other` is everything the four named kinds do not cover — a B-spline, a torus, a
+    surface of revolution — which is why it is a complement rather than another entry
+    in the mapping.
+    """
+    if kind == "all":
+        return True
+    if kind == "other":
+        return surface not in _FACE_KINDS.values()
+    return surface == _FACE_KINDS[kind]
 
 
 def analysis_part(

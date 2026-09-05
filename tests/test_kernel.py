@@ -859,6 +859,7 @@ class TestSketchesAndSolidFeatures:
         assert reopened["profiles"] == 0
 
     def test_an_unsupported_pad_limit_is_named_not_silently_ignored(self) -> None:
+        """`up_to_surface` is the one limit still owed, and it says what it needs."""
         from app.kernel import OcctRunner
 
         runner = OcctRunner()
@@ -866,8 +867,103 @@ class TestSketchesAndSolidFeatures:
         runner("catia_sketch_create", {"support": "XY", "name": "s"})
         runner("catia_sketch_rectangle", {"sketch": "s", "width_mm": 10.0, "height_mm": 10.0})
 
-        with pytest.raises(OperationNotSupported, match="Phase 2.5|Phase 2.4"):
-            runner("catia_pad", {"sketch": "s", "length_mm": 5.0, "limit": "up_to_next"})
+        with pytest.raises(OperationNotSupported, match="Phase 2.6"):
+            runner("catia_pad", {"sketch": "s", "length_mm": 5.0, "limit": "up_to_surface"})
+
+    def test_a_limit_stops_the_extrusion_where_the_geometry_says(self) -> None:
+        """Master plan 2.5. Two 10 mm plates with a 20 mm gap: a post drawn on the lower
+        one stops at the upper one, and a bore drilled from the top breaks out of the
+        upper plate rather than continuing into the lower.
+
+        `up_to_next` means the opposite thing for the two, and both are checked here:
+        a pad grows *until it reaches* the next wall, a pocket cuts *until it leaves*
+        the one it is in. One meaning for both would make every pocket stop the instant
+        it touched the face it was drilling.
+        """
+        from app.kernel import OcctRunner
+
+        def two_plates():
+            runner = OcctRunner()
+            runner("catia_new_part", {"name": "P"})
+            runner("catia_sketch_create", {"support": "XY", "name": "a"})
+            runner("catia_sketch_rectangle", {"sketch": "a", "width_mm": 60.0, "height_mm": 60.0})
+            runner("catia_pad", {"sketch": "a", "length_mm": 10.0, "name": "lower"})
+            runner("catia_plane_offset", {"reference": "XY", "distance_mm": 30.0, "name": "high"})
+            runner("catia_sketch_create", {"support": "high", "name": "b"})
+            runner("catia_sketch_rectangle", {"sketch": "b", "width_mm": 60.0, "height_mm": 60.0})
+            runner("catia_pad", {"sketch": "b", "length_mm": 10.0, "name": "upper"})
+            runner("catia_plane_offset", {"reference": "XY", "distance_mm": 10.0, "name": "mid"})
+            return runner
+
+        base = 60.0 * 60.0 * 10.0 * 2.0
+        bore_area = math.pi * 5.0**2
+
+        runner = two_plates()
+        runner("catia_sketch_create", {"support": "mid", "name": "c"})
+        runner("catia_sketch_circle", {"sketch": "c", "diameter_mm": 10.0})
+        result = runner("catia_pad", {"sketch": "c", "limit": "up_to_next", "name": "post"})
+        assert result["volume_mm3"] == pytest.approx(base + bore_area * 20.0, rel=1e-9)
+
+        runner = two_plates()
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 25.0, "name": "stop"})
+        runner("catia_sketch_create", {"support": "mid", "name": "c"})
+        runner("catia_sketch_circle", {"sketch": "c", "diameter_mm": 10.0})
+        result = runner(
+            "catia_pad",
+            {"sketch": "c", "limit": "up_to_plane", "up_to": "stop", "name": "post"},
+        )
+        assert result["volume_mm3"] == pytest.approx(base + bore_area * 15.0, rel=1e-9)
+
+        runner = two_plates()
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 40.0, "name": "top"})
+        runner("catia_sketch_create", {"support": "top", "name": "d"})
+        runner("catia_sketch_circle", {"sketch": "d", "diameter_mm": 10.0})
+        result = runner(
+            "catia_pocket",
+            {"sketch": "d", "limit": "up_to_next", "reversed": True, "name": "bore"},
+        )
+        assert result["volume_mm3"] == pytest.approx(base - bore_area * 10.0, rel=1e-9)
+
+        runner = two_plates()
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 40.0, "name": "top"})
+        runner("catia_sketch_create", {"support": "top", "name": "d"})
+        runner("catia_sketch_circle", {"sketch": "d", "diameter_mm": 10.0})
+        result = runner(
+            "catia_pocket",
+            {"sketch": "d", "limit": "up_to_last", "reversed": True, "name": "bore"},
+        )
+        assert result["volume_mm3"] == pytest.approx(base - bore_area * 20.0, rel=1e-9)
+
+    def test_a_limit_is_measured_from_the_sketch_not_from_the_world_origin(self) -> None:
+        """The bug this pins, which shipped for exactly one test run: the extent of the
+        material ahead was measured with the two-argument `gp_Trsf.SetTransformation`,
+        which leaves the result in world coordinates. A post bridging a 20 mm gap from a
+        sketch at z=10 came out 30 mm long — wrong by exactly the sketch's height.
+
+        Built on ZX so the extrusion direction is **not** world Z: measuring absolute Z
+        would then not merely offset the answer, it would measure a different axis.
+        """
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "P"})
+        runner("catia_sketch_create", {"support": "ZX", "name": "a"})
+        runner("catia_sketch_rectangle", {"sketch": "a", "width_mm": 60.0, "height_mm": 60.0})
+        runner("catia_pad", {"sketch": "a", "length_mm": 10.0, "name": "wall"})
+        runner("catia_plane_offset", {"reference": "ZX", "distance_mm": 30.0, "name": "far"})
+        runner("catia_sketch_create", {"support": "far", "name": "b"})
+        runner("catia_sketch_rectangle", {"sketch": "b", "width_mm": 60.0, "height_mm": 60.0})
+        runner("catia_pad", {"sketch": "b", "length_mm": 10.0, "name": "far_wall"})
+
+        runner("catia_plane_offset", {"reference": "ZX", "distance_mm": 10.0, "name": "inner"})
+        runner("catia_sketch_create", {"support": "inner", "name": "c"})
+        runner("catia_sketch_circle", {"sketch": "c", "diameter_mm": 10.0})
+        result = runner("catia_pad", {"sketch": "c", "limit": "up_to_next", "name": "post"})
+
+        base = 60.0 * 60.0 * 10.0 * 2.0
+        assert result["volume_mm3"] == pytest.approx(
+            base + math.pi * 5.0**2 * 20.0, rel=1e-9
+        )
 
 
 class TestDeterminism:

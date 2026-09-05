@@ -151,7 +151,7 @@ class Element:
             face = faces(self.shape)[0]
             if classify.face_surface_type(face) == "Plane":
                 normal = classify.face_normal(face)
-                centre = _face_centre(face)
+                centre = face_centre(face)
                 if normal is not None:
                     return symbol("gp_Ax3")(
                         symbol("gp_Pnt")(*centre), symbol("gp_Dir")(*normal)
@@ -306,7 +306,7 @@ def axis_for(document: Any, reference: Any, *, tool: str) -> Any:
     if element.position is not None:
         origin = element.position
     elif element.kind == "edges":
-        origin = _edge_midpoint(edges(element.require_shape())[0])
+        origin = edge_midpoint(edges(element.require_shape())[0])
     else:  # pragma: no cover - every kind with a direction has one of the two above
         origin = (0.0, 0.0, 0.0)
 
@@ -323,14 +323,14 @@ _WORLD_AXES: Final[dict[str, tuple[float, float, float]]] = {
 }
 
 
-def _edge_midpoint(edge: Any) -> tuple[float, float, float]:
+def edge_midpoint(edge: Any) -> tuple[float, float, float]:
     """A point the edge actually passes through, so the axis is a line and not a guess."""
     adaptor = symbol("BRepAdaptor_Curve")(edge)
     point = adaptor.Value((adaptor.FirstParameter() + adaptor.LastParameter()) / 2.0)
     return (point.X(), point.Y(), point.Z())
 
 
-def _face_centre(face: Any) -> tuple[float, float, float]:
+def face_centre(face: Any) -> tuple[float, float, float]:
     """The point at a face's parametric centre — where its own frame is anchored."""
     surface = symbol("BRepAdaptor_Surface")(face)
     point = surface.Value(
@@ -550,6 +550,8 @@ __all__ = [
     "Element",
     "angle_between",
     "axis_for",
+    "edge_midpoint",
+    "face_centre",
     "plane_frame",
     "resolve_element",
     "resolve_elements",

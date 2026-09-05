@@ -48,6 +48,11 @@ from app.kernel.occt.reference import AxisSystem, ReferencePlane, ReferencePoint
 #: save would write.
 OCAF_FORMAT = "BinOcaf"
 
+#: CATIA's name for the body every part starts with. A design that never mentions bodies
+#: works entirely inside this one, which is what keeps multi-body from changing the
+#: meaning of any existing plan.
+DEFAULT_BODY = "PartBody"
+
 
 @dataclass
 class Feature:
@@ -75,8 +80,18 @@ class Feature:
     #: layer must not be able to tell which kernel ran.
     catia_style_name: str = ""
 
+    #: Which body this feature was built in, recorded at build time. A feature cannot be
+    #: moved between bodies afterwards, so this is a fact about the build rather than a
+    #: mutable property — and it is what lets a listing say where each feature went.
+    body: str = DEFAULT_BODY
+
     def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "tool": self.tool, "catia_name": self.catia_style_name}
+        return {
+            "name": self.name,
+            "tool": self.tool,
+            "catia_name": self.catia_style_name,
+            "body": self.body,
+        }
 
 
 @dataclass
@@ -92,10 +107,18 @@ class PartDocument:
     _names: NameRegistry | None = field(default=None, repr=False)
     _features: list[Feature] = field(default_factory=list, repr=False)
     _by_name: dict[str, Feature] = field(default_factory=dict, repr=False)
-    _shape: Any = field(default=None, repr=False)
+    #: Bodies by name, each holding its own shape. `PartBody` is CATIA's default name
+    #: for the one every part starts with, and a design that never mentions bodies uses
+    #: only that one — which is why every operation can go on reading `document.shape`.
+    _bodies: dict[str, Any] = field(default_factory=lambda: {DEFAULT_BODY: None}, repr=False)
+    _active_body: str = field(default=DEFAULT_BODY, repr=False)
     _planes: dict[str, ReferencePlane] = field(default_factory=dict, repr=False)
     _points: dict[str, ReferencePoint] = field(default_factory=dict, repr=False)
     _axis_systems: dict[str, AxisSystem] = field(default_factory=dict, repr=False)
+    #: Geometrical sets by name → whether the set is ordered. Organisation only: this
+    #: backend addresses construction geometry by name rather than by tree position, so
+    #: a set records the grouping a design asked for without changing what resolves.
+    _sets: dict[str, bool] = field(default_factory=dict, repr=False)
     _tool_counters: dict[str, int] = field(default_factory=dict, repr=False)
     _measurement_cache: dict[Detail, dict[str, Any]] = field(default_factory=dict, repr=False)
 
@@ -127,8 +150,71 @@ class PartDocument:
 
     @property
     def shape(self) -> Any:
-        """The part as it currently stands. None until something has been built."""
-        return self._shape
+        """The **active body** as it currently stands. None until something is built.
+
+        A part holds several bodies (master plan 2.5) and features land in whichever one
+        is active, exactly as CATIA's *Define In Work Object* decides. Every operation
+        reads and writes the part through this property, so making it the active body
+        rather than a single shape is what makes multi-body work without every operation
+        learning about bodies.
+        """
+        return self._bodies.get(self._active_body)
+
+    @property
+    def active_body(self) -> str:
+        """Which body new features are added to."""
+        return self._active_body
+
+    @property
+    def sets(self) -> dict[str, bool]:
+        """Geometrical sets by name, mapped to whether each is ordered."""
+        return self._sets
+
+    def add_set(self, name: str, *, ordered: bool = False) -> str:
+        """Record a geometrical set. Re-declaring one is a no-op, not an error, because
+        a regeneration re-runs the call that made it and a set holds no geometry to lose."""
+        self._sets[name] = ordered
+        return name
+
+    def set_names(self) -> list[str]:
+        return list(self._sets)
+
+    def body_names(self) -> list[str]:
+        """Every body in the part, in creation order — the first is CATIA's `PartBody`."""
+        return list(self._bodies)
+
+    def add_body(self, name: str, *, activate: bool = True) -> str:
+        """Create an empty body. Re-creating one by the same name is refused.
+
+        Refused rather than replaced, unlike sketches and planes: a body holds built
+        geometry, so silently emptying one on a regeneration would delete a part of the
+        design that nothing else records.
+        """
+        if name in self._bodies:
+            raise GeometryError(
+                f"This part already has a body called {name!r}. Bodies hold built "
+                f"geometry, so this one is not replaced — activate it with "
+                f"catia_body_activate, or choose another name. Bodies so far: "
+                f"{', '.join(self._bodies)}."
+            )
+        self._bodies[name] = None
+        if activate:
+            self._active_body = name
+        return name
+
+    def activate_body(self, name: str) -> str:
+        """Choose which body new features are added to."""
+        if name not in self._bodies:
+            known = ", ".join(self._bodies)
+            raise NamingError(
+                f"No body called {name!r} in {self.name}. Bodies here: {known}."
+            )
+        self._active_body = name
+        # The measurement cache is keyed by detail level, not by body, so switching
+        # bodies must clear it or the next `measure()` reports the previous body's
+        # numbers under the new body's name.
+        self._measurement_cache.clear()
+        return name
 
     def __iter__(self) -> Iterator[Feature]:
         return iter(self._features)
@@ -256,7 +342,22 @@ class PartDocument:
         return sorted(self._axis_systems)
 
     def body(self, name: str) -> Any:
-        """The shape a named feature produced — what a boolean's `tool_body` refers to."""
+        """A named body's shape, or a named feature's — what `tool_body` refers to.
+
+        **Bodies are checked first**, because that is what the word means: a design that
+        built `Body.2` and asks a boolean to subtract `Body.2` means the body, not some
+        feature that happens to share the name. A feature name still resolves, which is
+        what it meant before multi-body existed and what a single-body design relies on.
+        """
+        if name in self._bodies:
+            shape = self._bodies[name]
+            if shape is None:
+                raise NamingError(
+                    f"The body {name!r} is empty — nothing has been built in it yet, so "
+                    "it cannot be combined with anything."
+                )
+            return shape
+
         feature = self.feature(name)
         if feature.shape is None:
             raise NamingError(
@@ -336,9 +437,10 @@ class PartDocument:
                 "operation's dimensions are compatible with the geometry it acts on."
             )
         feature.shape = shape
+        feature.body = self._active_body
         if contributed is not None:
             feature.contributed_faces, feature.contributed_edges = contributed
-        self._shape = shape
+        self._bodies[self._active_body] = shape
         self._measurement_cache.clear()
 
     def _next_catia_name(self, tool: str) -> str:
@@ -372,13 +474,14 @@ class PartDocument:
         fresh on every call, onto a copy the caller may mutate freely.
         """
         payload: dict[str, Any]
-        if self._shape is None:
+        shape = self.shape
+        if shape is None:
             payload = {"has_solid": False}
         else:
             cached = self._measurement_cache.get(detail)
             if cached is None:
                 cached = metrology.measure(
-                    self._shape, density_kg_m3=self.density_kg_m3, detail=detail
+                    shape, density_kg_m3=self.density_kg_m3, detail=detail
                 )
                 self._measurement_cache[detail] = cached
             payload = dict(cached)
@@ -386,6 +489,11 @@ class PartDocument:
         payload["features"] = self.feature_names()
         if self.material is not None:
             payload["material"] = self.material
+        if len(self._bodies) > 1:
+            # Reported only when there is more than one, so a single-body design's
+            # payload is unchanged and no assertion written against it starts failing.
+            payload["bodies"] = self.body_names()
+            payload["active_body"] = self._active_body
         return payload
 
     def to_dict(self) -> dict[str, Any]:
@@ -397,4 +505,4 @@ class PartDocument:
         }
 
 
-__all__ = ["OCAF_FORMAT", "Feature", "PartDocument"]
+__all__ = ["DEFAULT_BODY", "OCAF_FORMAT", "Feature", "PartDocument"]

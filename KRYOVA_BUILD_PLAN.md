@@ -98,6 +98,23 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-05** — E5/E16 → **rung 2 of the ladder passes, and the part is right**
+  (`docs/verification-2026-09-05-night/REPORT.md`). Not "every call returned ok": 18 calls,
+  no refusals, no retries, and the finished volume and mass match the closed form to the
+  last digit — 101207.4703614367 mm³ against 101207.47036143667, 0.2732601699758791 kg
+  against 0.27326016997587904 — with 15 faces, one solid, and a feature list naming all
+  four features. Pictures beside the report. Ollama on the GPU, confirmed resident
+  mid-run at 70%/30%, 6572 MiB.
+  Getting there took **three defects out of our own code, none of them visible from a
+  green suite, all three found by driving the product rather than by reading it**: the
+  mass cache that never noticed a material being set (`55557da`), the exact-equality rule
+  that refused `solid_count == 1` (`55557da`), and the unnamed-feature collision that made
+  a second pocket a regeneration of the first (`a6595ff`). Every one of them left the
+  geometry correct, which is why they survived four verification runs. Not verified on a
+  CATIA seat: the bridge daemon is not running and binding it to the overnight test
+  account unattended is not a trade worth making — recorded in the report with the reason
+  and with what can honestly be said without it.
+
 - **2026-09-05** — E16 → **polar placement: the bolt circle could not be said at all.**
   The flange that came out wrong three times was blamed on the model twice. It was the
   vocabulary. `catia_sketch_circle` offered one way to state a position — Cartesian `at` —

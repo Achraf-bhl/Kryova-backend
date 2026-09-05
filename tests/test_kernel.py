@@ -2922,10 +2922,10 @@ class TestWireframeCurvesLiveInSpace:
             with pytest.raises(OperationNotSupported, match=expected):
                 runner("catia_curve_circle", arguments)
 
-        with pytest.raises(OperationNotSupported, match="chaining it over a whole polyline"):
+        with pytest.raises(OperationNotSupported, match="comes back sampled"):
             runner(
-                "catia_curve_polyline",
-                {"points": [[0, 0, 0], [1, 0, 0]], "radius_mm": 1.0},
+                "catia_curve_reflect_line",
+                {"surface": "Refuse", "direction": [0, 0, 1], "angle_deg": 45.0},
             )
 
 
@@ -4021,3 +4021,213 @@ class TestASpiralIsFittedAndSaysSo:
                     "name": "no",
                 },
             )
+
+
+class TestTheReflectLineIsGeometryNotADrawing:
+    """The silhouette as real geometry: a parting line, an outline, a highlight.
+
+    Two things separate this from the hidden-line drawing OCCT computes it with, and both
+    are pinned below. It keeps the part of the line that is hidden, because a parting line
+    does not stop existing when something is in front of it. And it keeps only what lies
+    on a *curved* face, because HLR reports a box's eight boundary edges as "outline" and
+    a box has no reflect line at all — a polyhedron does its turning at edges that already
+    exist.
+    """
+
+    @staticmethod
+    def _ball(radius: float = 10.0) -> object:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Ball"})
+        runner(
+            "catia_surface_primitive",
+            {"kind": "sphere", "centre": [0, 0, 0], "radius_mm": radius, "name": "ball"},
+        )
+        return runner
+
+    @staticmethod
+    def _length(runner: object, name: str) -> float:
+        return float(runner("catia_measure_item", {"element": name})["length_mm"])  # type: ignore[operator]
+
+    def test_a_sphere_s_reflect_line_is_its_great_circle_whichever_way_you_look(
+        self,
+    ) -> None:
+        """The one shape whose answer is the same from every direction, which is what makes
+        it the check: a reflect line that came out as anything but 2πr, or that changed
+        with the direction, is not a silhouette."""
+        runner = self._ball()
+
+        for index, direction in enumerate(([0, 0, 1], [1, 0, 0], [1, 1, 1])):
+            runner(  # type: ignore[operator]
+                "catia_curve_reflect_line",
+                {"surface": "ball", "direction": direction, "name": f"equator{index}"},
+            )
+            assert self._length(runner, f"equator{index}") == pytest.approx(
+                2 * math.pi * 10.0, rel=1e-9
+            )
+
+    def test_a_cylinder_from_the_side_gives_its_two_straight_edges(self) -> None:
+        """Two lines the length of the cylinder, at ±r across the view — and nothing on
+        the flat ends, which have no reflect line of their own."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Post"})
+        runner(
+            "catia_surface_primitive",
+            {"kind": "cylinder", "radius_mm": 10.0, "length_mm": 30.0, "name": "post"},
+        )
+
+        runner("catia_curve_reflect_line", {"surface": "post", "direction": [1, 0, 0], "name": "sides"})
+
+        assert self._length(runner, "sides") == pytest.approx(60.0, abs=1e-9)
+        box = runner("catia_measure_item", {"element": "sides"})["bounding_box_mm"]
+        assert box["size"] == pytest.approx([0.0, 20.0, 30.0], abs=1e-6)
+
+    def test_the_hidden_half_of_a_reflect_line_is_still_a_reflect_line(self) -> None:
+        """Two overlapping spheres 15 mm apart, looked at along the line joining them: the
+        far equator is exactly behind the near one. Hidden-line removal is what computes
+        this, and its default answer is what a *viewer* sees — one equator, 62.83. A
+        parting line does not stop existing because something is in front of it, so the
+        answer here is both, 125.66."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Peanut"})
+        runner("catia_body_create", {"name": "lower"})
+        runner(
+            "catia_surface_primitive",
+            {"kind": "sphere", "centre": [0, 0, 0], "radius_mm": 10.0, "name": "near"},
+        )
+        runner("catia_body_create", {"name": "upper"})
+        runner(
+            "catia_surface_primitive",
+            {"kind": "sphere", "centre": [0, 0, 15], "radius_mm": 10.0, "name": "far"},
+        )
+        runner("catia_body_activate", {"body": "lower"})
+        runner(
+            "catia_boolean",
+            {
+                "operation": "union",
+                "target_body": "lower",
+                "tool_body": "upper",
+                "name": "peanut",
+            },
+        )
+
+        runner(
+            "catia_curve_reflect_line",
+            {"surface": "peanut", "direction": [0, 0, 1], "name": "both"},
+        )
+
+        assert self._length(runner, "both") == pytest.approx(2 * 2 * math.pi * 10.0, rel=1e-9)
+
+    def test_a_flat_faced_shape_has_no_reflect_line_at_all(self) -> None:
+        """HLR calls a box's eight boundary edges "outline", and they are nothing of the
+        sort — they are model edges, and a plane never turns away across itself. Handing
+        them back would make every prismatic part appear to have a parting line."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Block"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        runner(
+            "catia_sketch_rectangle",
+            {"sketch": "outline", "width_mm": 40.0, "height_mm": 20.0},
+        )
+        runner("catia_pad", {"sketch": "outline", "length_mm": 12.0, "name": "block"})
+
+        with pytest.raises(GeometryError, match="A shape made only of flat faces"):
+            runner(
+                "catia_curve_reflect_line",
+                {"surface": "block", "direction": [0, 0, 1], "name": "no"},
+            )
+
+    def test_an_angle_that_is_not_the_silhouette_is_refused_before_anything_is_resolved(
+        self,
+    ) -> None:
+        """No correction to the surface or the direction makes an unanswerable angle work,
+        so that is the message even when the rest is wrong too."""
+        runner = self._ball()
+
+        with pytest.raises(OperationNotSupported, match="comes back sampled"):
+            runner(  # type: ignore[operator]
+                "catia_curve_reflect_line",
+                {"surface": "nothing_by_this_name", "direction": [0, 0, 1], "angle_deg": 45.0},
+            )
+        # ... and the silhouette written out explicitly is still the silhouette.
+        runner(  # type: ignore[operator]
+            "catia_curve_reflect_line",
+            {"surface": "ball", "direction": [0, 0, 1], "angle_deg": 90.0, "name": "equator"},
+        )
+        assert self._length(runner, "equator") == pytest.approx(2 * math.pi * 10.0, rel=1e-9)
+
+
+class TestAPolylineRoundsItsOwnCorners:
+    """`radius_mm` on a polyline, which matters because the polyline is usually a path.
+
+    A sharp corner makes a sweep fail, so rounding has to be available in the call that
+    builds the path rather than corner by corner afterwards. Every case here has an exact
+    closed form: each rounded corner replaces `2r` of straight run with a quarter arc, so
+    a right-angled corner costs `2r − πr/2`.
+    """
+
+    @staticmethod
+    def _run(points: list, **extra: object) -> float:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Path"})
+        runner("catia_curve_polyline", {"points": points, "name": "path", **extra})
+        return float(runner("catia_measure_item", {"element": "path"})["length_mm"])
+
+    def test_one_corner_costs_two_radii_of_straight_and_gains_a_quarter_arc(self) -> None:
+        ell = [[0, 0, 0], [40, 0, 0], [40, 30, 0]]
+
+        assert self._run(ell) == pytest.approx(70.0, abs=TOL)
+        assert self._run(ell, radius_mm=5.0) == pytest.approx(
+            60.0 + 2 * math.pi * 5.0 / 4, abs=1e-9
+        )
+
+    def test_a_segment_between_two_corners_is_trimmed_at_both_ends(self) -> None:
+        """The trims accumulate: the middle run of 40 loses 5 mm at each end. Filleting the
+        pairs independently would leave it 40 long and the chain would not close."""
+        zed = [[0, 0, 0], [40, 0, 0], [40, 30, 0], [0, 30, 0]]
+
+        assert self._run(zed, radius_mm=5.0) == pytest.approx(
+            (35 + 20 + 35) + 2 * (2 * math.pi * 5.0 / 4), abs=1e-9
+        )
+
+    def test_each_corner_is_rounded_in_the_plane_of_its_own_two_segments(self) -> None:
+        """A path that turns out of one plane. Rounding it in a single plane fitted to the
+        whole polyline puts every arc somewhere slightly wrong while still measuring right,
+        so the length is checked *and* so is the fact that the first corner's arc stays in
+        the XZ plane its own segments define."""
+        assert self._run(
+            [[0, 0, 0], [40, 0, 0], [40, 0, 30]], radius_mm=5.0
+        ) == pytest.approx(60.0 + 2 * math.pi * 5.0 / 4, abs=1e-9)
+        assert self._run(
+            [[0, 0, 0], [40, 0, 0], [40, 30, 0], [40, 30, 20]], radius_mm=5.0
+        ) == pytest.approx((35 + 20 + 15) + 2 * (2 * math.pi * 5.0 / 4), abs=1e-9)
+
+    def test_a_closed_polyline_rounds_the_corner_where_it_meets_itself(self) -> None:
+        """Four corners on a square, not three. The wrap-around one is the easy one to
+        miss, and a path with one sharp corner left in it fails a sweep exactly as a path
+        with four would."""
+        square = [[0, 0, 0], [40, 0, 0], [40, 40, 0], [0, 40, 0]]
+
+        assert self._run(square, closed=True, radius_mm=5.0) == pytest.approx(
+            4 * 30.0 + 4 * (2 * math.pi * 5.0 / 4), abs=1e-9
+        )
+
+    def test_two_segments_running_the_same_way_have_no_corner_to_round(self) -> None:
+        """Not a failure — there is simply nothing there. The extra point splits the first
+        leg in two and the result must be the same length as without it."""
+        assert self._run(
+            [[0, 0, 0], [20, 0, 0], [40, 0, 0], [40, 30, 0]], radius_mm=5.0
+        ) == pytest.approx(60.0 + 2 * math.pi * 5.0 / 4, abs=1e-9)
+
+    def test_a_radius_larger_than_a_segment_names_the_corner_it_failed_at(self) -> None:
+        with pytest.raises(GeometryError, match="could not round corner"):
+            self._run([[0, 0, 0], [40, 0, 0], [40, 30, 0]], radius_mm=100.0)

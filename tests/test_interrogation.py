@@ -417,7 +417,9 @@ class TestDraftAnalysisAndDraftFeatureAgree:
         from app.kernel.errors import OperationNotSupported
 
         runner = self._block()
-        with pytest.raises(OperationNotSupported, match="reflect line"):
+        # Pins the *current* reason, not merely that there is one: the silhouette
+        # shipped, so a refusal still blaming it would be stale.
+        with pytest.raises(OperationNotSupported, match="takes a neutral"):
             runner(
                 "catia_draft",
                 {"faces": self.WALLS, "angle_deg": 2.0, "neutral": "XY", "mode": "reflect_line"},

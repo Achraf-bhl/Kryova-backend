@@ -67,9 +67,13 @@ _ORIGIN_PLANES: Final[dict[str, tuple[tuple[float, float, float], tuple[float, f
 #: parting element is a plane the design already named.
 _UNSUPPORTED_MODES: Final[dict[str, str]] = {
     "reflect_line": (
-        "drafting about a reflect line needs the silhouette curve of the pull direction, "
-        "which is generative-shape work (Phase 2.6). A draft split at a plane is the "
-        "`parting` argument and does not need this mode"
+        "the silhouette itself is available now — catia_curve_reflect_line builds it — but "
+        "the draft is not, and the reason is a different one: OCCT's draft takes a neutral "
+        "*plane*, and a reflect-line draft pivots about a curve lying on the face. Doing it "
+        "means building the ruled surface that leaves that curve at the draft angle and "
+        "replacing the face with it, which is surfacing work rather than a missing "
+        "argument. A draft split at a plane is the `parting` argument and does not need "
+        "this mode"
     ),
     "variable": (
         "a variable-angle draft needs a law along the face, which the operation "

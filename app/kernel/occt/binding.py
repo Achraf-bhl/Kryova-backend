@@ -126,6 +126,8 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         gp_XYZ,
     )
     from OCP.GProp import GProp_GProps, GProp_PGProps
+    from OCP.HLRAlgo import HLRAlgo_Projector
+    from OCP.HLRBRep import HLRBRep_Algo, HLRBRep_HLRToShape
     from OCP.Precision import Precision
     from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
     from OCP.ShapeFix import ShapeFix_Shape
@@ -202,6 +204,9 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "GCPnts_AbscissaPoint": GCPnts_AbscissaPoint,
         "GProp_GProps": GProp_GProps,
         "GProp_PGProps": GProp_PGProps,
+        "HLRAlgo_Projector": HLRAlgo_Projector,
+        "HLRBRep_Algo": HLRBRep_Algo,
+        "HLRBRep_HLRToShape": HLRBRep_HLRToShape,
         "Geom2d_Line": Geom2d_Line,
         "GeomAPI_Interpolate": GeomAPI_Interpolate,
         "GeomAPI_PointsToBSpline": GeomAPI_PointsToBSpline,

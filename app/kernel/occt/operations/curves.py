@@ -80,6 +80,7 @@ COMBINE = "catia_curve_combine"
 CORNER = "catia_curve_corner"
 CONNECT = "catia_curve_connect"
 SPIRAL = "catia_curve_spiral"
+REFLECT_LINE = "catia_curve_reflect_line"
 
 #: Below this a direction, a chord or a radius is treated as zero rather than normalised
 #: into a division by zero.
@@ -107,6 +108,16 @@ _SPIRAL_POINTS_PER_TURN: Final = 64
 
 #: How the continuities are spelled in the registry, and what each one costs in degree.
 _CONTINUITY_DEGREE: Final[dict[str, int]] = {"point": 1, "tangent": 3, "curvature": 5}
+
+#: The reflect-line angle this backend can answer exactly, in degrees. 90° is the
+#: silhouette — where the surface turns away from the direction — and is what a parting
+#: line and a draft's reflect line both mean.
+_SILHOUETTE_ANGLE_DEG: Final = 90.0
+
+#: How far an angle may sit from 90° and still be the silhouette. Half a thousandth of a
+#: degree: far tighter than anyone types, loose enough that 90.0 read back from JSON is
+#: never rejected for its own float representation.
+_SILHOUETTE_TOLERANCE_DEG: Final = 5e-4
 
 
 # -- curves drawn in space ----------------------------------------------------
@@ -208,24 +219,23 @@ def curve_circle(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
 
 
 def curve_polyline(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
-    """A 3D polyline through a list of points — straight segments, chained into one curve."""
+    """A 3D polyline through a list of points, optionally with every corner rounded.
+
+    Rounding in the same call matters when the polyline is about to become a sweep path: a
+    sharp corner there makes the sweep fail, and rounding afterwards means naming every
+    corner by hand. **Each arc is solved in the plane of its own two segments**, not in one
+    plane fitted to the whole polyline — two consecutive segments always share a plane, a
+    path that turns out of one does not, and rounding a 3D path in a single fitted plane
+    puts every arc somewhere slightly wrong while measuring exactly right.
+    """
     document = context.require_document()
     points = _point_list(document, arguments.get("points"), tool=POLYLINE, minimum=2)
 
-    if arguments.get("radius_mm"):
-        raise OperationNotSupported(
-            f"{POLYLINE} with radius_mm",
-            "rounding every corner of a 3D polyline means solving the arc in the plane of "
-            "each successive pair and carrying each shortened segment into the next. "
-            "catia_curve_corner does one corner and is the piece that was missing; "
-            "chaining it over a whole polyline is not done here yet. Round the corners "
-            "that matter with catia_curve_corner",
-        )
-
-    if arguments.get("closed"):
+    closed = bool(arguments.get("closed"))
+    if closed:
         points = [*points, points[0]]
 
-    wire = symbol("BRepBuilderAPI_MakeWire")()
+    segments = []
     for start, end in zip(points, points[1:], strict=False):
         if _distance_between(start, end) < MIN_LENGTH_MM:
             raise GeometryError(
@@ -233,11 +243,20 @@ def curve_polyline(context: BuildContext, arguments: Mapping[str, Any]) -> Mappi
                 f"{[round(value, 4) for value in start]}, which is a segment of no "
                 "length. Remove the repeat."
             )
-        wire.Add(
-            symbol("BRepBuilderAPI_MakeEdge")(
-                symbol("gp_Pnt")(*start), symbol("gp_Pnt")(*end)
-            ).Edge()
+        segments.append(_segment(start, end))
+
+    radius = arguments.get("radius_mm")
+    if radius:
+        segments = _rounded_corners(
+            segments,
+            as_positive_length(radius, argument="radius_mm", tool=POLYLINE),
+            closed=closed,
+            tool=POLYLINE,
         )
+
+    wire = symbol("BRepBuilderAPI_MakeWire")()
+    for segment in segments:
+        wire.Add(segment)
 
     built = build_or_raise(
         wire,
@@ -875,6 +894,65 @@ def curve_connect(context: BuildContext, arguments: Mapping[str, Any]) -> Mappin
     }
 
 
+def curve_reflect_line(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The line on a surface where it turns away from a direction — its silhouette.
+
+    Real geometry for something normally only seen: the outline of a shape as drawn, the
+    parting line a mould has to split along, the highlight a class-A surface is judged by.
+    A design can then measure it, sketch from it, or split a surface on it.
+
+    **The whole line, including the part that is hidden.** OCCT's hidden-line machinery is
+    what computes this, and its default answer is what a *viewer* would see — on a shape
+    that occludes itself, half of its own reflect line is dropped. That is the right answer
+    for a drawing and the wrong one for a parting line, which does not stop existing
+    because something is in front of it. Two fused spheres 15 mm apart return one equator
+    with visibility on and both with it off, so the difference is not subtle.
+
+    The projection is **parallel**, not perspective: a reflect line is a property of the
+    surface and a direction, so it must not move when a viewpoint does.
+
+    Only the silhouette — 90°, the default — is answered here. A general angle is a
+    different question: the contour where the normal meets the direction at that angle has
+    to be marched over each face and would come back sampled, and this package does not
+    hand back a sampled curve as though it were constructed.
+    """
+    from app.kernel.occt.operations.surfaces import named_geometry
+
+    document = context.require_document()
+
+    # Asked before anything is resolved: no correction to the surface or the direction
+    # makes an angle this backend cannot answer work, so that is the useful message even
+    # when the other arguments are wrong too.
+    angle = float(
+        _SILHOUETTE_ANGLE_DEG if arguments.get("angle_deg") is None else arguments["angle_deg"]
+    )
+    if abs(angle - _SILHOUETTE_ANGLE_DEG) > _SILHOUETTE_TOLERANCE_DEG:
+        raise OperationNotSupported(
+            f"{REFLECT_LINE} at {angle:g}°",
+            "only the silhouette (90°, the default) is exact here. The contour where a "
+            "surface's normal meets a direction at some other angle has to be marched "
+            "face by face and comes back sampled, and a sampled curve reported as a "
+            "constructed one is the mistake this kernel refuses to make. Ask for the "
+            "silhouette, or measure draft directly with catia_analysis",
+        )
+
+    named = arguments.get("surface")
+    surface = named_geometry(document, named, tool=REFLECT_LINE, argument="surface")
+    direction = _unit(
+        as_direction(arguments.get("direction"), argument="direction"), tool=REFLECT_LINE
+    )
+
+    found = _silhouette_of(surface, direction)
+    if found is None or not count(found, EDGE):
+        raise GeometryError(
+            f"{REFLECT_LINE} found no reflect line on {named!r} along "
+            f"[{', '.join(f'{value:g}' for value in direction)}]. A shape made only of "
+            "flat faces has none — a plane either faces the direction or does not, and "
+            "never turns away across itself. Only curved surfaces carry one."
+        )
+    return _record(context, document, arguments, REFLECT_LINE, found, "reflect_line")
+
+
 def curve_spiral(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
     """A planar spiral: a curve that grows outwards in its plane rather than climbing.
 
@@ -1379,6 +1457,108 @@ def _swept_wall(curve: Any, direction: tuple[float, float, float], span: float) 
     return symbol("BRepPrimAPI_MakePrism")(
         moved, symbol("gp_Vec")(*(value * span for value in direction))
     ).Shape()
+
+
+def _silhouette_of(surface: Any, direction: tuple[float, float, float]) -> Any:
+    """Where a shape turns away from a direction, as real 3D curves.
+
+    `ShowAll` rather than `Hide`, and that one call is the whole difference between a
+    drawing and a reflect line: `Hide` computes what a viewer would see, so a shape that
+    occludes itself loses the part of its own silhouette that is behind it. The projector
+    is built from a `gp_Ax2` at the world origin, which for a parallel projection carries
+    no information but the direction — the origin cannot move the answer.
+
+    **What comes back is a drawing's outline, which is not the same thing**, and the
+    difference is a box: HLR reports the eight model edges that bound its projection as
+    "outline", and they are nothing of the sort. A reflect line is where a surface *turns*
+    away from the direction, and a polyhedron does its turning at edges that already
+    exist. So every candidate is kept only if it lies on a curved face — which leaves a
+    box with nothing, a sphere with its great circle, and a filleted block with the fillet
+    alone rather than the fillet plus its own outline.
+    """
+    from app.kernel.occt import classify
+    from app.kernel.occt.topology import compound
+    from app.kernel.occt.topology import edges as edge_list
+
+    algorithm = symbol("HLRBRep_Algo")()
+    algorithm.Add(surface)
+    algorithm.Projector(
+        symbol("HLRAlgo_Projector")(
+            symbol("gp_Ax2")(symbol("gp_Pnt")(0.0, 0.0, 0.0), symbol("gp_Dir")(*direction))
+        )
+    )
+    algorithm.Update()
+    algorithm.ShowAll()
+
+    outline = symbol("HLRBRep_HLRToShape")(algorithm).OutLineVCompound3d()
+    if outline is None:
+        return None
+
+    curved = []
+    for edge in edge_list(outline):
+        adaptor = symbol("BRepAdaptor_Curve")(edge)
+        middle = adaptor.Value(
+            (adaptor.FirstParameter() + adaptor.LastParameter()) / 2.0
+        )
+        face, _, _ = closest_on_surface(
+            surface, (middle.X(), middle.Y(), middle.Z()), tool=REFLECT_LINE
+        )
+        if classify.face_surface_type(face) != "Plane":
+            curved.append(edge)
+    return compound(curved) if curved else None
+
+
+def _rounded_corners(
+    edges: Sequence[Any], radius: float, *, closed: bool, tool: str
+) -> list[Any]:
+    """Every corner of a chain rounded, each in the plane of its own two segments.
+
+    A 3D polyline's corners need not share a plane — two consecutive segments always do,
+    and that is the plane each arc belongs in. Filleting them all in one fitted plane
+    would be right for a flat polyline and silently wrong for a path that turns out of it.
+
+    Trims accumulate: a segment between two corners is shortened at both ends, and the
+    second fillet runs on what the first left, which is why the pieces are kept in a list
+    and updated in place rather than paired off independently.
+    """
+    pieces = [symbol("TopoDS").Edge_s(edge) for edge in edges]
+    corners = [(index, index + 1) for index in range(len(pieces) - 1)]
+    if closed:
+        corners.append((len(pieces) - 1, 0))
+
+    arcs: dict[int, Any] = {}
+    for before, after in corners:
+        try:
+            frame = _shared_plane(
+                (pieces[before], pieces[after]), tool=tool, named=("this segment", "the next")
+            )
+        except GeometryError:
+            # Two segments running the same way have no corner between them. That is not
+            # a failure — there is simply nothing to round there.
+            continue
+
+        maker = symbol("ChFi2d_FilletAPI")()
+        maker.Init(pieces[before], pieces[after], symbol("gp_Pln")(frame))
+        meeting, _ = _closest_between(pieces[before], pieces[after])
+        if not maker.Perform(radius):
+            raise GeometryError(
+                f"{tool} could not round corner {before + 1} to {radius:g} mm. The radius "
+                "is larger than one of the two segments meeting there can carry — the arc "
+                "would run off the end of it. Use a smaller radius, or round only the "
+                "corners that need it with catia_curve_corner."
+            )
+        shortened_before, shortened_after = symbol("TopoDS_Edge")(), symbol("TopoDS_Edge")()
+        arcs[before] = maker.Result(
+            symbol("gp_Pnt")(*meeting), shortened_before, shortened_after, -1
+        )
+        pieces[before], pieces[after] = shortened_before, shortened_after
+
+    chained: list[Any] = []
+    for index, piece in enumerate(pieces):
+        chained.append(piece)
+        if index in arcs:
+            chained.append(arcs[index])
+    return chained
 
 
 def _interpolated(
@@ -2156,6 +2336,7 @@ __all__ = [
     "PARALLEL",
     "POLYLINE",
     "PROJECT",
+    "REFLECT_LINE",
     "SECTION",
     "SPIRAL",
     "SPLINE",
@@ -2175,6 +2356,7 @@ __all__ = [
     "curve_parallel",
     "curve_polyline",
     "curve_project",
+    "curve_reflect_line",
     "curve_section",
     "curve_spiral",
     "curve_spline",

@@ -29,21 +29,19 @@ What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its ow
 - **the rest of the trimming family** — `catia_extrapolate`, `catia_sew_surface`, and
   `propagation` on `catia_extract` / `catia_boundary`. Split, trim, untrim, disassemble
   and healing shipped 2026-09-05;
-- **`catia_curve_reflect_line`** — the last wireframe operation, and the only one left.
-  Everything else in the family shipped on 2026-09-05: the drawn curves (helix, circle,
-  polyline, spline), the derived ones (section, intersection, extremum, project, parallel,
-  offset_3d, combine, corner, connect, spiral), the anchors
+- **a reflect line at an angle other than 90°** — the silhouette is exact and shipped;
+  the iso-angle contour has to be marched face by face and would come back sampled, which
+  this kernel will not report as a constructed curve without saying so. Everything else in
+  the wireframe family is done as of 2026-09-05: the drawn curves (helix, circle, polyline
+  with rounded corners, spline, spiral), the derived ones (section, intersection, extremum,
+  project, parallel, offset_3d, combine, corner, connect, reflect_line), the anchors
   (`catia_point_{on_curve,on_surface,centre}`, `catia_line_{between,direction,normal,
   tangent}`) and the planes (`catia_plane_{normal_to_curve,tangent_to_surface,mean}`,
-  `catia_planes_between`). The silhouette case (`angle_deg` 90, the default) is exact
-  through `HLRBRep` — measured against a sphere's great circle and a cylinder's two
-  straight edges — and a general angle is an iso-angle contour that has to be marched and
-  will have to say it was sampled. It is also what unblocks `catia_draft` in reflect-line
-  mode, so the two belong in one commit;
-- `catia_draft` in `reflect_line` mode (needs `catia_curve_reflect_line`);
-- `catia_curve_polyline` with `radius_mm` — rounding *every* corner of a chain, which
-  means carrying each shortened segment into the next call. `catia_curve_corner` does
-  one corner now, so this is chaining rather than missing machinery;
+  `catia_planes_between`);
+- `catia_draft` in `reflect_line` mode — **no longer blocked on the silhouette**, which
+  shipped 2026-09-05. OCCT's draft takes a neutral *plane* and this mode pivots about a
+  curve lying on the face, so it means building the ruled surface that leaves that
+  curve at the draft angle and replacing the face: surfacing work, not an argument;
 - a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs the profile offset into two
   walls and the inner sweep subtracted from the outer — `catia_curve_parallel` supplies
   the offset now, so what is left is the sweeping and the cut);
@@ -72,6 +70,28 @@ measurement vocabulary a visual check would assert against already exists.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E2 → **2.6 continues: the reflect line, and the wireframe family closes**.
+  `catia_curve_reflect_line` plus `radius_mm` on `catia_curve_polyline`. Coverage 105 →
+  **106/201**, and every wireframe operation the registry declares is now implemented. A
+  reflect line is the silhouette as *geometry* — the parting line a mould splits along —
+  and two things separate it from the hidden-line drawing OCCT computes it with. It keeps
+  the **hidden** part (`ShowAll`, not `Hide`: two fused spheres give one equator with
+  visibility on and both with it off, and a parting line does not stop existing because
+  something is in front of it). And it keeps only what lies on a **curved** face, because
+  HLR calls a box's eight boundary edges "outline" and a box has no reflect line at all —
+  a polyhedron does its turning at edges that already exist. Without that filter every
+  prismatic part appears to have a parting line. Verified against a sphere's great circle
+  from three directions and a cylinder's two straight edges. A general angle is refused
+  *before anything is resolved*, since no correction to the surface makes an unanswerable
+  angle work. The polyline now rounds its own corners, **each in the plane of its own two
+  segments** — two consecutive segments always share a plane, a path that turns out of one
+  does not, and rounding a 3D path in one fitted plane puts every arc slightly wrong while
+  measuring exactly right. Trims accumulate along a run, the wrap-around corner of a closed
+  path is rounded too, and two collinear segments are no corner rather than a failure.
+  Seven guards, all seven verified by breaking them. The draft's reflect-line refusal was
+  **corrected rather than removed**: the silhouette exists now, so the real reason is that
+  OCCT's draft takes a neutral *plane* where the mode wants a curve on the face.
 
 - **2026-09-05** — E2 → **2.6 continues: the joins and the spiral**.
   `catia_curve_{corner,connect,spiral}`. Coverage 102 → **105/201**, which leaves

@@ -120,6 +120,7 @@ HANDLERS: Final[dict[str, Handler]] = {
     curves.CORNER: curves.curve_corner,
     curves.CONNECT: curves.curve_connect,
     curves.SPIRAL: curves.curve_spiral,
+    curves.REFLECT_LINE: curves.curve_reflect_line,
     # surfaces, and the two ways one becomes material
     surfaces.EXTRUDE: surfaces.surface_extrude,
     surfaces.REVOLVE: surfaces.surface_revolve,

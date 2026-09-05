@@ -69,6 +69,10 @@ CORE_TOOLS: Final[frozenset[str]] = frozenset(
         "catia_capture_view",
         "catia_list_features",
         "catia_update",
+        # Verification is never withheld. Narrowing the offer must not be able to
+        # produce a part nobody checked — that is the failure 16.1 would otherwise
+        # cause while fixing a different one.
+        "check_part",
     }
 )
 

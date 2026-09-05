@@ -98,6 +98,32 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-05** — E5/E16 → **`check_part`: the agent checks its own work**, and three
+  generalisations that replaced a recipe. `assertions.py` had existed since 2026-09-04 and
+  could not be called from a conversation, so the only thing between "every tool returned ok"
+  and "the part is right" was the model's opinion — and that gap produced a flange whose every
+  call succeeded, whose bolt circle sat on a 99 mm diameter instead of 70, whose every edge was
+  rounded instead of four, and which read as a complete success. `check_part` takes one claim
+  per requirement and runs `check_assertions` **unchanged**, so `UNMEASURED` keeps meaning
+  "nobody checked" and is said in words as well as in the structure. The measurement is the
+  `catia_measure` both backends already answer, and either payload shape is read, so the caller
+  never learns which backend replied. In `CORE_TOOLS`, because retrieval that could withhold
+  the check would cause exactly the failure it was built to fix.
+
+  **And the prompt work was corrected rather than extended.** A first pass had written "four
+  holes on a bolt circle is exactly these three steps" into a system prompt that has to serve a
+  stamping press — a recipe per shape never covers the next shape. Replaced with the four ways
+  a build reports success and delivers something else: repeated features are patterned not
+  placed; a dimension is read as the quantity it names (a bolt circle is a diameter); select the
+  smallest group that matches, since "all" really is every edge including hole rims; and a value
+  that will not build is reported, never quietly substituted. The specific knowledge moved into
+  the refusal, where it generalises by construction — `Document.feature()` now tells a *sketch*
+  from a nothing and names the missing step, because "No feature called 'Hole Sketch'" is true
+  and sends the reader hunting for a feature that does not exist. Also corrected in the tool
+  descriptions rather than the prompt: `catia_sketch_circle` was advertising `at` as the way to
+  draw a bolt circle, telling the model to do the coordinate maths the prompt forbids, and the
+  model obeyed the nearer instruction — that contradiction was ours. 21 tests across the two.
+
 - **2026-09-05** — E16 → **16.1: tool retrieval, and rung 2 passes**.
   `app/ai/tool_retrieval.py`. The wall was measured here rather than read in a paper: with
   108 tools offered, the model asked for a mounting flange opened with `catia_pad` on a

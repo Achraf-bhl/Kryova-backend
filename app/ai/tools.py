@@ -98,6 +98,9 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     # `catia_` prefix: that prefix means "goes to the workstation", and this one
     # answers with CATIA closed. `tests/test_tool_registry.py` enforces it.
     "design_history": "Reading what was already built",
+    # Says what it is for, not which module answers. A user watching the step
+    # list should read that the work is being checked.
+    "check_part": "Checking the part against the request",
     # Deliberately says what the assistant is doing, not how it does it. A user
     # watching the step list should read "it went and checked the manuals",
     # which is the true and useful description; the retrieval mechanism behind
@@ -316,6 +319,81 @@ class ToolBox:
                     }
                 ),
                 handler=self._design_history,
+            ),
+            Tool(
+                name="check_part",
+                description=(
+                    "Measure the part you have built and check it against what was "
+                    "asked for. Call this after finishing a part, before telling the "
+                    "user it is done.\n"
+                    "Give one claim per requirement, in numbers: the plate is 100 mm "
+                    "wide, it weighs no more than 2 kg, it is one solid. Each claim "
+                    "names a `measure` -- a path into the measurement, such as "
+                    "mass_kg, volume_mm3, solid_count, face_count, "
+                    "bounding_box_mm.size[0] or centre_of_mass_mm[2] -- a comparison "
+                    "(<=, >=, <, >, ==, !=) and a bound. An `==` on a measured number "
+                    "needs a tolerance; a kernel does not return round decimals.\n"
+                    "A claim that could not be measured comes back UNMEASURED, which "
+                    "is NOT a pass: it means nobody checked, and you must say so "
+                    "rather than reporting the part as verified. Volume and mass are "
+                    "the two that catch the most, because a feature that went in "
+                    "wrong almost always moves one of them."
+                ),
+                parameters=_object(
+                    {
+                        "claims": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 40,
+                            "description": (
+                                "One entry per requirement you are checking."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": (
+                                            "What this claim says, in words -- it is "
+                                            "what a failure is reported under."
+                                        ),
+                                    },
+                                    "measure": {
+                                        "type": "string",
+                                        "description": (
+                                            "Path into the measurement, e.g. mass_kg "
+                                            "or bounding_box_mm.size[2]."
+                                        ),
+                                    },
+                                    "comparison": {
+                                        "type": "string",
+                                        "enum": ["<=", ">=", "<", ">", "==", "!="],
+                                    },
+                                    "bound": {
+                                        "type": "number",
+                                        "description": "The value to compare against.",
+                                    },
+                                    "tolerance": {
+                                        "type": "number",
+                                        "description": (
+                                            "Slack in the measurement's own unit. "
+                                            "Required for ==."
+                                        ),
+                                    },
+                                },
+                                "required": [
+                                    "name",
+                                    "measure",
+                                    "comparison",
+                                    "bound",
+                                ],
+                                "additionalProperties": False,
+                            },
+                        }
+                    },
+                    ["claims"],
+                ),
+                handler=self._check_part,
             ),
             Tool(
                 name="list_projects",
@@ -1271,6 +1349,65 @@ class ToolBox:
                 )
             )
         return tools
+
+    def _check_part(self, claims: list[dict[str, Any]]) -> dict[str, Any]:
+        """Measure the built part and check the model's own claims against it.
+
+        Master plan Decision 3 reaching the conversation. `assertions.py` has
+        existed since 2026-09-04 and could not be called from a chat, so the only
+        thing standing between "every tool returned ok" and "the part is right"
+        was the model's opinion. Measured on this seat 2026-09-05: a flange whose
+        every call succeeded came out with its bolt circle on a 99 mm diameter
+        instead of 70 and every edge rounded instead of four, and read as a
+        complete success in the transcript.
+
+        **Nothing is re-implemented here.** The measurement comes from the same
+        `catia_measure` both backends already answer, and the comparison is
+        `check_assertions` unchanged — so `UNMEASURED` keeps its meaning, a
+        formula bound keeps working, and provenance still marks an approximate
+        number as approximate. This is a seam, not a second checker.
+        """
+        from app.design.assertions import Assertion, check_assertions
+
+        if not claims:
+            raise ToolError(
+                "check_part needs at least one claim. State what the part is "
+                "supposed to be -- a width, a mass, a solid count -- as numbers."
+            )
+
+        parsed: list[Assertion] = []
+        for index, claim in enumerate(claims, start=1):
+            try:
+                parsed.append(Assertion.from_dict(claim))
+            except Exception as bad:
+                # The compiler's own message names the field and what is wrong
+                # with it, which is better feedback than anything restated here.
+                raise ToolError(f"Claim {index} is not usable: {bad}") from bad
+
+        measurement = self._call_catia("catia_measure", {})
+        if not isinstance(measurement, dict):
+            raise ToolError(
+                "The measurement came back in a shape check_part cannot read. "
+                "Call catia_measure on its own and see what it says."
+            )
+        # The kernel route wraps its payload; the bridge returns it flat. Both are
+        # legitimate and the caller should not have to know which backend answered.
+        payload = measurement.get("measurements")
+        if not isinstance(payload, dict):
+            payload = measurement
+
+        report = check_assertions(parsed, payload)
+        out = report.to_dict()
+        out["summary"] = report.summary()
+        # Said in words as well as in the structure, because the whole point is
+        # that a model reading this cannot mistake "not checked" for "checked".
+        if report.unmeasured:
+            out["warning"] = (
+                f"{len(report.unmeasured)} claim(s) could not be measured. That is "
+                "not a pass -- say which ones were not checked rather than "
+                "reporting the part as verified."
+            )
+        return out
 
     def _catia_handler(self, name: str) -> Callable[..., Any]:
         def handler(**arguments: Any) -> Any:

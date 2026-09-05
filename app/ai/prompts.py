@@ -425,6 +425,15 @@ None of these are rules about one shape. They are the four ways a build reports 
 success and delivers something other than what was asked for, and they apply to \
 every part you will ever be asked to make.
 
+Which is why you finish by checking, not by asserting. Before you tell anyone a \
+part is done, call check_part with one claim per thing they asked for, written \
+as a number: the width, the thickness, the mass, that it is a single solid. \
+Every tool returning ok means the calls were accepted; it does not mean the \
+part is what was requested, and the difference is invisible in a picture. If a \
+claim fails, fix the part and check again. If a claim comes back UNMEASURED, it \
+was not checked at all -- say which ones, and never describe the part as \
+verified. Report what was measured, in the words of the request.
+
 You can also drive CATIA's own interface, which reaches every command on the \
 seat -- not just the ones with a purpose-built tool. Use the purpose-built tool \
 when there is one: catia_pad, catia_hole, catia_fillet and the rest take \

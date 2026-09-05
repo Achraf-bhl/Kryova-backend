@@ -81,15 +81,18 @@ storage only — no consumer yet) · bcrypt + python-jose (auth) · Neon Postgre
 Install:      python -m venv venv && source venv/bin/activate && pip install -r requirements-dev.txt
 Migrate:      alembic upgrade head
 Dev server:   uvicorn app.main:app --reload      # with --reload also set INLINE_JOBS=true
-Offline test: pytest tests/test_solver.py tests/test_mesh.py tests/test_geometry.py   # ~0.6s, no DB
+Offline test: pytest tests/test_solver.py tests/test_mesh.py tests/test_geometry.py \
+              tests/test_kernel.py tests/test_interrogation.py tests/test_design_*.py \
+              tests/test_render.py tests/test_vision.py          # no DB, no network
 Full test:    pytest                              # needs a live Neon connection, ~4 min
 Drift check:  alembic check                       # fails if models diverged from migrations
 New revision: alembic revision --autogenerate -m "..."
 ```
 
-**There is no venv checked out on this machine and the system Python has none of the
-dependencies** — create one before claiming any backend test result. `numpy 1.26 / scipy 1.11
-/ SQLAlchemy 1.4` in the system site-packages are the wrong versions and are not the project's.
+**The venv exists** (`venv/`, numpy 2.5.2 / scipy 1.18.0 / SQLAlchemy 2.0.52) — this section
+used to say it did not, and a session that believed it either refused to report a result or
+rebuilt the environment for nothing. Always `venv/bin/python`, never the system one, whose
+`numpy 1.26 / scipy 1.11 / SQLAlchemy 1.4` are the wrong versions and are not the project's.
 
 **Lint and type-check exist now** (this section used to say they did not):
 `pyproject.toml` configures ruff (`E,F,I`, line length 100) and mypy (`python_version = "3.12"`,
@@ -271,6 +274,51 @@ Things that will bite you:
 - **`str.capitalize()` is banned in error text.** It lowercases everything after the
   first character, turning `BRepFeat_MakePrism` into `brepfeat_makeprism`. Sentence
   casing lives in `errors._as_sentence`.
+- **OCP passes `Handle(Geom_…)&` by value**, so any OCCT function that works by
+  reassigning a handle is *inert* here — it builds the answer and drops it, with no
+  exception and no return value. `GeomLib::ExtendCurveToPoint` and `ExtendSurfByLength`
+  are both like this, which is why `catia_extrapolate` widens a parameter range instead.
+- **`explore` yields base `TopoDS_Shape`.** `BRepAdaptor_Curve`, `BRepTools_WireExplorer`
+  and `MakeWire.Add` are overloaded on the concrete type and refuse it — cast through
+  `symbol("TopoDS").Edge_s` / `Face_s` / `Wire_s`. This has cost time four times now.
+- **Only what `occt/binding.py` registers is reachable through `symbol()`.**
+  `GeomAbs_CurveType`, `TopAbs_Orientation` and `Geom_Plane` are *not* registered; go
+  through `classify.edge_curve_type` and `BRepAdaptor_Surface(...).Plane()`, or add the
+  symbol to the registry deliberately rather than importing OCP at the call site.
+
+## Rendering and the visual check (`app/render/`, `app/ai/vision.py`)
+
+Phase E4. Eight canonical views rendered byte-identically run to run, section cuts, a
+before/after diff, and a vision model asked whether the part matches the request.
+
+- **Hidden-line removal, not OpenGL.** OCP exposes `V3d`/`AIS` and a viewer does come up
+  here — but 4.1 needs two renders of the same geometry to be *byte-identical* so a render
+  hash can join mass and plan-digest as a third identity check, and a GL image is a
+  function of the driver, sampling and display server on a project that develops on Linux
+  and ships on Windows. HLR is arithmetic; the raster under it is integer.
+- **OCCT's `gp_Ax2` Y axis is `direction × X`** — the opposite of the up vector `views.py`
+  declares — so `project._flatten` negates y. Leaving it out renders every part upside
+  down and **nothing can see it**: a consistently mirrored image is still byte-identical to
+  itself, so determinism holds, a diff of two mirrored renders is still correct, and a
+  wireframe looks plausible either way up. It shipped inverted for one day.
+- Determinism is defended at each cheap place to lose it: no anti-aliasing, `floor(v+0.5)`
+  rather than banker's rounding, dash phase per polyline not per segment, curve deflection
+  relative to model size, and a hand-written PNG encoder (an outside one can add a
+  timestamp chunk or change its filter heuristic between versions).
+- **A section's normal points at the material that is removed** — `catia_split`'s own
+  convention. Two conventions for one question is how a part ends up mirrored with every
+  test green. Hatching fills by **even-odd across every wire at once**, so a bore falls out
+  of the parity with nothing having to identify it as a hole.
+- **The visual check is a filter, never a sign-off**, so `VisualReview` deliberately has no
+  `approved`/`passed` property — only `objected`. Every way it can fail to run is
+  `unchecked`, which is never a pass (the rule `assertions.py` applies to an unmeasured
+  assertion). Nothing in it raises.
+- **Ollama does not refuse an image handed to a text-only model** — it drops it and answers
+  anyway, so the check would manufacture agreement, which is worse than no check. `_sees()`
+  gates on `/api/show` `capabilities` or a `projector_info` block (structural signals, no
+  model-name list to rot); `AI_VISION_MODEL` names the model that looks, because locally it
+  is a second pull. `num_ctx` must be sized for the images too — Ollama truncates a prompt
+  from the front in silence.
 
 ## Reference manuals (`app/retrieval/`)
 
@@ -555,6 +603,25 @@ Read these before touching the relevant file — they are live defects, not styl
   index in ~7s to ~4,900 passages.
 
 ## Testing
+
+**Tests are written on Linux and run on Windows (agreed 2026-09-05).** The user has a
+Windows machine with CATIA and the bridge, and that is where the suites are executed —
+against the real application rather than repeatedly here. So on this machine:
+
+- **Write the tests with the work and commit them with it.** Skipping them because they
+  will not be run here is the one thing this arrangement must not turn into: the seat runs
+  what exists, so a phase with no tests written is a phase that never gets verified.
+- **Do not run the suites here** — not `pytest`, not a single file, not to "check it
+  works". Report what was written, not what passed.
+- **`ruff` and `mypy` still run here before finishing.** They are lint and type-check, not
+  tests, and they are cheap. `venv/bin/python -m ruff check app/ tests/` and
+  `venv/bin/python -m mypy app/`.
+- Verifying a new guard by **breaking the thing it guards** is still required. Reason it
+  through against the source and say so plainly in the commit; where a guard cannot be
+  shown to fail, label it unpinned rather than shipping it as verified.
+- A one-off *API-surface* check — does this OCCT symbol exist, does this method take these
+  arguments — is not a test and is worth doing, because shipping code that calls a name
+  that is not there wastes a seat session on an `AttributeError`.
 
 - Physics tests (`test_solver.py`, `test_mesh.py`, `test_geometry.py`) never request a database
   fixture, so they open no connection and run offline in under a second. Keep it that way —

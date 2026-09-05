@@ -96,6 +96,13 @@ class OpenCurve:
         return _same_point(self.start, self.end)
 
 
+#: How much of a profile may lie inside another before the two are called
+#: overlapping rather than nested or disjoint. Areas here come from an exact
+#: boolean intersection, not a sample, so this guards against numerical fuzz on a
+#: shared tangent edge rather than against a wrong answer.
+_OVERLAP_TOLERANCE: float = 1e-6
+
+
 @dataclass
 class Sketch:
     """A plane and the closed profiles drawn on it.
@@ -184,11 +191,35 @@ class Sketch:
         return self.frame_ax3
 
     def face(self) -> Any:
-        """The profiles as a single face, ready to be extruded or revolved.
+        """The profiles as one region, ready to be extruded or revolved.
 
-        Later profiles become holes in the first. That is what a sketch containing an
-        outer rectangle and an inner circle means, and building it any other way makes
-        a pad that ignores its own bore.
+        **A profile inside another is a hole; a profile beside it is a second
+        region.** That is what a sketch means everywhere else in CAD, and it is
+        the convention `app/render/section.py` already fills by — "even-odd
+        across every wire at once, so a bore falls out of the parity with nothing
+        having to identify it as a hole". Two conventions for one question is how
+        a part ends up looking right and weighing wrong.
+
+        This used to hand every profile after the first to
+        `BRepBuilderAPI_MakeFace.Add`, whose docstring said the same thing this
+        one does. It does not do it: OCCT requires an inner wire to carry the
+        *opposite* orientation to the outer one, and an unreversed wire is
+        accepted without complaint and integrates as material. Measured on
+        2026-09-05 — a 100x100 sketch with a 40 mm circle padded 10 mm came back
+        at 112,566 mm³, which is the plate **plus** a boss, where the plate minus
+        its bore is 87,434. `IsDone()` was true. The agent had drawn exactly what
+        it was asked for.
+
+        So containment is decided by boolean algebra rather than by wire order:
+        each profile is intersected with the region built so far, and the ratio of
+        that area to its own says whether it lands in material (cut) or in empty space
+        (fuse). Exact, not sampled, and it does not care what order the profiles
+        were drawn in — which matters, because an agent draws the bore before the
+        outline about as often as after it.
+
+        A profile that *partly* overlaps another is refused. It is neither a hole
+        nor a second region, CATIA refuses it too, and guessing between the two
+        readings is how a part comes out plausible and wrong.
         """
         require()
         if self.is_empty:
@@ -196,15 +227,64 @@ class Sketch:
                 f"Sketch {self.name!r} has no closed profile, so there is nothing to "
                 "build from. Draw a rectangle, circle or polygon on it first."
             )
-        maker = symbol("BRepBuilderAPI_MakeFace")(self.plane(), self.profiles[0])
-        for inner in self.profiles[1:]:
-            maker.Add(inner)
+        region = self._face_of(self.profiles[0])
+        for profile in self.profiles[1:]:
+            region = self._merge(region, self._face_of(profile))
+        return region
+
+    def _face_of(self, wire: Any) -> Any:
+        """One closed wire as a planar face on this sketch's own plane."""
+        maker = symbol("BRepBuilderAPI_MakeFace")(self.plane(), wire)
         if not maker.IsDone():
             raise GeometryError(
-                f"The profiles on sketch {self.name!r} do not form a valid face. They "
-                "may overlap, or an inner profile may fall outside the outer one."
+                f"A profile on sketch {self.name!r} does not form a valid face. It may "
+                "cross itself, or not lie flat on the sketch plane."
             )
         return maker.Face()
+
+    def _merge(self, region: Any, addition: Any) -> Any:
+        """Fold one more profile into the region, by where it falls."""
+        from app.kernel.occt import metrology
+
+        own_area = metrology.surface_area_mm2(addition)
+        region_area = metrology.surface_area_mm2(region)
+        if own_area <= 0.0:  # pragma: no cover - a degenerate wire is refused earlier
+            return region
+
+        overlap = symbol("BRepAlgoAPI_Common")(region, addition)
+        overlap.Build()
+        shared = metrology.surface_area_mm2(overlap.Shape()) if overlap.IsDone() else 0.0
+
+        # Both directions, because draw order is not containment order. An agent
+        # draws the bore before the outline about as often as after it, and a rule
+        # that only asked "is the new one inside the old one" refused the second
+        # case as an overlap — the profiles are identical either way round.
+        inside_region = shared >= own_area * (1.0 - _OVERLAP_TOLERANCE)
+        contains_region = shared >= region_area * (1.0 - _OVERLAP_TOLERANCE)
+
+        if shared <= own_area * _OVERLAP_TOLERANCE:
+            operation = symbol("BRepAlgoAPI_Fuse")(region, addition)
+        elif inside_region:
+            operation = symbol("BRepAlgoAPI_Cut")(region, addition)
+        elif contains_region:
+            operation = symbol("BRepAlgoAPI_Cut")(addition, region)
+        else:
+            fraction = shared / own_area
+            raise GeometryError(
+                f"Two profiles on sketch {self.name!r} partly overlap "
+                f"({fraction:.0%} of one lies inside the other), so this sketch is "
+                "neither an outline with a hole in it nor two separate outlines. Move "
+                "one clear of the other, or draw them on separate sketches and build "
+                "each in its own step."
+            )
+
+        operation.Build()
+        if not operation.IsDone():
+            raise GeometryError(
+                f"The profiles on sketch {self.name!r} could not be combined into one "
+                "region. Check that each is closed and that none crosses itself."
+            )
+        return operation.Shape()
 
     def add_segment(
         self, edge: Any, start: tuple[float, float], end: tuple[float, float]

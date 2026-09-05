@@ -59,6 +59,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.mesh.types import TetMesh
+from app.solve.constraints import require_restrained
 from app.solve.loads import assemble_loads
 from app.solve.selection import select_nodes
 from app.solve.types import Fixture, LoadCase, Material, SolverError
@@ -259,7 +260,29 @@ def write_deck(mesh: TetMesh, case: LoadCase, *, name: str = "Kryova") -> str:
     as a callable.
     """
     material: Material = case.material
+
+    # Refused here rather than diagnosed afterwards, because CalculiX does not
+    # diagnose it at all. Measured against ccx 2.23 on 2026-09-06: a deck whose
+    # *BOUNDARY block was removed came back exit 0, a complete .frd, no *ERROR,
+    # no *WARNING - and a maximum displacement of 5.4e+11 mm. PaStiX factorises
+    # the singular system and returns a finite, meaningless vector, which is the
+    # same trap `linear_static._residual_is_small` exists to catch on our own
+    # solver. There, the residual can catch it because the stiffness matrix is
+    # in hand; here it is not, and federating is the reason. So the check moves
+    # *before* the solve, where it is exact and needs no matrix at all: the
+    # fixtures either remove all six rigid-body motions or they do not, and that
+    # is a property of the load case rather than of whoever solves it.
+    #
+    # A static step only. `write_model` deliberately does not do this, because a
+    # free-free modal analysis is a legitimate case with no fixtures at all -
+    # its six zero-frequency modes are the answer, not a fault.
+    #
+    # And it runs *after* `write_model` rather than before it, so that a
+    # fixture selecting no nodes at all is still reported as "fixture 2
+    # selected nothing" rather than as "the model is under-constrained".
+    # Both are true of that case; only the first says what to fix.
     lines, boundary = write_model(mesh, material, case.fixtures, name=name)
+    require_restrained(mesh, case.fixtures)
 
     lines.append("*STEP")
     lines.append("*STATIC")

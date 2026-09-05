@@ -24,6 +24,7 @@ from app.solve.calculix import (
     write_deck,
 )
 from app.solve.calculix.deck import cload_data_lines as _cload_lines
+from app.solve.calculix.deck import write_model
 from app.solve.materials import MATERIALS
 from app.solve.types import FaceSelector, Fixture, ForceLoad, LoadCase, SolverError
 
@@ -207,7 +208,12 @@ class TestFixturesHoldOnlyWhatTheyHold:
                 )
             ]
         )
-        rows = [r for r in _section(write_deck(_mesh(), case), "*BOUNDARY") if r.strip()]
+        # write_model, not write_deck: a single roller plane leaves five
+        # rigid-body motions free, and write_deck now refuses that before it
+        # writes anything. What is under test here is the *syntax* a fixture
+        # produces, which is the model half's job and is unaffected by whether
+        # the assembled case could be solved.
+        _lines, rows = write_model(_mesh(), case.material, case.fixtures)
 
         assert len(rows) == 1
         assert int(rows[0].split(",")[1]) == 3
@@ -220,7 +226,10 @@ class TestFixturesHoldOnlyWhatTheyHold:
                 Fixture(where=FaceSelector(type="face", axis="x", side="min"), dofs=["x"]),
             ]
         )
-        deck = write_deck(_mesh(), case)
+        # Two roller planes still leave four motions free, so this is the
+        # model half's question too - see the note above.
+        lines, _rows = write_model(_mesh(), case.material, case.fixtures)
+        deck = "\n".join(lines)
 
         assert "NSET=FIX1" in deck
         assert "NSET=FIX2" in deck
@@ -406,3 +415,82 @@ class TestTheModelSeam:
 
         start = deck.index("*CLOAD") + 1
         assert rows == deck[start : start + len(rows)]
+
+
+class TestAnUnsolvableModelIsRefusedBeforeItIsWritten:
+    """CalculiX does not detect a singular system, so we have to.
+
+    Measured against ccx 2.23 on 2026-09-06: a deck whose `*BOUNDARY` block was
+    removed came back **exit 0, a complete .frd, no `*ERROR`, no `*WARNING`** and
+    a maximum displacement of 5.4e+11 mm. PaStiX factorises the singular system
+    and returns a finite, meaningless vector — the same trap
+    `linear_static._residual_is_small` exists to catch on our own solver, where
+    the stiffness matrix is in hand. Here it is not, and federating is the whole
+    reason. So the check moves *before* the solve, where it needs no matrix: the
+    fixtures either remove all six rigid-body motions or they do not, and that is
+    a property of the load case rather than of whoever solves it.
+    """
+
+    def test_one_roller_plane_is_refused(self) -> None:
+        case = _case(
+            fixtures=[
+                Fixture(where=FaceSelector(type="face", axis="z", side="min"), dofs=["z"])
+            ]
+        )
+
+        with pytest.raises(SolverError, match="under-constrained"):
+            write_deck(_mesh(), case)
+
+    def test_the_refusal_names_which_motions_are_free(self) -> None:
+        """"Under-constrained" alone costs the engineer the diagnosis. Which of
+        the six is loose tells them which face to hold."""
+        case = _case(
+            fixtures=[
+                Fixture(where=FaceSelector(type="face", axis="z", side="min"), dofs=["z"])
+            ]
+        )
+
+        with pytest.raises(SolverError) as refused:
+            write_deck(_mesh(), case)
+
+        message = str(refused.value)
+        assert "translation along x" in message
+        assert "rotation about z" in message
+
+    def test_a_properly_restrained_case_is_untouched(self) -> None:
+        """The guard must not cost a legitimate model anything."""
+        case = _case(
+            fixtures=[
+                Fixture(where=FaceSelector(type="face", axis="z", side="min"), dofs=["z"]),
+                Fixture(where=FaceSelector(type="face", axis="x", side="min"), dofs=["x"]),
+                Fixture(where=FaceSelector(type="face", axis="y", side="min"), dofs=["y"]),
+            ]
+        )
+
+        assert "*STATIC" in write_deck(_mesh(), case)
+
+    def test_a_clamped_face_is_enough_on_its_own(self) -> None:
+        """A fixture with no `dofs` holds all three, which removes all six
+        motions by itself. The commonest real case must not be refused."""
+        case = _case(
+            fixtures=[Fixture(where=FaceSelector(type="face", axis="z", side="min"))]
+        )
+
+        assert "*STATIC" in write_deck(_mesh(), case)
+
+    def test_an_empty_fixture_still_says_which_fixture(self) -> None:
+        """Both faults are true of that case; only one says what to fix, so the
+        order of the two checks is load-bearing."""
+        from app.solve.types import BoxSelector
+
+        case = _case(
+            fixtures=[
+                Fixture(where=FaceSelector(type="face", axis="z", side="min")),
+                Fixture(where=BoxSelector(type="box", min=[500, 500, 500], max=[600, 600, 600])),
+            ]
+        )
+
+        with pytest.raises(SolverError) as raised:
+            write_deck(_mesh(), case)
+
+        assert "Fixture 2" in str(raised.value)

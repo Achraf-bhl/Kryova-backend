@@ -23,7 +23,7 @@ from app.solve.calculix import (
     element_type,
     write_deck,
 )
-from app.solve.calculix.deck import _cload_lines
+from app.solve.calculix.deck import cload_data_lines as _cload_lines
 from app.solve.materials import MATERIALS
 from app.solve.types import FaceSelector, Fixture, ForceLoad, LoadCase, SolverError
 
@@ -332,3 +332,77 @@ class TestTheDeckDescribesTheMeshItWasGiven:
 
         assert " " not in name.split("NAME=")[1]
         assert "STEEL_1018" in name
+
+
+class TestTheModelSeam:
+    """`write_deck` is built from `write_model`, and must not have drifted.
+
+    The split exists because the `*BOUNDARY` card belongs to the *step* while
+    the `*NSET` blocks belong to the *model*: a static step, a `*FREQUENCY` step
+    and a `*BUCKLE` step restrain the same nodes but each writes its own card in
+    its own place, and a modal case has no `LoadCase` to hand a combined writer.
+    Doing it by copying `write_deck`'s first half would have left two node
+    writers and two DOF tables free to describe different models — and then 6.5's
+    oracle would localise a disagreement to the deck writer rather than to the
+    physics, which is the one thing that comparison exists to rule out.
+
+    So the contract worth pinning is not the seam's shape, it is that extracting
+    it changed nothing.
+    """
+
+    def test_the_model_lines_are_the_first_half_of_the_deck(self) -> None:
+        from app.solve.calculix.deck import write_model
+
+        mesh = _mesh()
+        case = _case()
+
+        lines, _boundary = write_model(mesh, case.material, case.fixtures)
+        whole = write_deck(mesh, case).splitlines()
+
+        assert lines == whole[: len(lines)]
+        assert lines[0] == "*HEADING"
+        assert lines[-1].startswith("*SOLID SECTION")
+
+    def test_the_boundary_rows_carry_no_card(self) -> None:
+        """The card is the step's to write, and a modal step writes its own."""
+        from app.solve.calculix.deck import write_model
+
+        mesh = _mesh()
+        case = _case()
+
+        _lines, boundary = write_model(mesh, case.material, case.fixtures)
+
+        assert boundary
+        assert not any(row.startswith("*") for row in boundary)
+        assert all(row.count(",") == 3 for row in boundary)
+
+    def test_every_restrained_set_is_declared_in_the_model_half(self) -> None:
+        """A `*BOUNDARY` row naming a set the model never declared is a deck
+        CalculiX refuses — and the two halves are now written by one function
+        precisely so they cannot disagree about which sets exist."""
+        from app.solve.calculix.deck import write_model
+
+        mesh = _mesh()
+        case = _case()
+
+        lines, boundary = write_model(mesh, case.material, case.fixtures)
+
+        declared = {
+            line.split("NSET=")[1].strip() for line in lines if line.startswith("*NSET")
+        }
+        used = {row.split(",")[0].strip() for row in boundary}
+        assert used <= declared
+
+    def test_cload_rows_are_the_same_rows_the_static_deck_writes(self) -> None:
+        from app.solve.calculix.deck import cload_data_lines
+        from app.solve.loads import assemble_loads
+
+        mesh = _mesh()
+        case = _case()
+        forces, _ = assemble_loads(mesh, case.loads, case.material.density_kg_m3)
+
+        rows = cload_data_lines(forces)
+        deck = write_deck(mesh, case).splitlines()
+
+        start = deck.index("*CLOAD") + 1
+        assert rows == deck[start : start + len(rows)]

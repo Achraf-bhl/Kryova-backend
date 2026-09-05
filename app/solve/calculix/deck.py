@@ -61,7 +61,7 @@ from numpy.typing import NDArray
 from app.mesh.types import TetMesh
 from app.solve.loads import assemble_loads
 from app.solve.selection import select_nodes
-from app.solve.types import LoadCase, Material, SolverError
+from app.solve.types import Fixture, LoadCase, Material, SolverError
 
 #: Our midside slot order -> CalculiX's. See the module docstring; verified
 #: against `TET10_EDGES` by a test rather than trusted as a comment.
@@ -135,7 +135,9 @@ def _wrap(numbers: Sequence[int], per_line: int = 8) -> list[str]:
     ]
 
 
-def _fixture_sets(mesh: TetMesh, case: LoadCase) -> list[tuple[str, NDArray[np.int64]]]:
+def _fixture_sets(
+    mesh: TetMesh, fixtures: Sequence[Fixture]
+) -> list[tuple[str, NDArray[np.int64]]]:
     """One node set per fixture, named for its position in the case.
 
     Named positionally rather than by the selector's contents: two fixtures can
@@ -143,7 +145,7 @@ def _fixture_sets(mesh: TetMesh, case: LoadCase) -> list[tuple[str, NDArray[np.i
     freedom, and merging them by name would silently drop one.
     """
     sets: list[tuple[str, NDArray[np.int64]]] = []
-    for index, fixture in enumerate(case.fixtures):
+    for index, fixture in enumerate(fixtures):
         try:
             nodes = select_nodes(mesh, fixture.where)
         except SolverError as empty:
@@ -157,14 +159,34 @@ def _fixture_sets(mesh: TetMesh, case: LoadCase) -> list[tuple[str, NDArray[np.i
     return sets
 
 
-def write_deck(mesh: TetMesh, case: LoadCase, *, name: str = "Kryova") -> str:
-    """The complete `.inp` for one linear static run.
+def write_model(
+    mesh: TetMesh,
+    material: Material,
+    fixtures: Sequence[Fixture],
+    *,
+    name: str = "Kryova",
+) -> tuple[list[str], list[str]]:
+    """The model half of a deck, and the restraints that go with it.
 
-    Returned as text rather than written to a path so it can be asserted against
-    in a test with no filesystem — the same reason `execute.py` takes its runner
-    as a callable.
+    Returns `(model lines, boundary data lines)` — everything from `*HEADING`
+    down to `*SOLID SECTION`, including the per-fixture `*NSET` blocks, and
+    separately the `*BOUNDARY` data rows for those sets **without the
+    `*BOUNDARY` card itself**.
+
+    Split that way because the card belongs to the *step* and the sets belong to
+    the *model*. A static step, a `*FREQUENCY` step and a `*BUCKLE` step all
+    restrain the same nodes, but each writes its own `*BOUNDARY` in its own
+    place, and a modal case has no `LoadCase` at all to hand a combined writer.
+    Taking the mesh, the material and the fixtures rather than a `LoadCase` is
+    what makes it usable by all three: those three things are what a *model* is,
+    and loads are what a *step* adds to it.
+
+    `write_deck` is built on this rather than keeping its own copy. A second node
+    writer, or a second DOF table, is how two decks quietly start describing
+    different models — and 6.5's oracle would then localise a disagreement to
+    the deck writer rather than to the physics, which is the one thing that
+    comparison exists to rule out.
     """
-    material: Material = case.material
     lines: list[str] = [
         "*HEADING",
         f"{name} -- written by Kryova. Units: mm, N, MPa, tonne.",
@@ -181,7 +203,7 @@ def write_deck(mesh: TetMesh, case: LoadCase, *, name: str = "Kryova") -> str:
         for extra in chunks[1:]:
             lines.append(extra)
 
-    sets = _fixture_sets(mesh, case)
+    sets = _fixture_sets(mesh, fixtures)
     for set_name, held_nodes in sets:
         lines.append(f"*NSET, NSET={set_name}")
         lines.extend(_wrap([int(n) + 1 for n in held_nodes]))
@@ -198,21 +220,55 @@ def write_deck(mesh: TetMesh, case: LoadCase, *, name: str = "Kryova") -> str:
         lines.append(_number(material.thermal_expansion_per_k))
     lines.append(f"*SOLID SECTION, ELSET=EALL, MATERIAL={_material_name(material)}")
 
-    lines.append("*STEP")
-    lines.append("*STATIC")
-
-    lines.append("*BOUNDARY")
-    for (set_name, _), fixture in zip(sets, case.fixtures, strict=True):
+    boundary: list[str] = []
+    for (set_name, _), fixture in zip(sets, fixtures, strict=True):
         for dof in fixture.held:
             number = _DOF[dof]
             # start, end, value -- CalculiX takes a range, and a single dof is a
             # range of one. The explicit 0.0 matters: omitting it is legal and
             # means the same thing, but a reader diffing two decks should not
             # have to know that.
-            lines.append(f"{set_name}, {number}, {number}, 0.0")
+            boundary.append(f"{set_name}, {number}, {number}, 0.0")
+
+    return lines, boundary
+
+
+def cload_data_lines(forces: NDArray[np.float64]) -> list[str]:
+    """Nodal forces as `*CLOAD` data rows, without the card.
+
+    Public because a buckling step carries its own load and has to write these
+    after `*BUCKLE` rather than after `*STATIC`. Re-deriving the 1-based node
+    numbering and the axis mapping at the second call site is exactly the
+    duplication that would let 6.5's oracle localise a disagreement to the deck
+    writer instead of to the physics.
+    """
+    lines: list[str] = []
+    reshaped = forces.reshape(-1, 3)
+    nonzero = np.argwhere(np.abs(reshaped) > _FORCE_EPS)
+    for node_index, axis in nonzero:
+        value = reshaped[node_index, axis]
+        lines.append(f"{int(node_index) + 1}, {axis + 1}, {_number(value)}")
+    return lines
+
+
+def write_deck(mesh: TetMesh, case: LoadCase, *, name: str = "Kryova") -> str:
+    """The complete `.inp` for one linear static run.
+
+    Returned as text rather than written to a path so it can be asserted against
+    in a test with no filesystem — the same reason `execute.py` takes its runner
+    as a callable.
+    """
+    material: Material = case.material
+    lines, boundary = write_model(mesh, material, case.fixtures, name=name)
+
+    lines.append("*STEP")
+    lines.append("*STATIC")
+
+    lines.append("*BOUNDARY")
+    lines.extend(boundary)
 
     forces, _warnings = assemble_loads(mesh, case.loads, material.density_kg_m3)
-    cloads = _cload_lines(forces)
+    cloads = cload_data_lines(forces)
     if cloads:
         lines.append("*CLOAD")
         lines.extend(cloads)
@@ -240,25 +296,12 @@ def _material_name(material: Material) -> str:
     return cleaned.upper()[:80] or "MATERIAL"
 
 
-def _cload_lines(forces: NDArray[np.float64]) -> list[str]:
-    """Nodal forces as `*CLOAD`, skipping the exact zeros.
-
-    Tributary-area distribution leaves most of the mesh at zero; writing those
-    out multiplies the deck by the node count and changes no answer.
-    """
-    lines: list[str] = []
-    reshaped = forces.reshape(-1, 3)
-    nonzero = np.argwhere(np.abs(reshaped) > _FORCE_EPS)
-    for node_index, axis in nonzero:
-        value = reshaped[node_index, axis]
-        lines.append(f"{int(node_index) + 1}, {axis + 1}, {_number(value)}")
-    return lines
-
-
 __all__ = [
     "C3D10_EDGES",
     "C3D10_MIDSIDE_ORDER",
     "DENSITY_KG_M3_TO_TONNE_MM3",
+    "cload_data_lines",
     "element_type",
     "write_deck",
+    "write_model",
 ]

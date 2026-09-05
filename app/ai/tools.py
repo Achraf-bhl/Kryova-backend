@@ -1399,6 +1399,26 @@ class ToolBox:
         report = check_assertions(parsed, payload)
         out = report.to_dict()
         out["summary"] = report.summary()
+
+        # A bounding box is unchanged by every internal feature. A claim set made
+        # only of extents therefore passes on a part whose bore is missing, whose
+        # holes are in the wrong place and whose fillets took the wrong edges —
+        # which is exactly what happened here on 2026-09-05: width, height and
+        # thickness all passed on a flange with the wrong bolt circle.
+        #
+        # Volume and mass are the two quantities that move when any feature does,
+        # so a suite with neither has not checked the part, only its envelope.
+        # Said as a caveat rather than a refusal: the caller may legitimately be
+        # checking one dimension mid-build, and refusing that would teach the
+        # model to stop calling this at all.
+        watching = {a.measure.split("[")[0].split(".")[0] for a in parsed}
+        if not watching & {"volume_mm3", "mass_kg"}:
+            out["blind_to_features"] = (
+                "None of these claims reads volume_mm3 or mass_kg, so none of them "
+                "can see an internal feature. A bounding box is the same whether "
+                "the bore was cut or not. Add a volume or mass claim before "
+                "calling the part verified."
+            )
         # Said in words as well as in the structure, because the whole point is
         # that a model reading this cannot mistake "not checked" for "checked".
         if report.unmeasured:

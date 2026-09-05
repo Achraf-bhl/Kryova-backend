@@ -206,3 +206,101 @@ class TestItIsWiredIntoTheAgent:
 
         assert "check_part" in AGENT_SYSTEM_CATIA
         assert "UNMEASURED" in AGENT_SYSTEM_CATIA
+
+
+class TestTheDailyBudgetKnobIsReal:
+    """A setting read with `getattr(settings, ...)` that is not a field on
+    `Settings` is a knob that does nothing.
+
+    `Settings` is configured `extra="ignore"`, so the environment variable is
+    accepted, dropped, and the default used — with no warning anywhere. Found on
+    2026-09-05 by hitting the limit during an overnight run and being unable to
+    raise it: `AI_DAILY_TOKEN_BUDGET=0` changed nothing. `max_steps()` carries a
+    comment about this exact trap and works around it by reading `os.environ` as
+    well; the budget had the same hole and no workaround.
+    """
+
+    def test_the_field_exists_on_settings(self) -> None:
+        from app.core.config import Settings
+
+        assert "ai_daily_token_budget" in Settings.model_fields, (
+            "usage.daily_token_budget() reads this with getattr and a default, so "
+            "without the field the environment variable is silently ignored."
+        )
+
+    def test_zero_means_unlimited(self, monkeypatch: Any) -> None:
+        from app.ai import usage
+
+        monkeypatch.setattr(usage.settings, "ai_daily_token_budget", 0, raising=False)
+
+        assert usage.daily_token_budget() == 0
+
+    def test_a_configured_value_is_used(self, monkeypatch: Any) -> None:
+        from app.ai import usage
+
+        monkeypatch.setattr(usage.settings, "ai_daily_token_budget", 123, raising=False)
+
+        assert usage.daily_token_budget() == 123
+
+    def test_an_unusable_value_falls_back_rather_than_crashing_the_turn(
+        self, monkeypatch: Any
+    ) -> None:
+        from app.ai import usage
+
+        monkeypatch.setattr(usage.settings, "ai_daily_token_budget", "lots", raising=False)
+
+        assert usage.daily_token_budget() == usage.DEFAULT_DAILY_TOKEN_BUDGET
+
+
+class TestAnEnvelopeCheckIsNotAVerification:
+    """A bounding box is unchanged by every internal feature.
+
+    Measured on this seat 2026-09-05: the model checked width, height and
+    thickness, all three passed, and the part had its bolt circle on the wrong
+    diameter and every edge rounded instead of four. Nothing it claimed could
+    have seen any of that. Volume and mass are the two quantities that move when
+    any feature does.
+
+    A caveat rather than a refusal, deliberately: checking one dimension
+    mid-build is legitimate, and refusing it would teach the model to stop
+    calling this at all — which costs more than the warning saves.
+    """
+
+    def test_extent_only_claims_are_flagged_as_blind(self) -> None:
+        out = _box(FLAT)._check_part(
+            [
+                {"name": "100 wide", "measure": "bounding_box_mm.size[0]",
+                 "comparison": "==", "bound": 100.0, "tolerance": 1e-3},
+                {"name": "12 thick", "measure": "bounding_box_mm.size[2]",
+                 "comparison": "==", "bound": 12.0, "tolerance": 1e-3},
+            ]
+        )
+
+        assert out["ok"] is True, "the claims themselves do pass"
+        assert "can see an internal feature" in out["blind_to_features"]
+
+    def test_a_volume_claim_clears_it(self) -> None:
+        out = _box(FLAT)._check_part(
+            [{"name": "volume", "measure": "volume_mm3", "comparison": "==",
+              "bound": 101701.91, "tolerance": 1.0}]
+        )
+
+        assert "blind_to_features" not in out
+
+    def test_a_mass_claim_clears_it(self) -> None:
+        out = _box(FLAT)._check_part(
+            [{"name": "mass", "measure": "mass_kg", "comparison": "<=", "bound": 1.0}]
+        )
+
+        assert "blind_to_features" not in out
+
+    def test_it_is_a_caveat_and_not_a_failure(self) -> None:
+        """Refusing would teach the model to stop calling check_part."""
+        out = _box(FLAT)._check_part(
+            [{"name": "one solid", "measure": "solid_count", "comparison": "==",
+              "bound": 1, "tolerance": 0.5}]
+        )
+
+        assert out["ok"] is True
+        assert out["failed"] == 0
+        assert "blind_to_features" in out

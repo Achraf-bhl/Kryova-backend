@@ -160,6 +160,18 @@ class Settings(BaseSettings):
     #: no setting of this can make a capability unreachable.
     ai_tool_limit: int = 0
 
+    #: Tokens one user may spend per UTC day. 0 means unlimited.
+    #:
+    #: This field has to exist for the environment variable to do anything.
+    #: `usage.daily_token_budget()` reads it with `getattr(..., DEFAULT)`, and
+    #: `Settings` is configured `extra="ignore"` — so while the field was absent,
+    #: `AI_DAILY_TOKEN_BUDGET` was accepted, silently dropped, and the documented
+    #: knob did nothing. Found on 2026-09-05 by hitting the limit during an
+    #: overnight test run and failing to raise it. `max_steps()` carries a comment
+    #: about exactly this trap and works around it by reading `os.environ` too;
+    #: the budget had the same hole and no workaround.
+    ai_daily_token_budget: int = 2_000_000
+
     ai_max_tokens: int = 8_000
     # A 7B model on CPU can take a minute; the default is generous on purpose.
     ai_timeout_seconds: float = 120.0

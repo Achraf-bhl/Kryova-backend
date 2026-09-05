@@ -15,21 +15,35 @@ happened.
 
 ## Now
 
-**E2 — Selection & authoring vocabulary.** 2.1–2.5 are done. **2.6 (surfaces / GSD) is
-the only thing between here and `*E2`**, and the master plan marks it *deferrable within
-the era* — so the next decision is whether 2.6 moves to E-later and the star lands now,
-or whether it is built here.
+**E2 — Selection & authoring vocabulary.** 2.1–2.5 are done and **2.6 is started**: a
+surface is now a thing the document holds, ten GSD operations build and consume one, and
+both crossings back into material work. The decision recorded here on 2026-09-05 — defer
+2.6 or build it — was answered by building the half that everything else in the phase was
+waiting on.
 
-What 2.6 is still holding up, named rather than left to be rediscovered — each is a live
-`OperationNotSupported` in the tree today:
+What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its own reason:
 
-- `catia_draft` in `reflect_line` mode (needs the pull direction's silhouette curve),
-- a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs the profile offset into two
-  walls),
-- `control="reference_surface"` on a swept feature (orienting the section against a
-  surface),
+- **steered surfaces** — `catia_surface_loft` with `guides` or a `spine` (a swept
+  construction with rails, not a section loft), and `catia_surface_fill` with `tangent` or
+  `curvature` continuity (each boundary edge has to be paired with the face it lies on);
+- **the trimming family** — `catia_split`, `catia_trim`, `catia_healing`, `catia_untrim`,
+  `catia_disassemble`, `catia_extrapolate`, `catia_sew_surface`, and `propagation` on
+  `catia_extract` / `catia_boundary`;
+- **the wireframe curves they are built on** — `catia_curve_*`, `catia_line_*`,
+  `catia_point_on_*`, `catia_plane_normal_to_curve` and their kin, none started;
+- `catia_draft` in `reflect_line` mode (needs `catia_curve_reflect_line`);
+- a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs a *2D* profile offset in the
+  sketcher — the surface offset that shipped today answers a different question);
+- `control="reference_surface"` on a swept feature (OCCT takes a surface as a sweep
+  reference only when every spine edge already lies on one of its faces, so the spine must
+  be *derived from* the surface);
 - the surface half of `catia_thickness` (offsetting a curved face rather than sweeping a
   planar one along its normal).
+
+Three of those reasons were **corrected** today rather than inherited: `up_to_surface`,
+`thick=true` and `reference_surface` all said they were waiting for constructed surfaces,
+which now exist. A stale "blocked on X" outlives X and sends the next reader to rebuild
+something that is already there.
 
 Hardware-blocked and **not** counted against the star: the CATIA-seat halves of E1's and
 E3's conformance runs need a Windows seat.
@@ -45,6 +59,27 @@ measurement vocabulary a visual check would assert against already exists.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-05** — E2 → **2.6 started**: surfaces exist, and become material only when
+  asked. `PartDocument` gained a construction store separate from its bodies, so building
+  a skin leaves the part's mass exactly where it was — a surface that quietly became the
+  active body would report a part with no solid, which reads like a failed feature rather
+  than like a skin waiting to be closed. Ten operations land: extrude, revolve, offset,
+  fill, loft, join, extract, boundary, and the two crossings back into material,
+  `catia_close_surface` and `catia_thick_surface`. Each checked against the closed form —
+  2πrh for a revolved line, π(R+r)·slant for a lofted frustum, and a truncated cone built
+  *entirely* as skin then closed into h/3·π(R²+Rr+r²) to 5e-13. Coverage 64 → **74/201**.
+  Two OCCT traps found and pinned, both verified by removing the fix and watching the
+  right tests fail: **`MakeThickSolidBySimple` returns the solid inside-out**, which
+  `BRepCheck_Analyzer` calls valid and which makes a later fuse *silently* return the
+  wrong answer (a 1,000 mm³ block fused onto the uncorrected plate measured −4,800 — no
+  error, block gone), and **`MakeFilling` approximates even a dead-flat boundary**, so a
+  patched circular hole measured 314.1595 mm² against πr² = 314.1593 and carried a
+  bounding box half as big again as the disc. A third fix has its own guard:
+  `topology.connected_pieces`, because a connexity check written as a shell count reported
+  "0 pieces" for two sheets that never met — `explore` flattens, so two disconnected
+  shells and one shell of two faces are indistinguishable through it. `catia_extract` is
+  where `feature#selector` pays for itself, taking `block#top` off a solid as a surface of
+  its own.
 - **2026-09-05** — E2 → **2.5 DONE**: stiffeners and the parting draft, the two Part
   Design features whose extent their own arguments do not state. `catia_stiffener`
   thickens an open profile and grows it past the part, subtracts the part, and keeps the

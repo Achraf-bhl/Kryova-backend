@@ -95,6 +95,34 @@ class Feature:
         }
 
 
+@dataclass(frozen=True)
+class Construction:
+    """One constructed surface or curve — geometry the design named but did not make material.
+
+    A surface is not a body. It has no volume, contributes nothing to the mass, and is
+    not what gets exported as the part; it exists so that something can be built *from*
+    it. `catia_close_surface` and `catia_thick_surface` are the two operations that carry
+    geometry across that line, and both do it by name and on purpose.
+
+    `to_dict` is deliberately free of geometry. It is called once per `measure()`, a plan
+    is 10⁵–10⁶ operations, and integrating over every constructed surface to report an
+    area nobody asked for is the most expensive way to say nothing. The numbers come from
+    `catia_measure_item`, through the documented `area_mm2` / `length_mm` vocabulary.
+    """
+
+    name: str
+
+    #: `surface` or `curve`. Recorded rather than derived because it is what the
+    #: *operation* produced: a fill makes a surface even when it comes out as one face,
+    #: and a boundary makes a curve even when it comes out as several wires.
+    kind: str
+
+    shape: Any = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "kind": self.kind}
+
+
 @dataclass
 class PartDocument:
     """One part, mid-construction."""
@@ -128,6 +156,18 @@ class PartDocument:
     #: Keyed by name because `catia_pad(sketch=@plate.profile)` addresses it by name;
     #: resolving "the last sketch drawn" is how a second sketch steals a pad.
     _sketches: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    #: Surfaces and curves built by the shape-design vocabulary, under the design's own
+    #: name for each.
+    #:
+    #: **One namespace for both kinds**, because they are handed to each other: a
+    #: boundary is a curve taken off a surface and passed straight back into a fill.
+    #: Splitting them would make every operation choose which store to look in, and would
+    #: let one name mean a surface in one store and a curve in the other.
+    #:
+    #: **Separate from the bodies**, because a surface is not material — see
+    #: `Construction`.
+    _construction: dict[str, Construction] = field(default_factory=dict, repr=False)
 
     #: Threads declared on the part, in the order they were called for.
     #:
@@ -282,6 +322,59 @@ class PartDocument:
 
     def sketch_names(self) -> list[str]:
         return sorted(self._sketches)
+
+    # -- constructed surfaces and curves --------------------------------------
+
+    def add_construction(self, name: str, kind: str, shape: Any) -> Construction:
+        """Record a constructed surface or curve under the design's own name.
+
+        Replaces one of the same name, for the reason `add_sketch` and `add_plane` do: a
+        regeneration re-runs the operation that built it, and refusing the second run
+        would make every rebuild fail on the first surface the design constructs.
+        """
+        element = Construction(name=name, kind=kind, shape=shape)
+        self._construction[name] = element
+        return element
+
+    def construction(self, name: str) -> Construction:
+        try:
+            return self._construction[name]
+        except KeyError:
+            known = ", ".join(self.construction_names()) or "none"
+            raise NamingError(
+                f"No constructed surface or curve called {name!r} in {self.name}. "
+                f"Built so far: {known}."
+            ) from None
+
+    def has_construction(self, name: str) -> bool:
+        return name in self._construction
+
+    def construction_names(self) -> list[str]:
+        return sorted(self._construction)
+
+    def set_construction(
+        self, feature: Feature, shape: Any, *, name: str, kind: str
+    ) -> Construction:
+        """Record what a shape-design feature produced, **without making it material**.
+
+        The counterpart of `set_result`, and the difference is the whole point: this does
+        not touch `_bodies`, so the part's volume, mass and centre of gravity are exactly
+        what they were. A surface that quietly became the active body would show up as a
+        part with zero mass and no solid, which reads like a failed feature rather than
+        like a skin waiting to be closed.
+
+        The measurement cache is left alone for the same reason — the geometric half it
+        holds describes the body, and the body has not changed. The construction listing
+        is overlaid fresh on every `measure()`, so a new surface still appears.
+        """
+        if shape is None or shape.IsNull():
+            raise GeometryError(
+                f"{feature.tool} produced no geometry for {name!r}. The inputs were "
+                "accepted but the kernel returned an empty shape — check that the "
+                "elements it was given actually meet."
+            )
+        feature.shape = shape
+        return self.add_construction(name, kind, shape)
 
     # -- annotations ----------------------------------------------------------
 
@@ -531,6 +624,12 @@ class PartDocument:
             # Same rule, same reason: absent on a part with no threads, so this cannot
             # change any payload a design was already asserting against.
             payload["threads"] = [dict(record) for record in self._threads]
+        if self._construction:
+            # And again for constructed surfaces and curves. Names and kinds only — see
+            # `Construction.to_dict` on why no geometry is integrated here.
+            payload["construction"] = [
+                self._construction[name].to_dict() for name in self.construction_names()
+            ]
         return payload
 
     def to_dict(self) -> dict[str, Any]:
@@ -554,4 +653,4 @@ def _thread_key(face: Any) -> str:
     return json.dumps(face, sort_keys=True, default=str)
 
 
-__all__ = ["DEFAULT_BODY", "OCAF_FORMAT", "Feature", "PartDocument"]
+__all__ = ["DEFAULT_BODY", "OCAF_FORMAT", "Construction", "Feature", "PartDocument"]

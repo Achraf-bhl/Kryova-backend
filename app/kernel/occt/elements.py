@@ -47,7 +47,11 @@ from app.kernel.occt.topology import compound, edges, faces
 
 #: Selector words that name **edges** rather than faces when written after a `#`.
 #: Everything else in the vocabulary resolves faces — see the module docstring.
-_EDGE_WORDS: Final[frozenset[str]] = frozenset(
+#:
+#: Public because `operations/surfaces.py` resolves the same spelling for `catia_extract`
+#: and must agree with this exactly. A second copy would drift, and the symptom would be
+#: a selector that means edges to a measurement and faces to an extract.
+EDGE_WORDS: Final[frozenset[str]] = frozenset(
     {"convex", "concave", "vertical", "horizontal"}
 )
 
@@ -395,7 +399,7 @@ def _resolve_sub_entity(document: Any, text: str, *, tool: str) -> Element:
             f"{document.name} yet."
         )
 
-    if word in _EDGE_WORDS:
+    if word in EDGE_WORDS:
         found = select_edges(shape, text, tool=tool, document=document)
         kind, noun = "edges", "edge"
     else:
@@ -422,7 +426,15 @@ def _namespaces_holding(document: Any, name: str) -> set[str]:
         ("point", document.has_point),
         ("plane", document.has_plane),
         ("axis system", document.has_axis_system),
-        ("feature", document.has_feature),
+        ("surface", document.has_construction),
+        # **A constructed surface is also a feature**, filed under the same name in both
+        # — it is one element in the tree, not two things that happen to collide. Left as
+        # a plain `has_feature` it would make every surface ambiguous with itself, and
+        # the advice would be to rename it to something it already is not called.
+        (
+            "feature",
+            lambda text: document.has_feature(text) and not document.has_construction(text),
+        ),
     )
     return {label for label, holds in checks if holds(name)}
 
@@ -462,6 +474,24 @@ def _build(document: Any, name: str, namespace: str) -> Element:
             description=f"the origin of axis system {name}",
         )
 
+    if namespace == "surface":
+        # A constructed surface or curve measures as what it is made of — `faces` for a
+        # surface, `edges` for a curve — so `catia_measure_item` reports its area or its
+        # length through the documented vocabulary, with no new payload spelling. That is
+        # what the measurement contract is for: a new *kind* of geometry should not need
+        # a new *name* for its area.
+        element = document.construction(name)
+        curve = element.kind == "curve"
+        return Element(
+            reference=name,
+            kind="edges" if curve else "faces",
+            shape=element.shape,
+            entity_count=len(
+                edges(element.shape) if curve else faces(element.shape)
+            ),
+            description=f"the constructed {element.kind} {name}",
+        )
+
     # **A feature's shape is the whole part as it stood after that feature**, not the
     # material that feature added — that is what `body()` means everywhere else, and
     # what a boolean's `tool_body` consumes. Measuring `boss` against `slab` therefore
@@ -490,6 +520,7 @@ def _known_names(document: Any) -> str:
         ("planes", document.plane_names()),
         ("points", document.point_names()),
         ("axis systems", document.axis_system_names()),
+        ("surfaces and curves", document.construction_names()),
     )
     listed = [f"{label}: {', '.join(names)}" for label, names in groups if names]
     return ("It holds " + "; ".join(listed) + ".") if listed else "It holds nothing yet."
@@ -547,6 +578,7 @@ def _patch_covering(frame: Any, shape: Any) -> Any:
 
 
 __all__ = [
+    "EDGE_WORDS",
     "Element",
     "angle_between",
     "axis_for",

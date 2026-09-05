@@ -53,8 +53,10 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         BRepBuilderAPI_GTransform,
         BRepBuilderAPI_MakeEdge,
         BRepBuilderAPI_MakeFace,
+        BRepBuilderAPI_MakeSolid,
         BRepBuilderAPI_MakeVertex,
         BRepBuilderAPI_MakeWire,
+        BRepBuilderAPI_Sewing,
         BRepBuilderAPI_Transform,
     )
     from OCP.BRepCheck import BRepCheck_Analyzer
@@ -65,9 +67,12 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.BRepLProp import BRepLProp_SLProps
     from OCP.BRepOffsetAPI import (
         BRepOffsetAPI_DraftAngle,
+        BRepOffsetAPI_MakeFilling,
+        BRepOffsetAPI_MakeOffsetShape,
         BRepOffsetAPI_MakePipe,
         BRepOffsetAPI_MakePipeShell,
         BRepOffsetAPI_MakeThickSolid,
+        BRepOffsetAPI_ThruSections,
     )
     from OCP.BRepPrimAPI import (
         BRepPrimAPI_MakeBox,
@@ -80,6 +85,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.BRepTools import BRepTools
     from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d
     from OCP.GC import GC_MakeArcOfCircle
+    from OCP.GeomAbs import GeomAbs_Shape
     from OCP.GeomAPI import GeomAPI_PointsToBSpline
     from OCP.gp import (
         gp_Ax1,
@@ -99,6 +105,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         gp_XYZ,
     )
     from OCP.GProp import GProp_GProps
+    from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
     from OCP.TColgp import TColgp_Array1OfPnt, TColgp_Array1OfPnt2d
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDF import TDF_LabelMap, TDF_TagSource
@@ -106,7 +113,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.TNaming import TNaming_Builder, TNaming_Selector, TNaming_Tool
     from OCP.TopAbs import TopAbs_ShapeEnum, TopAbs_State
     from OCP.TopExp import TopExp, TopExp_Explorer
-    from OCP.TopoDS import TopoDS, TopoDS_Compound
+    from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Iterator
     from OCP.TopTools import (
         TopTools_IndexedDataMapOfShapeListOfShape,
         TopTools_IndexedMapOfShape,
@@ -126,8 +133,10 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepBuilderAPI_GTransform": BRepBuilderAPI_GTransform,
         "BRepBuilderAPI_MakeEdge": BRepBuilderAPI_MakeEdge,
         "BRepBuilderAPI_MakeFace": BRepBuilderAPI_MakeFace,
+        "BRepBuilderAPI_MakeSolid": BRepBuilderAPI_MakeSolid,
         "BRepBuilderAPI_MakeVertex": BRepBuilderAPI_MakeVertex,
         "BRepBuilderAPI_MakeWire": BRepBuilderAPI_MakeWire,
+        "BRepBuilderAPI_Sewing": BRepBuilderAPI_Sewing,
         "BRepBuilderAPI_Transform": BRepBuilderAPI_Transform,
         "BRepCheck_Analyzer": BRepCheck_Analyzer,
         "BRepExtrema_DistShapeShape": BRepExtrema_DistShapeShape,
@@ -137,9 +146,12 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepIntCurveSurface_Inter": BRepIntCurveSurface_Inter,
         "BRepLProp_SLProps": BRepLProp_SLProps,
         "BRepOffsetAPI_DraftAngle": BRepOffsetAPI_DraftAngle,
+        "BRepOffsetAPI_MakeFilling": BRepOffsetAPI_MakeFilling,
+        "BRepOffsetAPI_MakeOffsetShape": BRepOffsetAPI_MakeOffsetShape,
         "BRepOffsetAPI_MakePipe": BRepOffsetAPI_MakePipe,
         "BRepOffsetAPI_MakePipeShell": BRepOffsetAPI_MakePipeShell,
         "BRepOffsetAPI_MakeThickSolid": BRepOffsetAPI_MakeThickSolid,
+        "BRepOffsetAPI_ThruSections": BRepOffsetAPI_ThruSections,
         "BRepPrimAPI_MakeBox": BRepPrimAPI_MakeBox,
         "BRepPrimAPI_MakeCone": BRepPrimAPI_MakeCone,
         "BRepPrimAPI_MakeCylinder": BRepPrimAPI_MakeCylinder,
@@ -153,6 +165,8 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "GC_MakeArcOfCircle": GC_MakeArcOfCircle,
         "GProp_GProps": GProp_GProps,
         "GeomAPI_PointsToBSpline": GeomAPI_PointsToBSpline,
+        "GeomAbs_Shape": GeomAbs_Shape,
+        "ShapeAnalysis_FreeBounds": ShapeAnalysis_FreeBounds,
         "TCollection_ExtendedString": TCollection_ExtendedString,
         "TColgp_Array1OfPnt": TColgp_Array1OfPnt,
         "TColgp_Array1OfPnt2d": TColgp_Array1OfPnt2d,
@@ -172,6 +186,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "TopTools_ListOfShape": TopTools_ListOfShape,
         "TopoDS": TopoDS,
         "TopoDS_Compound": TopoDS_Compound,
+        "TopoDS_Iterator": TopoDS_Iterator,
         "gp_Ax1": gp_Ax1,
         "gp_Ax2": gp_Ax2,
         "gp_Ax3": gp_Ax3,

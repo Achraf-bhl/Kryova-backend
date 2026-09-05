@@ -859,7 +859,13 @@ class TestSketchesAndSolidFeatures:
         assert reopened["profiles"] == 0
 
     def test_an_unsupported_pad_limit_is_named_not_silently_ignored(self) -> None:
-        """`up_to_surface` is the one limit still owed, and it says what it needs."""
+        """`up_to_surface` is the one limit still owed, and it says what it needs.
+
+        Matched on **what is missing**, not on the phase number it used to name. The
+        reason went stale the moment constructed surfaces shipped — the blocker was never
+        having a surface but trimming against one — and a test pinned to `Phase 2.6`
+        would have kept the wrong explanation alive by failing when it was corrected.
+        """
         from app.kernel import OcctRunner
 
         runner = OcctRunner()
@@ -867,7 +873,7 @@ class TestSketchesAndSolidFeatures:
         runner("catia_sketch_create", {"support": "XY", "name": "s"})
         runner("catia_sketch_rectangle", {"sketch": "s", "width_mm": 10.0, "height_mm": 10.0})
 
-        with pytest.raises(OperationNotSupported, match="Phase 2.6"):
+        with pytest.raises(OperationNotSupported, match="trimmed against it"):
             runner("catia_pad", {"sketch": "s", "length_mm": 5.0, "limit": "up_to_surface"})
 
     def test_a_limit_stops_the_extrusion_where_the_geometry_says(self) -> None:
@@ -1962,4 +1968,381 @@ class TestDraftSplitsAtAPartingElement:
                     "neutral": "XY",
                     "mode": "reflect_line",
                 },
+            )
+
+
+class TestSurfacesAreSkinNotMaterial:
+    """A surface has area and no volume, and the part does not change when one is built.
+
+    That is the property the whole shape-design layer rests on: a skin is built, joined,
+    checked and only then turned into material by `catia_close_surface` or
+    `catia_thick_surface`. A surface that quietly became the active body would report a
+    part with no solid, which reads like a failed feature rather than like a skin waiting
+    to be closed — so the first test here is that nothing happened to the part.
+
+    Every area and volume is checked against the closed form, never against a recorded
+    number: a loft that comes out the wrong shape still looks like a loft.
+    """
+
+    @staticmethod
+    def _sheet() -> object:
+        """A 50 × 20 rectangle of skin, drawn as a line and extruded 20 mm up +Z."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Skin"})
+        runner("catia_sketch_create", {"support": "XY", "name": "edge"})
+        runner("catia_sketch_line", {"sketch": "edge", "start": (0.0, 0.0), "end": (50.0, 0.0)})
+        runner(
+            "catia_surface_extrude",
+            {"profile": "edge", "direction": [0, 0, 1], "length_mm": 20.0, "name": "wall"},
+        )
+        return runner
+
+    @staticmethod
+    def _square(runner: object, name: str = "outline", side: float = 40.0) -> None:
+        """A closed square contour, drawn segment by segment on XY."""
+        corners = [(0.0, 0.0), (side, 0.0), (side, side), (0.0, side)]
+        runner("catia_sketch_create", {"support": "XY", "name": name})  # type: ignore[operator]
+        for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+            runner("catia_sketch_line", {"sketch": name, "start": start, "end": end})  # type: ignore[operator]
+
+    def test_building_a_surface_leaves_the_part_without_material(self) -> None:
+        runner = self._sheet()
+
+        payload = runner("catia_measure", {})  # type: ignore[operator]
+
+        assert payload["has_solid"] is False
+        assert "volume_mm3" not in payload
+        assert payload["construction"] == [{"name": "wall", "kind": "surface"}]
+
+    def test_an_extruded_curve_has_the_area_it_swept(self) -> None:
+        runner = self._sheet()
+
+        measured = runner("catia_measure_item", {"element": "wall"})  # type: ignore[operator]
+
+        assert measured["area_mm2"] == pytest.approx(50.0 * 20.0, abs=TOL)
+
+    def test_a_symmetric_extrusion_is_the_stated_length_in_total(self) -> None:
+        """The same rule `catia_pad` follows: the number is the whole extent, not the
+        extent each way. The two must agree or one number means two things."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Sym"})
+        runner("catia_sketch_create", {"support": "XY", "name": "edge"})
+        runner("catia_sketch_line", {"sketch": "edge", "start": (0.0, 0.0), "end": (50.0, 0.0)})
+        runner(
+            "catia_surface_extrude",
+            {
+                "profile": "edge",
+                "direction": [0, 0, 1],
+                "length_mm": 20.0,
+                "symmetric": True,
+                "name": "wall",
+            },
+        )
+
+        measured = runner("catia_measure_item", {"element": "wall"})
+
+        assert measured["area_mm2"] == pytest.approx(50.0 * 20.0, abs=TOL)
+
+    def test_a_revolved_curve_is_a_cylinder_of_the_right_area(self) -> None:
+        """2πrh, from a line 10 mm off the axis revolved right round it."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Rev"})
+        # ZX places u along Z and v along X, so this is a line at x = 10 from z = 0 to 30.
+        runner("catia_sketch_create", {"support": "ZX", "name": "gen"})
+        runner("catia_sketch_line", {"sketch": "gen", "start": (0.0, 10.0), "end": (30.0, 10.0)})
+        runner("catia_surface_revolve", {"profile": "gen", "axis": "Z", "name": "tube"})
+
+        measured = runner("catia_measure_item", {"element": "tube"})
+
+        assert measured["area_mm2"] == pytest.approx(2 * math.pi * 10.0 * 30.0, abs=1e-9)
+
+    def test_a_flat_fill_is_exact_rather_than_approximated(self) -> None:
+        """The reason `_flat_patch` exists. OCCT's filling algorithm fits a B-spline
+        through the boundary, so a circular hole patched with it measures 314.1595 mm²
+        against πr² = 314.1593 and carries a bounding box half as big again as the disc.
+        A flat opening has an exact answer and this takes it."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Disc"})
+        runner("catia_sketch_create", {"support": "XY", "name": "rim"})
+        runner("catia_sketch_circle", {"sketch": "rim", "diameter_mm": 20.0})
+        runner("catia_surface_fill", {"boundary": ["rim"], "name": "disc"})
+
+        measured = runner("catia_measure_item", {"element": "disc"})
+
+        assert measured["area_mm2"] == pytest.approx(math.pi * 100.0, abs=1e-9)
+
+    def test_a_loft_between_two_circles_is_a_frustum(self) -> None:
+        """Lateral area π(R + r)·slant, which no other surface through those two
+        sections has."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Loft"})
+        runner("catia_sketch_create", {"support": "XY", "name": "big"})
+        runner("catia_sketch_circle", {"sketch": "big", "diameter_mm": 20.0})
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 20.0, "name": "top"})
+        runner("catia_sketch_create", {"support": "top", "name": "small"})
+        runner(
+            "catia_sketch_circle", {"sketch": "small", "diameter_mm": 10.0}
+        )
+
+        runner("catia_surface_loft", {"sections": ["big", "small"], "name": "side"})
+
+        slant = math.sqrt(20.0**2 + 5.0**2)
+        measured = runner("catia_measure_item", {"element": "side"})
+        assert measured["area_mm2"] == pytest.approx(math.pi * 15.0 * slant, abs=1e-6)
+
+    def test_an_offset_surface_sits_at_the_stated_radius(self) -> None:
+        """A cylinder offset outward by 2 mm is a cylinder of radius 12 — the check that
+        the offset went along the normal and by the distance asked for."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Off"})
+        runner("catia_sketch_create", {"support": "ZX", "name": "gen"})
+        runner("catia_sketch_line", {"sketch": "gen", "start": (0.0, 10.0), "end": (30.0, 10.0)})
+        runner("catia_surface_revolve", {"profile": "gen", "axis": "Z", "name": "tube"})
+
+        runner("catia_surface_offset", {"surface": "tube", "distance_mm": 2.0, "name": "outer"})
+
+        measured = runner("catia_measure_item", {"element": "outer"})
+        assert measured["area_mm2"] == pytest.approx(2 * math.pi * 12.0 * 30.0, abs=1e-6)
+
+    def test_the_free_boundary_of_a_sheet_is_its_outline(self) -> None:
+        runner = self._sheet()
+
+        runner("catia_boundary", {"surface": "wall", "name": "rim"})  # type: ignore[operator]
+
+        measured = runner("catia_measure_item", {"element": "rim"})  # type: ignore[operator]
+        assert measured["length_mm"] == pytest.approx(2 * (50.0 + 20.0), abs=TOL)
+
+    def test_extracting_a_face_by_selector_takes_that_face_and_no_other(self) -> None:
+        """Where `feature#selector` pays for itself: the top face is named rather than
+        indexed, so the extract survives everything that renumbers the part."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Block"})
+        self._square(runner, "base", 20.0)
+        runner("catia_pad", {"sketch": "base", "length_mm": 40.0, "name": "block"})
+
+        runner("catia_extract", {"elements": ["block#top"], "name": "lid"})
+
+        measured = runner("catia_measure_item", {"element": "lid"})
+        assert measured["area_mm2"] == pytest.approx(20.0 * 20.0, abs=TOL)
+        assert measured["element"]["entity_count"] == 1
+
+
+class TestASkinBecomesMaterialOnlyWhenAsked:
+    """The seam between shape design and part design, in both directions it is crossed.
+
+    `catia_close_surface` fills a closed skin; `catia_thick_surface` gives an open one a
+    wall. Both are checked against the closed form for the solid they should produce,
+    because the failure mode here is a solid of plausible size — a fill that bridged a
+    gap nobody noticed, or a wall grown on the wrong side.
+    """
+
+    #: A truncated cone: bottom radius 10, top radius 5, height 20.
+    R_MM, R_TOP_MM, H_MM = 10.0, 5.0, 20.0
+
+    @classmethod
+    def _closed_frustum(cls) -> object:
+        """A part built entirely as skin — lofted side, two flat caps, sewn together."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Frustum"})
+        runner("catia_sketch_create", {"support": "XY", "name": "big"})
+        runner(
+            "catia_sketch_circle",
+            {"sketch": "big", "diameter_mm": 2 * cls.R_MM},
+        )
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": cls.H_MM, "name": "top"})
+        runner("catia_sketch_create", {"support": "top", "name": "small"})
+        runner(
+            "catia_sketch_circle",
+            {"sketch": "small", "diameter_mm": 2 * cls.R_TOP_MM},
+        )
+        runner("catia_surface_loft", {"sections": ["big", "small"], "name": "side"})
+        runner("catia_surface_fill", {"boundary": ["big"], "name": "bottom"})
+        runner("catia_surface_fill", {"boundary": ["small"], "name": "lid"})
+        return runner
+
+    @staticmethod
+    def _panel() -> object:
+        """A 40 × 40 flat patch of skin and nothing else."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Panel"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        corners = [(0.0, 0.0), (40.0, 0.0), (40.0, 40.0), (0.0, 40.0)]
+        for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+            runner("catia_sketch_line", {"sketch": "outline", "start": start, "end": end})
+        runner("catia_surface_fill", {"boundary": ["outline"], "name": "patch"})
+        return runner
+
+    def test_closing_a_sewn_skin_gives_the_solid_it_encloses(self) -> None:
+        """h/3·π(R² + Rr + r²) — the frustum, reached without a single solid feature."""
+        runner = self._closed_frustum()
+
+        runner("catia_join", {"elements": ["side", "bottom", "lid"], "name": "skin"})  # type: ignore[operator]
+        result = runner("catia_close_surface", {"surface": "skin", "name": "solid"})  # type: ignore[operator]
+
+        expected = (
+            self.H_MM
+            / 3.0
+            * math.pi
+            * (self.R_MM**2 + self.R_MM * self.R_TOP_MM + self.R_TOP_MM**2)
+        )
+        assert result["volume_mm3"] == pytest.approx(expected, abs=1e-6)
+        assert result["solid_count"] == 1
+
+    def test_a_skin_that_is_not_closed_is_refused_rather_than_filled(self) -> None:
+        """The failure this operation exists to catch. An almost-closed skin filled
+        anyway is a solid with a hole in it that measures a plausible volume, which is
+        strictly worse than a refusal naming the gap."""
+        runner = self._closed_frustum()
+
+        with pytest.raises(GeometryError, match="not closed"):
+            runner("catia_close_surface", {"surface": "side", "name": "solid"})  # type: ignore[operator]
+
+    def test_a_thickened_panel_is_the_area_times_the_wall(self) -> None:
+        runner = self._panel()
+
+        result = runner("catia_thick_surface", {"surface": "patch", "thickness_mm": 3.0})  # type: ignore[operator]
+
+        assert result["volume_mm3"] == pytest.approx(40.0 * 40.0 * 3.0, abs=1e-6)
+
+    def test_material_grows_along_the_normal_and_the_second_side_grows_back(self) -> None:
+        """Both halves of `thickness_mm` / `second_thickness_mm`, checked by where the
+        material actually is rather than only by how much of it there is."""
+        runner = self._panel()
+
+        result = runner(  # type: ignore[operator]
+            "catia_thick_surface",
+            {"surface": "patch", "thickness_mm": 3.0, "second_thickness_mm": 2.0},
+        )
+
+        assert result["volume_mm3"] == pytest.approx(40.0 * 40.0 * 5.0, abs=1e-5)
+        box = result["bounding_box_mm"]
+        assert box["min"][2] == pytest.approx(-2.0, abs=1e-5)
+        assert box["max"][2] == pytest.approx(3.0, abs=1e-5)
+
+    def test_a_thickened_surface_can_be_fused_into_the_part(self) -> None:
+        """The reason `_outward` exists, and it cannot be checked any other way.
+
+        OCCT returns the thickened solid inside-out: its signed volume is negative,
+        `BRepCheck_Analyzer` calls it valid — because it is, it is the complement — and a
+        later fuse **silently returns the wrong answer** instead of failing. Fusing a
+        1,000 mm³ block onto the uncorrected 4,800 mm³ plate measured −4,800: no error,
+        block gone. So the check is a fuse, not a volume.
+        """
+        runner = self._panel()
+        runner("catia_thick_surface", {"surface": "patch", "thickness_mm": 3.0})  # type: ignore[operator]
+
+        runner("catia_sketch_create", {"support": "XY", "name": "boss"})  # type: ignore[operator]
+        runner(  # type: ignore[operator]
+            "catia_sketch_circle",
+            {"sketch": "boss", "at": (20.0, 20.0), "diameter_mm": 10.0},
+        )
+        result = runner("catia_pad", {"sketch": "boss", "length_mm": 8.0})  # type: ignore[operator]
+
+        # The pad starts at z = 0 inside the plate and runs to z = 8, so the material it
+        # adds is the 5 mm standing clear of the 3 mm wall.
+        added = math.pi * 5.0**2 * 5.0
+        assert result["volume_mm3"] == pytest.approx(40.0 * 40.0 * 3.0 + added, abs=1e-4)
+
+    def test_joining_elements_that_do_not_meet_is_refused_by_count(self) -> None:
+        """A join that quietly returned two disconnected shells would be found by
+        whatever failed next, several operations later — so it says how many pieces are
+        left, and `check_connexity: false` is how a design says it meant that."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Apart"})
+        for name, x in (("near", 0.0), ("far", 50.0)):
+            runner("catia_sketch_create", {"support": "XY", "name": f"{name}_line"})
+            runner(
+                "catia_sketch_line",
+                {"sketch": f"{name}_line", "start": (x, 0.0), "end": (x + 10.0, 0.0)},
+            )
+            runner(
+                "catia_surface_extrude",
+                {
+                    "profile": f"{name}_line",
+                    "direction": [0, 0, 1],
+                    "length_mm": 5.0,
+                    "name": name,
+                },
+            )
+
+        with pytest.raises(GeometryError, match="2 separate pieces"):
+            runner("catia_join", {"elements": ["near", "far"], "name": "sewn"})
+
+        runner(
+            "catia_join",
+            {"elements": ["near", "far"], "check_connexity": False, "name": "sewn"},
+        )
+        assert runner("catia_measure", {})["construction"][-1]["name"] == "sewn"
+
+    def test_a_curve_named_where_a_surface_belongs_is_refused_by_name(self) -> None:
+        runner = self._sheet_with_a_curve()
+
+        with pytest.raises(GeometryError, match="is a curve"):
+            runner("catia_thick_surface", {"surface": "rim", "thickness_mm": 1.0})  # type: ignore[operator]
+
+    def test_a_surface_named_where_a_curve_belongs_is_refused_by_name(self) -> None:
+        runner = self._sheet_with_a_curve()
+
+        with pytest.raises(GeometryError, match="is a surface"):
+            runner(  # type: ignore[operator]
+                "catia_surface_extrude",
+                {"profile": "wall", "direction": [0, 0, 1], "length_mm": 5.0},
+            )
+
+    @staticmethod
+    def _sheet_with_a_curve() -> object:
+        """A sheet called `wall` and its boundary called `rim` — one of each kind."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Both"})
+        runner("catia_sketch_create", {"support": "XY", "name": "edge"})
+        runner("catia_sketch_line", {"sketch": "edge", "start": (0.0, 0.0), "end": (50.0, 0.0)})
+        runner(
+            "catia_surface_extrude",
+            {"profile": "edge", "direction": [0, 0, 1], "length_mm": 20.0, "name": "wall"},
+        )
+        runner("catia_boundary", {"surface": "wall", "name": "rim"})
+        return runner
+
+    def test_what_a_surface_cannot_do_yet_is_named_rather_than_ignored(self) -> None:
+        """An ignored `guides` builds a different shape from the one asked for and says
+        nothing about it. Each of these is a real GSD capability, and each refusal names
+        what it would take."""
+        runner = self._closed_frustum()
+
+        for arguments, expected in (
+            ({"sections": ["big", "small"], "guides": ["big"]}, "guides"),
+            ({"sections": ["big", "small"], "spine": "big"}, "spine"),
+        ):
+            with pytest.raises(OperationNotSupported, match=expected):
+                runner("catia_surface_loft", arguments)  # type: ignore[operator]
+
+        with pytest.raises(OperationNotSupported, match="continuity"):
+            runner(  # type: ignore[operator]
+                "catia_surface_fill", {"boundary": ["big"], "continuity": "tangent"}
+            )
+        with pytest.raises(OperationNotSupported, match="propagation"):
+            runner(  # type: ignore[operator]
+                "catia_extract", {"elements": ["side"], "propagation": "tangent"}
             )

@@ -29,6 +29,7 @@ from app.kernel.occt.operations import (
     primitives,
     reference_ops,
     sketcher,
+    surfaces,
     sweeps,
     transforms,
 )
@@ -92,6 +93,17 @@ HANDLERS: Final[dict[str, Handler]] = {
     dressup.THICKNESS: dressup.thickness,
     dressup.REMOVE_FACE: dressup.remove_face,
     annotation_ops.THREAD: annotation_ops.thread,
+    # surfaces, and the two ways one becomes material
+    surfaces.EXTRUDE: surfaces.surface_extrude,
+    surfaces.REVOLVE: surfaces.surface_revolve,
+    surfaces.OFFSET: surfaces.surface_offset,
+    surfaces.FILL: surfaces.surface_fill,
+    surfaces.LOFT: surfaces.surface_loft,
+    surfaces.JOIN: surfaces.join,
+    surfaces.EXTRACT: surfaces.extract,
+    surfaces.BOUNDARY: surfaces.boundary,
+    surfaces.CLOSE: surfaces.close_surface,
+    surfaces.THICKEN: surfaces.thick_surface,
     # whole-body operations
     booleans.BOOLEAN: booleans.boolean,
     booleans.SHELL: booleans.shell,

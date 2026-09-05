@@ -50,9 +50,17 @@ SOLID_COMBINE = "catia_solid_combine"
 #: The reasons for the first two used to blame Phase 2.1's face selection. That shipped,
 #: and the reasons were wrong from that moment: the missing piece was never *naming* the
 #: face to stop against but *stopping* against it. Recorded because a stale "blocked on X"
-#: outlives X and then sends the next reader to rebuild something that already exists.
+#: outlives X and then sends the next reader to rebuild something that already exists —
+#: which is why `up_to_surface` no longer says it is waiting for constructed surfaces
+#: either. Those arrived with `operations/surfaces.py`; what is still missing is trimming
+#: the extrusion against one, which is a cut and not a distance.
 _UNSUPPORTED_LIMITS: dict[str, str] = {
-    "up_to_surface": "stopping against a surface needs constructed surfaces (Phase 2.6)",
+    "up_to_surface": (
+        "a surface can be named and built now, but a pad stopping at one is trimmed "
+        "against it rather than run to a distance, and this backend still extrudes to a "
+        "distance. Extrude past the surface and cut with catia_boolean, or stop at a "
+        "plane with limit='up_to_plane'"
+    ),
 }
 
 #: Limits that are resolved against the geometry rather than given as a distance.

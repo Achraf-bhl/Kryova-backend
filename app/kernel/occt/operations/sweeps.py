@@ -334,9 +334,10 @@ def _swept_feature(
     if arguments.get("thick"):
         raise OperationNotSupported(
             f"{tool} with thick=true",
-            "A thin-walled sweep needs the profile offset into two walls, which is "
-            "surface work (Phase 2.6). Sweep the wall's own closed section instead, or "
-            "sweep the solid and hollow it with catia_shell",
+            "A thin-walled sweep needs the *sketch profile* offset into two walls, which "
+            "is a 2D offset in the sketcher — `catia_surface_offset` offsets a built "
+            "surface and does not answer it. Sweep the wall's own closed section "
+            "instead, or sweep the solid and hollow it with catia_shell",
         )
 
     profile = _sketch_named(document, arguments, "profile", tool)
@@ -417,8 +418,11 @@ def _apply_control(maker: Any, arguments: Mapping[str, Any], tool: str) -> None:
     if control == REFERENCE_SURFACE:
         raise OperationNotSupported(
             f"{tool} with control='{REFERENCE_SURFACE}'",
-            "Orienting the section against a surface needs constructed surfaces "
-            f"(Phase 2.6). '{KEEP_ANGLE}' and '{PULLING_DIRECTION}' are available",
+            "A surface can be named and built now, but OCCT takes one as a sweep "
+            "reference only when every edge of the spine already lies on one of its "
+            "faces — so the spine has to be *derived from* the surface rather than drawn "
+            f"beside it, which no operation here does yet. '{KEEP_ANGLE}' and "
+            f"'{PULLING_DIRECTION}' are available",
         )
 
     raise GeometryError(

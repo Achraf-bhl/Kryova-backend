@@ -33,6 +33,7 @@ VERTEX: Final = "VERTEX"
 SOLID: Final = "SOLID"
 SHELL: Final = "SHELL"
 WIRE: Final = "WIRE"
+COMPOUND: Final = "COMPOUND"
 
 
 def _enum(kind: str) -> Any:
@@ -130,6 +131,32 @@ def has_solid(shape: Any) -> bool:
     return bool(explorer.More())
 
 
+def connected_pieces(shape: Any) -> int:
+    """How many disconnected pieces a shape is in.
+
+    A sewing returns **one** shape whatever happened, and what says whether its parts
+    actually meet is its *type*: OCCT promotes touching faces into a SHELL and leaves
+    untouched ones side by side in a COMPOUND. So a compound's direct children are the
+    pieces, and anything else is a single piece.
+
+    `explore` cannot answer this. It flattens, so two disconnected shells and one shell
+    made of two faces are indistinguishable through it — which is how a connexity check
+    written as a shell count reported "0 pieces" for two sheets that never met.
+
+    Counted rather than returned as a boolean because "left 3 pieces" is a diagnosis and
+    "not connected" is a shrug.
+    """
+    require()
+    if shape.ShapeType() != _enum(COMPOUND):
+        return 1
+    iterator = symbol("TopoDS_Iterator")(shape)
+    pieces = 0
+    while iterator.More():
+        pieces += 1
+        iterator.Next()
+    return pieces
+
+
 def compound(shapes: Iterable[Any]) -> Any:
     """Several shapes as one, for an algorithm that takes a single argument.
 
@@ -182,6 +209,7 @@ def shape_list(topo_list: Any) -> list[Any]:
 
 
 __all__ = [
+    "COMPOUND",
     "EDGE",
     "FACE",
     "SHELL",
@@ -190,6 +218,7 @@ __all__ = [
     "WIRE",
     "census",
     "compound",
+    "connected_pieces",
     "count",
     "edges",
     "endpoints",

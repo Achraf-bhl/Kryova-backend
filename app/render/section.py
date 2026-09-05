@@ -227,13 +227,16 @@ def section_faces(shape: Any, section: Section) -> list[Any]:
     from app.kernel.occt.topology import FACE, explore
 
     found = []
-    for face in explore(shape, FACE):
+    for found_face in explore(shape, FACE):
+        # Face_s once, up front: `explore` answers in base TopoDS_Shape, and both
+        # classify and the adaptor are overloaded on the concrete type.
+        face = symbol("TopoDS").Face_s(found_face)
         if classify.face_surface_type(face) != "Plane":
             continue
         # Through the adaptor rather than `BRep_Tool.Surface_s` + a downcast:
         # the adaptor is what `classify` already uses for every other surface
         # question here, and it hands back a `gp_Pln` without a handle in sight.
-        axis = symbol("BRepAdaptor_Surface")(symbol("TopoDS").Face_s(face)).Plane().Axis()
+        axis = symbol("BRepAdaptor_Surface")(face).Plane().Axis()
         direction = axis.Direction()
         parallel = abs(abs(_dot(direction, section.normal)) - 1.0) < 1e-9
         if not parallel:

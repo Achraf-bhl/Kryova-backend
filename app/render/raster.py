@@ -182,7 +182,10 @@ def hatch(
             continue
         if pixels[0] != pixels[-1]:
             pixels.append(pixels[0])  # close it; a hatch of an open outline leaks
-        edges.extend(zip(pixels, pixels[1:], strict=True))
+        # Consecutive pairs: head against tail. `strict` would be a bug here --
+        # the tail is one shorter by construction, and the first smoke run that
+        # ever reached this line found exactly that mistake.
+        edges.extend(zip(pixels[:-1], pixels[1:], strict=False))
     if not edges:
         return
 

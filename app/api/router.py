@@ -5,6 +5,7 @@ from app.api.routes import (
     auth,
     catia,
     geometry,
+    kernel,
     materials,
     media,
     projects,
@@ -20,3 +21,4 @@ api_router.include_router(media.router)
 api_router.include_router(materials.router)
 api_router.include_router(ai.router)
 api_router.include_router(catia.router)
+api_router.include_router(kernel.router)

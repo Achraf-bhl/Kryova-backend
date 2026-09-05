@@ -124,12 +124,14 @@ class Settings(BaseSettings):
     # what stops a single account from occupying every worker.
     max_concurrent_simulations_per_user: int = 3
 
-    # AI. Which model serves the AI features is the user's choice -- see
-    # app/ai/providers/. The default is local Ollama: CAD geometry and load
-    # cases are proprietary engineering IP, so nothing is posted to a third
-    # party unless the user opts in. A misconfigured provider makes the AI
+    # AI. Which model serves the AI features -- see app/ai/providers/.
+    # Ollama is the TEST-PHASE default (decided 2026-09-05): free, keyless, and
+    # what dev machines and CI run. Production runs a hosted API and will not
+    # support Ollama -- which also means production posts geometry summaries and
+    # load cases to the model vendor, a data-flow fact that belongs in the
+    # customer contract, not buried here. A misconfigured provider makes the AI
     # endpoints report themselves unavailable; it never stops the app booting.
-    #   ollama            -> local, no key, offline (default)
+    #   ollama            -> local, no key; dev/test only
     #   anthropic         -> hosted Claude, needs AI_API_KEY
     #   nvidia            -> NVIDIA NIM (build.nvidia.com), needs AI_API_KEY
     #   openai_compatible -> OpenAI / LM Studio / vLLM / llama.cpp / Groq /

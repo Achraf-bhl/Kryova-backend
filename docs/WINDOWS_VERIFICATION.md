@@ -53,6 +53,7 @@ venv\Scripts\python -m pytest tests\test_kernel.py tests\test_interrogation.py -
 venv\Scripts\python -m pytest tests\test_design_*.py -q
 venv\Scripts\python -m pytest tests\test_render.py tests\test_vision.py -q
 venv\Scripts\python -m pytest tests\test_geometry_backends.py -q
+venv\Scripts\python -m pytest tests\test_kernel_routes.py -q   # needs the DB (tier 2)
 ```
 
 | Suite | What a pass actually proves |
@@ -102,6 +103,20 @@ and `108 / 201`. A part built here is **not saved to disk** — it lives in the 
 process, one document per conversation, eight at a time. The ninth evicts the oldest, and
 the evicted conversation is *told* on its next call rather than silently continuing against
 an empty document.
+
+**See the part over HTTP** (new — this is what the frontend will consume):
+
+```
+GET /api/v1/kernel/conversations/{conversation_id}/render          # PNG, iso view
+GET /api/v1/kernel/conversations/{conversation_id}/render?view=front&section=x
+GET /api/v1/kernel/conversations/{conversation_id}/measure         # JSON with provenance
+```
+
+Open the render URL in a browser tab while chatting: same conversation id as the chat, and
+the ETag is the render digest, so refreshing is cheap. A section (`section=x|y|z`) cuts
+through the middle of that axis and hatches the cut face at 45° — a bore or pocket that is
+invisible in a wireframe shows immediately. Expect a 409 with a plain-English reason when
+nothing is built yet, when the document was evicted, or when the backend is `catia`.
 
 Then switch back to `GEOMETRY_BACKEND=catia` for tier 3.
 

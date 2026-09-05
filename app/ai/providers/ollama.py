@@ -1,9 +1,11 @@
 """Ollama provider -- local inference, nothing leaves the machine.
 
-This is the default for Kryova. CAD geometry and load cases are proprietary
-engineering IP, so the shipping default must not post them to a third party.
-It also means no API key, no per-token cost, and a desktop install that works
-offline.
+**The test-phase default, not the production story** (decided 2026-09-05):
+production runs a hosted API and will not support Ollama. This provider stays
+for two reasons that survive that decision -- it is the free, keyless loop every
+developer and CI run uses, and it is the ready-made answer if a customer's
+security review ever demands a deployment where geometry cannot leave the
+building. Neither reason makes it what customers get by default.
 
 Ollama constrains generation to a JSON Schema via the `format` field, so the
 structured-output contract in `provider.py` holds here the same as it does for

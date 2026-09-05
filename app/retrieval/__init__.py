@@ -4,15 +4,14 @@ The assistant answers questions about CATIA and FEA, and the authoritative
 answers live in a few hundred megabytes of vendor manuals. This package is what
 lets it consult them: extract, chunk, index, search.
 
-**Why lexical rather than embeddings.** Three properties of this deployment
-decide it, and they all point the same way.
-
-The provider is pluggable and the default is local. `AI_PROVIDER` is `ollama`,
-`anthropic` or `openai_compatible`, and **Anthropic publishes no embedding
-model at all** -- an embedding-based index would either force a second vendor
-into a deployment that had deliberately chosen one, or force an extra model pull
-onto an install whose whole point is that it runs offline with no key. A lexical
-index has no model, so it works identically under all three.
+**Why lexical rather than embeddings.** Two properties of the corpus decide it.
+(A third argument used to stand here -- that the install's whole point was
+running offline with no key. That premise died 2026-09-05 when production was
+decided to be a hosted API; the two arguments below carry the decision on their
+own, which is why the index is still lexical.) A practical point survives too:
+**Anthropic publishes no embedding model**, so a dense index would drag a second
+vendor into the deployment, where a lexical index has no model and works
+identically under every provider.
 
 The corpus is technical manuals, which is the regime where lexical retrieval is
 strongest rather than merely adequate. What discriminates between passages here

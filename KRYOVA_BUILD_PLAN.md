@@ -30,12 +30,12 @@ happened.
 > real result and not a small one — it says the phases are green on capability and have
 > never been connected to anything.
 >
-> **Step 1 of 3 landed the same day.** `GEOMETRY_BACKEND=occt` routes tool calls to
+> **Steps 1 and 2 of 3 landed the same day.** `GEOMETRY_BACKEND=occt` routes tool calls to
 > `OcctRunner` in-process: the agent builds geometry with no seat and no licence, and a
-> 60×40×20 pad measures 48000 mm³ through the real dispatch path. Still to do: **(2)**
-> endpoints for render / measure / assert, so `app/render/`, `app/ai/vision.py`,
-> `machine_checks.py` and `sensitivity.py` have a caller at all; **(3)** the frontend
-> surface, which is E4.4 and part of P5.
+> 60×40×20 pad measures 48000 mm³ through the real dispatch path, and
+> `GET /kernel/conversations/{id}/render` + `/measure` let anyone *see* and measure the
+> part a conversation is building. Still to do: **(3)** the frontend surface (E4.4 and
+> part of P5) — and callers for vision / machine_checks / sensitivity.
 
 
 **E5 — Assertions and self-correction.** Foundation 2026-09-04; **5.1 and 5.3 landed
@@ -92,6 +92,23 @@ and what 5.3's sensitivity can then be run over.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — **The integration gap, step 2 + two product decisions.**
+  `app/api/routes/kernel.py`: `GET /kernel/conversations/{id}/render` (any canonical view,
+  optional mid-axis section, hatched, the render digest as ETag) and `/measure` (payload with
+  provenance) — the first callers `app/render/` ever had. OCCT-backend only, and it **refuses**
+  to draw a CATIA-seat part rather than fake a picture; three distinct 409s because the
+  remedies differ. The smoke run found two defects reading had not: the Face_s cast trap in
+  `section_faces` (fourth occurrence of that trap), and the hatcher's `zip(..., strict=True)`
+  that can never be satisfied — **hatching had never executed before this run**; its first
+  output was inspected by eye and is correct. Two decisions recorded the same day, both now in
+  Decision 1 / the config: **OCCT is kept, demoted to internal engine** — the only free
+  industrial B-rep kernel; no customer surface, no new operations except when a test or sweep
+  needs one; installs silently inside Kryova (a wheel, no executable, ~805 MB with VTK, which
+  the compiled extension links directly and cannot be trimmed). And **Ollama is test-phase
+  only; production is a hosted API** — with the data-flow consequence (geometry summaries go
+  to the model vendor) written down where the contract discussion can find it, and the
+  retrieval rationale re-based on the two arguments that survive the change.
 
 - **2026-09-05** — **The integration gap, step 1: the agent can build without CATIA.**
   `app/geometry/backends.py` + a local branch in `dispatch.call_catia`. This is Decision 1

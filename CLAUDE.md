@@ -20,10 +20,18 @@ capability audit it grew out of.
 Eight decisions from the master plan that change how code here should be written. Contradicting
 one is a design change, not a detail:
 
-1. **The design IR compiles to an open kernel first; CATIA is one backend among several.**
-   Geometry must be buildable headless, free, in CI — that is what makes optimisation,
-   sensitivity, self-correction and geometry regression tests affordable at all. Never write
-   anything that assumes CATIA is the only way to make geometry.
+1. **OCCT is the internal engine; CATIA is the delivery target** (amended 2026-09-05 — it
+   used to say "CATIA is one backend among several", which read as though Kryova might be
+   sold without CATIA. It will not be: every customer holds a licence). The agent *designs
+   and iterates* in OCCT, because a design loop needs tens of rebuilds a minute and a seat
+   gives one every few seconds; the result **lands** in CATIA, where the customer works.
+   Geometry must still be buildable headless, free and in CI — without that there is no
+   geometry test that runs without a seat, and no sensitivity or optimisation at all. But:
+   **no customer-facing OCCT surface**, and **operations are added to the OCCT backend only
+   when a test, a sweep or an optimisation needs one**, never for coverage. Deployment is
+   hybrid (Kryova's server + the engineer's machine); OCCT installs silently as an ordinary
+   dependency — a Python wheel with no executable, so it cannot surface as a separate app.
+   Never write anything that assumes CATIA is the only way to make geometry.
 2. **Physics is federated, never re-implemented.** Keep `solve/loads.py`, `solve/selection.py`
    and `solve/materials.py` — the load-case and geometric-selector vocabulary is the real asset.
    Swap the kernel underneath (CalculiX and friends). Do not hand-write another solver.

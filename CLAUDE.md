@@ -593,8 +593,10 @@ Read these before touching the relevant file — they are live defects, not styl
 - **The README and `.env.example` claim SQLite is refused at startup.** It is not —
   `Settings._require_postgres` returns SQLite URLs unchanged and `database.py` has a full
   SQLite branch. Fix the docs or the code, but do not trust either in isolation.
-- **`/health` returns `{"status":"ok"}` unconditionally** — it does not check the database, so
-  it cannot be used as a readiness probe.
+- ~~**`/health` returns `{"status":"ok"}` unconditionally**~~ — **stale, corrected 2026-09-05.**
+  It returns `{"status", "version", "git_sha", "built_at", "checks": {"database", "media_store"}}`
+  and genuinely checks both, so it *is* usable as a readiness probe. Verified live on the
+  Windows seat.
 - **`data/bm25/` holds ~450 MB of Dassault Systèmes / CATIA training PDFs, and they are tracked
   again on purpose** (2026-09-01) so the corpus syncs to the Windows test workstation with a
   plain `git pull`. They are third-party copyrighted material in a repo carrying its own

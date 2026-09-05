@@ -29,17 +29,21 @@ What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its ow
 - **the rest of the trimming family** — `catia_extrapolate`, `catia_sew_surface`, and
   `propagation` on `catia_extract` / `catia_boundary`. Split, trim, untrim, disassemble
   and healing shipped 2026-09-05;
-- **the last four derived curves** — `catia_curve_{connect,corner,spiral,reflect_line}`.
-  Everything else in the wireframe family shipped on 2026-09-05: the drawn curves (helix,
-  circle, polyline, spline) with section, intersection and extremum, the anchors
+- **`catia_curve_reflect_line`** — the last wireframe operation, and the only one left.
+  Everything else in the family shipped on 2026-09-05: the drawn curves (helix, circle,
+  polyline, spline), the derived ones (section, intersection, extremum, project, parallel,
+  offset_3d, combine, corner, connect, spiral), the anchors
   (`catia_point_{on_curve,on_surface,centre}`, `catia_line_{between,direction,normal,
-  tangent}`), and the associative ones (`catia_curve_{project,parallel,offset_3d,
-  combine}`, `catia_plane_{normal_to_curve,tangent_to_surface,mean}`,
-  `catia_planes_between`). `connect` and `corner` are joins between two curves with a
-  stated continuity; `spiral` is the one curve here OCCT has no analytic form for, so it
-  will be an approximation that must say so; `reflect_line` is what unblocks
-  `catia_draft` in reflect-line mode;
+  tangent}`) and the planes (`catia_plane_{normal_to_curve,tangent_to_surface,mean}`,
+  `catia_planes_between`). The silhouette case (`angle_deg` 90, the default) is exact
+  through `HLRBRep` — measured against a sphere's great circle and a cylinder's two
+  straight edges — and a general angle is an iso-angle contour that has to be marched and
+  will have to say it was sampled. It is also what unblocks `catia_draft` in reflect-line
+  mode, so the two belong in one commit;
 - `catia_draft` in `reflect_line` mode (needs `catia_curve_reflect_line`);
+- `catia_curve_polyline` with `radius_mm` — rounding *every* corner of a chain, which
+  means carrying each shortened segment into the next call. `catia_curve_corner` does
+  one corner now, so this is chaining rather than missing machinery;
 - a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs the profile offset into two
   walls and the inner sweep subtracted from the outer — `catia_curve_parallel` supplies
   the offset now, so what is left is the sweeping and the cut);
@@ -68,6 +72,31 @@ measurement vocabulary a visual check would assert against already exists.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E2 → **2.6 continues: the joins and the spiral**.
+  `catia_curve_{corner,connect,spiral}`. Coverage 102 → **105/201**, which leaves
+  `catia_curve_reflect_line` as the only wireframe operation still refused. A corner is an
+  arc tangent to two curves, exact against `2πr/4` between perpendicular legs, and it
+  leaves both inputs untouched — `trim` decides what the *new* element contains, never
+  what the old ones are, because a step that edited an earlier one would make the same
+  plan mean something different the second time it ran. A connect is a Bézier of the
+  lowest degree that carries the continuity asked for: 1, 3 or 5. **The curvature case is
+  where the arithmetic bites** — the source states its second derivative in its own
+  parameter and the join runs on [0, 1], so the affine reparameterisation factor
+  `(s/|d1|)²` is load-bearing; without it the curve is out by the square of the chord
+  length, invisible at unit scale and wrong by four orders on a 100 mm join. Across a 60°
+  gap in a 10 mm circle the quintic carries the circle's own 0.1/mm and the cubic leaves a
+  0.0068/mm step: identical in a shaded view, and exactly the break a reflection shows.
+  The operation reports both numbers rather than claiming G2. A spiral is the one curve
+  here no kernel holds exactly, so it is fitted and says so — and the honesty has a trap
+  of its own: measured at the interpolation knots the fit error reads 1e-14 against the
+  9.4e-5 mm it is really out by between them, a factor of 10⁹, so a self-measurement taken
+  at the points it was given would report machine zero and be believed. That one took two
+  attempts to guard: the first breakage (sampling coarsely) still landed between the
+  knots because `GeomAPI_Interpolate` parameterises by chord length, and the test's floor
+  of "greater than zero" passed on 1e-14. Nine guards, all nine verified by breaking them.
+  Also refactored: `curve_spline` and the spiral now share one interpolator, and the
+  polyline's `radius_mm` refusal names what actually exists now.
 
 - **2026-09-05** — E2 → **2.6 continues: the associative curves and planes**.
   `catia_curve_{project,parallel,offset_3d,combine}`,

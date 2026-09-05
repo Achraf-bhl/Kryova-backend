@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Final
 
 from app.kernel.errors import GeometryError, OperationNotSupported
@@ -76,6 +77,9 @@ PROJECT = "catia_curve_project"
 PARALLEL = "catia_curve_parallel"
 OFFSET_3D = "catia_curve_offset_3d"
 COMBINE = "catia_curve_combine"
+CORNER = "catia_curve_corner"
+CONNECT = "catia_curve_connect"
+SPIRAL = "catia_curve_spiral"
 
 #: Below this a direction, a chord or a radius is treated as zero rather than normalised
 #: into a division by zero.
@@ -93,6 +97,16 @@ _COPLANAR_DEFINITION: Final = 1e-9
 #: enough for a fitted curve's own approximation error, tight enough that a curve on the
 #: wrong plane is caught rather than silently flattened onto this one.
 _IN_PLANE_TOLERANCE_MM: Final = 1e-6
+
+#: Interpolation points per turn of a spiral. A spiral is not a NURBS, so it is fitted
+#: rather than constructed, and this is the one number that decides how well. Measured
+#: worst radial error over three turns: 16/turn 2.3e-2 mm, 32/turn 1.5e-3 mm, 64/turn
+#: 9.3e-5 mm. 64 puts the error two orders under any machining tolerance, and the
+#: operation reports what it actually achieved rather than trusting the constant.
+_SPIRAL_POINTS_PER_TURN: Final = 64
+
+#: How the continuities are spelled in the registry, and what each one costs in degree.
+_CONTINUITY_DEGREE: Final[dict[str, int]] = {"point": 1, "tangent": 3, "curvature": 5}
 
 
 # -- curves drawn in space ----------------------------------------------------
@@ -201,10 +215,11 @@ def curve_polyline(context: BuildContext, arguments: Mapping[str, Any]) -> Mappi
     if arguments.get("radius_mm"):
         raise OperationNotSupported(
             f"{POLYLINE} with radius_mm",
-            "rounding every corner of a 3D polyline is a fillet between successive "
-            "segments, which needs the corner arc solved in the plane of each pair. Build "
-            "the polyline and round the corners that matter with catia_curve_corner once "
-            "it lands",
+            "rounding every corner of a 3D polyline means solving the arc in the plane of "
+            "each successive pair and carrying each shortened segment into the next. "
+            "catia_curve_corner does one corner and is the piece that was missing; "
+            "chaining it over a whole polyline is not done here yet. Round the corners "
+            "that matter with catia_curve_corner",
         )
 
     if arguments.get("closed"):
@@ -254,40 +269,24 @@ def curve_spline(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
             "here, then lay the result onto the surface with catia_curve_project",
         )
 
-    array = symbol("TColgp_HArray1OfPnt")(1, len(points))
-    for index, point in enumerate(points, start=1):
-        array.SetValue(index, symbol("gp_Pnt")(*point))
-
-    interpolator = symbol("GeomAPI_Interpolate")(array, closed, MIN_LENGTH_MM)
     start_tangent, end_tangent = arguments.get("start_tangent"), arguments.get("end_tangent")
-    if start_tangent is not None or end_tangent is not None:
-        if closed:
-            raise GeometryError(
-                f"{SPLINE} cannot take end tangents on a closed curve — a loop has no "
-                "ends. Drop `closed`, or drop the tangents."
-            )
-        interpolator.Load(
-            symbol("gp_Vec")(*as_direction(start_tangent, argument="start_tangent")),
-            symbol("gp_Vec")(*as_direction(end_tangent, argument="end_tangent")),
-            True,
-        )
-
-    try:
-        interpolator.Perform()
-        done = interpolator.IsDone()
-    except Exception as exc:  # noqa: BLE001 - OCCT's Standard_Failure hierarchy
+    if (start_tangent is not None or end_tangent is not None) and closed:
         raise GeometryError(
-            f"{SPLINE} could not interpolate the points: {exc}. Two points at the same "
-            "place, or a closed curve given fewer than three, are the usual causes."
-        ) from exc
-    if not done:
-        raise GeometryError(
-            f"{SPLINE} could not interpolate the {len(points)} points given. Check that "
-            "no two of them coincide."
+            f"{SPLINE} cannot take end tangents on a closed curve — a loop has no "
+            "ends. Drop `closed`, or drop the tangents."
         )
+    tangents = (
+        None
+        if start_tangent is None and end_tangent is None
+        else (
+            as_direction(start_tangent, argument="start_tangent"),
+            as_direction(end_tangent, argument="end_tangent"),
+        )
+    )
 
+    curve = _interpolated(points, closed=closed, tool=SPLINE, tangents=tangents)
     edge = build_or_raise(
-        symbol("BRepBuilderAPI_MakeEdge")(interpolator.Curve()),
+        symbol("BRepBuilderAPI_MakeEdge")(curve),
         tool=SPLINE,
         detail="The interpolated curve could not be made into an edge.",
     )
@@ -721,6 +720,205 @@ def curve_combine(context: BuildContext, arguments: Mapping[str, Any]) -> Mappin
     return _record(context, document, arguments, COMBINE, combined, "combine")
 
 
+def curve_corner(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """An arc tangent to two curves — the wireframe equivalent of a sketch fillet.
+
+    **Neither input is modified.** CATIA's own Corner offers to trim the two curves it
+    rounds; here `trim` decides what the *new* element contains — the arc chained between
+    the two shortened legs, or the arc alone — and the curves it was built from are left
+    exactly as they were. Editing an input in place is the thing this whole package
+    exists not to do: a design is regenerated from its specification, so a step that
+    quietly changed an earlier one would make the plan mean something different the
+    second time it ran.
+
+    With no `support` the plane is taken from the two curves together, which is what
+    "these two curves have a corner" presumes. Curves that share no plane are refused —
+    a corner between skew curves is not an arc, and no radius makes it one.
+    """
+    from app.kernel.occt.operations.surfaces import named_geometry
+
+    document = context.require_document()
+    references = _references(arguments.get("elements"), tool=CORNER, argument="elements", minimum=2)
+    if len(references) != 2:
+        raise GeometryError(
+            f"{CORNER} rounds between exactly two curves and was given {len(references)}. "
+            "Round them a pair at a time."
+        )
+
+    curves = [
+        named_geometry(document, reference, tool=CORNER, argument="elements")
+        for reference in references
+    ]
+    radius = as_positive_length(arguments.get("radius_mm"), argument="radius_mm", tool=CORNER)
+    frame = (
+        _flat_support(document, arguments["support"], tool=CORNER)
+        if arguments.get("support")
+        else _shared_plane(curves, tool=CORNER, named=references)
+    )
+    for curve, reference in zip(curves, references, strict=True):
+        _lies_in_plane(curve, frame, tool=CORNER, named=str(reference))
+
+    legs = [
+        _single_edge(curve, tool=CORNER, argument="elements", named=str(reference))
+        for curve, reference in zip(curves, references, strict=True)
+    ]
+    meeting, apart = _closest_between(legs[0], legs[1])
+
+    maker = symbol("ChFi2d_FilletAPI")()
+    maker.Init(legs[0], legs[1], symbol("gp_Pln")(frame))
+    if not maker.Perform(radius):
+        raise GeometryError(
+            f"{CORNER} could not fit an arc of {radius:g} mm between {references[0]!r} and "
+            + (
+                f"{references[1]!r}: they come no closer than {apart:.4g} mm, so there is "
+                "no corner to round. Extend one of them until they meet."
+                if apart > _IN_PLANE_TOLERANCE_MM
+                else f"{references[1]!r}. The radius is larger than the shorter leg can "
+                "carry — the arc would run off the end of it. Try a smaller radius."
+            )
+        )
+
+    shortened_first, shortened_second = symbol("TopoDS_Edge")(), symbol("TopoDS_Edge")()
+    arc = maker.Result(
+        symbol("gp_Pnt")(*meeting), shortened_first, shortened_second, -1
+    )
+    if arguments.get("trim") is False:
+        return _record(context, document, arguments, CORNER, arc, "corner")
+
+    chained = symbol("BRepBuilderAPI_MakeWire")()
+    for piece in (shortened_first, arc, shortened_second):
+        chained.Add(piece)
+    rounded = build_or_raise(
+        chained,
+        tool=CORNER,
+        detail="The arc and the two shortened curves would not chain into one. Ask for "
+        "trim=false to take the arc on its own.",
+    )
+    return _record(context, document, arguments, CORNER, rounded, "corner")
+
+
+def curve_connect(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A curve joining the ends of two others, as smoothly as asked.
+
+    Continuity is the whole point, and each level costs a degree: `point` is the straight
+    chord, `tangent` a cubic that leaves and arrives along the two curves, `curvature` a
+    quintic that also matches how hard each is turning — which is what stops a reflection
+    breaking across the join on a class-A surface, and what `tangent` cannot do however
+    smooth it looks in a shaded view.
+
+    **The payload reports what the join actually achieved**, in degrees of tangent error
+    and in curvature error per mm, measured on the built curve against the two it joins.
+    A continuity that is claimed rather than measured is exactly the sort of number this
+    codebase refuses to print: the failure mode is not a wrong shape, it is a right-looking
+    shape whose G2 claim is false.
+
+    **Which ends** are the nearest pair — the end of the first curve closest to the second
+    and vice versa. That is the join an engineer means by "connect these two", and it is
+    stated because the alternative (the curves' own start and end) joins the wrong ends
+    whenever one of them was drawn backwards.
+
+    Matching a second derivative needs the reparameterisation done properly: the source's
+    derivatives are with respect to *its* parameter, and this curve runs on [0, 1]. Under
+    the affine change `u = k·t` the second derivative scales by `(s/|d1|)²`, and dropping
+    that factor gives a curve whose curvature is out by the square of the chord length —
+    invisible at unit scale and wrong by four orders on a 100 mm join.
+    """
+    from app.kernel.occt.operations.surfaces import named_geometry
+
+    document = context.require_document()
+    names = (arguments.get("first_curve"), arguments.get("second_curve"))
+    first, second = (
+        named_geometry(document, name, tool=CONNECT, argument=argument)
+        for name, argument in zip(names, ("first_curve", "second_curve"), strict=True)
+    )
+
+    continuity = str(arguments.get("continuity") or "tangent").strip().lower()
+    if continuity not in _CONTINUITY_DEGREE:
+        raise GeometryError(
+            f"{CONNECT} takes continuity of "
+            f"{', '.join(sorted(_CONTINUITY_DEGREE))}; got {arguments.get('continuity')!r}."
+        )
+
+    here, there = _nearest_ends(first, second, tool=CONNECT)
+    chord = _distance_between(here.place, there.place)
+    if chord < MIN_LENGTH_MM:
+        raise GeometryError(
+            f"{CONNECT} was given two curves that already touch at "
+            f"{[round(value, 4) for value in here.place]}, so there is no gap to join. "
+            "Join them with catia_join instead."
+        )
+
+    # `or 1.0` would swallow a tension of zero — falsy, and the very value that must be
+    # refused rather than quietly turned into the default.
+    tensions = (
+        1.0 if arguments.get("first_tension") is None else float(arguments["first_tension"]),
+        1.0 if arguments.get("second_tension") is None else float(arguments["second_tension"]),
+    )
+    if min(tensions) <= 0.0:
+        raise GeometryError(
+            f"{CONNECT} takes tensions greater than zero; got {tensions}. A tension of "
+            "zero drops the tangent it was meant to follow."
+        )
+
+    curve = _joining_curve(here, there, chord, continuity, tensions)
+    edge = build_or_raise(
+        symbol("BRepBuilderAPI_MakeEdge")(curve),
+        tool=CONNECT,
+        detail="The joining curve could not be made into an edge.",
+    )
+
+    achieved = _achieved_continuity(curve, here, there, continuity)
+    return {
+        **_record(context, document, arguments, CONNECT, edge, "connect"),
+        "continuity": continuity,
+        **achieved,
+    }
+
+
+def curve_spiral(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A planar spiral: a curve that grows outwards in its plane rather than climbing.
+
+    The path of a scroll compressor or a spiral heat exchanger, and not of a thread —
+    `catia_curve_helix` is the one that climbs.
+
+    **This is the one curve here that is fitted rather than constructed, and it says so.**
+    An Archimedean spiral `r = r₀ + aθ` is not a NURBS and no CAD kernel holds one
+    exactly; it is interpolated through points on the true spiral, and the payload carries
+    `deviation_mm` — the worst radial error, *measured* against the closed form on the
+    built curve rather than inferred from the sample count. At 64 points per turn that is
+    around 1e-4 mm, which is two orders under any machining tolerance, but a number
+    reported is a number the caller can act on and an assumed one is not.
+
+    Two of `pitch_mm`, `end_radius_mm` and `turns` fix the third, and any two will do.
+    Giving one is refused rather than guessed at.
+    """
+    document = context.require_document()
+    frame = _flat_support(document, arguments.get("support"), tool=SPIRAL)
+    centre = _point_named(document, arguments.get("centre"), tool=SPIRAL, argument="centre")
+    start_radius = as_positive_length(
+        arguments.get("start_radius_mm"), argument="start_radius_mm", tool=SPIRAL
+    )
+
+    pitch, turns = _spiral_extent(arguments, start_radius)
+    clockwise = arguments.get("clockwise") is not False
+
+    points, exact = _spiral_points(frame, centre, start_radius, pitch, turns, clockwise=clockwise)
+    curve = _interpolated(points, closed=False, tool=SPIRAL)
+    edge = build_or_raise(
+        symbol("BRepBuilderAPI_MakeEdge")(curve),
+        tool=SPIRAL,
+        detail="The interpolated spiral could not be made into an edge.",
+    )
+
+    return {
+        **_record(context, document, arguments, SPIRAL, edge, "spiral"),
+        "deviation_mm": _worst_radial_error(curve, exact),
+        "turns": turns,
+        "pitch_mm": pitch,
+        "end_radius_mm": start_radius + pitch * turns,
+    }
+
+
 # -- construction -------------------------------------------------------------
 
 
@@ -1009,9 +1207,9 @@ def _lies_in_plane(wire: Any, frame: Any, *, tool: str, named: str) -> None:
     )
     if worst > _IN_PLANE_TOLERANCE_MM:
         raise GeometryError(
-            f"{tool} offsets a curve within its support, and {named!r} stands "
-            f"{worst:.4g} mm off the one named. Name the plane the curve is actually in, "
-            "or project it onto this one first with catia_curve_project."
+            f"{tool} works within a support, and {named!r} stands {worst:.4g} mm off the "
+            "one named. Name the plane the curve is actually in, or project it onto this "
+            "one first with catia_curve_project."
         )
 
 
@@ -1181,6 +1379,379 @@ def _swept_wall(curve: Any, direction: tuple[float, float, float], span: float) 
     return symbol("BRepPrimAPI_MakePrism")(
         moved, symbol("gp_Vec")(*(value * span for value in direction))
     ).Shape()
+
+
+def _interpolated(
+    points: Sequence[tuple[float, float, float]],
+    *,
+    closed: bool,
+    tool: str,
+    tangents: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None,
+) -> Any:
+    """A curve **through** the points, not near them.
+
+    `GeomAPI_Interpolate` passes through every point given; `GeomAPI_PointsToBSpline` fits
+    one that may miss them by up to its tolerance. Where the points were chosen
+    deliberately — a section through a scanned surface, a set of clearance limits, a
+    spiral's own locus — a curve that misses them is a different curve and no message
+    would say so.
+    """
+    array = symbol("TColgp_HArray1OfPnt")(1, len(points))
+    for index, point in enumerate(points, start=1):
+        array.SetValue(index, symbol("gp_Pnt")(*point))
+
+    interpolator = symbol("GeomAPI_Interpolate")(array, closed, MIN_LENGTH_MM)
+    if tangents is not None:
+        interpolator.Load(
+            symbol("gp_Vec")(*tangents[0]), symbol("gp_Vec")(*tangents[1]), True
+        )
+
+    try:
+        interpolator.Perform()
+        done = interpolator.IsDone()
+    except Exception as exc:  # noqa: BLE001 - OCCT's Standard_Failure hierarchy
+        raise GeometryError(
+            f"{tool} could not interpolate the points: {exc}. Two points at the same "
+            "place, or a closed curve given fewer than three, are the usual causes."
+        ) from exc
+    if not done:
+        raise GeometryError(
+            f"{tool} could not interpolate the {len(points)} points given. Check that "
+            "no two of them coincide."
+        )
+    return interpolator.Curve()
+
+
+def _single_edge(curve: Any, *, tool: str, argument: str, named: str) -> Any:
+    """One edge of a curve, refusing a chain rather than picking from it."""
+    from app.kernel.occt.topology import edges as edge_list
+
+    found = edge_list(curve)
+    if len(found) != 1:
+        raise GeometryError(
+            f"{tool} needs {argument} to be a single curve, and {named!r} is "
+            f"{len(found)} edges. Name one of them, or round the corners of a chain as "
+            "it is built."
+        )
+    return symbol("TopoDS").Edge_s(found[0])
+
+
+def _closest_between(first: Any, second: Any) -> tuple[tuple[float, float, float], float]:
+    """The nearest place between two shapes, and how far apart they are there."""
+    measure = symbol("BRepExtrema_DistShapeShape")(first, second)
+    measure.Perform()
+    if not measure.IsDone() or measure.NbSolution() < 1:  # pragma: no cover - both are real edges
+        raise GeometryError("The distance between these two curves could not be measured.")
+    place = measure.PointOnShape1(1)
+    return (place.X(), place.Y(), place.Z()), float(measure.Value())
+
+
+def _shared_plane(curves: Sequence[Any], *, tool: str, named: Sequence[Any]) -> Any:
+    """The plane two curves lie in together, fitted rather than assumed.
+
+    Only the *fit* happens here — whether the curves actually lie in it is
+    `_lies_in_plane`'s question, asked straight afterwards. Two skew lines have a
+    best-fit plane like anything else, and it contains neither of them.
+    """
+    from app.kernel.occt.reference import frame_from_normal, least_spread_axis
+    from app.kernel.occt.topology import compound
+
+    properties = symbol("GProp_GProps")()
+    symbol("BRepGProp").LinearProperties_s(compound(curves), properties)
+    normal, definition = least_spread_axis(properties)
+    if definition < _COPLANAR_DEFINITION:
+        raise GeometryError(
+            f"{tool} was given {named[0]!r} and {named[1]!r}, which lie on one line — "
+            "there is no corner between them to round. Name a support plane if they do "
+            "share one, or check that they are not the same curve twice."
+        )
+    centre = properties.CentreOfMass()
+    return frame_from_normal((centre.X(), centre.Y(), centre.Z()), normal)
+
+
+@dataclass(frozen=True)
+class _CurveEnd:
+    """One end of a curve, with everything a join needs to leave or arrive smoothly.
+
+    `outward` points *away* from the curve at this end whichever end it is, so a join
+    reads the same from a curve's start as from its finish. `first` and `second` are the
+    raw derivatives in the source curve's own parameter, kept raw because the
+    reparameterisation that makes a second derivative comparable needs `|first|`.
+    """
+
+    place: tuple[float, float, float]
+    outward: tuple[float, float, float]
+    first: tuple[float, float, float]
+    second: tuple[float, float, float]
+
+    def speed(self) -> float:
+        return math.sqrt(sum(value * value for value in self.first))
+
+    def curvature(self) -> float:
+        """κ = |c′ × c″| / |c′|³ — independent of how the curve is parameterised."""
+        speed = self.speed()
+        if speed < MIN_LENGTH_MM:
+            return 0.0
+        turn = _cross(self.first, self.second)
+        return math.sqrt(sum(value * value for value in turn)) / speed**3
+
+
+def _ends_of(curve: Any, *, tool: str) -> tuple[_CurveEnd, _CurveEnd]:
+    """A curve's two ends, in its own running order."""
+    chain = _chain_of(curve, tool=tool)
+    made = []
+    for adaptor, parameter, sign in (
+        (chain[0][0], chain[0][0].FirstParameter(), -1.0),
+        (chain[-1][0], chain[-1][0].LastParameter(), 1.0),
+    ):
+        place, first, second = symbol("gp_Pnt")(), symbol("gp_Vec")(), symbol("gp_Vec")()
+        adaptor.D2(parameter, place, first, second)
+        raw = (first.X(), first.Y(), first.Z())
+        made.append(
+            _CurveEnd(
+                place=(place.X(), place.Y(), place.Z()),
+                outward=_stepped((0.0, 0.0, 0.0), _unit(raw, tool=tool), sign),
+                first=raw,
+                second=(second.X(), second.Y(), second.Z()),
+            )
+        )
+    return made[0], made[1]
+
+
+def _nearest_ends(first: Any, second: Any, *, tool: str) -> tuple[_CurveEnd, _CurveEnd]:
+    """The pair of ends a join should use: the two that face each other."""
+    here = _ends_of(first, tool=tool)
+    there = _ends_of(second, tool=tool)
+    return min(
+        ((a, b) for a in here for b in there),
+        key=lambda pair: _distance_between(pair[0].place, pair[1].place),
+    )
+
+
+def _joining_curve(
+    here: _CurveEnd,
+    there: _CurveEnd,
+    chord: float,
+    continuity: str,
+    tensions: tuple[float, float],
+) -> Any:
+    """A Bézier of the lowest degree that can carry the continuity asked for.
+
+    Degree 1 for a point join, 3 for tangency, 5 for curvature — each the minimum, because
+    a higher degree has slack the constraints do not use and the slack shows up as a
+    wobble between the ends.
+    """
+    start, end = here.place, there.place
+    leaving = _stepped((0.0, 0.0, 0.0), here.outward, chord * tensions[0])
+    arriving = _stepped((0.0, 0.0, 0.0), there.outward, -chord * tensions[1])
+
+    if continuity == "point":
+        poles = [start, end]
+    elif continuity == "tangent":
+        poles = [
+            start,
+            _summed(start, leaving, 1.0 / 3.0),
+            _summed(end, arriving, -1.0 / 3.0),
+            end,
+        ]
+    else:
+        # The reparameterisation factor. The source states its second derivative in its
+        # own parameter; this curve runs on [0, 1] at speed |leaving|, so under the affine
+        # change the second derivative scales by (speed here / speed there)².
+        curl_here = _scaled(here.second, (chord * tensions[0] / here.speed()) ** 2)
+        curl_there = _scaled(there.second, (chord * tensions[1] / there.speed()) ** 2)
+        poles = [
+            start,
+            _summed(start, leaving, 1.0 / 5.0),
+            _summed(_summed(start, leaving, 2.0 / 5.0), curl_here, 1.0 / 20.0),
+            _summed(_summed(end, arriving, -2.0 / 5.0), curl_there, 1.0 / 20.0),
+            _summed(end, arriving, -1.0 / 5.0),
+            end,
+        ]
+
+    array = symbol("TColgp_Array1OfPnt")(1, len(poles))
+    for index, pole in enumerate(poles, start=1):
+        array.SetValue(index, symbol("gp_Pnt")(*pole))
+    return symbol("Geom_BezierCurve")(array)
+
+
+def _achieved_continuity(
+    curve: Any, here: _CurveEnd, there: _CurveEnd, continuity: str
+) -> dict[str, float]:
+    """What the join actually achieved, measured on the built curve.
+
+    A point join makes no statement about tangency, so nothing is reported for it —
+    printing its tangent error would read as the failure of something nobody asked for.
+    The other two both report the curvature step, and for a *tangent* join that is not a
+    defect: it is the price of asking for tangency instead of curvature, and it is the
+    number that says whether paying for curvature is worth it. On two arcs of a 10 mm
+    circle the tangent join leaves 0.0068/mm of step against the arcs' own 0.1/mm, and
+    the curvature join leaves 1e-15.
+    """
+    if continuity == "point":
+        return {}
+
+    measured = []
+    for parameter, end, sign in ((0.0, here, 1.0), (1.0, there, -1.0)):
+        place, first, second = symbol("gp_Pnt")(), symbol("gp_Vec")(), symbol("gp_Vec")()
+        curve.D2(parameter, place, first, second)
+        raw = (first.X(), first.Y(), first.Z())
+        wanted = _scaled(end.outward, sign)
+        along = sum(a * b for a, b in zip(_unit(raw, tool="connect"), wanted, strict=True))
+        built = _CurveEnd(
+            place=(place.X(), place.Y(), place.Z()),
+            outward=wanted,
+            first=raw,
+            second=(second.X(), second.Y(), second.Z()),
+        )
+        measured.append((math.degrees(math.acos(max(-1.0, min(1.0, along)))), built, end))
+
+    return {
+        "tangent_error_deg": max(entry[0] for entry in measured),
+        "curvature_error_per_mm": max(
+            abs(built.curvature() - end.curvature()) for _, built, end in measured
+        ),
+    }
+
+
+def _spiral_extent(arguments: Mapping[str, Any], start_radius: float) -> tuple[float, float]:
+    """`(pitch, turns)` from whichever two of the three the caller gave."""
+    pitch = arguments.get("pitch_mm")
+    turns = arguments.get("turns")
+    end_radius = arguments.get("end_radius_mm")
+
+    given = sum(value is not None for value in (pitch, turns, end_radius))
+    if given < 2:
+        raise GeometryError(
+            f"{SPIRAL} needs two of pitch_mm, turns and end_radius_mm — any two fix the "
+            f"third, and one fixes nothing. It was given {given}."
+        )
+
+    if pitch is not None and turns is not None:
+        return float(pitch), float(turns)
+    if pitch is not None:
+        span = float(end_radius) - start_radius  # type: ignore[arg-type]
+        if abs(float(pitch)) < MIN_LENGTH_MM or span / float(pitch) <= 0.0:
+            raise GeometryError(
+                f"{SPIRAL} was given a pitch of {pitch} mm and asked to reach "
+                f"{end_radius} mm from {start_radius:g} mm, which it never does — the "
+                "pitch grows the radius the other way. Reverse its sign."
+            )
+        return float(pitch), span / float(pitch)
+    if float(turns) <= 0.0:  # type: ignore[arg-type]
+        raise GeometryError(f"{SPIRAL} needs turns greater than zero; got {turns!r}.")
+    return (float(end_radius) - start_radius) / float(turns), float(turns)  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class _ExactSpiral:
+    """The spiral the fitted curve is meant to be, kept so the fit can be measured."""
+
+    centre: tuple[float, float, float]
+    x_axis: tuple[float, float, float]
+    y_axis: tuple[float, float, float]
+    start_radius: float
+    growth: float
+    turns: float
+
+    def at(self, angle: float) -> tuple[float, float, float]:
+        radius = self.start_radius + self.growth * angle
+        return (
+            self.centre[0] + radius * (math.cos(angle) * self.x_axis[0] + math.sin(angle) * self.y_axis[0]),
+            self.centre[1] + radius * (math.cos(angle) * self.x_axis[1] + math.sin(angle) * self.y_axis[1]),
+            self.centre[2] + radius * (math.cos(angle) * self.x_axis[2] + math.sin(angle) * self.y_axis[2]),
+        )
+
+    def radial_error(self, point: tuple[float, float, float]) -> float:
+        """How far this point sits from the true spiral, radially.
+
+        The angle comes back from `atan2` wrapped into one turn, so every turn the point
+        could belong to is tried and the nearest wins. Comparing against one turn would
+        report a fit error of a whole pitch on a three-turn spiral.
+        """
+        offset = tuple(point[i] - self.centre[i] for i in range(3))
+        u = sum(offset[i] * self.x_axis[i] for i in range(3))
+        v = sum(offset[i] * self.y_axis[i] for i in range(3))
+        measured = math.hypot(u, v)
+        wrapped = math.atan2(v, u)
+        return min(
+            abs(measured - (self.start_radius + self.growth * (wrapped + 2 * math.pi * turn)))
+            for turn in range(-1, int(self.turns) + 2)
+        )
+
+
+def _spiral_points(
+    frame: Any,
+    centre: tuple[float, float, float],
+    start_radius: float,
+    pitch: float,
+    turns: float,
+    *,
+    clockwise: bool,
+) -> tuple[list[tuple[float, float, float]], _ExactSpiral]:
+    """Points on the true spiral, and the spiral itself for measuring the fit against.
+
+    Winding is handled by flipping the frame's Y axis rather than by negating angles, so
+    everything downstream — the sampling, the error measurement — sees one spiral running
+    one way.
+    """
+    if turns <= 0.0:
+        raise GeometryError(f"{SPIRAL} needs turns greater than zero; got {turns:g}.")
+    if start_radius + pitch * turns <= 0.0:
+        raise GeometryError(
+            f"{SPIRAL} shrinks from {start_radius:g} mm through zero over {turns:g} turns, "
+            "which passes through its own centre and out the other side. Use a smaller "
+            "pitch or fewer turns."
+        )
+
+    x_direction, y_direction = frame.XDirection(), frame.YDirection()
+    exact = _ExactSpiral(
+        centre=centre,
+        x_axis=(x_direction.X(), x_direction.Y(), x_direction.Z()),
+        y_axis=tuple(  # type: ignore[arg-type]
+            value * (-1.0 if clockwise else 1.0)
+            for value in (y_direction.X(), y_direction.Y(), y_direction.Z())
+        ),
+        start_radius=start_radius,
+        growth=pitch / (2.0 * math.pi),
+        turns=turns,
+    )
+
+    count = max(2, int(round(_SPIRAL_POINTS_PER_TURN * turns)) + 1)
+    sweep = 2.0 * math.pi * turns
+    return [exact.at(sweep * index / (count - 1)) for index in range(count)], exact
+
+
+def _worst_radial_error(curve: Any, exact: _ExactSpiral) -> float:
+    """The fit's worst radial error, sampled *between* the interpolation points.
+
+    Sampling at the points themselves would measure nothing — an interpolating spline
+    passes through every one of them by construction, so the answer would be zero however
+    coarse the fit.
+    """
+    first, last = curve.FirstParameter(), curve.LastParameter()
+    steps = max(400, int(_SPIRAL_POINTS_PER_TURN * exact.turns * 8))
+    worst = 0.0
+    for index in range(steps + 1):
+        place = curve.Value(first + (last - first) * index / steps)
+        worst = max(worst, exact.radial_error((place.X(), place.Y(), place.Z())))
+    return worst
+
+
+def _summed(
+    origin: tuple[float, float, float],
+    offset: tuple[float, float, float],
+    weight: float,
+) -> tuple[float, float, float]:
+    return (
+        origin[0] + offset[0] * weight,
+        origin[1] + offset[1] * weight,
+        origin[2] + offset[2] * weight,
+    )
+
+
+def _scaled(vector: tuple[float, float, float], factor: float) -> tuple[float, float, float]:
+    return (vector[0] * factor, vector[1] * factor, vector[2] * factor)
 
 
 def _cross(
@@ -1571,6 +2142,8 @@ def _distance_between(
 __all__ = [
     "CIRCLE",
     "COMBINE",
+    "CONNECT",
+    "CORNER",
     "EXTREMUM",
     "HELIX",
     "INTERSECT",
@@ -1584,6 +2157,7 @@ __all__ = [
     "POLYLINE",
     "PROJECT",
     "SECTION",
+    "SPIRAL",
     "SPLINE",
     "closest_curve_tangent",
     "closest_face_normal",
@@ -1592,6 +2166,8 @@ __all__ = [
     "closest_on_surface",
     "curve_circle",
     "curve_combine",
+    "curve_connect",
+    "curve_corner",
     "curve_extremum",
     "curve_helix",
     "curve_intersect",
@@ -1600,6 +2176,7 @@ __all__ = [
     "curve_polyline",
     "curve_project",
     "curve_section",
+    "curve_spiral",
     "curve_spline",
     "line_between",
     "line_direction",

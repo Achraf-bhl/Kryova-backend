@@ -2922,7 +2922,7 @@ class TestWireframeCurvesLiveInSpace:
             with pytest.raises(OperationNotSupported, match=expected):
                 runner("catia_curve_circle", arguments)
 
-        with pytest.raises(OperationNotSupported, match="fillet between successive"):
+        with pytest.raises(OperationNotSupported, match="chaining it over a whole polyline"):
             runner(
                 "catia_curve_polyline",
                 {"points": [[0, 0, 0], [1, 0, 0]], "radius_mm": 1.0},
@@ -3642,3 +3642,382 @@ class TestCurvesDerivedFromSurfaces:
 
         with pytest.raises(GeometryError, match="never cross"):
             runner("catia_curve_combine", {"first_curve": "here", "second_curve": "far", "name": "no"})
+
+
+class TestJoiningTwoCurves:
+    """The corner and the connection: the two operations that fill a gap between curves.
+
+    Both have exact closed forms to check against — a corner arc is a circular arc of the
+    radius asked for, and a curvature-continuous join across a gap in a circle must carry
+    the circle's own curvature, `1/R`. The second is the interesting one: a tangent join
+    across the same gap looks identical in a shaded view and leaves a curvature step of
+    0.0068/mm against the arcs' 0.1/mm, which is exactly the break a reflection shows.
+    """
+
+    @staticmethod
+    def _ell() -> object:
+        """Two straight curves meeting at (40, 0, 0): 40 mm along +X, then 30 mm up +Y."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Corner"})
+        runner("catia_curve_polyline", {"points": [[0, 0, 0], [40, 0, 0]], "name": "along"})
+        runner("catia_curve_polyline", {"points": [[40, 0, 0], [40, 30, 0]], "name": "up"})
+        return runner
+
+    @staticmethod
+    def _gapped_circle(radius: float = 10.0) -> object:
+        """Two arcs of one circle with a 60° gap between them, at each end."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Arcs"})
+        for start, end, name in ((0.0, 150.0, "first"), (210.0, 330.0, "second")):
+            runner(
+                "catia_curve_circle",
+                {
+                    "kind": "centre_radius",
+                    "centre": [0, 0, 0],
+                    "radius_mm": radius,
+                    "support": "XY",
+                    "start_angle_deg": start,
+                    "end_angle_deg": end,
+                    "name": name,
+                },
+            )
+        return runner
+
+    @staticmethod
+    def _length(runner: object, name: str) -> float:
+        return float(runner("catia_measure_item", {"element": name})["length_mm"])  # type: ignore[operator]
+
+    def test_a_corner_is_an_arc_of_the_radius_asked_for(self) -> None:
+        """Between two perpendicular legs the arc is a quarter circle: 2πr/4 exactly."""
+        runner = self._ell()
+
+        runner(  # type: ignore[operator]
+            "catia_curve_corner",
+            {"elements": ["along", "up"], "radius_mm": 5.0, "trim": False, "name": "arc"},
+        )
+
+        assert self._length(runner, "arc") == pytest.approx(2 * math.pi * 5.0 / 4, abs=1e-9)
+
+    def test_trimming_shortens_the_legs_into_the_new_curve_and_leaves_the_originals(
+        self,
+    ) -> None:
+        """The rounded chain is 35 + 25 + the arc. The two curves it was built from are
+        still 40 and 30 — a step that edited an earlier one would make the same plan mean
+        something different the second time it ran, which is what regenerating from a
+        specification exists to prevent."""
+        runner = self._ell()
+
+        runner(  # type: ignore[operator]
+            "catia_curve_corner",
+            {"elements": ["along", "up"], "radius_mm": 5.0, "name": "rounded"},
+        )
+
+        assert self._length(runner, "rounded") == pytest.approx(
+            60.0 + 2 * math.pi * 5.0 / 4, abs=1e-9
+        )
+        assert self._length(runner, "along") == pytest.approx(40.0, abs=TOL)
+        assert self._length(runner, "up") == pytest.approx(30.0, abs=TOL)
+
+    def test_curves_that_never_meet_have_no_corner_and_say_which_failure_it_was(
+        self,
+    ) -> None:
+        """OCCT returns the same false for "they do not meet" and "the radius is too big",
+        and the two need different fixes — extend a curve, or ask for less."""
+        runner = self._ell()
+        runner("catia_curve_polyline", {"points": [[0, 50, 0], [40, 50, 0]], "name": "away"})  # type: ignore[operator]
+
+        with pytest.raises(GeometryError, match="come no closer"):
+            runner(  # type: ignore[operator]
+                "catia_curve_corner",
+                {"elements": ["along", "away"], "radius_mm": 5.0, "name": "no"},
+            )
+        with pytest.raises(GeometryError, match="larger than the shorter leg"):
+            runner(  # type: ignore[operator]
+                "catia_curve_corner",
+                {"elements": ["along", "up"], "radius_mm": 100.0, "name": "no"},
+            )
+
+    def test_a_point_join_is_the_straight_chord(self) -> None:
+        """Nothing more is claimed and nothing more is built: 20 mm of gap, 20 mm of curve."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Join"})
+        runner("catia_curve_polyline", {"points": [[0, 0, 0], [10, 0, 0]], "name": "left"})
+        runner("catia_curve_polyline", {"points": [[30, 0, 0], [40, 0, 0]], "name": "right"})
+
+        joined = runner(
+            "catia_curve_connect",
+            {
+                "first_curve": "left",
+                "second_curve": "right",
+                "continuity": "point",
+                "name": "chord",
+            },
+        )
+
+        assert self._length(runner, "chord") == pytest.approx(20.0, abs=1e-9)
+        assert "tangent_error_deg" not in joined
+
+    def test_a_curvature_join_carries_the_circle_s_own_curvature_and_a_tangent_one_does_not(
+        self,
+    ) -> None:
+        """The reason `curvature` exists. Both joins look the same shaded and both are
+        tangent to 0°; across a 60° gap in a 10 mm circle the cubic leaves a curvature
+        step of about 0.0068/mm against the arcs' own 0.1/mm, and the quintic leaves
+        nothing. That step is precisely the break a reflection shows on a class-A panel."""
+        runner = self._gapped_circle()
+
+        smooth = runner(  # type: ignore[operator]
+            "catia_curve_connect",
+            {
+                "first_curve": "first",
+                "second_curve": "second",
+                "continuity": "curvature",
+                "name": "smooth",
+            },
+        )
+        merely_tangent = runner(  # type: ignore[operator]
+            "catia_curve_connect",
+            {
+                "first_curve": "first",
+                "second_curve": "second",
+                "continuity": "tangent",
+                "name": "kinked",
+            },
+        )
+
+        assert smooth["tangent_error_deg"] == pytest.approx(0.0, abs=1e-9)
+        assert merely_tangent["tangent_error_deg"] == pytest.approx(0.0, abs=1e-9)
+        assert smooth["curvature_error_per_mm"] == pytest.approx(0.0, abs=1e-12)
+        assert merely_tangent["curvature_error_per_mm"] > 1e-3
+
+    def test_a_join_uses_the_ends_that_face_each_other(self) -> None:
+        """Not the curves' own start and end, which join the wrong ends the moment one of
+        them was drawn backwards. The two facing ends here are 20 mm apart and the far
+        pair is 40, so a join that took the wrong ends is 40 mm long and visibly wrong."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Join"})
+        runner("catia_curve_polyline", {"points": [[0, 0, 0], [10, 0, 0]], "name": "left"})
+        # drawn backwards: from the far end towards the gap
+        runner("catia_curve_polyline", {"points": [[40, 0, 0], [30, 0, 0]], "name": "right"})
+
+        runner(
+            "catia_curve_connect",
+            {"first_curve": "left", "second_curve": "right", "name": "bridge"},
+        )
+
+        assert self._length(runner, "bridge") == pytest.approx(20.0, abs=1e-9)
+
+    def test_a_tension_of_zero_is_refused_rather_than_read_as_the_default(self) -> None:
+        """Zero is falsy, so `arguments.get(...) or 1.0` turns the one value that must be
+        refused into the default — a join that silently ignores the tangent it was told to
+        follow."""
+        runner = self._gapped_circle()
+
+        with pytest.raises(GeometryError, match="greater than zero"):
+            runner(  # type: ignore[operator]
+                "catia_curve_connect",
+                {
+                    "first_curve": "first",
+                    "second_curve": "second",
+                    "first_tension": 0.0,
+                    "name": "no",
+                },
+            )
+
+    def test_two_curves_that_already_touch_have_no_gap_to_join(self) -> None:
+        runner = self._ell()
+
+        with pytest.raises(GeometryError, match="already touch"):
+            runner(  # type: ignore[operator]
+                "catia_curve_connect",
+                {"first_curve": "along", "second_curve": "up", "name": "no"},
+            )
+
+
+class TestASpiralIsFittedAndSaysSo:
+    """The one curve here that no kernel holds exactly, and the honesty that requires.
+
+    An Archimedean spiral `r = r₀ + aθ` is not a NURBS. It is interpolated, so the
+    operation measures its own worst radial error against the closed form and reports it —
+    an assumed accuracy and a measured one look identical in a payload, and only one of
+    them survives someone changing the sample count.
+    """
+
+    @staticmethod
+    def _exact_length(start_radius: float, pitch: float, turns: float) -> float:
+        """∫√(r² + a²) dθ for r = r₀ + aθ, integrated in r rather than θ."""
+        growth = pitch / (2 * math.pi)
+
+        def antiderivative(radius: float) -> float:
+            return 0.5 * (
+                radius * math.hypot(radius, growth)
+                + growth * growth * math.asinh(radius / growth)
+            )
+
+        return (
+            antiderivative(start_radius + pitch * turns) - antiderivative(start_radius)
+        ) / growth
+
+    @staticmethod
+    def _scroll(**extra: object) -> tuple[object, dict]:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Scroll"})
+        runner("catia_point_at", {"at": [0, 0, 0], "name": "hub"})
+        made = runner(
+            "catia_curve_spiral",
+            {
+                "support": "XY",
+                "centre": "hub",
+                "start_radius_mm": 10.0,
+                "pitch_mm": 5.0,
+                "turns": 3,
+                "name": "scroll",
+                **extra,
+            },
+        )
+        return runner, dict(made)
+
+    def test_a_spiral_has_the_arc_length_the_closed_form_gives(self) -> None:
+        """Three turns from 10 mm at 5 mm a turn. Checked to a relative tolerance because
+        the curve is a fit — the exact figure is 330.2315 mm and the fit lands within one
+        part in 10⁷ of it."""
+        runner, _ = self._scroll()
+
+        got = runner("catia_measure_item", {"element": "scroll"})["length_mm"]  # type: ignore[operator]
+
+        assert got == pytest.approx(self._exact_length(10.0, 5.0, 3.0), rel=1e-6)
+
+    def test_it_reports_the_fit_error_it_actually_achieved(self) -> None:
+        """Measured on the built curve *between* the interpolation knots. Sampling at the
+        knots reports 1e-14 — the curve passes through every one of them by construction —
+        against the 9.4e-5 mm the fit is really out by between them, a factor of 10⁹. So
+        the floor here is not "greater than zero" but "not machine zero": a deviation of
+        1e-14 is the signature of a fit that measured itself at the points it was given."""
+        _, made = self._scroll()
+
+        assert 1e-6 < made["deviation_mm"] < 1e-3
+        assert made["end_radius_mm"] == pytest.approx(25.0, abs=TOL)
+
+    def test_any_two_of_pitch_turns_and_end_radius_fix_the_third(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Scroll"})
+        runner("catia_point_at", {"at": [0, 0, 0], "name": "hub"})
+        shared = {"support": "XY", "centre": "hub", "start_radius_mm": 10.0}
+
+        by_radius = runner(
+            "catia_curve_spiral",
+            {**shared, "pitch_mm": 5.0, "end_radius_mm": 25.0, "name": "a"},
+        )
+        by_turns = runner(
+            "catia_curve_spiral",
+            {**shared, "turns": 3, "end_radius_mm": 25.0, "name": "b"},
+        )
+
+        assert by_radius["turns"] == pytest.approx(3.0, abs=TOL)
+        assert by_turns["pitch_mm"] == pytest.approx(5.0, abs=TOL)
+
+    def test_one_of_the_three_fixes_nothing_and_is_refused(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Scroll"})
+        runner("catia_point_at", {"at": [0, 0, 0], "name": "hub"})
+
+        with pytest.raises(GeometryError, match="needs two of"):
+            runner(
+                "catia_curve_spiral",
+                {
+                    "support": "XY",
+                    "centre": "hub",
+                    "start_radius_mm": 10.0,
+                    "pitch_mm": 5.0,
+                    "name": "no",
+                },
+            )
+
+    def test_winding_mirrors_the_spiral_rather_than_reversing_its_direction(self) -> None:
+        """A quarter turn in: clockwise is below the axis and anticlockwise above it, and
+        both are the same length. Reading the winding as a reversed parameter instead
+        would give the same curve traversed backwards, which is not a mirror image."""
+        runner, _ = self._scroll()
+        runner("catia_curve_spiral", {  # type: ignore[operator]
+            "support": "XY",
+            "centre": "hub",
+            "start_radius_mm": 10.0,
+            "pitch_mm": 5.0,
+            "turns": 3,
+            "clockwise": False,
+            "name": "anti",
+        })
+
+        places = {
+            name: runner("catia_point_on_curve", {"curve": name, "ratio": 0.08, "name": f"q_{name}"})[  # type: ignore[operator]
+                "position_mm"
+            ]
+            for name in ("scroll", "anti")
+        }
+
+        assert places["scroll"][1] < -1.0
+        assert places["anti"][1] > 1.0
+        assert runner("catia_measure_item", {"element": "scroll"})["length_mm"] == pytest.approx(  # type: ignore[operator]
+            runner("catia_measure_item", {"element": "anti"})["length_mm"], abs=1e-9  # type: ignore[operator]
+        )
+
+    def test_a_spiral_lies_in_the_support_it_was_given(self) -> None:
+        """In ZX it has no Y extent at all. A spiral built in the world XY whatever the
+        support would measure exactly right on every count except where it is."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Scroll"})
+        runner("catia_point_at", {"at": [0, 0, 0], "name": "hub"})
+        runner(
+            "catia_curve_spiral",
+            {
+                "support": "ZX",
+                "centre": "hub",
+                "start_radius_mm": 10.0,
+                "pitch_mm": 5.0,
+                "turns": 3,
+                "name": "sideways",
+            },
+        )
+
+        # A bounding box is inflated by the shape's own tolerance, so "no Y extent" is
+        # 2e-7 rather than 0 — five orders under the 45 mm the spiral spans in X and Z.
+        box = runner("catia_measure_item", {"element": "sideways"})["bounding_box_mm"]
+        assert box["size"][1] == pytest.approx(0.0, abs=1e-5)
+        assert box["size"][0] > 40.0
+        assert box["size"][2] > 40.0
+
+    def test_a_spiral_that_shrinks_through_its_own_centre_is_refused(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Scroll"})
+        runner("catia_point_at", {"at": [0, 0, 0], "name": "hub"})
+
+        with pytest.raises(GeometryError, match="through its own centre"):
+            runner(
+                "catia_curve_spiral",
+                {
+                    "support": "XY",
+                    "centre": "hub",
+                    "start_radius_mm": 10.0,
+                    "pitch_mm": -5.0,
+                    "turns": 3,
+                    "name": "no",
+                },
+            )

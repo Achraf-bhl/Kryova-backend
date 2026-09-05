@@ -90,9 +90,15 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.BRepProj import BRepProj_Projection
     from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
     from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d
+    from OCP.ChFi2d import ChFi2d_FilletAPI
     from OCP.GC import GC_MakeArcOfCircle, GC_MakeCircle
     from OCP.GCPnts import GCPnts_AbscissaPoint
-    from OCP.Geom import Geom_ConicalSurface, Geom_CylindricalSurface, Geom_OffsetCurve
+    from OCP.Geom import (
+        Geom_BezierCurve,
+        Geom_ConicalSurface,
+        Geom_CylindricalSurface,
+        Geom_OffsetCurve,
+    )
     from OCP.Geom2d import Geom2d_Line
     from OCP.GeomAbs import GeomAbs_JoinType, GeomAbs_Shape
     from OCP.GeomAPI import (
@@ -134,7 +140,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.TNaming import TNaming_Builder, TNaming_Selector, TNaming_Tool
     from OCP.TopAbs import TopAbs_ShapeEnum, TopAbs_State
     from OCP.TopExp import TopExp, TopExp_Explorer
-    from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Iterator
+    from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Edge, TopoDS_Iterator
     from OCP.TopTools import (
         TopTools_IndexedDataMapOfShapeListOfShape,
         TopTools_IndexedMapOfShape,
@@ -189,6 +195,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepTools_WireExplorer": BRepTools_WireExplorer,
         "BRepTopAdaptor_FClass2d": BRepTopAdaptor_FClass2d,
         "Bnd_Box": Bnd_Box,
+        "ChFi2d_FilletAPI": ChFi2d_FilletAPI,
         "Bnd_OBB": Bnd_OBB,
         "GC_MakeArcOfCircle": GC_MakeArcOfCircle,
         "GC_MakeCircle": GC_MakeCircle,
@@ -202,6 +209,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "GeomAPI_ProjectPointOnSurf": GeomAPI_ProjectPointOnSurf,
         "GeomAbs_JoinType": GeomAbs_JoinType,
         "GeomAbs_Shape": GeomAbs_Shape,
+        "Geom_BezierCurve": Geom_BezierCurve,
         "Geom_ConicalSurface": Geom_ConicalSurface,
         "Geom_CylindricalSurface": Geom_CylindricalSurface,
         "Geom_OffsetCurve": Geom_OffsetCurve,
@@ -228,6 +236,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "TopTools_ListOfShape": TopTools_ListOfShape,
         "TopoDS": TopoDS,
         "TopoDS_Compound": TopoDS_Compound,
+        "TopoDS_Edge": TopoDS_Edge,
         "TopoDS_Iterator": TopoDS_Iterator,
         "gp_Ax1": gp_Ax1,
         "gp_Ax2": gp_Ax2,

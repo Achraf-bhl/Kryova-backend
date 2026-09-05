@@ -111,6 +111,36 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E6 → **CalculiX is installed and the integration met the real
+  program for the first time.** `calculix_2.23_4win.zip` from dhondt.de, nothing
+  vendored into the repo, `find_ccx()` resolves it with no code change. A
+  10×20×60 bar at 5 kN: σ = 25.000000 MPa against F/A to 5.7e-16, δ within
+  4.3e-07 of FL/AE, exit 0 in 0.03 s. tet10 through real ccx confirms
+  `C3D10_MIDSIDE_ORDER = (0,1,2,3,5,4)` — a wrong permutation would have built a
+  differently shaped element and returned a visibly wrong answer. `frd.describe()`
+  on real output: **zero unrecognised records**, components in exactly the
+  documented order. A parser written from the manual is now measured against the
+  program, which is the distinction this codebase draws between a mock and a
+  measurement. 6.5's oracle agrees with the in-house solver to 4.4e-09 mm and
+  2.7e-13 MPa; 6.6's taxonomy matched real `*ERROR` text verbatim and
+  misclassified nothing. **Three defects the real solver exposed**, none of them
+  visible from reading the code: an **under-constrained model comes back exit 0,
+  no `*ERROR`, no `*WARNING`, `diagnose()` returning None — and 5.4e+11 mm of
+  displacement**, because CalculiX/PaStiX does not detect the singularity at all
+  (the in-house solver catches this with its equilibrium residual, which the
+  federated path does not have); `CcxRun.wrote_results` is not a success signal,
+  because ccx echoes the mesh into the `.frd` even when it solved nothing;
+  and `_ERROR_RE` is line-anchored while CalculiX wraps its messages, so
+  `*ERROR in e_c3d: nonpositive jacobian` arrives without the
+  `determinant in element 1` that names which one. Commits `e8877e5`, `e813f54`.
+
+- **2026-09-06** — E7/E8/E9/E10/E11/E12/E17 → **opened, in parallel.** Seven
+  phases moved off `not started` in one session by fanning the work across
+  concurrent agents assigned by file rather than by topic (the approach is now a
+  standing instruction in `CLAUDE.md`). Nothing here is `DONE`; each row names
+  what is being built and what it rests on. The point of recording it is that a
+  session which picks this file up mid-flight should not re-derive seven briefs.
+
 - **2026-09-06** — P1 → **sessions became rows, and rotation grew the half that
   makes it worth doing.** `User.refresh_token_hash` was one hash per user. Three
   consequences, all of them live: signing in on a second device silently ended

@@ -15,6 +15,27 @@ happened.
 
 ## Now
 
+> **Blocking gap found 2026-09-05, before the first Windows verification session:
+> nothing built in Era I–II is reachable from the product.** `OcctRunner` is constructed
+> only inside `app/kernel/` and its tests — `app/catia/dispatch.py` has no backend
+> selection at all and goes straight to the CATIA bridge. So the entire OCCT kernel (E1,
+> E2, 108 operations) can only be driven by a test, and **the agent cannot build geometry
+> without a CATIA licence**, which is the exact opposite of Decision 1. `app/render/`,
+> `app/ai/vision.py`, `app/design/machine_checks.py` and `app/design/sensitivity.py` have
+> **zero** callers outside tests: no route, no service, no UI. A grep of `app/api/` for any
+> of them returns nothing.
+>
+> Consequence for verification: on the Windows seat, "try what was built" currently means
+> *run pytest*. The product itself looks exactly as it did before Era I began. That is a
+> real result and not a small one — it says the phases are green on capability and have
+> never been connected to anything.
+>
+> **This is now the front of the queue**, ahead of E6. The order is: wire `OcctRunner` as a
+> selectable backend in dispatch (the keystone — it makes the kernel drivable and CATIA
+> genuinely one backend among several), then endpoints for render/measure/assert, then the
+> frontend surface (which is E4.4 and part of P5).
+
+
 **E5 — Assertions and self-correction.** Foundation 2026-09-04; **5.1 and 5.3 landed
 2026-09-05**. What is left is **5.4** — the mission ladder as a permanent regression suite,
 which wants E18's missions to exist first — and **5.2**, blocked on Phase 11 (requirements).

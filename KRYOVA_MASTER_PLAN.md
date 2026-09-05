@@ -299,6 +299,11 @@ follow-up that can be forgotten. Rules:
 
 - Status vocabulary, exactly four: `not started` · `in progress (since YYYY-MM-DD)` ·
   `partial — <what shipped> (YYYY-MM-DD)` · `DONE (YYYY-MM-DD)`.
+- **A `*` before the phase number means the phase is finished in full** — `*E1`, not `E1`. It is
+  the one mark that is scannable down the left edge of the table, so "how far are we?" is
+  answered by counting stars rather than by reading eighteen status cells. A phase gets its star
+  in the same edit that marks it `DONE`, and only then: a phase with any sub-item still open
+  keeps a bare number however much of it has shipped.
 - A phase is marked `DONE` **only when its Proof runs green** — and the row says where that
   proof lives (a test file, a CI job, a mission id). A phase without a checkable proof cannot be
   `DONE`; fix the phase definition instead.
@@ -309,7 +314,7 @@ follow-up that can be forgotten. Rules:
 
 | Phase | Title (short) | Status | Evidence / where the proof lives |
 |---|---|---|---|
-| E1 | OCCT kernel target | **DONE (2026-09-05)** — 1.0/1.1/1.4/1.5/1.6 complete; 1.2 at 22/201 ops, 1.3 parametric (solver deferred, see below) | `app/kernel/` (24 modules), `tests/test_kernel.py`. M1 bracket builds on OCCT. **Residual: the CATIA-seat half of the conformance run needs a Windows seat.** |
+| *E1 | OCCT kernel target | **DONE (2026-09-05)** — 1.0/1.1/1.4/1.5/1.6 complete; 1.2 at 22/201 ops, 1.3 parametric (solver deferred, see below) | `app/kernel/` (24 modules), `tests/test_kernel.py`. M1 bracket builds on OCCT. **Residual: the CATIA-seat half of the conformance run needs a Windows seat.** |
 | E2 | Selection & authoring vocabulary | **2.1/2.2/2.3/2.4 DONE (2026-09-05)**; 2.5 started (`catia_draft`); 2.6 open | `app/kernel/selection.py`, `occt/{resolve,classify,selectors,reference,naming}.py`, `occt/operations/{dressup.draft,reference_ops}`, `tests/test_reference_geometry.py` (36 tests). Every vocabulary word decidable; per-edge parameters; `parallel_to`/`perpendicular_to` make "the vertical walls" one selection; reference geometry complete for everything not needing a named face; **`feature#selector` resolves — `slab#top` returns the annulus under a boss, a face the plain word `top` can never return.** Coverage 30/201. **Five regressions this phase introduced were caught and fixed on 2026-09-05 by the first `pytest` run since — see the build plan.** **Every geometry operation now records its own faces** — pad/pocket/shaft/groove, primitives, transforms, boolean, shell, fillet, chamfer and draft — and a test fails if one stops. |
 | E3 | Interrogation & measurement | **OCCT side DONE (2026-09-05)** — 3.1–3.5 complete; CATIA-side measures shipped 2026-09-03 | `app/kernel/{interrogation,contract,provenance}.py`, `app/kernel/occt/interrogate/` (8 modules), `occt/metrology.oriented_bounding_box`, `tests/test_interrogation.py` (39 tests, offline, all against closed-form answers). Reached via `catia_analysis_part`. **Residual: 3.3's clearance is implemented and tested but not yet wired to `catia_measure_between` — that needs 2.2 element references; and the cross-backend agreement half of the Proof needs a Windows seat, same as E1.** |
 | E4 | Visual verification | not started | |

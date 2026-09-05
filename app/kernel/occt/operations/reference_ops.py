@@ -29,7 +29,6 @@ from app.kernel.occt.reference import (
     offset_frame,
     rotated_frame,
 )
-from app.kernel.occt.sketching import frame_of
 
 PLANE_OFFSET = "catia_plane_offset"
 PLANE_THROUGH_POINTS = "catia_plane_through_points"
@@ -100,25 +99,16 @@ def plane_offset(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
 
 
 def _reference_frame(document: Any, reference: str) -> Any:
-    """The frame of an origin plane or a plane the design constructed.
+    """The frame of an origin plane, a constructed plane, or a named planar face.
 
-    Offsetting from a *planar face* is the third thing the operation's schema allows and
-    it is refused, not approximated: naming a face needs `feature#selector` (Phase 2.2),
-    and picking the nearest origin plane instead would build the boss at a height nobody
-    chose — the kind of wrong that looks right until it is measured.
+    The third of those used to be refused with a message blaming Phase 2.2. That phase
+    shipped, so `catia_plane_offset(reference="slab#top", distance_mm=5)` now means what
+    it reads as — a plane 5 mm above the slab's top face — and goes through the one
+    resolver in `app.kernel.occt.elements` that every "which plane" argument uses.
     """
-    if reference.upper() in vocabulary.ORIGIN_PLANES:
-        return frame_of(reference)
-    if document.has_plane(reference):
-        return document.plane(reference).frame
+    from app.kernel.occt.elements import plane_frame
 
-    known = ", ".join(document.plane_names()) or "none yet"
-    raise OperationNotSupported(
-        f"{PLANE_OFFSET} from {reference!r}",
-        f"the origin planes are {', '.join(vocabulary.ORIGIN_PLANES)} and this design "
-        f"has constructed: {known}. Offsetting from a face of the part needs the "
-        "feature#selector syntax (Phase 2.2)",
-    )
+    return plane_frame(document, reference, tool=PLANE_OFFSET)
 
 
 # -- points -------------------------------------------------------------------

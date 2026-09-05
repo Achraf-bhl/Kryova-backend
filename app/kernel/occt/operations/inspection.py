@@ -1,28 +1,56 @@
 """Reading the part: measurement and analysis, without changing anything.
 
-Two operations, and the split between them is the one `app.kernel.interrogation`
-explains. `catia_measure` reports what the part **is** — always defined, always cheap
-enough to run after every operation. `catia_analysis_part` asks what it can be **made
-into**, which has a premise, can be inapplicable, and costs thousands of kernel calls.
+Four operations along two axes — *what* is measured, and *how much of a premise* the
+answer carries.
+
+`catia_measure` reports what the whole part **is**: always defined, always cheap enough
+to run after every operation. `catia_measure_item` asks the same of **one element** — the
+length of an edge, the diameter of a bore. `catia_measure_between` asks about **a pair**,
+which is how a clearance is checked without guessing from a screenshot. All three are
+plain properties. `catia_analysis_part` is the odd one out: it asks what the part can be
+**made into**, which has a premise, can be inapplicable, and costs thousands of kernel
+calls.
 
 `catia_measure` is deliberately more than a dimension read — it returns bounding box,
 volume, mass, centre of gravity and surface area in one call, because those are what a
 following FEA setup or a sanity check actually need, and three round trips to collect
 them is three chances to go wrong. That reasoning is the registry's, and this honours it.
+The two element-scoped operations follow it: `catia_measure_between` computes distance,
+overlap and closest points from the one extremum search that yields all three, and
+`kind` selects the *headline* rather than gating the work.
+
+**What each element reference may name lives in `app.kernel.occt.elements`**, not here,
+so the two operations cannot drift apart on what `boss#top` means.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, Final
 
+from app.kernel import provenance
 from app.kernel.errors import OperationNotSupported
 from app.kernel.interrogation import InterrogationPayload
 from app.kernel.measurement import Detail
+from app.kernel.occt import classify, elements, metrology
+from app.kernel.occt.binding import symbol
 from app.kernel.occt.operations.context import BuildContext
+from app.kernel.occt.topology import edges, faces
 
 MEASURE = "catia_measure"
+MEASURE_BETWEEN = "catia_measure_between"
+MEASURE_ITEM = "catia_measure_item"
 ANALYSIS = "catia_analysis_part"
+
+#: What `catia_measure_between` can be asked for, in the registry's own spelling.
+#: `minimum_distance` and `closest_points` come from one search and differ only in which
+#: number is the headline; `angle` is a different computation with a different premise.
+_BETWEEN_KINDS: Final[frozenset[str]] = frozenset(
+    {"minimum_distance", "angle", "closest_points"}
+)
+
+_DEFAULT_BETWEEN_KIND: Final = "minimum_distance"
 
 #: The registry names a *plane* for the pull, which is how a CATIA user thinks about it —
 #: "pulled off the XY plane". A pull direction is the plane's normal. Declared here rather
@@ -48,6 +76,164 @@ def measure(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str,
     document = context.require_document()
     detail = Detail.INERTIA if arguments.get("include_inertia") else Detail.FULL
     return document.measure(detail=detail)
+
+
+def measure_between(
+    context: BuildContext, arguments: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Minimum distance, overlap and closest points between two named elements.
+
+    **Both numbers are measured, not sampled** — `BRepExtrema_DistShapeShape` is an exact
+    extremum search over the B-rep and the overlap is a real boolean whose volume is
+    integrated. That is worth saying because clearance *sounds* like the kind of thing
+    that would be approximated, and here it is not.
+
+    Distance and overlap are not redundant: two shapes that interpenetrate have a minimum
+    distance of zero, and so do two that merely touch. Only the common volume separates
+    "in contact" from "inside each other".
+    """
+    from app.kernel.occt.interrogate import measure_clearance, plane_separation
+
+    document = context.require_document()
+    kind = str(arguments.get("kind") or _DEFAULT_BETWEEN_KIND).strip().lower()
+    if kind not in _BETWEEN_KINDS:
+        supported = ", ".join(sorted(_BETWEEN_KINDS))
+        raise OperationNotSupported(
+            subject=MEASURE_BETWEEN,
+            reason=f"{kind!r} is not a measurement this backend takes. Supported: {supported}",
+            backend="occt",
+        )
+
+    first, second = elements.resolve_elements(
+        document, arguments.get("elements"), tool=MEASURE_BETWEEN
+    )
+
+    payload: dict[str, Any] = {
+        "measurement": kind,
+        "elements": [first.to_dict(), second.to_dict()],
+    }
+
+    if kind == "angle":
+        payload.update(elements.angle_between(first, second, tool=MEASURE_BETWEEN))
+        provenance.attach(
+            payload, "angle_deg", provenance.measured("exact directions of both elements")
+        )
+        return payload
+
+    if first.is_plane and second.is_plane:
+        report = plane_separation(first.frame, second.frame)
+    else:
+        report = measure_clearance(first.require_shape(), second.require_shape())
+        if first.is_plane or second.is_plane:
+            report = replace(
+                report,
+                interference_unavailable=(
+                    "a construction plane bounds no volume, so an overlap between these "
+                    "two elements is not a measurable quantity."
+                ),
+            )
+
+    payload.update(report.to_payload())
+    return payload
+
+
+def measure_item(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Measure one element — whatever kind of thing it turns out to be.
+
+    **The payload says which kind it found**, because that is what makes an unexpected
+    answer traceable rather than mysterious: asking for the diameter of something that
+    turned out to be a planar face returns an area and the word `Plane`, not a silence
+    and not a zero.
+
+    A selector that matched several entities is measured in aggregate — total length for
+    edges, total area for faces — with the count reported beside it. Aggregating without
+    saying how many were aggregated is how "the area of the top face" quietly becomes the
+    area of four of them.
+    """
+    document = context.require_document()
+    element = elements.resolve_element(
+        document, arguments.get("element"), tool=MEASURE_ITEM
+    )
+
+    payload: dict[str, Any] = {"element": element.to_dict()}
+
+    if element.kind == "body":
+        # A named feature is a whole solid, and "measure this body" means the same
+        # numbers `catia_measure` gives for the part — volume, mass, centre of gravity,
+        # box. Reporting only its surface area because this operation is element-scoped
+        # would be an answer nobody wants when the full one is one call away.
+        payload["measured_kind"] = "body"
+        payload.update(
+            metrology.measure(
+                element.require_shape(),
+                density_kg_m3=document.density_kg_m3,
+                detail=Detail.FULL,
+            )
+        )
+        return payload
+
+    if element.kind in {"point", "axis_system"}:
+        payload["measured_kind"] = "point"
+        payload["position_mm"] = list(element.position or (0.0, 0.0, 0.0))
+        provenance.attach(payload, "position_mm", provenance.measured("exact construction"))
+        return payload
+
+    if element.is_plane:
+        payload["measured_kind"] = "plane"
+        payload["position_mm"] = list(element.position or (0.0, 0.0, 0.0))
+        normal = element.frame.Direction()
+        payload["normal"] = [normal.X(), normal.Y(), normal.Z()]
+        provenance.attach(payload, "normal", provenance.measured("exact construction"))
+        return payload
+
+    if element.kind == "edges":
+        found = edges(element.require_shape())
+        payload["measured_kind"] = (
+            classify.edge_curve_type(found[0]) if len(found) == 1 else "edges"
+        )
+        payload["length_mm"] = sum(classify.edge_length_mm(edge) for edge in found)
+        provenance.attach(payload, "length_mm", provenance.measured("curve integration"))
+        _add_circle_size(payload, found)
+        return payload
+
+    found = faces(element.require_shape())
+    payload["measured_kind"] = (
+        classify.face_surface_type(found[0]) if len(found) == 1 else "faces"
+    )
+    payload["area_mm2"] = sum(classify.face_area_mm2(face) for face in found)
+    provenance.attach(payload, "area_mm2", provenance.measured("surface integration"))
+
+    if len(found) == 1:
+        normal = classify.face_normal(found[0])
+        if normal is not None:
+            payload["normal"] = list(normal)
+            provenance.attach(
+                payload, "normal", provenance.measured("outward normal at the face centre")
+            )
+        diameter = classify.cylinder_diameter_mm(found[0])
+        if diameter is not None:
+            payload["diameter_mm"] = diameter
+            payload["radius_mm"] = diameter / 2.0
+            provenance.attach(
+                payload, "diameter_mm", provenance.measured("exact cylindrical surface")
+            )
+    return payload
+
+
+def _add_circle_size(payload: dict[str, Any], found: list[Any]) -> None:
+    """Diameter of a single circular edge — the bore question, asked of an edge.
+
+    Only for exactly one edge: summing the diameters of four holes would produce a number
+    with no meaning that reads exactly like one with meaning.
+    """
+    if len(found) != 1 or classify.edge_curve_type(found[0]) != "Circle":
+        return
+    radius = float(symbol("BRepAdaptor_Curve")(found[0]).Circle().Radius())
+    payload["radius_mm"] = radius
+    payload["diameter_mm"] = radius * 2.0
+    provenance.attach(
+        payload, "diameter_mm", provenance.measured("exact circular edge")
+    )
 
 
 def analysis_part(

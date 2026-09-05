@@ -101,9 +101,31 @@ class Sketch:
     #: "why is my pad hollow" has an inspectable answer.
     construction: list[Any] = field(default_factory=list)
 
+    #: Points drawn on the sketch, in **its own 2D coordinates**, in the order drawn.
+    #:
+    #: Held as (u, v) pairs rather than as `TopoDS_Vertex` for the reason
+    #: `ReferencePoint` is: a point is a place, not geometry. Letting one into `profiles`
+    #: would put it into the face a pad extrudes, where it means nothing and changes the
+    #: determinism digest. A user pattern reads these through `world_points()`.
+    points: list[tuple[float, float]] = field(default_factory=list)
+
     @property
     def is_empty(self) -> bool:
         return not self.profiles
+
+    def to_world(self, point: tuple[float, float]) -> tuple[float, float, float]:
+        """One of this sketch's own (u, v) coordinates, as a world position."""
+        frame = self.frame()
+        origin, x_axis, y_axis = frame.Location(), frame.XDirection(), frame.YDirection()
+        return (
+            origin.X() + point[0] * x_axis.X() + point[1] * y_axis.X(),
+            origin.Y() + point[0] * x_axis.Y() + point[1] * y_axis.Y(),
+            origin.Z() + point[0] * x_axis.Z() + point[1] * y_axis.Z(),
+        )
+
+    def world_points(self) -> list[tuple[float, float, float]]:
+        """Every drawn point, in world coordinates and in the order drawn."""
+        return [self.to_world(point) for point in self.points]
 
     def plane(self) -> Any:
         """The OCCT plane this sketch is drawn on."""
@@ -148,6 +170,7 @@ class Sketch:
             "support": self.support,
             "profiles": len(self.profiles),
             "construction": len(self.construction),
+            "points": len(self.points),
         }
 
 

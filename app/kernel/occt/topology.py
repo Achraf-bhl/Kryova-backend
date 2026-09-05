@@ -20,6 +20,7 @@ class of bug that is very hard to see afterwards.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Final
 
 from app.kernel.errors import MeasurementError
@@ -129,6 +130,23 @@ def has_solid(shape: Any) -> bool:
     return bool(explorer.More())
 
 
+def compound(shapes: Iterable[Any]) -> Any:
+    """Several shapes as one, for an algorithm that takes a single argument.
+
+    A compound is the only way to hand OCCT "these four faces" as one operand, so it is
+    what both feature-restricted selection and multi-entity measurement are built on.
+    It is a container and nothing more: no boolean is performed, so overlapping members
+    stay overlapping and the result encloses no volume of its own.
+    """
+    require()
+    builder = symbol("BRep_Builder")()
+    result = symbol("TopoDS_Compound")()
+    builder.MakeCompound(result)
+    for shape in shapes:
+        builder.Add(result, shape)
+    return result
+
+
 def point_of(vertex: Any) -> tuple[float, float, float]:
     point = symbol("BRep_Tool").Pnt_s(vertex)
     return (point.X(), point.Y(), point.Z())
@@ -171,6 +189,7 @@ __all__ = [
     "VERTEX",
     "WIRE",
     "census",
+    "compound",
     "count",
     "edges",
     "endpoints",

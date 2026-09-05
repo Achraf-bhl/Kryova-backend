@@ -25,7 +25,7 @@ from typing import Any
 from app.kernel.errors import GeometryError, OperationNotSupported
 from app.kernel.occt import classify
 from app.kernel.occt.binding import require
-from app.kernel.occt.topology import edges, faces
+from app.kernel.occt.topology import compound, edges, faces
 from app.kernel.selection import AXIS_INDEX, Predicate, unit
 
 #: How close an entity must sit to the shape's extreme along an axis to count as being
@@ -90,8 +90,6 @@ def _within_feature(shape: Any, predicate: Predicate, document: Any) -> list[Any
     the whole difference between "the top of the boss" and "the top of the part", and it
     is why this cannot be written as one more filter in the existing chain.
     """
-    from app.kernel.occt.binding import symbol
-
     candidates = edges(shape) if predicate.kind == "edge" else faces(shape)
     owned = restrict_to_feature(document, predicate, candidates)
     if not owned:
@@ -100,22 +98,29 @@ def _within_feature(shape: Any, predicate: Predicate, document: Any) -> list[Any
     # Rebuild a compound of just this feature's entities so that `axis`/`side` measures
     # the feature's own extent. Measuring against `shape` would make `boss#top` mean the
     # top of the whole part, which is the confusion this field exists to remove.
-    builder = symbol("BRep_Builder")()
-    compound = symbol("TopoDS_Compound")()
-    builder.MakeCompound(compound)
-    for entity in owned:
-        builder.Add(compound, entity)
+    owned_only = compound(owned)
 
     narrowed = Predicate(**{**predicate.__dict__, "of": None})
-    return _resolve_edges(compound, narrowed) if predicate.kind == "edge" else (
-        _resolve_faces(compound, narrowed)
-    )
+    if predicate.kind == "edge":
+        # The whole part is passed as the convexity context — see `_resolve_edges`.
+        return _resolve_edges(owned_only, narrowed, context=shape)
+    return _resolve_faces(owned_only, narrowed)
 
 
 # -- edges -------------------------------------------------------------------
 
 
-def _resolve_edges(shape: Any, predicate: Predicate) -> list[Any]:
+def _resolve_edges(shape: Any, predicate: Predicate, context: Any = None) -> list[Any]:
+    """Edges of `shape` matching the predicate.
+
+    **`context` is the shape convexity is judged against, and it is not always `shape`.**
+    Whether an edge is convex is a fact about the two faces meeting at it, so it is a
+    property of the *part* — but `_within_feature` narrows `shape` to a compound holding
+    only the feature's own entities, so that `axis`/`side` measure the feature's extent.
+    A compound of edges has no faces, so building the adjacency map from it makes every
+    edge's convexity `None` and `boss#convex` match nothing at all, on a part with twelve
+    convex edges. Everything else here is a property of one edge and is unaffected.
+    """
     candidates = edges(shape)
 
     if predicate.circular is not None:
@@ -143,7 +148,7 @@ def _resolve_edges(shape: Any, predicate: Predicate) -> list[Any]:
     if predicate.convex is not None:
         # Built last, and only when convexity is actually asked for: the map costs a
         # full traversal of the shape's faces.
-        mapping = classify.faces_by_edge(shape)
+        mapping = classify.faces_by_edge(context if context is not None else shape)
         candidates = [
             edge for edge in candidates
             if classify.edge_is_convex(edge, classify.adjoining_faces(mapping, edge))

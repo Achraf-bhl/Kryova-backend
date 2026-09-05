@@ -42,11 +42,18 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.Bnd import Bnd_Box, Bnd_OBB
     from OCP.BRep import BRep_Builder, BRep_Tool
     from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-    from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+    from OCP.BRepAlgoAPI import (
+        BRepAlgoAPI_Common,
+        BRepAlgoAPI_Cut,
+        BRepAlgoAPI_Defeaturing,
+        BRepAlgoAPI_Fuse,
+    )
     from OCP.BRepBndLib import BRepBndLib
     from OCP.BRepBuilderAPI import (
+        BRepBuilderAPI_GTransform,
         BRepBuilderAPI_MakeEdge,
         BRepBuilderAPI_MakeFace,
+        BRepBuilderAPI_MakeVertex,
         BRepBuilderAPI_MakeWire,
         BRepBuilderAPI_Transform,
     )
@@ -62,6 +69,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     )
     from OCP.BRepPrimAPI import (
         BRepPrimAPI_MakeBox,
+        BRepPrimAPI_MakeCone,
         BRepPrimAPI_MakeCylinder,
         BRepPrimAPI_MakePrism,
         BRepPrimAPI_MakeRevol,
@@ -76,14 +84,18 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         gp_Ax3,
         gp_Circ,
         gp_Dir,
+        gp_GTrsf,
         gp_Lin,
+        gp_Mat,
         gp_Pln,
         gp_Pnt,
         gp_Pnt2d,
         gp_Trsf,
         gp_Vec,
+        gp_XYZ,
     )
     from OCP.GProp import GProp_GProps
+    from OCP.TColgp import TColgp_Array1OfPnt2d
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDF import TDF_LabelMap, TDF_TagSource
     from OCP.TDocStd import TDocStd_Application, TDocStd_Document
@@ -104,10 +116,13 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepAdaptor_Surface": BRepAdaptor_Surface,
         "BRepAlgoAPI_Common": BRepAlgoAPI_Common,
         "BRepAlgoAPI_Cut": BRepAlgoAPI_Cut,
+        "BRepAlgoAPI_Defeaturing": BRepAlgoAPI_Defeaturing,
         "BRepAlgoAPI_Fuse": BRepAlgoAPI_Fuse,
         "BRepBndLib": BRepBndLib,
+        "BRepBuilderAPI_GTransform": BRepBuilderAPI_GTransform,
         "BRepBuilderAPI_MakeEdge": BRepBuilderAPI_MakeEdge,
         "BRepBuilderAPI_MakeFace": BRepBuilderAPI_MakeFace,
+        "BRepBuilderAPI_MakeVertex": BRepBuilderAPI_MakeVertex,
         "BRepBuilderAPI_MakeWire": BRepBuilderAPI_MakeWire,
         "BRepBuilderAPI_Transform": BRepBuilderAPI_Transform,
         "BRepCheck_Analyzer": BRepCheck_Analyzer,
@@ -120,6 +135,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepOffsetAPI_DraftAngle": BRepOffsetAPI_DraftAngle,
         "BRepOffsetAPI_MakeThickSolid": BRepOffsetAPI_MakeThickSolid,
         "BRepPrimAPI_MakeBox": BRepPrimAPI_MakeBox,
+        "BRepPrimAPI_MakeCone": BRepPrimAPI_MakeCone,
         "BRepPrimAPI_MakeCylinder": BRepPrimAPI_MakeCylinder,
         "BRepPrimAPI_MakePrism": BRepPrimAPI_MakePrism,
         "BRepPrimAPI_MakeRevol": BRepPrimAPI_MakeRevol,
@@ -131,6 +147,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "GC_MakeArcOfCircle": GC_MakeArcOfCircle,
         "GProp_GProps": GProp_GProps,
         "TCollection_ExtendedString": TCollection_ExtendedString,
+        "TColgp_Array1OfPnt2d": TColgp_Array1OfPnt2d,
         "TDF_LabelMap": TDF_LabelMap,
         "TDF_TagSource": TDF_TagSource,
         "TDocStd_Application": TDocStd_Application,
@@ -152,12 +169,15 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "gp_Ax3": gp_Ax3,
         "gp_Circ": gp_Circ,
         "gp_Dir": gp_Dir,
+        "gp_GTrsf": gp_GTrsf,
         "gp_Lin": gp_Lin,
+        "gp_Mat": gp_Mat,
         "gp_Pln": gp_Pln,
         "gp_Pnt": gp_Pnt,
         "gp_Pnt2d": gp_Pnt2d,
         "gp_Trsf": gp_Trsf,
         "gp_Vec": gp_Vec,
+        "gp_XYZ": gp_XYZ,
     }
 except Exception as exc:  # noqa: BLE001 - every import failure means the same thing
     _IMPORT_ERROR = exc

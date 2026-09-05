@@ -34,7 +34,11 @@ from __future__ import annotations
 from app.kernel.occt.interrogate.continuity import scan_continuity
 from app.kernel.occt.interrogate.curvature import scan_curvature
 from app.kernel.occt.interrogate.draft import analyse_draft
-from app.kernel.occt.interrogate.proximity import measure_clearance, minimum_distance_mm
+from app.kernel.occt.interrogate.proximity import (
+    measure_clearance,
+    minimum_distance_mm,
+    plane_separation,
+)
 from app.kernel.occt.interrogate.raycast import (
     escape_point,
     first_hit_distance,
@@ -63,6 +67,7 @@ __all__ = [
     "is_blocked",
     "measure_clearance",
     "minimum_distance_mm",
+    "plane_separation",
     "sample_face",
     "sample_face_centre",
     "scan_continuity",

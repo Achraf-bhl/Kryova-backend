@@ -25,8 +25,8 @@ from typing import Any, Final
 from app.catia.ops import vocabulary
 from app.kernel.errors import GeometryError
 from app.kernel.occt.binding import symbol
-from app.kernel.occt.resolve import require_matches, resolve
-from app.kernel.occt.topology import edges
+from app.kernel.occt.resolve import require_matches, resolve, restrict_to_feature
+from app.kernel.occt.topology import compound, edges
 from app.kernel.selection import EntityKind, Predicate, is_predicate, parse
 
 #: How far an edge's curve must climb before it counts as vertical. Well under any real
@@ -48,6 +48,7 @@ ALL: Final = vocabulary.EDGE_SELECTORS[0]
 #: which the predicate vocabulary does not describe — a direction predicate for edges is
 #: worth adding when something needs it, and inventing it unused would be worse.
 _WORD_PREDICATES: Final[dict[str, dict[str, Any]]] = {
+    "all": {},
     "top": {"axis": "z", "side": "max"},
     "bottom": {"axis": "z", "side": "min"},
     "convex": {"convex": True},
@@ -90,7 +91,7 @@ def parse_sub_entity(text: str, *, tool: str = "this operation") -> dict[str, An
 
     template = _WORD_PREDICATES.get(word.lower())
     if template is None:
-        known = ", ".join(sorted(_WORD_PREDICATES))
+        known = ", ".join(sorted((*_WORD_PREDICATES, *_DIRECTIONAL_WORDS)))
         raise GeometryError(
             f"{word!r} is not a selector word, so {text!r} cannot be resolved. After "
             f"the {SUB_ENTITY_MARK} use one of: {known} — or write the predicate out "
@@ -120,6 +121,20 @@ def _select(
         return resolve(shape, Predicate(kind=kind))
 
     if isinstance(selector, str) and SUB_ENTITY_MARK in selector:
+        feature, _, word = selector.partition(SUB_ENTITY_MARK)
+        if kind == "edge" and word.strip().lower() in _DIRECTIONAL_WORDS:
+            # `boss#vertical` cannot become a predicate, because direction is measured
+            # from the edge's own curve rather than declared as a field. So the feature
+            # restriction is applied first and the direction test runs on what is left —
+            # the same two steps `_within_feature` performs, in the other order, which is
+            # safe here only because a direction is a property of one edge alone.
+            return require_matches(
+                _directional_within(
+                    shape, feature.strip(), word.strip().lower(), document=document
+                ),
+                Predicate(kind=kind, of=feature.strip()),
+                tool,
+            )
         selector = parse_sub_entity(selector, tool=tool)
 
     if is_predicate(selector):
@@ -153,6 +168,27 @@ def _select(
         f"{word!r} is not a selector word. The vocabulary is: {known} — or give a "
         'predicate such as {"longer_than_mm": 10}.'
     )
+
+
+def _directional_within(
+    shape: Any, feature: str, word: str, *, document: Any
+) -> list[Any]:
+    """`boss#vertical` — the vertical edges *of one feature*.
+
+    Refuses rather than widening when the document is absent or the feature recorded no
+    contribution, for the reason `restrict_to_feature` gives: silently answering across
+    the whole part returns the right edges on the part everyone tests with and the wrong
+    ones on every other.
+    """
+    if document is None:
+        raise GeometryError(
+            f"{feature}{SUB_ENTITY_MARK}{word} names one feature's edges, but no "
+            "document was supplied to say which edges that feature contributed."
+        )
+    owned = restrict_to_feature(
+        document, Predicate(kind="edge", of=feature), edges(shape)
+    )
+    return _select_by_direction(compound(owned), word) if owned else []
 
 
 def _select_by_direction(shape: Any, word: str) -> list[Any]:

@@ -423,6 +423,11 @@ class ClearanceReport:
     overlap is a real boolean intersection integrated for volume. Neither is a sampling
     approximation — which is worth stating, because clearance *sounds* like the sort of
     thing that would be approximated and here is not.
+
+    **An overlap that is not a question is reported as unavailable, never as zero.** A
+    construction plane has no volume, so "how much does the part overlap the datum plane"
+    has no answer — and `0.0` would be read as "they do not clash", which is a claim
+    nobody made. `interference_unavailable` carries the reason instead.
     """
 
     #: Minimum distance between the two shapes, in mm. Zero when they touch or overlap.
@@ -437,9 +442,13 @@ class ClearanceReport:
     #: Why the query failed, when it did.
     failure: str = ""
 
+    #: Why an overlap volume is not a meaningful question for this pair, when it is not.
+    #: Set means `interference_mm3` is not reported at all rather than reported as zero.
+    interference_unavailable: str = ""
+
     @property
     def interferes(self) -> bool:
-        return self.interference_mm3 > 0.0
+        return self.interference_mm3 > 0.0 and not self.interference_unavailable
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {}
@@ -465,6 +474,14 @@ class ClearanceReport:
                     list(self.closest_points[0]),
                     list(self.closest_points[1]),
                 ]
+
+        if self.interference_unavailable:
+            provenance.attach(
+                payload,
+                INTERFERENCE_VOLUME_MM3,
+                provenance.unavailable(self.interference_unavailable),
+            )
+            return payload
 
         payload[INTERFERENCE_VOLUME_MM3] = self.interference_mm3
         payload["interferes"] = self.interferes

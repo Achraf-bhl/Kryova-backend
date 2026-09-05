@@ -35,10 +35,13 @@ def _part(name: str = "P"):
     return runner
 
 
-def _padded(runner, width=40.0, height=30.0, length=20.0):
+def _padded(runner, width=40.0, height=30.0, length=20.0, name=None):
     runner("catia_sketch_create", {"support": "XY", "name": "base"})
     runner("catia_sketch_rectangle", {"sketch": "base", "width_mm": width, "height_mm": height})
-    runner("catia_pad", {"sketch": "base", "length_mm": length})
+    pad: dict[str, object] = {"sketch": "base", "length_mm": length}
+    if name is not None:
+        pad["name"] = name
+    runner("catia_pad", pad)
     return runner
 
 
@@ -101,15 +104,29 @@ class TestConstructedPlanes:
                 (base.X(), base.Y(), base.Z()), abs=TOL
             )
 
-    def test_offsetting_from_a_face_is_refused_with_the_reason(self):
-        """Naming a face needs feature#selector. Falling back to the nearest origin
-        plane would build at a height nobody chose."""
-        runner = _padded(_part())
-        with pytest.raises(OperationNotSupported, match="feature#selector"):
-            runner(
-                "catia_plane_offset",
-                {"reference": "top_face", "distance_mm": 5.0},
-            )
+    def test_a_plane_can_be_offset_from_a_named_face(self):
+        """This was refused until 2.2 shipped, with a message pointing at 2.2. Once
+        `feature#selector` resolved, the refusal was the only thing left standing
+        between a design and `catia_plane_offset(reference="slab#top")` — a stale
+        "blocked on X" outliving X, which is how a capability stays unreachable.
+
+        The slab is 20 mm tall, so a plane 5 mm above its top face sits at z=25.
+        """
+        runner = _padded(_part(), name="slab")
+        result = runner(
+            "catia_plane_offset",
+            {"reference": "slab#top", "distance_mm": 5.0, "name": "above"},
+        )
+
+        assert result["origin_mm"][2] == pytest.approx(25.0, abs=TOL)
+        assert result["normal"] == pytest.approx([0.0, 0.0, 1.0], abs=TOL)
+
+    def test_offsetting_from_something_with_no_plane_is_still_refused(self):
+        """The fix must not make everything resolve: a whole body has no single plane,
+        and answering with one of its six faces would build at a height nobody chose."""
+        runner = _padded(_part(), name="slab")
+        with pytest.raises(GeometryError, match="no single plane"):
+            runner("catia_plane_offset", {"reference": "slab", "distance_mm": 5.0})
 
     def test_a_missing_distance_is_refused_not_defaulted(self):
         runner = _part()

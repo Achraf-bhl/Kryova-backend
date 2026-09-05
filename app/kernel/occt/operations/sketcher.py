@@ -41,6 +41,7 @@ POLYGON = "catia_sketch_polygon"
 SLOT = "catia_sketch_slot"
 CLOSE = "catia_sketch_close"
 CONSTRAIN = "catia_sketch_constrain"
+POINT = "catia_sketch_point"
 
 
 def sketch_create(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -140,6 +141,28 @@ def sketch_slot(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[
     return _add_profile(sketch, wire, arguments)
 
 
+def sketch_point(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Place a point in the sketch, by its own 2D coordinates.
+
+    A point is never a profile: it goes on `Sketch.points`, not `Sketch.profiles`, so a
+    pad over this sketch extrudes the outlines and ignores the points. That separation
+    is what lets a user pattern draw its positions in the same sketch as the shape being
+    positioned, which is how CATIA does it.
+
+    `construction` is accepted and makes no difference here, because a sketch point is
+    already reference geometry — there is nothing for the flag to switch off. Accepting
+    it rather than refusing it keeps a design that sets it from failing over a no-op.
+    """
+    sketch = _target_sketch(context, arguments, POINT)
+    at = _uv(arguments.get("at"), "at")
+    sketch.points.append(at)
+    return {
+        **sketch.to_dict(),
+        "point": list(at),
+        "world_mm": list(sketch.to_world(at)),
+    }
+
+
 def sketch_close(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
     """Finish a sketch.
 
@@ -233,6 +256,7 @@ __all__ = [
     "CLOSE",
     "CONSTRAIN",
     "CREATE",
+    "POINT",
     "POLYGON",
     "RECTANGLE",
     "SLOT",
@@ -240,6 +264,7 @@ __all__ = [
     "sketch_close",
     "sketch_constrain",
     "sketch_create",
+    "sketch_point",
     "sketch_polygon",
     "sketch_rectangle",
     "sketch_slot",

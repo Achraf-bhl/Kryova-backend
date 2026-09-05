@@ -298,9 +298,71 @@ QUANTITIES: Final[tuple[Entry, ...]] = (
     Entry(
         path=interrogation.INTERFERENCE_VOLUME_MM3,
         unit="mm³",
-        summary="Volume common to two shapes. Greater than zero is a clash.",
+        summary="Volume common to two shapes. Greater than zero is a clash. Unavailable "
+        "when either element is a construction plane, which bounds no volume — never "
+        "reported as a zero that would read as 'they do not clash'.",
         typical_basis=provenance.Basis.MEASURED,
         since="1.1",
+    ),
+    # -- elements.py: one element, and pairs of them (3.3) --------------------
+    Entry(
+        path="angle_deg",
+        unit="degrees",
+        summary="Angle between two elements' reference directions, folded to [0°, 90°] "
+        "because the sense of a plane normal or an edge is not the caller's choice. "
+        "Read angle_between for which two directions were compared.",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.2",
+    ),
+    Entry(
+        path="length_mm",
+        unit="mm",
+        summary="Length of a measured edge, or the total over a selector that matched "
+        "several — element.entity_count says how many.",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.2",
+    ),
+    Entry(
+        path="area_mm2",
+        unit="mm²",
+        summary="Area of a measured face, or the total over a selector that matched "
+        "several. Not the same as surface_area_mm2, which is the whole part.",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.2",
+    ),
+    Entry(
+        path="diameter_mm",
+        unit="mm",
+        summary="Diameter of a cylindrical face or a circular edge — the bore question. "
+        "Absent when the element is neither, which is an answer rather than a zero.",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.2",
+    ),
+    Entry(
+        path="radius_mm",
+        unit="mm",
+        summary="Radius of the same element diameter_mm describes. Both are reported "
+        "because a drawing calls out one and a fillet the other.",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.2",
+    ),
+    Entry(
+        path="position_mm",
+        unit="mm",
+        summary="Where a measured point, axis system or construction plane sits, as "
+        "[x, y, z].",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.2",
+        indexed=True,
+    ),
+    Entry(
+        path="normal",
+        unit="unit vector",
+        summary="Outward normal of a measured planar face, or the normal of a "
+        "construction plane, as [x, y, z].",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.2",
+        indexed=True,
     ),
 )
 
@@ -390,8 +452,16 @@ _DIAGNOSTIC_MARKERS: Final = (
 )
 
 
+#: Payload blocks that describe *what was measured* rather than a property of the part.
+#: `element.entity_count` says a selector matched two faces; it is part of the question,
+#: not part of the answer, and nobody writes a design assertion against it.
+_QUESTION_BLOCKS: Final = ("element.", "elements.", "elements[")
+
+
 def _is_diagnostic(path: str) -> bool:
     if path.startswith(("thickness_", "draft_", "curvature_", "continuity_", "undercut_")):
+        return True
+    if path.startswith(_QUESTION_BLOCKS):
         return True
     return any(path.endswith(marker) for marker in _DIAGNOSTIC_MARKERS)
 

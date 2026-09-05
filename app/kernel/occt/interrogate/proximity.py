@@ -24,7 +24,7 @@ a drawing needs to know which is which.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 from app.kernel.errors import GeometryError
 from app.kernel.interrogation import ClearanceReport
@@ -109,4 +109,66 @@ def minimum_distance_mm(first: Any, second: Any) -> float:
     return report.distance_mm
 
 
-__all__ = ["measure_clearance", "minimum_distance_mm"]
+def plane_separation(first: Any, second: Any) -> ClearanceReport:
+    """Distance between two unbounded construction planes.
+
+    Analytic rather than a shape search, because two planes have no bounded extent to
+    search over. Only the parallel case has a distance at all — non-parallel planes
+    intersect somewhere however far apart their origins are, so the honest answer is
+    zero, and the closest points are the infinitely many points of the intersection
+    line rather than a pair. Reporting a pair there would invent a location.
+
+    Overlap volume is refused rather than reported as zero: a plane bounds no volume, so
+    "do these clash" is not a question these two operands can answer.
+    """
+    require()
+
+    left, right = first.Direction(), second.Direction()
+    dot = abs(
+        left.X() * right.X() + left.Y() * right.Y() + left.Z() * right.Z()
+    )
+    parallel = dot >= 1.0 - _PLANE_PARALLEL_EPSILON
+
+    no_volume = (
+        "a construction plane bounds no volume, so an overlap between these two "
+        "elements is not a measurable quantity."
+    )
+    if not parallel:
+        return ClearanceReport(
+            distance_mm=0.0,
+            closest_points=None,
+            interference_unavailable=no_volume,
+        )
+
+    origin, other = first.Location(), second.Location()
+    offset = (other.X() - origin.X(), other.Y() - origin.Y(), other.Z() - origin.Z())
+    distance = abs(offset[0] * left.X() + offset[1] * left.Y() + offset[2] * left.Z())
+
+    # The closest pair on two parallel planes: the first plane's origin and its
+    # perpendicular projection onto the second. Any pair at that separation would do —
+    # this one is reproducible and lies on both planes' defining frames.
+    landing = (
+        origin.X() + left.X() * distance * _sign(offset, left),
+        origin.Y() + left.Y() * distance * _sign(offset, left),
+        origin.Z() + left.Z() * distance * _sign(offset, left),
+    )
+    return ClearanceReport(
+        distance_mm=distance,
+        closest_points=((origin.X(), origin.Y(), origin.Z()), landing),
+        interference_unavailable=no_volume,
+    )
+
+
+def _sign(offset: tuple[float, float, float], axis: Any) -> float:
+    """Which way along the normal the second plane lies. Zero offset counts as forward."""
+    along = offset[0] * axis.X() + offset[1] * axis.Y() + offset[2] * axis.Z()
+    return -1.0 if along < 0.0 else 1.0
+
+
+#: Dot-product threshold on unit normals below which two planes are treated as parallel.
+#: About 0.0008° — tighter than any modelling tolerance, because a plane's normal comes
+#: from an exact construction rather than from a tessellation.
+_PLANE_PARALLEL_EPSILON: Final = 1e-10
+
+
+__all__ = ["measure_clearance", "minimum_distance_mm", "plane_separation"]

@@ -706,6 +706,7 @@ class PartDocument:
             payload = self._weighed(dict(cached))
 
         payload["features"] = self.feature_names()
+        _note_if_in_pieces(payload)
         if self.material is not None:
             payload["material"] = self.material
         if len(self._bodies) > 1:
@@ -747,3 +748,39 @@ def _thread_key(face: Any) -> str:
 
 
 __all__ = ["DEFAULT_BODY", "OCAF_FORMAT", "Construction", "Feature", "PartDocument"]
+
+
+def _note_if_in_pieces(payload: dict[str, Any]) -> None:
+    """Say so, in words, when the part is not one connected solid.
+
+    `contract.py` has always described `solid_count` as *"more than one means the
+    operation left the part in pieces, which is usually a defect"* — and until
+    2026-09-06 nothing acted on that. Measured at gate G1 that night: asked for a
+    plate with a bore and four corner holes, the agent placed the four holes on a
+    20 mm radius, which is **inside** the 60 mm bore. Each little circle therefore
+    fell in the hole rather than in the material, and a profile that shares no area
+    with the region is a separate region — so they came back as four loose posts
+    standing in the bore, and the part was five disconnected solids.
+
+    Every number reported about it was correct. The volume was exactly
+    `330000 - 31102 + 4976`, the mass was 2.391 kg, and the mass was *within the
+    20 g tolerance the user asked for*, by coincidence, on a part that is not a
+    part. The agent reported success and nothing anywhere disagreed.
+
+    The mass of five disconnected solids is not the mass of a component — it is the
+    sum of unrelated things, and a caller who does not know that is being told
+    something false in a true number. So the payload says it. Not an exception:
+    a multi-solid result is legitimate for a deliberate multi-body design, and
+    refusing it would break those. But it is never *silent* again.
+    """
+    count = payload.get("solid_count")
+    if not isinstance(count, int) or count <= 1:
+        return
+    payload["in_pieces"] = True
+    payload["advisory"] = (
+        f"This part is {count} separate solids, not one connected body. Any mass, "
+        "volume or centre of mass below is the total over all of them, which is "
+        "not the same thing as a component's. If one part was intended, a profile "
+        "has almost certainly landed where there is no material to join it to — a "
+        "hole drawn inside another hole becomes a post rather than a hole."
+    )

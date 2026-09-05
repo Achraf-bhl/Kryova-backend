@@ -409,7 +409,7 @@ place and the stretch continues.
 
 | Gate | Opens after | What becomes true | What is driven at it |
 |---|---|---|---|
-| **G1** | **E6** — solver federation | the system can say a part *carries its load*, not only what shape it is. Until CalculiX answers, every structural claim is either the in-house linear-static component solver or nothing | rung 3 (carried over — measure-and-correct to a mass target), then a load-bearing prompt: build it, load it, tell me if it holds. Oracle check `ccx` vs `linear_static` on the same case |
+| **G1** *(run 2026-09-06, did not pass — rung 3 failed; see `docs/verification-2026-09-06/`)* | **E6** — solver federation | the system can say a part *carries its load*, not only what shape it is. Until CalculiX answers, every structural claim is either the in-house linear-static component solver or nothing | rung 3 (carried over — measure-and-correct to a mass target), then a load-bearing prompt: build it, load it, tell me if it holds. Oracle check `ccx` vs `linear_static` on the same case |
 | **G2** | **E11 + E12** | the input stops being a shape description and becomes a written requirement, with real materials and bought-in parts | rung 4 — two parts and a constraint, specified as a requirement rather than as dimensions |
 | **G3** | **E14 + E9** | assemblies with interface contracts, and motion — a thing with a range rather than a pose | rung 5 — a mechanism whose clearance must hold through its travel |
 | **G4** | **E17 (with 17.3)** | a package leaves the system that a manufacturer can act on: drawings, STEP, BOM | the package is produced and *read* — a drawing looked at, not a file counted |

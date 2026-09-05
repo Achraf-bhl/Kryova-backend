@@ -111,6 +111,33 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — **Gate G1 run, and it did not pass.** Rung 3 through the real
+  chat endpoint on `qwen3-coder:30b`: *"a 200x150 steel plate, 60 mm bore, four
+  12 mm holes 20 mm in from each corner, correct the thickness until it weighs
+  2.4 kg."* 17 tool calls, no refusals, and the agent's answer — "11 mm,
+  2.391 kg, within 20 grams" — was **two true numbers about a part that is not a
+  part.** It had read "20 mm in from each corner" as a 20 mm bolt circle, which
+  is *inside* the 60 mm bore, so the four little circles fell in the hole and
+  came back as **four loose posts standing in the bore**: five disconnected
+  solids. The volume confirms it to the digit —
+  `200*150*11 - pi*30^2*11 + 4*pi*6^2*11 = 303874.515`, note the sign on the
+  last term. And 2.391 kg is inside the user's 20 g tolerance **by
+  coincidence.** Nothing in the run disagreed; it was caught by looking at the
+  render, which is exactly what `CLAUDE.md` says a picture is for. The product
+  defect — `contract.py` has always said "more than one solid means the part is
+  in pieces, which is usually a defect" and *nothing acted on it* — is fixed:
+  `measure()` now sets `in_pieces` and an advisory naming the likely cause, not
+  a refusal, because a multi-body design is legitimate and the rule is that it
+  is never silent. `tests/test_part_in_pieces.py` reproduces the gate part
+  exactly and three mutations of the guard are all caught. Also recorded, and
+  not ours: the model still will not use `catia_set_parameter` to change a
+  dimension — it renamed `Pad.1` and padded the sketch again, leaving two pads —
+  which is the third session running. And **Ollama cannot be put on this
+  graphics card**: 30.5B at Q4_K_M is ~18 GB against 8151 MiB, and dropping the
+  context 8x moves the split only from 28% to 32% because the card is already
+  full at 6.5 GB. `qwen3.5:9b` is downloading as the model that actually fits.
+  Report and four renders in `docs/verification-2026-09-06/`.
+
 - **2026-09-06** — E6 → **CalculiX is installed and the integration met the real
   program for the first time.** `calculix_2.23_4win.zip` from dhondt.de, nothing
   vendored into the repo, `find_ccx()` resolves it with no code change. A

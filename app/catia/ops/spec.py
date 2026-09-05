@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Final
 
 from app.catia.ops import limits
 
@@ -214,6 +214,11 @@ class Operation:
 # no call site can forget it or contradict it.
 
 
+#: How many per-entity values one argument may carry. Matches `catia_fillet_edges`'
+#: `maxItems`, since both express the same thing: a hand-authored list of edge sizes.
+MAX_PER_ENTITY_VALUES: Final = 50
+
+
 def length(description: str, *, maximum: float = limits.MAX_LENGTH_MM) -> dict[str, Any]:
     """A strictly positive distance in millimetres."""
     return {
@@ -227,6 +232,36 @@ def length(description: str, *, maximum: float = limits.MAX_LENGTH_MM) -> dict[s
 def feature_length(description: str) -> dict[str, Any]:
     """A local dimension — radius, fillet, chamfer — on a tighter bound."""
     return length(description, maximum=limits.MAX_FEATURE_MM)
+
+
+def feature_length_per_entity(description: str) -> dict[str, Any]:
+    """A local dimension that may be given once, or once per selected entity.
+
+    Master plan 2.3 — per-entity parameters — is what makes "the four vertical edges at
+    2, 3, 4 and 5 mm" one call against a *predicate*, rather than four calls against four
+    edge ids that stop meaning anything the moment an upstream feature is inserted.
+
+    The backend has taken a list here since 2.3 landed (`_sizes_for` in the OCCT dress-up
+    module matches it against the resolution order `resolve()` guarantees, and refuses a
+    length mismatch rather than padding it). This declaration did not, which made the
+    capability unreachable from the design IR — that layer validates against the registry
+    before it compiles anything, so a spec asking for it was refused with "must be
+    number". Found by E2's Proof, which is the first thing to author a part through the
+    IR and the kernel together.
+    """
+    single = feature_length(description)
+    return {
+        **single,
+        "type": ["number", "array"],
+        "items": feature_length(f"{description} This entity's own value."),
+        "minItems": 1,
+        "maxItems": MAX_PER_ENTITY_VALUES,
+        "description": (
+            f"{description} Millimetres. One number applies to every selected entity; a "
+            "list gives one per entity, in selection order, and must be exactly as long "
+            "as the selection."
+        ),
+    }
 
 
 def thickness(description: str) -> dict[str, Any]:

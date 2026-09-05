@@ -5283,3 +5283,217 @@ class TestARunOfBoundary:
                     "name": "no",
                 },
             )
+
+
+class TestTheProofOfPhaseTwo:
+    """E2's Proof, run end to end — the first thing to author a part through the design
+    IR *and* the real kernel together.
+
+    > A part authored with every fillet radius different, each chosen by predicate; the
+    > design regenerates correctly after an upstream feature insertion changes every face
+    > id in the model.
+
+    Everything below the surface of that sentence had been tested and nothing had tested
+    the sentence. The vocabulary is checked operation by operation against a runner; the
+    IR is checked against an *injected* callable, offline, in under a second — both
+    deliberately, and both still worth keeping. But the claim the two make together is
+    the whole of Phase 2, and running it found **four** places where the layers were each
+    right and disagreed:
+
+    * `catia_fillet`'s `radius_mm` was declared a number, so the per-edge list the kernel
+      has taken since 2.3 was unreachable from a spec (`feature_length_per_entity` now);
+    * `catia_fillet`'s `feature` argument was **declared and silently dropped** — the
+      canonical bracket fixture in the design suite asks for it, and every vertical edge
+      on the part was being rounded (`_scoped_selector` now);
+    * a compiled design renames every feature to its own name, and `Document.feature`
+      looked up only the build name, so `feature#selector` — the whole of 2.2 — could not
+      see a design's names at all;
+    * the bare word `vertical` matches a vertical bore's **seam**, which is a fact about
+      the parameterisation and not an edge of the part. Not fixed here: `boss#vertical`
+      naming a cylinder's seam is how `catia_measure_item` reports a boss's height today,
+      so narrowing it is a vocabulary decision rather than a bug fix. The Proof uses the
+      feature-scoped form, which is unaffected and is what 2.2 exists for.
+
+    The arithmetic is closed-form throughout. Rounding a vertical corner of a prism
+    replaces a square post of side r with a quarter-cylinder, so each fillet removes
+    exactly `h·r²(1 − π/4)`, and the inserted pocket removes exactly `πr²d`.
+    """
+
+    WIDTH_MM = 60.0
+    DEPTH_MM = 40.0
+    THICK_MM = 20.0
+    RADII = (2.0, 3.0, 4.0, 5.0)
+    NOTCH_WIDTH_MM = 10.0
+    NOTCH_DEPTH_MM = 6.0
+
+    @classmethod
+    def _spec(cls, *, insert: bool) -> object:
+        """The design, with the upstream pocket present or absent. Nothing else differs."""
+        from app.design.params import Parameter, Unit
+        from app.design.spec import DesignSpec, FeatureSpec, expr, ref
+
+        features = [
+            FeatureSpec("plate.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "plate.outline",
+                "catia_sketch_rectangle",
+                {
+                    "sketch": ref("plate.profile"),
+                    "width_mm": expr("width_mm"),
+                    "height_mm": expr("depth_mm"),
+                },
+            ),
+            FeatureSpec(
+                "plate.body",
+                "catia_pad",
+                {"sketch": ref("plate.profile"), "length_mm": expr("thick_mm")},
+                note="The blank.",
+            ),
+        ]
+        if insert:
+            features += [
+                FeatureSpec("plate.window", "catia_sketch_create", {"support": "XY"}),
+                FeatureSpec(
+                    "plate.slot",
+                    "catia_sketch_rectangle",
+                    {
+                        "sketch": ref("plate.window"),
+                        "width_mm": expr("notch_mm"),
+                        "height_mm": expr("depth_mm * 2"),
+                    },
+                ),
+                FeatureSpec(
+                    "plate.groove",
+                    "catia_pocket",
+                    {"sketch": ref("plate.window"), "depth_mm": expr("cut_mm")},
+                    note="Inserted upstream of the corners. Renumbers every face.",
+                ),
+            ]
+        features.append(
+            FeatureSpec(
+                "plate.corners",
+                "catia_fillet",
+                {
+                    "feature": ref("plate.body"),
+                    "edges": "vertical",
+                    "radius_mm": list(cls.RADII),
+                },
+                note="One radius per corner, and the corners chosen by predicate.",
+            )
+        )
+        return DesignSpec.of(
+            "Proof",
+            material="aluminium-6061-t6",
+            parameters=[
+                Parameter("width_mm", Unit.MM, value=cls.WIDTH_MM),
+                Parameter("depth_mm", Unit.MM, value=cls.DEPTH_MM),
+                Parameter("thick_mm", Unit.MM, value=cls.THICK_MM),
+                Parameter("notch_mm", Unit.MM, value=cls.NOTCH_WIDTH_MM),
+                Parameter("cut_mm", Unit.MM, value=cls.NOTCH_DEPTH_MM),
+            ],
+            features=features,
+        )
+
+    @classmethod
+    def _built(cls, *, insert: bool) -> tuple[object, object]:
+        from app.design.compile import compile_spec
+        from app.design.execute import execute_plan
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        report = execute_plan(compile_spec(cls._spec(insert=insert)), runner)
+        assert report, f"the design did not build: {report.failure}"
+        return runner, report
+
+    @classmethod
+    def _expected_volume(cls, *, insert: bool) -> float:
+        blank = cls.WIDTH_MM * cls.DEPTH_MM * cls.THICK_MM
+        corners = cls.THICK_MM * sum(r * r for r in cls.RADII) * (1.0 - math.pi / 4.0)
+        notch = (
+            cls.NOTCH_WIDTH_MM * cls.DEPTH_MM * cls.NOTCH_DEPTH_MM if insert else 0.0
+        )
+        return blank - corners - notch
+
+    @staticmethod
+    def _fillet_radii(runner: object) -> list[float]:
+        return sorted(
+            round(face["diameter_mm"] / 2.0, 9)
+            for face in runner("catia_list_faces", {})["faces"]  # type: ignore[operator]
+            if face.get("diameter_mm")
+        )
+
+    def test_the_part_builds_to_the_closed_form_with_a_radius_per_corner(self) -> None:
+        """Four corners, four different radii, one call, chosen by predicate. If any edge
+        had taken the wrong radius the volume would be wrong, and if the radii had been
+        applied in a different order it would be wrong differently."""
+        runner, _ = self._built(insert=False)
+
+        assert runner("catia_measure", {})["volume_mm3"] == pytest.approx(  # type: ignore[operator]
+            self._expected_volume(insert=False), rel=1e-12
+        )
+        assert self._fillet_radii(runner) == list(self.RADII)
+
+    def test_the_insertion_really_does_renumber_the_model(self) -> None:
+        """The premise, measured rather than assumed. If the pocket left the topology
+        alone then the test below proves nothing, so this pins that the thing the design
+        has to survive actually happened: the part gains faces, and the edges the fillets
+        are chosen from sit at different positions in the topology than they did."""
+        positions = []
+        counts = []
+        for insert in (False, True):
+            runner, _ = self._built(insert=insert)
+            listed = runner("catia_list_faces", {})["faces"]  # type: ignore[operator]
+            counts.append(len(listed))
+            # Where the four rounded corners sit in the model's own face order. These are
+            # the faces the design produced; if the insertion left them where they were,
+            # a positional reference would have survived and this Proof would be proving
+            # nothing.
+            positions.append(
+                [
+                    at
+                    for at, face in enumerate(listed)
+                    if face.get("diameter_mm")
+                    and round(face["diameter_mm"] / 2.0, 9) in self.RADII
+                ]
+            )
+
+        assert len(positions[0]) == len(self.RADII)
+        assert len(positions[1]) == len(self.RADII)
+        assert counts[1] > counts[0]
+        assert positions[0] != positions[1]
+
+    def test_the_design_regenerates_correctly_across_that_insertion(self) -> None:
+        """**The Proof.** The same spec with one feature inserted ahead of the fillets,
+        recompiled and rebuilt from nothing. Every corner still carries the radius the
+        design gave it — so the volume is the blank, less the same four corners, less the
+        notch — and there is no fifth cylinder anywhere on the part.
+
+        Nothing in the fillet feature changed. What changed is everything it refers to.
+        """
+        runner, _ = self._built(insert=True)
+
+        assert runner("catia_measure", {})["volume_mm3"] == pytest.approx(  # type: ignore[operator]
+            self._expected_volume(insert=True), rel=1e-12
+        )
+        # Exactly the four the design asked for, and no others: a rectangular notch
+        # brings no cylinder of its own, so anything else here would be a fillet that
+        # landed somewhere it was not sent.
+        assert self._fillet_radii(runner) == list(self.RADII)
+
+    def test_the_feature_argument_actually_narrows_the_selection(self) -> None:
+        """The defect this Proof found, pinned. `feature` was declared and dropped, so
+        `catia_fillet(feature="plate.body", edges="vertical")` rounded every vertical edge
+        on the part — which is the same answer on a part with one feature, and the wrong
+        one on any part with two. On the finished part the unscoped word finds the notch's
+        vertical edges as well as the corners, so the four-radius list no longer matches —
+        and before this was fixed, the design's own call was being answered that way."""
+        from app.kernel import OcctRunner
+
+        runner, _ = self._built(insert=True)
+        assert isinstance(runner, OcctRunner)
+
+        with pytest.raises(GeometryError, match="must match the selection exactly"):
+            runner(  # type: ignore[operator]
+                "catia_fillet",
+                {"edges": "vertical", "radius_mm": list(self.RADII), "name": "unscoped"},
+            )

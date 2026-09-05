@@ -23,7 +23,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, Final
 
-from app.kernel.errors import MeasurementError
 from app.kernel.occt.binding import require, symbol
 
 #: OCCT shape kinds this package walks, in the spelling `TopAbs_ShapeEnum` uses.
@@ -194,26 +193,19 @@ def endpoints(edge: Any) -> list[tuple[float, float, float]]:
 def shape_list(topo_list: Any) -> list[Any]:
     """`TopTools_ListOfShape` → python list.
 
-    The binding exposes `First`/`Last`/`Extent` but no iterator, so a list longer than
-    two is not reachable through this API. Every caller here asks about one operation's
-    Modified/Generated result for one sub-shape, where the count is 0 or 1 in practice.
-    The limit is *stated and enforced* rather than assumed: a longer list raises instead
-    of silently dropping the middle, which would corrupt a naming history in a way that
-    only shows up as a name resolving to the wrong face much later.
+    **This used to refuse a list longer than two**, on the belief that OCP exposed only
+    `First`/`Last`/`Extent`. It raised rather than dropping the middle — the right call
+    for an unknown, since a silently shortened naming history resolves to the wrong face
+    much later and nothing points back here — but the belief was wrong: OCP's binding
+    does implement `__iter__` and `__len__` on this list.
+
+    It went unnoticed because the callers here ask for one operation's Modified/Generated
+    result for one sub-shape, which is 0 or 1 entries on everything the suite built.
+    A pocket that cuts a slot **through** a part is the ordinary case that is not: one
+    face of the blank becomes five, the refusal fired, and a plain notch was unbuildable.
+    Found by E2's Proof.
     """
-    extent = topo_list.Extent()
-    if extent == 0:
-        return []
-    if extent == 1:
-        return [topo_list.First()]
-    if extent == 2:
-        return [topo_list.First(), topo_list.Last()]
-    raise MeasurementError(
-        f"An OCCT shape list holds {extent} entries and this binding exposes only "
-        "First/Last, so the middle would be silently lost. Widen "
-        "app/kernel/occt/topology.shape_list with a real iterator before relying on an "
-        "operation that returns this many results."
-    )
+    return list(topo_list)
 
 
 __all__ = [

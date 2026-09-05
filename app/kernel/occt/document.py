@@ -272,16 +272,36 @@ class PartDocument:
         return len(self._features)
 
     def feature(self, name: str) -> Feature:
-        try:
-            return self._by_name[name]
-        except KeyError:
-            known = ", ".join(f.name for f in self._features) or "nothing yet"
-            raise NamingError(
-                f"No feature called {name!r} in {self.name}. Built so far: {known}."
-            ) from None
+        """A feature by the name it was built under, or by the one it was renamed to.
+
+        **Both, because a compiled design uses the second.** `catia_feature_rename` sets
+        `catia_style_name` — it is what an operation that cannot be named on creation gets
+        called afterwards, and the design IR emits one after every such operation, so by
+        the time a spec's fillet says `feature: plate_body` the pad is filed under `pad`
+        and *called* `plate_body`. Looking up only the build name made `feature#selector`
+        — the whole of master plan 2.2 — unreachable from an authored design, while
+        working perfectly in every test that drove the kernel directly. Found by E2's
+        Proof; the two layers were each right and disagreed.
+
+        The build name wins on a collision, and a collision is possible: nothing stops a
+        design renaming one feature to another's build name. Preferring the build name
+        keeps the answer stable, since that one never changes.
+        """
+        found = self._by_name.get(name)
+        if found is not None:
+            return found
+        for feature in self._features:
+            if feature.catia_style_name == name:
+                return feature
+        known = ", ".join(self.feature_names()) or "nothing yet"
+        raise NamingError(
+            f"No feature called {name!r} in {self.name}. Built so far: {known}."
+        )
 
     def has_feature(self, name: str) -> bool:
-        return name in self._by_name
+        return name in self._by_name or any(
+            feature.catia_style_name == name for feature in self._features
+        )
 
     def feature_labels(self) -> list[Any]:
         """Every label the current generation wrote — what `NameRegistry.resolve` needs."""

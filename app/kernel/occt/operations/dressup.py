@@ -33,7 +33,7 @@ from app.kernel.occt.operations.context import (
     build_or_raise,
     feature_name,
 )
-from app.kernel.occt.selectors import select_edges, select_faces
+from app.kernel.occt.selectors import SUB_ENTITY_MARK, select_edges, select_faces
 from app.kernel.occt.topology import edges, faces, has_solid
 
 FILLET = "catia_fillet"
@@ -121,7 +121,9 @@ def _dress_up(
             "length_mm"
         )
 
-    selected = select_edges(source, arguments.get("edges"), tool=tool, document=document)
+    selected = select_edges(
+        source, _scoped_selector(arguments, tool=tool), tool=tool, document=document
+    )
     if not selected:
         raise GeometryError(
             f"{tool} matched no edges on this shape. The selector "
@@ -158,6 +160,46 @@ def _dress_up(
         generated=generated,
     )
     return context.result_for(feature)
+
+
+def _scoped_selector(arguments: Mapping[str, Any], *, tool: str) -> Any:
+    """`edges`, narrowed to `feature` when one was named.
+
+    **`feature` was declared and silently dropped**, which is the worst shape a bug can
+    take here: `catia_fillet(feature="boss", edges="vertical")` rounded every vertical
+    edge on the part, reported success, and produced a part that looks plausible in a
+    screenshot. The design suite's own bracket fixture is written that way, so the
+    canonical example of the vocabulary was relying on an argument nothing read. Found by
+    E2's Proof — the first thing to author a part through the design IR and the kernel
+    together, which is exactly where two layers that each look right disagree.
+
+    The two spellings mean the same thing and compose to the same predicate: naming
+    `feature` alongside a word is `feature#word`, and alongside a predicate it sets `of`.
+    Giving both a `feature` and an `edges` that already carries a `#` is refused rather
+    than resolved by precedence — two answers to "whose edges" is not a question this
+    should be picking a winner for.
+    """
+    selector = arguments.get("edges")
+    scope = arguments.get("feature")
+    if not scope:
+        return selector
+
+    if isinstance(selector, Mapping):
+        if selector.get("of") not in (None, scope):
+            raise GeometryError(
+                f"{tool} was given feature={scope!r} and a predicate that already names "
+                f"of={selector.get('of')!r}. Those are two answers to whose edges these "
+                "are — give one."
+            )
+        return {**selector, "of": scope}
+
+    word = str(selector or "all").strip()
+    if SUB_ENTITY_MARK in word:
+        raise GeometryError(
+            f"{tool} was given feature={scope!r} and edges={word!r}, which already names "
+            "a feature of its own. Give one or the other."
+        )
+    return f"{scope}{SUB_ENTITY_MARK}{word}"
 
 
 def _sizes_for(raw: Any, count: int, *, tool: str, argument: str) -> list[float]:

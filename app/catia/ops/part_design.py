@@ -31,6 +31,7 @@ from app.catia.ops.spec import (
     direction3,
     distance,
     feature_length,
+    feature_length_per_entity,
     flag,
     length,
     name_list,
@@ -183,14 +184,16 @@ OPERATIONS: tuple[Operation, ...] = (
         summary=(
             "Round edges of the part by a group name — all of them, or the vertical, "
             "horizontal, top or bottom ones.\n"
-            "Convenient when the intent really is 'break all the sharp edges'. For a "
-            "specific edge or a per-edge radius use catia_list_edges then "
-            "catia_fillet_edges."
+            "Convenient when the intent really is 'break all the sharp edges' — and "
+            "radius_mm may be a list, one per selected edge in selection order, which is "
+            "how 'the four vertical corners at 2, 3, 4 and 5 mm' is said against a "
+            "predicate. Use catia_fillet_edges instead when the edges have to be named "
+            "individually by id."
         ),
         tier=Tier.WRITE,
         workbench=_WB,
         params=(
-            required("radius_mm", feature_length("Radius to round to.")),
+            required("radius_mm", feature_length_per_entity("Radius to round to.")),
             optional("feature", vocab.element_reference("Restrict to edges of this feature.")),
             optional("edges", one_of(vocab.EDGE_SELECTORS, "Which group of edges. Default all.")),
             optional(
@@ -203,13 +206,14 @@ OPERATIONS: tuple[Operation, ...] = (
         name="catia_chamfer",
         summary=(
             "Bevel edges of the part by a group name.\n"
-            "Same selection vocabulary as catia_fillet. A chamfer is usually the right "
-            "edge break on a machined part where a fillet would need a form tool."
+            "Same selection vocabulary as catia_fillet, list of per-edge sizes included. "
+            "A chamfer is usually the right edge break on a machined part where a fillet "
+            "would need a form tool."
         ),
         tier=Tier.WRITE,
         workbench=_WB,
         params=(
-            required("length_mm", feature_length("Length of the bevel.")),
+            required("length_mm", feature_length_per_entity("Length of the bevel.")),
             optional("angle_deg", tilt("Angle of the bevel. Default 45.")),
             optional("feature", vocab.element_reference("Restrict to edges of this feature.")),
             optional("edges", one_of(vocab.EDGE_SELECTORS, "Which group of edges. Default all.")),

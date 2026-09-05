@@ -15,88 +15,39 @@ happened.
 
 ## Now
 
-**E2 — Selection & authoring vocabulary.** 2.1–2.5 are done and **2.6 is all but
-finished**: a surface is a thing the document holds, the GSD operations build, cut, steer,
-extend and consume one, all three crossings back into material work, and the wireframe
-curve family is complete. The decision recorded here on 2026-09-05 — defer 2.6 or build it
-— was answered by building the half that everything else in the phase was waiting on, and
-then the rest of it.
+**E4 — Visual verification.** Nothing started. E3's OCCT side is complete, so the
+measurement vocabulary a visual check would assert against already exists.
 
-**Every capability 2.6 owed is now built.** What stands between here and `*E2` is not an
-operation — it is the phase's own **Proof**, and it has never been written:
+**E2 closed on 2026-09-05** — `*E2`, Proof green. Its capability list and its Proof are
+both done; what remains under it are refusals with stated reasons, each raised where it
+happens, none of which block the star:
 
-- **E2's Proof: "a part authored with every fillet radius different, each chosen by
-  predicate; the design regenerates correctly after an upstream feature insertion changes
-  every face id in the model."** Nothing in `tests/` does this. The vocabulary is tested
-  operation by operation (`tests/test_kernel.py`, `tests/test_reference_geometry.py`) and
-  the design IR is tested against an *injected* callable, offline, in under a second
-  (`tests/test_design_execute.py`) — deliberately, and it is worth keeping that way. But
-  the claim the two make **together** is the entire point of the phase: that a design
-  written against predicates survives a change that renumbers everything it referred to.
-  No test drives a `DesignSpec` through the real `OcctRunner` at all, so that claim is
-  currently made by the board and by nothing else. Marking `*E2` without it would be
-  exactly the thing `CLAUDE.md` forbids — `DONE` requires the Proof running green.
+- OCCT's own limits: `continuity='curvature'` on a fill (`BRepFill_Filling` answers "the
+  continuity is not G0 G1 or G2"), a loft `closed` along a spine, more than one guide;
+- `catia_extrapolate` on a freeform face (OCCT's `ExtendSurfByLength` is inert through
+  these bindings) and with `up_to` (an iterative solve — extend generously and cut back
+  with `catia_split`);
+- `catia_draft` in reflect-line mode: the silhouette exists, but OCCT's draft takes a
+  neutral *plane* where the mode pivots about a curve on the face, so it means building a
+  ruled surface and replacing the face — surfacing work, not an argument;
+- a reflect line at an angle other than 90° (the iso-angle contour is marched face by face
+  and comes back sampled);
+- a thin-walled `catia_rib`/`catia_slot`, `control="reference_surface"` on a swept
+  feature, and the surface half of `catia_thickness`.
 
-`catia_extrapolate` landed 2026-09-05, and **the approach this file recommended for it was
-wrong** — worth leaving written down rather than quietly correcting.
-`GeomLib::ExtendCurveToPoint` and `ExtendSurfByLength` are OCCT's own answer to that job
-and **do nothing through these bindings**: each takes the geometry as `Handle(Geom_...)&`
-and reassigns it, and OCP passes handles by value, so the extension is built and dropped.
-No exception, no return value, bounds and poles and type identical afterwards. A test
-measures that rather than trusting the note. What runs instead is widening the parameter
-range, exact wherever the basis has geometry outside its range, and building the extension
-from the end's own derivatives where it does not.
+**One vocabulary decision is open and deliberately unmade**: the bare word `vertical`
+matches a vertical bore's **seam**. A seam is a fact about the parameterisation — nothing
+meets there and OCCT will not fillet it — so a design that rounds "the vertical edges"
+gains an edge the day somebody drills a hole. But `boss#vertical` naming a cylinder's seam
+is how `catia_measure_item` reports a boss's height today, and seven tests rest on
+behaviour around it. Narrowing the word is a decision about what the vocabulary *means*,
+not a bug fix, and it wants making on purpose rather than in passing.
 
-Still refused, each with a reason raised where it happens:
-
-- each of these is OCCT's own limit or a construction not built here: a loft `closed` along
-  a spine (closure belongs to the section loft), more than one guide (the sweep takes one),
-  `continuity='curvature'` on a fill (`BRepFill_Filling` answers "the continuity is not G0
-  G1 or G2" and builds nothing);
-- **`catia_extrapolate` on a freeform face**, refused with the binding fact above rather
-  than with "not implemented" — a BSpline surface has nothing outside its knot range to
-  widen into, and OCCT's extender is inert here. Rebuilding the surface larger or lofting
-  a strip onto its edge are the two answers that do work;
-- **`catia_extrapolate` with `up_to`** — extending until the result reaches another
-  element is an iterative solve, because the intersection decides how far to go and the
-  extension moves the intersection. Extending generously and cutting back with
-  `catia_split` is the same answer and every step of it is exact;
-- **a reflect line at an angle other than 90°** — the silhouette is exact and shipped;
-  the iso-angle contour has to be marched face by face and would come back sampled, which
-  this kernel will not report as a constructed curve without saying so. Everything else in
-  the wireframe family is done as of 2026-09-05: the drawn curves (helix, circle, polyline
-  with rounded corners, spline, spiral), the derived ones (section, intersection, extremum,
-  project, parallel, offset_3d, combine, corner, connect, reflect_line), the anchors
-  (`catia_point_{on_curve,on_surface,centre}`, `catia_line_{between,direction,normal,
-  tangent}`) and the planes (`catia_plane_{normal_to_curve,tangent_to_surface,mean}`,
-  `catia_planes_between`);
-- `catia_draft` in `reflect_line` mode — **no longer blocked on the silhouette**, which
-  shipped 2026-09-05. OCCT's draft takes a neutral *plane* and this mode pivots about a
-  curve lying on the face, so it means building the ruled surface that leaves that
-  curve at the draft angle and replacing the face: surfacing work, not an argument;
-- a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs the profile offset into two
-  walls and the inner sweep subtracted from the outer — `catia_curve_parallel` supplies
-  the offset now, so what is left is the sweeping and the cut);
-- `control="reference_surface"` on a swept feature (OCCT takes a surface as a sweep
-  reference only when every spine edge already lies on one of its faces, so the spine must
-  be *derived from* the surface);
-- the surface half of `catia_thickness` (offsetting a curved face rather than sweeping a
-  planar one along its normal).
-
-Seven of those reasons have been **corrected** rather than inherited: `up_to_surface`,
-`thick=true` and `reference_surface` all said they were waiting for constructed surfaces,
-which now exist; `thick=true` and `catia_curve_spline(support=)` were corrected again once
-`catia_curve_parallel` and `catia_curve_project` landed; `catia_draft` in reflect-line mode
-stopped being blocked on the silhouette the day it shipped; and on 2026-09-05
-`catia_boundary`'s `limit_from`/`limit_to` stopped saying "once catia_split lands", which
-split had already done. A stale "blocked on X" outlives X and sends the next reader to
-rebuild something that is already there — which is exactly what this file's own note on
-`catia_extrapolate` did, pointing at two OCCT functions that turn out to be inert through
-these bindings. Correcting them is not bookkeeping; it is the difference between a queue
-and a list of rumours.
-
-Hardware-blocked and **not** counted against the star: the CATIA-seat halves of E1's and
-E3's conformance runs need a Windows seat.
+**Testing moves to the Windows seat.** The user has a Windows machine with CATIA and the
+bridge, and asked (2026-09-05) that the suites be run there against the real application
+rather than repeatedly here. Offline work continues to be written to be testable; the
+verification pass happens on the seat. That also unblocks the two things this machine
+never could do — the CATIA-seat halves of E1's and E3's conformance runs.
 
 ## Next
 
@@ -108,6 +59,27 @@ measurement vocabulary a visual check would assert against already exists.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — **`*E2` — the phase Proof, written and green.** A 60×40×20 plate whose
+  four vertical corners carry 2, 3, 4 and 5 mm — one call, edges chosen by predicate,
+  radii matched to the selection order — compiled from a `DesignSpec` and run through the
+  real `OcctRunner`; then the *same spec* with a through-notch inserted ahead of the
+  fillets, recompiled and rebuilt from nothing. Volume exact against
+  `blank − Σh·r²(1−π/4) − notch` both times; the corners come back with the radii the
+  design gave them. The renumbering is measured rather than assumed — the plate's vertical
+  edges move from 0, 1, 4, 7 to 5, 7, 19, 23 and the design still finds them.
+  **Running it found four disagreements between layers that were each right alone**, none
+  of which any existing test could see: `catia_fillet.radius_mm` declared a number so the
+  kernel's per-edge list was unreachable from a spec (`feature_length_per_entity`);
+  `catia_fillet.feature` **declared and silently dropped**, so the design suite's own
+  bracket fixture was rounding every vertical edge on the part and reporting success
+  (`_scoped_selector`); `Document.feature` looking up only the build name while a compiled
+  design renames everything to its own, which made `feature#selector` invisible to an
+  authored part; and `topology.shape_list` refusing any list longer than two on the belief
+  that OCP had no iterator — it does, and a slot cut *through* a part turns one face into
+  five, so an ordinary notch was unbuildable. Left deliberately unmade: whether the bare
+  word `vertical` should stop matching a cylinder's seam. 2021 offline tests green, ruff
+  clean, mypy clean.
 
 - **2026-09-05** — E2 → **2.6's last capability: a run of boundary**. `catia_boundary`
   takes `limit_from` (where the run starts — an element, and the boundary edge nearest it

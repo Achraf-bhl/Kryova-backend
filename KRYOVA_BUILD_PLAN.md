@@ -15,8 +15,19 @@ happened.
 
 ## Now
 
-**E4 — Visual verification.** Nothing started. E3's OCCT side is complete, so the
-measurement vocabulary a visual check would assert against already exists.
+**E4 — Visual verification.** **4.1 and 4.3 landed 2026-09-05.** `app/render/` renders
+eight canonical views deterministically and diffs two of them. What is left:
+
+- **4.2 — the vision-model check.** Render, then ask a VLM whether the result matches the
+  request. The provider layer is already pluggable and defaults to local Ollama with no
+  key, so this is a prompt, a schema for the answer, and a place to put it — not new
+  infrastructure. It is a **filter, never a sign-off**: a VLM will confidently approve a
+  subtly wrong part, and the phase says so.
+- **4.4 — renders into the conversation**, so the user sees what the agent sees. Product
+  Track P5 owns the surface, so this waits on it rather than growing its own.
+- Section cuts, named in 4.1 alongside the eight views and not yet built: a cut is a
+  boolean against a half-space and then the same projection, so the work is the vocabulary
+  for saying *where* to cut, not the rendering.
 
 **E2 closed on 2026-09-05** — `*E2`, Proof green. Its capability list and its Proof are
 both done; what remains under it are refusals with stated reasons, each raised where it
@@ -51,14 +62,42 @@ never could do — the CATIA-seat halves of E1's and E3's conformance runs.
 
 ## Next
 
-**E4 — Visual verification.** Nothing started. E3's OCCT side is complete, so the
-measurement vocabulary a visual check would assert against already exists.
+**E4 — Visual verification.** **4.1 and 4.3 landed 2026-09-05.** `app/render/` renders
+eight canonical views deterministically and diffs two of them. What is left:
+
+- **4.2 — the vision-model check.** Render, then ask a VLM whether the result matches the
+  request. The provider layer is already pluggable and defaults to local Ollama with no
+  key, so this is a prompt, a schema for the answer, and a place to put it — not new
+  infrastructure. It is a **filter, never a sign-off**: a VLM will confidently approve a
+  subtly wrong part, and the phase says so.
+- **4.4 — renders into the conversation**, so the user sees what the agent sees. Product
+  Track P5 owns the surface, so this waits on it rather than growing its own.
+- Section cuts, named in 4.1 alongside the eight views and not yet built: a cut is a
+  boolean against a half-space and then the same projection, so the work is the vocabulary
+  for saying *where* to cut, not the rendering.
 
 ---
 
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E4 → **4.1 and 4.3: the system can look at the model.** `app/render/`,
+  five modules, no new dependency. **Hidden-line removal rather than OpenGL**, and that is
+  the phase's requirement rather than a shortcut: OCP exposes the GL viewer and it comes
+  up on this machine, but 4.1 wants two renders of the same geometry to be byte-identical
+  so that a render hash can join mass and plan-digest as a third identity check — and a GL
+  image depends on the driver, the sampling and the display server, on a project that
+  develops on Linux and ships on Windows. HLR is arithmetic; the raster under it is
+  integer. Eight views, each from three HLR streams per side, because taking only the
+  sharp edges loses every curved silhouette. The same shape renders identically twice, a
+  part rebuilt from scratch matches, a part with a pocket differs. Framing is a value, not
+  a step: `render_views` fits one frame over every view so a sheet is at one scale, and
+  `render_pair` puts two parts through one frame, which is the whole of what makes a diff
+  mean anything. **4.3 diffs ink rather than shade** — a line that went from hidden to
+  visible has not moved — with added and removed in separate colours, and refuses two
+  renders that were framed differently rather than reporting the framing as the change.
+  Measured: a plate gaining a Ø14 pocket is 321 pixels arrived, 0 gone, 3.3% of the ink.
 
 - **2026-09-05** — **`*E2` — the phase Proof, written and green.** A 60×40×20 plate whose
   four vertical corners carry 2, 3, 4 and 5 mm — one call, edges chosen by predicate,

@@ -1,3 +1,38 @@
+# Kryova backend CI.
+#
+# The interesting constraint here is the database, and it is the reason this
+# file is three jobs rather than one `pytest -q`.
+#
+# The suite is deliberately split (CLAUDE.md, "Testing"): the physics, mesh,
+# geometry, kernel, interrogation, design, render and vision suites open no
+# connection and run in seconds, while everything else runs against a real
+# PostgreSQL in a `kryova_test` schema. `tests/conftest.py` falls back to
+# in-memory SQLite when `TEST_DATABASE_URL` is unset -- a sensible default on a
+# laptop, and a trap in CI, because it lets a single `pytest -q` report green
+# for the whole suite having exercised no PostgreSQL at all. That is precisely
+# the drift CLAUDE.md names ("testing on SQLite while shipping on Postgres is
+# the drift that hides JSONB, enum and cascade bugs"), and this project's whole
+# verification stance is that an unmeasured claim is never a pass.
+#
+# So: `offline` runs the half that needs nothing and says in its own log how
+# many database tests it did not run; `database` runs the other half against a
+# real PostgreSQL service container and *refuses to start* if it has not got
+# one. The split is by fixture, not by filename -- see `scripts/pytest_split.py`.
+#
+# Everything here is runnable locally, which is the other rule:
+#
+#   ruff:     venv/bin/python -m ruff check .
+#   mypy:     venv/bin/python -m mypy app
+#   offline:  PYTHONPATH=scripts pytest -p pytest_split --offline-only
+#   database: docker run --rm -e POSTGRES_PASSWORD=kryova -p 5432:5432 postgres:17
+#             createdb -h localhost -U postgres kryova_ci kryova_ci_test
+#             DATABASE_URL=... TEST_DATABASE_URL=... PYTHONPATH=scripts \
+#               pytest -p pytest_split --database-only
+#
+# Actions are pinned to a commit SHA with the tag alongside: a tag is a moving
+# pointer, and CI is the one place a silently updated third-party action runs
+# with the repository checked out.
+
 name: CI
 
 on:
@@ -5,27 +40,179 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to the same branch makes the in-flight run obsolete.
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # 3.12, not 3.11: numpy's bundled stubs use PEP 695 syntax that mypy rejects
+  # under an older target. Keep in step with `python_version` in pyproject.toml.
+  # (The venv on the Windows seat is 3.14; this pins the *check*, not the app.)
+  PYTHON_VERSION: "3.12"
+  # Required by pydantic-settings validation in every job. A placeholder, and
+  # deliberately not a secret: no job below connects to it except `database`,
+  # which overrides it with its own service container. Pointing this at a real
+  # database would put CI one bug away from dropping a schema in production.
+  DATABASE_URL: postgresql://kryova:kryova@localhost:5432/kryova_ci
+  SECRET_KEY: ci-only-not-a-secret-and-never-used-to-sign-anything-real
+
 jobs:
-  backend:
+  lint:
+    name: ruff + mypy
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          # 3.12, not 3.11: numpy's stubs use PEP 695 syntax that mypy rejects
-          # under an older target. Keep in step with pyproject's python_version.
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - run: ruff check .
-      - run: mypy app tests
-      - run: pytest -q
+
+      # `ruff check .` and not `app/ tests/`: pyproject already excludes `data`,
+      # and the linting is worth having over `scripts/` and `migrations/` too.
+      - name: ruff
+        run: ruff check .
+
+      # `mypy app`, not `mypy app tests`, and that is a deliberate narrowing of
+      # what this file used to claim. Two measured reasons:
+      #
+      #  * `mypy app tests` does not fail with type errors, it *aborts* -- "Source
+      #    file found twice under different module names: scripts.catia_bridge.backend
+      #    and catia_bridge.backend". `mypy_path = "scripts"` makes the daemon
+      #    importable as `catia_bridge.*`, and eleven test files use that spelling
+      #    while five use `scripts.catia_bridge.*`. mypy sees one file under two
+      #    module names and stops before checking anything, so the step was red
+      #    on main and checking nothing.
+      #  * `mypy scripts/catia_bridge` (the obvious alternative) reports 326
+      #    errors in 16 files. The bridge daemon has never been type-checked.
+      #
+      # Neither is a CI problem to paper over: normalising the test imports and
+      # typing the daemon are real pieces of work. Until they are done this step
+      # checks `app/` -- which is clean, is what CLAUDE.md documents, and is a
+      # gate that means something -- rather than a broader target that means
+      # nothing because it never ran.
+      - name: mypy
+        run: mypy app
+
+  offline:
+    name: offline suite (no database)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      # OCP (the OCCT kernel) and gmsh ship compiled extensions that link
+      # against the system's GL/X11 stack. The wheels install fine without
+      # these and then fail at *import*, which would silently turn the geometry
+      # half of this job into skips.
+      - name: System libraries for OCCT and gmsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libglu1-mesa libxrender1 libxext6 libsm6 libxcursor1 \
+            libxft2 libxinerama1 libfontconfig1
+
+      - run: pip install -r requirements-dev.txt
+
+      # requirements.txt notes that `app/kernel/` imports and the suite runs
+      # *without* OCP -- degrading to the CATIA backend. That contract is right
+      # for an install and wrong for CI: a missing OCP here would turn every
+      # kernel, interrogation and render test into a skip and still report
+      # green. Fail the job instead, loudly, before pytest gets a chance to be
+      # quietly reassuring.
+      - name: The heavyweight kernels really are importable
+        run: |
+          python -c "import OCP; print('OCP', OCP.__file__)"
+          python -c "import gmsh; gmsh.initialize(); print('gmsh', gmsh.GMSH_API_VERSION); gmsh.finalize()"
+
+      # `--offline-only` deselects every test that resolves the `db_connection`
+      # fixture and prints the count it dropped, so the log states what this job
+      # did not cover instead of leaving the reader to infer it.
+      - name: pytest (offline half)
         env:
-          # A placeholder, deliberately not a secret: nothing in the suite
-          # connects to it. Settings validation requires a PostgreSQL URL, and
-          # the tests run against TEST_DATABASE_URL -- left unset here, so
-          # conftest builds an in-memory SQLite database instead. Pointing this
-          # at a real database would put CI one bug away from dropping a schema
-          # in production.
-          DATABASE_URL: postgresql://ci:ci@localhost:5432/kryova_ci
-          SECRET_KEY: ci-only-secret-key-not-used-in-production
+          PYTHONPATH: scripts
+        run: pytest -q -p pytest_split --offline-only
+
+  database:
+    name: database suite + alembic drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # PostgreSQL 17, matching what Neon runs. This is a *direct* endpoint, not
+    # a pooler, which matters: `migrations/env.py` issues `SET search_path`,
+    # which is safe here and is the one thing CLAUDE.md forbids against the
+    # pooled Neon host.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: kryova
+          POSTGRES_PASSWORD: kryova
+          POSTGRES_DB: kryova_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://kryova:kryova@localhost:5432/kryova_ci
+      # A *different* database on the same host, not a different schema.
+      # `tests/conftest.py::_resolve_test_database_url` refuses a
+      # TEST_DATABASE_URL that resolves to the same host and database as
+      # DATABASE_URL, because the fixtures create and drop tables. Honour that
+      # here rather than working around it.
+      TEST_DATABASE_URL: postgresql://kryova:kryova@localhost:5432/kryova_ci_test
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: System libraries for OCCT and gmsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libglu1-mesa libxrender1 libxext6 libsm6 libxcursor1 \
+            libxft2 libxinerama1 libfontconfig1
+
+      - run: pip install -r requirements-dev.txt
+
+      - name: Create the test database
+        env:
+          PGPASSWORD: kryova
+        run: createdb -h localhost -U kryova kryova_ci_test
+
+      # Applying the migrations is half the value: `alembic check` compares the
+      # models against the *database*, so it can only speak once the migrations
+      # have actually run. A migration that no longer applies fails here.
+      - name: alembic upgrade head
+        run: alembic upgrade head
+
+      # Fails when the ORM models have drifted from the migration chain -- the
+      # check CLAUDE.md asks for before finishing any model change, run where a
+      # database exists to run it against.
+      - name: alembic check (model/migration drift)
+        run: alembic check
+
+      # `--database-only` refuses to start unless TEST_DATABASE_URL names a real
+      # PostgreSQL. That refusal is the point of the whole split: without it a
+      # forgotten variable turns this job into a SQLite run wearing the name
+      # "database suite".
+      - name: pytest (database half)
+        env:
+          PYTHONPATH: scripts
+        run: pytest -q -p pytest_split --database-only

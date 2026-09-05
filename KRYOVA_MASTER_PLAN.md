@@ -11,8 +11,12 @@ gap, and records four defects that investigation of the actual code surfaced mea
 
 1. **Auth is single-device by design accident.** `users.refresh_token_hash` is one column on the
    user row — a second login invalidates the first device's session silently. Fixed in P1.
-2. **The frontend has no CI at all.** 237 tests, clean lint and types — and nothing runs them on
-   push (`.github/` does not exist in that repo). Fixed in P9.
+2. ~~**The frontend has no CI at all.**~~ **Wrong as written, corrected 2026-09-06.** The
+   frontend *does* have `.github/workflows/ci.yml`, added 2026-08-29, and it already ran lint,
+   `tsc`, vitest and the build on every push. The real gap was in this repo: the **backend**
+   workflow ran the whole suite with `TEST_DATABASE_URL` unset, which `tests/conftest.py`
+   silently answers with in-memory SQLite — so one green tick stood for a Postgres suite that
+   had never touched Postgres. Both are addressed in P9; see that row.
 3. **`SECRET_KEY` defaults to `"changeme"` and the server starts anyway.** Already listed as a
    landmine in CLAUDE.md; now owned by P1 with a startup refusal.
 4. **`pythonocc-core`'s coverage of OCCT's OCAF/TNaming layers is not confirmed by its docs.**
@@ -364,7 +368,7 @@ follow-up that can be forgotten. Rules:
 | E17 | Manufacturing output | not started | |
 | E17.3 | Sheet metal (pulled forward to Era IV) | not started | tracked separately by the sequencing exception |
 | E18 | Machine missions M1–M8 | partial — **the harness exists and M1 is green (2026-09-05, via 5.4)**; M2–M9 declared and PENDING | `app/design/missions.py` `LADDER`, `tests/test_design_missions.py`. M1 builds on the real kernel and holds eight closed-form claims. The other eight rungs are declared with the phase that owns each gap, counted in every summary, and never reported as passes — so coverage is measured (1/9) rather than asserted. Each new rung lands by giving its `Mission` a spec and assertions. |
-| P1 | Identity, sessions, token rotation | not started | defect recorded: single `refresh_token_hash` per user |
+| P1 | Identity, sessions, token rotation | **partial — P1.1, P1.2 and P1.4 DONE (2026-09-06); P1.3's backend DONE, its UI open; P1.5–P1.8 not started.** The recorded defect is fixed: `refresh_token_hash` held one slot per *user*, so a second device silently ended the first and a stolen token and the real one wrote to the same slot — whoever refreshed last won, and nothing noticed a token had been used twice. Now a row per device family, rotation per use, and a replay outside a 10 s race window revokes the whole family | `app/models/session.py`, `app/core/sessions.py`, `tests/test_auth_sessions.py` (39 tests; 8 mutations run against the guards, 8 caught — the two that first escaped are recorded in the build plan) |
 | P2 | Orgs, roles, RLS tenancy | not started | |
 | P3 | Admin panel & audit log | not started | |
 | P4 | File attachments & understanding | partial — chunked upload + content-addressed store exist | `app/media/`, frontend `chunked-upload.ts`; extraction/injection-boundary not started |
@@ -372,7 +376,7 @@ follow-up that can be forgotten. Rules:
 | P6 | Viewer at machine scale | partial — single-part WebGL viewer exists | `webgl-stress-viewer.tsx` (tested); tessellation service/LOD/streaming open |
 | P7 | Desktop & workstation bridge | partial — Tauri shell + bridge panel exist; **the Windows installer builds (2026-09-05)** | `src-tauri/`, `catia-bridge-panel.tsx`. `npm run desktop:msi` produces `Kryova_0.2.0_x64_en-US.msi` (3.8 MB) on this machine, release profile, WiX candle+light, ~41 s Rust compile. **Built is not installed**: nothing has run the installer and confirmed the app starts from it, so P7.1's signed auto-update and P9.4's release pipeline both remain open, and a release still needs a human. |
 | P8 | Billing & metering | not started | |
-| P9 | Delivery: CI/CD, backups | not started | **frontend has no CI — first fix** |
+| P9 | Delivery: CI/CD, backups | partial — P9.1 done; CI is honest about the database (2026-09-06) | `.github/workflows/ci.yml` in **both** repos, `scripts/pytest_split.py`, `../Kryova-frontend/scripts/check-dependencies.mjs`. Backend CI is three jobs: `lint` (ruff + `mypy app`), `offline` (3,327 tests, no connection, and it prints how many database tests it did *not* run), `database` (PostgreSQL 17 service container + `alembic upgrade head` + `alembic check` + the other 430 tests). `--database-only` refuses to start without a real PostgreSQL, so the SQLite fallback can no longer wear the name of the database suite; `tests/test_repository_hygiene.py::TestContinuousIntegration` pins that and was verified by breaking all five guards. Frontend CI existed already and was upgraded (SHA-pinned actions, `.nvmrc`, three-dependency check). **Not done:** P9.2 images, P9.3 staging, P9.4 releases (see `../Kryova-frontend/.github/workflows/desktop.yml` for why a tagged MSI would ship broken), P9.5 backups, P9.6 supply chain. |
 | P10 | Docs, onboarding, trust surface | not started | |
 
 ### Stop gates — where coding stops and the product is tested for real *(new, 2026-09-06)*
@@ -1206,9 +1210,12 @@ cost estimates. One number, two uses; divergence is a bug class of its own.
 
 **~3 engineer-months. Starts immediately — the frontend's zero-CI state is the first fix.**
 
-**P9.1 — Frontend CI, week one**: lint, `tsc`, vitest, build on every push (all three are
-currently clean and only discipline keeps them so — that is what CI is for). Then: preview
-deployments per PR.
+**P9.1 — Frontend CI, week one**: **done 2026-09-06** — and it turned out to be mostly done
+already (the workflow was added 2026-08-29; this plan's claim that `.github/` did not exist was
+simply wrong). Lint, `tsc`, vitest and build run on every push, now with SHA-pinned actions, the
+Node version in `.nvmrc` so CI and `nvm use` agree, and a check that the repo still has exactly
+three runtime dependencies — the one design rule in that repo that nothing else notices being
+broken. Still open: preview deployments per PR.
 **P9.2 — Backend images that carry the fleet**: containers with OCCT + gmsh + CalculiX +
 (later) Chrono pinned — the determinism substrate (1.6) and the deploy artefact are the same
 thing. GPL components live in their own layers/processes per Decision 4.
@@ -1216,6 +1223,16 @@ thing. GPL components live in their own layers/processes per Decision 4.
 against it; production migrations gated on `alembic check` and a rollback note per migration.
 **P9.4 — Desktop release pipeline**: tauri build matrix (Windows first — the CATIA audience),
 signing, `latest.json` publication, channel promotion (beta → stable) as a pipeline step.
+**Decided 2026-09-06: a tagged release must not build the MSI yet, and the reason is not
+scheduling.** `src-tauri/src/lib.rs` resolves both checkouts and node through `option_env!`,
+fixed at compile time by `scripts/desktop-build.mjs`, and `tauri.conf.json` sets
+`frontendDist: "http://localhost:3000"` — so the desktop app is a shell that launches a dev
+server from paths baked in at build time. An MSI built on a runner therefore ships pointing at
+`D:\a\...`, and on a customer machine starts nothing and times out. Publishing it would be the
+"green on a suite nobody ran" failure in artefact form. P9.4 begins with bundling the frontend
+statically and packaging the backend (P9.2), not with a release workflow. Meanwhile
+`../Kryova-frontend/.github/workflows/desktop.yml` type-checks the Rust shell on Windows
+(`workflow_dispatch` only, no artefact, gates nothing) so `src-tauri/` cannot rot silently.
 **P9.5 — Backups and restore *drills***: Neon PITR verified by actually restoring; blob-store
 backup with refcount integrity check; a written RTO/RPO and a quarterly drill that proves it.
 **P9.6 — Secrets and supply chain**: no default secrets boot (P1.4), dependency pinning +

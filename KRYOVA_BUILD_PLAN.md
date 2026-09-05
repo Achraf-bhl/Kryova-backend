@@ -107,7 +107,43 @@ and what 5.3's sensitivity can then be run over.
 
 ## Done
 
+- **P9.1 — CI that is honest about the database (2026-09-06).** Backend CI split into `lint` / `offline` / `database`: the offline half (3,327 tests) gates every push and reports the 430 it deliberately skipped, the database half runs against a PostgreSQL 17 service container with `alembic upgrade head` + `alembic check`, and `scripts/pytest_split.py --database-only` refuses to start without a real PostgreSQL so conftest's SQLite fallback can never again be reported as the database suite. Fixed two things that were red on main: `mypy app tests` aborted on a duplicate module name and had been checking nothing, and `.env.example` was missing `AI_TOOL_LIMIT` / `AI_DAILY_TOKEN_BUDGET`. Frontend CI already existed (the plan was wrong about that) and was upgraded: SHA-pinned actions, `.nvmrc`, and a three-dependency guard. Decided against a tagged MSI release — the installer bakes build-machine paths, so it would ship broken.
+
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-06** — P1 → **sessions became rows, and rotation grew the half that
+  makes it worth doing.** `User.refresh_token_hash` was one hash per user. Three
+  consequences, all of them live: signing in on a second device silently ended
+  the session on the first (and the first found out at its next refresh, as an
+  indistinguishable "Invalid refresh token"); there was no way to sign out one
+  device without signing out all of them; and **a stolen token and the real one
+  wrote to the same slot**, so whoever refreshed last won and nothing anywhere
+  noticed that one token had been used twice. Rotation existed. The detection
+  half — the half that makes rotation more than theatre — did not.
+  `app/models/session.py` is now a row per device family, holding the current
+  token hash *and the previous one*, with an absolute deadline rotation cannot
+  extend. `app/core/sessions.py` is the state machine: a presented token matches
+  the current hash (rotate), the previous hash inside a 10-second window (two
+  tabs raced — serve the current token rather than rotating again, or the loser's
+  next refresh looks exactly like an attack), the previous hash outside it
+  (**theft: revoke the whole family**), or nothing (refused, with the same
+  wording, so a refusal never tells a guesser how close they were).
+  `/auth/sessions`, `/auth/sessions/{id}` and `/auth/logout-all` back P1.3's
+  device list; `logout` now ends one device instead of all of them. P1.4: an
+  empty `CORS_ORIGINS` in production is now refused at startup alongside the
+  existing `SECRET_KEY` checks, and on a development machine
+  `Settings.insecure_defaults()` is logged at every boot — the reason
+  `SECRET_KEY` sat at "changeme" long enough to become a documented landmine is
+  that nothing ever said so out loud. 39 tests, and the guards were verified by
+  breaking them: 8 mutations, **6 caught immediately, 2 escaped and both were
+  worth the finding.** Widening the grace window to a day changed nothing,
+  because every theft test aged the family by `REUSE_GRACE_SECONDS + 1` and so
+  followed the constant wherever it went — fixed by pinning both sides in
+  engineering terms instead (a replay an hour later is theft; a replay one
+  second later is a race). Revoking by row rather than by family also changed
+  nothing, and that one is **honestly unpinned**: today a family is exactly one
+  row, so the two are indistinguishable until the design that appends a row per
+  rotation lands. Migration `6b877d045c82`; `alembic check` clean.
 
 - **2026-09-06** — E2/E5/E16 → **rung 3 of the ladder: three more defects, and the one
   that made the rung impossible rather than hard.** Driving "the plate has to weigh 2.4 kg;

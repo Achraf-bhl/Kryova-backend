@@ -612,6 +612,55 @@ Read these before touching the relevant file — they are live defects, not styl
   `scanned, no text layer` and carries on; this is expected, not a regression. The other 21
   index in ~7s to ~4,900 passages.
 
+## Build with parallel agents — this is the default, not an optimisation
+
+**Standing instruction (2026-09-06): spread the work across concurrent subagents
+rather than writing it one file at a time.** A phase here is usually five or six
+pieces that touch disjoint files — a module, its tests, a wiring change, a
+document check, an install — and running them one after another spends the night
+on the ordering rather than on the code. Six agents on one phase is normal.
+Ten is not too many when the lanes are genuinely separate.
+
+What makes it work rather than a merge conflict:
+
+- **Assign by FILE, not by topic.** Every agent's brief names exactly what it
+  owns and lists what it must not touch, by path. "You own `app/verify/**` and
+  `tests/test_verify*.py`" is a lane; "you handle verification" is a collision.
+  Two agents that both decide they need to edit `deck.py` will silently overwrite
+  each other, and the loser's work looks like it was never done.
+- **Say who else is running.** The brief names the other agents' lanes so an
+  agent that finds it needs something from a locked file *reports the seam it
+  needs* instead of reaching into the file. A clean unsatisfied interface is
+  worth far more than a duplicated node writer — integration is cheap, and
+  un-picking two divergent copies of the same function is not.
+- **Nobody commits but the parent.** Agents do not `git add` and do not
+  `git commit`. Six agents committing into one branch interleaves half-finished
+  work with no way to tell which change belongs to which piece. The parent reads
+  the reports, integrates, runs the checks, and commits each piece with its own
+  message.
+- **Migrations are serialised, always.** Alembic's `down_revision` chain is
+  linear, so two agents generating revisions at once produce branching heads that
+  someone has to merge by hand. One agent (or the parent) holds migration rights
+  at a time; everyone else reports the model change they need.
+- **Nobody runs the full suite.** It needs a live Neon connection and takes
+  minutes; six agents running it at once is six times that for no extra
+  information. Each agent runs *its own test files*, plus `ruff` and `mypy`.
+- **Every brief carries the same non-negotiables**: read `CLAUDE.md` first; no
+  duplicated code or files; tests written with the work; every new guard verified
+  by breaking the thing it guards; and *report what you could not do*, because an
+  agent that quietly narrows its scope is worse than one that fails loudly.
+- **Give them the authority to decide.** An agent that stops to ask has cost more
+  than it saved. The brief should say "you have full authority over the
+  engineering decisions; make them, record why in the docstrings, do not stop to
+  ask" — and then the parent reviews the decision in the report, where it is
+  cheap to overturn.
+
+**Delegate the expensive-but-shallow work first.** Installing a dependency and
+probing it, sweeping a corpus, writing a fixture builder, auditing what CI
+actually checks — these are hours of wall-clock and almost no judgement, which is
+exactly what a parallel agent is for. Keep the integration, the seam design and
+the commit for the parent, because those need the whole picture.
+
 ## Testing
 
 **Tests are written on Linux and run on Windows (agreed 2026-09-05).** The user has a

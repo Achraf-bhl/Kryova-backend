@@ -63,28 +63,94 @@ class TestEnvExampleDocumentsEverySetting:
 
 
 class TestContinuousIntegration:
+    """What the workflow must still be true of, after P9 split it in three.
+
+    This class used to assert the opposite of two things below, and the reasons
+    it changed are worth keeping:
+
+    * It required the literal `mypy app tests`. That command does not report
+      type errors, it *aborts* -- `scripts/catia_bridge/` is reachable both as
+      `catia_bridge.*` (via `mypy_path`) and as `scripts.catia_bridge.*` (as the
+      test files spell it), and mypy refuses one file under two module names
+      before checking anything. The gate is now `mypy app`, which is what
+      CLAUDE.md documents and what actually runs.
+    * It required `TEST_DATABASE_URL` to be *absent*, so that `conftest` would
+      fall back to in-memory SQLite. That made CI structurally unable to catch
+      the JSONB, enum and cascade behaviour the product ships on, while a single
+      green tick stood for the whole suite. CI now runs the database half
+      against a PostgreSQL service container.
+
+    The safety property behind that second rule is real and is kept: CI must
+    never point the suite at a database anybody cares about. It is asserted
+    directly below -- every database URL is localhost, and none comes from a
+    secret -- rather than by banning the variable.
+    """
+
     WORKFLOW = BASE_DIR / ".github" / "workflows" / "ci.yml"
 
     @pytest.fixture
     def workflow(self) -> str:
         return self.WORKFLOW.read_text(encoding="utf-8")
 
-    def test_there_is_no_frontend_job(self, workflow: str) -> None:
+    @pytest.fixture
+    def commands(self, workflow: str) -> str:
+        """The workflow with comments and step *names* stripped.
+
+        Every assertion here reads this and not the raw text, because prose is
+        not a gate. Both exclusions were found by breaking the guard and
+        watching it stay green:
+
+        * Comments: the old version of this class searched the whole file, so
+          the long explanation of why `mypy app tests` was dropped was itself
+          enough to satisfy the assertion that `mypy app tests` runs.
+        * `name:`: replacing `run: alembic check` with `run: true` left the step
+          titled "alembic check (model/migration drift)" behind, and that alone
+          kept `test_every_gate_runs` green. A step can be renamed freely; what
+          must be asserted is the command.
+        """
+        return "\n".join(
+            line
+            for line in workflow.splitlines()
+            if not line.lstrip().startswith("#")
+            and not line.lstrip().lstrip("- ").startswith("name:")
+        )
+
+    def test_there_is_no_frontend_job(self, commands: str) -> None:
         # There is no package.json in this repo; the job could only ever fail.
-        assert "npm" not in workflow
+        assert "npm" not in commands
 
-    def test_all_three_gates_run(self, workflow: str) -> None:
-        assert "ruff check ." in workflow
-        assert "mypy app tests" in workflow
-        assert "pytest -q" in workflow
+    def test_every_gate_runs(self, commands: str) -> None:
+        assert "ruff check ." in commands
+        assert "mypy app" in commands
+        # Both halves of the suite, and the drift check that needs a database.
+        assert "--offline-only" in commands
+        assert "--database-only" in commands
+        assert "alembic check" in commands
 
-    def test_ci_does_not_point_the_suite_at_a_real_database(self, workflow: str) -> None:
-        # TEST_DATABASE_URL stays unset so conftest builds SQLite, and
-        # DATABASE_URL is a placeholder nothing connects to.
-        env_lines = [line for line in workflow.splitlines() if not line.lstrip().startswith("#")]
-        assigned = "\n".join(env_lines)
-        assert "TEST_DATABASE_URL:" not in assigned
-        assert "secrets.DATABASE_URL" not in assigned
+    def test_ci_never_points_at_a_database_anybody_owns(self, commands: str) -> None:
+        """Ephemeral service container only: localhost, and never a secret.
+
+        The fixtures create tables and drop a schema. A workflow that could
+        reach a real deployment is one bug away from doing that to it.
+        """
+        urls = re.findall(r"^\s*(?:TEST_)?DATABASE_URL:\s*(\S+)", commands, re.M)
+        assert urls, "the workflow sets no database URL at all"
+        for url in urls:
+            assert "secrets." not in url, f"CI database URL comes from a secret: {url}"
+            assert "@localhost:" in url, f"CI database URL is not local: {url}"
+
+    def test_the_database_half_is_not_silently_sqlite(self, commands: str) -> None:
+        """`--database-only` must be handed a real PostgreSQL.
+
+        `scripts/pytest_split.py` refuses to start otherwise, so this is belt
+        and braces -- but the failure it guards (a job named for the database
+        reporting green having run SQLite) is the one the whole split exists to
+        make impossible.
+        """
+        test_urls = re.findall(r"^\s*TEST_DATABASE_URL:\s*(\S+)", commands, re.M)
+        assert test_urls, "the database job sets no TEST_DATABASE_URL"
+        for url in test_urls:
+            assert url.startswith("postgresql"), f"TEST_DATABASE_URL is not PostgreSQL: {url}"
 
 
 class TestMigrationChain:

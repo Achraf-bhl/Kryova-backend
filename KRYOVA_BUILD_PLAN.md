@@ -98,6 +98,33 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-05** — E16 → **16.1: tool retrieval, and rung 2 passes**.
+  `app/ai/tool_retrieval.py`. The wall was measured here rather than read in a paper: with
+  108 tools offered, the model asked for a mounting flange opened with `catia_pad` on a
+  conversation holding no document, invented `profile`, invented two tools that have never
+  existed, and never reached `catia_sketch_create` — on the open kernel *and* on a real
+  CATIA seat, identically. With `AI_TOOL_LIMIT=40` the same request built the whole part.
+  **The design decision that makes this safe is that retrieval narrows what the model is
+  *shown* and never what it can *call*** — `ToolBox.schemas(only=)` filters the offer,
+  `ToolBox.call` keeps every tool — so no setting of it can make a capability unreachable,
+  and the worst case is a turn where the model names a tool from memory, which still works.
+  Anything less would be a capability cut wearing an optimisation's clothes. Lexical, not
+  embeddings, for `app/retrieval/`'s reasons: tool names are exact terms and the bilingual
+  tokeniser is already built. The core modelling loop is never withheld whatever the query
+  says (hiding `catia_new_part` because the user said "flange" is the measured failure from
+  the other end), recently-used tools stay offered because continuity beats similarity, and
+  a limit at or above the registry size is a genuine no-op rather than a reordering. Default
+  is off: it changes what the model sees, so it is switched on deliberately and measured.
+  **And the result is the best argument for Decision 3 this project has produced.** Every
+  tool call succeeded and the part is wrong. The four holes went to (±35, ±35) — a
+  bolt-circle radius of 49.5 mm where "a 70 mm bolt circle" means radius 35, the model having
+  taken the number as a coordinate — and `edges="all"` rounded every edge including the bore
+  and hole rims, which is exactly the 4,494 mm³ by which the measured 97,208 falls short of
+  the closed-form 101,702. The render (`docs/night-2026-09-05/02-flange-top.png`) is an
+  entirely plausible flange. Mechanical completion has become the easy half; nothing in the
+  chat path yet checks the part against what was asked, and wiring `assertions.py` and 5.1's
+  machine checks into the conversation is what 16.x owes next. 22 tests.
+
 - **2026-09-05** — E6 → **started: the CalculiX deck**. `app/solve/calculix/deck.py`.
   Decision 2 says physics is federated rather than re-implemented and Decision 4 says how —
   GPL, so a separate process across a file/CLI boundary, never linked. The deck is the whole

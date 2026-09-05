@@ -151,6 +151,15 @@ class Settings(BaseSettings):
     # every model reads images. Ollama refuses honestly when the model cannot
     # see, rather than dropping the picture and answering anyway.
     ai_vision_model: str | None = None
+    #: How many tool schemas to put in front of the model in one turn — master
+    #: plan 16.1. 0 (the default) offers the whole registry, which is what every
+    #: deployment did before retrieval existed: it changes what the model sees,
+    #: so it is switched on deliberately and measured, never inherited.
+    #:
+    #: It narrows the *offer* only. `ToolBox.call` still accepts every tool, so
+    #: no setting of this can make a capability unreachable.
+    ai_tool_limit: int = 0
+
     ai_max_tokens: int = 8_000
     # A 7B model on CPU can take a minute; the default is generous on purpose.
     ai_timeout_seconds: float = 120.0

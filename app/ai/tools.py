@@ -26,7 +26,7 @@ so they say *when* to use a tool, not just what it does.
 
 import difflib
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,6 +43,7 @@ from app.jobs import JobQueue
 from app.media import LocalMediaStore, MediaService
 from app.models import (
     Conversation,
+    ConversationMessage,
     GeometryVersion,
     JobStatus,
     Project,
@@ -1560,9 +1561,65 @@ class ToolBox:
         """Tool name -> human label, for the step list the UI renders."""
         return {name: tool_label(name) for name in self._tools}
 
-    def schemas(self, include_mutating: bool) -> list[dict[str, Any]]:
+    def every_tool(self) -> list[Tool]:
+        """Every tool this box holds, offered or not.
+
+        The retrieval selector scores against this rather than against the
+        narrowed offer, which is the difference between choosing what to show and
+        compounding a previous turn's choice.
+        """
+        return list(self._tools.values())
+
+    def recent_tool_names(self, limit: int = 12) -> list[str]:
+        """Tools this conversation has actually used, newest first.
+
+        Continuity beats similarity for the retrieval selector (16.1): a model
+        that called `catia_pattern_circular` last turn is likely to call it again,
+        and a query that has moved on to "now measure it" would otherwise drop it
+        out of the offer at exactly the wrong moment.
+
+        Bounded and indexed — `(conversation_id, sequence)` is the transcript's
+        own index, so this is the same lookup the window already does. Returns
+        empty rather than raising if there is no conversation, because the
+        introspection paths build a toolbox without one.
+        """
+        if self.conversation is None:
+            return []
+        rows = self.db.scalars(
+            select(ConversationMessage.tool_name)
+            .where(
+                ConversationMessage.conversation_id == self.conversation.id,
+                ConversationMessage.tool_name.is_not(None),
+            )
+            .order_by(ConversationMessage.sequence.desc())
+            .limit(limit)
+        ).all()
+        seen: dict[str, None] = {}
+        for name in rows:
+            if name:
+                seen.setdefault(name, None)
+        return list(seen)
+
+    def schemas(
+        self, include_mutating: bool, *, only: Collection[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """The tool definitions sent to the model.
+
+        `only` narrows what is *shown* — master plan 16.1, where 108 schemas are
+        ~16k prompt tokens re-evaluated every turn and measurably cost the model
+        its accuracy. It deliberately does **not** narrow what `call` accepts: a
+        model that names a tool it was not offered still gets it. Retrieval is an
+        attention optimisation, and the moment it starts refusing real tools it
+        has become a capability cut wearing an optimisation's clothes.
+
+        A name in `only` that is not a tool is ignored rather than refused — the
+        selector works from specs and the toolbox from handlers, and the two can
+        legitimately differ by a tool whose bridge went offline mid-turn.
+        """
         return [
-            tool.schema() for tool in self._tools.values() if include_mutating or not tool.mutating
+            tool.schema()
+            for name, tool in self._tools.items()
+            if (include_mutating or not tool.mutating) and (only is None or name in only)
         ]
 
     def call(self, name: str, arguments: dict[str, Any], *, allow_mutations: bool) -> Any:

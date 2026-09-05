@@ -38,6 +38,7 @@ import os
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -132,6 +133,42 @@ def system_prompt() -> str:
     if settings.catia_enabled:
         return prompts.AGENT_SYSTEM_CATIA_DOCS if has_docs else prompts.AGENT_SYSTEM_CATIA
     return prompts.AGENT_SYSTEM_DOCS if has_docs else prompts.AGENT_SYSTEM
+
+
+def _shown_tools(toolbox: Any, user_message: str) -> set[str] | None:
+    """Which tools to put in front of the model this turn — master plan 16.1.
+
+    `None` means all of them, which is the default and what every deployment did
+    before this existed: retrieval is opt-in via `AI_TOOL_LIMIT` because it
+    changes what the model sees, and a change to that must be measured before it
+    is switched on rather than after.
+
+    It narrows the *offer* only. `ToolBox.call` still accepts every tool, so
+    nothing here can make a capability unreachable — the worst case is a turn
+    where the model has to name a tool from memory instead of reading it, and
+    that call still works.
+
+    Never raises. A retrieval failure falls back to offering everything, on
+    `KnowledgeService.search`'s contract: consulting an index may improve an
+    answer and must never be the reason there is not one.
+    """
+    limit = getattr(settings, "ai_tool_limit", 0)
+    if not limit:
+        return None
+    try:
+        from app.ai.tool_retrieval import select_tool_names
+
+        specs = [
+            SimpleNamespace(name=tool.name, description=tool.description)
+            for tool in toolbox.every_tool()
+        ]
+        if len(specs) <= limit:
+            return None
+        recent = toolbox.recent_tool_names()
+        return select_tool_names(specs, user_message, recent=recent, limit=limit)
+    except Exception:  # pragma: no cover - retrieval must never break a turn
+        logger.exception("tool retrieval failed; offering the whole registry")
+        return None
 
 
 def summarise_step(tool: str, result: Any, ok: bool) -> str:
@@ -313,7 +350,9 @@ def stream_agent(
     usage += maybe_summarise(db, provider, conversation)
 
     steps: list[AgentStep] = []
-    schemas = toolbox.schemas(include_mutating=allow_mutations)
+    schemas = toolbox.schemas(
+        include_mutating=allow_mutations, only=_shown_tools(toolbox, user_message)
+    )
     known = set(labels)
     corrections = 0
 

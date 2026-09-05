@@ -63,6 +63,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     )
     from OCP.BRepCheck import BRepCheck_Analyzer
     from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    from OCP.BRepFill import BRepFill_TypeOfContact
     from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer, BRepFilletAPI_MakeFillet
     from OCP.BRepGProp import BRepGProp
     from OCP.BRepIntCurveSurface import BRepIntCurveSurface_Inter
@@ -171,6 +172,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepBuilderAPI_Transform": BRepBuilderAPI_Transform,
         "BRepCheck_Analyzer": BRepCheck_Analyzer,
         "BRepExtrema_DistShapeShape": BRepExtrema_DistShapeShape,
+        "BRepFill_TypeOfContact": BRepFill_TypeOfContact,
         "BRepFilletAPI_MakeChamfer": BRepFilletAPI_MakeChamfer,
         "BRepFilletAPI_MakeFillet": BRepFilletAPI_MakeFillet,
         "BRepGProp": BRepGProp,

@@ -23,9 +23,13 @@ waiting on.
 
 What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its own reason:
 
-- **steered surfaces** — `catia_surface_loft` with `guides` or a `spine` (a swept
-  construction with rails, not a section loft), and `catia_surface_fill` with `tangent` or
-  `curvature` continuity (each boundary edge has to be paired with the face it lies on);
+- **the rest of the trimming family is now the whole of what 2.6 owes.** The steered
+  surfaces shipped 2026-09-05: `catia_surface_loft` takes a `spine` and one `guide`, and
+  `catia_surface_fill` is tangent to its supports and says by how much. Still refused, each
+  for a stated reason: a loft `closed` along a spine (closure is a property of the section
+  loft), more than one guide (the sweep takes one), and `continuity='curvature'` on a fill
+  — which is OCCT's refusal, not a choice: `BRepFill_Filling` answers "the continuity is
+  not G0 G1 or G2" for `GeomAbs_G2` and builds nothing;
 - **the rest of the trimming family** — `catia_extrapolate`, `catia_sew_surface`, and
   `propagation` on `catia_extract` / `catia_boundary`. Split, trim, untrim, disassemble
   and healing shipped 2026-09-05;
@@ -70,6 +74,29 @@ measurement vocabulary a visual check would assert against already exists.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E2 → **2.6 continues: the steered surfaces**. `catia_surface_loft`
+  now takes a `spine` and a `guide`, and `catia_surface_fill` meets its supports
+  tangentially. No new operations, so coverage stays at **106/201** — what changed is that
+  three arguments the vocabulary declares stopped being refused. A spine is a different
+  algorithm rather than a refinement (the sections are swept, not interpolated): two 5 mm
+  circles at the ends of a quarter arc give the torus segment Pappus predicts to 1e-9,
+  where the free loft of the same sections is 23% smaller. A guide flaring 5→15 over 60 mm
+  gives the cone's `π(r₁+r₂)·slant` to one part in 10⁵ — and it only does so with
+  `ContactOnBorder`; with `NoContact` the guide merely turns the section about the spine,
+  which for a circular section changes *nothing at all* and returns the unguided surface
+  reporting success. Two OCCT traps in the fill. **Handing `MakeFilling` a boundary edge
+  with no parameter curve on the support segfaults** — `Add` accepts it quietly, the
+  process dies inside `Build()`, and there is no exception to catch, so the check has to
+  come first; boundary edges are matched to the support's own edges by geometry (length and
+  midpoint), never by position in the two lists. **And OCCT reports a tangency it did not
+  deliver**: a cylinder's rim asks the patch to leave straight up, the plate solver gives
+  up, and it returns `IsDone()` true with a flat disc 82.5° out — where the same call on a
+  spherical opening lands within 1e-4°. So the fill measures what it achieved, reports
+  `tangent_error_deg`, and refuses a patch that missed. G2 is refused with what OCCT itself
+  says. Also fixed: a loft section may be a bare wireframe curve and not only a sketch —
+  without that, the spine and guide arguments were unreachable from the curve vocabulary.
+  Seven guards, all seven verified by breaking them.
 
 - **2026-09-05** — E2 → **2.6 continues: the reflect line, and the wireframe family closes**.
   `catia_curve_reflect_line` plus `radius_mm` on `catia_curve_polyline`. Coverage 105 →

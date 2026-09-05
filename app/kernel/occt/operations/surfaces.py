@@ -22,11 +22,18 @@ rather than failing. Fusing a 1,000 mm³ block onto a −4,800 mm³ plate measur
 the block did not error, it was swallowed. `_outward` is where that is fixed, and it is
 fixed by the definition of the defect, not by taking an absolute value; see its docstring.
 
-**What a surface operation cannot yet do is refused with the reason.** Guides on a loft, a
-tangent-continuous fill, tangent propagation on an extract: each is a real GSD capability
-and each is named in the refusal with what it would take, rather than being silently
-ignored — an ignored `guides` argument builds a different shape from the one asked for and
-nothing says so.
+**What a surface operation cannot yet do is refused with the reason** — and the reason is
+kept current. Guides on a loft, a spine, and a tangent-continuous fill were all on that
+list and are now built; what is left is tangent propagation on an extract, `extrapolate`,
+`sew_surface`, and G2 filling, which OCCT itself refuses. An ignored argument builds a
+different shape from the one asked for and nothing says so, so nothing here is accepted
+and dropped.
+
+**And what OCCT reports is not always what it did.** A tangent fill against a support that
+stands square to the opening — a cylinder's wall at its own rim — returns `IsDone()` true
+and a flat patch that is 90° from tangent all the way round. So `surface_fill` measures the
+tangency it achieved against the support and refuses a patch that missed, rather than
+filing one under a name that claims it is smooth.
 
 **Which side of a cut survives is stated, not implied.** `catia_split` and `catia_trim`
 both have to answer "which piece did you mean", and CATIA answers it by where the user
@@ -98,6 +105,31 @@ CURVE: Final = "curve"
 #: the same construction are joined and two that genuinely do not meet are not — a
 #: generous default silently bridges a gap the design has a real reason to care about.
 DEFAULT_SEWING_TOLERANCE_MM: Final = 1e-6
+
+#: How the continuities are spelled in the registry, and what OCCT calls each. `G1` is
+#: *geometric* tangency — of the shape, not of the parameterisation — which is what an
+#: engineer looking at a reflection means by smooth. `curvature` has no entry because
+#: `BRepFill_Filling` refuses `GeomAbs_G2` outright in this build; see `surface_fill`.
+_CONTINUITY_ORDER: Final[dict[str, str]] = {
+    "point": "GeomAbs_C0",
+    "tangent": "GeomAbs_G1",
+}
+
+#: Points per boundary edge at which a tangent fill's achieved tangency is measured. The
+#: answer is therefore **sampled** — a patch could in principle wander between samples —
+#: but the failure this catches is not subtle: OCCT gives up on a tangency it cannot reach
+#: and returns a flat patch, which is 90° out everywhere rather than at one point.
+_TANGENCY_SAMPLES: Final = 12
+
+#: How far a "tangent" patch may actually miss tangency before the result is refused, in
+#: degrees. Generous: a fill that works lands within a ten-thousandth of a degree, and the
+#: one that does not is out by ninety.
+_TANGENCY_TOLERANCE_DEG: Final = 1.0
+
+#: How close two edges must be to be the same edge, in mm — one built by extraction and
+#: the original it was taken from. Tight, because these are copies rather than neighbours:
+#: anything looser starts matching a *different* edge of the same face.
+_EDGE_MATCH_TOLERANCE_MM: Final = 1e-7
 
 #: Distance below which two offset surfaces are the same surface. Used only to refuse a
 #: zero offset, which is a no-op dressed as an operation.
@@ -196,31 +228,65 @@ def surface_offset(context: BuildContext, arguments: Mapping[str, Any]) -> Mappi
 
 
 def surface_fill(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Patch a closed boundary of curves with a surface.
+    """Patch a closed boundary of curves with a surface, optionally tangent to its neighbours.
 
-    How a hole in a skin is closed. **Continuity beyond `point` is refused**, because it
-    is not the fill that provides it: matching a patch tangentially to its neighbours
-    needs each boundary edge handed to OCCT together with the face it lies on, and
-    resolving "the surface this curve came off" is not something a name alone answers.
-    A point-continuous patch that says so beats a tangent one that is not.
+    How a hole in a skin is closed, and `continuity` is what decides whether the repair
+    shows. A `point` patch meets the opening and creases against it; a `tangent` one leaves
+    each neighbour along that neighbour's own surface, which is the difference between a
+    panel that reflects cleanly and one that does not.
+
+    **Tangency is to a *face*, not to a curve**, so `supports` is not optional decoration:
+    OCCT needs the boundary edge as it exists *on* the neighbouring face, carrying that
+    face's parameter curve. Each boundary edge is therefore matched against the supports'
+    own edges by geometry — same length, same midpoint — and the support's edge is what is
+    handed over. Matching by position in the two lists would break the moment a caller
+    ordered them differently, and nothing in the result would say so.
+
+    **An unmatched edge is refused, and that refusal is load-bearing.** Handing OCCT an
+    edge with no parameter curve on the face is documented to raise; in this binding it
+    **segfaults during `Build()`** — `Add` accepts it quietly and the process dies with no
+    exception to catch. So the check has to happen before the call, and no `try` anywhere
+    could stand in for it.
+
+    **And the tangency is measured on the result, because OCCT will report success without
+    delivering it.** Filling the rim of a cylinder tangentially asks the patch to leave
+    straight up, which the plate solver cannot reach: it returns `IsDone()` true and a flat
+    disc that is 90° out all the way round. The same call on a spherical opening lands
+    within a ten-thousandth of a degree. So the patch's normal is compared against the
+    support's along the shared boundary, the answer rides in `tangent_error_deg`, and a
+    patch that missed by more than a degree is refused rather than filed under a name that
+    claims it is smooth.
     """
     document = context.require_document()
     boundary = _references(arguments.get("boundary"), tool=FILL, argument="boundary", minimum=1)
 
     continuity = str(arguments.get("continuity") or "point").lower()
-    if continuity != "point":
+    if continuity == "curvature":
         raise OperationNotSupported(
-            f"{FILL} with continuity={continuity!r}",
-            "matching a patch to its neighbours needs each boundary edge paired with "
-            "the face it lies on, which a curve's name does not carry. Use "
-            "continuity='point', or build the neighbours' shared edges with "
-            "catia_boundary and fill against those",
+            f"{FILL} with continuity='curvature'",
+            "OCCT's filling algorithm refuses G2 outright in this build — it answers "
+            '"the continuity is not G0 G1 or G2" and builds nothing, so there is no '
+            "curvature-continuous patch to be had here rather than a choice not to make "
+            "one. Use continuity='tangent', which is measured and reported",
         )
-    if arguments.get("supports"):
-        raise OperationNotSupported(
-            f"{FILL} with supports",
-            "supports exist to carry continuity, and only point continuity is "
-            "available here, where they change nothing",
+    if continuity not in _CONTINUITY_ORDER:
+        raise GeometryError(
+            f"{FILL} takes continuity of point, tangent or curvature; got "
+            f"{arguments.get('continuity')!r}."
+        )
+
+    supports = [
+        face
+        for reference in _references(
+            arguments.get("supports") or [], tool=FILL, argument="supports", minimum=0
+        )
+        for face in faces(named_geometry(document, reference, tool=FILL, argument="supports"))
+    ]
+    if continuity != "point" and not supports:
+        raise GeometryError(
+            f"{FILL} was asked for {continuity} continuity with no supports. There is "
+            "nothing for the patch to be tangent *to* — name the neighbouring surfaces in "
+            "`supports`, or ask for continuity='point'."
         )
 
     outline = [
@@ -235,18 +301,33 @@ def surface_fill(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
         )
 
     point = arguments.get("passing_point")
-    if point is None:
+    if point is None and continuity == "point":
         # A flat opening has an exact answer, and it is worth taking — see `_flat_patch`.
-        # A passing point is what rules it out: a planar face cannot be made to pass
-        # through somewhere off its own plane.
+        # A passing point rules it out, and so does tangency: a planar face cannot be made
+        # to pass through somewhere off its own plane, nor to leave a curved neighbour
+        # along that neighbour's surface.
         flat = _flat_patch(outline)
         if flat is not None:
             return _record(context, document, arguments, FILL, flat, SURFACE, "fill")
 
+    order = getattr(symbol("GeomAbs_Shape"), _CONTINUITY_ORDER[continuity])
     maker = symbol("BRepOffsetAPI_MakeFilling")()
-    c0 = symbol("GeomAbs_Shape").GeomAbs_C0
-    for edge in outline:
-        maker.Add(edge, c0)
+    matches = []
+    for index, edge in enumerate(outline):
+        if continuity == "point":
+            maker.Add(edge, order)
+            continue
+        matched = _edge_on_a_support(edge, supports)
+        if matched is None:
+            raise GeometryError(
+                f"{FILL} cannot make boundary curve {index + 1} {continuity}-continuous: "
+                "it is not an edge of any surface named in `supports`, so there is no "
+                "face for the patch to leave along. Extract the boundary from the "
+                "neighbour with catia_boundary, name that neighbour as a support, or ask "
+                "for continuity='point'."
+            )
+        maker.Add(matched[0], matched[1], order)
+        matches.append(matched)
     if point is not None:
         maker.Add(symbol("gp_Pnt")(*as_point(point, argument="passing_point")))
 
@@ -256,48 +337,149 @@ def surface_fill(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
         detail="The boundary does not enclose an area — check that the curves meet end "
         "to end, and that they are not all in one straight line.",
     )
-    return _record(context, document, arguments, FILL, patch, SURFACE, "fill")
+    if continuity == "point":
+        return _record(context, document, arguments, FILL, patch, SURFACE, "fill")
+
+    missed = _worst_tangency_error(patch, matches)
+    if missed > _TANGENCY_TOLERANCE_DEG:
+        raise GeometryError(
+            f"{FILL} was asked for a tangent patch and could only manage one {missed:.3g}° "
+            "out along its boundary, so it is not tangent at all — OCCT reports success "
+            "and returns a flat patch when it cannot reach the tangent it was given. That "
+            "happens where the support stands square to the opening, as a cylinder's wall "
+            "does at its own rim: the patch would have to leave straight up. Give a "
+            "passing_point to lead it out, or fill with continuity='point' and blend "
+            "separately."
+        )
+    return {
+        **_record(context, document, arguments, FILL, patch, SURFACE, "fill"),
+        "continuity": continuity,
+        "tangent_error_deg": missed,
+    }
+
+
+def _worst_tangency_error(patch: Any, matches: Sequence[tuple[Any, Any]]) -> float:
+    """How far the patch's normal turns away from its supports' along the shared boundary.
+
+    Sampled — `_TANGENCY_SAMPLES` points per boundary edge — and the docstring on
+    `surface_fill` says so. The absolute value of the dot product is taken because the two
+    faces are neighbours: their outward normals can legitimately point opposite ways across
+    a shared edge, and 180° apart is as tangent as 0°.
+    """
+    from app.kernel.occt.operations.curves import closest_face_normal
+
+    worst = 0.0
+    for edge, face in matches:
+        adaptor = symbol("BRepAdaptor_Curve")(edge)
+        first, last = adaptor.FirstParameter(), adaptor.LastParameter()
+        for step in range(1, _TANGENCY_SAMPLES):
+            place = adaptor.Value(first + (last - first) * step / _TANGENCY_SAMPLES)
+            at = (place.X(), place.Y(), place.Z())
+            _, _, on_patch = closest_face_normal(patch, at, tool=FILL)
+            _, _, on_support = closest_face_normal(face, at, tool=FILL)
+            aligned = abs(sum(a * b for a, b in zip(on_patch, on_support, strict=True)))
+            worst = max(worst, math.degrees(math.acos(max(-1.0, min(1.0, aligned)))))
+    return worst
+
+
+def _edge_on_a_support(edge: Any, supports: Sequence[Any]) -> tuple[Any, Any] | None:
+    """The support face carrying this edge, and the face's own copy of it.
+
+    Matched on length and midpoint rather than by identity: the boundary the caller names
+    is normally an *extracted* copy — `catia_boundary` builds a new edge — so identity
+    never matches, and the copy carries no parameter curve on the face it came from. The
+    support's own edge does, which is the whole reason for looking it up.
+    """
+    wanted_length, wanted_middle = _edge_signature(edge)
+    for face in supports:
+        for candidate in edges(face):
+            length, middle = _edge_signature(candidate)
+            if abs(length - wanted_length) > _EDGE_MATCH_TOLERANCE_MM:
+                continue
+            if max(abs(a - b) for a, b in zip(middle, wanted_middle, strict=True)) > (
+                _EDGE_MATCH_TOLERANCE_MM
+            ):
+                continue
+            return symbol("TopoDS").Edge_s(candidate), symbol("TopoDS").Face_s(face)
+    return None
+
+
+def _edge_signature(edge: Any) -> tuple[float, tuple[float, float, float]]:
+    """An edge as (length, midpoint) — enough to recognise a copy of it."""
+    adaptor = symbol("BRepAdaptor_Curve")(edge)
+    middle = adaptor.Value((adaptor.FirstParameter() + adaptor.LastParameter()) / 2.0)
+    properties = symbol("GProp_GProps")()
+    symbol("BRepGProp").LinearProperties_s(edge, properties)
+    return float(properties.Mass()), (middle.X(), middle.Y(), middle.Z())
 
 
 def surface_loft(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
     """Loft a surface through a series of section curves — a Multi-sections Surface.
 
-    **Guides and a spine are refused rather than ignored**, and that distinction is the
-    reason this operation is honest: a loft steered by two guides is a different shape
-    from the same sections lofted freely, so accepting the argument and dropping it would
-    build the wrong surface and report success.
+    Two different algorithms sit behind one operation, and which runs is decided by
+    whether the loft is *steered*:
+
+    * **sections alone** — `ThruSections`, which interpolates from each section to the
+      next and lets the shape go where that takes it;
+    * **with a `spine`** — a swept construction: each section is carried along the spine
+      and stays square to it. Two identical circles at the ends of a quarter arc give the
+      torus segment Pappus predicts, where the free loft of the same two sections gives a
+      straight tube 23% smaller. That is not a refinement, it is a different surface.
+    * **with `guides`** — the same sweep, with a section scaled to keep contact with the
+      guide. A circle of r=5 swept 60 mm along a guide flaring to 15 is the cone whose
+      lateral area is `π(r₁+r₂)·slant`, to one part in 10⁶.
+
+    **A guide without a spine is refused.** OCCT sweeps *along* a spine and steers with a
+    guide, so with no spine there is nothing to sweep; computing a default spine from the
+    sections would be inventing the curve the surface follows, which is the one thing a
+    steered loft is asked to be told.
     """
     document = context.require_document()
     sections = _references(arguments.get("sections"), tool=LOFT, argument="sections", minimum=2)
 
-    for unsupported, reason in (
-        (
-            "guides",
-            "steering a loft between its sections needs a swept construction with the "
-            "guides as rails, which is a different algorithm from the section loft this "
-            "builds. Add intermediate sections to control the shape instead",
-        ),
-        (
-            "spine",
-            "a spine orients each section against a curve rather than against its "
-            "neighbours, which the section loft has no way to be told. Place the "
-            "sections on planes normal to the path you had in mind",
-        ),
-    ):
-        if arguments.get(unsupported):
-            raise OperationNotSupported(f"{LOFT} with {unsupported}", reason)
+    guides = _references(arguments.get("guides") or [], tool=LOFT, argument="guides", minimum=0)
+    spine = arguments.get("spine")
+    if guides and not spine:
+        raise OperationNotSupported(
+            f"{LOFT} with guides and no spine",
+            "a steered loft is swept along a spine and pulled sideways by the guide, so "
+            "with no spine there is nothing to sweep along. Working one out from the "
+            "sections would mean inventing the curve the surface follows — name the "
+            "spine, or drop the guide and add intermediate sections instead",
+        )
+    if len(guides) > 1:
+        raise OperationNotSupported(
+            f"{LOFT} with {len(guides)} guides",
+            "the sweep takes one guide, which it uses to place and scale each section. "
+            "Two guides is a different construction — build it with one guide and add "
+            "intermediate sections where the second one mattered",
+        )
+
+    wires = [
+        _wire_of(
+            named_geometry(document, reference, tool=LOFT, argument="sections"),
+            reference=reference,
+            tool=LOFT,
+        )
+        for reference in sections
+    ]
+
+    if spine:
+        return _record(
+            context,
+            document,
+            arguments,
+            LOFT,
+            _swept_loft(document, wires, spine, guides, closed=bool(arguments.get("closed"))),
+            SURFACE,
+            "loft",
+        )
 
     maker = symbol("BRepOffsetAPI_ThruSections")(False, False)
     if arguments.get("closed"):
         maker.SetContinuity(symbol("GeomAbs_Shape").GeomAbs_C0)
-    for reference in sections:
-        maker.AddWire(
-            _wire_of(
-                named_geometry(document, reference, tool=LOFT, argument="sections"),
-                reference=reference,
-                tool=LOFT,
-            )
-        )
+    for wire in wires:
+        maker.AddWire(wire)
 
     lofted = build_or_raise(
         maker,
@@ -306,6 +488,63 @@ def surface_loft(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
         "closed or open wire, and they must not cross one another.",
     )
     return _record(context, document, arguments, LOFT, lofted, SURFACE, "loft")
+
+
+def _swept_loft(
+    document: Any,
+    wires: Sequence[Any],
+    spine: Any,
+    guides: Sequence[Any],
+    *,
+    closed: bool,
+) -> Any:
+    """Sections carried along a spine, optionally kept in contact with a guide.
+
+    `ContactOnBorder` rather than `NoContact` is what makes a guide mean anything: without
+    it the guide only turns the section about the spine, which for a circular section
+    changes nothing at all — the surface comes back byte-identical to the unguided sweep
+    and reports success. With it, the section is scaled to touch the guide, which is what
+    a guide curve is for.
+    """
+    if closed:
+        raise OperationNotSupported(
+            f"{LOFT} closed along a spine",
+            "closing a loft back onto its first section is a property of the section "
+            "loft; along a spine the sweep starts and ends where the spine does. Close "
+            "the spine itself, or drop the spine",
+        )
+
+    maker = symbol("BRepOffsetAPI_MakePipeShell")(
+        _wire_of(
+            named_geometry(document, spine, tool=LOFT, argument="spine"),
+            reference=spine,
+            tool=LOFT,
+        )
+    )
+    for guide in guides:
+        maker.SetMode(
+            _wire_of(
+                named_geometry(document, guide, tool=LOFT, argument="guides"),
+                reference=guide,
+                tool=LOFT,
+            ),
+            True,
+            symbol("BRepFill_TypeOfContact").BRepFill_ContactOnBorder,
+        )
+    for wire in wires:
+        maker.Add(wire, False, False)
+
+    if not maker.IsReady():
+        raise GeometryError(
+            f"{LOFT} could not set up the sweep along {spine!r}. The spine must be one "
+            "connected curve, and each section must be a wire."
+        )
+    return build_or_raise(
+        maker,
+        tool=LOFT,
+        detail="The sections could not be swept along that spine. A section far from the "
+        "spine, or a guide the sections cannot reach, is the usual cause.",
+    )
 
 
 # -- operations on surfaces ---------------------------------------------------
@@ -1273,6 +1512,11 @@ def _wire_of(shape: Any, *, reference: Any, tool: str) -> Any:
     A section handed to a loft must be a single wire; a compound of two is refused here
     by name rather than by OCCT, which reports it as a failure to build with nothing
     said about which section was wrong.
+
+    **Loose edges are chained rather than refused.** A sketch arrives holding a wire, but
+    every wireframe curve — a circle from `catia_curve_circle`, a helix, a spline — is a
+    bare edge with no wire around it, and refusing those made the loft usable only from
+    sketches. Anything that does chain into one curve is one curve.
     """
     from app.kernel.occt.topology import WIRE
 
@@ -1280,6 +1524,18 @@ def _wire_of(shape: Any, *, reference: Any, tool: str) -> Any:
     if len(wires) == 1:
         return symbol("TopoDS").Wire_s(wires[0])
     if not wires:
+        loose = edges(shape)
+        if loose:
+            maker = symbol("BRepBuilderAPI_MakeWire")()
+            for edge in loose:
+                maker.Add(edge)
+            build_or_raise(
+                maker,
+                tool=tool,
+                detail=f"{reference!r} is {len(loose)} edges that do not chain into one "
+                "curve. Each section must be a single connected curve.",
+            )
+            return maker.Wire()
         raise GeometryError(
             f"{tool} was given {reference!r} as a section and it holds no wire. A "
             "section is one closed or open curve."

@@ -2326,21 +2326,27 @@ class TestASkinBecomesMaterialOnlyWhenAsked:
         return runner
 
     def test_what_a_surface_cannot_do_yet_is_named_rather_than_ignored(self) -> None:
-        """An ignored `guides` builds a different shape from the one asked for and says
+        """An ignored argument builds a different shape from the one asked for and says
         nothing about it. Each of these is a real GSD capability, and each refusal names
-        what it would take."""
+        what it would take — pinned here so a refusal that outlives its reason is caught.
+        Guides, a spine and a tangent fill all used to be on this list and are now built;
+        what remains is what OCCT itself will not do, or what needs a construction this
+        backend does not make yet."""
         runner = self._closed_frustum()
 
         for arguments, expected in (
-            ({"sections": ["big", "small"], "guides": ["big"]}, "guides"),
-            ({"sections": ["big", "small"], "spine": "big"}, "spine"),
+            ({"sections": ["big", "small"], "guides": ["big"]}, "nothing to sweep along"),
+            (
+                {"sections": ["big", "small"], "spine": "big", "guides": ["big", "big"]},
+                "takes one guide",
+            ),
         ):
             with pytest.raises(OperationNotSupported, match=expected):
                 runner("catia_surface_loft", arguments)  # type: ignore[operator]
 
-        with pytest.raises(OperationNotSupported, match="continuity"):
+        with pytest.raises(OperationNotSupported, match="refuses G2 outright"):
             runner(  # type: ignore[operator]
-                "catia_surface_fill", {"boundary": ["big"], "continuity": "tangent"}
+                "catia_surface_fill", {"boundary": ["big"], "continuity": "curvature"}
             )
         with pytest.raises(OperationNotSupported, match="propagation"):
             runner(  # type: ignore[operator]
@@ -4231,3 +4237,246 @@ class TestAPolylineRoundsItsOwnCorners:
     def test_a_radius_larger_than_a_segment_names_the_corner_it_failed_at(self) -> None:
         with pytest.raises(GeometryError, match="could not round corner"):
             self._run([[0, 0, 0], [40, 0, 0], [40, 30, 0]], radius_mm=100.0)
+
+
+class TestSteeredSurfaces:
+    """A loft that follows a spine, and a patch that leaves its neighbour smoothly.
+
+    These are the two GSD capabilities that were refused rather than ignored for as long
+    as the surface module has existed, and both have exact closed forms to land on: a
+    section swept along an arc is Pappus's theorem, a section flared along a guide is a
+    cone, and a tangent patch's tangency is an angle that can be read off the built
+    surface. The last one matters most, because OCCT reports success without delivering it.
+    """
+
+    @staticmethod
+    def _area(runner: object, name: str) -> float:
+        return float(runner("catia_measure_item", {"element": name})["area_mm2"])  # type: ignore[operator]
+
+    @staticmethod
+    def _bend() -> object:
+        """Two 5 mm circles at the ends of a quarter arc of radius 40, and the arc."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Duct"})
+        runner(
+            "catia_curve_circle",
+            {
+                "kind": "centre_radius",
+                "centre": [0, 0, 0],
+                "radius_mm": 40.0,
+                "support": "ZX",
+                "start_angle_deg": 0.0,
+                "end_angle_deg": 90.0,
+                "name": "spine",
+            },
+        )
+        for centre, support, name in (
+            ([40, 0, 0], "XY", "start"),
+            ([0, 0, 40], "YZ", "end"),
+        ):
+            runner(
+                "catia_curve_circle",
+                {
+                    "kind": "centre_radius",
+                    "centre": centre,
+                    "radius_mm": 5.0,
+                    "support": support,
+                    "name": name,
+                },
+            )
+        return runner
+
+    @staticmethod
+    def _cap() -> object:
+        """A spherical cap of radius 10 from its pole down to z = 6, as a surface.
+
+        ZX sketch coordinates are (z, x), so this arc starts on the axis at the pole and
+        ends at z = 6, x = 8 — a cap of one rim, area 2πRh = 2π·10·4.
+        """
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Dome"})
+        runner("catia_sketch_create", {"support": "ZX", "name": "profile"})
+        runner(
+            "catia_sketch_arc_three_point",
+            {"sketch": "profile", "start": (10.0, 0.0), "through": (8.0, 6.0), "end": (6.0, 8.0)},
+        )
+        runner("catia_surface_revolve", {"profile": "profile", "axis": "Z", "name": "shell"})
+        runner("catia_boundary", {"surface": "shell", "name": "rim"})
+        return runner
+
+    def test_a_spine_makes_the_loft_follow_it_and_pappus_says_by_how_much(self) -> None:
+        """Two identical circles swept along a quarter arc is a torus segment, and its area
+        is `2πr` times the path its centroid takes: `2π·5 · 40·π/2`. The same two sections
+        lofted freely go straight between them and come out 23% smaller — which is the
+        point. A spine is not a refinement of a loft, it is a different surface."""
+        runner = self._bend()
+
+        runner("catia_surface_loft", {"sections": ["start", "end"], "spine": "spine", "name": "bend"})  # type: ignore[operator]
+        runner("catia_surface_loft", {"sections": ["start", "end"], "name": "straight"})  # type: ignore[operator]
+
+        pappus = 2 * math.pi * 5.0 * (40.0 * math.pi / 2)
+        assert self._area(runner, "bend") == pytest.approx(pappus, rel=1e-9)
+        assert self._area(runner, "straight") < 0.8 * pappus
+
+    def test_a_guide_scales_the_section_along_the_way(self) -> None:
+        """A 5 mm circle swept 60 mm along a guide that flares to 15 is a cone, and its
+        lateral area is `π(r₁+r₂)·slant`. Without the guide the same sweep is a tube of
+        `2πr·h`, which is half of it — so a guide that was accepted and dropped would be
+        caught here rather than in a screenshot."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Horn"})
+        runner("catia_curve_polyline", {"points": [[0, 0, 0], [0, 0, 60]], "name": "spine"})
+        runner("catia_curve_polyline", {"points": [[5, 0, 0], [15, 0, 60]], "name": "flare"})
+        for height, name in ((0, "mouth"), (60, "top")):
+            runner(
+                "catia_curve_circle",
+                {
+                    "kind": "centre_radius",
+                    "centre": [0, 0, height],
+                    "radius_mm": 5.0,
+                    "support": "XY",
+                    "name": name,
+                },
+            )
+
+        runner(
+            "catia_surface_loft",
+            {"sections": ["mouth", "mouth"], "spine": "spine", "guides": ["flare"], "name": "horn"},
+        )
+        runner("catia_surface_loft", {"sections": ["mouth", "top"], "spine": "spine", "name": "tube"})
+
+        cone = math.pi * (5.0 + 15.0) * math.hypot(60.0, 10.0)
+        assert self._area(runner, "horn") == pytest.approx(cone, rel=1e-5)
+        assert self._area(runner, "tube") == pytest.approx(2 * math.pi * 5.0 * 60.0, rel=1e-9)
+
+    def test_a_guide_with_no_spine_is_refused_rather_than_given_an_invented_one(self) -> None:
+        """The sweep runs *along* a spine and is pulled sideways by the guide. Working one
+        out from the sections would mean inventing the curve the surface follows, which is
+        the one thing a steered loft exists to be told."""
+        runner = self._bend()
+
+        with pytest.raises(OperationNotSupported, match="nothing to sweep along"):
+            runner(  # type: ignore[operator]
+                "catia_surface_loft",
+                {"sections": ["start", "end"], "guides": ["spine"], "name": "no"},
+            )
+
+    def test_a_tangent_patch_leaves_its_support_along_the_support(self) -> None:
+        """The cap is a sphere of radius 10 cut at z = 6, so its rim is a circle of radius
+        8 and a *flat* patch over it has area π·64 = 201.06. The tangent patch has to bulge
+        to leave the sphere along the sphere, and comes out 273.7 — and the operation says
+        how close to tangent it actually got."""
+        runner = self._cap()
+
+        assert self._area(runner, "shell") == pytest.approx(2 * math.pi * 10.0 * 4.0, rel=1e-9)
+
+        flat = runner("catia_surface_fill", {"boundary": ["rim"], "name": "flat"})  # type: ignore[operator]
+        smooth = runner(  # type: ignore[operator]
+            "catia_surface_fill",
+            {
+                "boundary": ["rim"],
+                "supports": ["shell"],
+                "continuity": "tangent",
+                "name": "smooth",
+            },
+        )
+
+        assert self._area(runner, "flat") == pytest.approx(math.pi * 64.0, rel=1e-6)
+        assert "tangent_error_deg" not in flat
+        assert smooth["tangent_error_deg"] < 1e-3
+        assert self._area(runner, "smooth") > 1.3 * math.pi * 64.0
+
+    def test_a_tangency_occt_reports_but_does_not_deliver_is_refused(self) -> None:
+        """The failure this measurement exists for. A cylinder's wall stands square to its
+        own rim, so a tangent patch would have to leave straight up; the plate solver
+        cannot reach that, and returns `IsDone()` true with a flat disc 82.5° out all the
+        way round. A patch filed under a name that claims it is smooth, when it is not, is
+        worse than no patch."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Post"})
+        runner("catia_sketch_create", {"support": "ZX", "name": "gen"})
+        runner("catia_sketch_line", {"sketch": "gen", "start": (0.0, 10.0), "end": (30.0, 10.0)})
+        runner("catia_surface_revolve", {"profile": "gen", "axis": "Z", "name": "tube"})
+        runner("catia_boundary", {"surface": "tube", "name": "rims"})
+
+        with pytest.raises(GeometryError, match="could only manage one"):
+            runner(
+                "catia_surface_fill",
+                {
+                    "boundary": ["rims"],
+                    "supports": ["tube"],
+                    "continuity": "tangent",
+                    "name": "no",
+                },
+            )
+
+    def test_a_boundary_that_is_on_no_support_is_refused_before_occt_sees_it(self) -> None:
+        """Not merely an error — a **segfault**. `MakeFilling.Add` accepts an edge with no
+        parameter curve on the face without complaint and the process dies inside
+        `Build()`, so there is no exception for a caller to catch and no `try` that could
+        stand in for this check."""
+        runner = self._cap()
+        runner(  # type: ignore[operator]
+            "catia_curve_circle",
+            {
+                "kind": "centre_radius",
+                "centre": [0, 0, 20],
+                "radius_mm": 6.0,
+                "support": "XY",
+                "name": "loose",
+            },
+        )
+
+        with pytest.raises(GeometryError, match="not an edge of any surface named"):
+            runner(  # type: ignore[operator]
+                "catia_surface_fill",
+                {
+                    "boundary": ["loose"],
+                    "supports": ["shell"],
+                    "continuity": "tangent",
+                    "name": "no",
+                },
+            )
+
+    def test_tangency_with_nothing_to_be_tangent_to_is_refused(self) -> None:
+        runner = self._cap()
+
+        with pytest.raises(GeometryError, match="nothing for the patch to be tangent"):
+            runner(  # type: ignore[operator]
+                "catia_surface_fill",
+                {"boundary": ["rim"], "continuity": "tangent", "name": "no"},
+            )
+
+    def test_curvature_continuity_is_refused_with_what_occt_actually_says(self) -> None:
+        """Not a decision — `BRepFill_Filling` answers "the continuity is not G0 G1 or G2"
+        for `GeomAbs_G2` and builds nothing, so there is no G2 patch to be had here."""
+        runner = self._cap()
+
+        with pytest.raises(OperationNotSupported, match="refuses G2 outright"):
+            runner(  # type: ignore[operator]
+                "catia_surface_fill",
+                {
+                    "boundary": ["rim"],
+                    "supports": ["shell"],
+                    "continuity": "curvature",
+                    "name": "no",
+                },
+            )
+
+    def test_a_section_built_as_a_bare_curve_is_a_section(self) -> None:
+        """A sketch arrives holding a wire; every wireframe curve is a loose edge. Refusing
+        those made the loft usable only from sketches, which is not what the vocabulary
+        says — and the spine and guide arguments would have been unreachable."""
+        runner = self._bend()
+
+        runner("catia_surface_loft", {"sections": ["start", "end"], "name": "tube"})  # type: ignore[operator]
+
+        assert self._area(runner, "tube") > 0.0

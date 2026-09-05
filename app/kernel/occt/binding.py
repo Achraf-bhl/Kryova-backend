@@ -47,6 +47,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         BRepAlgoAPI_Cut,
         BRepAlgoAPI_Defeaturing,
         BRepAlgoAPI_Fuse,
+        BRepAlgoAPI_Section,
         BRepAlgoAPI_Splitter,
     )
     from OCP.BRepBndLib import BRepBndLib
@@ -65,6 +66,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer, BRepFilletAPI_MakeFillet
     from OCP.BRepGProp import BRepGProp
     from OCP.BRepIntCurveSurface import BRepIntCurveSurface_Inter
+    from OCP.BRepLib import BRepLib
     from OCP.BRepLProp import BRepLProp_SLProps
     from OCP.BRepOffsetAPI import (
         BRepOffsetAPI_DraftAngle,
@@ -85,15 +87,18 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     )
     from OCP.BRepTools import BRepTools
     from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d
-    from OCP.GC import GC_MakeArcOfCircle
+    from OCP.GC import GC_MakeArcOfCircle, GC_MakeCircle
+    from OCP.Geom import Geom_ConicalSurface, Geom_CylindricalSurface
+    from OCP.Geom2d import Geom2d_Line
     from OCP.GeomAbs import GeomAbs_Shape
-    from OCP.GeomAPI import GeomAPI_PointsToBSpline
+    from OCP.GeomAPI import GeomAPI_Interpolate, GeomAPI_PointsToBSpline
     from OCP.gp import (
         gp_Ax1,
         gp_Ax2,
         gp_Ax3,
         gp_Circ,
         gp_Dir,
+        gp_Dir2d,
         gp_Elips,
         gp_GTrsf,
         gp_Lin,
@@ -109,7 +114,11 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.Precision import Precision
     from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
     from OCP.ShapeFix import ShapeFix_Shape
-    from OCP.TColgp import TColgp_Array1OfPnt, TColgp_Array1OfPnt2d
+    from OCP.TColgp import (
+        TColgp_Array1OfPnt,
+        TColgp_Array1OfPnt2d,
+        TColgp_HArray1OfPnt,
+    )
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDF import TDF_LabelMap, TDF_TagSource
     from OCP.TDocStd import TDocStd_Application, TDocStd_Document
@@ -132,6 +141,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepAlgoAPI_Cut": BRepAlgoAPI_Cut,
         "BRepAlgoAPI_Defeaturing": BRepAlgoAPI_Defeaturing,
         "BRepAlgoAPI_Fuse": BRepAlgoAPI_Fuse,
+        "BRepAlgoAPI_Section": BRepAlgoAPI_Section,
         "BRepAlgoAPI_Splitter": BRepAlgoAPI_Splitter,
         "BRepBndLib": BRepBndLib,
         "BRepBuilderAPI_GTransform": BRepBuilderAPI_GTransform,
@@ -149,6 +159,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepGProp": BRepGProp,
         "BRepIntCurveSurface_Inter": BRepIntCurveSurface_Inter,
         "BRepLProp_SLProps": BRepLProp_SLProps,
+        "BRepLib": BRepLib,
         "BRepOffsetAPI_DraftAngle": BRepOffsetAPI_DraftAngle,
         "BRepOffsetAPI_MakeFilling": BRepOffsetAPI_MakeFilling,
         "BRepOffsetAPI_MakeOffsetShape": BRepOffsetAPI_MakeOffsetShape,
@@ -167,15 +178,21 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "Bnd_Box": Bnd_Box,
         "Bnd_OBB": Bnd_OBB,
         "GC_MakeArcOfCircle": GC_MakeArcOfCircle,
+        "GC_MakeCircle": GC_MakeCircle,
         "GProp_GProps": GProp_GProps,
+        "Geom2d_Line": Geom2d_Line,
+        "GeomAPI_Interpolate": GeomAPI_Interpolate,
         "GeomAPI_PointsToBSpline": GeomAPI_PointsToBSpline,
         "GeomAbs_Shape": GeomAbs_Shape,
+        "Geom_ConicalSurface": Geom_ConicalSurface,
+        "Geom_CylindricalSurface": Geom_CylindricalSurface,
         "Precision": Precision,
         "ShapeAnalysis_FreeBounds": ShapeAnalysis_FreeBounds,
         "ShapeFix_Shape": ShapeFix_Shape,
         "TCollection_ExtendedString": TCollection_ExtendedString,
         "TColgp_Array1OfPnt": TColgp_Array1OfPnt,
         "TColgp_Array1OfPnt2d": TColgp_Array1OfPnt2d,
+        "TColgp_HArray1OfPnt": TColgp_HArray1OfPnt,
         "TDF_LabelMap": TDF_LabelMap,
         "TDF_TagSource": TDF_TagSource,
         "TDocStd_Application": TDocStd_Application,
@@ -198,6 +215,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "gp_Ax3": gp_Ax3,
         "gp_Circ": gp_Circ,
         "gp_Dir": gp_Dir,
+        "gp_Dir2d": gp_Dir2d,
         "gp_Elips": gp_Elips,
         "gp_GTrsf": gp_GTrsf,
         "gp_Lin": gp_Lin,

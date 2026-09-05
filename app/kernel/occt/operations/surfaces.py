@@ -226,7 +226,7 @@ def surface_fill(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
     outline = [
         edge
         for reference in boundary
-        for edge in edges(_named_geometry(document, reference, tool=FILL, argument="boundary"))
+        for edge in edges(named_geometry(document, reference, tool=FILL, argument="boundary"))
     ]
     if not outline:
         raise GeometryError(
@@ -293,7 +293,7 @@ def surface_loft(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
     for reference in sections:
         maker.AddWire(
             _wire_of(
-                _named_geometry(document, reference, tool=LOFT, argument="sections"),
+                named_geometry(document, reference, tool=LOFT, argument="sections"),
                 reference=reference,
                 tool=LOFT,
             )
@@ -328,7 +328,7 @@ def join(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, An
     tolerance = float(arguments.get("tolerance_mm") or DEFAULT_SEWING_TOLERANCE_MM)
 
     pieces = [
-        _named_geometry(document, reference, tool=JOIN, argument="elements")
+        named_geometry(document, reference, tool=JOIN, argument="elements")
         for reference in references
     ]
     curves = [piece for piece in pieces if count(piece, FACE) == 0]
@@ -392,7 +392,7 @@ def extract(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str,
     wanted: list[Any] = []
     kind = SURFACE
     for reference in references:
-        found = _named_geometry(document, reference, tool=EXTRACT, argument="elements")
+        found = named_geometry(document, reference, tool=EXTRACT, argument="elements")
         if count(found, FACE) == 0:
             kind = CURVE
         wanted.append(found)
@@ -476,8 +476,8 @@ def split(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
     because the rule is fixed rather than depending on how OCCT listed the pieces.
     """
     document = context.require_document()
-    element = _named_geometry(document, arguments.get("element"), tool=SPLIT, argument="element")
-    cutter = _named_geometry(document, arguments.get("cutting"), tool=SPLIT, argument="cutting")
+    element = named_geometry(document, arguments.get("element"), tool=SPLIT, argument="element")
+    cutter = named_geometry(document, arguments.get("cutting"), tool=SPLIT, argument="cutting")
 
     keep = str(arguments.get("keep") or "first").lower()
     if keep not in {"first", "second", "both"}:
@@ -517,7 +517,7 @@ def trim(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, An
         )
 
     first, second = (
-        _named_geometry(document, reference, tool=TRIM, argument="elements")
+        named_geometry(document, reference, tool=TRIM, argument="elements")
         for reference in references
     )
     halves = []
@@ -596,7 +596,7 @@ def disassemble(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[
     """
     document = context.require_document()
     reference = str(arguments.get("element") or "").strip()
-    source = _named_geometry(document, reference, tool=DISASSEMBLE, argument="element")
+    source = named_geometry(document, reference, tool=DISASSEMBLE, argument="element")
 
     mode = str(arguments.get("mode") or "domains").lower()
     if mode not in {"domains", "all_cells"}:
@@ -675,7 +675,7 @@ def healing(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str,
 
     sewing = symbol("BRepBuilderAPI_Sewing")(merging)
     for reference in references:
-        sewing.Add(_named_geometry(document, reference, tool=HEALING, argument="elements"))
+        sewing.Add(named_geometry(document, reference, tool=HEALING, argument="elements"))
     sewing.Perform()
 
     fixer = symbol("ShapeFix_Shape")(sewing.SewedShape())
@@ -811,7 +811,7 @@ def surface_analysis(context: BuildContext, arguments: Mapping[str, Any]) -> Map
         arguments.get("elements"), tool=ANALYSIS, argument="elements", minimum=1
     )
     pieces = [
-        _named_geometry(document, reference, tool=ANALYSIS, argument="elements")
+        named_geometry(document, reference, tool=ANALYSIS, argument="elements")
         for reference in references
     ]
     subject = pieces[0] if len(pieces) == 1 else compound(pieces)
@@ -1153,8 +1153,13 @@ def _record(
 # -- resolving what a name points at ------------------------------------------
 
 
-def _named_geometry(document: Any, reference: Any, *, tool: str, argument: str) -> Any:
+def named_geometry(document: Any, reference: Any, *, tool: str, argument: str) -> Any:
     """One named element as a shape: a constructed surface or curve, a sketch, or a selector.
+
+    Public because `operations/curves.py` resolves exactly the same four namespaces and
+    must agree with this on every one of them — including which collisions are refused.
+    A second resolver would drift, and the symptom would be a name that means one thing
+    to a section and another to a split.
 
     Four namespaces meet here, and a name that lands in two of them is **refused rather
     than resolved by table order** — the rule `app.kernel.occt.elements` already holds for
@@ -1236,7 +1241,7 @@ def _sketch_geometry(sketch: Sketch, *, tool: str) -> Any:
 
 def _curve_named(document: Any, reference: Any, *, tool: str, argument: str) -> Any:
     """A named element that is a curve, refusing a surface by name rather than by silence."""
-    shape = _named_geometry(document, reference, tool=tool, argument=argument)
+    shape = named_geometry(document, reference, tool=tool, argument=argument)
     if count(shape, FACE):
         raise GeometryError(
             f"{tool} needs {argument} to be a curve and {reference!r} is a surface. "
@@ -1252,7 +1257,7 @@ def _curve_named(document: Any, reference: Any, *, tool: str, argument: str) -> 
 
 def _surface_named(document: Any, reference: Any, *, tool: str, argument: str) -> Any:
     """A named element that is a surface, refusing a curve the same way."""
-    shape = _named_geometry(document, reference, tool=tool, argument=argument)
+    shape = named_geometry(document, reference, tool=tool, argument=argument)
     if not count(shape, FACE):
         raise GeometryError(
             f"{tool} needs {argument} to be a surface and {reference!r} is a curve. "
@@ -1380,6 +1385,7 @@ __all__ = [
     "extract",
     "healing",
     "join",
+    "named_geometry",
     "split",
     "surface_analysis",
     "surface_extrude",

@@ -32,7 +32,7 @@ from typing import Any, Final
 from app.kernel import provenance
 from app.kernel.errors import OperationNotSupported
 from app.kernel.interrogation import InterrogationPayload
-from app.kernel.measurement import Detail
+from app.kernel.measurement import BOUNDING_BOX_MM, Detail
 from app.kernel.occt import classify, elements, metrology
 from app.kernel.occt.binding import symbol
 from app.kernel.occt.operations.context import BuildContext
@@ -218,6 +218,16 @@ def measure_item(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
         )
         payload["length_mm"] = sum(classify.edge_length_mm(edge) for edge in found)
         provenance.attach(payload, "length_mm", provenance.measured("curve integration"))
+        # **Where the curve reaches, not only how long it is.** A length says nothing
+        # about placement, and for a wireframe curve — a helix, a section, a spline
+        # through scanned points — "does it stay inside the envelope" is the question
+        # asked next. It is also the only thing that shows an edge carrying a parameter
+        # curve and no 3D curve: that edge measures the right length and reports a box
+        # 1.7 mm too big on a 20 mm helix, and every consumer that needs the 3D curve
+        # then fails somewhere else entirely.
+        payload[BOUNDING_BOX_MM] = metrology.bounding_box_mm(
+            element.require_shape()
+        )
         _add_circle_size(payload, found)
         return payload
 

@@ -29,11 +29,11 @@ What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its ow
 - **the rest of the trimming family** — `catia_extrapolate`, `catia_sew_surface`, and
   `propagation` on `catia_extract` / `catia_boundary`. Split, trim, untrim, disassemble
   and healing shipped 2026-09-05;
-- **the wireframe curves they are built on** — `catia_curve_*`, `catia_line_*`,
-  `catia_point_on_*`, `catia_plane_normal_to_curve` and their kin, none started. This is
-  the largest block left and the one everything else in 2.6 leans on: every curve today
-  must come from a planar sketch or a surface boundary, so a genuinely 3D path — a helix,
-  a projection, the intersection of two surfaces — cannot be expressed at all;
+- **the derived wireframe curves** — `catia_curve_{project,parallel,offset_3d,combine,
+  connect,corner,spiral,reflect_line}`, plus `catia_line_*`, `catia_point_on_*` and
+  `catia_plane_normal_to_curve`. The curves that are *drawn* rather than derived landed
+  2026-09-05 (helix, circle, polyline, spline) along with section, intersection and
+  extremum, so a 3D path is expressible now; what is left is the associative half;
 - `catia_draft` in `reflect_line` mode (needs `catia_curve_reflect_line`);
 - a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs a *2D* profile offset in the
   sketcher — the surface offset that shipped today answers a different question);
@@ -62,6 +62,26 @@ measurement vocabulary a visual check would assert against already exists.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-05** — E2 → **2.6 continues: wireframe curves** (`occt/operations/curves.py`).
+  `catia_curve_{helix,circle,polyline,spline,section,intersect,extremum}`. Coverage 80 →
+  **87/201**. Until these, every curve in a design came from a planar sketch or a surface
+  boundary, so a genuinely 3D path was not expressible at all — a helix cannot be
+  sketched, which is the reason the registry gives this its own module. Checked against
+  `n·√(pitch² + (2πr)²)` for the length and `r + h·tan(taper)` for the cone, not against
+  recorded output: a helix of the wrong pitch and one of the right pitch are the same
+  picture. Four traps, each verified by breaking it: **`Geom2d_Line` normalises the
+  direction it is given**, so sweeping the pcurve 0 → 2πn builds the right shape and a
+  16% wrong length (265.5 mm measured against 314.8); a cone's v runs along the **slant**,
+  so climbing `pitch` per turn in height means climbing `pitch/cos(taper)` in v; the
+  cylinder's X is aimed at `start_point` rather than left to OCCT, or the helix is right
+  in shape and wrong in **phase**; and `BRepLib.BuildCurves3d` is load-bearing — without
+  it the edge has no 3D curve at all, measures the right length, reports a box 1.7 mm too
+  big in every direction, and makes anything that sweeps along it raise
+  `Standard_NullObject` somewhere else entirely. That last one passed every test until
+  `catia_measure_item` was widened to report `bounding_box_mm` for a curve, which is the
+  cheapest question that tells the two apart. **Response-shape note:** that widening adds
+  `bounding_box_mm` to `catia_measure_item`'s payload for an edge element; nothing is
+  removed and the path is already in the measurement contract.
 - **2026-09-05** — E2 → **2.6 continues: the trimming family**. `catia_split`,
   `catia_trim`, `catia_untrim`, `catia_disassemble`, `catia_healing` and
   `catia_surface_analysis`. Coverage 74 → **80/201**. The question every one of these has

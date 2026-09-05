@@ -2631,3 +2631,299 @@ class TestCuttingSurfacesAgainstEachOther:
             runner(  # type: ignore[operator]
                 "catia_surface_analysis", {"kind": "isophote", "elements": ["cone"]}
             )
+
+
+class TestWireframeCurvesLiveInSpace:
+    """The curves a sketch cannot hold: a helix, a section, an intersection.
+
+    Until these existed every curve in a design came from a planar sketch or a surface
+    boundary, so a genuinely 3D path was not expressible at all. Each is checked against
+    the closed form for the curve it claims to be, because a helix of the wrong pitch and
+    a helix of the right one are the same picture.
+    """
+
+    RADIUS_MM, PITCH_MM, HEIGHT_MM = 10.0, 4.0, 20.0
+
+    @classmethod
+    def _helix_length(cls, radius: float, pitch: float, height: float) -> float:
+        """n·√(pitch² + (2πr)²) — a helix unrolled is the hypotenuse, n times."""
+        return (height / pitch) * math.sqrt(pitch**2 + (2 * math.pi * radius) ** 2)
+
+    @staticmethod
+    def _spring(**extra: object) -> object:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Spring"})
+        runner("catia_point_at", {"at": [0.0, 10.0, 0.0], "name": "start"})
+        runner(
+            "catia_curve_helix",
+            {
+                "axis": "Z",
+                "start_point": "start",
+                "pitch_mm": 4.0,
+                "height_mm": 20.0,
+                "name": "coil",
+                **extra,
+            },
+        )
+        return runner
+
+    def test_a_helix_has_the_length_a_helix_has(self) -> None:
+        """The parameterisation trap this operation is built around. `Geom2d_Line`
+        normalises the direction it is given, so sweeping the pcurve from 0 to 2πn builds
+        a helix of the right shape and the wrong length — 265.5 mm measured against a
+        closed form of 314.8, a 16% error that looks entirely plausible in a screenshot.
+
+        The tolerance is relative because OCCT integrates the length over a B-spline
+        approximation of the pcurve; the residual is about 2 parts in 10⁸, which is the
+        quadrature and not the construction.
+        """
+        runner = self._spring()
+
+        measured = runner("catia_measure_item", {"element": "coil"})  # type: ignore[operator]
+
+        expected = self._helix_length(self.RADIUS_MM, self.PITCH_MM, self.HEIGHT_MM)
+        assert measured["length_mm"] == pytest.approx(expected, rel=1e-6)
+
+    def test_a_helix_begins_at_the_point_that_named_its_start(self) -> None:
+        """The radius comes from the start point, and so does the phase. Letting OCCT
+        choose the cylinder's own X gives a helix that is correct in shape and wrong in
+        phase — a thread that does not line up with its own runout."""
+        runner = self._spring()
+
+        runner(  # type: ignore[operator]
+            "catia_curve_extremum",
+            {"element": "coil", "direction": [0, 0, 1], "maximum": False, "name": "foot"},
+        )
+
+        foot = runner("catia_measure_item", {"element": "foot"})["position_mm"]  # type: ignore[operator]
+        assert foot == pytest.approx([0.0, 10.0, 0.0], abs=1e-9)
+
+    def test_a_tapered_helix_opens_by_the_tangent_of_its_angle(self) -> None:
+        """r + h·tan(taper) at the top, exactly. A cone's v runs along the slant rather
+        than up the axis, so climbing `pitch` per turn in *height* means climbing
+        pitch/cos(taper) in v — leave the cosine out and the coil rises too slowly."""
+        runner = self._spring(taper_deg=10.0)
+
+        runner(  # type: ignore[operator]
+            "catia_curve_extremum",
+            {"element": "coil", "direction": [0, 0, 1], "name": "crown"},
+        )
+
+        crown = runner("catia_measure_item", {"element": "crown"})["position_mm"]  # type: ignore[operator]
+        radius = math.hypot(crown[0], crown[1])
+        assert radius == pytest.approx(
+            self.RADIUS_MM + self.HEIGHT_MM * math.tan(math.radians(10.0)), abs=1e-6
+        )
+        assert crown[2] == pytest.approx(self.HEIGHT_MM, abs=1e-6)
+
+    def test_a_helix_carries_a_real_3d_curve_not_only_a_pcurve(self) -> None:
+        """An edge built on a surface holds a *parameter* curve, and the 3D curve is a
+        separate thing that has to be asked for. Skip `BuildCurves3d` and the edge still
+        measures the right length — but it has no 3D curve at all, its bounding box comes
+        out 1.7 mm too big in every direction on a 20 mm helix, and anything that sweeps
+        along it raises `Standard_NullObject` from somewhere else entirely.
+
+        So the check is the box, which is the cheapest question that can tell the two
+        apart. The helix winds on a cylinder of radius 10 from z = 0 to z = 20; the box
+        exceeds that only by OCCT's own spline margin.
+        """
+        runner = self._spring()
+
+        box = runner("catia_measure_item", {"element": "coil"})["bounding_box_mm"]  # type: ignore[operator]
+
+        # OCCT pads a bounding box by its own gap tolerance, so the margins here are
+        # 1e-4 and 0.7 mm rather than zero. Without the 3D curve the same box reads
+        # -1.667 to 21.667 and 11.667 across, which neither margin comes close to.
+        assert box["min"][2] == pytest.approx(0.0, abs=1e-4)
+        assert box["max"][2] == pytest.approx(self.HEIGHT_MM, abs=1e-4)
+        assert box["max"][0] == pytest.approx(self.RADIUS_MM, abs=0.7)
+
+    def test_a_3d_circle_needs_the_plane_it_lies_in(self) -> None:
+        """Through one centre at one radius there is a circle in every plane, so a
+        support is not this backend being strict — it is the missing half of the question."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Ring"})
+
+        with pytest.raises(GeometryError, match="needs a support"):
+            runner(
+                "catia_curve_circle",
+                {"kind": "centre_radius", "centre": [0, 0, 0], "radius_mm": 5.0},
+            )
+
+    def test_a_circle_and_an_arc_measure_what_they_should(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Ring"})
+        common = {"kind": "centre_radius", "centre": [0, 0, 0], "radius_mm": 12.0, "support": "XY"}
+
+        runner("catia_curve_circle", {**common, "name": "whole"})
+        runner(
+            "catia_curve_circle",
+            {**common, "start_angle_deg": 0.0, "end_angle_deg": 90.0, "name": "quarter"},
+        )
+
+        circumference = 2 * math.pi * 12.0
+        assert runner("catia_measure_item", {"element": "whole"})["length_mm"] == pytest.approx(
+            circumference, abs=1e-9
+        )
+        assert runner("catia_measure_item", {"element": "quarter"})["length_mm"] == pytest.approx(
+            circumference / 4.0, abs=1e-9
+        )
+
+    def test_three_points_give_the_whole_circle_not_the_arc_between_them(self) -> None:
+        """`GC_MakeArcOfCircle` answers a different question — the arc from the first
+        point through the second to the third — so building the circle from it returns
+        half of what this operation promises."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Three"})
+
+        runner(
+            "catia_curve_circle",
+            {"kind": "three_points", "points": [[10, 0, 0], [0, 10, 0], [-10, 0, 0]], "name": "hoop"},
+        )
+
+        measured = runner("catia_measure_item", {"element": "hoop"})
+        assert measured["length_mm"] == pytest.approx(2 * math.pi * 10.0, abs=1e-9)
+
+    def test_three_points_in_a_line_lie_on_no_circle(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Flat"})
+
+        with pytest.raises(GeometryError, match="straight line"):
+            runner(
+                "catia_curve_circle",
+                {"kind": "three_points", "points": [[0, 0, 0], [10, 0, 0], [20, 0, 0]], "name": "no"},
+            )
+
+    def test_a_polyline_is_the_sum_of_its_segments(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Path"})
+        points = [[0, 0, 0], [10, 0, 0], [10, 10, 0], [10, 10, 10]]
+
+        runner("catia_curve_polyline", {"points": points, "name": "open"})
+        runner("catia_curve_polyline", {"points": points, "closed": True, "name": "loop"})
+
+        assert runner("catia_measure_item", {"element": "open"})["length_mm"] == pytest.approx(
+            30.0, abs=TOL
+        )
+        assert runner("catia_measure_item", {"element": "loop"})["length_mm"] == pytest.approx(
+            30.0 + math.sqrt(300.0), abs=TOL
+        )
+
+    def test_a_spline_passes_through_its_points_rather_than_near_them(self) -> None:
+        """Interpolation, not approximation: three collinear points give a straight line
+        of exactly their span. A fitted curve would come back a little longer, and nothing
+        would say which it had done."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Curve"})
+
+        runner("catia_curve_spline", {"points": [[0, 0, 0], [10, 0, 0], [20, 0, 0]], "name": "line"})
+
+        measured = runner("catia_measure_item", {"element": "line"})
+        assert measured["length_mm"] == pytest.approx(20.0, abs=1e-9)
+
+    def test_a_section_takes_the_real_profile_off_the_geometry(self) -> None:
+        """A plane through a Ø20 post cuts a circle of exactly 2πr — not a profile
+        someone drew to look like one."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Post"})
+        runner(
+            "catia_surface_primitive",
+            {"kind": "cylinder", "radius_mm": 10.0, "length_mm": 30.0, "name": "post"},
+        )
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 15.0, "name": "mid"})
+
+        runner("catia_curve_section", {"element": "post", "plane": "mid", "name": "ring"})
+
+        measured = runner("catia_measure_item", {"element": "ring"})
+        assert measured["length_mm"] == pytest.approx(2 * math.pi * 10.0, abs=1e-9)
+
+    def test_a_section_that_misses_is_refused_rather_than_returned_empty(self) -> None:
+        """"They do not meet" and "the section is empty" are the same sentence, and only
+        one of them is what the caller expected to hear."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Post"})
+        runner(
+            "catia_surface_primitive",
+            {"kind": "cylinder", "radius_mm": 10.0, "length_mm": 30.0, "name": "post"},
+        )
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 90.0, "name": "away"})
+
+        with pytest.raises(GeometryError, match="misses it entirely"):
+            runner("catia_curve_section", {"element": "post", "plane": "away", "name": "nothing"})
+
+    def test_two_crossing_surfaces_give_the_seam_between_them(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Cross"})
+        corners = [(-20.0, -20.0), (20.0, -20.0), (20.0, 20.0), (-20.0, 20.0)]
+        for name, plane in (("flat", "XY"), ("upright", "ZX")):
+            outline = f"{name}_outline"
+            runner("catia_sketch_create", {"support": plane, "name": outline})
+            for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+                runner("catia_sketch_line", {"sketch": outline, "start": start, "end": end})
+            runner("catia_surface_fill", {"boundary": [outline], "name": name})
+
+        runner("catia_curve_intersect", {"elements": ["flat", "upright"], "name": "seam"})
+
+        measured = runner("catia_measure_item", {"element": "seam"})
+        assert measured["length_mm"] == pytest.approx(40.0, abs=TOL)
+
+    def test_an_extremum_is_a_point_the_rest_of_the_vocabulary_can_use(self) -> None:
+        """It goes into the document's point store, not a second place for points, so
+        every operation that takes a point can already find it."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Block"})
+        runner("catia_sketch_create", {"support": "XY", "name": "base"})
+        runner("catia_sketch_rectangle", {"sketch": "base", "width_mm": 40.0, "height_mm": 20.0})
+        runner("catia_pad", {"sketch": "base", "length_mm": 12.0, "name": "block"})
+
+        top = runner("catia_curve_extremum", {"element": "block", "direction": [0, 0, 1], "name": "crown"})
+        bottom = runner(
+            "catia_curve_extremum",
+            {"element": "block", "direction": [0, 0, 1], "maximum": False, "name": "foot"},
+        )
+
+        assert top["position_mm"][2] == pytest.approx(12.0, abs=TOL)
+        assert bottom["position_mm"][2] == pytest.approx(0.0, abs=TOL)
+        # In the point store, so `catia_measure_item` resolves it like any other point.
+        assert runner("catia_measure_item", {"element": "crown"})["measured_kind"] == "point"
+
+    def test_what_a_curve_cannot_do_yet_is_named_rather_than_ignored(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Refuse"})
+
+        for arguments, expected in (
+            ({"kind": "bitangent"}, "constraint problem"),
+            ({"kind": "tritangent"}, "constraint problem"),
+        ):
+            with pytest.raises(OperationNotSupported, match=expected):
+                runner("catia_curve_circle", arguments)
+
+        with pytest.raises(OperationNotSupported, match="fillet between successive"):
+            runner(
+                "catia_curve_polyline",
+                {"points": [[0, 0, 0], [1, 0, 0]], "radius_mm": 1.0},
+            )

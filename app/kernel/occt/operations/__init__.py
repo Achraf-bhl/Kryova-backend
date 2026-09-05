@@ -20,6 +20,7 @@ from typing import Any, Final
 from app.kernel.occt.operations import (
     annotation_ops,
     booleans,
+    curves,
     document_ops,
     dressup,
     features,
@@ -93,6 +94,14 @@ HANDLERS: Final[dict[str, Handler]] = {
     dressup.THICKNESS: dressup.thickness,
     dressup.REMOVE_FACE: dressup.remove_face,
     annotation_ops.THREAD: annotation_ops.thread,
+    # wireframe curves, which is what a 3D path is made of
+    curves.HELIX: curves.curve_helix,
+    curves.CIRCLE: curves.curve_circle,
+    curves.POLYLINE: curves.curve_polyline,
+    curves.SPLINE: curves.curve_spline,
+    curves.SECTION: curves.curve_section,
+    curves.INTERSECT: curves.curve_intersect,
+    curves.EXTREMUM: curves.curve_extremum,
     # surfaces, and the two ways one becomes material
     surfaces.EXTRUDE: surfaces.surface_extrude,
     surfaces.REVOLVE: surfaces.surface_revolve,

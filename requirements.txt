@@ -25,6 +25,20 @@ numpy==2.5.2
 scipy==1.18.0
 gmsh==4.15.2
 
+# The OCCT geometry kernel (app/kernel/) -- the primary compilation target for the
+# design IR, so geometry can be built headless, free, in CI and deterministically.
+# `cadquery-ocp` and not `pythonocc-core`: the latter is not published on PyPI at all
+# and would drag conda into the deployment (measured 2026-09-05, master plan Phase 1.0).
+#
+# It is BIG: ~166 MB for OCP itself plus ~640 MB of VTK pulled in as a hard dependency
+# and never used by this codebase -- nothing here renders through VTK. Stripping it is
+# a container-layer job (master plan P9.2), not something to fake with --no-deps here.
+#
+# `app/kernel/` imports and the whole test suite runs without it -- same contract the
+# CATIA bridge keeps for pywin32 -- so an install that omits it degrades to the CATIA
+# backend rather than breaking.
+cadquery-ocp==7.9.3.1.1
+
 # Local vector indexes
 faiss-cpu==1.15.0
 

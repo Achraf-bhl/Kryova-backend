@@ -49,5 +49,18 @@ module = [
   "faiss.*",
   "jose.*",
   "scipy.*",
+  "OCP",
+  "OCP.*",
 ]
 ignore_missing_imports = true
+
+# OCP (`cadquery-ocp`) is the OCCT geometry kernel binding behind `app/kernel/`. It is
+# pybind11-generated and ships no `py.typed` marker, so every one of its ~320 modules
+# raises `import-untyped` -- and that error is reported against the *importing* file,
+# which is why this override targets our module rather than OCP. Suppressing it here
+# and nowhere else is exactly why `app/kernel/occt.py` exists as the single place OCP
+# may be imported: the untyped surface is contained in one file instead of spreading
+# across the package, and `occ()` hands the rest of the kernel plain `Any`.
+[[tool.mypy.overrides]]
+module = ["app.kernel.occt"]
+disable_error_code = ["import-untyped"]

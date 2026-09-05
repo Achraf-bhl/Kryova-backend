@@ -1,0 +1,102 @@
+"""Every operation this backend implements, assembled into one table.
+
+Mirrors how `app/catia/ops/` is laid out: one module per domain, one table assembling
+them, and adding an operation is one entry in the module it belongs to. The registry
+there declares *what the vocabulary is*; this declares *what OCCT can do about it*, and
+the gap between the two is the honest coverage number.
+
+**Every handler name is checked against the real registry at import.** A typo in a key
+here would otherwise produce a handler that can never be called — dead code that looks
+live, and a silent hole in coverage. `HANDLERS` is validated on first use instead, so a
+mistake surfaces immediately rather than as an operation that mysteriously reports
+"not implemented".
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from typing import Any, Final
+
+from app.kernel.occt.operations import (
+    booleans,
+    document_ops,
+    dressup,
+    features,
+    inspection,
+    primitives,
+    reference_ops,
+    sketcher,
+    transforms,
+)
+from app.kernel.occt.operations.context import BuildContext
+
+#: What every operation handler looks like.
+Handler = Callable[[BuildContext, Mapping[str, Any]], Mapping[str, Any]]
+
+#: Operation name → implementation. The single place a new OCCT operation is wired in.
+HANDLERS: Final[dict[str, Handler]] = {
+    # document
+    "catia_new_part": document_ops.new_part,
+    "catia_set_material": document_ops.set_material,
+    "catia_feature_rename": document_ops.feature_rename,
+    "catia_list_features": document_ops.list_features,
+    # reference geometry
+    reference_ops.POINT_AT: reference_ops.point_at,
+    reference_ops.POINT_BETWEEN: reference_ops.point_between,
+    reference_ops.PLANE_OFFSET: reference_ops.plane_offset,
+    reference_ops.PLANE_THROUGH_POINTS: reference_ops.plane_through_points,
+    reference_ops.PLANE_ANGLE: reference_ops.plane_angle,
+    reference_ops.AXIS_SYSTEM: reference_ops.axis_system,
+    # sketching
+    sketcher.CREATE: sketcher.sketch_create,
+    sketcher.RECTANGLE: sketcher.sketch_rectangle,
+    sketcher.CIRCLE: sketcher.sketch_circle,
+    sketcher.POLYGON: sketcher.sketch_polygon,
+    sketcher.SLOT: sketcher.sketch_slot,
+    sketcher.CLOSE: sketcher.sketch_close,
+    sketcher.CONSTRAIN: sketcher.sketch_constrain,
+    # sketch-based solid features
+    features.PAD: features.pad,
+    features.POCKET: features.pocket,
+    features.SHAFT: features.shaft,
+    features.GROOVE: features.groove,
+    # primitives and dress-up
+    primitives.TOOL: primitives.surface_primitive,
+    dressup.FILLET: dressup.fillet,
+    dressup.CHAMFER: dressup.chamfer,
+    dressup.DRAFT: dressup.draft,
+    # whole-body operations
+    booleans.BOOLEAN: booleans.boolean,
+    booleans.SHELL: booleans.shell,
+    transforms.TRANSLATE: transforms.translate,
+    # reading
+    inspection.MEASURE: inspection.measure,
+    inspection.ANALYSIS: inspection.analysis_part,
+}
+
+
+def unknown_handler_names() -> tuple[str, ...]:
+    """Handler keys that are not operations the registry declares.
+
+    Imported lazily so this package does not drag the CATIA operation registry into a
+    geometry-only import path. Called by the runner's self-check and by the test suite;
+    an empty result is the invariant.
+    """
+    from app.catia.ops import registry
+
+    return tuple(sorted(name for name in HANDLERS if registry.get(name) is None))
+
+
+def coverage() -> dict[str, int]:
+    """How much of the vocabulary this backend implements, as data rather than a claim."""
+    from app.catia.ops import registry
+
+    declared = len(registry.OPERATIONS_BY_NAME)
+    return {
+        "implemented": len(HANDLERS),
+        "declared": declared,
+        "remaining": declared - len(HANDLERS),
+    }
+
+
+__all__ = ["HANDLERS", "BuildContext", "Handler", "coverage", "unknown_handler_names"]

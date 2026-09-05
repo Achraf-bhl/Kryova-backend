@@ -1,5 +1,69 @@
 # Kryova Backend
 
+## What this project is for — read this before proposing anything
+
+**The goal is a system an engineer can talk to that designs, analyses, validates and documents a
+complete working machine** — a stamping press, a gearbox, a conveyor, a robot arm, a motorcycle
+chassis — to a standard a licensed engineer can review, sign, and have manufactured.
+
+Not a chatbot that models a bracket. Not a gear generator. **A machine.**
+
+The controlling document is **[KRYOVA_MASTER_PLAN.md](KRYOVA_MASTER_PLAN.md)** (v2) — an
+Engineering Track (18 phases, 7 eras) **plus a Product Track (P1–P10: identity/sessions, orgs and
+tenancy, admin+audit, file attachments, agent UX, viewer at scale, desktop, billing, delivery,
+trust)**, the technology choices and why, and the honest effort. Read it before designing
+anything substantial; it will usually say where the work belongs and what it must not break.
+[KRYOVA_BUILD_PLAN.md](KRYOVA_BUILD_PLAN.md) is the short-term working queue (one phase at a
+time, green before the next). [KRYOVA_CAPABILITY_ROADMAP.md](KRYOVA_CAPABILITY_ROADMAP.md) is the
+capability audit it grew out of.
+
+Eight decisions from the master plan that change how code here should be written. Contradicting
+one is a design change, not a detail:
+
+1. **The design IR compiles to an open kernel first; CATIA is one backend among several.**
+   Geometry must be buildable headless, free, in CI — that is what makes optimisation,
+   sensitivity, self-correction and geometry regression tests affordable at all. Never write
+   anything that assumes CATIA is the only way to make geometry.
+2. **Physics is federated, never re-implemented.** Keep `solve/loads.py`, `solve/selection.py`
+   and `solve/materials.py` — the load-case and geometric-selector vocabulary is the real asset.
+   Swap the kernel underneath (CalculiX and friends). Do not hand-write another solver.
+3. **Verification is the product.** An unmeasured claim is never a pass; an unconverged number is
+   worse than no number; every result is bound to the geometry, mesh, material, load case and
+   solver version that produced it. The existing honesty conventions (a mock mass says it is a
+   mock, a missing translation says it is missing) are this rule applied locally — extend them,
+   never erode them.
+4. **Free and open, with the licence consequences taken seriously.** GPL solvers (CalculiX,
+   code_aster, OpenFOAM, gmsh) are invoked **as separate processes across a file/CLI boundary**.
+   Never link one in-process, however convenient.
+5. **Honest scope.** Kryova does the structural, kinematic and packaging content and integrates
+   bought-in components. Unattended sign-off on a safety-critical machine is not the goal and
+   never becomes it. Do not write copy, docstrings or model prompts implying otherwise.
+6. **One platform.** Web and desktop share one frontend (`../Kryova-frontend`: Next.js + Tauri),
+   one API, one auth. No second admin web app, no separate viewer product. Respect that repo's
+   three-dependency minimalism — a new frontend dependency is a named decision, not an import.
+7. **Security and tenancy are architecture.** Refresh tokens rotate per use in per-device
+   families with reuse detection (a replayed rotated token kills the family). Orgs own projects;
+   Postgres RLS is the safety net under application scoping, fed **only** by `SET LOCAL` inside
+   an explicit transaction — the one sanctioned exception to the "never `SET` on the pooled
+   endpoint" rule, safe because it dies at COMMIT. Cross-tenant is 404, never 403. Admin
+   impersonation carries both identities, defaults read-only, and always lands in the
+   append-only audit log.
+8. **Attachments are data, never instructions.** User files are parsed locally (Docling /
+   MarkItDown class, `ezdxf`, the geometry pipeline) into provenance-tagged content. Extracted
+   text is quoted material — it never enters system prompts, and no tool action may be justified
+   solely by attachment text without the user seeing that justification. Document-borne prompt
+   injection is a tested-against attack class here, not a hypothetical.
+
+**Keep the phase status board current — this is how sessions keep the thread.** The master plan
+carries a **phase status board** (Part 2, one row per phase E1–E18/17.3 and P1–P10). When your
+work completes or materially advances a phase, update its row **in the same commit as the work**:
+status (`not started` / `in progress (since date)` / `partial — what shipped (date)` /
+`DONE (date)`) plus the evidence column naming the code or test where the claim is checkable.
+`DONE` requires the phase's Proof running green — never mark it otherwise. Also append one line
+to [KRYOVA_BUILD_PLAN.md](KRYOVA_BUILD_PLAN.md)'s *Done* section (the board is current-state;
+the build plan is the history). A session that starts on Kryova work should read the board
+first — it is the answer to "where were we?".
+
 FastAPI service for an AI-native CAD + FEA platform: upload geometry → mesh → linear-static
 FEA → viewer-ready results. Frontend is a **separate repo** (`../Kryova-frontend`, own
 CLAUDE.md). Product scope lives in [KRYOVA_PRD.md](KRYOVA_PRD.md); honest current state and
@@ -58,6 +122,8 @@ app/
   solve/          Solver interface, linear-static tet4 FEA, materials, region selectors
   simulation/     runner.py — the geometry → mesh → solve job pipeline
   jobs/           JobQueue interface; ThreadPoolJobQueue today, Celery/RQ later
+  design/         a part as a compilable specification, not a tree to edit (see below)
+  kernel/         the open geometry kernel — OCCT, headless, free, in CI (see below)
   retrieval/      the reference manuals the agent consults (see below)
 migrations/       Alembic (versions/ is the only migration path)
 tests/            pytest, mirrors app/
@@ -105,6 +171,103 @@ meaningful statement is the ratio to the compressive case.
   S3 store is a swap, not a rewrite.
 
 Never reach around a seam. If a route needs to know which solver ran, put it on the job row.
+
+## The design IR (`app/design/`)
+
+A part described as a **specification that is compiled**, rather than a feature tree that is
+edited. This is Layer B of `KRYOVA_CAPABILITY_ROADMAP.md`, and it exists because editing a
+tree conversationally breaks on the topological naming problem: insert a fillet upstream and
+every downstream reference shatters. Regenerating from a spec has no downstream edit to break.
+
+Read `spec.py` first (what a design *is*), then `compile.py` (what happens to one). Then
+`execute` runs a plan, `assertions` says whether the result is acceptable, `diff` says what an
+edit reached, `correct` closes the loop between them. `names` and `params` are usable alone.
+
+Things that will bite you:
+
+- **Only `execute` touches anything outside the package, and it does so through an injected
+  callable.** No session, no socket, no `dispatch` import. That is why all 338 tests over this
+  package run offline in under a second, and it is worth keeping — the same property the
+  physics tests have and for the same reason.
+- **`Plan.digest()` does not answer "does this build the same part?"** despite reading like
+  it. A plan carries each call's `note` — rationale travels with the design on purpose, and
+  `DesignSpec.digest()` covering it is a *tested contract* — so rewriting a comment moves both
+  digests and builds identical geometry. Every geometry question goes through
+  `diff.builds_the_same` (tools and resolved arguments only). Do not "simplify" one into the
+  other; the digests are what a provenance record wants (D11) and are deliberately coarser.
+- **Impact analysis compares compiled plans, never spec text.** By compile time every
+  parameter is a literal in the argument list of the calls using it, so a feature moved iff
+  its resolved calls differ — exact, with no parameter-usage graph to fall out of step.
+- **A reference is not always a read.** `catia_sketch_rectangle(sketch=@profile)` draws
+  *into* the profile; `catia_pad(sketch=@profile)` extrudes what it finds. So a feature's
+  geometry can change while its call is byte-identical, and following `@` references alone
+  silently leaves every solid built on a changed sketch looking current. The two are told
+  apart by `Plan.unaddressable` — a feature that creates a tree element gets an allocated
+  name, and one that does not is unaddressable *because* its effect landed on something else.
+- **A plan carries exactly one late-bound value**, `Created(feature)`, because a fresh pad is
+  called whatever CATIA invented. `bind()` resolves it from what the creating call reported.
+  Predicting `Pad.1` is the positional fragility this package exists to remove. The executor
+  records the *creating* call's name with `setdefault`, not the following rename's.
+- **An assertion that could not be measured is `UNMEASURED`, never a pass.** A suite that
+  skips what it could not read reports green on a part nobody checked.
+- **The correction loop's stopping rules are exact, not heuristic.** A repair compiling to the
+  same buildable plan cannot change the outcome, so it ends the loop and is not counted as an
+  attempt; a plan already tried is a cycle. Both are gifts from the compiler being
+  deterministic. The attempt cap is only the backstop. A repair that *does not compile* is a
+  normal attempt on purpose — the compiler's error names the feature and says what to do,
+  which is the best feedback in the system, so it goes back round as the next brief.
+- **`feature#selector` is parsed and refused, not resolved.** Predicate selection is roadmap
+  A3 and is blocked behind A1 — a predicate is only decidable against geometry that exists.
+
+## The geometry kernel (`app/kernel/`)
+
+Decision 1 made real: geometry built **headless, free and in CI**, so optimisation,
+sensitivity and geometry regression tests are affordable at all. OCCT via
+`cadquery-ocp` (OCP) — `pythonocc-core` is not on PyPI and would have forced conda into
+the deployment. `app/design/` compiles a spec to a `Plan`; `OcctRunner` executes it, and
+a CATIA seat executes the same plan through the same `CallRunner` seam.
+
+Reading order: `occt/binding.py` (the one place OCP is imported), then `occt/document.py`
+(what a part *is* here), then `occt/naming.py` (the three non-obvious rules that make
+names survive regeneration — break one and `Solve()` returns success while resolving to
+nothing).
+
+Above the backends sit four backend-neutral modules, and the split is load-bearing:
+
+- **`measurement.py`** — what a measured part reports, and `Detail` levels, which exist
+  for latency: a plan for a machine is 10⁵–10⁶ operations and computing the full set
+  after each would dominate the run.
+- **`interrogation.py` + `occt/interrogate/`** — what a part can be *made into*: wall
+  thickness, draft, undercuts, curvature, continuity, validity, clearance. These have a
+  premise ("pulled along +Z"), can be inapplicable, and are frequently **sampled**.
+  Nothing here runs speculatively; `measure()` never calls it.
+- **`contract.py`** — the written vocabulary an assertion may read, with unit and
+  meaning. `undocumented_paths()` is asserted empty, which is what makes it a contract.
+- **`provenance.py`** — measured / approximated / unavailable-with-a-reason, as a
+  *sidecar* so `bounding_box_mm.size[2]` still resolves. `assertions.py` reads it per
+  path, so an exact mass is not tainted by a ray-cast thickness beside it.
+
+Things that will bite you:
+
+- **`topology.explore` de-duplicates and `explore_oriented` does not**, deliberately.
+  `TopExp_Explorer` visits a sub-shape once *per owning parent*, so a box explores as 24
+  edges and 48 vertices. Use the first for "every edge of this part", the second only
+  where a face's own boundary orientation is the point (convexity).
+- **A face's outward normal is not its surface normal.** OCCT stores orientation
+  separately, so a REVERSED face's normal points into the material. `face_normal_at` is
+  the one place that correction lives — and it flips curvature's sign too, which is why
+  concave/convex is measured against a table in `interrogate/curvature.py` rather than
+  reasoned about.
+- **A UV grid is not a set of points on a face.** A trimmed face reports its whole
+  surface's parameter range, so most of a naive grid lands in the hole. Everything goes
+  through `interrogate/sampling.py`, which classifies against the real boundary and
+  refines once when a face is too narrow to catch a sample.
+- **Sampled answers must never be reported as measured.** Thickness and undercut are
+  upper bounds from a finite ray set, and they say so. Draft works this out per part —
+  exact on planes, sampled on curves.
+- **`str.capitalize()` is banned in error text.** It lowercases everything after the
+  first character, turning `BRepFeat_MakePrism` into `brepfeat_makeprism`. Sentence
+  casing lives in `errors._as_sentence`.
 
 ## Reference manuals (`app/retrieval/`)
 

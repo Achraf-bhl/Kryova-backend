@@ -85,13 +85,19 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         BRepPrimAPI_MakeRevol,
         BRepPrimAPI_MakeSphere,
     )
-    from OCP.BRepTools import BRepTools
+    from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
     from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d
     from OCP.GC import GC_MakeArcOfCircle, GC_MakeCircle
+    from OCP.GCPnts import GCPnts_AbscissaPoint
     from OCP.Geom import Geom_ConicalSurface, Geom_CylindricalSurface
     from OCP.Geom2d import Geom2d_Line
     from OCP.GeomAbs import GeomAbs_Shape
-    from OCP.GeomAPI import GeomAPI_Interpolate, GeomAPI_PointsToBSpline
+    from OCP.GeomAPI import (
+        GeomAPI_Interpolate,
+        GeomAPI_PointsToBSpline,
+        GeomAPI_ProjectPointOnCurve,
+        GeomAPI_ProjectPointOnSurf,
+    )
     from OCP.gp import (
         gp_Ax1,
         gp_Ax2,
@@ -174,15 +180,19 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepPrimAPI_MakeRevol": BRepPrimAPI_MakeRevol,
         "BRepPrimAPI_MakeSphere": BRepPrimAPI_MakeSphere,
         "BRepTools": BRepTools,
+        "BRepTools_WireExplorer": BRepTools_WireExplorer,
         "BRepTopAdaptor_FClass2d": BRepTopAdaptor_FClass2d,
         "Bnd_Box": Bnd_Box,
         "Bnd_OBB": Bnd_OBB,
         "GC_MakeArcOfCircle": GC_MakeArcOfCircle,
         "GC_MakeCircle": GC_MakeCircle,
+        "GCPnts_AbscissaPoint": GCPnts_AbscissaPoint,
         "GProp_GProps": GProp_GProps,
         "Geom2d_Line": Geom2d_Line,
         "GeomAPI_Interpolate": GeomAPI_Interpolate,
         "GeomAPI_PointsToBSpline": GeomAPI_PointsToBSpline,
+        "GeomAPI_ProjectPointOnCurve": GeomAPI_ProjectPointOnCurve,
+        "GeomAPI_ProjectPointOnSurf": GeomAPI_ProjectPointOnSurf,
         "GeomAbs_Shape": GeomAbs_Shape,
         "Geom_ConicalSurface": Geom_ConicalSurface,
         "Geom_CylindricalSurface": Geom_CylindricalSurface,

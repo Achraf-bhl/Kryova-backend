@@ -2927,3 +2927,202 @@ class TestWireframeCurvesLiveInSpace:
                 "catia_curve_polyline",
                 {"points": [[0, 0, 0], [1, 0, 0]], "radius_mm": 1.0},
             )
+
+
+class TestAnchorsPointsAndLines:
+    """Points and lines derived from geometry rather than typed in.
+
+    The whole value of these is that they follow what they were derived from. A point
+    measured once and typed as a coordinate is right until the part changes and wrong
+    silently afterwards; `catia_point_on_curve` is right afterwards too. So every test
+    here checks the *place*, against the closed form for where that place is.
+    """
+
+    @staticmethod
+    def _ell() -> object:
+        """An L-shaped polyline: 30 mm along +X, then 40 mm along +Y. Total 70."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Anchor"})
+        runner(
+            "catia_curve_polyline",
+            {"points": [[0, 0, 0], [30, 0, 0], [30, 40, 0]], "name": "path"},
+        )
+        return runner
+
+    @staticmethod
+    def _tube() -> object:
+        """A cylinder of radius 10 standing 30 mm tall, as a surface."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Tube"})
+        runner("catia_sketch_create", {"support": "ZX", "name": "gen"})
+        runner("catia_sketch_line", {"sketch": "gen", "start": (0.0, 10.0), "end": (30.0, 10.0)})
+        runner("catia_surface_revolve", {"profile": "gen", "axis": "Z", "name": "tube"})
+        return runner
+
+    def test_a_point_walks_the_whole_chain_not_just_its_first_edge(self) -> None:
+        """The L is 30 mm then 40 mm. Halfway is 35 mm along, which is 5 mm up the second
+        leg — and taking the first edge alone would put "halfway" at 15 mm along the
+        first, a number nobody would question."""
+        runner = self._ell()
+
+        halfway = runner("catia_point_on_curve", {"curve": "path", "ratio": 0.5, "name": "mid"})  # type: ignore[operator]
+
+        assert halfway["position_mm"] == pytest.approx([30.0, 5.0, 0.0], abs=TOL)
+
+    def test_a_point_can_be_placed_by_length_from_either_end(self) -> None:
+        runner = self._ell()
+
+        corner = runner("catia_point_on_curve", {"curve": "path", "distance_mm": 30.0, "name": "corner"})  # type: ignore[operator]
+        near_top = runner(  # type: ignore[operator]
+            "catia_point_on_curve",
+            {"curve": "path", "distance_mm": 10.0, "from_end": True, "name": "near_top"},
+        )
+
+        assert corner["position_mm"] == pytest.approx([30.0, 0.0, 0.0], abs=TOL)
+        assert near_top["position_mm"] == pytest.approx([30.0, 30.0, 0.0], abs=TOL)
+
+    def test_a_ratio_is_arc_length_and_not_a_curve_parameter(self) -> None:
+        """A B-spline's parameter is not proportional to its length, so `ratio: 0.5` read
+        as a parameter lands at the midpoint of nothing. Four evenly spaced points make
+        the two answers coincide only if the walk is by length."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Spline"})
+        runner(
+            "catia_curve_spline",
+            {"points": [[0, 0, 0], [10, 0, 0], [20, 0, 0], [30, 0, 0]], "name": "line"},
+        )
+
+        middle = runner("catia_point_on_curve", {"curve": "line", "ratio": 0.5, "name": "mid"})
+
+        assert middle["position_mm"] == pytest.approx([15.0, 0.0, 0.0], abs=1e-6)
+
+    def test_ratio_and_distance_together_are_refused(self) -> None:
+        """Two ways of saying the same thing, and which one wins would be left to chance."""
+        runner = self._ell()
+
+        with pytest.raises(GeometryError, match="not both"):
+            runner(  # type: ignore[operator]
+                "catia_point_on_curve",
+                {"curve": "path", "ratio": 0.5, "distance_mm": 3.0, "name": "no"},
+            )
+
+    def test_a_centre_is_taken_from_the_geometry_that_has_one(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Centres"})
+        runner(
+            "catia_curve_circle",
+            {"kind": "centre_radius", "centre": [5, 7, 0], "radius_mm": 12.0, "support": "XY", "name": "ring"},
+        )
+        runner(
+            "catia_surface_primitive",
+            {"kind": "sphere", "centre": [1, 2, 3], "radius_mm": 4.0, "name": "ball"},
+        )
+
+        hub = runner("catia_point_centre", {"element": "ring", "name": "hub"})
+        core = runner("catia_point_centre", {"element": "ball", "name": "core"})
+
+        assert hub["position_mm"] == pytest.approx([5.0, 7.0, 0.0], abs=TOL)
+        assert core["position_mm"] == pytest.approx([1.0, 2.0, 3.0], abs=TOL)
+
+    def test_a_curve_with_no_centre_says_so(self) -> None:
+        """A straight line has no centre, and returning its midpoint would be answering a
+        different question with the same confidence."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Straight"})
+        runner("catia_point_at", {"at": [0, 0, 0], "name": "a"})
+        runner("catia_point_at", {"at": [10, 0, 0], "name": "b"})
+        runner("catia_line_between", {"points": ["a", "b"], "name": "ab"})
+
+        with pytest.raises(GeometryError, match="rather than a circle"):
+            runner("catia_point_centre", {"element": "ab", "name": "no"})
+
+    def test_lines_are_the_length_they_were_asked_for(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Lines"})
+        runner("catia_point_at", {"at": [0, 0, 0], "name": "a"})
+        runner("catia_point_at", {"at": [3, 4, 0], "name": "b"})
+
+        runner("catia_line_between", {"points": ["a", "b"], "name": "plain"})
+        runner(
+            "catia_line_between",
+            {"points": ["a", "b"], "extend_start_mm": 5.0, "extend_end_mm": 10.0, "name": "long"},
+        )
+        runner("catia_line_direction", {"point": "a", "direction": [0, 0, 1], "length_mm": 12.0, "name": "up"})
+        runner(
+            "catia_line_direction",
+            {"point": "a", "direction": [0, 0, 1], "length_mm": 12.0, "both_sides": True, "name": "both"},
+        )
+
+        for name, expected in (("plain", 5.0), ("long", 20.0), ("up", 12.0), ("both", 24.0)):
+            measured = runner("catia_measure_item", {"element": name})
+            assert measured["length_mm"] == pytest.approx(expected, abs=TOL), name
+
+    def test_a_normal_is_read_at_the_point_not_at_the_face_centre(self) -> None:
+        """On a flat wall the two are the same and the difference never shows. On a
+        cylinder, the face's centre normal points somewhere else entirely, and the stud
+        would come out of the tube at an angle nobody asked for while still looking like
+        a normal."""
+        runner = self._tube()
+        runner("catia_point_at", {"at": [0, 10, 15], "name": "side"})  # type: ignore[operator]
+
+        runner(  # type: ignore[operator]
+            "catia_line_normal",
+            {"surface": "tube", "point": "side", "length_mm": 5.0, "name": "stud"},
+        )
+
+        box = runner("catia_measure_item", {"element": "stud"})["bounding_box_mm"]  # type: ignore[operator]
+        # Radially outward from (0, 10, 15) to (0, 15, 15): no run in x, none in z.
+        assert box["size"] == pytest.approx([0.0, 5.0, 0.0], abs=1e-6)
+        assert box["min"][1] == pytest.approx(10.0, abs=1e-6)
+
+    def test_a_tangent_runs_along_the_curve_where_it_was_asked(self) -> None:
+        """At the east point of a circle in XY the tangent is +Y — and nothing about the
+        circle's own construction says so, which is why it is measured."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Tangent"})
+        runner(
+            "catia_curve_circle",
+            {"kind": "centre_radius", "centre": [0, 0, 0], "radius_mm": 10.0, "support": "XY", "name": "ring"},
+        )
+        runner("catia_point_at", {"at": [10, 0, 0], "name": "east"})
+
+        runner("catia_line_tangent", {"curve": "ring", "point": "east", "length_mm": 6.0, "name": "tang"})
+
+        box = runner("catia_measure_item", {"element": "tang"})["bounding_box_mm"]
+        assert box["size"] == pytest.approx([0.0, 6.0, 0.0], abs=1e-6)
+        assert box["min"][0] == pytest.approx(10.0, abs=1e-6)
+
+    def test_a_point_offset_along_a_curved_surface_stays_on_it(self) -> None:
+        """The whole operation. Moving 3 mm along +Y from a point on the axis leaves the
+        cylinder; projecting back puts it on the skin, at radius 10 exactly. Without the
+        projection it is a point in the air that still reads as being on the surface."""
+        runner = self._tube()
+        runner("catia_point_at", {"at": [0, 0, 15], "name": "middle"})  # type: ignore[operator]
+
+        placed = runner(  # type: ignore[operator]
+            "catia_point_on_surface",
+            {
+                "surface": "tube",
+                "reference": "middle",
+                "direction": [0, 1, 0],
+                "distance_mm": 3.0,
+                "name": "on_skin",
+            },
+        )
+
+        x, y, _ = placed["position_mm"]
+        assert math.hypot(x, y) == pytest.approx(10.0, abs=1e-9)

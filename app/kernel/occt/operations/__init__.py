@@ -52,6 +52,9 @@ HANDLERS: Final[dict[str, Handler]] = {
     # reference geometry
     reference_ops.POINT_AT: reference_ops.point_at,
     reference_ops.POINT_BETWEEN: reference_ops.point_between,
+    reference_ops.POINT_ON_CURVE: reference_ops.point_on_curve,
+    reference_ops.POINT_ON_SURFACE: reference_ops.point_on_surface,
+    reference_ops.POINT_CENTRE: reference_ops.point_centre,
     reference_ops.PLANE_OFFSET: reference_ops.plane_offset,
     reference_ops.PLANE_THROUGH_POINTS: reference_ops.plane_through_points,
     reference_ops.PLANE_ANGLE: reference_ops.plane_angle,
@@ -102,6 +105,10 @@ HANDLERS: Final[dict[str, Handler]] = {
     curves.SECTION: curves.curve_section,
     curves.INTERSECT: curves.curve_intersect,
     curves.EXTREMUM: curves.curve_extremum,
+    curves.LINE_BETWEEN: curves.line_between,
+    curves.LINE_DIRECTION: curves.line_direction,
+    curves.LINE_NORMAL: curves.line_normal,
+    curves.LINE_TANGENT: curves.line_tangent,
     # surfaces, and the two ways one becomes material
     surfaces.EXTRUDE: surfaces.surface_extrude,
     surfaces.REVOLVE: surfaces.surface_revolve,

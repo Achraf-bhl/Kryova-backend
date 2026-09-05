@@ -14,11 +14,13 @@ which is also why they return the plane's own description rather than a measurem
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
 from app.catia.ops import vocabulary
 from app.kernel.errors import GeometryError, OperationNotSupported
+from app.kernel.occt.binding import symbol
 from app.kernel.occt.operations.context import BuildContext, feature_name
 from app.kernel.occt.reference import (
     AxisSystem,
@@ -35,6 +37,9 @@ PLANE_THROUGH_POINTS = "catia_plane_through_points"
 PLANE_ANGLE = "catia_plane_angle"
 POINT_AT = "catia_point_at"
 POINT_BETWEEN = "catia_point_between"
+POINT_ON_CURVE = "catia_point_on_curve"
+POINT_ON_SURFACE = "catia_point_on_surface"
+POINT_CENTRE = "catia_point_centre"
 AXIS_SYSTEM = "catia_axis_system"
 
 #: The world axes, accepted wherever a hinge line is wanted. They are always present in
@@ -324,6 +329,191 @@ def _as_vector(value: Any, *, argument: str, tool: str) -> tuple[float, float, f
         ) from exc
 
 
+# -- points derived from geometry ---------------------------------------------
+#
+# These three are what make a point *associative*: instead of measuring a place and
+# typing the coordinate — which goes stale the moment the geometry changes — the point is
+# defined by the geometry and follows it. The evaluation lives in
+# `operations/curves.py`, shared with the line operations, so a point placed on a curve
+# and a tangent read at it cannot end up describing two different places on it.
+
+
+def point_on_curve(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A point on a curve, by proportion of its length or by length along it.
+
+    Both are **arc length**, never parameter. A B-spline's parameter is not proportional
+    to its length, so `ratio: 0.5` read as a parameter lands at the midpoint of nothing —
+    a mistake that is invisible on a straight line and wrong on every curve worth putting
+    a point on.
+    """
+    from app.kernel.occt.operations.curves import point_along_curve
+    from app.kernel.occt.operations.surfaces import named_geometry
+
+    document = context.require_document()
+    named = arguments.get("curve")
+    curve = named_geometry(document, named, tool=POINT_ON_CURVE, argument="curve")
+
+    ratio = arguments.get("ratio")
+    distance = arguments.get("distance_mm")
+    position = point_along_curve(
+        curve,
+        ratio=None if ratio is None else float(ratio),
+        distance_mm=None if distance is None else float(distance),
+        from_end=bool(arguments.get("from_end")),
+        tool=POINT_ON_CURVE,
+    )
+
+    where = (
+        f"{float(ratio):g} of the way along"
+        if ratio is not None
+        else (f"{float(distance):g} mm along" if distance is not None else "halfway along")
+    )
+    return _derived_point(
+        document,
+        arguments,
+        position,
+        derived_from=str(named),
+        description=f"{where} {named}" + (" from its far end" if arguments.get("from_end") else ""),
+    )
+
+
+def point_on_surface(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A point on a surface, offset from a reference point along a direction.
+
+    **The offset point is projected back onto the surface**, which is the whole operation:
+    moving along a direction leaves a curved face, and a point that has drifted off it is
+    not an anchor for anything. On a flat wall the projection changes nothing; on a
+    curved one it is the difference between a fastener on the face and one in the air.
+    """
+    from app.kernel.occt.operations.curves import closest_on_surface
+    from app.kernel.occt.operations.surfaces import named_geometry
+
+    document = context.require_document()
+    named = arguments.get("surface")
+    surface = named_geometry(document, named, tool=POINT_ON_SURFACE, argument="surface")
+
+    reference = arguments.get("reference")
+    if reference is None:
+        # No anchor named: the surface's own centre of area, which is a place derived
+        # from the surface rather than a corner of its bounding box.
+        start = _area_centre_of(surface)
+    else:
+        from app.kernel.occt.operations.curves import _point_named
+
+        start = _point_named(document, reference, tool=POINT_ON_SURFACE, argument="reference")
+
+    distance = float(arguments.get("distance_mm") or 0.0)
+    if distance:
+        along = _as_vector(
+            arguments.get("direction"), argument="direction", tool=POINT_ON_SURFACE
+        )
+        span = math.sqrt(sum(value * value for value in along))
+        if span < 1e-12:
+            raise GeometryError(
+                f"{POINT_ON_SURFACE} was given a distance to move and a direction of zero "
+                "length, which points nowhere."
+            )
+        start = (
+            start[0] + along[0] / span * distance,
+            start[1] + along[1] / span * distance,
+            start[2] + along[2] / span * distance,
+        )
+
+    _, position, _ = closest_on_surface(surface, start, tool=POINT_ON_SURFACE)
+    return _derived_point(
+        document,
+        arguments,
+        position,
+        derived_from=str(named),
+        description=f"on {named}" + (f", {distance:g} mm from {reference}" if distance else ""),
+    )
+
+
+def point_centre(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The centre of a circle, arc, sphere or planar face.
+
+    The reliable way to reference the middle of an existing feature, rather than measuring
+    it once and typing a coordinate that then goes stale. Each kind has an **exact**
+    centre — a circle's own, a sphere's own, a planar face's centroid — so nothing here is
+    a fit or an average of samples.
+    """
+    from app.kernel.occt import classify
+    from app.kernel.occt.operations.surfaces import named_geometry
+    from app.kernel.occt.topology import edges, faces
+
+    document = context.require_document()
+    named = arguments.get("element")
+    element = named_geometry(document, named, tool=POINT_CENTRE, argument="element")
+
+    found_edges, found_faces = edges(element), faces(element)
+    if len(found_edges) == 1 and not found_faces:
+        edge = found_edges[0]
+        if classify.edge_curve_type(edge) != "Circle":
+            raise GeometryError(
+                f"{POINT_CENTRE} was given {named!r}, which is a "
+                f"{classify.edge_curve_type(edge).lower()} rather than a circle or an arc. "
+                "A curve with no centre has none to report."
+            )
+        location = symbol("BRepAdaptor_Curve")(edge).Circle().Location()
+        kind = "circle"
+    elif len(found_faces) == 1:
+        face = found_faces[0]
+        surface = classify.face_surface_type(face)
+        if surface == "Sphere":
+            location = symbol("BRepAdaptor_Surface")(face).Sphere().Location()
+            kind = "sphere"
+        elif surface == "Plane":
+            properties = symbol("GProp_GProps")()
+            symbol("BRepGProp").SurfaceProperties_s(face, properties)
+            location = properties.CentreOfMass()
+            kind = "planar face"
+        else:
+            raise GeometryError(
+                f"{POINT_CENTRE} was given a {surface.lower()} face. A circle, an arc, a "
+                "sphere or a flat face has a centre; a general surface does not."
+            )
+    else:
+        raise GeometryError(
+            f"{POINT_CENTRE} takes one circle, arc, sphere or planar face, and {named!r} "
+            f"holds {len(found_edges)} edges and {len(found_faces)} faces. Name one of "
+            "them — catia_list_faces and catia_list_edges report what is there."
+        )
+
+    return _derived_point(
+        document,
+        arguments,
+        (location.X(), location.Y(), location.Z()),
+        derived_from=str(named),
+        description=f"the centre of the {kind} {named}",
+    )
+
+
+def _derived_point(
+    document: Any,
+    arguments: Mapping[str, Any],
+    position: tuple[float, float, float],
+    *,
+    derived_from: str,
+    description: str,
+) -> Mapping[str, Any]:
+    """File a computed point under the design's own name, in the one point store."""
+    point = ReferencePoint(
+        name=feature_name(arguments, "point"),
+        position=position,
+        derived_from=derived_from,
+        description=description,
+    )
+    document.add_point(point)
+    return {"feature": point.name, **point.to_dict(), "points": document.point_names()}
+
+
+def _area_centre_of(shape: Any) -> tuple[float, float, float]:
+    properties = symbol("GProp_GProps")()
+    symbol("BRepGProp").SurfaceProperties_s(shape, properties)
+    point = properties.CentreOfMass()
+    return (point.X(), point.Y(), point.Z())
+
+
 def _optional_vector(
     value: Any, argument: str, tool: str
 ) -> tuple[float, float, float] | None:
@@ -337,10 +527,16 @@ __all__ = [
     "PLANE_THROUGH_POINTS",
     "POINT_AT",
     "POINT_BETWEEN",
+    "POINT_CENTRE",
+    "POINT_ON_CURVE",
+    "POINT_ON_SURFACE",
     "axis_system",
     "plane_angle",
     "plane_offset",
     "plane_through_points",
     "point_at",
     "point_between",
+    "point_centre",
+    "point_on_curve",
+    "point_on_surface",
 ]

@@ -30,10 +30,13 @@ What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its ow
   `propagation` on `catia_extract` / `catia_boundary`. Split, trim, untrim, disassemble
   and healing shipped 2026-09-05;
 - **the derived wireframe curves** — `catia_curve_{project,parallel,offset_3d,combine,
-  connect,corner,spiral,reflect_line}`, plus `catia_line_*`, `catia_point_on_*` and
-  `catia_plane_normal_to_curve`. The curves that are *drawn* rather than derived landed
-  2026-09-05 (helix, circle, polyline, spline) along with section, intersection and
-  extremum, so a 3D path is expressible now; what is left is the associative half;
+  connect,corner,spiral,reflect_line}`, plus `catia_plane_{normal_to_curve,
+  tangent_to_surface,mean}` and `catia_planes_between`. The drawn curves landed
+  2026-09-05 (helix, circle, polyline, spline) with section, intersection and extremum,
+  and the anchors with them (`catia_point_{on_curve,on_surface,centre}`,
+  `catia_line_{between,direction,normal,tangent}`), so a 3D path and the points that
+  position it are both expressible now; what is left is the curves *derived from
+  surfaces*;
 - `catia_draft` in `reflect_line` mode (needs `catia_curve_reflect_line`);
 - a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs a *2D* profile offset in the
   sketcher — the surface offset that shipped today answers a different question);
@@ -62,6 +65,23 @@ measurement vocabulary a visual check would assert against already exists.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-05** — E2 → **2.6 continues: the derived anchors**.
+  `catia_point_{on_curve,on_surface,centre}` and
+  `catia_line_{between,direction,normal,tangent}`. Coverage 87 → **94/201**. What these
+  are for is associativity: a point measured once and typed as a coordinate is right
+  until the part changes and wrong silently afterwards, and `catia_point_on_curve` is
+  right afterwards too. Four traps, each verified by breaking it: **a point on a curve
+  walks the whole chain**, not its first edge — halfway along an L of 30 then 40 is 5 mm
+  up the second leg, and the first-edge answer (15 mm along the first) is the number
+  nobody would question; **the chain is walked in connection order**, because
+  `topology.explore` returns edges in *build* order and the two genuinely differ (the
+  test fails when swapped); both `ratio` and `distance_mm` are **arc length**, never
+  parameter, since a B-spline's parameter is not proportional to its length; a normal is
+  read **at the point** rather than at the face centre, identical on a flat wall and a
+  different fastener axis on a cylinder; and a point offset along a surface is
+  **projected back onto it**, or it is a point in the air that still reads as being on
+  the face. `catia_point_centre` refuses anything without an exact centre — a straight
+  line gets a refusal rather than its midpoint.
 - **2026-09-05** — E2 → **2.6 continues: wireframe curves** (`occt/operations/curves.py`).
   `catia_curve_{helix,circle,polyline,spline,section,intersect,extremum}`. Coverage 80 →
   **87/201**. Until these, every curve in a design came from a planar sketch or a surface

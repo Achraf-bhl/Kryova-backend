@@ -61,6 +61,10 @@ SPLINE = "catia_curve_spline"
 SECTION = "catia_curve_section"
 INTERSECT = "catia_curve_intersect"
 EXTREMUM = "catia_curve_extremum"
+LINE_BETWEEN = "catia_line_between"
+LINE_DIRECTION = "catia_line_direction"
+LINE_NORMAL = "catia_line_normal"
+LINE_TANGENT = "catia_line_tangent"
 
 #: Below this a direction, a chord or a radius is treated as zero rather than normalised
 #: into a division by zero.
@@ -267,6 +271,105 @@ def curve_spline(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
         detail="The interpolated curve could not be made into an edge.",
     )
     return _record(context, document, arguments, SPLINE, edge, "spline")
+
+
+# -- lines ---------------------------------------------------------------------
+#
+# A line is a curve, so these build edges and file them in the construction store beside
+# the helices and the sections. That is not a filing decision: `catia_line_direction`
+# exists to make a rotation axis or a sweep spine an actual object, and an object that
+# lives somewhere the rest of the vocabulary cannot name would not do that job.
+
+
+def line_between(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A line between two points, optionally pushed past either end.
+
+    The extensions are what make this more than a segment: a rotation axis or a cutting
+    line has to reach the geometry it acts on, and the two points that *define* it are
+    usually inside the part rather than clear of it.
+    """
+    document = context.require_document()
+    points = _point_list(document, arguments.get("points"), tool=LINE_BETWEEN, minimum=2)
+    if len(points) != 2:
+        raise GeometryError(
+            f"{LINE_BETWEEN} joins exactly two points and was given {len(points)}. Use "
+            "catia_curve_polyline for a run of them."
+        )
+
+    start, end = points
+    span = _distance_between(start, end)
+    if span < MIN_LENGTH_MM:
+        raise GeometryError(
+            f"{LINE_BETWEEN} was given the same point twice, so the line has no length "
+            "and no direction. Name two different points."
+        )
+
+    along = (
+        (end[0] - start[0]) / span,
+        (end[1] - start[1]) / span,
+        (end[2] - start[2]) / span,
+    )
+    back = float(arguments.get("extend_start_mm") or 0.0)
+    forward = float(arguments.get("extend_end_mm") or 0.0)
+    first = _stepped(start, along, -back)
+    last = _stepped(end, along, forward)
+
+    return _record(context, document, arguments, LINE_BETWEEN, _segment(first, last), "line")
+
+
+def line_direction(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A line from a point, along a direction, for a length.
+
+    `both_sides` runs the same length backwards as well, so the line is `2 × length_mm`
+    long — the same reading `catia_pad`'s `symmetric` does not take, and deliberately: the
+    registry's own wording is "extend the same length backwards too", which is an
+    addition rather than a division.
+    """
+    document = context.require_document()
+    origin = _point_named(document, arguments.get("point"), tool=LINE_DIRECTION, argument="point")
+    along = _unit(as_direction(arguments.get("direction"), argument="direction"), tool=LINE_DIRECTION)
+    length = as_positive_length(
+        arguments.get("length_mm"), argument="length_mm", tool=LINE_DIRECTION
+    )
+
+    back = length if arguments.get("both_sides") else 0.0
+    first = _stepped(origin, along, -back)
+    last = _stepped(origin, along, length)
+    return _record(context, document, arguments, LINE_DIRECTION, _segment(first, last), "line")
+
+
+def line_normal(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A line standing off a surface at a point on it — where a hole would be drilled.
+
+    **The normal is taken at the point, not at the face's centre.** On a flat wall the two
+    are the same and the difference never shows; on a curved one, using the centre points
+    the fastener somewhere nobody asked for, and the line still looks plausible.
+    """
+    from app.kernel.occt.operations.surfaces import named_geometry
+
+    document = context.require_document()
+    surface = named_geometry(document, arguments.get("surface"), tool=LINE_NORMAL, argument="surface")
+    at = _point_named(document, arguments.get("point"), tool=LINE_NORMAL, argument="point")
+    length = as_positive_length(arguments.get("length_mm"), argument="length_mm", tool=LINE_NORMAL)
+
+    face, foot, normal = _closest_face_normal(surface, at, tool=LINE_NORMAL)
+    del face
+    tip = _stepped(foot, normal, length)
+    return _record(context, document, arguments, LINE_NORMAL, _segment(foot, tip), "normal")
+
+
+def line_tangent(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A line tangent to a curve at a point on it — the local direction of travel."""
+    from app.kernel.occt.operations.surfaces import named_geometry
+
+    document = context.require_document()
+    curve = named_geometry(document, arguments.get("curve"), tool=LINE_TANGENT, argument="curve")
+    at = _point_named(document, arguments.get("point"), tool=LINE_TANGENT, argument="point")
+    length = as_positive_length(arguments.get("length_mm"), argument="length_mm", tool=LINE_TANGENT)
+
+    foot, tangent = _closest_curve_tangent(curve, at, tool=LINE_TANGENT)
+    tip = _stepped(foot, tangent, length)
+    return _record(context, document, arguments, LINE_TANGENT, _segment(foot, tip), "tangent")
 
 
 # -- curves derived from other geometry ---------------------------------------
@@ -534,6 +637,231 @@ def _extreme_vertex(
     return point_of(chosen)
 
 
+# -- points on curves and surfaces --------------------------------------------
+#
+# Shared with `reference_ops`, which builds the *points*. The evaluation lives here
+# because it is a curve question and the two must agree: a point placed on a curve by one
+# rule and a tangent read at it by another describe two different places on the same
+# curve, and nothing in either payload would say so.
+
+
+def closest_on_curve(curve: Any, at: tuple[float, float, float], *, tool: str) -> tuple[Any, float]:
+    """The edge of a curve nearest a point, and the parameter of the nearest point on it.
+
+    A named curve may be several edges — a section around a cylinder, a polyline — so the
+    edge is chosen rather than assumed. Refusing a multi-edge curve would make the point
+    operations useless on exactly the curves that are worth putting a point on.
+    """
+    from app.kernel.occt.topology import edges as edge_list
+
+    found = edge_list(curve)
+    if not found:
+        raise GeometryError(f"{tool} was given something with no curve in it to sit on.")
+
+    target = symbol("gp_Pnt")(*at)
+    best_edge, best_parameter, best_distance = None, 0.0, math.inf
+    for edge in found:
+        adaptor = symbol("BRepAdaptor_Curve")(edge)
+        projector = symbol("GeomAPI_ProjectPointOnCurve")(
+            target, adaptor.Curve().Curve(), adaptor.FirstParameter(), adaptor.LastParameter()
+        )
+        if projector.NbPoints() < 1:
+            continue
+        if projector.LowerDistance() < best_distance:
+            best_edge = edge
+            best_parameter = projector.LowerDistanceParameter()
+            best_distance = projector.LowerDistance()
+
+    if best_edge is None:
+        raise GeometryError(
+            f"{tool} could not find a point on the curve nearest "
+            f"{[round(value, 4) for value in at]}. The curve may be degenerate."
+        )
+    return best_edge, best_parameter
+
+
+def point_along_curve(
+    curve: Any, *, ratio: float | None, distance_mm: float | None, from_end: bool, tool: str
+) -> tuple[float, float, float]:
+    """A place on a curve, by proportion of its length or by absolute length along it.
+
+    **Both are measured as arc length**, not as parameter. A B-spline's parameter is not
+    proportional to its length, so `ratio: 0.5` read as a parameter lands somewhere that
+    is the midpoint of nothing — plausible on a line, wrong on every curve worth the name.
+    """
+    chain = _chain_of(curve, tool=tool)
+    lengths = [symbol("GCPnts_AbscissaPoint").Length_s(adaptor) for adaptor, _ in chain]
+    total = sum(lengths)
+    if total < MIN_LENGTH_MM:
+        raise GeometryError(f"{tool} was given a curve of no length to place a point on.")
+
+    if ratio is not None and distance_mm is not None:
+        raise GeometryError(
+            f"{tool} takes ratio or distance_mm, not both — they are two ways of saying "
+            "the same thing and giving both leaves which one wins to chance."
+        )
+    if ratio is None and distance_mm is None:
+        travelled = total / 2.0
+    elif ratio is not None:
+        if not 0.0 <= ratio <= 1.0:
+            raise GeometryError(
+                f"{tool} takes ratio between 0 and 1 as a proportion along the curve; got "
+                f"{ratio}. Use distance_mm to go past the end."
+            )
+        travelled = ratio * total
+    else:
+        travelled = float(distance_mm or 0.0)
+
+    if from_end:
+        travelled = total - travelled
+
+    # Walk the chain segment by segment, spending each one's length before moving on.
+    # Anything else would need one adaptor over the whole wire, which OCCT does not offer
+    # — and taking the first edge instead would put "halfway along" a quarter of the way
+    # along an L, which is the number nobody would question.
+    remaining = travelled
+    for (adaptor, _), length in zip(chain, lengths, strict=True):
+        if remaining <= length or (adaptor, length) == (chain[-1][0], lengths[-1]):
+            walker = symbol("GCPnts_AbscissaPoint")(adaptor, remaining, adaptor.FirstParameter())
+            if not walker.IsDone():
+                raise GeometryError(
+                    f"{tool} could not walk {travelled:.4g} mm along a curve {total:.4g} mm "
+                    "long. Check the distance against the curve's own length."
+                )
+            place = adaptor.Value(walker.Parameter())
+            return (place.X(), place.Y(), place.Z())
+        remaining -= length
+
+    raise GeometryError(  # pragma: no cover - the loop always returns on its last segment
+        f"{tool} could not place a point {travelled:.4g} mm along a curve {total:.4g} mm long."
+    )
+
+
+def _chain_of(curve: Any, *, tool: str) -> list[tuple[Any, Any]]:
+    """A curve's edges **in the order they connect**, each with its own adaptor.
+
+    `topology.edges` returns them in map order, which is the order they were built rather
+    than the order they run — fine for "every edge of this", useless for "40 mm along
+    this". `BRepTools_WireExplorer` walks a wire end to end, which is the only ordering
+    that makes arc length along a chain mean anything.
+    """
+    from app.kernel.occt.topology import WIRE, explore
+    from app.kernel.occt.topology import edges as edge_list
+
+    wires = explore(curve, WIRE)
+    if len(wires) == 1:
+        walker = symbol("BRepTools_WireExplorer")(symbol("TopoDS").Wire_s(wires[0]))
+        ordered = []
+        while walker.More():
+            edge = walker.Current()
+            ordered.append((symbol("BRepAdaptor_Curve")(edge), edge))
+            walker.Next()
+        if ordered:
+            return ordered
+
+    found = edge_list(curve)
+    if len(found) == 1:
+        return [(symbol("BRepAdaptor_Curve")(found[0]), found[0])]
+    if not found:
+        raise GeometryError(f"{tool} was given something with no curve in it.")
+    raise GeometryError(
+        f"{tool} places a point by length along one connected curve, and this one is "
+        f"{len(found)} edges that do not form a single chain. Join them with catia_join, "
+        "or name one of them."
+    )
+
+
+def closest_on_surface(
+    surface: Any, at: tuple[float, float, float], *, tool: str
+) -> tuple[Any, tuple[float, float, float], tuple[float, float]]:
+    """The face of a surface nearest a point, the nearest point on it, and its (u, v)."""
+    from app.kernel.occt.topology import faces as face_list
+
+    found = face_list(surface)
+    if not found:
+        raise GeometryError(f"{tool} was given something with no face in it to sit on.")
+
+    target = symbol("gp_Pnt")(*at)
+    best: tuple[Any, tuple[float, float, float], tuple[float, float]] | None = None
+    best_distance = math.inf
+    for face in found:
+        geometry = symbol("BRep_Tool").Surface_s(face)
+        projector = symbol("GeomAPI_ProjectPointOnSurf")(target, geometry)
+        if projector.NbPoints() < 1:
+            continue
+        if projector.LowerDistance() < best_distance:
+            u, v = projector.LowerDistanceParameters()
+            place = projector.NearestPoint()
+            best = (face, (place.X(), place.Y(), place.Z()), (u, v))
+            best_distance = projector.LowerDistance()
+
+    if best is None:
+        raise GeometryError(
+            f"{tool} could not find a point on the surface nearest "
+            f"{[round(value, 4) for value in at]}."
+        )
+    return best
+
+
+def _closest_face_normal(
+    surface: Any, at: tuple[float, float, float], *, tool: str
+) -> tuple[Any, tuple[float, float, float], tuple[float, float, float]]:
+    """The nearest face, the foot of the perpendicular, and the outward normal there."""
+    from app.kernel.occt import classify
+
+    face, foot, (u, v) = closest_on_surface(surface, at, tool=tool)
+    normal = classify.face_normal_at(face, u, v)
+    if normal is None:
+        raise GeometryError(
+            f"{tool} could not read the surface's normal at "
+            f"{[round(value, 4) for value in foot]}. The surface may be degenerate there."
+        )
+    return face, foot, normal
+
+
+def _closest_curve_tangent(
+    curve: Any, at: tuple[float, float, float], *, tool: str
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """The nearest point on a curve, and the unit tangent there."""
+    edge, parameter = closest_on_curve(curve, at, tool=tool)
+    adaptor = symbol("BRepAdaptor_Curve")(edge)
+    place, derivative = symbol("gp_Pnt")(), symbol("gp_Vec")()
+    adaptor.D1(parameter, place, derivative)
+
+    tangent = (derivative.X(), derivative.Y(), derivative.Z())
+    return (place.X(), place.Y(), place.Z()), _unit(tangent, tool=tool)
+
+
+def _stepped(
+    origin: tuple[float, float, float],
+    along: tuple[float, float, float],
+    distance: float,
+) -> tuple[float, float, float]:
+    """`origin + along · distance`, spelled out rather than zipped.
+
+    A comprehension over `zip` produces `tuple[float, ...]`, which loses the one fact
+    every consumer here depends on — that a place has three components.
+    """
+    return (
+        origin[0] + along[0] * distance,
+        origin[1] + along[1] * distance,
+        origin[2] + along[2] * distance,
+    )
+
+
+def _segment(start: tuple[float, float, float], end: tuple[float, float, float]) -> Any:
+    return symbol("BRepBuilderAPI_MakeEdge")(
+        symbol("gp_Pnt")(*start), symbol("gp_Pnt")(*end)
+    ).Edge()
+
+
+def _unit(vector: tuple[float, float, float], *, tool: str) -> tuple[float, float, float]:
+    span = math.sqrt(sum(value * value for value in vector))
+    if span < MIN_LENGTH_MM:
+        raise GeometryError(f"{tool} was given a direction of zero length, which points nowhere.")
+    return (vector[0] / span, vector[1] / span, vector[2] / span)
+
+
 def _record(
     context: BuildContext,
     document: Any,
@@ -629,10 +957,16 @@ __all__ = [
     "EXTREMUM",
     "HELIX",
     "INTERSECT",
+    "LINE_BETWEEN",
+    "LINE_DIRECTION",
+    "LINE_NORMAL",
+    "LINE_TANGENT",
     "MIN_LENGTH_MM",
     "POLYLINE",
     "SECTION",
     "SPLINE",
+    "closest_on_curve",
+    "closest_on_surface",
     "curve_circle",
     "curve_extremum",
     "curve_helix",
@@ -640,4 +974,9 @@ __all__ = [
     "curve_polyline",
     "curve_section",
     "curve_spline",
+    "line_between",
+    "line_direction",
+    "line_normal",
+    "line_tangent",
+    "point_along_curve",
 ]

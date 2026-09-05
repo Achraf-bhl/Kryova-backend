@@ -15,16 +15,13 @@ happened.
 
 ## Now
 
-**E4 — Visual verification.** **4.1, 4.2 and 4.3 landed 2026-09-05.** `app/render/`
+**E4 — Visual verification.** **4.1 (with section cuts), 4.2 and 4.3 landed 2026-09-05.** `app/render/`
 renders eight canonical views deterministically and diffs two of them; `app/ai/vision.py`
 asks a vision model whether the part matches the request. What is left:
 
-- **Section cuts**, named in 4.1 alongside the eight views and not yet built: a cut is a
-  boolean against a half-space and then the same projection, so the work is the vocabulary
-  for saying *where* to cut, not the rendering.
 - **4.4 — renders into the conversation**, so the user sees what the agent sees. Product
-  Track P5 owns the surface, so this waits on it rather than growing its own. It is the
-  only part of E4 that is blocked on something outside E4.
+  Track P5 owns the surface, so this waits on it rather than growing its own. It is now the
+  **only** part of E4 outstanding, and the only one blocked on something outside E4.
 
 **E2 closed on 2026-09-05** — `*E2`, Proof green. Its capability list and its Proof are
 both done; what remains under it are refusals with stated reasons, each raised where it
@@ -75,6 +72,29 @@ duplicate is removed here rather than left to read as two separate pieces of wor
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E4 → **section cuts, and the upside-down renderer they found.**
+  `app/render/section.py`. The vocabulary is the work: `mid_section` / `offset_section` /
+  `section_named`, the normal pointing at the material that is *removed* (the convention
+  `catia_split` already states — two conventions for one question is how a part ends up
+  mirrored with every test green), a plane that misses the part **refused** rather than
+  returning an uncut part that looks like a successful section of a solid one, and a finite
+  removing box rather than `MakeHalfSpace`, whose failure mode is returning the shape
+  unchanged. Cut faces found by geometry rather than boolean history, and hatched at 45° by
+  the **even-odd rule across every wire at once**, so a bore falls out of the parity with
+  nothing identifying it as a hole. That needs ordered wires, which HLR cannot give, so
+  `face_outlines` walks with `BRepTools_WireExplorer` and asks the *wire* which way to walk
+  each edge — half the edges of a rectangle are stored backwards.
+
+  **And writing it found that 4.1 shipped upside down.** OCCT's `gp_Ax2` Y axis is
+  `direction × X`, the opposite of the up vector `views.py` declares: the top of a 40 mm box
+  seen from the front came back at y = −40. Nothing could see it — a consistently mirrored
+  image is byte-identical to itself, a diff of two mirrored renders is still correct, and a
+  plate looks plausible either way up. It is exactly the wrong-orientation error 4.1 claims a
+  render hash catches. Fixed in the projection rather than the raster so view millimetres do
+  not lie, and pinned by `TestTheRenderIsTheRightWayUp` in the new `tests/test_render.py`
+  (37 tests) — which is also 4.1 and 4.3 finally getting the test file they never had, having
+  been verified by smoke run only.
 
 - **2026-09-05** — E4 → **4.2: the model looks at the model.** `app/ai/vision.py`, plus
   `LLMProvider.look` and the three providers that can implement it. Written around the

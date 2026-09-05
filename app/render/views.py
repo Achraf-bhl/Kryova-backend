@@ -58,8 +58,34 @@ class View:
         return _unit(across)
 
     def frame_up(self) -> tuple[float, float, float]:
-        """The view's own +y axis, re-orthogonalised against the direction."""
+        """The view's own +y axis, re-orthogonalised against the direction.
+
+        `right × direction`, which is **the opposite of OCCT's own convention**:
+        a `gp_Ax2` built from the same direction and X axis has
+        `YDirection = direction × X`, pointing the other way. That is not a
+        detail — it is why `project.py` negates the y it gets back from HLR, and
+        getting it wrong renders every part upside down while every determinism
+        check still passes, because a consistently mirrored image is still
+        identical to itself. See `to_view_mm`.
+        """
         return _unit(_cross(self.right(), self.direction))
+
+    def to_view_mm(self, x: float, y: float, z: float) -> tuple[float, float]:
+        """One world point in view millimetres, +x right and +y up.
+
+        The same map HLR applies, written out: the projection is linear, so a
+        point's view coordinates are its components along the view's own two
+        in-plane axes. This exists for the places that need an *ordered* wire —
+        a section's hatch boundary — where HLR's flat pile of edges cannot say
+        which point follows which. `tests/test_render.py` asserts the two agree,
+        which is the guard against the second implementation drifting from the
+        first.
+        """
+        right, up = self.right(), self.frame_up()
+        return (
+            x * right[0] + y * right[1] + z * right[2],
+            x * up[0] + y * up[1] + z * up[2],
+        )
 
 
 def _cross(

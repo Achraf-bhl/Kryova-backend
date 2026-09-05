@@ -14,6 +14,7 @@ model reads a crisp wireframe at least as well.
 
 from __future__ import annotations
 
+import math
 import struct
 import zlib
 from typing import Final
@@ -54,10 +55,20 @@ DASH_OFF: Final = 4
 COMPRESSION: Final = 6
 
 
+#: Section hatching: shade, spacing in pixels, and the 45° convention every
+#: engineering drawing uses for a cut face. Lighter than a hidden line so the
+#: geometry still reads over it, and spaced widely enough that a small cut face
+#: gets at least a line or two rather than turning solid grey.
+HATCH: Final = 190
+HATCH_SPACING: Final = 9
+
+
 def rasterise(
     frame: Frame,
     visible: tuple[tuple[tuple[float, float], ...], ...],
     hidden: tuple[tuple[tuple[float, float], ...], ...],
+    *,
+    onto: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:
     """Draw a projection onto a canvas, hidden lines first.
 
@@ -65,8 +76,16 @@ def rasterise(
     hidden in one place and visible in another the visible run wins the shared pixels,
     which is what a drawing does and what makes a part read correctly rather than as a
     grey smear where two features touch.
+
+    `onto` draws over an existing canvas rather than a blank one — how a section view
+    puts its outline back on top of the hatch, so a hatch line never breaks the edge it
+    runs into.
     """
-    canvas = np.full((frame.height, frame.width), BACKGROUND, dtype=np.uint8)
+    canvas = (
+        onto
+        if onto is not None
+        else np.full((frame.height, frame.width), BACKGROUND, dtype=np.uint8)
+    )
     for line in hidden:
         _draw(canvas, frame, line, HIDDEN, HIDDEN_WIDTH, dashed=True)
     for line in visible:
@@ -135,6 +154,70 @@ def _segment(
             y0 += step_y
 
 
+def hatch(
+    canvas: NDArray[np.uint8],
+    frame: Frame,
+    polygons: list[tuple[tuple[float, float], ...]],
+) -> None:
+    """Fill closed polygons with 45° hatching, by the even-odd rule.
+
+    **Even-odd across every polygon at once, which is what makes holes free.** A
+    cut face with a bore through it arrives as an outer boundary and an inner
+    one; a span that crosses the inner boundary twice on its way through the
+    hole flips the inside/outside parity twice and is simply not drawn. Nothing
+    here has to know which wire is a hole, or that there is one.
+
+    The hatch runs along lines of constant `x + y`, so a span is found by
+    intersecting each polygon edge with that line rather than by walking
+    scanlines and rotating. Integer stepping and a fixed spacing, for the same
+    reason everything else in this file is integer: the picture has to come out
+    the same every time.
+    """
+    if not polygons:
+        return
+    edges: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    for polygon in polygons:
+        pixels = [frame.to_pixels(*point) for point in polygon]
+        if len(pixels) < 3:
+            continue
+        if pixels[0] != pixels[-1]:
+            pixels.append(pixels[0])  # close it; a hatch of an open outline leaks
+        edges.extend(zip(pixels, pixels[1:], strict=True))
+    if not edges:
+        return
+
+    keys = [x + y for edge in edges for x, y in edge]
+    start = (min(keys) // HATCH_SPACING) * HATCH_SPACING
+    for key in range(int(start), int(max(keys)) + 1, HATCH_SPACING):
+        crossings: list[float] = []
+        for (x0, y0), (x1, y1) in edges:
+            # Where does this edge cross x + y = key? Parameterise along it and
+            # solve; a parallel edge (constant x + y) never crosses and is
+            # skipped rather than dividing by zero.
+            span = (x1 + y1) - (x0 + y0)
+            if span == 0:
+                continue
+            at = (key - (x0 + y0)) / span
+            # Half-open [0, 1): a vertex shared by two edges is otherwise counted
+            # twice, which flips parity back and leaves a gap through the corner.
+            if 0.0 <= at < 1.0:
+                crossings.append(x0 + at * (x1 - x0))
+        if len(crossings) < 2:
+            continue
+        crossings.sort()
+        for index in range(0, len(crossings) - 1, 2):
+            _hatch_span(canvas, key, crossings[index], crossings[index + 1])
+
+
+def _hatch_span(canvas: NDArray[np.uint8], key: int, from_x: float, to_x: float) -> None:
+    """One run of a hatch line, from x to x along `x + y = key`."""
+    height, width = canvas.shape
+    for x in range(math.floor(from_x + 0.5), math.floor(to_x + 0.5) + 1):
+        y = key - x
+        if 0 <= x < width and 0 <= y < height:
+            canvas[y, x] = min(int(canvas[y, x]), HATCH)
+
+
 def to_png(canvas: NDArray[np.uint8]) -> bytes:
     """An 8-bit PNG, byte-for-byte reproducible. Greyscale for 2D, RGB for 3D input.
 
@@ -177,6 +260,8 @@ def _chunk(kind: bytes, payload: bytes) -> bytes:
 
 __all__ = [
     "BACKGROUND",
+    "HATCH",
+    "HATCH_SPACING",
     "COMPRESSION",
     "DASH_OFF",
     "DASH_ON",
@@ -186,6 +271,7 @@ __all__ = [
     "HIDDEN_WIDTH",
     "VISIBLE",
     "VISIBLE_WIDTH",
+    "hatch",
     "rasterise",
     "to_png",
 ]

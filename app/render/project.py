@@ -71,6 +71,10 @@ def project(shape: Any, view: View) -> Projection:
     knowing before reading this: the obvious implementation, projecting each point by
     hand against the camera basis, would be a second answer to a question OCCT has
     already answered, and the two would drift.
+
+    One sign is corrected, in `_flatten`, and it is not a transform: OCCT's `gp_Ax2`
+    defines its Y axis as `direction × X`, which points *down* relative to the up vector
+    `views.View` declares. Read the note there before changing it.
     """
     projector = symbol("HLRAlgo_Projector")(
         symbol("gp_Ax2")(
@@ -157,7 +161,21 @@ def _flatten(edge: Any) -> tuple[tuple[float, float], ...]:
     points = []
     for index in range(steps + 1):
         at = adaptor.Value(first + (last - first) * index / steps)
-        points.append((at.X(), at.Y()))
+        # **y is negated, and leaving it out renders every part upside down.**
+        # HLR reports in the frame of the `gp_Ax2` it was given, whose
+        # `YDirection` is `direction x XDirection` -- the opposite of the up
+        # vector `views.py` declares (`right x direction`). Measured rather than
+        # reasoned: the top of a 40 mm box seen from the front comes back at
+        # y = -40 and its base at y = 0.
+        #
+        # This shipped inverted on 2026-09-05 and no test could see it. A
+        # vertical mirror of the whole image is still byte-identical to itself,
+        # so determinism held; a diff of two mirrored renders is still correct,
+        # so 4.3 held; and a wireframe of a plate looks perfectly plausible
+        # upside down. It is exactly the "wrong orientation" error 4.1 says a
+        # render hash is supposed to catch, which is the reason to fix it here
+        # rather than to flip the raster and leave view millimetres lying.
+        points.append((at.X(), -at.Y()))
     return tuple(points)
 
 

@@ -58,6 +58,7 @@ from app.kernel.occt.operations.context import (
     as_positive_length,
     build_or_raise,
     feature_name,
+    given_name,
 )
 from app.kernel.occt.reference import ReferencePoint
 from app.kernel.occt.topology import EDGE, count, explore
@@ -2252,8 +2253,8 @@ def _record(
     from app.kernel.occt.naming import record_primitive
     from app.kernel.occt.operations.surfaces import CURVE
 
-    name = feature_name(arguments, fallback)
-    feature = document.add_feature(name, tool)
+    feature = document.add_feature(given_name(arguments) or fallback, tool)
+    name = feature.name
     document.set_construction(feature, shape, name=name, kind=CURVE)
     record_primitive(feature.labels, shape)
     return context.result_for(feature)

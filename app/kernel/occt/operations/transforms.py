@@ -34,7 +34,7 @@ from app.kernel.occt.operations.context import (
     BuildContext,
     as_point,
     build_or_raise,
-    feature_name,
+    given_name,
 )
 from app.kernel.occt.topology import edges, faces, has_solid
 
@@ -71,7 +71,7 @@ def translate(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[st
         "probably empty or already invalid.",
     )
 
-    feature = document.add_feature(feature_name(arguments, "translate"), TRANSLATE)
+    feature = document.add_feature(given_name(arguments), TRANSLATE)
     modified, generated = evolution_of(maker, source)
     document.set_result(feature, result, contributed=(faces(result), edges(result)))
     record_derived(
@@ -163,7 +163,7 @@ def mirror(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, 
             "mirror plane and actually touches it."
         )
 
-    feature = document.add_feature(feature_name(arguments, "mirror"), MIRROR)
+    feature = document.add_feature(given_name(arguments), MIRROR)
     modified, generated = evolution_of(maker, source)
     document.set_result(
         feature,
@@ -255,7 +255,7 @@ def _scale_along_plane_normal(
         "one that cannot be stretched (a sphere, a full cylinder) is where this fails.",
     )
 
-    feature = document.add_feature(feature_name(arguments, "scale"), SCALE)
+    feature = document.add_feature(given_name(arguments), SCALE)
     document.set_result(feature, result, contributed=(faces(result), edges(result)))
     record_derived(
         feature.labels, result=result, source=source, modified=[], generated=[]
@@ -284,9 +284,7 @@ def _apply(
     maker = symbol("BRepBuilderAPI_Transform")(source, transformation, COPY_ON_TRANSFORM)
     result = build_or_raise(maker, tool=tool, detail=detail)
 
-    feature = document.add_feature(
-        feature_name(arguments, tool.removeprefix("catia_")), tool
-    )
+    feature = document.add_feature(given_name(arguments), tool)
     modified, generated = evolution_of(maker, source)
     document.set_result(feature, result, contributed=(faces(result), edges(result)))
     record_derived(

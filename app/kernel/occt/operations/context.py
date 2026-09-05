@@ -128,8 +128,37 @@ def frame(origin: tuple[float, float, float], axis: tuple[float, float, float]) 
 
 
 def feature_name(arguments: Mapping[str, Any], fallback: str) -> str:
-    """The design's name for what is being built, or a readable default."""
+    """The design's name for what is being built, or a readable default.
+
+    Still the right helper for anything the document stores *by name and only by
+    name* — a sketch, a plane, a point. For a **feature**, use `given_name` and
+    let the document allocate: see the note there for the two-hour version of why.
+    """
     return str(arguments.get("name") or fallback)
+
+
+def given_name(arguments: Mapping[str, Any]) -> str | None:
+    """The design's name for a feature, or `None` for "you choose".
+
+    `None` rather than a default string, and that is the whole point. Every
+    feature used to fall back to its tool's own word, so two unnamed pockets were
+    both called `pocket` — and `add_feature` treats a repeated name as a
+    *regeneration of the same feature*, which is required behaviour when a plan
+    is rebuilt. The second pocket therefore rewrote the first one's labels
+    instead of becoming a feature of its own.
+
+    Measured end to end on 2026-09-05: a flange built with a bore and then four
+    bolt holes reported a feature list of `[Pad.1, Pocket.1]` — one pocket, not
+    two. The geometry was right, because the cut lands on the part's shape either
+    way; the *names* were not, and names are what a fillet scoped to a feature, a
+    pattern seeded on one, and every `feature#selector` resolve against. An agent
+    almost never passes a name, so this was the ordinary case, not an edge one.
+    """
+    given = arguments.get("name")
+    if given is None:
+        return None
+    text = str(given).strip()
+    return text or None
 
 
 def build_or_raise(maker: Any, *, tool: str, detail: str) -> Any:

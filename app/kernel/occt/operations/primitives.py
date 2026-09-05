@@ -20,8 +20,8 @@ from app.kernel.occt.operations.context import (
     as_point,
     as_positive_length,
     build_or_raise,
-    feature_name,
     frame,
+    given_name,
     point,
 )
 from app.kernel.occt.topology import edges, faces
@@ -61,7 +61,7 @@ def surface_primitive(context: BuildContext, arguments: Mapping[str, Any]) -> Ma
 
     shape = build_or_raise(maker, tool=f"{TOOL} ({kind})", detail=advice)
 
-    feature = document.add_feature(feature_name(arguments, kind), TOOL)
+    feature = document.add_feature(given_name(arguments), TOOL)
     document.set_result(feature, shape, contributed=(faces(shape), edges(shape)))
     record_primitive(feature.labels, shape)
     return context.result_for(feature)

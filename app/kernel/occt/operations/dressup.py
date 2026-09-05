@@ -31,7 +31,7 @@ from app.kernel.occt.operations.context import (
     BuildContext,
     as_positive_length,
     build_or_raise,
-    feature_name,
+    given_name,
 )
 from app.kernel.occt.selectors import SUB_ENTITY_MARK, select_edges, select_faces
 from app.kernel.occt.topology import edges, faces, has_solid
@@ -141,9 +141,7 @@ def _dress_up(
         maker, tool=f"{tool} at {span} on {len(selected)} edge(s)", detail=_ADVICE
     )
 
-    feature = document.add_feature(
-        feature_name(arguments, tool.removeprefix("catia_")), tool
-    )
+    feature = document.add_feature(given_name(arguments), tool)
     modified, generated = evolution_of(maker, source)
     blend = faces_generated_by(maker, source)
     document.set_result(
@@ -309,7 +307,7 @@ def draft(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
         "faces.",
     )
 
-    feature = document.add_feature(feature_name(arguments, "draft"), DRAFT)
+    feature = document.add_feature(given_name(arguments), DRAFT)
     modified, generated = evolution_of(maker, source)
     # The faces that were *asked* for, mapped to where they ended up. Not
     # `faces_modified_by`: OCCT propagates a taper along tangent-continuous neighbours,
@@ -479,7 +477,7 @@ def _parted_draft(
         )
     ]
 
-    feature = document.add_feature(feature_name(arguments, "draft"), DRAFT)
+    feature = document.add_feature(given_name(arguments), DRAFT)
     modified, generated = evolution_of(fuse, halves[0][2])
     document.set_result(
         feature,
@@ -853,9 +851,7 @@ def _record_dressup(
     surface and for an offset is the moved wall — never the neighbours it merely trimmed,
     which stay with whatever built them.
     """
-    feature = document.add_feature(
-        feature_name(arguments, tool.removeprefix("catia_")), tool
-    )
+    feature = document.add_feature(given_name(arguments), tool)
     if maker is None:
         modified: list[Any] = []
         generated: list[Any] = []

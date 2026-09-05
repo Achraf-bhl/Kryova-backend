@@ -36,7 +36,11 @@ from app.kernel.errors import GeometryError
 from app.kernel.occt import elements
 from app.kernel.occt.binding import symbol
 from app.kernel.occt.naming import contribution_of, evolution_of, record_derived
-from app.kernel.occt.operations.context import BuildContext, build_or_raise, feature_name
+from app.kernel.occt.operations.context import (
+    BuildContext,
+    build_or_raise,
+    given_name,
+)
 from app.kernel.occt.topology import has_solid
 
 PATTERN_RECTANGULAR = "catia_pattern_rectangular"
@@ -240,7 +244,7 @@ def _apply_pattern(
             "everything the part was made of — reduce the count or the spacing."
         )
 
-    feature = document.add_feature(feature_name(arguments, "pattern"), tool)
+    feature = document.add_feature(given_name(arguments), tool)
     modified, generated = evolution_of(maker, part)
     document.set_result(
         feature,

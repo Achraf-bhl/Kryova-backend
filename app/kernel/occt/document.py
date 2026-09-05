@@ -531,14 +531,38 @@ class PartDocument:
 
     # -- building ------------------------------------------------------------
 
-    def add_feature(self, name: str, tool: str) -> Feature:
+    def add_feature(self, name: str | None, tool: str) -> Feature:
         """Reserve a feature's labels. Once per feature per document, forever.
 
         Re-adding an existing name returns the same `Feature` — that is a regeneration
         rewriting its own labels, which is required. What it must never do is allocate a
         second label triple for the same name: the selectors recorded against the first
         set would stop resolving, and `Solve()` would not say so.
+
+        **`None` means "you choose", and it is not the same as a default string.**
+        Every operation used to fall back to its own tool's word, so two unnamed
+        pockets both arrived here as `pocket` — and the regeneration rule above then
+        did exactly what it says: the second one rewrote the first one's labels
+        instead of becoming a feature. Measured on 2026-09-05, a flange with a bore
+        and four bolt holes reported `[Pad.1, Pocket.1]`. The geometry was right,
+        because a cut lands on the part's shape either way; the names were not, and
+        names are what a scoped fillet, a seeded pattern and every `feature#selector`
+        resolve against. An agent almost never passes a name, so this was the ordinary
+        case. An allocated name is the CATIA-style one, so the design-facing name and
+        the reported name are the same string and there is nothing to map between.
         """
+        if name is None:
+            allocated = self._next_catia_name(tool)
+            feature = Feature(
+                name=allocated,
+                tool=tool,
+                labels=allocate_feature_labels(self.root),
+                catia_style_name=allocated,
+            )
+            self._features.append(feature)
+            self._by_name[allocated] = feature
+            return feature
+
         existing = self._by_name.get(name)
         if existing is not None:
             if existing.tool != tool:

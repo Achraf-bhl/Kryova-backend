@@ -65,7 +65,7 @@ from app.kernel.occt.operations.context import (
     as_point,
     as_positive_length,
     build_or_raise,
-    feature_name,
+    given_name,
 )
 from app.kernel.occt.selectors import SUB_ENTITY_MARK, select_edges, select_faces
 from app.kernel.occt.sketching import Sketch
@@ -2178,8 +2178,8 @@ def _record(
     backends still report the same `Created(feature)` — the executor binds late-bound
     names from what this returns and must not be able to tell which kernel ran.
     """
-    name = feature_name(arguments, fallback)
-    feature = document.add_feature(name, tool)
+    feature = document.add_feature(given_name(arguments) or fallback, tool)
+    name = feature.name
     document.set_construction(feature, shape, name=name, kind=kind)
     record_primitive(feature.labels, shape)
     return context.result_for(feature)

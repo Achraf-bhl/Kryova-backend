@@ -32,7 +32,7 @@ from app.kernel.occt.operations.context import (
     as_point,
     as_positive_length,
     build_or_raise,
-    feature_name,
+    given_name,
 )
 from app.kernel.occt.sketching import Sketch
 from app.kernel.occt.topology import edges, faces
@@ -232,7 +232,7 @@ def combine_into_part(
     adds_material: bool,
 ) -> Mapping[str, Any]:
     """Fuse or cut the new material into the part, recording the naming history."""
-    feature = document.add_feature(feature_name(arguments, tool.removeprefix("catia_")), tool)
+    feature = document.add_feature(given_name(arguments), tool)
     existing = document.shape
 
     if existing is None:

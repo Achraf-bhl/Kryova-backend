@@ -34,7 +34,7 @@ from app.kernel.occt.operations.context import (
     BuildContext,
     as_positive_length,
     build_or_raise,
-    feature_name,
+    given_name,
 )
 from app.kernel.occt.topology import has_solid
 
@@ -186,7 +186,7 @@ def _drill(
             "than the material around it."
         )
 
-    feature = document.add_feature(feature_name(arguments, "hole"), tool)
+    feature = document.add_feature(given_name(arguments), tool)
     modified, generated = evolution_of(maker, part)
     document.set_result(
         feature, result, contributed=contribution_of(maker, cutter), evolved_by=maker

@@ -25,7 +25,7 @@ from app.kernel.occt.operations.context import (
     BuildContext,
     as_positive_length,
     build_or_raise,
-    feature_name,
+    given_name,
 )
 from app.kernel.occt.selectors import select_faces
 from app.kernel.occt.topology import has_solid
@@ -78,7 +78,7 @@ def boolean(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str,
             "covers the target entirely; for an intersection they probably do not overlap."
         )
 
-    feature = document.add_feature(feature_name(arguments, word), BOOLEAN)
+    feature = document.add_feature(given_name(arguments), BOOLEAN)
     modified, generated = evolution_of(maker, target)
     document.set_result(
         feature,
@@ -176,7 +176,7 @@ def shell(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
             f"{SHELL} at {thickness} mm consumed the whole part. The wall is thicker "
             "than the material available; reduce it."
         )
-    feature = document.add_feature(feature_name(arguments, "shell"), SHELL)
+    feature = document.add_feature(given_name(arguments), SHELL)
     modified, generated = evolution_of(maker, source)
     document.set_result(
         feature,

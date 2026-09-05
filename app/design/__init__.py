@@ -56,6 +56,16 @@ from app.design.execute import (
     CallRunner,
     execute_plan,
 )
+from app.design.missions import (
+    LADDER,
+    LadderReport,
+    Mission,
+    MissionOutcome,
+    MissionResult,
+    mission,
+    run_ladder,
+    run_mission,
+)
 from app.design.names import NameTable, SemanticName
 from app.design.params import (
     Dimension,
@@ -88,7 +98,12 @@ __all__ = [
     "FeatureChange",
     "FeatureError",
     "FeatureSpec",
+    "LADDER",
+    "LadderReport",
     "Measurer",
+    "Mission",
+    "MissionOutcome",
+    "MissionResult",
     "NameTable",
     "Outcome",
     "Parameter",
@@ -116,6 +131,9 @@ __all__ = [
     "diff_specs",
     "execute_plan",
     "expr",
+    "mission",
     "ref",
     "refs",
+    "run_ladder",
+    "run_mission",
 ]

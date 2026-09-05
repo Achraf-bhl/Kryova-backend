@@ -619,17 +619,92 @@ against the real application rather than repeatedly here. So on this machine:
 - **Write the tests with the work and commit them with it.** Skipping them because they
   will not be run here is the one thing this arrangement must not turn into: the seat runs
   what exists, so a phase with no tests written is a phase that never gets verified.
-- **Do not run the suites here** — not `pytest`, not a single file, not to "check it
-  works". Report what was written, not what passed.
-- **`ruff` and `mypy` still run here before finishing.** They are lint and type-check, not
+- **Which machine you are on decides whether you run them, and "here" is ambiguous —
+  check.** On the **Linux authoring machine**: do not run the suites — not `pytest`, not a
+  single file, not to "check it works" — and report what was written, not what passed. On
+  the **Windows seat** (CATIA installed, `venv\Scripts\python.exe`), running them *is* the
+  job, and a phase reported as done without a green run on the seat has not been verified.
+  This paragraph used to say "do not run the suites here" unconditionally, which read as a
+  refusal on the one machine that can actually execute them.
+- **`ruff` and `mypy` run on both before finishing.** They are lint and type-check, not
   tests, and they are cheap. `venv/bin/python -m ruff check app/ tests/` and
-  `venv/bin/python -m mypy app/`.
+  `venv/bin/python -m mypy app/` — on Windows, `venv\Scripts\python.exe`, and note that
+  `PYTHONPATH=.` is needed to run a script against the package there.
 - Verifying a new guard by **breaking the thing it guards** is still required. Reason it
   through against the source and say so plainly in the commit; where a guard cannot be
   shown to fail, label it unpinned rather than shipping it as verified.
 - A one-off *API-surface* check — does this OCCT symbol exist, does this method take these
   arguments — is not a test and is worth doing, because shipping code that calls a name
   that is not there wastes a seat session on an `AttributeError`.
+
+**An end-to-end test goes through the Ollama chatbot, never through the dispatcher**
+(standing rule, 2026-09-05). "End to end" means the path a user actually takes —
+chat → agent → tool layer → dispatch → backend → CATIA or the open kernel — and a test
+that starts at `dispatch.call_catia` or at a bare `OcctRunner` is testing a *middle*, not
+an end. It may still be the right test; it may not be *called* an end-to-end one.
+
+This is not a preference, it is the lesson of two measured defects. **D2** — on
+`GEOMETRY_BACKEND=occt` the agent could create a part and then do nothing to it, because
+the local branch returned before writing the `CatiaDocument` row, and every document-scoped
+tool after it was refused *in `app/ai/tools.py`*. `tests/test_geometry_backends.py` could
+not see it: it calls the dispatcher, and the refusal lives one layer up. The master plan's
+"measured end to end, a 60×40×20 pad returns 48000 mm³" had been measured through the
+dispatcher, and the product was broken the whole time. **D9** — a test calls
+`runner("catia_pad", {"name": "slab", ...})`, an argument `dispatch.validate()` rejects, so
+it passes while proving nothing about the path it is quoted for.
+
+So: every phase whose Proof mentions the product, and every verification session, drives a
+real conversation against the real chat endpoint with a real local model. The model is
+`qwen3-coder:30b` — re-measured 2026-09-05 against the 108-tool payload the OCCT backend
+offers, where `gpt-oss:20b` returns prose and no `tool_calls` at all (the earlier benchmark
+that favoured it used ~26 tools). **Confirm Ollama is on the GPU** (`ollama ps` shows the
+CPU/GPU split; `nvidia-smi` shows resident bytes) — an 8 GB card holds ~30% of a 20.6 GB
+model and the rest runs from RAM, which is slow but working, and *not* being on the GPU at
+all is a different and reportable condition.
+
+A weak local model is part of what is being tested, not an obstacle to it: it guesses
+argument names outside the schema and calls tools before their prerequisites, and every one
+of those must come back as a named refusal from our own validation rather than as a wrongly
+built part.
+
+**Every CATIA test result is screenshotted, and the screenshot is looked at.** A tool result
+that says `ok` is not evidence the geometry is right — `catia_capture_view`'s own summary
+says it: *"a feature that succeeded but produced the wrong shape looks identical to one that
+worked, in every other result."* A run with no picture has not been verified, it has been
+believed. Two pictures, because they fail to show different things:
+
+- **`catia_capture_view`** — the part as CATIA draws it, taken *through the product's own
+  tool*, so the tool is exercised too. This is the one that shows a pad that went the wrong
+  way, a pocket that missed, a fillet that swallowed a face.
+- **A screenshot of the application window** — the spec tree, a modal dialog, a greyed
+  command, an error box, a floating toolbar. `catia_capture_view` renders the *viewport* and
+  cannot show any of that, which is exactly why **D11** — a floating toolbar read as an open
+  modal dialog, refusing every interactive command on a working seat — was invisible until
+  somebody looked at the whole window.
+
+Save them beside the session's report (`docs/verification-<date>/`) and name them in it. The
+French seat names features `Extrusion.1` and `Poche.1`, so the tree in the picture is also
+how you confirm the localisation path is intact.
+
+**The chat prompt gets harder every session, and the target is a machine.** Kryova's point
+is a system that designs a stamping press, not one that models a plate — so an end-to-end
+prompt that stays at "make a 60×40×20 plate" stops measuring anything the day it first
+passes. Each session starts one rung above where the last one got to, and records where it
+stopped and why. A rough ladder, deliberately parallel to `app/design/missions.py`:
+
+1. one solid from a sketch — the plumbing (this is *passed*, do not re-run it as the test);
+2. a part with several features that must agree: holes on a bolt circle, corner fillets, a
+   pocket to a named depth, all dimensioned from parameters rather than typed twice;
+3. a part the agent must *measure and correct* — "make it 2.4 kg" — so the loop in
+   `correct.py` and the aim in `sensitivity.py` run for real;
+4. two parts and a constraint between them: an assembly, with a clash check;
+5. a mechanism — something with a motion range and a clearance that must hold through it;
+6. a subsystem of a machine off the ladder (M2 upward), against a written requirement.
+
+Rung 2 upward is where the interesting failures live, because they need the agent to hold
+intent across many calls — which is the open question Phases 14 and 16 exist to answer, and
+the thing no amount of kernel coverage tests for. **Report the rung reached, not just
+pass/fail**, and expect the local model to be the limit long before the geometry is.
 
 - Physics tests (`test_solver.py`, `test_mesh.py`, `test_geometry.py`) never request a database
   fixture, so they open no connection and run offline in under a second. Keep it that way —

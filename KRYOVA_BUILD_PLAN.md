@@ -38,9 +38,14 @@ happened.
 > part of P5) — and callers for vision / machine_checks / sensitivity.
 
 
-**E5 — Assertions and self-correction.** Foundation 2026-09-04; **5.1 and 5.3 landed
-2026-09-05**. What is left is **5.4** — the mission ladder as a permanent regression suite,
-which wants E18's missions to exist first — and **5.2**, blocked on Phase 11 (requirements).
+**E5 — Assertions and self-correction.** Foundation 2026-09-04; **5.1, 5.3 and 5.4 all
+landed 2026-09-05**. 5.4 did not in fact need E18's missions to exist first, which is what
+the queue had assumed: what it needed was the *harness*, and M1 already built. So the
+ladder now runs — 1/9 rungs green, 8 declared PENDING with the phase each waits on — and
+E18 gains a rung by giving its `Mission` a spec and assertions rather than by starting from
+nothing. **All that remains under E5 is 5.2**, requirement-bound assertions, genuinely
+blocked on Phase 11: "meets REQ-014" needs REQ-014 to exist as an object. E5 therefore
+keeps a bare number rather than a star.
 
 **E4 is done except 4.4** (renders into the conversation), which Product Track P5 owns.
 `app/render/` renders eight canonical views deterministically, cuts sections and diffs two
@@ -92,6 +97,43 @@ and what 5.3's sensitivity can then be run over.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E5 → **5.4: the ladder becomes a suite that runs**, and E18 gets its
+  harness. `app/design/missions.py`. Decision 5 lists nine machines and calls each rung a
+  permanent regression test; nothing executed it, so "M1 works" was a claim from the day
+  somebody last tried it by hand and there was no moment at which M1 quietly breaking would
+  have been noticed. All nine rungs are declared, M1 carries a real `DesignSpec`, and its
+  claims are closed forms computed from the same constants the spec is built from — a
+  changed dimension moves the design and its claims together, where a hand-typed number
+  stops describing the part and then fails looking like a geometry bug. M1 builds through
+  the real `OcctRunner` in twelve calls and holds all eight: volume, mass, surface area,
+  thickness, footprint, one solid, eleven faces, centroid at mid-thickness. The last three
+  are there because **a bore that stopped short keeps the volume plausible** — only an
+  independent quantity catches it. **The eight unreachable rungs are `PENDING`, never a
+  pass and never a skip**, each naming the phase that owns the gap; but pending does not
+  make the report red, because a suite red until M9 is a suite somebody switches off. `ok`
+  is the regression question, `complete` is the programme question, and the sentence a
+  human reads — "1/9 rungs pass, 8 not yet buildable" — cannot be misread as coverage.
+  A rung that claims to build and does not is a **failure whatever the reason**, unlike
+  `conformance.py`, which is asking a different question: there a gap says which backend is
+  behind, here the mission declared it builds and an operation that regressed into
+  unimplemented has falsified that. Five guards verified by breaking them; dropping the
+  pending rungs flips `complete` to true, the exact false green the split prevents.
+  **Writing it corrected a rationale rather than shipping it:** fillet-before-bore was
+  justified as *necessary*, expecting `vertical` to catch the bore's seam. It does not —
+  bore-first matches to 1e-12 on the same eleven faces. The `feature` scope is what is
+  load-bearing: with a boss on the slab, scoped removes 171.68 mm³ and unscoped 386.28 mm³,
+  having rounded the boss and reported success — the defect the verification found in the
+  design suite's own bracket fixture. 31 tests, 743 green across design+kernel, ruff and
+  mypy clean.
+
+  Three standing rules added to `CLAUDE.md` the same day, at the user's direction: **an
+  end-to-end test goes through the Ollama chatbot, never the dispatcher** (D2 and D9 are
+  what a middle misses); **every CATIA result is screenshotted and looked at**, both the
+  viewport via `catia_capture_view` and the whole window via the restored
+  `scripts/shot.ps1`, because D11 was invisible in every viewport render; and **the chat
+  prompt gets harder every session**, on a rung ladder parallel to the missions, because a
+  prompt that stays at "make a plate" stops measuring anything the day it first passes.
 
 - **2026-09-05** — **The integration gap, step 2 + two product decisions.**
   `app/api/routes/kernel.py`: `GET /kernel/conversations/{id}/render` (any canonical view,

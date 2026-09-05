@@ -2628,10 +2628,18 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
             "type": "object",
             "properties": {
                 "radius_mm": {
-                    "type": "number",
+                    "type": ["number", "array"],
                     "exclusiveMinimum": 0,
                     "maximum": 1000.0,
-                    "description": "Radius to round to. Millimetres.",
+                    "description": "Radius to round to. Millimetres. One number applies to every selected entity; a list gives one per entity, in selection order, and must be exactly as long as the selection.",
+                    "items": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 1000.0,
+                        "description": "Radius to round to. This entity's own value. Millimetres.",
+                    },
+                    "minItems": 1,
+                    "maxItems": 50,
                 },
                 "feature": {
                     "type": "string",
@@ -2661,10 +2669,18 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
             "type": "object",
             "properties": {
                 "length_mm": {
-                    "type": "number",
+                    "type": ["number", "array"],
                     "exclusiveMinimum": 0,
                     "maximum": 1000.0,
-                    "description": "Length of the bevel. Millimetres.",
+                    "description": "Length of the bevel. Millimetres. One number applies to every selected entity; a list gives one per entity, in selection order, and must be exactly as long as the selection.",
+                    "items": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 1000.0,
+                        "description": "Length of the bevel. This entity's own value. Millimetres.",
+                    },
+                    "minItems": 1,
+                    "maxItems": 50,
                 },
                 "angle_deg": {
                     "type": "number",

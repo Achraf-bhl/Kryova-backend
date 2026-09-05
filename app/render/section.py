@@ -135,8 +135,8 @@ def offset_section(shape: Any, axis: Axis, at_mm: float) -> Section:
     if not low - MINIMUM_SPAN_MM <= at_mm <= high + MINIMUM_SPAN_MM:
         raise SectionError(
             f"A section at {axis}={at_mm:g} mm misses the part, which spans "
-            f"{low:g} to {high:g} mm along {axis}. Pick a value inside that range, "
-            f"or use mid_section for the middle of it."
+            f"{_stated(low)} to {_stated(high)} mm along {axis}. Pick a value inside "
+            f"that range, or use mid_section for the middle of it."
         )
     return _section_at(axis, at_mm, f"{axis}={at_mm:g}")
 
@@ -160,6 +160,21 @@ def _section_at(axis: Axis, at_mm: float, name: str) -> Section:
         origin=tuple(at_mm * one for one in normal),  # type: ignore[arg-type]
         normal=normal,
     )
+
+
+def _stated(value_mm: float) -> str:
+    """A bound as a person should read it: rounded to the micron, no negative zero.
+
+    The comparison above is made against the exact number; only the sentence is
+    rounded. `BRepBndLib` returns a face lying on x=0 as -1e-07 even with the gap
+    set to zero, so a 60 mm plate told the user it "spans -1e-07 to 60 mm" — a
+    tenth of a nanometre of kernel tolerance printed as if it were a fact about
+    the part, in the one message whose whole job is to name a range to pick from.
+    A micron is the finest distinction worth making in mm, and rounding to it can
+    only move the stated edge by less than the tolerance already there.
+    """
+    rounded = round(value_mm, 3)
+    return f"{rounded if rounded else 0.0:g}"
 
 
 def _bounds(shape: Any, axis: Axis) -> tuple[float, float]:

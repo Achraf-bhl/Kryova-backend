@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -152,20 +153,50 @@ def render() -> str:
     return "\n".join(lines)
 
 
+def _ruff() -> str | None:
+    """The project's own ruff, on either venv layout.
+
+    A venv puts console scripts in `venv/bin` on POSIX and `venv\\Scripts` on
+    Windows, with an `.exe` suffix there and none here. This looked only in the
+    first, so on Windows it found nothing and `_formatted` silently returned raw
+    source -- which made `--check` call the correctly formatted checked-in file
+    stale on every Windows machine (`tests/test_bridge_table_is_generated.py`
+    could not pass there at all), and made running the generator rewrite all
+    ~7,000 lines in `repr()` style: exactly the diff noise the formatting step
+    exists to prevent, and then stale on Linux instead.
+
+    `shutil.which` is what applies PATHEXT, so `ruff.exe` is found without the
+    suffix being spelled out here. Only the venv is searched: a ruff from
+    somewhere else could be a different version, and a generated file whose
+    formatting depends on which machine ran it is the same bug again.
+    """
+    for directory in (REPO_ROOT / "venv" / "bin", REPO_ROOT / "venv" / "Scripts"):
+        found = shutil.which("ruff", path=str(directory))
+        if found:
+            return found
+    return None
+
+
 def _formatted(source: str) -> str:
     """Run the project's formatter over the output, when it is installed.
 
     Generated code that does not match the repo's style shows up as noise in
     every diff of the file, which is how people learn to stop reading it.
     """
-    ruff = REPO_ROOT / "venv" / "bin" / "ruff"
-    if not ruff.exists():
+    ruff = _ruff()
+    if ruff is None:
         return source
+    # `encoding="utf-8"` and not the `text=True` that used to be here: text mode
+    # encodes the pipe with the *locale* encoding, which is cp1252 on a French
+    # Windows install, so the descriptions carrying mm³, Ø and em dashes reached
+    # ruff as mojibake and it refused the whole stream as invalid UTF-8. That is
+    # silent -- the fallback below returns the source unformatted -- so it showed
+    # up only as the generated file being permanently stale.
     result = subprocess.run(  # noqa: S603 - fixed path, no shell
-        [str(ruff), "format", "--stdin-filename", str(TARGET), "-"],
+        [ruff, "format", "--stdin-filename", str(TARGET), "-"],
         input=source,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=False,
     )
     return result.stdout if result.returncode == 0 and result.stdout else source

@@ -72,14 +72,35 @@ def project(shape: Any, view: View) -> Projection:
     hand against the camera basis, would be a second answer to a question OCCT has
     already answered, and the two would drift.
 
-    One sign is corrected, in `_flatten`, and it is not a transform: OCCT's `gp_Ax2`
-    defines its Y axis as `direction × X`, which points *down* relative to the up vector
-    `views.View` declares. Read the note there before changing it.
+    **The direction handed to HLR is negated, and that is the whole of the camera.**
+    `View.direction` points from the eye towards the part, which is what every other
+    reader of it wants. `HLRAlgo_Projector` takes the opposite sense: the `gp_Ax2` it is
+    built from has its main direction pointing from the part *towards the eye*, and that
+    direction is what decides which side of the part the algorithm is standing on — which
+    is to say, which lines come back visible and which come back hidden.
+
+    Handing it the un-negated direction put the eye on the far side of the part in all
+    eight canonical views. Nothing looked wrong, because an orthographic silhouette is
+    unchanged by viewing the part from behind and mirroring it — so the outline, the
+    framing, the extent, the render digest and every determinism and diff check were all
+    exactly as they should be. Only the visible/hidden split was inverted: a pocket you
+    are looking straight into came back dashed, and a pocket on the far side came back
+    solid. Measured on 2026-09-05 with a blind pocket in each of the six faces in turn;
+    every one of them reported 0 added visible and 8 added hidden lines in the view that
+    faces it. That is the same class of error as the upside-down render this module
+    already carries a note about, and it survived for the same reason.
+
+    Negating it here also removes the y correction `_flatten` used to apply, and the two
+    are one fact rather than two: `gp_Ax2` defines its Y axis as `main × X`, so with the
+    main direction the right way round that Y axis *is* the up vector `views.View`
+    declares (`right × direction`) instead of its opposite. The two sign errors cancelled
+    in the 2D coordinates, which is why fixing only the visible one left this behind. The
+    view millimetres are unchanged by this fix; the depth ordering is not.
     """
     projector = symbol("HLRAlgo_Projector")(
         symbol("gp_Ax2")(
             symbol("gp_Pnt")(0.0, 0.0, 0.0),
-            symbol("gp_Dir")(*view.direction),
+            symbol("gp_Dir")(*(-component for component in view.direction)),
             symbol("gp_Dir")(*view.right()),
         )
     )
@@ -161,21 +182,18 @@ def _flatten(edge: Any) -> tuple[tuple[float, float], ...]:
     points = []
     for index in range(steps + 1):
         at = adaptor.Value(first + (last - first) * index / steps)
-        # **y is negated, and leaving it out renders every part upside down.**
-        # HLR reports in the frame of the `gp_Ax2` it was given, whose
-        # `YDirection` is `direction x XDirection` -- the opposite of the up
-        # vector `views.py` declares (`right x direction`). Measured rather than
-        # reasoned: the top of a 40 mm box seen from the front comes back at
-        # y = -40 and its base at y = 0.
+        # **y is taken as HLR reports it, and that depends on `project` negating
+        # the direction it builds the `gp_Ax2` from.** `gp_Ax2` defines its Y
+        # axis as `main x XDirection`, so with the main direction pointing from
+        # the part towards the eye -- the sense HLR actually wants -- that Y axis
+        # is exactly the up vector `views.py` declares (`right x direction`).
         #
-        # This shipped inverted on 2026-09-05 and no test could see it. A
-        # vertical mirror of the whole image is still byte-identical to itself,
-        # so determinism held; a diff of two mirrored renders is still correct,
-        # so 4.3 held; and a wireframe of a plate looks perfectly plausible
-        # upside down. It is exactly the "wrong orientation" error 4.1 says a
-        # render hash is supposed to catch, which is the reason to fix it here
-        # rather than to flip the raster and leave view millimetres lying.
-        points.append((at.X(), -at.Y()))
+        # This was a negation until 2026-09-05, correcting an upside-down image
+        # that the un-negated direction caused. It worked, and it hid the other
+        # half: the same wrong sense also put the eye behind the part, which a
+        # vertical flip cannot fix and no test could see. Both are now one sign,
+        # in `project`. Read the note there before touching either.
+        points.append((at.X(), at.Y()))
     return tuple(points)
 
 

@@ -105,19 +105,115 @@ class TestTheRenderIsTheRightWayUp:
         nearest = min(points, key=lambda p: (p[0] - by_hand[0]) ** 2 + (p[1] - by_hand[1]) ** 2)
         assert nearest == pytest.approx(by_hand, abs=1e-3)
 
-    def test_the_declared_up_vector_is_the_opposite_of_occts(self) -> None:
-        """Stated because it is the whole reason `_flatten` negates y."""
+    def test_the_negated_direction_is_what_makes_occts_y_axis_the_declared_up(self) -> None:
+        """Both signs of the same fact, stated because `project` now relies on it.
+
+        `gp_Ax2` defines its Y axis as `main x XDirection`. Built from the raw
+        `View.direction` that axis is the opposite of the up vector `views.py`
+        declares, which is what `_flatten` used to cancel with a negation. Built
+        from the *negated* direction -- the sense `HLRAlgo_Projector` actually
+        wants, see `project` -- it is that up vector exactly, so no negation is
+        needed and the depth ordering comes out right as well.
+        """
         view = view_named("front")
-        ax2 = symbol("gp_Ax2")(
-            symbol("gp_Pnt")(0.0, 0.0, 0.0),
-            symbol("gp_Dir")(*view.direction),
-            symbol("gp_Dir")(*view.right()),
-        )
-        occt_up = ax2.YDirection()
         declared = view.frame_up()
-        assert (occt_up.X(), occt_up.Y(), occt_up.Z()) == pytest.approx(
-            tuple(-one for one in declared)
+
+        def y_axis_of(direction: tuple[float, float, float]) -> tuple[float, float, float]:
+            ax2 = symbol("gp_Ax2")(
+                symbol("gp_Pnt")(0.0, 0.0, 0.0),
+                symbol("gp_Dir")(*direction),
+                symbol("gp_Dir")(*view.right()),
+            )
+            axis = ax2.YDirection()
+            return (axis.X(), axis.Y(), axis.Z())
+
+        raw = view.direction
+        negated = tuple(-one for one in raw)
+        assert y_axis_of(raw) == pytest.approx(tuple(-one for one in declared))
+        assert y_axis_of(negated) == pytest.approx(declared)
+
+
+class TestTheRenderIsSeenFromTheSideItNames:
+    """The other half of the same defect, and the one a vertical flip cannot fix.
+
+    `View.direction` points from the eye towards the part; `HLRAlgo_Projector`
+    wants the opposite sense, so handing it the direction unchanged stands the
+    camera *behind* the part in all eight canonical views. An orthographic
+    silhouette is unchanged by that -- outline, extent, framing and render digest
+    come out byte-identical -- so determinism held, the diff held, and the only
+    thing wrong was which lines were solid and which were dashed: a pocket the
+    camera was looking straight into was drawn as a hidden feature. Measured on
+    the Windows seat on 2026-09-05, first run of this module on real geometry.
+    """
+
+    OPPOSITE = {
+        "top": "bottom",
+        "bottom": "top",
+        "front": "back",
+        "back": "front",
+        "left": "right",
+        "right": "left",
+    }
+
+    @staticmethod
+    def _pocket(face: str):
+        """The 60x40x20 plate with a 6 mm blind pocket in one named face."""
+        at = {
+            "top": (25.0, 15.0, 14.0),
+            "bottom": (25.0, 15.0, -4.0),
+            "front": (25.0, -4.0, 5.0),
+            "back": (25.0, 34.0, 5.0),
+            "right": (54.0, 15.0, 5.0),
+            "left": (-4.0, 15.0, 5.0),
+        }[face]
+        operation = symbol("BRepAlgoAPI_Cut")(_box(), _box(10.0, 10.0, 10.0, at=at))
+        operation.Build()
+        return operation.Shape()
+
+    @staticmethod
+    def _visible_segments(shape, view: str) -> int:
+        projected = project(shape, view_named(view))
+        return sum(len(line) - 1 for line in projected.visible)
+
+    @pytest.mark.parametrize("face", sorted(OPPOSITE))
+    def test_a_pocket_is_open_to_the_view_that_faces_it(self, face: str) -> None:
+        """And is drawn entirely hidden from the far side of 20 mm of material."""
+        opposite = self.OPPOSITE[face]
+        pocketed = self._pocket(face)
+
+        assert self._visible_segments(pocketed, face) > self._visible_segments(_box(), face), (
+            f"the pocket in the {face} face is drawn hidden in the {face} view -- "
+            "the camera is standing on the wrong side of the part"
         )
+        assert self._visible_segments(pocketed, opposite) == self._visible_segments(
+            _box(), opposite
+        ), f"the {face} pocket is drawn visible through the part in the {opposite} view"
+
+    def test_the_isometric_views_look_down_from_the_octant_they_name(self) -> None:
+        """A boss on the top face is the discriminator, and it is not degenerate.
+
+        Both isometrics stand above the part, so a boss on the top face is the
+        nearest thing to either camera and must contribute visible lines, while
+        one hanging underneath must contribute none. Unlike the orthographic
+        cases nothing here projects coincident with anything else, so the counts
+        are unambiguous.
+        """
+        def with_boss(z: float):
+            operation = symbol("BRepAlgoAPI_Fuse")(
+                _box(), _box(10.0, 10.0, 8.0, at=(20.0, 15.0, z))
+            )
+            operation.Build()
+            return operation.Shape()
+
+        on_top, underneath = with_boss(20.0), with_boss(-8.0)
+        for view in ("iso", "iso_rear"):
+            plain = self._visible_segments(_box(), view)
+            assert self._visible_segments(on_top, view) > plain, (
+                f"{view} draws a boss standing on the top face as hidden"
+            )
+            assert self._visible_segments(underneath, view) == plain, (
+                f"{view} draws a boss hanging under the plate as visible"
+            )
 
 
 class TestDeterminism:

@@ -196,6 +196,16 @@ class Settings(BaseSettings):
     # it, half of it is unreachable from an English question.
     catia_knowledge_expand_queries: bool = True
 
+    # Which kernel executes a geometry tool call.
+    #   catia -> a real seat over the desktop bridge (needs Windows + a licence)
+    #   occt  -> the open kernel, in this process; no licence, no seat, no network
+    # Default `catia` so an existing deployment is unchanged. `occt` is what makes
+    # Decision 1 true of the product rather than only of the libraries: the agent
+    # can build geometry on any machine. Never chosen automatically -- a
+    # deployment that silently fell back would hand the user a part built by a
+    # different kernel without saying so.
+    geometry_backend: str = "catia"
+
     # CATIA desktop bridge. The daemon dials out to this service over a
     # WebSocket; see docs/CATIA_BRIDGE_PROTOCOL.md for the wire format.
     # Off switches the tools out of the agent's vocabulary entirely rather than

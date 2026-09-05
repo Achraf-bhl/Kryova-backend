@@ -61,6 +61,7 @@ from app.catia.transfer import (
 from app.catia.validation import SchemaError, validate
 from app.catia_kb.ui import ButtonRole, button_labels, resolve_command, resolve_workbench
 from app.core.config import settings
+from app.geometry import backends
 from app.media import MediaService, get_media_store
 from app.models import Conversation, MediaKind
 from app.models.base import utcnow
@@ -274,6 +275,17 @@ def offered_tool_specs(db: Session, user_id: str) -> list[CatiaToolSpec]:
       original vocabulary, and offering it nothing would be a worse guess than
       offering it too much.
     """
+    if backends.is_local():
+        # The open kernel's coverage is read from its handler table, so it cannot
+        # drift from the code. Offering all 201 when 108 work costs the model a
+        # turn per miss and teaches it nothing -- the same argument as the bridge
+        # intersection below, with a source of truth that is in this process.
+        implemented = backends.local_tool_names()
+        offered = [spec for spec in CATIA_TOOL_SPECS if spec.name in implemented]
+        # Never offer nothing: an unusable kernel must reach the model as a
+        # message it can repeat, not as a vocabulary with no geometry in it.
+        return offered or list(CATIA_TOOL_SPECS)
+
     found = _online(db, user_id)
     if found is None:
         return list(CATIA_TOOL_SPECS)
@@ -292,6 +304,11 @@ def catia_available(db: Session, user_id: str) -> bool:
     """
     if not settings.catia_enabled:
         return False
+    # No device to bring up, no socket to wait for: the kernel is in this
+    # process. Answering False here would withhold every geometry tool from a
+    # deployment that can build perfectly well.
+    if backends.is_local():
+        return bool(backends.local_tool_names())
     if any(registry.get(device.id) is not None for device in _owned_devices(db, user_id)):
         return True
     return local_bridge.ensure_started(db, user_id)
@@ -327,6 +344,30 @@ def status_payload(db: Session, user_id: str, conversation_id: str | None) -> di
     # connected" until the user had already asked for something, which is the
     # wrong way round for the thing they check *before* asking. Non-blocking:
     # a status call must stay fast, and the supervisor is rate-limited.
+    if backends.is_local():
+        # Reported as connected because a tool call will succeed, which is what
+        # the field means to every reader of it. `backend` is what says the part
+        # is being built by the open kernel rather than by a seat -- a result is
+        # bound to what produced it, and a status that hid the difference would
+        # make that unknowable from the outside.
+        coverage = backends.local_coverage()
+        return {
+            "connected": True,
+            "enabled": settings.catia_enabled,
+            "backend": "occt",
+            "backend_version": backends.backend_version(),
+            "paired_devices": 0,
+            "operations_implemented": coverage.get("implemented"),
+            "operations_declared": coverage.get("declared"),
+            "open_documents": backends.session_count(),
+            "document": _local_document(conversation_id),
+            "detail": (
+                "Geometry is being built by the open kernel in this process — no "
+                "CATIA seat is involved, and none is needed. Set "
+                "GEOMETRY_BACKEND=catia to drive a real seat instead."
+            ),
+        }
+
     local_bridge.ensure_started(db, user_id)
 
     devices = _owned_devices(db, user_id)
@@ -348,6 +389,7 @@ def status_payload(db: Session, user_id: str, conversation_id: str | None) -> di
         return {
             "connected": False,
             "enabled": settings.catia_enabled,
+            "backend": "catia",
             "paired_devices": len(devices),
             "document": document,
             "detail": _offline_detail(devices, user_id),
@@ -357,6 +399,7 @@ def status_payload(db: Session, user_id: str, conversation_id: str | None) -> di
     return {
         "connected": True,
         "enabled": settings.catia_enabled,
+        "backend": "catia",
         "paired_devices": len(devices),
         "device_id": device.id,
         "device_name": clean_text(device.name),
@@ -374,6 +417,25 @@ def status_payload(db: Session, user_id: str, conversation_id: str | None) -> di
         "connected_since": connection.connected_at.isoformat(),
         "document": document,
     }
+
+
+def _local_document(conversation_id: str | None) -> dict[str, Any] | None:
+    """What the open kernel is holding for this conversation.
+
+    Reports the in-memory document rather than the `CatiaDocument` row, because
+    on this backend the row is not the truth: nothing is saved to disk, the
+    document lives in the worker, and a status that quoted a database row would
+    keep describing a part that had been evicted.
+    """
+    if backends.was_evicted(conversation_id):
+        return {"doc_name": None, "evicted": True}
+    runner = backends.peek_session(conversation_id)
+    if runner is None:
+        return None
+    document = getattr(runner, "document", None)
+    if document is None:
+        return None
+    return {"doc_name": clean_text(getattr(document, "name", "") or ""), "evicted": False}
 
 
 # -- the public entry point --------------------------------------------------
@@ -434,6 +496,33 @@ def call_catia(
             )
             return data
 
+        # The open kernel runs in this process, so there is no device to resolve,
+        # no rate limit to enforce against a shared seat, and no round trip. It is
+        # placed here rather than earlier so that a local call gets the same
+        # normalisation, schema validation and augmentation a remote one does --
+        # the vocabulary is the contract, and a backend that accepted looser
+        # arguments would make plans that only build on one of them.
+        if backends.is_local():
+            data = _execute_locally(
+                spec=spec,
+                conversation_id=conversation_id,
+                arguments=arguments,
+            )
+            _log(
+                db,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                device_id=None,
+                tool=tool,
+                tier=tier,
+                arguments=arguments,
+                result=data,
+                ok=True,
+                error=None,
+                started=started,
+            )
+            return data
+
         device, connection = _resolve_connection(db, user_id)
         _enforce_rate_limit(device.id)
         if spec.tier is CatiaTier.DESTRUCTIVE:
@@ -479,6 +568,63 @@ def call_catia(
         started=started,
     )
     return data
+
+
+def _execute_locally(
+    *,
+    spec: CatiaToolSpec,
+    conversation_id: str | None,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one call against the in-process OCCT kernel.
+
+    Three failures are translated rather than propagated, because each means
+    something specific that the agent must be able to act on differently:
+
+    * **The operation is not implemented in this backend.** Not a geometry error.
+      An agent told "that failed" will try to repair a part that is fine; told
+      "this backend cannot do it yet", it can use another operation or ask for
+      the CATIA seat. It names the coverage so the answer is checkable.
+    * **The document was evicted** to bound memory. Silence here would let the
+      agent add a feature to an empty document and report success, which is the
+      worst outcome available — so the first call after an eviction refuses,
+      says so, and clears the flag so a retry starts cleanly.
+    * **Anything else** is a real geometry failure and keeps its own message; the
+      kernel's errors are already written in this codebase's register.
+    """
+    from app.kernel.errors import KernelError, OperationNotSupported
+
+    if backends.was_evicted(conversation_id):
+        backends.clear_eviction(conversation_id)
+        raise CatiaError(
+            "The part this conversation was building is no longer in memory — too "
+            "many documents were open at once and this one was closed. Nothing was "
+            "saved. Start the part again with catia_new_part; the design is still "
+            "in the conversation, so the same calls will rebuild it."
+        )
+
+    runner = backends.session_for(conversation_id)
+    try:
+        result = runner(spec.name, arguments)
+    except OperationNotSupported as exc:
+        coverage = backends.local_coverage()
+        implemented = coverage.get("implemented", 0)
+        declared = coverage.get("declared", 0)
+        raise CatiaError(
+            f"{spec.name} is not implemented in the open kernel yet "
+            f"({implemented} of {declared} operations are). This is a gap in the "
+            "backend, not a problem with the part. Use another operation, or switch "
+            "GEOMETRY_BACKEND to catia and connect a seat."
+        ) from exc
+    except KernelError as exc:
+        raise CatiaError(f"{spec.name}: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 - an unexpected kernel fault must not 500
+        logger.exception("The open kernel failed on %s", spec.name)
+        raise CatiaError(
+            f"{spec.name} failed unexpectedly in the open kernel: {exc}"
+        ) from exc
+
+    return dict(result)
 
 
 # -- enforcement -------------------------------------------------------------

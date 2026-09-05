@@ -30,10 +30,12 @@ happened.
 > real result and not a small one — it says the phases are green on capability and have
 > never been connected to anything.
 >
-> **This is now the front of the queue**, ahead of E6. The order is: wire `OcctRunner` as a
-> selectable backend in dispatch (the keystone — it makes the kernel drivable and CATIA
-> genuinely one backend among several), then endpoints for render/measure/assert, then the
-> frontend surface (which is E4.4 and part of P5).
+> **Step 1 of 3 landed the same day.** `GEOMETRY_BACKEND=occt` routes tool calls to
+> `OcctRunner` in-process: the agent builds geometry with no seat and no licence, and a
+> 60×40×20 pad measures 48000 mm³ through the real dispatch path. Still to do: **(2)**
+> endpoints for render / measure / assert, so `app/render/`, `app/ai/vision.py`,
+> `machine_checks.py` and `sensitivity.py` have a caller at all; **(3)** the frontend
+> surface, which is E4.4 and part of P5.
 
 
 **E5 — Assertions and self-correction.** Foundation 2026-09-04; **5.1 and 5.3 landed
@@ -90,6 +92,20 @@ and what 5.3's sensitivity can then be run over.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — **The integration gap, step 1: the agent can build without CATIA.**
+  `app/geometry/backends.py` + a local branch in `dispatch.call_catia`. This is Decision 1
+  made true of the *product* rather than only of the libraries — until now `OcctRunner` was
+  constructed solely by tests and 108 working operations needed a licence to reach. Measured
+  end to end through the real path: a 60×40×20 pad returns 48000 mm³ exactly, on Linux, with
+  no seat. The seam is additive; the CATIA path keeps its validation, approval, logging and
+  messages untouched, and the branch sits *after* normalisation so both backends take
+  identical arguments. Three honesty rules: the offered tool list is read from the handler
+  table (108, not 201) so it cannot drift; an unimplemented operation is named as a **backend
+  gap**, never a geometry failure; and the backend is **never** chosen automatically, because
+  a silent fallback hands you a part built by a different kernel. The module lives in
+  `app/geometry/`, not `app/catia/` — filing the thing that chooses between two backends
+  under one of them says the opposite of what it does.
 
 - **2026-09-05** — E5 → **5.3: a repair that is aimed rather than guessed.**
   `app/design/sensitivity.py`. The plan's blunt version is that a validator which cannot say

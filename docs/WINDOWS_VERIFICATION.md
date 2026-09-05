@@ -52,6 +52,7 @@ venv\Scripts\python -m pytest tests\test_solver.py tests\test_mesh.py tests\test
 venv\Scripts\python -m pytest tests\test_kernel.py tests\test_interrogation.py -q
 venv\Scripts\python -m pytest tests\test_design_*.py -q
 venv\Scripts\python -m pytest tests\test_render.py tests\test_vision.py -q
+venv\Scripts\python -m pytest tests\test_geometry_backends.py -q
 ```
 
 | Suite | What a pass actually proves |
@@ -75,6 +76,34 @@ obviously top-heavy if a plain box is ambiguous. That defect shipped once and no
 check saw it.
 
 ---
+
+## 1b. Drive the agent with **no CATIA at all**
+
+Added 2026-09-05. Set in `.env`:
+
+```
+GEOMETRY_BACKEND=occt
+```
+
+and the agent builds geometry with the open kernel **in the API process** — no seat, no
+licence, no bridge. 108 of the 201 declared operations are implemented, and the agent is
+offered exactly those 108 rather than all 201, so it cannot pick a tool that will fail on a
+round trip.
+
+This is worth doing before anything CATIA-related, because it exercises Era I and II
+(the whole geometry kernel and selection vocabulary) through the real product path —
+chat → agent → dispatch → kernel — on a machine that needs nothing installed. Ask it for
+something concrete:
+
+> make a 60 by 40 by 20 plate and round its four vertical corners 5 mm
+
+`GET /catia/status` (or the bridge panel) reports `backend: "occt"`, the kernel version,
+and `108 / 201`. A part built here is **not saved to disk** — it lives in the worker
+process, one document per conversation, eight at a time. The ninth evicts the oldest, and
+the evicted conversation is *told* on its next call rather than silently continuing against
+an empty document.
+
+Then switch back to `GEOMETRY_BACKEND=catia` for tier 3.
 
 ## 2. Database — needs a live Neon connection
 

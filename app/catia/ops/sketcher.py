@@ -185,8 +185,14 @@ OPERATIONS: tuple[Operation, ...] = (
             "Draw a circle in the sketch.\n"
             "Omit `at` and the circle is centred on the sketch origin, which is the "
             "old behaviour and still the right one for a single-profile part. Give "
-            "`at` to place it anywhere — that is how a bolt circle or an off-centre "
-            "boss gets drawn."
+            "`at` to place ONE off-centre feature — a single boss, a single hole.\n"
+            "Do NOT draw a ring of holes by giving `at` for each one. Place one at "
+            "the bolt-circle radius and repeat it with catia_pattern_circular: that "
+            "needs a radius and a count, where four hand-placed circles need the "
+            "trigonometry of each position, and getting it wrong produces a part "
+            "that looks right and is not. Measured on this seat: asked for a 70 mm "
+            "bolt circle, a model placed circles at (±35, ±35) — a bolt-circle "
+            "radius of 49.5 mm, having used the radius as a coordinate."
         ),
         tier=Tier.WRITE,
         workbench=_WB,

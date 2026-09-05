@@ -184,7 +184,14 @@ OPERATIONS: tuple[Operation, ...] = (
         summary=(
             "Round edges of the part by a group name — all of them, or the vertical, "
             "horizontal, top or bottom ones.\n"
-            "Convenient when the intent really is 'break all the sharp edges' — and "
+            "`all` means EVERY edge on the part, including the rims of every bore and "
+            "hole and the top and bottom rims of the outside. It is right only when "
+            "the intent really is 'break all the sharp edges'. **The four outside "
+            "corners of a plate are `vertical`**, not `all` — measured on this seat, "
+            "`all` on a flange rounded the bore and all four hole rims too, took the "
+            "volume 4,494 mm³ below what was asked for, and reported success.\n"
+            "Scope it with `feature` as well when the part has more than one: "
+            "unscoped, a later feature's edges join the selection.\n"
             "radius_mm may be a list, one per selected edge in selection order, which is "
             "how 'the four vertical corners at 2, 3, 4 and 5 mm' is said against a "
             "predicate. Use catia_fillet_edges instead when the edges have to be named "
@@ -276,7 +283,12 @@ OPERATIONS: tuple[Operation, ...] = (
         summary=(
             "Repeat a feature evenly around a circle.\n"
             "The tool for a bolt circle, a spline pattern or a set of cooling slots. "
-            "Instances are spread over `total_angle_deg`, which defaults to a full turn."
+            "Instances are spread over `total_angle_deg`, which defaults to a full turn.\n"
+            "It repeats **material** — a pocket, a pad, a hole — never a sketch. Draw "
+            "the circle, pocket it, then pattern the pocket; patterning the sketch is "
+            "refused because there is nothing yet to repeat. The instances sit wherever "
+            "the original does, so place that one at the bolt-circle radius and leave "
+            "`radius_mm` alone."
         ),
         tier=Tier.WRITE,
         workbench=_WB,

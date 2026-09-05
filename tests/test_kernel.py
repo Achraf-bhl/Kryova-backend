@@ -5497,3 +5497,68 @@ class TestTheProofOfPhaseTwo:
                 "catia_fillet",
                 {"edges": "vertical", "radius_mm": list(self.RADII), "name": "unscoped"},
             )
+
+
+class TestASketchIsNotAFeature:
+    """A refusal that names the missing *step*, not just the missing name.
+
+    Measured on this seat 2026-09-05: asked for a bolt circle, the model drew a
+    circle in a sketch and then tried to pattern the sketch. The old message —
+    "No feature called 'Hole Sketch'" — was true and sent it looking for a
+    differently-spelled feature, which does not exist. What was missing was the
+    pocket. It tried twice, then gave up and hand-placed a hole instead.
+
+    Deliberately not a rule about patterns or bolt circles. Every tool taking a
+    `feature` builds on material, so this is the one place the distinction lives.
+    """
+
+    @staticmethod
+    def _part():
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "P"})
+        runner("catia_sketch_create", {"support": "XY", "name": "base"})
+        runner("catia_sketch_rectangle", {"sketch": "base", "width_mm": 40.0, "height_mm": 40.0})
+        runner("catia_pad", {"sketch": "base", "length_mm": 10.0, "name": "slab"})
+        runner("catia_sketch_create", {"support": "XY", "name": "hole"})
+        runner("catia_sketch_circle", {"sketch": "hole", "diameter_mm": 6.0, "at": [12.0, 0.0]})
+        return runner
+
+    def test_patterning_a_sketch_says_to_build_with_it_first(self) -> None:
+        runner = self._part()
+
+        with pytest.raises(Exception) as raised:
+            runner("catia_pattern_circular", {"count": 4, "feature": "hole"})
+
+        message = str(raised.value)
+        assert "is a sketch, not a feature" in message
+        assert "pad or pocket it first" in message
+
+    def test_it_still_lists_what_has_been_built(self) -> None:
+        """The old half of the message was useful and is kept."""
+        runner = self._part()
+
+        with pytest.raises(Exception) as raised:
+            runner("catia_pattern_circular", {"count": 4, "feature": "hole"})
+
+        assert "Built so far" in str(raised.value)
+
+    def test_a_name_that_is_neither_still_reports_it_as_unknown(self) -> None:
+        """The new branch must not swallow the ordinary typo case."""
+        runner = self._part()
+
+        with pytest.raises(Exception) as raised:
+            runner("catia_pattern_circular", {"count": 4, "feature": "nonesuch"})
+
+        assert "No feature called" in str(raised.value)
+        assert "is a sketch" not in str(raised.value)
+
+    def test_the_pocket_can_then_be_patterned(self) -> None:
+        """The repair the message names must actually work, or it is bad advice."""
+        runner = self._part()
+        runner("catia_pocket", {"sketch": "hole", "limit": "up_to_last", "name": "bore"})
+
+        result = runner("catia_pattern_circular", {"count": 4, "feature": "bore"})
+
+        assert result["volume_mm3"] < 40.0 * 40.0 * 10.0

@@ -294,6 +294,22 @@ class PartDocument:
             if feature.catia_style_name == name:
                 return feature
         known = ", ".join(self.feature_names()) or "nothing yet"
+        if name in self._sketches:
+            # The caller named something real and named it in the right document —
+            # it is simply the wrong *kind* of thing. Saying "no feature called
+            # 'Hole Sketch'" is true and unhelpful, because the obvious repair is
+            # to look for a differently-spelled feature, and there is not one. What
+            # is missing is a step, so the message names the step.
+            #
+            # Not specific to any one operation or shape: every tool taking a
+            # `feature` builds on material, and a sketch is a drawing until
+            # something extrudes or removes with it.
+            raise NamingError(
+                f"{name!r} is a sketch, not a feature. A sketch is a drawing until "
+                "something builds with it, so there is nothing yet to act on: pad or "
+                "pocket it first, then use the feature that creates. "
+                f"Built so far: {known}."
+            )
         raise NamingError(
             f"No feature called {name!r} in {self.name}. Built so far: {known}."
         )

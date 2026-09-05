@@ -95,6 +95,7 @@ DISASSEMBLE = "catia_disassemble"
 HEALING = "catia_healing"
 ANALYSIS = "catia_surface_analysis"
 CLOSE = "catia_close_surface"
+SEW = "catia_sew_surface"
 THICKEN = "catia_thick_surface"
 
 #: What the construction store calls each kind. `Construction.kind` carries one of these.
@@ -125,6 +126,25 @@ _TANGENCY_SAMPLES: Final = 12
 #: degrees. Generous: a fill that works lands within a ten-thousandth of a degree, and the
 #: one that does not is out by ninety.
 _TANGENCY_TOLERANCE_DEG: Final = 1.0
+
+#: How far two faces may turn across a shared edge and still count as a tangent join, in
+#: degrees. A fillet meets its neighbour to machine precision, and the next-smallest angle
+#: in a real part is a draft of half a degree, so this sits well below that.
+_TANGENT_JOIN_TOLERANCE_DEG: Final = 0.05
+
+#: Points along a shared edge at which two faces are compared for tangency. Three rather
+#: than one as a hedge for freeform faces, where tangency can hold at one end of an edge
+#: and not the other. **Nothing in the suite distinguishes one sample from three**: every
+#: pair of analytic surfaces that meets tangentially at all does so along the whole edge,
+#: which is what the test geometry is made of. Said plainly because a guard nobody has
+#: seen fail is a guard nobody knows works — this one is a cheap precaution, not a
+#: measured requirement.
+_JOIN_SAMPLES: Final = 3
+
+#: How far an extraction spreads from its seed faces, as the registry spells it.
+_PROPAGATION_MODES: Final[frozenset[str]] = frozenset(
+    {"none", "point_continuity", "tangent_continuity"}
+)
 
 #: How close two edges must be to be the same edge, in mm — one built by extraction and
 #: the original it was taken from. Tight, because these are copies rather than neighbours:
@@ -619,12 +639,10 @@ def extract(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str,
     references = _references(arguments.get("elements"), tool=EXTRACT, argument="elements", minimum=1)
 
     propagation = str(arguments.get("propagation") or "none").lower()
-    if propagation != "none":
-        raise OperationNotSupported(
-            f"{EXTRACT} with propagation={propagation!r}",
-            "spreading from a seed face along its tangent chain is not something this "
-            "backend walks yet. Name the faces you want — catia_list_faces reports the "
-            "predicate that selects each one",
+    if propagation not in _PROPAGATION_MODES:
+        raise GeometryError(
+            f"{EXTRACT} takes propagation of {', '.join(sorted(_PROPAGATION_MODES))}; got "
+            f"{arguments.get('propagation')!r}."
         )
 
     source = context.require_shape(EXTRACT)
@@ -657,8 +675,83 @@ def extract(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str,
                 "complement is empty. Name fewer faces."
             )
 
+    if propagation != "none":
+        if kind == CURVE:
+            raise OperationNotSupported(
+                f"{EXTRACT} with propagation over edges",
+                "propagation spreads across faces, over the edges they share. An edge's "
+                "own chain is a different walk — take the boundary you want by selector",
+            )
+        wanted = _propagated_faces(
+            source,
+            [face for piece in wanted for face in faces(piece)],
+            propagation,
+            tool=EXTRACT,
+        )
+
     taken = wanted[0] if len(wanted) == 1 else compound(wanted)
     return _record(context, document, arguments, EXTRACT, taken, kind, "extract")
+
+
+def _propagated_faces(
+    source: Any, seeds: Sequence[Any], mode: str, *, tool: str
+) -> list[Any]:
+    """Every face reachable from the seeds, by the continuity asked for.
+
+    `point_continuity` crosses any shared edge, so it takes the whole connected skin.
+    `tangent_continuity` crosses only where the two faces meet smoothly, which is what
+    picks up a fillet and its neighbours and stops at the first sharp corner — the reason
+    to propagate at all, since "the rounded end of this part" is a set of faces nobody
+    wants to enumerate.
+
+    **Tangency is measured at the shared edge, not between the faces' own normals.** A
+    fillet's normal at its parametric centre is 45° from the flat face it runs into; the
+    two agree only *along the edge they share*. `classify.edge_is_convex` answers a
+    different question with the centre normals and would call every fillet a sharp corner
+    here.
+    """
+    from app.kernel.occt import classify
+
+    mapping = classify.faces_by_edge(source)
+    found = list(seeds)
+    frontier = list(seeds)
+    while frontier:
+        face = frontier.pop()
+        for edge in edges(face):
+            for neighbour in classify.adjoining_faces(mapping, edge):
+                if any(neighbour.IsSame(known) for known in found):
+                    continue
+                if mode == "tangent_continuity" and not _joins_smoothly(edge, face, neighbour):
+                    continue
+                found.append(neighbour)
+                frontier.append(neighbour)
+    return found
+
+
+def _joins_smoothly(edge: Any, first: Any, second: Any) -> bool:
+    """Whether two faces meet without a crease along the edge they share.
+
+    Sampled along the edge at `_JOIN_SAMPLES` points — a hedge for freeform faces, and one
+    the suite does not pin; see that constant. The absolute dot product is taken for the
+    reason `_worst_tangency_error` gives: on a shell whose faces are not consistently
+    oriented, two normals 180° apart describe the same tangent plane.
+    """
+    from app.kernel.occt.operations.curves import closest_face_normal
+
+    adaptor = symbol("BRepAdaptor_Curve")(edge)
+    low, high = adaptor.FirstParameter(), adaptor.LastParameter()
+    for step in range(1, _JOIN_SAMPLES + 1):
+        place = adaptor.Value(low + (high - low) * step / (_JOIN_SAMPLES + 1))
+        at = (place.X(), place.Y(), place.Z())
+        try:
+            _, _, here = closest_face_normal(first, at, tool=EXTRACT)
+            _, _, there = closest_face_normal(second, at, tool=EXTRACT)
+        except GeometryError:  # pragma: no cover - a degenerate face at the edge
+            return False
+        aligned = abs(sum(a * b for a, b in zip(here, there, strict=True)))
+        if math.degrees(math.acos(max(-1.0, min(1.0, aligned)))) > _TANGENT_JOIN_TOLERANCE_DEG:
+            return False
+    return True
 
 
 def boundary(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -973,6 +1066,58 @@ def close_surface(context: BuildContext, arguments: Mapping[str, Any]) -> Mappin
         detail="The shell is closed but could not be filled. It may be self-intersecting.",
     )
     return _into_the_part(context, document, arguments, CLOSE, _outward(solid))
+
+
+def sew_surface(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Trim a solid to a surface — how a shaped face is impressed on a prismatic part.
+
+    The third crossing from skin into material, and the one that does not build anything
+    new: `catia_close_surface` fills a closed skin, `catia_thick_surface` gives a skin
+    depth, and this cuts an existing part back to a skin that crosses it.
+
+    **Which side survives is stated**, by the same rule `catia_split` uses and for the same
+    reason: the material on the side the surface's normal points *away* from is kept.
+    `reversed` flips that, and so does `remove` — with a surface that crosses the part,
+    adding material on one side and removing it from the other are the same cut described
+    from the two ends, and CATIA offers both words for it.
+
+    **A surface that does not cross the part is refused.** That is the case where CATIA
+    would *add* material, filling the region between the surface and the part's own face,
+    and it needs that face to close the region — a different construction from this one.
+    Building nothing and reporting success would be the worse answer.
+    """
+    from app.kernel.occt.operations.features import combine_into_part
+
+    document = context.require_document()
+    body = context.require_shape(SEW)
+    named = arguments.get("surface")
+    surface = _surface_named(document, named, tool=SEW, argument="surface")
+
+    # Asked before the split, not after: the splitter's own refusal for a cut that
+    # changed nothing is accurate but generic, and the case worth naming here is the one
+    # CATIA would answer by *adding* material.
+    measure = symbol("BRepExtrema_DistShapeShape")(body, surface)
+    measure.Perform()
+    if measure.IsDone() and measure.Value() > DEFAULT_SEWING_TOLERANCE_MM:
+        raise GeometryError(
+            f"{SEW} was given {named!r}, which stands {measure.Value():.4g} mm clear of "
+            "the part and so cuts nothing. Sewing a surface that misses the material "
+            "would mean *adding* the region between the two, and that region needs the "
+            "part's own face to close it — extend the surface until it crosses, or build "
+            "the region as a skin and close it with catia_close_surface."
+        )
+
+    _, cells = _split_cells(body, surface, tool=SEW, named=named)
+
+    # Two flips compose, exactly as `catia_plane_offset`'s signed distance and `reversed`
+    # do: a design that says `remove` and one that says `reversed` mean the same cut, and
+    # one that says both means neither.
+    discard = "second"
+    if bool(arguments.get("reversed")) != bool(arguments.get("remove")):
+        discard = "first"
+
+    removed = _side_of(cells, surface, discard, tool=SEW)
+    return combine_into_part(context, document, arguments, SEW, removed, adds_material=False)
 
 
 def thick_surface(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -1618,6 +1763,8 @@ __all__ = [
     "ANALYSIS",
     "BOUNDARY",
     "CLOSE",
+    "SEW",
+    "SEW",
     "CURVE",
     "DEFAULT_SEWING_TOLERANCE_MM",
     "DISASSEMBLE",
@@ -1637,6 +1784,7 @@ __all__ = [
     "UNTRIM",
     "boundary",
     "close_surface",
+    "sew_surface",
     "disassemble",
     "extract",
     "healing",

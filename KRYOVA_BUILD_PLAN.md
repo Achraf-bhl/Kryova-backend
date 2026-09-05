@@ -23,13 +23,21 @@ waiting on.
 
 What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its own reason:
 
-- **the rest of the trimming family is now the whole of what 2.6 owes.** The steered
-  surfaces shipped 2026-09-05: `catia_surface_loft` takes a `spine` and one `guide`, and
-  `catia_surface_fill` is tangent to its supports and says by how much. Still refused, each
-  for a stated reason: a loft `closed` along a spine (closure is a property of the section
-  loft), more than one guide (the sweep takes one), and `continuity='curvature'` on a fill
-  — which is OCCT's refusal, not a choice: `BRepFill_Filling` answers "the continuity is
-  not G0 G1 or G2" for `GeomAbs_G2` and builds nothing;
+- **`catia_extrapolate` is the last operation 2.6 owes**, and it is three cases rather
+  than one: a curve extended along its end tangent (`GeomLib.ExtendCurveToPoint`), a
+  freeform face extended in U or V (`GeomLib.ExtendSurfByLength`, which needs the named
+  boundary edge mapped to a parametric side), and an *analytic* face — a plane, a cylinder
+  — whose surface is unbounded and whose extension is a widened parameter range rather than
+  a new surface at all. `up_to` is a fourth: extending until the result reaches another
+  element is an iterative solve;
+- **`propagation` on `catia_boundary`** — the boundary comes back whole, and a run of
+  tangent edges needs a seed to start from. `limit_from` is the argument for it and is
+  itself still refused;
+- still refused with a stated reason, each of them OCCT's limit or a construction not built
+  here: a loft `closed` along a spine (closure belongs to the section loft), more than one
+  guide (the sweep takes one), `continuity='curvature'` on a fill (`BRepFill_Filling`
+  answers "the continuity is not G0 G1 or G2" and builds nothing), and `catia_draft` in
+  reflect-line mode;
 - **the rest of the trimming family** — `catia_extrapolate`, `catia_sew_surface`, and
   `propagation` on `catia_extract` / `catia_boundary`. Split, trim, untrim, disassemble
   and healing shipped 2026-09-05;
@@ -74,6 +82,25 @@ measurement vocabulary a visual check would assert against already exists.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E2 → **2.6 continues: propagation and sewing**. `catia_sew_surface`
+  (coverage 106 → **107/201**) and `propagation` on `catia_extract`. Tangent propagation is
+  what makes "the rounded end of this part" a selection instead of an enumeration, and the
+  one thing that had to be got right is **where tangency is measured**: at the shared edge,
+  not between the faces' own normals. A fillet's normal at its parametric centre is 45°
+  from the flat face it runs into, so `classify.edge_is_convex` — which uses centre normals
+  and is right about the question it answers — calls every fillet a sharp corner here.
+  Verified on a flared post whose base, quarter-round fillet and wall all meet smoothly and
+  whose top rim does not: tangent propagation returns base + fillet + wall to 1e-16 against
+  Pappus, point continuity adds the top disc. `catia_sew_surface` trims a solid to a
+  surface, reusing `catia_split`'s stated side rule; `remove` and `reversed` each flip it
+  and compose. A surface clear of the part is refused with the reason, because that is the
+  case CATIA answers by *adding* material. Six guards, all six verified by breaking them —
+  a seventh (three tangency samples per edge rather than one) was **removed from the
+  harness and labelled in the code as unpinned**, because every analytic pair of surfaces
+  that meets tangentially does so along the whole edge and nothing in the suite can tell
+  one sample from three. Flagged, not fixed: `block#vertical` handed to
+  `catia_fillet_edges` rounds all twelve edges of a box, not the four vertical ones.
 
 - **2026-09-05** — E2 → **2.6 continues: the steered surfaces**. `catia_surface_loft`
   now takes a `spine` and a `guide`, and `catia_surface_fill` meets its supports

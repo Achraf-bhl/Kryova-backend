@@ -137,6 +137,7 @@ HANDLERS: Final[dict[str, Handler]] = {
     surfaces.HEALING: surfaces.healing,
     surfaces.ANALYSIS: surfaces.surface_analysis,
     surfaces.CLOSE: surfaces.close_surface,
+    surfaces.SEW: surfaces.sew_surface,
     surfaces.THICKEN: surfaces.thick_surface,
     # whole-body operations
     booleans.BOOLEAN: booleans.boolean,

@@ -2350,7 +2350,7 @@ class TestASkinBecomesMaterialOnlyWhenAsked:
             )
         with pytest.raises(OperationNotSupported, match="propagation"):
             runner(  # type: ignore[operator]
-                "catia_extract", {"elements": ["side"], "propagation": "tangent"}
+                "catia_boundary", {"surface": "side", "propagation": "tangent_continuity"}
             )
 
 
@@ -4480,3 +4480,176 @@ class TestSteeredSurfaces:
         runner("catia_surface_loft", {"sections": ["start", "end"], "name": "tube"})  # type: ignore[operator]
 
         assert self._area(runner, "tube") > 0.0
+
+
+class TestPropagationAndSewing:
+    """Spreading a selection along tangency, and trimming a solid to a surface.
+
+    The last two of 2.6's owed capabilities. Both have exact closed forms: a flared post
+    built as one shaft has a flat base, a toroidal fillet and a cylindrical wall that all
+    meet smoothly and a top rim that does not, so "everything smooth from here" is a
+    number Pappus gives; and a solid cut by a flat surface has the volume arithmetic
+    predicts.
+    """
+
+    @staticmethod
+    def _flared() -> object:
+        """A base of radius 20, a quarter-round fillet of radius 10, a wall of radius 10.
+
+        Built as one shaft so every face is the feature's own. The base, the fillet and
+        the wall meet **tangentially** — the fillet leaves the base in the base's own
+        plane and arrives at the wall along the wall — and the top rim is sharp.
+        """
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Flare"})
+        runner("catia_sketch_create", {"support": "ZX", "name": "profile"})
+        runner("catia_sketch_axis", {"sketch": "profile", "start": (0.0, 0.0), "end": (20.0, 0.0)})
+        runner("catia_sketch_line", {"sketch": "profile", "start": (0.0, 0.0), "end": (0.0, 20.0)})
+        runner(
+            "catia_sketch_arc_three_point",
+            {
+                "sketch": "profile",
+                "start": (0.0, 20.0),
+                "through": (2.9289321881345245, 12.928932188134524),
+                "end": (10.0, 10.0),
+            },
+        )
+        for start, end in (
+            ((10.0, 10.0), (20.0, 10.0)),
+            ((20.0, 10.0), (20.0, 0.0)),
+            ((20.0, 0.0), (0.0, 0.0)),
+        ):
+            runner("catia_sketch_line", {"sketch": "profile", "start": start, "end": end})
+        runner("catia_shaft", {"sketch": "profile", "name": "flare"})
+        return runner
+
+    #: Pappus for the quarter-round fillet: the generating arc's length times the circle
+    #: its centroid sweeps. A quarter arc of radius r has its centroid `r·sin(π/4)/(π/4)`
+    #: from the arc's centre along the bisector.
+    _FILLET_AREA = (
+        2 * math.pi * (20 - 10 * math.sin(math.pi / 4) / (math.pi / 4) / math.sqrt(2))
+    ) * (10 * math.pi / 2)
+
+    @staticmethod
+    def _area(runner: object, name: str) -> float:
+        return float(runner("catia_measure_item", {"element": name})["area_mm2"])  # type: ignore[operator]
+
+    @staticmethod
+    def _slab_and_knife(height: float = 8.0) -> object:
+        """A 40 × 20 × 12 slab and a flat surface across it at the given height."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Slab"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        runner(
+            "catia_sketch_rectangle", {"sketch": "outline", "width_mm": 40.0, "height_mm": 20.0}
+        )
+        runner("catia_pad", {"sketch": "outline", "length_mm": 12.0, "name": "slab"})
+        runner(
+            "catia_sketch_create",
+            {"support": "XY", "name": "cut_outline", "origin": [0, 0, height]},
+        )
+        runner(
+            "catia_sketch_rectangle",
+            {"sketch": "cut_outline", "width_mm": 80.0, "height_mm": 60.0},
+        )
+        runner("catia_surface_fill", {"boundary": ["cut_outline"], "name": "knife"})
+        return runner
+
+    def test_without_propagation_an_extract_takes_only_what_was_named(self) -> None:
+        runner = self._flared()
+
+        runner("catia_extract", {"elements": ["flare#bottom"], "name": "seed"})  # type: ignore[operator]
+
+        assert self._area(runner, "seed") == pytest.approx(math.pi * 400.0, rel=1e-9)
+
+    def test_tangent_propagation_crosses_smooth_joins_and_stops_at_a_sharp_one(self) -> None:
+        """From the base it crosses onto the fillet and from the fillet onto the wall —
+        two smooth joins — and stops at the sharp top rim. That is the whole reason to
+        propagate: "the rounded end of this part" is a set of faces nobody wants to
+        enumerate, and the boundary of the set is where the shape creases."""
+        runner = self._flared()
+
+        runner(  # type: ignore[operator]
+            "catia_extract",
+            {
+                "elements": ["flare#bottom"],
+                "propagation": "tangent_continuity",
+                "name": "smooth",
+            },
+        )
+
+        expected = math.pi * 400.0 + self._FILLET_AREA + 2 * math.pi * 10.0 * 10.0
+        assert self._area(runner, "smooth") == pytest.approx(expected, rel=1e-9)
+
+    def test_point_continuity_takes_the_whole_connected_skin(self) -> None:
+        """The same walk without the tangency test, so the sharp top rim is crossed too."""
+        runner = self._flared()
+
+        runner(  # type: ignore[operator]
+            "catia_extract",
+            {
+                "elements": ["flare#bottom"],
+                "propagation": "point_continuity",
+                "name": "all",
+            },
+        )
+
+        whole = (
+            math.pi * 400.0
+            + self._FILLET_AREA
+            + 2 * math.pi * 10.0 * 10.0
+            + math.pi * 100.0
+        )
+        assert self._area(runner, "all") == pytest.approx(whole, rel=1e-9)
+
+    def test_a_propagation_word_the_vocabulary_does_not_have_is_refused(self) -> None:
+        runner = self._flared()
+
+        with pytest.raises(GeometryError, match="takes propagation of"):
+            runner(  # type: ignore[operator]
+                "catia_extract",
+                {"elements": ["flare#bottom"], "propagation": "sideways", "name": "no"},
+            )
+
+    def test_sewing_a_surface_trims_the_solid_to_it(self) -> None:
+        """A 40 × 20 × 12 slab cut at z = 8 keeps the material below: 6400 of 9600. Which
+        side survives is the rule `catia_split` states — the side the surface's normal
+        points away from — not whichever piece OCCT listed first."""
+        runner = self._slab_and_knife()
+
+        assert runner("catia_measure", {})["volume_mm3"] == pytest.approx(9600.0, rel=1e-9)  # type: ignore[operator]
+        runner("catia_sew_surface", {"surface": "knife", "name": "sewn"})  # type: ignore[operator]
+
+        assert runner("catia_measure", {})["volume_mm3"] == pytest.approx(6400.0, rel=1e-9)  # type: ignore[operator]
+
+    def test_remove_and_reversed_each_take_the_other_side(self) -> None:
+        """Two flips that compose, exactly as `catia_plane_offset`'s signed distance and
+        its `reversed` do: with a surface that crosses the part, adding on one side and
+        removing from the other are the same cut described from the two ends. Both
+        together mean neither."""
+        for extra, expected in (
+            ({"remove": True}, 3200.0),
+            ({"reversed": True}, 3200.0),
+            ({"remove": True, "reversed": True}, 6400.0),
+        ):
+            runner = self._slab_and_knife()
+            runner("catia_sew_surface", {"surface": "knife", "name": "sewn", **extra})  # type: ignore[operator]
+            assert runner("catia_measure", {})["volume_mm3"] == pytest.approx(  # type: ignore[operator]
+                expected, rel=1e-9
+            )
+
+    def test_a_surface_clear_of_the_part_is_refused_rather_than_silently_doing_nothing(
+        self,
+    ) -> None:
+        """This is the case CATIA answers by *adding* material, filling the region between
+        the surface and the part's own face — a different construction, and one that needs
+        that face to close the region. Cutting nothing and reporting success would be the
+        worse answer."""
+        runner = self._slab_and_knife(height=100.0)
+
+        with pytest.raises(GeometryError, match="clear of"):
+            runner("catia_sew_surface", {"surface": "knife", "name": "no"})  # type: ignore[operator]

@@ -25,7 +25,7 @@ from app.kernel.errors import OperationNotSupported
 from app.kernel.measurement import Detail
 from app.kernel.occt.binding import occt_version, require
 from app.kernel.occt.document import PartDocument
-from app.kernel.occt.operations import HANDLERS, BuildContext, coverage
+from app.kernel.occt.operations import HANDLERS, RECORDED, BuildContext, coverage
 
 
 class OcctRunner:
@@ -50,7 +50,14 @@ class OcctRunner:
         handler = HANDLERS.get(tool)
         if handler is None:
             raise OperationNotSupported(tool)
-        return handler(self._context, arguments)
+        result = handler(self._context, arguments)
+        if tool in RECORDED:
+            # After the handler, deliberately: a call that raised changed nothing,
+            # and replaying a failure would only fail again — taking the part with
+            # it, since a replay rebuilds from the top. See
+            # `app.kernel.occt.operations.parameters` for what the journal is for.
+            self._context.record(tool, arguments, result)
+        return result
 
     # -- introspection -------------------------------------------------------
 

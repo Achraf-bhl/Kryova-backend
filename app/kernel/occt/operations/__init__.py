@@ -26,6 +26,7 @@ from app.kernel.occt.operations import (
     features,
     holes,
     inspection,
+    parameters,
     patterns,
     primitives,
     reference_ops,
@@ -152,7 +153,10 @@ HANDLERS: Final[dict[str, Handler]] = {
     patterns.PATTERN_RECTANGULAR: patterns.pattern_rectangular,
     patterns.PATTERN_CIRCULAR: patterns.pattern_circular,
     patterns.PATTERN_USER: patterns.pattern_user,
+    # parameters — the build log read and rewritten as a parameter set
+    parameters.SET: parameters.set_parameter,
     # reading
+    parameters.LIST: parameters.list_parameters,
     inspection.MEASURE: inspection.measure,
     inspection.MEASURE_BETWEEN: inspection.measure_between,
     inspection.MEASURE_ITEM: inspection.measure_item,
@@ -160,6 +164,52 @@ HANDLERS: Final[dict[str, Handler]] = {
     inspection.LIST_FACES: inspection.list_faces,
     inspection.LIST_EDGES: inspection.list_edges,
 }
+
+
+#: Calls that go into the build journal, so `catia_set_parameter` has something to
+#: rewrite and replay. Derived from the declared tier rather than listed by hand —
+#: an operation that mutates the part is one the rebuild must repeat, and a list
+#: kept here would fall out of step with the registry the day somebody adds one.
+#:
+#: `catia_set_parameter` itself is excluded and must stay excluded: it *is* the
+#: rewrite, and recording it would make a replay re-apply every past edit on top
+#: of the one being made.
+def _recorded() -> frozenset[str]:
+    from app.catia.ops import registry
+    from app.catia.ops.spec import Tier
+
+    return frozenset(
+        name
+        for name in HANDLERS
+        if name != parameters.SET
+        and (operation := registry.get(name)) is not None
+        and operation.tier is not Tier.READ
+    )
+
+
+class _Recorded(frozenset[str]):
+    """Resolved on first use, for the reason `unknown_handler_names` is lazy: the
+    CATIA operation registry must not be dragged into a geometry-only import."""
+
+    _resolved: frozenset[str] | None = None
+
+    def __contains__(self, item: object) -> bool:
+        if _Recorded._resolved is None:
+            _Recorded._resolved = _recorded()
+        return item in _Recorded._resolved
+
+    def __iter__(self):  # type: ignore[override]
+        if _Recorded._resolved is None:
+            _Recorded._resolved = _recorded()
+        return iter(_Recorded._resolved)
+
+    def __len__(self) -> int:
+        if _Recorded._resolved is None:
+            _Recorded._resolved = _recorded()
+        return len(_Recorded._resolved)
+
+
+RECORDED: Final[_Recorded] = _Recorded()
 
 
 def unknown_handler_names() -> tuple[str, ...]:
@@ -186,4 +236,11 @@ def coverage() -> dict[str, int]:
     }
 
 
-__all__ = ["HANDLERS", "BuildContext", "Handler", "coverage", "unknown_handler_names"]
+__all__ = [
+    "HANDLERS",
+    "RECORDED",
+    "BuildContext",
+    "Handler",
+    "coverage",
+    "unknown_handler_names",
+]

@@ -14,7 +14,7 @@ which is the failure mode this whole kernel is arranged to make impossible.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.kernel.errors import GeometryError
@@ -32,6 +32,22 @@ MIN_DIRECTION_LENGTH: float = 1e-12
 
 
 @dataclass
+class JournalEntry:
+    """One mutating call, as it was made.
+
+    Kept because a part built in conversation has no parameter set and its build
+    log is the closest honest thing to one — see
+    `app.kernel.occt.operations.parameters` for the argument. `feature` is what
+    the call reported creating, which is how a dimension gets an owner to be
+    named under: `Pad.1` + a backslash + `length_mm`.
+    """
+
+    tool: str
+    arguments: dict[str, Any]
+    feature: str | None = None
+
+
+@dataclass
 class BuildContext:
     """The document under construction, plus how much to measure after each step."""
 
@@ -42,6 +58,30 @@ class BuildContext:
     #: react to a number it was not given. A bulk replay should lower it; see
     #: `app.kernel.measurement.Detail`.
     detail: Detail = Detail.FULL
+
+    #: Every mutating call that has run, in order. This is what
+    #: `catia_set_parameter` rewrites and replays; nothing else reads it, and a
+    #: runner that never sets a parameter simply carries a list.
+    journal: list[JournalEntry] = field(default_factory=list)
+
+    def record(self, tool: str, arguments: Mapping[str, Any], result: Any) -> None:
+        """Note a call that changed the part. Never raises.
+
+        Called *after* the handler returned, so a call that failed is not in the
+        history — replaying a failure would fail again and take the part with it.
+
+        A replay calls this itself, because it drives the handlers directly and
+        there is no runner in that loop; it builds its own journal from scratch,
+        which is what makes the swap at the end total rather than a patch.
+        """
+        feature = None
+        if isinstance(result, Mapping):
+            reported = result.get("feature") or result.get("sketch")
+            if isinstance(reported, str) and reported:
+                feature = reported
+        self.journal.append(
+            JournalEntry(tool=tool, arguments=dict(arguments), feature=feature)
+        )
 
     def require_document(self) -> PartDocument:
         if self.document is None:

@@ -2348,7 +2348,12 @@ class TestASkinBecomesMaterialOnlyWhenAsked:
             runner(  # type: ignore[operator]
                 "catia_surface_fill", {"boundary": ["big"], "continuity": "curvature"}
             )
-        with pytest.raises(OperationNotSupported, match="propagation"):
+
+        # `catia_boundary` with propagation was on this list until 2026-09-05 and is now
+        # built, so what is pinned here is the *argument* it needs rather than the
+        # capability it lacked. This test failing is how that was noticed, which is what
+        # it is for — see TestARunOfBoundary for the capability itself.
+        with pytest.raises(GeometryError, match="needs limit_from"):
             runner(  # type: ignore[operator]
                 "catia_boundary", {"surface": "side", "propagation": "tangent_continuity"}
             )
@@ -5048,6 +5053,233 @@ class TestExtendingPastAnEnd:
                     "boundary": "above",
                     "length_mm": 5.0,
                     "continuity": "sideways",
+                    "name": "no",
+                },
+            )
+
+
+class TestARunOfBoundary:
+    """`catia_boundary` with a seed and a stop — the last capability 2.6 owed.
+
+    A boundary comes back whole, which is the right default and the wrong answer for "the
+    rounded end of this pocket". The run is walked outward from a seed edge in both
+    directions, in **connection order** rather than as a set, because `limit_to` has to be
+    able to cut it and because a sweep along it needs to know which edge follows which.
+
+    The geometry is one sheet: a path of line → arc → line, all three tangent, extruded
+    10 mm. Its boundary is that path at each end and two straight ends, so tangency picks
+    out exactly the three-edge path and creases at the corners — and every length in here
+    has a closed form.
+    """
+
+    #: 25 + 15 straight, plus a quarter of a Ø10 circle where they meet.
+    PATH_MM = 25.0 + 15.0 + math.pi * 5.0 / 2.0
+
+    @staticmethod
+    def _bent_sheet() -> object:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Bent"})
+        runner(
+            "catia_curve_polyline",
+            {
+                "points": [[0, 0, 0], [30, 0, 0], [30, 20, 0]],
+                "radius_mm": 5.0,
+                "name": "path",
+            },
+        )
+        runner(
+            "catia_surface_extrude",
+            {"profile": "path", "direction": [0, 0, 1], "length_mm": 10.0, "name": "sheet"},
+        )
+        for at, name in (
+            ([10.0, -5.0, 0.0], "under_the_first_leg"),
+            ([35.0, 12.0, 0.0], "past_the_second_leg"),
+            ([32.0, 3.0, 0.0], "beside_the_arc"),
+            ([0.0, -5.0, 5.0], "at_the_open_end"),
+        ):
+            runner("catia_point_at", {"at": at, "name": name})
+        return runner
+
+    @staticmethod
+    def _length(runner: object, name: str) -> float:
+        return float(runner("catia_measure_item", {"element": name})["length_mm"])  # type: ignore[operator]
+
+    def test_the_whole_boundary_is_still_the_default(self) -> None:
+        runner = self._bent_sheet()
+
+        runner("catia_boundary", {"surface": "sheet", "name": "whole"})
+
+        assert self._length(runner, "whole") == pytest.approx(
+            2 * self.PATH_MM + 20.0, rel=1e-12
+        )
+
+    def test_tangency_picks_out_the_path_and_stops_at_the_corners(self) -> None:
+        """The one that earns the operation: three edges, two of them not named, chosen
+        because they run into each other smoothly. Point continuity from the same seed
+        takes the whole loop, so the difference is tangency and not the seed."""
+        runner = self._bent_sheet()
+
+        for mode, expected in (
+            ("tangent_continuity", self.PATH_MM),
+            ("point_continuity", 2 * self.PATH_MM + 20.0),
+            ("complete", 2 * self.PATH_MM + 20.0),
+        ):
+            runner(
+                "catia_boundary",
+                {
+                    "surface": "sheet",
+                    "propagation": mode,
+                    "limit_from": "under_the_first_leg",
+                    "name": mode,
+                },
+            )
+            assert self._length(runner, mode) == pytest.approx(expected, rel=1e-12)
+
+    def test_limit_to_cuts_the_run_short_at_the_edge_it_names(self) -> None:
+        """Stopping on the arc gives the first leg plus the arc — 25 + πr/2 — and not the
+        second leg. The stop is an *edge*, found as the boundary edge nearest what was
+        named, so a point beside the arc means the arc."""
+        runner = self._bent_sheet()
+
+        runner(
+            "catia_boundary",
+            {
+                "surface": "sheet",
+                "propagation": "tangent_continuity",
+                "limit_from": "under_the_first_leg",
+                "limit_to": "beside_the_arc",
+                "name": "two",
+            },
+        )
+        runner(
+            "catia_boundary",
+            {
+                "surface": "sheet",
+                "propagation": "tangent_continuity",
+                "limit_from": "under_the_first_leg",
+                "limit_to": "past_the_second_leg",
+                "name": "three",
+            },
+        )
+
+        assert self._length(runner, "two") == pytest.approx(
+            25.0 + math.pi * 5.0 / 2.0, rel=1e-12
+        )
+        assert self._length(runner, "three") == pytest.approx(self.PATH_MM, rel=1e-12)
+
+    def test_a_run_that_closes_into_a_loop_refuses_to_be_trimmed(self) -> None:
+        """Point continuity round this sheet comes back to the seed, so there are two ways
+        from it to the stop and the arguments do not choose. Answering with whichever the
+        walk found first would be right half the time and would flip when the geometry
+        moved — the same rule `catia_split` states for which side of a cut survives."""
+        runner = self._bent_sheet()
+
+        with pytest.raises(GeometryError, match="two ways round"):
+            runner(
+                "catia_boundary",
+                {
+                    "surface": "sheet",
+                    "propagation": "point_continuity",
+                    "limit_from": "under_the_first_leg",
+                    "limit_to": "beside_the_arc",
+                    "name": "no",
+                },
+            )
+
+    def test_a_stop_that_is_not_on_the_run_says_so(self) -> None:
+        runner = self._bent_sheet()
+
+        with pytest.raises(GeometryError, match="not on the run"):
+            runner(
+                "catia_boundary",
+                {
+                    "surface": "sheet",
+                    "propagation": "tangent_continuity",
+                    "limit_from": "under_the_first_leg",
+                    "limit_to": "at_the_open_end",
+                    "name": "no",
+                },
+            )
+
+    def test_propagation_without_a_seed_is_refused_rather_than_started_somewhere(
+        self,
+    ) -> None:
+        """A boundary is a loop, or several. It has no first edge of its own, so "spread
+        from here" needs a here — and picking one would make the same call return
+        different edges on a part that had been rebuilt."""
+        runner = self._bent_sheet()
+
+        with pytest.raises(GeometryError, match="needs limit_from"):
+            runner(
+                "catia_boundary",
+                {"surface": "sheet", "propagation": "tangent_continuity", "name": "no"},
+            )
+
+    def test_the_walk_stops_where_three_boundary_edges_meet(self) -> None:
+        """Three blades sharing one root edge. That edge is used by more than one face so
+        it is not free, but its ends are vertices where three *free* edges meet — and a
+        chain has no way through a branch. Continuing would mean choosing an arm, which is
+        the same silent guess the loop case is refused for, so the walk stops: point
+        continuity from one blade's tip returns that blade's three free edges, 20 + 20 +
+        10, and not one millimetre of the other two.
+        """
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Vane"})
+        for index, direction in enumerate(([1, 0, 0], [-1, 0, 0], [0, 1, 0])):
+            runner("catia_curve_polyline", {"points": [[0, 0, 0], [0, 0, 10]], "name": f"root{index}"})
+            runner(
+                "catia_surface_extrude",
+                {
+                    "profile": f"root{index}",
+                    "direction": direction,
+                    "length_mm": 20.0,
+                    "name": f"blade{index}",
+                },
+            )
+        runner(
+            "catia_join",
+            {
+                "elements": ["blade0", "blade1", "blade2"],
+                "check_connexity": False,
+                "name": "vane",
+            },
+        )
+        runner("catia_point_at", {"at": [20.0, 0.0, 5.0], "name": "tip"})
+
+        runner("catia_boundary", {"surface": "vane", "name": "whole"})
+        whole = self._length(runner, "whole")
+        runner(
+            "catia_boundary",
+            {
+                "surface": "vane",
+                "propagation": "point_continuity",
+                "limit_from": "tip",
+                "name": "one_blade",
+            },
+        )
+
+        assert self._length(runner, "one_blade") == pytest.approx(50.0, rel=1e-12)
+        assert whole > 3 * 50.0 - 1.0  # every blade's free edges are in there
+
+    def test_a_stop_with_no_start_and_an_unknown_word_are_both_refused(self) -> None:
+        runner = self._bent_sheet()
+
+        with pytest.raises(GeometryError, match="nothing for"):
+            runner(
+                "catia_boundary",
+                {"surface": "sheet", "limit_to": "beside_the_arc", "name": "no"},
+            )
+        with pytest.raises(GeometryError, match="complete, point_continuity"):
+            runner(
+                "catia_boundary",
+                {
+                    "surface": "sheet",
+                    "propagation": "sideways",
+                    "limit_from": "beside_the_arc",
                     "name": "no",
                 },
             )

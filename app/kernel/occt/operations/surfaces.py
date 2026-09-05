@@ -160,6 +160,18 @@ _EDGE_MATCH_TOLERANCE_MM: Final = 1e-7
 #: zero offset, which is a no-op dressed as an operation.
 MIN_OFFSET_MM: Final = 1e-9
 
+#: How far a boundary spreads from its seed edge, as the registry spells it.
+_BOUNDARY_MODES: Final[frozenset[str]] = frozenset(
+    {"complete", "point_continuity", "tangent_continuity"}
+)
+
+#: Grid, in mm, on which two boundary endpoints count as the same corner.
+#: `ShapeAnalysis_FreeBounds` rebuilds the boundary rather than handing back the face's
+#: own edges, so a corner arrives as two vertices that are equal to within tolerance and
+#: `IsSame` to nothing — the walk needs "the same place" to be a dictionary key. A
+#: micron is far below any feature this kernel builds and far above the rebuild's residual.
+_VERTEX_GRID_MM: Final = 1e-6
+
 #: How an extension may continue the shape it leaves, as the registry spells it.
 _EXTENSION_CONTINUITY: Final[tuple[str, ...]] = ("tangent", "curvature")
 
@@ -803,44 +815,208 @@ def _joins_smoothly(edge: Any, first: Any, second: Any) -> bool:
 
 
 def boundary(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
-    """The free boundary of a surface, as a curve.
+    """The free boundary of a surface, or a run of it, as a curve.
 
     The usual first step in patching a gap or building a blend. **Free** boundary: an
     edge shared by two faces of the same surface is interior and is not part of it, which
     is what makes the boundary of a sewn skin the outline of the skin rather than every
     edge in it.
+
+    `limit_from` names where the run **starts** — not a start/end flag but an element, and
+    the boundary edge nearest it is the seed. From there the walk goes both ways along the
+    wire, and `propagation` says how far: `point_continuity` takes the whole connected
+    wire, `tangent_continuity` stops the first time the boundary creases. That is the
+    difference between "the outline of this pocket" and "the rounded end of it", and
+    neither is expressible by naming edges one at a time.
+
+    `limit_to` stops the run early, and it is **decidable exactly when the run is an open
+    path** — then the seed sits between the two limits and there is one answer. On a run
+    that closes into a loop there are two ways round from the seed to the stop and nothing
+    in the arguments chooses, so that case is refused rather than resolved by walk order:
+    it would be right half the time and would flip when the geometry moved.
     """
     document = context.require_document()
     source = _surface_named(document, arguments.get("surface"), tool=BOUNDARY, argument="surface")
 
     propagation = str(arguments.get("propagation") or "complete").lower()
-    if propagation != "complete":
-        raise OperationNotSupported(
-            f"{BOUNDARY} with propagation={propagation!r}",
-            "this returns the whole free boundary. Split the result with catia_split, "
-            "or extract the edges you want by selector",
+    if propagation not in _BOUNDARY_MODES:
+        raise GeometryError(
+            f"{BOUNDARY} takes propagation of {', '.join(sorted(_BOUNDARY_MODES))}; got "
+            f"{arguments.get('propagation')!r}."
         )
-    for limit in ("limit_from", "limit_to"):
-        if arguments.get(limit):
-            raise OperationNotSupported(
-                f"{BOUNDARY} with {limit}",
-                "the boundary comes back whole and trimming it between two points needs "
-                "it split at each. catia_split has landed and does the cutting, so what "
-                "is left is only the wiring: take the whole boundary and split it",
-            )
+    if propagation != "complete" and not arguments.get("limit_from"):
+        raise GeometryError(
+            f"{BOUNDARY} with propagation={propagation!r} needs limit_from to say where "
+            "the run starts. A boundary has no first edge of its own — it is a loop, or "
+            "several — so spreading along it has to begin somewhere named."
+        )
+    if arguments.get("limit_to") and not arguments.get("limit_from"):
+        raise GeometryError(
+            f"{BOUNDARY} was given limit_to and no limit_from, so there is nothing for "
+            "the run to end from. Name both, or neither and take the whole boundary."
+        )
 
     analyser = symbol("ShapeAnalysis_FreeBounds")(source)
-    wires = list(explore(analyser.GetClosedWires(), EDGE)) + list(
-        explore(analyser.GetOpenWires(), EDGE)
-    )
+    # Cast to TopoDS_Edge here rather than at each use: `explore` answers in TopoDS_Shape,
+    # and BRepAdaptor_Curve is overloaded on the concrete type and refuses the base one.
+    wires = [
+        symbol("TopoDS").Edge_s(edge)
+        for found in (analyser.GetClosedWires(), analyser.GetOpenWires())
+        for edge in explore(found, EDGE)
+    ]
     if not wires:
         raise GeometryError(
             f"{BOUNDARY} found no free boundary on {arguments.get('surface')!r}. A "
             "closed surface has none — every edge is shared by two of its faces."
         )
 
+    if arguments.get("limit_from"):
+        wires = _boundary_run(
+            document,
+            wires,
+            propagation,
+            start=arguments.get("limit_from"),
+            stop=arguments.get("limit_to"),
+        )
+
     outline = compound(wires)
     return _record(context, document, arguments, BOUNDARY, outline, CURVE, "boundary")
+
+
+def _boundary_run(
+    document: Any, edges_found: Sequence[Any], propagation: str, *, start: Any, stop: Any
+) -> list[Any]:
+    """The ordered run of boundary edges the limits and the propagation ask for."""
+    seed = _nearest_edge(document, edges_found, start, argument="limit_from")
+    ordered = _walk_from(edges_found, seed, propagation)
+
+    if stop is None:
+        return ordered
+    ending = _nearest_edge(document, edges_found, stop, argument="limit_to")
+    within = [
+        index for index, edge in enumerate(ordered) if edge.IsSame(ending)
+    ]
+    if not within:
+        raise GeometryError(
+            f"{BOUNDARY} was given a limit_to that is not on the run limit_from starts. "
+            "With propagation the run stops where the boundary creases, so the two limits "
+            "have to lie on the same smooth stretch of it."
+        )
+    if len(within) > 1 or (len(ordered) > 1 and _closes_into_a_loop(ordered)):
+        raise GeometryError(
+            f"{BOUNDARY} cannot trim between two limits on a boundary that closes into a "
+            "loop: there are two ways round from one to the other and nothing here says "
+            "which. Use tangent_continuity if the run creases somewhere, or take the whole "
+            "boundary and cut it with catia_split."
+        )
+    seeded = next(index for index, edge in enumerate(ordered) if edge.IsSame(seed))
+    low, high = sorted((seeded, within[0]))
+    return ordered[low : high + 1]
+
+
+def _walk_from(edges_found: Sequence[Any], seed: Any, propagation: str) -> list[Any]:
+    """The seed's edges in connection order, spreading as far as `propagation` allows.
+
+    Walked outward from the seed in both directions rather than taken as a set, because a
+    run has to come back *ordered* for `limit_to` to be able to cut it — and because the
+    order is what a later sweep or fill along it needs. A vertex where three boundary
+    edges meet ends the walk: a chain has no way to continue through a branch, and
+    choosing one arm would be the same silent guess the loop case is refused for.
+    """
+    if propagation == "complete":
+        return list(edges_found)
+
+    meeting: dict[tuple[int, int, int], list[Any]] = {}
+    for edge in edges_found:
+        for place in _edge_ends(edge):
+            meeting.setdefault(place, []).append(edge)
+
+    ordered = [seed]
+    for outward in (True, False):
+        current, place = seed, _edge_ends(seed)[1 if outward else 0]
+        while True:
+            neighbours = [
+                edge
+                for edge in meeting.get(place, ())
+                if not edge.IsSame(current)
+                and not any(edge.IsSame(taken) for taken in ordered)
+            ]
+            if len(neighbours) != 1:
+                break
+            following = neighbours[0]
+            if propagation == "tangent_continuity" and not _meets_smoothly(
+                current, following, place
+            ):
+                break
+            ends = _edge_ends(following)
+            place = ends[1] if ends[0] == place else ends[0]
+            if outward:
+                ordered.append(following)
+            else:
+                ordered.insert(0, following)
+            current = following
+    return ordered
+
+
+def _edge_ends(edge: Any) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """An edge's two endpoints, rounded so two edges that meet hash to one vertex.
+
+    `TopExp.FirstVertex_s` would be exact and is not usable: `ShapeAnalysis_FreeBounds`
+    rebuilds the boundary, so the same corner arrives as two vertices that are equal to
+    within tolerance and identical to nothing. Rounding to `_VERTEX_GRID_MM` makes "the
+    same place" a dictionary key, which is what the walk needs.
+    """
+    adaptor = symbol("BRepAdaptor_Curve")(edge)
+    places = []
+    for parameter in (adaptor.FirstParameter(), adaptor.LastParameter()):
+        at = adaptor.Value(parameter)
+        places.append(
+            (
+                round(at.X() / _VERTEX_GRID_MM),
+                round(at.Y() / _VERTEX_GRID_MM),
+                round(at.Z() / _VERTEX_GRID_MM),
+            )
+        )
+    return places[0], places[1]
+
+
+def _meets_smoothly(first: Any, second: Any, place: tuple[int, int, int]) -> bool:
+    """Whether two boundary edges run into each other without a corner at the vertex.
+
+    The absolute dot product, for the reason `_joins_smoothly` gives one edge up: an edge
+    may be stored running either way, so two tangents 180° apart describe one continuous
+    curve rather than a fold back on itself.
+    """
+    directions = []
+    for edge in (first, second):
+        adaptor = symbol("BRepAdaptor_Curve")(edge)
+        ends = _edge_ends(edge)
+        parameter = adaptor.FirstParameter() if ends[0] == place else adaptor.LastParameter()
+        point, derivative = symbol("gp_Pnt")(), symbol("gp_Vec")()
+        adaptor.D1(parameter, point, derivative)
+        size = math.sqrt(derivative.SquareMagnitude())
+        if size < MIN_OFFSET_MM:  # pragma: no cover - a degenerate boundary edge
+            return False
+        directions.append(
+            (derivative.X() / size, derivative.Y() / size, derivative.Z() / size)
+        )
+    aligned = abs(sum(a * b for a, b in zip(*directions, strict=True)))
+    return math.degrees(math.acos(max(-1.0, min(1.0, aligned)))) <= _TANGENT_JOIN_TOLERANCE_DEG
+
+
+def _closes_into_a_loop(ordered: Sequence[Any]) -> bool:
+    """Whether the walk came back to where it started, so there are two ways round."""
+    ends = _edge_ends(ordered[0])
+    tail = _edge_ends(ordered[-1])
+    return bool(set(ends) & set(tail))
+
+
+def _nearest_edge(
+    document: Any, edges_found: Sequence[Any], reference: Any, *, argument: str
+) -> Any:
+    """The boundary edge nearest whatever was named — a point, a curve, a surface."""
+    towards = _towards(document, reference, tool=BOUNDARY, argument=argument)
+    return min(edges_found, key=lambda edge: _distance(edge, towards))
 
 
 # -- extending past an end ----------------------------------------------------
@@ -898,7 +1074,9 @@ def extrapolate(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[
             f"{arguments.get('continuity')!r}."
         )
 
-    towards = _towards(document, arguments.get("boundary"))
+    towards = _towards(
+        document, arguments.get("boundary"), tool=EXTRAPOLATE, argument="boundary"
+    )
 
     if count(element, FACE):
         extended, kind = _extended_surface(element, towards, length), SURFACE
@@ -1198,8 +1376,8 @@ def _parameter_speed(surface: Any, bounds: Sequence[float], side: int) -> float:
     return narrowest
 
 
-def _towards(document: Any, reference: Any) -> Any:
-    """What an extension is reaching for: a named element, or a reference point.
+def _towards(document: Any, reference: Any, *, tool: str, argument: str) -> Any:
+    """What an operation is reaching for: a named element, or a reference point.
 
     Points are a **fifth** namespace `named_geometry` does not resolve — it answers with
     shapes and a `ReferencePoint` is a position in the document, not one. They are worth
@@ -1214,16 +1392,16 @@ def _towards(document: Any, reference: Any) -> Any:
     text = str(reference or "").strip()
     if text and document.has_point(text):
         try:
-            named_geometry(document, text, tool=EXTRAPOLATE, argument="boundary")
+            named_geometry(document, text, tool=tool, argument=argument)
         except GeometryError:
             place = document.point(text).position
             return symbol("BRepBuilderAPI_MakeVertex")(symbol("gp_Pnt")(*place)).Vertex()
         raise GeometryError(
-            f"{EXTRAPOLATE} was given boundary={text!r}, which is both a point and a "
-            "surface, curve or sketch in this part. Rename one of them — there is no "
-            "safe way to guess which was meant."
+            f"{tool} was given {argument}={text!r}, which is both a point and a surface, "
+            "curve or sketch in this part. Rename one of them — there is no safe way to "
+            "guess which was meant."
         )
-    return named_geometry(document, reference, tool=EXTRAPOLATE, argument="boundary")
+    return named_geometry(document, reference, tool=tool, argument=argument)
 
 
 def _distance_to(shape: Any, place: tuple[float, float, float]) -> float:

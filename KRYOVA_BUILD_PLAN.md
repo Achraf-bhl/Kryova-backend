@@ -22,17 +22,20 @@ curve family is complete. The decision recorded here on 2026-09-05 — defer 2.6
 — was answered by building the half that everything else in the phase was waiting on, and
 then the rest of it.
 
-**What 2.6 still owes for `*E2` is one operation's arguments** — everything else it owed
-is built, and the star is one item away:
+**Every capability 2.6 owed is now built.** What stands between here and `*E2` is not an
+operation — it is the phase's own **Proof**, and it has never been written:
 
-- **`propagation` and `limit_from`/`limit_to` on `catia_boundary`.** The operation returns
-  the whole free boundary; cutting a run of tangent edges out of it needs a seed edge to
-  start from and a walk along shared vertices, crossing only where two edges meet
-  smoothly. The tangency test is the same one `_joins_smoothly` already makes for faces,
-  asked of edges at a shared vertex instead of faces at a shared edge. `catia_split`
-  landed on 2026-09-05 and does the cutting, so this is wiring rather than new geometry —
-  the refusal in `boundary()` now says that, where it used to say "once catia_split
-  lands", which had been false since the day split landed.
+- **E2's Proof: "a part authored with every fillet radius different, each chosen by
+  predicate; the design regenerates correctly after an upstream feature insertion changes
+  every face id in the model."** Nothing in `tests/` does this. The vocabulary is tested
+  operation by operation (`tests/test_kernel.py`, `tests/test_reference_geometry.py`) and
+  the design IR is tested against an *injected* callable, offline, in under a second
+  (`tests/test_design_execute.py`) — deliberately, and it is worth keeping that way. But
+  the claim the two make **together** is the entire point of the phase: that a design
+  written against predicates survives a change that renumbers everything it referred to.
+  No test drives a `DesignSpec` through the real `OcctRunner` at all, so that claim is
+  currently made by the board and by nothing else. Marking `*E2` without it would be
+  exactly the thing `CLAUDE.md` forbids — `DONE` requires the Proof running green.
 
 `catia_extrapolate` landed 2026-09-05, and **the approach this file recommended for it was
 wrong** — worth leaving written down rather than quietly correcting.
@@ -105,6 +108,26 @@ measurement vocabulary a visual check would assert against already exists.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E2 → **2.6's last capability: a run of boundary**. `catia_boundary`
+  takes `limit_from` (where the run starts — an element, and the boundary edge nearest it
+  is the seed), `limit_to` (where it stops) and `propagation`. The walk goes outward from
+  the seed in both directions and is kept in **connection order** rather than collected as
+  a set, because `limit_to` has to cut it and because anything sweeping along it needs to
+  know which edge follows which. Verified on a sheet whose boundary is line → arc → line
+  all tangent, with creases at the ends: tangency picks out exactly those three edges
+  (25 + 15 + πr/2, exact) where point continuity takes the whole 115.708 mm loop, and
+  stopping on the arc gives 25 + πr/2. Two cases refused rather than guessed, both for the
+  reason `catia_split` gives about which side of a cut survives — a `limit_to` on a run
+  that closes into a **loop** (two ways round, nothing chooses), and a **branch vertex**
+  where three free edges meet, verified on three blades sharing a root edge where point
+  continuity from one tip returns 50 mm and not a millimetre of the other two. Endpoints
+  are matched on a micron grid rather than by `IsSame`, because
+  `ShapeAnalysis_FreeBounds` rebuilds the boundary and a corner comes back as two vertices
+  that are equal to within tolerance and identical to nothing. Six guards, each verified
+  by breaking it; the branch stop did not bite until test geometry with a real branch
+  existed, which is why the vane is in there. **This closes 2.6's capability list and
+  opens the honest question the board now carries: E2's Proof has never been written.**
 
 - **2026-09-05** — E2 → **2.6: `catia_extrapolate`, the last operation the phase owed**.
   Coverage 107 → **108/201**. Three cases, and the route this file recommended for them

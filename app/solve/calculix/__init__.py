@@ -29,11 +29,23 @@ from app.solve.calculix.deck import (
     element_type,
     write_deck,
 )
+from app.solve.calculix.frd import (
+    FrdFile,
+    displacements,
+    nodal_stress_tensor,
+    parse_frd,
+    von_mises_from_tensor,
+)
 
 __all__ = [
     "C3D10_EDGES",
     "C3D10_MIDSIDE_ORDER",
     "DENSITY_KG_M3_TO_TONNE_MM3",
+    "FrdFile",
+    "displacements",
     "element_type",
+    "nodal_stress_tensor",
+    "parse_frd",
+    "von_mises_from_tensor",
     "write_deck",
 ]

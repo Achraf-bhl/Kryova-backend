@@ -97,10 +97,24 @@ _configure_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    _warn_about_insecure_defaults()
     _fail_orphaned_jobs()
     yield
     get_job_queue().shutdown()
     _stop_local_catia_bridge()
+
+
+def _warn_about_insecure_defaults() -> None:
+    """Say out loud, at every startup, what production would refuse.
+
+    `SECRET_KEY` sat at the public default "changeme" long enough to become a
+    documented landmine, and the reason is that nothing ever mentioned it: a
+    development server started silently and the deployment that forgot the
+    environment variable looked exactly the same. Production refuses these
+    outright (`Settings._harden_production`); here they are at least audible.
+    """
+    for problem in settings.insecure_defaults():
+        logger.warning("Insecure setting: %s", problem)
 
 
 def _stop_local_catia_bridge() -> None:

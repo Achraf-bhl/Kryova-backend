@@ -372,6 +372,15 @@ class Settings(BaseSettings):
             )
         if not self.cookie_secure:
             problems.append("COOKIE_SECURE must be true so session cookies are HTTPS-only")
+        if not [origin for origin in self.cors_origins if origin.strip()]:
+            # An empty list is not "no cross-origin access": it is a deployment
+            # whose own frontend cannot reach it, which presents as every request
+            # failing in the browser with nothing in the server log. Refusing at
+            # startup turns a confusing outage into a sentence.
+            problems.append(
+                "CORS_ORIGINS is empty, so no browser origin can call this API — "
+                "list the frontend's exact origin"
+            )
         if any(origin.startswith("http://") for origin in self.cors_origins):
             problems.append(
                 f"CORS_ORIGINS contains a plaintext http:// origin: {self.cors_origins}"
@@ -392,6 +401,28 @@ class Settings(BaseSettings):
                 "Refusing to start with ENVIRONMENT=production:\n  - " + "\n  - ".join(problems)
             )
         return self
+
+    def insecure_defaults(self) -> list[str]:
+        """Development-grade settings that would be refused in production.
+
+        Returned rather than raised, because a developer machine must still
+        start — but returned rather than ignored, because the reason
+        `SECRET_KEY` sat at "changeme" long enough to become a documented
+        landmine is that nothing ever said so out loud. `main.py` logs these at
+        startup; production refuses them outright in `_harden_production`.
+        """
+        found = []
+        if self.secret_key == INSECURE_SECRET_KEY:
+            found.append(
+                "SECRET_KEY is the public default 'changeme' — every token this "
+                "process signs can be forged by anyone with a copy of the source. "
+                'Set one: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+            )
+        elif len(self.secret_key) < MIN_SECRET_KEY_LENGTH:
+            found.append(
+                f"SECRET_KEY is shorter than {MIN_SECRET_KEY_LENGTH} characters"
+            )
+        return found
 
     @property
     def media_staging_dir(self) -> Path:

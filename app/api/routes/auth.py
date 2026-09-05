@@ -13,14 +13,27 @@ from app.core.config import settings
 from app.core.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, new_csrf_token, verify_csrf
 from app.core.security import (
     create_access_token,
-    create_refresh_token,
-    decode_refresh_token,
     hash_password,
     hash_token,
     verify_password,
 )
-from app.models import User
-from app.schemas import PasswordReset, PasswordResetRequest, SessionRead, UserCreate, UserRead
+from app.core.sessions import (
+    SessionError,
+    live_sessions,
+    revoke_all,
+    revoke_session,
+    rotate_session,
+    start_session,
+)
+from app.models import SessionRevocation, User, UserSession
+from app.schemas import (
+    DeviceSessionRead,
+    PasswordReset,
+    PasswordResetRequest,
+    SessionRead,
+    UserCreate,
+    UserRead,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,18 +47,24 @@ def _cookie_options() -> Any:
 class IssuedSession(NamedTuple):
     """The tokens just written to `response`, returned rather than re-parsed.
 
-    The refresh token has to be hashed onto the user row after the cookie is
-    set. Recovering it by string-splitting our own `Set-Cookie` header would
-    break the moment cookie encoding changes, so hand it back directly.
+    Recovering the CSRF token by string-splitting our own `Set-Cookie` header
+    would break the moment cookie encoding changes, so hand it back directly.
     """
 
     csrf: str
     refresh: str
 
 
-def _set_session_cookies(response: Response, user_id: str) -> IssuedSession:
+def _set_session_cookies(response: Response, user_id: str, refresh: str) -> IssuedSession:
+    """Write the three cookies for a refresh token the caller already has.
+
+    The refresh token is passed in rather than minted here, because since P1.2 it
+    is issued by `core/sessions.py` together with the row that authorises it.
+    Minting it in the cookie layer would allow a token to exist that no session
+    row backs — which would be accepted by nothing, but only after the user had
+    been told they were signed in.
+    """
     access = create_access_token(user_id)
-    refresh = create_refresh_token(user_id)
     csrf = new_csrf_token()
     common = _cookie_options()
     response.set_cookie(
@@ -169,8 +188,15 @@ def login(
         )
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
-    issued = _set_session_cookies(response, user.id)
-    user.refresh_token_hash = hash_token(issued.refresh)
+    # A login is a new device family (P1.1), not a rewrite of a shared slot.
+    # Signing in on a second machine used to end the session on the first.
+    started = start_session(
+        db,
+        user,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=_client_ip(request),
+    )
+    issued = _set_session_cookies(response, user.id, started.token)
     db.commit()
     return SessionRead(user=UserRead.model_validate(user), csrf_token=issued.csrf)
 
@@ -192,35 +218,125 @@ def refresh_session(request: Request, response: Response, db: DbSession) -> Sess
         request.headers.get(CSRF_HEADER_NAME), request.cookies.get(CSRF_COOKIE_NAME)
     ):
         raise HTTPException(status_code=403, detail="CSRF failure")
-    user_id = decode_refresh_token(token)
-    user = db.get(User, user_id) if user_id else None
-    expected_hash = user.refresh_token_hash if user else None
-    if (
-        user is None
-        or expected_hash is None
-        or not secrets.compare_digest(hash_token(token), expected_hash)
-    ):
+
+    try:
+        rotated = rotate_session(db, token, ip_address=_client_ip(request))
+    except SessionError as refused:
+        # The family may have been revoked by the attempt itself (reuse
+        # detection), so the write has to land before the response goes out —
+        # otherwise a replayed token revokes nothing and can be replayed again.
+        db.commit()
+        _clear_session_cookies(response)
+        if refused.compromised:
+            logger.warning(
+                "refresh token reuse detected; session family revoked",
+                extra={"remote_addr": _client_ip(request)},
+            )
+        raise HTTPException(status_code=401, detail=refused.detail) from refused
+
+    user = db.get(User, rotated.session.user_id)
+    if user is None:  # pragma: no cover - a live session for a deleted user
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     # A deactivated account keeps a valid refresh chain unless this is checked:
     # `login` and `get_current_user` both refuse an inactive user, so without it
     # the one path that *renews* a session is the one path that ignores the flag.
     if not user.is_active:
+        revoke_session(db, rotated.session, SessionRevocation.ADMIN)
+        db.commit()
+        _clear_session_cookies(response)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
 
-    # Rotate: the presented token is single-use, so the row only ever holds the
-    # hash of the newest one. Assigned in a single commit -- never blanked and
-    # re-set, which would log the user out if the second write failed.
-    issued = _set_session_cookies(response, user.id)
-    user.refresh_token_hash = hash_token(issued.refresh)
+    issued = _set_session_cookies(response, user.id, rotated.token)
     db.commit()
     return SessionRead(user=UserRead.model_validate(user), csrf_token=issued.csrf)
 
 
+def _current_session(db: DbSession, request: Request) -> UserSession | None:
+    """The session row behind this request's refresh cookie, if any.
+
+    Returns None rather than raising when the cookie is missing or unknown: the
+    callers below all want to *end* something, and an end that finds nothing has
+    already achieved what it was asked to do.
+    """
+    token = request.cookies.get("kryova_refresh")
+    if not token:
+        return None
+    presented = hash_token(token)
+    return db.scalars(
+        select(UserSession).where(UserSession.token_hash == presented)
+    ).first()
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(response: Response, current_user: CurrentUser, db: DbSession) -> None:
-    current_user.refresh_token_hash = None
+def logout(
+    request: Request, response: Response, current_user: CurrentUser, db: DbSession
+) -> None:
+    """Sign out this device only.
+
+    Other devices are left alone, which is new: `refresh_token_hash` was one slot
+    per user, so signing out anywhere signed out everywhere. The cookies are
+    cleared whether or not a row was found — a client asking to be signed out
+    must end up signed out even if its session had already expired.
+    """
+    session = _current_session(db, request)
+    if session is not None and session.user_id == current_user.id:
+        revoke_session(db, session, SessionRevocation.LOGOUT)
+        db.commit()
+    _clear_session_cookies(response)
+
+
+@router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
+def logout_everywhere(
+    request: Request, response: Response, current_user: CurrentUser, db: DbSession
+) -> None:
+    """Sign out every device, including this one.
+
+    This is the action someone takes when they believe their account is being
+    used by somebody else, so it takes the caller with it rather than sparing
+    them: a person who has just been told a token was stolen should end up with
+    nothing valid anywhere, and sign in again deliberately.
+    """
+    revoke_all(db, current_user, SessionRevocation.LOGOUT_ALL)
     db.commit()
     _clear_session_cookies(response)
+
+
+@router.get("/sessions", response_model=list[DeviceSessionRead])
+def list_sessions(
+    request: Request, current_user: CurrentUser, db: DbSession
+) -> list[DeviceSessionRead]:
+    """The devices this account is signed in on (P1.3's backing).
+
+    The row is the truth, not the cookie — a session revoked from another device
+    disappears from here immediately, which is the whole point of the feature.
+    """
+    here = _current_session(db, request)
+    return [
+        DeviceSessionRead(
+            id=row.id,
+            device_label=row.device_label,
+            ip_address=row.ip_address,
+            created_at=row.created_at,
+            last_used_at=row.last_used_at,
+            absolute_expires_at=row.absolute_expires_at,
+            current=here is not None and row.id == here.id,
+        )
+        for row in live_sessions(db, current_user)
+    ]
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def end_session(session_id: str, current_user: CurrentUser, db: DbSession) -> None:
+    """Sign out one named device.
+
+    Another user's session is a 404, never a 403 — the same rule every resource
+    here follows, so ids cannot be probed across accounts.
+    """
+    session = db.get(UserSession, session_id)
+    if session is None or session.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    revoke_session(db, session, SessionRevocation.LOGOUT)
+    db.commit()
 
 
 @router.get("/me", response_model=UserRead)

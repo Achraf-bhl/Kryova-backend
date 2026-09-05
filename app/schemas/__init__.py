@@ -1,4 +1,5 @@
 from app.schemas.auth import (
+    DeviceSessionRead,
     PasswordReset,
     PasswordResetRequest,
     SessionRead,
@@ -23,6 +24,7 @@ from app.schemas.simulation import (
 )
 
 __all__ = [
+    "DeviceSessionRead",
     "GeometryVersionPage",
     "GeometryVersionRead",
     "MaterialList",

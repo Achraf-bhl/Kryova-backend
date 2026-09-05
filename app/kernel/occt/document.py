@@ -32,6 +32,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.kernel import measurement
 from app.kernel.errors import GeometryError, NamingError
 from app.kernel.measurement import Detail
 from app.kernel.occt import metrology
@@ -619,6 +620,27 @@ class PartDocument:
 
     # -- reading -------------------------------------------------------------
 
+    def _weighed(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Put the mass onto a geometry-only payload, at today's density.
+
+        `mass_is_provisional` is the honesty flag `metrology.measure` sets when it
+        was given no density, and it must come *off* when a density arrives —
+        leaving it on beside a real mass would be the same lie in the other
+        direction. A detail level below FULL carries no volume, so there is
+        nothing to weigh and the flag is not touched.
+        """
+        if self.density_kg_m3 is None:
+            return payload
+        volume = payload.get(measurement.VOLUME_MM3)
+        if volume is None:
+            return payload
+        payload.pop("mass_is_provisional", None)
+        payload["density_kg_m3"] = self.density_kg_m3
+        payload[measurement.MASS_KG] = measurement.mass_kg(
+            float(volume), self.density_kg_m3
+        )
+        return payload
+
     def measure(self, *, detail: Detail = Detail.FULL) -> dict[str, Any]:
         """The measurement payload for the part as it stands.
 
@@ -634,6 +656,17 @@ class PartDocument:
         feature the design had already renamed `plate.body`: correct geometry, wrong
         names, and nothing to indicate which of the two to believe. So they are overlaid
         fresh on every call, onto a copy the caller may mutate freely.
+
+        **Mass is in that half too, and it was not — which is how a part came back with
+        no mass at all after its material was set.** `catia_set_material` changes the
+        density and no geometry, so it invalidates nothing, and a payload cached before
+        it kept `mass_is_provisional` for the rest of the session while cheerfully
+        reporting the material name beside it. Measured end to end on 2026-09-05: the
+        agent set aluminium, measured, was handed a material and no mass, and *invented*
+        one — 273 kg for a part weighing 0.27 — which is exactly the unmeasured claim
+        Decision 3 exists to prevent, caused by us and not by the model. So the cache
+        holds the density-free geometry and the mass is computed onto it per call, from
+        whatever density the document holds now.
         """
         payload: dict[str, Any]
         shape = self.shape
@@ -642,11 +675,11 @@ class PartDocument:
         else:
             cached = self._measurement_cache.get(detail)
             if cached is None:
-                cached = metrology.measure(
-                    shape, density_kg_m3=self.density_kg_m3, detail=detail
-                )
+                # Deliberately density-free: see the docstring. What is cached must
+                # be a function of the shape alone, or the cache outlives its truth.
+                cached = metrology.measure(shape, density_kg_m3=None, detail=detail)
                 self._measurement_cache[detail] = cached
-            payload = dict(cached)
+            payload = self._weighed(dict(cached))
 
         payload["features"] = self.feature_names()
         if self.material is not None:

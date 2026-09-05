@@ -86,6 +86,32 @@ class Outcome(StrEnum):
     UNMEASURED = "unmeasured"
 
 
+def counts_things(measure: str) -> bool:
+    """Whether a measurement path names a whole number of things.
+
+    A count is the one measurement where `==` with no tolerance is exactly the
+    right claim: one solid is one solid, eleven faces are eleven faces, and
+    asking for half a face of slack is meaningless. Everything else a kernel
+    reports is a float off an integration and needs slack.
+
+    Decided from the path rather than from the kernel's measurement contract,
+    which is where `unit="count"` actually lives, because importing
+    `app.kernel.contract` here would pull ~166 MB of OCP into a package whose
+    load-bearing property is that its 338 tests run offline in under a second.
+    The two are kept in step by a test that reads the real contract and asserts
+    this function agrees with it on every path — so the convention is checked
+    against the source of truth without this module depending on it.
+
+    Found by driving the chat end to end on 2026-09-05: asked to check the part
+    it had built, the model claimed `solid_count == 1`, which is correct and
+    exactly checkable, and was refused three times and told to add a tolerance
+    to it. Advice that is right for a length and wrong for a count spends the
+    model's turn teaching it to distrust the check.
+    """
+    leaf = str(measure).strip().split(".")[-1].split("[")[0]
+    return leaf == "count" or leaf.endswith("_count")
+
+
 @dataclass(frozen=True)
 class Assertion:
     """One checkable claim about the built part.
@@ -134,11 +160,12 @@ class Assertion:
                 "assertion stricter than exact, which is not a thing. Use a positive "
                 "slack, or zero."
             )
-        if self.comparison == "==" and self.tolerance == 0:
+        if self.comparison == "==" and self.tolerance == 0 and not counts_things(self.measure):
             raise SpecError(
                 f"{self.name}: an exact equality on a measured number will fail on a part "
                 "that is correct — a kernel does not return round decimals. Give it a "
-                "tolerance, e.g. tolerance=0.01."
+                "tolerance, e.g. tolerance=0.01. (A count is the exception: "
+                "solid_count == 1 needs no tolerance, because one solid is one solid.)"
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -557,6 +584,7 @@ __all__ = [
     "AssertionResult",
     "Outcome",
     "check_assertions",
+    "counts_things",
     "measurable_paths",
     "read_measurement",
 ]

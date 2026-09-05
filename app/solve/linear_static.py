@@ -31,8 +31,9 @@ from numpy.typing import NDArray
 from app.mesh.types import TET10_EDGES, TetMesh
 from app.solve.base import SolveOutput, Solver
 from app.solve.loads import assemble_loads
+from app.solve.postprocess import summarise_static
 from app.solve.selection import select_nodes
-from app.solve.types import LoadCase, Material, SolverError, StaticResult
+from app.solve.types import LoadCase, Material, SolverError
 
 # Derivatives of the tet4 shape functions with respect to natural coordinates.
 _DN_DXI = np.array([[-1.0, -1.0, -1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
@@ -313,7 +314,10 @@ class LinearStaticSolver(Solver):
         mises = self._recover_stress(
             mesh, case.material, displacements, delta_t_k=case.delta_t_k
         )
-        result = self._summarise(
+        # Shared with every other Solver rather than computed here: two
+        # solvers that summarised their own results would be free to mean
+        # different things by "factor of safety", and 6.5 compares them.
+        result = summarise_static(
             mesh, case, displacements, mises, warnings, time.perf_counter() - started
         )
         return SolveOutput(
@@ -405,36 +409,3 @@ class LinearStaticSolver(Solver):
 
             stress = stress - thermal_stress_correction(material, delta_t_k)
         return von_mises(stress)
-
-    def _summarise(
-        self,
-        mesh: TetMesh,
-        case: LoadCase,
-        displacements: NDArray[np.float64],
-        mises: NDArray[np.float64],
-        warnings: list[str],
-        seconds: float,
-    ) -> StaticResult:
-        magnitudes = np.linalg.norm(displacements.reshape(-1, 3), axis=1)
-        peak_node = int(np.argmax(magnitudes))
-        peak_element = int(np.argmax(mises))
-        peak_stress = float(mises[peak_element])
-
-        yield_strength = case.material.yield_strength_mpa
-        fos = yield_strength / peak_stress if peak_stress > 0.0 else float("inf")
-
-        volume_mm3 = mesh.volume
-        return StaticResult(
-            max_displacement_mm=float(magnitudes[peak_node]),
-            max_displacement_node=peak_node,
-            max_von_mises_mpa=peak_stress,
-            max_von_mises_element=peak_element,
-            factor_of_safety=fos,
-            yields=peak_stress >= yield_strength,
-            mass_kg=volume_mm3 * 1e-9 * case.material.density_kg_m3,
-            volume_mm3=volume_mm3,
-            node_count=mesh.node_count,
-            element_count=mesh.tet_count,
-            solve_seconds=seconds,
-            warnings=warnings,
-        )

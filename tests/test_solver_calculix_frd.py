@@ -8,6 +8,10 @@ built from the same documentation as the code can be wrong in the same direction
 — the runbook's own warning — so these tests pin *behaviour that must hold
 whatever the format turns out to be* wherever they can: fixed-width reading,
 components matched by name, a missing node refused rather than zeroed.
+
+The builders live in `tests/frd_fixtures.py` because the suite that drives a
+fake `ccx` needs the same ones to *write* a results file, and two copies of a
+record layout can agree with each other while both disagreeing with CalculiX.
 """
 
 from __future__ import annotations
@@ -24,47 +28,10 @@ from app.solve.calculix.frd import (
     parse_frd as parse,
 )
 from app.solve.types import SolverError
-
-
-def _record(node: int, *values: float) -> str:
-    """One ` -1` data record at the documented column widths."""
-    out = " -1" + f"{node:10d}"
-    for value in values:
-        out += f"{value:12.5E}"
-    return out
-
-
-def _disp_block(rows: list[tuple[int, float, float, float]]) -> str:
-    lines = [
-        "    1PSTEP                         1",
-        "  100CL  101  1.00000E+00" + f"{len(rows):12d}",
-        " -4  DISP        4    1",
-        " -5  D1          1    2    1    0",
-        " -5  D2          1    2    2    0",
-        " -5  D3          1    2    3    0",
-        " -5  ALL         1    2    0    0    1ALL",
-    ]
-    lines += [_record(n, x, y, z) for n, x, y, z in rows]
-    lines.append(" -3")
-    return "\n".join(lines)
-
-
-def _stress_block(rows: list[tuple[int, tuple[float, ...]]]) -> str:
-    lines = [
-        " -4  STRESS      6    1",
-        " -5  SXX         1    4    1    1",
-        " -5  SYY         1    4    2    2",
-        " -5  SZZ         1    4    3    3",
-        " -5  SXY         1    4    1    2",
-        " -5  SYZ         1    4    2    3",
-        " -5  SZX         1    4    3    1",
-    ]
-    lines += [_record(n, *values) for n, values in rows]
-    lines.append(" -3")
-    return "\n".join(lines)
-
-
-HEADER = "    1C\n"
+from tests.frd_fixtures import HEADER
+from tests.frd_fixtures import disp_block as _disp_block
+from tests.frd_fixtures import record as _record
+from tests.frd_fixtures import stress_block as _stress_block
 
 
 class TestTheRecordIsReadByColumn:

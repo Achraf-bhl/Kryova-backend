@@ -1,7 +1,19 @@
+"""Turning solved fields into what a caller reads.
+
+Shared by every `Solver`, and shared deliberately: two solvers that summarised
+their own results would be free to mean different things by "factor of safety",
+and master plan 6.5 keeps the hand-written solver as an **oracle** for CalculiX —
+a comparison that is only meaningful if both sides computed the summary the same
+way. A disagreement should localise to the physics, never to the reporting.
+"""
+
+from __future__ import annotations
+
 import numpy as np
 from numpy.typing import NDArray
 
 from app.mesh.types import TetMesh
+from app.solve.types import LoadCase, StaticResult
 
 
 def nodal_average(mesh: TetMesh, element_values: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -22,3 +34,64 @@ def nodal_average(mesh: TetMesh, element_values: NDArray[np.float64]) -> NDArray
     np.add.at(totals, connectivity, element_values[:, None])
     np.add.at(counts, connectivity, 1)
     return np.divide(totals, counts, out=np.zeros_like(totals), where=counts > 0)
+
+
+def element_average(mesh: TetMesh, nodal_values: NDArray[np.float64]) -> NDArray[np.float64]:
+    """The inverse of `nodal_average`: a nodal field read back per element.
+
+    Needed by any solver that reports at nodes while `SolveOutput` carries stress
+    per element — CalculiX writes its `.frd` that way. The average is over the
+    four **corner** nodes only, even on a tet10 mesh: a midside node sits on an
+    edge shared by more elements than a corner is, so including it weights the
+    element's own value towards its neighbours. Corner-only is what makes a
+    uniform field come back exactly uniform, which is what an oracle comparison
+    against a closed-form uniform stress state rests on.
+
+    Works on a scalar field (n_nodes,) and on a tensor field (n_nodes, k) alike;
+    the average is taken over the node axis in both cases.
+    """
+    corners = mesh.tets[:, :4]
+    return np.asarray(nodal_values)[corners].mean(axis=1)
+
+
+def summarise_static(
+    mesh: TetMesh,
+    case: LoadCase,
+    displacements: NDArray[np.float64],
+    von_mises_per_element: NDArray[np.float64],
+    warnings: list[str],
+    seconds: float,
+) -> StaticResult:
+    """The summary of one linear static run, however it was solved.
+
+    The peak stress is the raw per-element value and is never the smoothed one:
+    a factor of safety read off a smoothed field is optimistic exactly where it
+    matters, at the concentration. `nodal_average` above exists for display and
+    says the same thing from the other side.
+    """
+    magnitudes = np.linalg.norm(displacements.reshape(-1, 3), axis=1)
+    peak_node = int(np.argmax(magnitudes))
+    peak_element = int(np.argmax(von_mises_per_element))
+    peak_stress = float(von_mises_per_element[peak_element])
+
+    yield_strength = case.material.yield_strength_mpa
+    fos = yield_strength / peak_stress if peak_stress > 0.0 else float("inf")
+    volume_mm3 = mesh.volume
+
+    return StaticResult(
+        max_displacement_mm=float(magnitudes[peak_node]),
+        max_displacement_node=peak_node,
+        max_von_mises_mpa=peak_stress,
+        max_von_mises_element=peak_element,
+        factor_of_safety=fos,
+        yields=peak_stress >= yield_strength,
+        mass_kg=volume_mm3 * 1e-9 * case.material.density_kg_m3,
+        volume_mm3=volume_mm3,
+        node_count=mesh.node_count,
+        element_count=mesh.tet_count,
+        solve_seconds=seconds,
+        warnings=warnings,
+    )
+
+
+__all__ = ["element_average", "nodal_average", "summarise_static"]

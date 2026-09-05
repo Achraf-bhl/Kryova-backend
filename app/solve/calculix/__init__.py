@@ -29,6 +29,7 @@ from app.solve.calculix.deck import (
     element_type,
     write_deck,
 )
+from app.solve.calculix.diagnose import Diagnosis, diagnose
 from app.solve.calculix.frd import (
     FrdFile,
     displacements,
@@ -36,16 +37,33 @@ from app.solve.calculix.frd import (
     parse_frd,
     von_mises_from_tensor,
 )
+from app.solve.calculix.run import (
+    CalculiXUnavailable,
+    CcxRun,
+    find_ccx,
+    require_ccx,
+    run_ccx,
+)
+from app.solve.calculix.solver import CalculiXSolver, element_von_mises
 
 __all__ = [
     "C3D10_EDGES",
+    "CalculiXSolver",
+    "CalculiXUnavailable",
+    "CcxRun",
+    "Diagnosis",
     "C3D10_MIDSIDE_ORDER",
     "DENSITY_KG_M3_TO_TONNE_MM3",
     "FrdFile",
+    "diagnose",
     "displacements",
     "element_type",
+    "element_von_mises",
+    "find_ccx",
     "nodal_stress_tensor",
     "parse_frd",
+    "require_ccx",
+    "run_ccx",
     "von_mises_from_tensor",
     "write_deck",
 ]

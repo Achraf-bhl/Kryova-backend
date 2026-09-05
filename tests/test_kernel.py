@@ -3126,3 +3126,519 @@ class TestAnchorsPointsAndLines:
 
         x, y, _ = placed["position_mm"]
         assert math.hypot(x, y) == pytest.approx(10.0, abs=1e-9)
+
+
+class TestPlanesDerivedFromGeometry:
+    """Planes defined by a curve or a surface rather than typed as an offset.
+
+    `catia_plane_normal_to_curve` is the one that unlocks the most: it is what places a
+    sweep profile square to its path, so the helix that already existed is now something
+    a section can be swept along. Each test checks the plane's *normal* against the
+    closed form for the tangent or the surface normal at that place — a plane that is
+    merely somewhere near the curve looks identical in a screenshot.
+    """
+
+    @staticmethod
+    def _ring(radius: float = 10.0) -> object:
+        """A circle of the given radius in XY, centred on the origin."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Path"})
+        runner(
+            "catia_curve_circle",
+            {
+                "kind": "centre_radius",
+                "centre": [0, 0, 0],
+                "radius_mm": radius,
+                "support": "XY",
+                "name": "ring",
+            },
+        )
+        return runner
+
+    def test_a_plane_normal_to_a_curve_faces_along_its_tangent(self) -> None:
+        """At the east point of a circle in XY the tangent runs along Y, so the plane
+        must face along Y. A plane facing anywhere else cuts the curve at a slant and a
+        profile sketched on it comes out sheared."""
+        runner = self._ring()
+
+        plane = runner("catia_plane_normal_to_curve", {"curve": "ring", "name": "cut"})  # type: ignore[operator]
+
+        assert plane["origin_mm"] == pytest.approx([10.0, 0.0, 0.0], abs=TOL)
+        assert abs(plane["normal"][1]) == pytest.approx(1.0, abs=TOL)
+
+    def test_it_stands_at_the_named_point_rather_than_the_curve_start(self) -> None:
+        runner = self._ring()
+        runner("catia_point_at", {"at": [0, 10, 0], "name": "north"})  # type: ignore[operator]
+
+        plane = runner(  # type: ignore[operator]
+            "catia_plane_normal_to_curve",
+            {"curve": "ring", "point": "north", "name": "cut"},
+        )
+
+        assert plane["origin_mm"] == pytest.approx([0.0, 10.0, 0.0], abs=TOL)
+        assert abs(plane["normal"][0]) == pytest.approx(1.0, abs=TOL)
+
+    def test_a_plane_square_to_a_helix_carries_its_lead_angle(self) -> None:
+        """The closed form the sweep depends on. A helix of pitch p at radius r climbs at
+        `atan(p / 2πr)`, so a plane square to it tips out of horizontal by exactly that —
+        which is why a profile placed on it sweeps into a thread rather than a smear."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Spring"})
+        runner(
+            "catia_curve_helix",
+            {
+                "axis": "Z",
+                "start_point": [10.0, 0.0, 0.0],
+                "pitch_mm": 8.0,
+                "height_mm": 24.0,
+                "name": "coil",
+            },
+        )
+
+        plane = runner("catia_plane_normal_to_curve", {"curve": "coil", "name": "profile"})
+
+        lead = math.atan2(8.0, 2 * math.pi * 10.0)
+        assert abs(plane["normal"][2]) == pytest.approx(math.sin(lead), abs=1e-9)
+
+    def test_a_tangent_plane_sits_on_the_surface_not_at_the_point_given(self) -> None:
+        """The anchor is 20 mm clear of the wall. The plane belongs on the wall — a plane
+        floating where the anchor was would put every boss built on it in mid-air, and
+        nothing in its own description would say so."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Wall"})
+        runner(
+            "catia_surface_primitive",
+            {"kind": "cylinder", "radius_mm": 10.0, "length_mm": 30.0, "name": "tube"},
+        )
+        runner("catia_point_at", {"at": [30, 0, 15], "name": "outside"})
+
+        plane = runner(
+            "catia_plane_tangent_to_surface",
+            {"surface": "tube", "point": "outside", "name": "flat"},
+        )
+
+        assert plane["origin_mm"] == pytest.approx([10.0, 0.0, 15.0], abs=1e-6)
+        assert abs(plane["normal"][0]) == pytest.approx(1.0, abs=TOL)
+
+    def test_a_projection_lands_on_the_face_and_not_on_the_surface_it_was_cut_from(
+        self,
+    ) -> None:
+        """A face is a trimmed piece of an unbounded surface. The cylinder's top disc lies
+        in an infinite plane, and a point out beside the wall projects onto that plane
+        25 mm outside the disc's rim — nearer than the wall, so it wins, and the whole
+        chain then agrees on a place that is not on the part."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Post"})
+        runner(
+            "catia_surface_primitive",
+            {"kind": "cylinder", "radius_mm": 10.0, "length_mm": 30.0, "name": "tube"},
+        )
+        runner("catia_point_at", {"at": [30, 0, 25], "name": "beside"})
+
+        placed = runner(
+            "catia_point_on_surface", {"surface": "tube", "reference": "beside", "name": "on"}
+        )
+
+        x, y, z = placed["position_mm"]
+        assert math.hypot(x, y) == pytest.approx(10.0, abs=1e-6)
+        assert 0.0 <= z <= 30.0
+
+    def test_a_mean_plane_through_three_points_is_the_plane_through_them(self) -> None:
+        """A fit through three points has no residual to trade, so it must agree exactly
+        with the plane those three define. A fit that does not is not a fit."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Fit"})
+        for index, at in enumerate(([0, 0, 5], [10, 0, 5], [10, 10, 5])):
+            runner("catia_point_at", {"at": at, "name": f"p{index}"})
+
+        fitted = runner("catia_plane_mean", {"points": ["p0", "p1", "p2"], "name": "a"})
+        exact = runner("catia_plane_through_points", {"points": ["p0", "p1", "p2"], "name": "b"})
+
+        assert abs(sum(a * b for a, b in zip(fitted["normal"], exact["normal"]))) == pytest.approx(
+            1.0, abs=1e-9
+        )
+        assert fitted["deviation_mm"] == pytest.approx(0.0, abs=1e-12)
+
+    def test_a_mean_plane_reports_how_far_the_worst_point_stands_off_it(self) -> None:
+        """An average presented without its spread reads as a fact. Four points at z=5 and
+        one at z=7 fit a plane at their centroid z=5.4, and the outlier stands 1.6 mm off
+        it — which an engineer building to that plane needs to be told."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Fit"})
+        for index, at in enumerate(([0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5], [5, 5, 7])):
+            runner("catia_point_at", {"at": at, "name": f"p{index}"})
+
+        fitted = runner(
+            "catia_plane_mean",
+            {"points": ["p0", "p1", "p2", "p3", "p4"], "name": "fit"},
+        )
+
+        assert fitted["origin_mm"] == pytest.approx([5.0, 5.0, 5.4], abs=1e-9)
+        assert fitted["deviation_mm"] == pytest.approx(1.6, abs=1e-9)
+
+    def test_points_on_one_line_have_no_mean_plane_and_are_refused(self) -> None:
+        """Every plane through a line fits it equally well. OCCT returns one of them and
+        nothing in the number says it was arbitrary."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Line"})
+        for index, at in enumerate(([0, 0, 0], [10, 0, 0], [25, 0, 0])):
+            runner("catia_point_at", {"at": at, "name": f"p{index}"})
+
+        with pytest.raises(GeometryError, match="one line"):
+            runner("catia_plane_mean", {"points": ["p0", "p1", "p2"], "name": "no"})
+
+    def test_planes_between_are_spaced_strictly_inside_the_two_named(self) -> None:
+        """Three planes between 0 and 40 land at 10, 20 and 30. Including the ends would
+        give the design two names for one plane."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Slices"})
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 40.0, "name": "top"})
+
+        made = runner("catia_planes_between", {"first": "XY", "second": "top", "count": 3})
+
+        assert made["spacing_mm"] == pytest.approx(10.0, abs=TOL)
+        assert made["planes_created"] == ["between.1", "between.2", "between.3"]
+        heights = [
+            runner("catia_measure_item", {"element": name})["position_mm"][2]
+            for name in made["planes_created"]
+        ]
+        assert heights == pytest.approx([10.0, 20.0, 30.0], abs=TOL)
+
+    def test_planes_that_cross_have_no_single_spacing_and_are_refused(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Slices"})
+        runner(
+            "catia_plane_angle",
+            {"reference": "XY", "angle_deg": 30.0, "axis": "X", "name": "tilted"},
+        )
+
+        with pytest.raises(GeometryError, match="parallel"):
+            runner("catia_planes_between", {"first": "XY", "second": "tilted", "count": 2})
+
+
+class TestCurvesDerivedFromSurfaces:
+    """The associative curves: defined by other geometry, so they follow it when it moves.
+
+    Two of these have a *side*, and the side is the interesting part. OCCT picks one from
+    the wire's own winding — invisible to whoever named the curve — so the same circle
+    drawn the other way round would quietly grow where it had shrunk. The side is stated
+    here, measured on the result, and mirrored if OCCT went the other way; the winding
+    test below is what proves that machinery is doing something.
+    """
+
+    @staticmethod
+    def _panel(half: float = 50.0) -> object:
+        """A flat square plate in XY, as a surface."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Panel"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        runner(
+            "catia_sketch_rectangle",
+            {"sketch": "outline", "width_mm": 2 * half, "height_mm": 2 * half},
+        )
+        runner("catia_surface_fill", {"boundary": ["outline"], "name": "panel"})
+        return runner
+
+    @staticmethod
+    def _ring(runner: object, name: str, radius: float, height: float = 0.0) -> None:
+        runner(  # type: ignore[operator]
+            "catia_curve_circle",
+            {
+                "kind": "centre_radius",
+                "centre": [0, 0, height],
+                "radius_mm": radius,
+                "support": "XY",
+                "name": name,
+            },
+        )
+
+    @staticmethod
+    def _length(runner: object, name: str) -> float:
+        return float(runner("catia_measure_item", {"element": name})["length_mm"])  # type: ignore[operator]
+
+    def test_a_curve_projects_onto_a_surface_it_is_over(self) -> None:
+        """A circle 30 mm above a flat plate drops onto it unchanged. Checked to a
+        relative tolerance because OCCT approximates the projected curve as a B-spline —
+        about one part in 10⁷ here, which is right to manufacturing tolerance and wrong
+        for an equality test."""
+        runner = self._panel()
+        self._ring(runner, "ring", 10.0, height=30.0)
+
+        runner("catia_curve_project", {"element": "ring", "support": "panel", "name": "shadow"})  # type: ignore[operator]
+
+        assert self._length(runner, "shadow") == pytest.approx(2 * math.pi * 10.0, rel=1e-5)
+
+    def test_a_projection_that_lands_nowhere_is_refused_not_returned_empty(self) -> None:
+        """`IsDone()` is still true when nothing landed, so a caller that trusted the flag
+        would file an empty curve under a name and find out three operations later."""
+        runner = self._panel()
+        runner(  # type: ignore[operator]
+            "catia_curve_circle",
+            {
+                "kind": "centre_radius",
+                "centre": [200, 200, 30],
+                "radius_mm": 10.0,
+                "support": "XY",
+                "name": "far",
+            },
+        )
+
+        with pytest.raises(GeometryError, match="landed nothing"):
+            runner("catia_curve_project", {"element": "far", "support": "panel", "name": "no"})  # type: ignore[operator]
+
+    def test_a_point_projects_along_a_direction_that_points_away_from_the_surface(
+        self,
+    ) -> None:
+        """A projection direction says which way to *look*, not which way to walk. The
+        plate is below the point and +Z points up; refusing that because of a sign would
+        be a miss nothing downstream could tell from a real one."""
+        runner = self._panel()
+        runner("catia_point_at", {"at": [3, 4, 25], "name": "up_there"})  # type: ignore[operator]
+
+        cast = runner(  # type: ignore[operator]
+            "catia_curve_project",
+            {
+                "element": "up_there",
+                "support": "panel",
+                "direction": [0, 0, 1],
+                "name": "cast",
+            },
+        )
+
+        assert cast["position_mm"] == pytest.approx([3.0, 4.0, 0.0], abs=TOL)
+
+    def test_a_parallel_curve_grows_the_region_a_closed_curve_encloses(self) -> None:
+        """Positive grows it, negative shrinks it, `reversed` flips whichever applies."""
+        runner = self._panel()
+        self._ring(runner, "ring", 10.0)
+
+        for name, distance, extra in (
+            ("outer", 5.0, {}),
+            ("inner", -5.0, {}),
+            ("flipped", 5.0, {"reversed": True}),
+        ):
+            runner(  # type: ignore[operator]
+                "catia_curve_parallel",
+                {"curve": "ring", "support": "XY", "distance_mm": distance, "name": name, **extra},
+            )
+
+        assert self._length(runner, "outer") == pytest.approx(2 * math.pi * 15.0, abs=1e-9)
+        assert self._length(runner, "inner") == pytest.approx(2 * math.pi * 5.0, abs=1e-9)
+        assert self._length(runner, "flipped") == pytest.approx(2 * math.pi * 5.0, abs=1e-9)
+
+    def test_a_closed_curve_grows_whichever_way_round_it_was_drawn(self) -> None:
+        """A winding is not something a design ever states, so it must not decide the side.
+        The same square given clockwise and anticlockwise must both grow at +5: outward is
+        `160 + 2πr`, inward would be `4 × 30`, and no payload would say which happened."""
+        runner = self._panel()
+        square = [[-20, -20, 0], [20, -20, 0], [20, 20, 0], [-20, 20, 0]]
+        for name, points in (("anti", square), ("clock", list(reversed(square)))):
+            runner("catia_curve_polyline", {"points": points, "closed": True, "name": name})  # type: ignore[operator]
+            runner(  # type: ignore[operator]
+                "catia_curve_parallel",
+                {"curve": name, "support": "XY", "distance_mm": 5.0, "name": f"{name}_out"},
+            )
+
+        outward = 160.0 + 2 * math.pi * 5.0
+        assert self._length(runner, "anti_out") == pytest.approx(outward, abs=1e-9)
+        assert self._length(runner, "clock_out") == pytest.approx(outward, abs=1e-9)
+
+    def test_the_support_decides_an_open_curve_s_side_and_not_the_wire(self) -> None:
+        """The guard on the side machinery. OCCT never sees the support — it takes the
+        plane from the wire itself — so on its own it gives the same answer for both of
+        these. The rule this operation states is `tangent × normal` with the normal from
+        the support that was *named*, so a support facing the other way must offset the
+        other way: 77.854 outer against 60 inner, and the two are not close."""
+        runner = self._panel()
+        runner(  # type: ignore[operator]
+            "catia_plane_angle",
+            {"reference": "XY", "angle_deg": 180.0, "axis": "X", "name": "upside_down"},
+        )
+        runner(  # type: ignore[operator]
+            "catia_curve_polyline",
+            {"points": [[0, 0, 0], [30, 0, 0], [30, 40, 0]], "name": "ell"},
+        )
+
+        for support in ("XY", "upside_down"):
+            runner(  # type: ignore[operator]
+                "catia_curve_parallel",
+                {"curve": "ell", "support": support, "distance_mm": 5.0, "name": f"o_{support}"},
+            )
+
+        assert self._length(runner, "o_XY") == pytest.approx(70.0 + math.pi * 5.0 / 2, abs=1e-9)
+        assert self._length(runner, "o_upside_down") == pytest.approx(60.0, abs=1e-9)
+
+    def test_an_open_curve_offsets_to_the_side_the_tangent_and_normal_name(self) -> None:
+        """An L of 30 and 40 mm. The outer offset rounds its corner with a quarter arc, so
+        it is `70 + πr/2` long; the inner one cuts the corner square at `70 - 2r`. Both
+        exact, and they are different numbers, so a side that flipped would be caught."""
+        runner = self._panel()
+        runner(  # type: ignore[operator]
+            "catia_curve_polyline",
+            {"points": [[0, 0, 0], [30, 0, 0], [30, 40, 0]], "name": "ell"},
+        )
+
+        runner("catia_curve_parallel", {"curve": "ell", "support": "XY", "distance_mm": 5.0, "name": "wide"})  # type: ignore[operator]
+        runner("catia_curve_parallel", {"curve": "ell", "support": "XY", "distance_mm": -5.0, "name": "tight"})  # type: ignore[operator]
+
+        assert self._length(runner, "wide") == pytest.approx(70.0 + math.pi * 5.0 / 2, abs=1e-9)
+        assert self._length(runner, "tight") == pytest.approx(60.0, abs=1e-9)
+
+    def test_a_curve_off_its_support_is_refused_rather_than_flattened_onto_it(self) -> None:
+        """The offset is taken *within* the support, so a curve 12 mm above it would be
+        silently dropped onto the plane and offset there — a curve in the wrong place
+        that measures exactly right."""
+        runner = self._panel()
+        self._ring(runner, "raised", 10.0, height=12.0)
+
+        with pytest.raises(GeometryError, match="off the one named"):
+            runner(  # type: ignore[operator]
+                "catia_curve_parallel",
+                {"curve": "raised", "support": "XY", "distance_mm": 3.0, "name": "no"},
+            )
+
+    def test_a_3d_offset_is_perpendicular_to_the_curve_not_a_translation(self) -> None:
+        """The difference that names the operation. A circle offset by 4 mm is a
+        *concentric* circle of radius 14; a circle translated by 4 mm is the same circle
+        somewhere else, and its length would not change at all."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Off"})
+        self._ring(runner, "ring", 10.0)
+
+        runner("catia_curve_offset_3d", {"curve": "ring", "distance_mm": 4.0, "direction": [0, 0, 1], "name": "bigger"})
+        runner("catia_curve_offset_3d", {"curve": "ring", "distance_mm": -4.0, "direction": [0, 0, 1], "name": "smaller"})
+
+        assert self._length(runner, "bigger") == pytest.approx(2 * math.pi * 14.0, abs=1e-9)
+        assert self._length(runner, "smaller") == pytest.approx(2 * math.pi * 6.0, abs=1e-9)
+
+    def test_a_direction_along_the_curve_leaves_no_perpendicular_and_is_refused(self) -> None:
+        """Every direction around a straight line is perpendicular to it, so there is no
+        single one to offset towards. OCCT's own message for this names a class nobody
+        outside the kernel has heard of."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Off"})
+        runner("catia_line_between", {"points": [[0, 0, 0], [0, 0, 20]], "name": "post"})
+
+        with pytest.raises(GeometryError, match="no single perpendicular"):
+            runner(
+                "catia_curve_offset_3d",
+                {"curve": "post", "distance_mm": 3.0, "direction": [0, 0, 1], "name": "no"},
+            )
+
+    def test_two_views_combine_into_the_3d_curve_they_agree_on(self) -> None:
+        """A plan line rising to (10, 10) and an elevation rising to (10, 5) agree on one
+        3D line to (10, 10, 5) — length √225 exactly."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Views"})
+        runner("catia_curve_polyline", {"points": [[0, 0, 0], [10, 10, 0]], "name": "plan"})
+        runner("catia_curve_polyline", {"points": [[0, 0, 0], [10, 0, 5]], "name": "elevation"})
+
+        runner(
+            "catia_curve_combine",
+            {
+                "first_curve": "plan",
+                "second_curve": "elevation",
+                "first_direction": [0, 0, 1],
+                "second_direction": [0, 1, 0],
+                "name": "real",
+            },
+        )
+
+        assert self._length(runner, "real") == pytest.approx(math.sqrt(225.0), abs=1e-9)
+
+    def test_each_view_extrudes_along_its_own_plane_when_no_direction_is_given(self) -> None:
+        """Two circles of equal radius in perpendicular planes are two orthogonal
+        cylinders, and their intersection is the Steinmetz curve: two ellipses of
+        semi-axes r and r√2. That closed form is what says the default directions were
+        each curve's own plane and not a guess."""
+        from scipy.special import ellipe
+
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Views"})
+        for name, support in (("flat", "XY"), ("upright", "ZX")):
+            runner(
+                "catia_curve_circle",
+                {
+                    "kind": "centre_radius",
+                    "centre": [0, 0, 0],
+                    "radius_mm": 10.0,
+                    "support": support,
+                    "name": name,
+                },
+            )
+
+        runner(
+            "catia_curve_combine",
+            {"first_curve": "flat", "second_curve": "upright", "name": "saddle"},
+        )
+
+        # Perimeter of one ellipse with a = r√2, b = r: 4a·E(e²), e² = 1 - b²/a² = 1/2.
+        one_ellipse = 4.0 * 10.0 * math.sqrt(2.0) * float(ellipe(0.5))
+        assert self._length(runner, "saddle") == pytest.approx(2.0 * one_ellipse, rel=1e-6)
+
+    def test_a_straight_curve_names_no_view_of_its_own(self) -> None:
+        """A straight line lies in infinitely many planes, so there is no default to take.
+        One arbitrary choice out of a pencil of planes would put the combined curve
+        somewhere nobody asked for."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Views"})
+        runner("catia_curve_polyline", {"points": [[0, 0, 0], [10, 10, 0]], "name": "plan"})
+        runner("catia_curve_polyline", {"points": [[0, 0, 0], [10, 0, 5]], "name": "elevation"})
+
+        with pytest.raises(GeometryError, match="infinitely many planes"):
+            runner(
+                "catia_curve_combine",
+                {"first_curve": "plan", "second_curve": "elevation", "name": "no"},
+            )
+
+    def test_views_that_never_cross_are_refused(self) -> None:
+        """"They do not meet" and "the result is empty" are the same sentence, and only
+        one of them is what the caller expected to hear."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Views"})
+        self._ring(runner, "here", 10.0)
+        runner(
+            "catia_curve_circle",
+            {
+                "kind": "centre_radius",
+                "centre": [500, 0, 0],
+                "radius_mm": 3.0,
+                "support": "ZX",
+                "name": "far",
+            },
+        )
+
+        with pytest.raises(GeometryError, match="never cross"):
+            runner("catia_curve_combine", {"first_curve": "here", "second_curve": "far", "name": "no"})

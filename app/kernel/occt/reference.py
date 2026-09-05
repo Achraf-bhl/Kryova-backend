@@ -287,6 +287,59 @@ def frame_from_points(
     )
 
 
+def least_spread_axis(properties: Any) -> tuple[tuple[float, float, float], float]:
+    """The direction a mass distribution spreads *least* along, and how well-defined it is.
+
+    Two operations need the same answer from different inputs — the best-fit plane through
+    a set of points, and the plane a drawn curve happens to lie in — so the reasoning is
+    written once here.
+
+    **It is an inertia question asked backwards.** For unit masses the inertia tensor is
+    `I = tr(C)·Id − C`, where `C` is the covariance, so the principal axis with the
+    *greatest* moment is the covariance's *smallest* eigenvector: the least-squares normal.
+    OCCT computes it exactly, which is why this does not reach for numpy — and the answer
+    agrees with `numpy.linalg.svd` to the last digit on the same points.
+
+    The second return is `I3 / I1`, and it is what says whether the answer means anything.
+    `I3` is zero exactly when everything lies on one line, and a line has no plane — every
+    direction perpendicular to it fits equally well, so OCCT returns one of them and
+    nothing in the number says it was arbitrary. **The ratio is relative on purpose**: an
+    absolute threshold is simultaneously too tight for a part measured in metres and too
+    loose for one measured in microns.
+    """
+    require()
+    principal = properties.PrincipalProperties()
+    greatest, _, least = principal.Moments()
+    axis = principal.FirstAxisOfInertia()
+    definition = 0.0 if greatest <= 0.0 else abs(least) / abs(greatest)
+    return (axis.X(), axis.Y(), axis.Z()), definition
+
+
+def frame_from_normal(
+    origin: tuple[float, float, float], normal: tuple[float, float, float]
+) -> Any:
+    """A frame at `origin` facing along `normal`, with a **deterministic** local X.
+
+    The planes built from a curve or a surface have no parent plane to inherit an X from
+    — a curve gives a tangent and nothing else — so one has to be chosen, and the choice
+    matters: `gp_Ax3(point, direction)` picks its own, and which one it picks is not part
+    of OCCT's contract. A sketch drawn on the plane would then be square to something
+    that could move between OCCT versions. `_any_perpendicular` makes the same choice
+    every time, against the world axis least parallel to the normal.
+    """
+    require()
+    if _norm(normal) < 1e-12:
+        raise GeometryError(
+            "A plane needs a normal of some length, and this one is zero. The curve or "
+            "surface it was taken from may be degenerate at that point."
+        )
+    return symbol("gp_Ax3")(
+        symbol("gp_Pnt")(*origin),
+        symbol("gp_Dir")(*normal),
+        symbol("gp_Dir")(*_any_perpendicular(normal)),
+    )
+
+
 def rotated_frame(base: Any, axis_origin: tuple[float, float, float],
                   axis_direction: tuple[float, float, float], angle_deg: float) -> Any:
     """`base`, hinged about a line by an angle — what `catia_plane_angle` builds.
@@ -310,7 +363,9 @@ __all__ = [
     "ReferencePlane",
     "ReferencePoint",
     "axis_frame",
+    "frame_from_normal",
     "frame_from_points",
+    "least_spread_axis",
     "offset_frame",
     "rotated_frame",
     "translated_frame",

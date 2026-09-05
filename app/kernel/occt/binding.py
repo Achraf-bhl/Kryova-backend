@@ -71,10 +71,12 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.BRepOffsetAPI import (
         BRepOffsetAPI_DraftAngle,
         BRepOffsetAPI_MakeFilling,
+        BRepOffsetAPI_MakeOffset,
         BRepOffsetAPI_MakeOffsetShape,
         BRepOffsetAPI_MakePipe,
         BRepOffsetAPI_MakePipeShell,
         BRepOffsetAPI_MakeThickSolid,
+        BRepOffsetAPI_NormalProjection,
         BRepOffsetAPI_ThruSections,
     )
     from OCP.BRepPrimAPI import (
@@ -85,13 +87,14 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         BRepPrimAPI_MakeRevol,
         BRepPrimAPI_MakeSphere,
     )
+    from OCP.BRepProj import BRepProj_Projection
     from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
     from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d
     from OCP.GC import GC_MakeArcOfCircle, GC_MakeCircle
     from OCP.GCPnts import GCPnts_AbscissaPoint
-    from OCP.Geom import Geom_ConicalSurface, Geom_CylindricalSurface
+    from OCP.Geom import Geom_ConicalSurface, Geom_CylindricalSurface, Geom_OffsetCurve
     from OCP.Geom2d import Geom2d_Line
-    from OCP.GeomAbs import GeomAbs_Shape
+    from OCP.GeomAbs import GeomAbs_JoinType, GeomAbs_Shape
     from OCP.GeomAPI import (
         GeomAPI_Interpolate,
         GeomAPI_PointsToBSpline,
@@ -116,7 +119,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         gp_Vec,
         gp_XYZ,
     )
-    from OCP.GProp import GProp_GProps
+    from OCP.GProp import GProp_GProps, GProp_PGProps
     from OCP.Precision import Precision
     from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
     from OCP.ShapeFix import ShapeFix_Shape
@@ -168,10 +171,12 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepLib": BRepLib,
         "BRepOffsetAPI_DraftAngle": BRepOffsetAPI_DraftAngle,
         "BRepOffsetAPI_MakeFilling": BRepOffsetAPI_MakeFilling,
+        "BRepOffsetAPI_MakeOffset": BRepOffsetAPI_MakeOffset,
         "BRepOffsetAPI_MakeOffsetShape": BRepOffsetAPI_MakeOffsetShape,
         "BRepOffsetAPI_MakePipe": BRepOffsetAPI_MakePipe,
         "BRepOffsetAPI_MakePipeShell": BRepOffsetAPI_MakePipeShell,
         "BRepOffsetAPI_MakeThickSolid": BRepOffsetAPI_MakeThickSolid,
+        "BRepOffsetAPI_NormalProjection": BRepOffsetAPI_NormalProjection,
         "BRepOffsetAPI_ThruSections": BRepOffsetAPI_ThruSections,
         "BRepPrimAPI_MakeBox": BRepPrimAPI_MakeBox,
         "BRepPrimAPI_MakeCone": BRepPrimAPI_MakeCone,
@@ -179,6 +184,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepPrimAPI_MakePrism": BRepPrimAPI_MakePrism,
         "BRepPrimAPI_MakeRevol": BRepPrimAPI_MakeRevol,
         "BRepPrimAPI_MakeSphere": BRepPrimAPI_MakeSphere,
+        "BRepProj_Projection": BRepProj_Projection,
         "BRepTools": BRepTools,
         "BRepTools_WireExplorer": BRepTools_WireExplorer,
         "BRepTopAdaptor_FClass2d": BRepTopAdaptor_FClass2d,
@@ -188,14 +194,17 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "GC_MakeCircle": GC_MakeCircle,
         "GCPnts_AbscissaPoint": GCPnts_AbscissaPoint,
         "GProp_GProps": GProp_GProps,
+        "GProp_PGProps": GProp_PGProps,
         "Geom2d_Line": Geom2d_Line,
         "GeomAPI_Interpolate": GeomAPI_Interpolate,
         "GeomAPI_PointsToBSpline": GeomAPI_PointsToBSpline,
         "GeomAPI_ProjectPointOnCurve": GeomAPI_ProjectPointOnCurve,
         "GeomAPI_ProjectPointOnSurf": GeomAPI_ProjectPointOnSurf,
+        "GeomAbs_JoinType": GeomAbs_JoinType,
         "GeomAbs_Shape": GeomAbs_Shape,
         "Geom_ConicalSurface": Geom_ConicalSurface,
         "Geom_CylindricalSurface": Geom_CylindricalSurface,
+        "Geom_OffsetCurve": Geom_OffsetCurve,
         "Precision": Precision,
         "ShapeAnalysis_FreeBounds": ShapeAnalysis_FreeBounds,
         "ShapeFix_Shape": ShapeFix_Shape,

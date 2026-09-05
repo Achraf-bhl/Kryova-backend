@@ -50,6 +50,30 @@ def _line(origin: tuple[float, float, float], direction: tuple[float, float, flo
     )
 
 
+def signed_hit_distances(
+    shape: Any,
+    origin: tuple[float, float, float],
+    direction: tuple[float, float, float],
+) -> list[float]:
+    """Every intersection along the whole line, signed, nearest to the origin first.
+
+    Both halves, because `gp_Lin` is a line and some callers want it that way: projecting
+    a point onto a surface along a direction is a *line* question, not a ray one — the
+    surface may sit behind the point, and answering "it misses" because of a sign would
+    be wrong in a way nothing downstream could detect.
+    """
+    intersector = symbol("BRepIntCurveSurface_Inter")()
+    intersector.Init(shape, _line(origin, direction), _INTERSECTION_TOLERANCE)
+
+    distances: list[float] = []
+    while intersector.More():
+        distances.append(float(intersector.W()))
+        intersector.Next()
+
+    distances.sort(key=abs)
+    return distances
+
+
 def forward_hit_distances(
     shape: Any,
     origin: tuple[float, float, float],
@@ -64,18 +88,13 @@ def forward_hit_distances(
     `app.kernel.interrogation.unit_vector`, which refuses zero with a message about what
     a pull direction is for.
     """
-    intersector = symbol("BRepIntCurveSurface_Inter")()
-    intersector.Init(shape, _line(origin, direction), _INTERSECTION_TOLERANCE)
-
-    distances: list[float] = []
-    while intersector.More():
-        parameter = float(intersector.W())
-        if parameter > minimum_mm:
-            distances.append(parameter)
-        intersector.Next()
-
-    distances.sort()
-    return distances
+    ahead = [
+        distance
+        for distance in signed_hit_distances(shape, origin, direction)
+        if distance > minimum_mm
+    ]
+    ahead.sort()
+    return ahead
 
 
 def first_hit_distance(
@@ -138,4 +157,5 @@ __all__ = [
     "forward_hit_distances",
     "is_blocked",
     "opposite",
+    "signed_hit_distances",
 ]

@@ -29,27 +29,31 @@ What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its ow
 - **the rest of the trimming family** — `catia_extrapolate`, `catia_sew_surface`, and
   `propagation` on `catia_extract` / `catia_boundary`. Split, trim, untrim, disassemble
   and healing shipped 2026-09-05;
-- **the derived wireframe curves** — `catia_curve_{project,parallel,offset_3d,combine,
-  connect,corner,spiral,reflect_line}`, plus `catia_plane_{normal_to_curve,
-  tangent_to_surface,mean}` and `catia_planes_between`. The drawn curves landed
-  2026-09-05 (helix, circle, polyline, spline) with section, intersection and extremum,
-  and the anchors with them (`catia_point_{on_curve,on_surface,centre}`,
-  `catia_line_{between,direction,normal,tangent}`), so a 3D path and the points that
-  position it are both expressible now; what is left is the curves *derived from
-  surfaces*;
+- **the last four derived curves** — `catia_curve_{connect,corner,spiral,reflect_line}`.
+  Everything else in the wireframe family shipped on 2026-09-05: the drawn curves (helix,
+  circle, polyline, spline) with section, intersection and extremum, the anchors
+  (`catia_point_{on_curve,on_surface,centre}`, `catia_line_{between,direction,normal,
+  tangent}`), and the associative ones (`catia_curve_{project,parallel,offset_3d,
+  combine}`, `catia_plane_{normal_to_curve,tangent_to_surface,mean}`,
+  `catia_planes_between`). `connect` and `corner` are joins between two curves with a
+  stated continuity; `spiral` is the one curve here OCCT has no analytic form for, so it
+  will be an approximation that must say so; `reflect_line` is what unblocks
+  `catia_draft` in reflect-line mode;
 - `catia_draft` in `reflect_line` mode (needs `catia_curve_reflect_line`);
-- a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs a *2D* profile offset in the
-  sketcher — the surface offset that shipped today answers a different question);
+- a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs the profile offset into two
+  walls and the inner sweep subtracted from the outer — `catia_curve_parallel` supplies
+  the offset now, so what is left is the sweeping and the cut);
 - `control="reference_surface"` on a swept feature (OCCT takes a surface as a sweep
   reference only when every spine edge already lies on one of its faces, so the spine must
   be *derived from* the surface);
 - the surface half of `catia_thickness` (offsetting a curved face rather than sweeping a
   planar one along its normal).
 
-Three of those reasons were **corrected** today rather than inherited: `up_to_surface`,
+Five of those reasons have been **corrected** rather than inherited: `up_to_surface`,
 `thick=true` and `reference_surface` all said they were waiting for constructed surfaces,
-which now exist. A stale "blocked on X" outlives X and sends the next reader to rebuild
-something that is already there.
+which now exist, and `thick=true` plus `catia_curve_spline(support=)` were corrected again
+once `catia_curve_parallel` and `catia_curve_project` landed. A stale "blocked on X"
+outlives X and sends the next reader to rebuild something that is already there.
 
 Hardware-blocked and **not** counted against the star: the CATIA-seat halves of E1's and
 E3's conformance runs need a Windows seat.
@@ -64,6 +68,33 @@ measurement vocabulary a visual check would assert against already exists.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E2 → **2.6 continues: the associative curves and planes**.
+  `catia_curve_{project,parallel,offset_3d,combine}`,
+  `catia_plane_{normal_to_curve,tangent_to_surface,mean}` and `catia_planes_between`.
+  Coverage 94 → **102/201**. `plane_normal_to_curve` is the one that earns the rest: it
+  places a sweep profile square to its path, so the helix built earlier is now something
+  a section can be swept along, and the plane's normal carries the lead angle
+  `atan(p/2πr)` exactly. Nine guards, every one verified by breaking it and watching the
+  test fail. Three worth naming. **A face is a trimmed piece of an unbounded surface** —
+  a live defect the probe found in already-shipped code: `GeomAPI_ProjectPointOnSurf`
+  answers for the surface a face was cut out of, so a point beside a cylinder projected
+  onto the *infinite plane* of its top disc, 20 mm past the rim and nearer than the wall,
+  and `catia_point_on_surface`, `catia_line_normal` and the new tangent plane all agreed
+  on a place that is not on the part. `closest_on_surface` now measures against the real
+  boundary. **An offset has a side and OCCT does not take it from the argument given** —
+  it reads the wire's own winding and never sees the named support; the rule is stated
+  here, measured on the built result and mirrored when it went the other way, so the same
+  L offsets 77.854 mm on a support facing up and 60 mm on one facing down. The first
+  attempt at that guard did not bite, because OCCT already normalises *closed* wires — the
+  winding test was testing nothing, and the discriminating case is the support, not the
+  curve. **A best-fit plane is an inertia question asked backwards**: the principal axis
+  of greatest moment is the covariance's smallest eigenvector, so OCCT computes it exactly
+  and the kernel still needs no numpy (checked against `numpy.linalg.svd` to the last
+  digit). Points on one line are refused — every plane through a line fits equally well.
+  A projected curve is an OCCT B-spline fit (~1 part in 10⁷) and the docstring and the
+  test tolerance both say so; `curve_combine` with no directions extrudes each view along
+  its own plane, checked against the Steinmetz curve (two ellipses, semi-axes r and r√2).
 
 - **2026-09-05** — E2 → **2.6 continues: the derived anchors**.
   `catia_point_{on_curve,on_surface,centre}` and

@@ -27,7 +27,9 @@ from app.kernel.occt.reference import (
     ReferencePlane,
     ReferencePoint,
     axis_frame,
+    frame_from_normal,
     frame_from_points,
+    least_spread_axis,
     offset_frame,
     rotated_frame,
 )
@@ -35,6 +37,10 @@ from app.kernel.occt.reference import (
 PLANE_OFFSET = "catia_plane_offset"
 PLANE_THROUGH_POINTS = "catia_plane_through_points"
 PLANE_ANGLE = "catia_plane_angle"
+PLANE_NORMAL_TO_CURVE = "catia_plane_normal_to_curve"
+PLANE_TANGENT_TO_SURFACE = "catia_plane_tangent_to_surface"
+PLANE_MEAN = "catia_plane_mean"
+PLANES_BETWEEN = "catia_planes_between"
 POINT_AT = "catia_point_at"
 POINT_BETWEEN = "catia_point_between"
 POINT_ON_CURVE = "catia_point_on_curve"
@@ -51,6 +57,18 @@ _WORLD_AXES: dict[str, tuple[float, float, float]] = {
     "Y": (0.0, 1.0, 0.0),
     "Z": (0.0, 0.0, 1.0),
 }
+
+#: Below this ratio of least to greatest moment, a point set is treated as lying on one
+#: line. Relative rather than absolute — see `reference.least_spread_axis`.
+_COLLINEAR_DEFINITION = 1e-9
+
+#: How far from parallel two planes may face and still have one spacing between them, in
+#: radians. About 6 arc-seconds: tight enough that a real angle is caught, loose enough
+#: that a plane built by an offset chain is not refused for its own rounding.
+_PARALLEL_TOLERANCE_RAD = 3e-5
+
+#: Below this the two planes are the same plane and there is nothing between them, in mm.
+_COINCIDENT_TOLERANCE_MM = 1e-9
 
 
 def plane_offset(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -103,17 +121,21 @@ def plane_offset(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
     }
 
 
-def _reference_frame(document: Any, reference: str) -> Any:
+def _reference_frame(document: Any, reference: Any, *, tool: str = PLANE_OFFSET) -> Any:
     """The frame of an origin plane, a constructed plane, or a named planar face.
 
     The third of those used to be refused with a message blaming Phase 2.2. That phase
     shipped, so `catia_plane_offset(reference="slab#top", distance_mm=5)` now means what
     it reads as — a plane 5 mm above the slab's top face — and goes through the one
     resolver in `app.kernel.occt.elements` that every "which plane" argument uses.
+
+    `tool` is passed through so the refusal names the operation the caller actually ran.
+    A message blaming `catia_plane_offset` for an argument of `catia_planes_between` sends
+    the reader to a call that is not in their design.
     """
     from app.kernel.occt.elements import plane_frame
 
-    return plane_frame(document, reference, tool=PLANE_OFFSET)
+    return plane_frame(document, reference, tool=tool)
 
 
 # -- points -------------------------------------------------------------------
@@ -263,6 +285,213 @@ def _hinge_axis(
         f"these axis systems: {known} (name an axis of one as 'system.x'). Hinging about "
         "an edge of the part needs the feature#selector syntax (Phase 2.2)",
     )
+
+
+# -- planes derived from geometry ------------------------------------------------
+#
+# The associative planes: each is defined by a curve or a surface rather than typed as an
+# offset, so it follows what it was taken from. `plane_normal_to_curve` is the one that
+# unlocks the most — it is what places a sweep profile square to its path, which is the
+# first step of a pipe, a cable run or a swept rib, and it is why the helix that landed
+# earlier is now something a section can actually be swept along.
+
+
+def plane_normal_to_curve(
+    context: BuildContext, arguments: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """A plane perpendicular to a curve, at a point on it or at its start.
+
+    **The normal is the tangent at that point**, so the plane cuts the curve square. Given
+    no point it stands at the curve's start — the end that runs first in the curve's own
+    order, which for a drawn curve is the first point the design named.
+    """
+    from app.kernel.occt.operations.curves import (
+        closest_curve_tangent,
+        start_of_curve,
+    )
+    from app.kernel.occt.operations.surfaces import named_geometry
+
+    document = context.require_document()
+    named = arguments.get("curve")
+    curve = named_geometry(document, named, tool=PLANE_NORMAL_TO_CURVE, argument="curve")
+
+    at = arguments.get("point")
+    if at is None:
+        origin, tangent = start_of_curve(curve, tool=PLANE_NORMAL_TO_CURVE)
+        where = f"the start of {named}"
+    else:
+        from app.kernel.occt.operations.curves import _point_named
+
+        wanted = _point_named(document, at, tool=PLANE_NORMAL_TO_CURVE, argument="point")
+        origin, tangent = closest_curve_tangent(curve, wanted, tool=PLANE_NORMAL_TO_CURVE)
+        where = f"{at} on {named}"
+
+    plane = ReferencePlane(
+        name=feature_name(arguments, "plane"),
+        frame=frame_from_normal(origin, tangent),
+        derived_from=str(named),
+        description=f"perpendicular to {named} at {where}",
+    )
+    document.add_plane(plane)
+    return {"feature": plane.name, **plane.to_dict(), "planes": document.plane_names()}
+
+
+def plane_tangent_to_surface(
+    context: BuildContext, arguments: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """A plane touching a surface at a point on it — somewhere to sketch on a curved wall.
+
+    The plane sits at the point **projected onto the surface**, not at the point as given:
+    an anchor a millimetre off the wall would otherwise put the plane a millimetre off it
+    too, and a boss built there would float. Same rule as `catia_point_on_surface`, and it
+    matters more here because a plane hides the gap.
+    """
+    from app.kernel.occt.operations.curves import _point_named, closest_face_normal
+    from app.kernel.occt.operations.surfaces import named_geometry
+
+    document = context.require_document()
+    named = arguments.get("surface")
+    surface = named_geometry(
+        document, named, tool=PLANE_TANGENT_TO_SURFACE, argument="surface"
+    )
+    at = _point_named(
+        document, arguments.get("point"), tool=PLANE_TANGENT_TO_SURFACE, argument="point"
+    )
+
+    _, foot, normal = closest_face_normal(surface, at, tool=PLANE_TANGENT_TO_SURFACE)
+    plane = ReferencePlane(
+        name=feature_name(arguments, "plane"),
+        frame=frame_from_normal(foot, normal),
+        derived_from=str(named),
+        description=f"tangent to {named} at {arguments.get('point')}",
+    )
+    document.add_plane(plane)
+    return {"feature": plane.name, **plane.to_dict(), "planes": document.plane_names()}
+
+
+def plane_mean(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The best-fit plane through a set of points — a working plane out of measured data.
+
+    Least squares, computed exactly by OCCT rather than fitted iteratively: see
+    `reference.least_spread_axis` for why a principal axis of inertia answers a covariance
+    question. Through exactly three points it reproduces `catia_plane_through_points`,
+    because three points have a plane and a fit through them has no residual to trade.
+
+    **The payload says how far off the worst point is.** A mean plane through points that
+    are not coplanar is an average, and an average presented without its spread reads as a
+    fact — an engineer who cannot see that a point stands 4 mm off it will build to it as
+    if nothing did.
+    """
+    document = context.require_document()
+    names = arguments.get("points")
+    if not isinstance(names, (list, tuple)) or len(names) < 3:
+        raise GeometryError(
+            f"{PLANE_MEAN} fits a plane through at least three points, got {names!r}. "
+            "Two points define a line, not a plane."
+        )
+
+    positions = [document.point(str(name)).position for name in names]
+    properties = symbol("GProp_PGProps")()
+    for position in positions:
+        properties.AddPoint(symbol("gp_Pnt")(*position))
+
+    normal, definition = least_spread_axis(properties)
+    if definition < _COLLINEAR_DEFINITION:
+        raise GeometryError(
+            f"{PLANE_MEAN} was given {len(positions)} points that lie on one line, and a "
+            "line has no plane — every plane through it fits equally well. Move one of "
+            "them off the line through the others."
+        )
+
+    centre = properties.CentreOfMass()
+    origin = (centre.X(), centre.Y(), centre.Z())
+    frame = frame_from_normal(origin, normal)
+
+    deviation = max(
+        abs(sum((position[i] - origin[i]) * normal[i] for i in range(3)))
+        for position in positions
+    )
+    plane = ReferencePlane(
+        name=feature_name(arguments, "plane"),
+        frame=frame,
+        derived_from=", ".join(str(name) for name in names),
+        description=(
+            f"best fit through {len(positions)} points, worst of them {deviation:.4g} mm off"
+        ),
+    )
+    document.add_plane(plane)
+    return {
+        "feature": plane.name,
+        **plane.to_dict(),
+        "deviation_mm": deviation,
+        "planes": document.plane_names(),
+    }
+
+
+def planes_between(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A run of equally spaced planes between two others — the setup for a sectioning study.
+
+    **`count` planes strictly between the two**, evenly spaced, neither end included: the
+    two ends already exist and naming them again would give the design two names for one
+    plane. So `count: 3` between planes 0 mm and 40 mm apart lands them at 10, 20 and 30.
+
+    Non-parallel planes are **refused**. Two planes that meet have no single spacing
+    between them — the gap depends on where you measure it — so the run would be evenly
+    spaced only along the line the implementation happened to walk.
+    """
+    document = context.require_document()
+    first = _reference_frame(document, arguments.get("first"), tool=PLANES_BETWEEN)
+    second = _reference_frame(document, arguments.get("second"), tool=PLANES_BETWEEN)
+
+    raw = arguments.get("count")
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw < 1:
+        raise GeometryError(
+            f"{PLANES_BETWEEN} needs count as a whole number of planes to create, at "
+            f"least 1; got {raw!r}."
+        )
+
+    normal = first.Direction()
+    other = second.Direction()
+    if not normal.IsParallel(other, _PARALLEL_TOLERANCE_RAD):
+        raise GeometryError(
+            f"{PLANES_BETWEEN} needs two parallel planes, and "
+            f"{arguments.get('first')!r} and {arguments.get('second')!r} meet at an "
+            "angle. Two planes that cross have no single distance between them."
+        )
+
+    here, there = first.Location(), second.Location()
+    gap = (
+        (there.X() - here.X()) * normal.X()
+        + (there.Y() - here.Y()) * normal.Y()
+        + (there.Z() - here.Z()) * normal.Z()
+    )
+    if abs(gap) < _COINCIDENT_TOLERANCE_MM:
+        raise GeometryError(
+            f"{PLANES_BETWEEN} was given two planes in the same place, so there is no "
+            "space between them to fill. Offset one of them first."
+        )
+
+    step = gap / (raw + 1)
+    made = []
+    for index in range(1, raw + 1):
+        plane = ReferencePlane(
+            name=f"{feature_name(arguments, 'between')}.{index}",
+            frame=offset_frame(first, step * index),
+            derived_from=f"{arguments.get('first')}, {arguments.get('second')}",
+            description=(
+                f"{index} of {raw} between {arguments.get('first')} and "
+                f"{arguments.get('second')}, {step * index:.4g} mm from the first"
+            ),
+        )
+        document.add_plane(plane)
+        made.append(plane)
+
+    return {
+        "feature": made[0].name,
+        "planes_created": [plane.name for plane in made],
+        "spacing_mm": abs(step),
+        "planes": document.plane_names(),
+    }
 
 
 # -- axis systems ---------------------------------------------------------------
@@ -522,8 +751,12 @@ def _optional_vector(
 
 __all__ = [
     "AXIS_SYSTEM",
+    "PLANES_BETWEEN",
     "PLANE_ANGLE",
+    "PLANE_MEAN",
+    "PLANE_NORMAL_TO_CURVE",
     "PLANE_OFFSET",
+    "PLANE_TANGENT_TO_SURFACE",
     "PLANE_THROUGH_POINTS",
     "POINT_AT",
     "POINT_BETWEEN",
@@ -532,8 +765,12 @@ __all__ = [
     "POINT_ON_SURFACE",
     "axis_system",
     "plane_angle",
+    "plane_mean",
+    "plane_normal_to_curve",
     "plane_offset",
+    "plane_tangent_to_surface",
     "plane_through_points",
+    "planes_between",
     "point_at",
     "point_between",
     "point_centre",

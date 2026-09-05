@@ -334,10 +334,11 @@ def _swept_feature(
     if arguments.get("thick"):
         raise OperationNotSupported(
             f"{tool} with thick=true",
-            "A thin-walled sweep needs the *sketch profile* offset into two walls, which "
-            "is a 2D offset in the sketcher — `catia_surface_offset` offsets a built "
-            "surface and does not answer it. Sweep the wall's own closed section "
-            "instead, or sweep the solid and hollow it with catia_shell",
+            "A thin-walled sweep needs the *profile* offset into two walls and the inner "
+            "sweep subtracted from the outer. `catia_curve_parallel` now offsets a curve "
+            "within its plane, which is the missing half, but the two walls still have to "
+            "be swept and cut here rather than by the caller. Sweep the wall's own closed "
+            "section instead, or sweep the solid and hollow it with catia_shell",
         )
 
     profile = _sketch_named(document, arguments, "profile", tool)

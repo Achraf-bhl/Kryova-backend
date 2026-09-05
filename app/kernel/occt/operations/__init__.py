@@ -58,6 +58,10 @@ HANDLERS: Final[dict[str, Handler]] = {
     reference_ops.PLANE_OFFSET: reference_ops.plane_offset,
     reference_ops.PLANE_THROUGH_POINTS: reference_ops.plane_through_points,
     reference_ops.PLANE_ANGLE: reference_ops.plane_angle,
+    reference_ops.PLANE_NORMAL_TO_CURVE: reference_ops.plane_normal_to_curve,
+    reference_ops.PLANE_TANGENT_TO_SURFACE: reference_ops.plane_tangent_to_surface,
+    reference_ops.PLANE_MEAN: reference_ops.plane_mean,
+    reference_ops.PLANES_BETWEEN: reference_ops.planes_between,
     reference_ops.AXIS_SYSTEM: reference_ops.axis_system,
     # sketching
     sketcher.CREATE: sketcher.sketch_create,
@@ -109,6 +113,10 @@ HANDLERS: Final[dict[str, Handler]] = {
     curves.LINE_DIRECTION: curves.line_direction,
     curves.LINE_NORMAL: curves.line_normal,
     curves.LINE_TANGENT: curves.line_tangent,
+    curves.PROJECT: curves.curve_project,
+    curves.PARALLEL: curves.curve_parallel,
+    curves.OFFSET_3D: curves.curve_offset_3d,
+    curves.COMBINE: curves.curve_combine,
     # surfaces, and the two ways one becomes material
     surfaces.EXTRUDE: surfaces.surface_extrude,
     surfaces.REVOLVE: surfaces.surface_revolve,

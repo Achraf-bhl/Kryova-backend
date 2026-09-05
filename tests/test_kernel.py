@@ -2346,3 +2346,288 @@ class TestASkinBecomesMaterialOnlyWhenAsked:
             runner(  # type: ignore[operator]
                 "catia_extract", {"elements": ["side"], "propagation": "tangent"}
             )
+
+
+class TestCuttingSurfacesAgainstEachOther:
+    """Split, trim, untrim, disassemble and heal — the operations that shape a skin.
+
+    Every one of these has to answer "which piece did you mean", and CATIA answers it by
+    where the user clicked. There is no click here, so the rule is written down and these
+    tests are what hold it: pieces are ordered by the signed distance of their centre from
+    the cutting plane, `first` is the side its normal points away from. A rule that was
+    only *usually* right would pass a screenshot and fail a regeneration.
+    """
+
+    @staticmethod
+    def _patch(runner: object, name: str, corners: list[tuple[float, float]], plane: str = "XY") -> None:
+        """A flat patch of skin on a plane, from a closed contour."""
+        outline = f"{name}_outline"
+        runner("catia_sketch_create", {"support": plane, "name": outline})  # type: ignore[operator]
+        for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+            runner("catia_sketch_line", {"sketch": outline, "start": start, "end": end})  # type: ignore[operator]
+        runner("catia_surface_fill", {"boundary": [outline], "name": name})  # type: ignore[operator]
+
+    @classmethod
+    def _panel_and_knife(cls) -> object:
+        """A 40 × 40 patch on XY, and a big planar knife standing at x = 15."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Cut"})
+        cls._patch(runner, "panel", [(0.0, 0.0), (40.0, 0.0), (40.0, 40.0), (0.0, 40.0)])
+        runner("catia_plane_offset", {"reference": "YZ", "distance_mm": 15.0, "name": "cut_at"})
+        cls._patch(
+            runner,
+            "knife",
+            [(-50.0, -50.0), (50.0, -50.0), (50.0, 50.0), (-50.0, 50.0)],
+            plane="cut_at",
+        )
+        return runner
+
+    def test_which_side_survives_is_the_side_the_rule_names(self) -> None:
+        """40 mm cut at 15 gives 600 and 1000, and which is which is not a coin toss."""
+        for keep, expected in (("first", 600.0), ("second", 1000.0), ("both", 1600.0)):
+            runner = self._panel_and_knife()
+
+            runner(  # type: ignore[operator]
+                "catia_split",
+                {"element": "panel", "cutting": "knife", "keep": keep, "name": "half"},
+            )
+
+            measured = runner("catia_measure_item", {"element": "half"})  # type: ignore[operator]
+            assert measured["area_mm2"] == pytest.approx(expected, abs=TOL), keep
+
+    def test_a_side_takes_every_cell_on_it_not_just_one(self) -> None:
+        """Two panels joined into one element and cut together make four cells, two a
+        side. Keeping the furthest piece rather than every piece on that side would
+        silently drop half the material the caller asked to keep."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Pair"})
+        self._patch(runner, "near", [(0.0, 0.0), (40.0, 0.0), (40.0, 10.0), (0.0, 10.0)])
+        self._patch(runner, "far", [(0.0, 20.0), (40.0, 20.0), (40.0, 30.0), (0.0, 30.0)])
+        runner(
+            "catia_join",
+            {"elements": ["near", "far"], "check_connexity": False, "name": "both"},
+        )
+        runner("catia_plane_offset", {"reference": "YZ", "distance_mm": 15.0, "name": "cut_at"})
+        self._patch(
+            runner,
+            "knife",
+            [(-50.0, -50.0), (50.0, -50.0), (50.0, 50.0), (-50.0, 50.0)],
+            plane="cut_at",
+        )
+
+        runner(
+            "catia_split",
+            {"element": "both", "cutting": "knife", "keep": "first", "name": "stubs"},
+        )
+
+        # Two strips 15 mm long and 10 mm wide, not one.
+        measured = runner("catia_measure_item", {"element": "stubs"})
+        assert measured["area_mm2"] == pytest.approx(2 * 15.0 * 10.0, abs=TOL)
+
+    def test_a_cut_that_misses_is_refused_rather_than_returned_whole(self) -> None:
+        """The quiet failure: a cutter that does not reach leaves the element untouched,
+        and a split that returned it would report success on a part nobody cut."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Miss"})
+        self._patch(runner, "panel", [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)])
+        runner("catia_plane_offset", {"reference": "YZ", "distance_mm": 90.0, "name": "far_off"})
+        self._patch(
+            runner,
+            "knife",
+            [(-50.0, -50.0), (50.0, -50.0), (50.0, 50.0), (-50.0, 50.0)],
+            plane="far_off",
+        )
+
+        with pytest.raises(GeometryError, match="one piece"):
+            runner("catia_split", {"element": "panel", "cutting": "knife", "name": "half"})
+
+    @classmethod
+    def _split_cone(cls) -> object:
+        """A lofted frustum cut level at half height — both halves have a closed form."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Cone"})
+        runner("catia_sketch_create", {"support": "XY", "name": "big"})
+        runner("catia_sketch_circle", {"sketch": "big", "diameter_mm": 20.0})
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 20.0, "name": "top"})
+        runner("catia_sketch_create", {"support": "top", "name": "small"})
+        runner("catia_sketch_circle", {"sketch": "small", "diameter_mm": 10.0})
+        runner("catia_surface_loft", {"sections": ["big", "small"], "name": "cone"})
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 10.0, "name": "mid"})
+        cls._patch(
+            runner,
+            "knife",
+            [(-50.0, -50.0), (50.0, -50.0), (50.0, 50.0), (-50.0, 50.0)],
+            plane="mid",
+        )
+        return runner
+
+    def test_splitting_a_curved_skin_gives_both_frustums(self) -> None:
+        """Radius 10 at the bottom, 5 at the top, 7.5 at the cut: the lower band is
+        π(10 + 7.5)·slant and the upper π(7.5 + 5)·slant, with the same slant."""
+        slant = math.sqrt(10.0**2 + 2.5**2)
+
+        for keep, radii in (("first", (10.0, 7.5)), ("second", (7.5, 5.0))):
+            runner = self._split_cone()
+
+            runner(  # type: ignore[operator]
+                "catia_split",
+                {"element": "cone", "cutting": "knife", "keep": keep, "name": "band"},
+            )
+
+            measured = runner("catia_measure_item", {"element": "band"})  # type: ignore[operator]
+            assert measured["area_mm2"] == pytest.approx(
+                math.pi * sum(radii) * slant, abs=1e-6
+            ), keep
+
+    def test_untrim_restores_the_surface_the_cut_took_away(self) -> None:
+        """The cut half remembers the surface it was cut from, and untrim brings the
+        whole of it back — the same 971.48 mm² the loft had before anything touched it."""
+        runner = self._split_cone()
+        whole = runner("catia_measure_item", {"element": "cone"})["area_mm2"]  # type: ignore[operator]
+        runner(  # type: ignore[operator]
+            "catia_split",
+            {"element": "cone", "cutting": "knife", "keep": "first", "name": "band"},
+        )
+
+        runner("catia_untrim", {"surface": "band", "name": "restored"})  # type: ignore[operator]
+
+        measured = runner("catia_measure_item", {"element": "restored"})  # type: ignore[operator]
+        assert measured["area_mm2"] == pytest.approx(whole, abs=1e-9)
+
+    def test_untrimming_an_endless_surface_is_refused_not_built(self) -> None:
+        """The trap this operation is built around. A plane's parameter range is
+        infinite, and OCCT does **not** refuse it: `MakeFace` reports success and hands
+        back a face of area 8 × 10¹⁰⁰, which then flows into a mass, a bounding box and
+        any assertion reading them, looking like a measurement the whole way."""
+        runner = self._panel_and_knife()
+
+        with pytest.raises(GeometryError, match="runs to infinity"):
+            runner("catia_untrim", {"surface": "knife", "name": "endless"})  # type: ignore[operator]
+
+    def test_disassemble_numbers_the_pieces_after_the_element_they_came_from(self) -> None:
+        """The operation has no `name` argument because it makes several elements, so the
+        names are derived — and derived from the original, which is the only thing that
+        says where they came from."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Apart"})
+        self._patch(runner, "near", [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)])
+        self._patch(runner, "far", [(50.0, 0.0), (60.0, 0.0), (60.0, 10.0), (50.0, 10.0)])
+        runner(
+            "catia_join",
+            {"elements": ["near", "far"], "check_connexity": False, "name": "both"},
+        )
+
+        result = runner("catia_disassemble", {"element": "both"})
+
+        assert result["disassembled"] == ["both.1", "both.2"]
+        for name in result["disassembled"]:
+            assert runner("catia_measure_item", {"element": name})["area_mm2"] == pytest.approx(
+                100.0, abs=TOL
+            )
+
+    def test_healing_closes_the_gap_join_refuses_and_connect_names_its_size(self) -> None:
+        """The pair that makes the analysis worth running: `connect` reports the smallest
+        tolerance that would join the pieces, which is exactly the argument `catia_healing`
+        takes. An analysis that stopped at "there is a gap" would leave the engineer
+        doubling numbers until something worked."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Gap"})
+        self._patch(runner, "left", [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)])
+        self._patch(runner, "right", [(10.05, 0.0), (20.05, 0.0), (20.05, 10.0), (10.05, 10.0)])
+
+        with pytest.raises(GeometryError, match="2 separate pieces"):
+            runner("catia_join", {"elements": ["left", "right"], "name": "sewn"})
+
+        report = runner("catia_surface_analysis", {"kind": "connect", "elements": ["left", "right"]})
+        assert report["pieces"] == 2
+        assert report["gap_to_close_mm"] == pytest.approx(0.05, abs=1e-9)
+
+        healed = runner(
+            "catia_healing",
+            {
+                "elements": ["left", "right"],
+                "merging_distance_mm": report["gap_to_close_mm"] * 2,
+                "name": "skin",
+            },
+        )
+        assert healed["pieces"] == 1
+
+    def test_healing_without_a_stated_gap_is_refused(self) -> None:
+        """A heal that fell back to join's tight tolerance would report success and close
+        nothing, which is the one outcome worse than refusing."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "NoGap"})
+        self._patch(runner, "left", [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)])
+        self._patch(runner, "right", [(10.05, 0.0), (20.05, 0.0), (20.05, 10.0), (10.05, 10.0)])
+
+        with pytest.raises(GeometryError, match="merging_distance_mm"):
+            runner("catia_healing", {"elements": ["left", "right"], "name": "skin"})
+
+    def test_trimming_two_crossing_panels_keeps_a_side_of_each(self) -> None:
+        """The difference from split, stated as a number: split discards one side of one
+        element, trim keeps a chosen part of both and sews them into one."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Corner"})
+        # Flat on XY, 40 × 40 about the origin; upright on ZX, 40 wide × 20 tall.
+        self._patch(runner, "flat", [(-20.0, -20.0), (20.0, -20.0), (20.0, 20.0), (-20.0, 20.0)])
+        self._patch(
+            runner,
+            "upright",
+            [(-10.0, -20.0), (10.0, -20.0), (10.0, 20.0), (-10.0, 20.0)],
+            plane="ZX",
+        )
+
+        runner("catia_trim", {"elements": ["flat", "upright"], "name": "corner"})
+
+        # Half of each: 40 × 20 of the flat panel, 40 × 10 of the upright one.
+        measured = runner("catia_measure_item", {"element": "corner"})
+        assert measured["area_mm2"] == pytest.approx(40.0 * 20.0 + 40.0 * 10.0, abs=TOL)
+
+    def test_a_cut_by_a_non_planar_element_refuses_to_name_a_side(self) -> None:
+        """`first` and `second` are defined against a plane. A cutter that has none has no
+        sides, and answering anyway would be right about half the time."""
+        runner = self._split_cone()
+        runner(  # type: ignore[operator]
+            "catia_plane_offset", {"reference": "XY", "distance_mm": 5.0, "name": "low"}
+        )
+
+        with pytest.raises(GeometryError, match="no single plane"):
+            runner(  # type: ignore[operator]
+                "catia_split",
+                {"element": "knife", "cutting": "cone", "keep": "first", "name": "bit"},
+            )
+
+    def test_a_surface_analysis_runs_on_the_surface_not_the_part(self) -> None:
+        """The scans already exist and carry their own provenance — this points them at a
+        named surface rather than growing a second copy that would drift."""
+        runner = self._split_cone()
+
+        report = runner("catia_surface_analysis", {"kind": "curvature", "elements": ["cone"]})  # type: ignore[operator]
+
+        assert report["analysis_kind"] == "curvature"
+        assert report["elements"] == ["cone"]
+        assert "minimum_convex_radius_mm" in report
+
+    def test_a_rendered_analysis_says_it_belongs_to_the_viewer(self) -> None:
+        runner = self._split_cone()
+
+        with pytest.raises(OperationNotSupported, match="picture rather than a number"):
+            runner(  # type: ignore[operator]
+                "catia_surface_analysis", {"kind": "isophote", "elements": ["cone"]}
+            )

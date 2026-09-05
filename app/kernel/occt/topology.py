@@ -131,30 +131,38 @@ def has_solid(shape: Any) -> bool:
     return bool(explorer.More())
 
 
-def connected_pieces(shape: Any) -> int:
-    """How many disconnected pieces a shape is in.
+def domains(shape: Any) -> list[Any]:
+    """A shape's disconnected pieces, as separate shapes.
 
-    A sewing returns **one** shape whatever happened, and what says whether its parts
-    actually meet is its *type*: OCCT promotes touching faces into a SHELL and leaves
-    untouched ones side by side in a COMPOUND. So a compound's direct children are the
-    pieces, and anything else is a single piece.
+    A sewing or a split returns **one** shape whatever happened, and what says whether
+    its parts actually meet is its *type*: OCCT promotes touching faces into a SHELL and
+    leaves untouched ones side by side in a COMPOUND. So a compound's direct children are
+    the pieces, and anything else is a single piece.
 
     `explore` cannot answer this. It flattens, so two disconnected shells and one shell
     made of two faces are indistinguishable through it — which is how a connexity check
     written as a shell count reported "0 pieces" for two sheets that never met.
-
-    Counted rather than returned as a boolean because "left 3 pieces" is a diagnosis and
-    "not connected" is a shrug.
     """
     require()
     if shape.ShapeType() != _enum(COMPOUND):
-        return 1
+        return [shape]
     iterator = symbol("TopoDS_Iterator")(shape)
-    pieces = 0
+    pieces: list[Any] = []
     while iterator.More():
-        pieces += 1
+        pieces.append(iterator.Value())
         iterator.Next()
     return pieces
+
+
+def connected_pieces(shape: Any) -> int:
+    """How many disconnected pieces a shape is in.
+
+    Counted rather than returned as a boolean because "left 3 pieces" is a diagnosis and
+    "not connected" is a shrug. Defined as the length of `domains` rather than counted
+    separately: the count and the pieces are the same question asked twice, and two
+    implementations of it would eventually disagree about a shape nobody was looking at.
+    """
+    return len(domains(shape))
 
 
 def compound(shapes: Iterable[Any]) -> Any:
@@ -220,6 +228,7 @@ __all__ = [
     "compound",
     "connected_pieces",
     "count",
+    "domains",
     "edges",
     "endpoints",
     "explore",

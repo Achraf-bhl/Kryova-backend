@@ -26,11 +26,14 @@ What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its ow
 - **steered surfaces** — `catia_surface_loft` with `guides` or a `spine` (a swept
   construction with rails, not a section loft), and `catia_surface_fill` with `tangent` or
   `curvature` continuity (each boundary edge has to be paired with the face it lies on);
-- **the trimming family** — `catia_split`, `catia_trim`, `catia_healing`, `catia_untrim`,
-  `catia_disassemble`, `catia_extrapolate`, `catia_sew_surface`, and `propagation` on
-  `catia_extract` / `catia_boundary`;
+- **the rest of the trimming family** — `catia_extrapolate`, `catia_sew_surface`, and
+  `propagation` on `catia_extract` / `catia_boundary`. Split, trim, untrim, disassemble
+  and healing shipped 2026-09-05;
 - **the wireframe curves they are built on** — `catia_curve_*`, `catia_line_*`,
-  `catia_point_on_*`, `catia_plane_normal_to_curve` and their kin, none started;
+  `catia_point_on_*`, `catia_plane_normal_to_curve` and their kin, none started. This is
+  the largest block left and the one everything else in 2.6 leans on: every curve today
+  must come from a planar sketch or a surface boundary, so a genuinely 3D path — a helix,
+  a projection, the intersection of two surfaces — cannot be expressed at all;
 - `catia_draft` in `reflect_line` mode (needs `catia_curve_reflect_line`);
 - a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs a *2D* profile offset in the
   sketcher — the surface offset that shipped today answers a different question);
@@ -59,6 +62,26 @@ measurement vocabulary a visual check would assert against already exists.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-05** — E2 → **2.6 continues: the trimming family**. `catia_split`,
+  `catia_trim`, `catia_untrim`, `catia_disassemble`, `catia_healing` and
+  `catia_surface_analysis`. Coverage 74 → **80/201**. The question every one of these has
+  to answer is "which piece did you mean", and CATIA answers it by where the user clicked;
+  there is no click here, so the rule is written down instead — cells ordered by the
+  signed distance of their centre from the cutting plane, `first` the side its normal
+  points away from — and a cutter with no plane is **refused**, not resolved by whichever
+  piece OCCT happened to list first. Verified against the frustum closed form on each side
+  of a cut cone, and 600/1000/1600 on a flat panel. Three more traps, each pinned by a test
+  that fails when the fix is removed: **cells are not connected components** (a split
+  shell's halves share the cut edge, so `domains` correctly returns 1 while the caller
+  plainly wants the two faces — this cost a debugging session); **a side means *every*
+  cell on it**, because a surface crossing the plane twice is cut into three and keeping
+  the furthest one silently drops material; and **`untrim` on a plane is not refused by
+  OCCT** — `MakeFace` reports success and hands back a face of area 8 × 10¹⁰⁰, which flows
+  into a mass and a bounding box looking like a measurement all the way. `catia_healing`
+  refuses to run without a stated `merging_distance_mm` rather than falling back to join's
+  tight one and closing nothing, and `catia_surface_analysis(kind='connect')` reports the
+  smallest tolerance that *would* join the pieces — the exact argument healing takes, so
+  the analysis hands the repair its own parameter instead of saying "there is a gap".
 - **2026-09-05** — E2 → **2.6 started**: surfaces exist, and become material only when
   asked. `PartDocument` gained a construction store separate from its bodies, so building
   a skin leaves the part's mass exactly where it was — a surface that quietly became the

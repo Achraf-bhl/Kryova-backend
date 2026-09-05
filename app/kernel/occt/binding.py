@@ -47,6 +47,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         BRepAlgoAPI_Cut,
         BRepAlgoAPI_Defeaturing,
         BRepAlgoAPI_Fuse,
+        BRepAlgoAPI_Splitter,
     )
     from OCP.BRepBndLib import BRepBndLib
     from OCP.BRepBuilderAPI import (
@@ -105,7 +106,9 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         gp_XYZ,
     )
     from OCP.GProp import GProp_GProps
+    from OCP.Precision import Precision
     from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
+    from OCP.ShapeFix import ShapeFix_Shape
     from OCP.TColgp import TColgp_Array1OfPnt, TColgp_Array1OfPnt2d
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDF import TDF_LabelMap, TDF_TagSource
@@ -129,6 +132,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepAlgoAPI_Cut": BRepAlgoAPI_Cut,
         "BRepAlgoAPI_Defeaturing": BRepAlgoAPI_Defeaturing,
         "BRepAlgoAPI_Fuse": BRepAlgoAPI_Fuse,
+        "BRepAlgoAPI_Splitter": BRepAlgoAPI_Splitter,
         "BRepBndLib": BRepBndLib,
         "BRepBuilderAPI_GTransform": BRepBuilderAPI_GTransform,
         "BRepBuilderAPI_MakeEdge": BRepBuilderAPI_MakeEdge,
@@ -166,7 +170,9 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "GProp_GProps": GProp_GProps,
         "GeomAPI_PointsToBSpline": GeomAPI_PointsToBSpline,
         "GeomAbs_Shape": GeomAbs_Shape,
+        "Precision": Precision,
         "ShapeAnalysis_FreeBounds": ShapeAnalysis_FreeBounds,
+        "ShapeFix_Shape": ShapeFix_Shape,
         "TCollection_ExtendedString": TCollection_ExtendedString,
         "TColgp_Array1OfPnt": TColgp_Array1OfPnt,
         "TColgp_Array1OfPnt2d": TColgp_Array1OfPnt2d,

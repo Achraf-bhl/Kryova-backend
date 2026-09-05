@@ -83,7 +83,28 @@ CBN_SELCHANGE = 1
 
 EM_SETSEL = 0x00B1
 
+GW_OWNER = 4
 GW_ENABLEDPOPUP = 6
+
+#: Window classes that are owned popups of the frame but are **not** dialogs.
+#:
+#: CATIA implements an undocked toolbar as a popup window owned by the main
+#: frame, and an enabled one — so `GW_ENABLEDPOPUP` hands it back exactly as it
+#: would a modal dialog. Measured on a real V5-R33 seat on 2026-09-05, where
+#: four toolbars were floating ("PartDesign Feature Recognition", "Eléments de
+#: référence (étendue)", "Annotations", "Contraintes"), all with the class
+#: below and with the frame still *enabled* — nothing modal was up at all.
+#:
+#: The cost of not excluding them is not a cosmetic one: every one of these
+#: looks like a dialog CATIA is waiting on, so `catia_run_command` refuses with
+#: "a dialog is already open" for as long as any toolbar is undocked, which on a
+#: working seat is always. That is the over-refusal `ui_policy` warns about —
+#: the agent's recovery from a refusal is to try something else, and something
+#: else is how a part gets built wrong.
+#:
+#: Matched as a substring because the class arrives decorated: the real string
+#: is `N/A [ l_CATDlgFloatingFrame ]`.
+_NON_DIALOG_CLASS_MARKERS = ("l_CATDlgFloatingFrame",)
 
 GWL_STYLE = -16
 BS_TYPE_MASK = 0x0F
@@ -592,20 +613,59 @@ def window_titled(title: str) -> int:
 def active_dialog(main_hwnd: int) -> Dialog | None:
     """The dialog CATIA is waiting on, or `None` when it is waiting on nothing.
 
-    `GW_ENABLEDPOPUP` is the exact question being asked -- "which popup owned by
-    this window is currently enabled" -- and it is why this does not need to
-    guess from window styles or z-order. It answers `None` for an owner with no
-    popup and, usefully, for a *disabled* popup, which is what a dialog looks
-    like when it has in turn put up a dialog of its own.
+    `GW_ENABLEDPOPUP` is very nearly the exact question being asked -- "which
+    popup owned by this window is currently enabled" -- and it is why this does
+    not need to guess from window styles or z-order. It answers `None` for an
+    owner with no popup and, usefully, for a *disabled* popup, which is what a
+    dialog looks like when it has in turn put up a dialog of its own.
+
+    What it does not know is that **a floating CATIA toolbar is also an enabled
+    owned popup**, so on a seat with anything undocked it answered a toolbar and
+    every caller believed a dialog was waiting. See `_NON_DIALOG_CLASS_MARKERS`
+    for what that cost. Those are skipped here, and because `GW_ENABLEDPOPUP`
+    returns only the first popup in z-order, skipping one means looking for the
+    rest by hand rather than taking `None` for an answer -- a real dialog can be
+    open at the same time as a floating toolbar, and it is z-order that decides
+    which of them Windows names first.
     """
     user32 = _user32()
     popup = user32.GetWindow(wintypes.HWND(main_hwnd), wintypes.UINT(GW_ENABLEDPOPUP))
-    if not popup:
-        return None
-    handle = int(popup)
-    if handle == main_hwnd:
-        return None
-    return read_dialog(handle)
+    handle = int(popup) if popup else 0
+    if handle and handle != main_hwnd and not _is_non_dialog_popup(handle):
+        return read_dialog(handle)
+
+    for candidate in _owned_popups(main_hwnd):
+        if not _is_non_dialog_popup(candidate):
+            return read_dialog(candidate)
+    return None
+
+
+def _is_non_dialog_popup(hwnd: int) -> bool:
+    """Whether this owned popup is furniture rather than something to answer."""
+    cls = _class_name(hwnd)
+    return any(marker in cls for marker in _NON_DIALOG_CLASS_MARKERS)
+
+
+def _owned_popups(main_hwnd: int) -> list[int]:
+    """Visible, enabled top-level windows owned by the frame, in z-order.
+
+    `EnumWindows` yields top-level windows in z-order, so the first survivor is
+    the one in front -- the same ordering `GW_ENABLEDPOPUP` would have used.
+    """
+    user32 = _user32()
+    found: list[int] = []
+    for hwnd in _enum_top_level():
+        if hwnd == main_hwnd:
+            continue
+        owner = user32.GetWindow(wintypes.HWND(hwnd), wintypes.UINT(GW_OWNER))
+        if not owner or int(owner) != main_hwnd:
+            continue
+        if not user32.IsWindowVisible(wintypes.HWND(hwnd)):
+            continue
+        if not user32.IsWindowEnabled(wintypes.HWND(hwnd)):
+            continue
+        found.append(hwnd)
+    return found
 
 
 def read_dialog(hwnd: int) -> Dialog:

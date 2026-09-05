@@ -859,3 +859,86 @@ def test_the_agent_is_taught_the_loop_rather_than_left_to_infer_it():
     for tool in ("catia_run_command", "catia_describe_dialog", "catia_fill_dialog"):
         assert tool in AGENT_SYSTEM_CATIA
     assert "Never leave a dialog open" in AGENT_SYSTEM_CATIA
+
+
+class TestAFloatingToolbarIsNotADialog:
+    """Measured on a real V5-R33 seat, 2026-09-05 — the first Windows session.
+
+    This is one of the things the module docstring above lists as *not testable
+    from Linux*: what CATIA's real window classes are. The answer turned out to
+    matter more than a name in a report. CATIA implements an undocked toolbar as
+    a popup **owned by the main frame and enabled**, which is exactly what
+    `GW_ENABLEDPOPUP` is designed to return — so `active_dialog` reported a
+    toolbar as the dialog CATIA was waiting on, and `catia_run_command` refused
+    every call with "a dialog is already open and waiting for input" for as long
+    as anything was undocked. On the seat this was found on, four toolbars were
+    floating and the frame was still enabled: nothing modal was up at all.
+    """
+
+    FLOATING = "N/A [ l_CATDlgFloatingFrame ]"
+    REAL = "N/A [ l_CATDlgDialog ]"
+
+    @staticmethod
+    def _patched(monkeypatch: pytest.MonkeyPatch, popup: int, classes: dict[int, str]):
+        from catia_bridge import ui_automation as ui
+
+        class _User32:
+            def GetWindow(self, _hwnd, _cmd):  # noqa: N802 - Win32 name
+                return popup
+
+        monkeypatch.setattr(ui, "_user32", lambda: _User32())
+        monkeypatch.setattr(ui, "_class_name", lambda hwnd: classes.get(int(hwnd), ""))
+        monkeypatch.setattr(ui, "_owned_popups", lambda _main: [])
+        monkeypatch.setattr(ui, "read_dialog", lambda hwnd: ("dialog", int(hwnd)))
+        return ui
+
+    def test_a_floating_toolbar_is_not_reported_as_an_open_dialog(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ui = self._patched(monkeypatch, popup=999, classes={999: self.FLOATING})
+        assert ui.active_dialog(100) is None
+
+    def test_a_real_dialog_is_still_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The guard must not have bought its silence by going blind."""
+        ui = self._patched(monkeypatch, popup=999, classes={999: self.REAL})
+        assert ui.active_dialog(100) == ("dialog", 999)
+
+    def test_a_dialog_behind_a_toolbar_is_still_found(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`GW_ENABLEDPOPUP` names only the first popup in z-order.
+
+        A toolbar in front of a real dialog would otherwise hide it, which is
+        the opposite failure and the more dangerous one: the agent would be told
+        nothing is waiting while CATIA sat on a modal prompt.
+        """
+        from catia_bridge import ui_automation as ui
+
+        classes = {999: self.FLOATING, 777: self.REAL}
+
+        class _User32:
+            def GetWindow(self, _hwnd, _cmd):  # noqa: N802 - Win32 name
+                return 999
+
+        monkeypatch.setattr(ui, "_user32", lambda: _User32())
+        monkeypatch.setattr(ui, "_class_name", lambda hwnd: classes.get(int(hwnd), ""))
+        monkeypatch.setattr(ui, "_owned_popups", lambda _main: [999, 777])
+        monkeypatch.setattr(ui, "read_dialog", lambda hwnd: ("dialog", int(hwnd)))
+
+        assert ui.active_dialog(100) == ("dialog", 777)
+
+    def test_the_marker_matches_the_class_the_seat_actually_reports(self) -> None:
+        """Pinned verbatim: the class arrives decorated, not bare."""
+        from catia_bridge.ui_automation import _NON_DIALOG_CLASS_MARKERS, _is_non_dialog_popup
+
+        assert any(marker in self.FLOATING for marker in _NON_DIALOG_CLASS_MARKERS)
+        import catia_bridge.ui_automation as ui
+
+        original = ui._class_name
+        try:
+            ui._class_name = lambda _h: self.FLOATING  # type: ignore[assignment]
+            assert _is_non_dialog_popup(1) is True
+            ui._class_name = lambda _h: self.REAL  # type: ignore[assignment]
+            assert _is_non_dialog_popup(1) is False
+        finally:
+            ui._class_name = original  # type: ignore[assignment]

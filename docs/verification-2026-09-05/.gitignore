@@ -1,0 +1,4 @@
+# Screenshots are evidence for the session, not repository content: they are
+# large, they date instantly, and a full-screen capture can pick up whatever
+# else was on the desktop -- one in this session caught an API key.
+*.png

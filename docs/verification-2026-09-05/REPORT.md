@@ -299,15 +299,165 @@ favour.
 
 ---
 
+## Tier 4 — the real CATIA seat
+
+CATIA was launched **through the product's own endpoint** (`POST /catia/launch`,
+which is the sanctioned path — the daemon deliberately never starts a seat
+itself, because that spends a licence nobody asked to spend). It came up as
+`V5-R33`, and the bridge auto-paired and connected: `mock: false`,
+`ui_language: "fr"`, capabilities `part, sketch, measure, export, capture,
+checkpoint`.
+
+The build was driven from the chat endpoint and produced a real solid on the
+seat — screenshots `catia-01-launched.png` … `catia-04-hole.png` beside this
+file. The seat is French, so the features come back named `Extrusion.1` and
+`Poche.1`.
+
+| Step | Result on the seat |
+|---|---|
+| `catia_new_part` | `MyNewPart.CATPart`, title bar confirms |
+| `catia_sketch_create` / `catia_sketch_rectangle` | sketch `profile` |
+| `catia_pad` | `Extrusion.1`, `volume_mm3: 48000.0` |
+| `catia_hole` Ø14 through | `Poche.1`, `volume_mm3: 44921.2392` |
+
+### E1 / E3 — the cross-backend conformance halves, discharged
+
+The board has carried these as the outstanding residual on E1 and E3 since both
+phases shipped: the same compiled plan through `OcctRunner` and through a CATIA
+seat must build the same part, and every measurement must agree to a declared
+tolerance. The OCCT half passed; the seat half had never run. **Both halves now
+run, and they agree.**
+
+| Quantity | OCCT | CATIA seat | Closed form |
+|---|---|---|---|
+| Pad volume mm³ | 48000.0 | 48000.0 | 48000 |
+| After Ø14 hole mm³ | 44921.239199482 | 44921.2392 | 44921.23919948201 |
+| Bounding box mm | 60.0000002 × 40.0000002 × 20.0000002 | 60.0 × 40.0 × 20.0 | 60 × 40 × 20 |
+
+Volume agreement is **1.2 × 10⁻¹¹ relative** — the visible difference is CATIA
+rounding its own reported value to four decimals. The bounding box differs by
+1 × 10⁻⁷ mm, which is `BRepBndLib`'s tolerance on the OCCT side (the same
+artefact as D5) and is a tenth of a nanometre.
+
+Both backends also agree with the closed form, so this is not two
+implementations agreeing on a shared mistake.
+
+### D11 — A floating toolbar was read as an open modal dialog. **Code.** Fixed.
+
+The most serious thing tier 4 found, and it could only be found on a real seat.
+
+`ui_automation.active_dialog` asks Windows `GW_ENABLEDPOPUP` — "which enabled
+popup does this window own" — which is the right question for a dialog and the
+wrong one for CATIA. **CATIA implements an undocked toolbar as an enabled popup
+owned by the main frame**, so a floating toolbar came back as the dialog CATIA
+was waiting on.
+
+Measured on this seat, where four toolbars were floating:
+
+```
+GW_ENABLEDPOPUP -> 461072
+  title: 'PartDesign Feature Recognition'
+  class: 'N/A [ l_CATDlgFloatingFrame ]'
+  main enabled? True          <- nothing modal was up at all
+```
+
+The cost is not cosmetic. `catia_run_command` refuses while a dialog is open, so
+it refused **every** call with "A CATIA dialog is already open and waiting for
+input" — for as long as anything was undocked, which on a working seat is
+always. The whole interactive command family was unreachable. This is exactly
+the over-refusal `ui_policy` warns about: the agent's recovery from a refusal is
+to try something else, and something else is how a part gets built wrong. It was
+observed live doing precisely that — it tried `catia_dialog_action cancel` on a
+toolbar.
+
+Fixed by excluding the floating-frame class, and by falling back to enumerating
+owned popups rather than trusting the single window `GW_ENABLEDPOPUP` names —
+because a real dialog can be open *behind* a toolbar, and taking `None` for an
+answer there would be the opposite and more dangerous failure. Pinned by
+`TestAFloatingToolbarIsNotADialog`, including that case.
+
+### The operations that are actually risky
+
+A 60×40×20 pad proves the plumbing and almost nothing else. These are the four
+things previously recorded on this machine as broken or unobtainable, each
+checked against a closed form on an **80×40×20 rectangular** plate — a square one
+hides the pattern defect.
+
+| Operation | Previously recorded | Measured now |
+|---|---|---|
+| `catia_set_material` | silently falls back to steel, mass ~3× heavy | **CORRECT** — implied density 2710 kg/m³, `Aluminium` in the tree |
+| `catia_fillet` | edge references unobtainable over COM | **CORRECT** — `Congé arête.1`, removed 429.204 mm³ against closed form 429.204 |
+| `catia_pattern_rectangular` | copies step diagonally / none appear | **STILL BROKEN** — see below |
+| `catia_shell` | hollows with no face removed | hollows, no failure; 63570.8 → 20814.9 mm³ |
+
+Two of the three recorded defects are **no longer reproducible** — material
+attaches correctly and fillets now find their edges, exactly to the closed form.
+Those notes are out of date.
+
+**D12 — `catia_pattern_rectangular` places copies diagonally. Reported, not fixed.**
+
+The number identifies the failure mode precisely. On the 80×40×20 plate
+(x −40…40, y −20…20) with a Ø10 through hole at the centre, a rectangular
+pattern of `count: 3`, `spacing_mm: 20` about the `YZ` plane should place copies
+at x = 0, 20, 40 and remove **two** further holes:
+
+```
+one hole            = π·5²·20 = 1570.796 mm³
+expected removal    = 2 × 1570.796 = 3141.593 mm³
+actual removal      =     785.398 mm³   ( = exactly half of one hole )
+```
+
+Half of one hole is what a copy landing **exactly on a corner edge** removes. That
+is the diagonal step: instead of x = 20 and x = 40, the copies went to
+(20, 20) and (40, 40) — the first straddling the y = 20 edge and taking half a
+cylinder with it, the second entirely off the part and taking nothing. The
+screenshot shows it as a half-moon notch bitten out of the side, with no second
+hole anywhere on the face.
+
+So the operation reports success (`Répétition rectangulaire.1`), the mass moves,
+and the part is wrong — the worst shape a defect can take. Not fixed here: it is
+a `ShapeFactory` argument problem in the COM layer (`AddNewRectPattern` takes
+twelve arguments and refuses lines, directions and axis systems as direction
+references), and getting it right needs its own session against the API rather
+than a change made in passing.
+
+### The three Win32 unknowns
+
+The protocol doc lists these as unanswerable from Linux. Two are now answered.
+
+**What are CATIA's real window classes?** — **Answered.**
+
+| Window | Class |
+|---|---|
+| Main frame | `CATDlgDocument [ l_CATDlgMfcDocumentMDI ]` |
+| Floating toolbar | `N/A [ l_CATDlgFloatingFrame ]` |
+
+Both arrive *decorated* — the real class name is inside `[ ]`, with a prefix
+before it — which is why D11's fix matches on a substring rather than equality.
+Nobody would have guessed this shape.
+
+**Do CATIA's dialogs answer `WM_GETTEXT`?** — **Yes, for child controls**, with a
+caveat worth keeping. `describe_dialog` read real labels off the popup's
+children ("Manual Feature Recognition", "Automatic Feature Recognition", "Part
+Analysis", "Décomposition") and `dialog_action` correctly refused an action the
+window did not offer *and listed what it did offer*. Note the labels come back
+in **mixed English and French on a French seat**, which is CATIA's own
+inconsistency and a good argument for `ButtonRole` + `STANDARD_CONTROL_IDS`
+rather than label matching. The caveat: the window read was a floating toolbar,
+so this confirms the text-reading path against real CATIA widgets but not
+against a genuinely modal dialog.
+
+**Is `EN_CHANGE` needed after setting an edit field?** — **Still unanswered.** No
+edit field was filled; it needs a modal dialog with a text box open, which the
+build path above never produced.
+
+---
+
 ## Not done in this session
 
-- **Tier 4 — the CATIA seat.** Not attempted. CATIA is running on this machine
-  (`CNEXT.exe` is up and holding GPU memory), but the bridge daemon was not
-  started and no seat operation was driven.
-- **The E1 / E3 cross-backend conformance halves.** Still outstanding; they need
-  tier 4.
-- **The three Win32 unknowns** (`WM_GETTEXT`, `EN_CHANGE`, real window classes).
-  Unanswered — they need a live dialog on the seat.
 - **The vision check (tier 5).** `llava` not pulled; the refusal path not
   exercised.
 - **The four corner fillets** on the OCCT plate (see Tier 3).
+- **`EN_CHANGE`**, as above.
+- **`catia_run_command` end to end.** D11 unblocks it, but no command was driven
+  through the menu after the fix.

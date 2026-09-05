@@ -376,7 +376,23 @@ def _chain(
 
 
 def _at(arguments: Mapping[str, Any]) -> tuple[float, float]:
-    return _uv(arguments.get("at"), "at", default=(0.0, 0.0))
+    """Where a primitive is centred — Cartesian, or polar and resolved for us.
+
+    The polar spelling and its trigonometry live in `app.catia.ops.placement`,
+    not here, and that is the point: `dispatch._augment` resolves polar into
+    `at` before either backend is reached, so in the product this function only
+    ever sees Cartesian. It is called again here because the design IR and the
+    mission ladder drive `OcctRunner` directly, never through the dispatcher —
+    and a spec that builds through the chat and fails through a sweep would be
+    the worst of both. Same function, so the angle convention cannot fork.
+    """
+    from app.catia.ops.placement import PlacementError, resolve_polar
+
+    try:
+        resolved = resolve_polar(arguments)
+    except PlacementError as exc:
+        raise GeometryError(str(exc)) from exc
+    return _uv(resolved.get("at"), "at", default=(0.0, 0.0))
 
 
 def _uv_list(

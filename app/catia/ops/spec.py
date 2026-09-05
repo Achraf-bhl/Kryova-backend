@@ -500,3 +500,15 @@ def from_server(name: str, schema: dict[str, Any]) -> Param:
 def for_server(name: str, schema: dict[str, Any]) -> Param:
     """A value the model must supply and the server consumes rather than forwards."""
     return Param(name=name, schema=schema, required=True, consumed_by_server=True)
+
+
+def optional_for_server(name: str, schema: dict[str, Any]) -> Param:
+    """A value the model *may* supply and the server consumes rather than forwards.
+
+    The optional half of `for_server`, and it is a different thing rather than a
+    convenience: `catia_restore` cannot run without its checkpoint id, whereas
+    polar placement is one of two ways to say the same thing and the Cartesian
+    one must keep working untouched. Marking it required would make every
+    existing call to `catia_sketch_circle` invalid.
+    """
+    return Param(name=name, schema=schema, required=False, consumed_by_server=True)

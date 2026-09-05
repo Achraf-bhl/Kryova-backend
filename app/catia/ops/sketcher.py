@@ -21,6 +21,7 @@ would all dispatch to the same call.
 from __future__ import annotations
 
 from app.catia.ops import vocabulary as vocab
+from app.catia.ops.placement import polar_placement
 from app.catia.ops.spec import (
     Operation,
     Tier,
@@ -183,22 +184,23 @@ OPERATIONS: tuple[Operation, ...] = (
         name="catia_sketch_circle",
         summary=(
             "Draw a circle in the sketch.\n"
-            "Omit `at` and the circle is centred on the sketch origin, which is the "
-            "old behaviour and still the right one for a single-profile part. Give "
-            "`at` to place ONE off-centre feature — a single boss, a single hole.\n"
-            "Do NOT draw a ring of holes by giving `at` for each one. Place one at "
-            "the bolt-circle radius and repeat it with catia_pattern_circular: that "
-            "needs a radius and a count, where four hand-placed circles need the "
-            "trigonometry of each position, and getting it wrong produces a part "
-            "that looks right and is not. Measured on this seat: asked for a 70 mm "
-            "bolt circle, a model placed circles at (±35, ±35) — a bolt-circle "
-            "radius of 49.5 mm, having used the radius as a coordinate."
+            "Omit every placement argument and the circle is centred on the sketch "
+            "origin, which is the right thing for a single-profile part.\n"
+            "There are two ways to place one off centre, and which to use is decided "
+            "by how the request states the position, never by arithmetic here. A "
+            "position given as an offset — 20 mm across, 10 mm up — is `at`. A "
+            "position given as a distance and a direction — anything on a bolt "
+            "circle, a pitch circle, a radial arm — is `at_radius_mm` with "
+            "`at_angle_deg`, and the radius is half the stated circle diameter.\n"
+            "For a ring of identical features, place one and repeat it with "
+            "catia_pattern_circular rather than drawing each."
         ),
         tier=Tier.WRITE,
         workbench=_WB,
         params=(
             required("diameter_mm", length("Diameter of the circle.")),
             optional("at", point2("Centre of the circle. Defaults to the sketch origin.")),
+            *polar_placement(),
             optional("plane", vocab.support("Support to sketch on when no sketch is open.")),
             *_sketch_target(),
         ),
@@ -313,6 +315,7 @@ OPERATIONS: tuple[Operation, ...] = (
             required("width_mm", length("Width, along the sketch's horizontal axis.")),
             required("height_mm", length("Height, along the sketch's vertical axis.")),
             optional("at", point2("Centre of the rectangle. Defaults to the sketch origin.")),
+            *polar_placement(),
             optional("rotation_deg", signed_angle("Rotation about the centre. Default 0.")),
             optional("plane", vocab.support("Support to sketch on when no sketch is open.")),
             *_sketch_target(),
@@ -350,6 +353,7 @@ OPERATIONS: tuple[Operation, ...] = (
             required("sides", count("Number of sides.", minimum=3, maximum=64)),
             required("diameter_mm", length("Diameter of the circle the corners sit on.")),
             optional("at", point2("Centre of the polygon. Defaults to the sketch origin.")),
+            *polar_placement(),
             optional("rotation_deg", signed_angle("Rotation about the centre. Default 0.")),
             optional("plane", vocab.support("Support to sketch on when no sketch is open.")),
             *_sketch_target(),

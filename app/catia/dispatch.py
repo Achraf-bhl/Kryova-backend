@@ -44,6 +44,7 @@ from app.catia.connection import (
     registry,
 )
 from app.catia.geometry_import import GeometryImportError, import_step_export
+from app.catia.ops.placement import PlacementError, declares_polar, resolve_polar
 from app.catia.sanitize import clean_result, clean_text
 from app.catia.tool_specs import (
     CATIA_TOOL_SPECS,
@@ -477,7 +478,7 @@ def call_catia(
         except SchemaError as exc:
             raise CatiaError(f"{tool}: {exc}") from exc
 
-        arguments = _augment(tool, arguments)
+        arguments = _augment(tool, arguments, spec)
 
         if tool in _SERVER_SIDE_TOOLS:
             data = status_payload(db, user_id, conversation_id)
@@ -678,7 +679,9 @@ def _normalise(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return arguments
 
 
-def _augment(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+def _augment(
+    tool: str, arguments: dict[str, Any], spec: CatiaToolSpec | None = None
+) -> dict[str, Any]:
     """Add the fields the server supplies and the model may not.
 
     After validation, and that ordering is the whole point. The model-facing
@@ -690,7 +693,20 @@ def _augment(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     kept CATIA's default 1000 kg/m3, while the unit tests passed because they
     drove the daemon's schema -- which requires the density -- and never this
     path.
+
+    It also *consumes* polar placement, which is the mirror case: the model may
+    say `at_radius_mm`/`at_angle_deg`, and what goes on the wire is the `at`
+    both backends already take. Resolving it here rather than in each backend
+    means the workstation daemon needs no change and — more importantly — there
+    is one implementation of the trigonometry and so one angle convention. See
+    `app/catia/ops/placement.py` for why the polar spelling exists at all.
     """
+    if declares_polar(spec.parameters if spec else {}):
+        try:
+            arguments = resolve_polar(arguments)
+        except PlacementError as exc:
+            raise CatiaError(f"{tool}: {exc}") from exc
+
     if tool == "catia_set_material":
         chosen = MATERIALS.get(str(arguments.get("material", "")))
         if chosen is None:

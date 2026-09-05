@@ -485,6 +485,42 @@ class TestCatiaPrompting:
         assert "NEVER emit raw coordinates" in AGENT_SYSTEM_CATIA
         assert "transform matrices" in AGENT_SYSTEM_CATIA
 
+    def test_the_catia_prompt_teaches_the_modelling_order(self) -> None:
+        """A tool the prompt never explains is a tool the model calls in the wrong order.
+
+        Measured on this seat 2026-09-05, before this section existed: asked for a
+        mounting flange, `qwen3-coder:30b` opened with `catia_pad` — no document, no
+        sketch — then called `catia_hole` on a part that did not exist, then a tool
+        called `catia_pattern_circle` that has never existed. It never called
+        `catia_sketch_create` at all. The interactive family has been taught its
+        five-step loop since it shipped; the purpose-built modelling tools, which are
+        the *preferred* path, were left to be inferred.
+        """
+        from app.ai.prompts import AGENT_SYSTEM_CATIA
+
+        assert "A solid starts as a sketch" in AGENT_SYSTEM_CATIA
+        for tool in (
+            "catia_sketch_create",
+            "catia_sketch_rectangle",
+            "catia_pad",
+            "catia_pocket",
+        ):
+            assert tool in AGENT_SYSTEM_CATIA
+        assert "This makes an EMPTY sketch" in AGENT_SYSTEM_CATIA
+
+    def test_the_catia_prompt_names_the_two_mistakes_the_model_actually_makes(self) -> None:
+        """Both measured in the same run, and both were repeated after being refused.
+
+        The refusal already lists every accepted argument — the model read it, quoted
+        it back to the user, and then re-sent the same guess. Naming the failure in the
+        prompt is cheaper than a retry loop that cannot learn.
+        """
+        from app.ai.prompts import AGENT_SYSTEM_CATIA
+
+        assert "Do not invent argument names" in AGENT_SYSTEM_CATIA
+        assert "do not invent tool names" in AGENT_SYSTEM_CATIA
+        assert '"profile"' in AGENT_SYSTEM_CATIA, "name the wrong argument, not the class"
+
     def test_the_catia_prompt_demands_measure_and_capture_after_mutations(self) -> None:
         from app.ai.prompts import AGENT_SYSTEM_CATIA
 

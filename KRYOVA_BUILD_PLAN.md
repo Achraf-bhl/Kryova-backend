@@ -15,13 +15,14 @@ happened.
 
 ## Now
 
-**E4 — Visual verification.** **4.1 (with section cuts), 4.2 and 4.3 landed 2026-09-05.** `app/render/`
-renders eight canonical views deterministically and diffs two of them; `app/ai/vision.py`
-asks a vision model whether the part matches the request. What is left:
+**E5 — Assertions and self-correction.** Foundation 2026-09-04; **5.1 and 5.3 landed
+2026-09-05**. What is left is **5.4** — the mission ladder as a permanent regression suite,
+which wants E18's missions to exist first — and **5.2**, blocked on Phase 11 (requirements).
 
-- **4.4 — renders into the conversation**, so the user sees what the agent sees. Product
-  Track P5 owns the surface, so this waits on it rather than growing its own. It is now the
-  **only** part of E4 outstanding, and the only one blocked on something outside E4.
+**E4 is done except 4.4** (renders into the conversation), which Product Track P5 owns.
+`app/render/` renders eight canonical views deterministically, cuts sections and diffs two
+of them; `app/ai/vision.py` asks a vision model whether the part matches the request. 4.4 is
+the only part of E4 outstanding and the only one blocked outside E4.
 
 **E2 closed on 2026-09-05** — `*E2`, Proof green. Its capability list and its Proof are
 both done; what remains under it are refusals with stated reasons, each raised where it
@@ -56,25 +57,36 @@ never could do — the CATIA-seat halves of E1's and E3's conformance runs.
 
 ## Next
 
-**E5 — Assertions and self-correction.** The foundation shipped 2026-09-04 and **5.1
-landed 2026-09-05**. What remains: **5.3 diagnosis quality** — sensitivity by finite
-difference over the free geometry, so a repair is aimed rather than guessed, which the plan
-calls nearly free now that geometry is free and which is the difference between a validator
-and a retry counter. **5.4** the mission ladder as a permanent regression suite. **5.2** is
-blocked on Phase 11 (requirements). The now-closed 5.1 was: an assertion library **for machines rather than parts** — interference-free
-through a motion range, stack-up within tolerance, first natural frequency above a
-threshold, minimum wall, mass and cost budgets, factor of safety against a named load case.
-Everything it needs to measure exists (E3's interrogation, the four solvers, and now a
-visual check that can be one more assertion among them).
-
-This file's Now section was duplicated verbatim into Next between 2026-09-05 commits; the
-duplicate is removed here rather than left to read as two separate pieces of work.
+**E6 — The solver federation**, and it is the largest single thing left standing. CalculiX
+across a subprocess boundary (Decision 4: GPL solvers are invoked as separate processes,
+never linked), with the `Solver` ABC unchanged and the existing `loads.py`/`selection.py`
+vocabulary mapped onto CalculiX sets rather than rewritten — that surface is what the agent
+drives. It is also what turns three of 5.1's checks from honestly-unmeasured into measured,
+and what 5.3's sensitivity can then be run over.
 
 ---
 
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E5 → **5.3: a repair that is aimed rather than guessed.**
+  `app/design/sensitivity.py`. The plan's blunt version is that a validator which cannot say
+  *why* is a retry counter, and that was exactly the state: assertions could say 3.1 kg over,
+  `correct.py` could try something and see if the number moved, and nothing could say which of
+  eleven parameters to move or how far. Finite difference per free parameter, plus `aim()` to
+  turn a `gap` into a parameter and a distance. Affordable only because of Decision 1 — a probe
+  was minutes of a CATIA workstation and is a headless build here. Four decisions separate a
+  number from a lie, each pinned: **a failed build is not zero sensitivity** (reporting 0.0
+  tells the loop to leave alone the parameter that is at its limit); **a topology change is not
+  a derivative** (a fillet that swallows a face makes two different parts — counts are
+  differenced too, and a payload without them is `topology_unchecked` rather than assumed);
+  **only free parameters are probed**, with a derived one excluded *carrying its formula*
+  rather than dropped, since absent from a ranking reads as "no influence"; and **the ranking
+  is by elasticity**, because kg/mm and kg/degree cannot be compared and "which matters most"
+  is meaningless until they are dimensionless. `aim` refuses rather than dividing by a
+  negligible derivative, and carries its first-order caveat on every suggestion. 34 tests
+  written; they run on the Windows seat.
 
 - **2026-09-05** — E5 → **5.1: assertions for machines, not parts.**
   `app/design/machine_checks.py`. The reason it needs to exist: `assertions.py` checks a claim

@@ -22,7 +22,7 @@ from app.jobs import get_job_queue
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 
 
 def _resolve_git_sha() -> str:

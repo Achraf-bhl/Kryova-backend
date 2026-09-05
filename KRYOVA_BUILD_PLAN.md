@@ -85,6 +85,17 @@ never could do — the CATIA-seat halves of E1's and E3's conformance runs.
 
 ## Next
 
+> **Working arrangement changed 2026-09-06: coding runs in stretches, verification happens at
+> gates.** The master plan's new *Stop gates* section (Part 2) names six of them and says which
+> phase opens each. Inside a stretch the testing is `pytest`, `ruff` and `mypy`, and **Ollama is
+> stopped** so the card is free; at a gate the whole product is driven once — real chat endpoint,
+> real seat, both pictures, dated report. **The current stretch is E6, and it opens gate G1**,
+> which carries rung 3 forward and adds the first load-bearing prompt. The reason is measured:
+> one chatbot prompt costs four to seven minutes on this hardware, and running one after every
+> commit spends the night on the model instead of on the product — while the seven defects found
+> on 2026-09-05 show the gate itself cannot be skipped, only batched.
+
+
 **E6 — The solver federation** is now *in progress* rather than next: the deck writer landed 2026-09-05. What is left of it is the largest single thing standing. CalculiX
 across a subprocess boundary (Decision 4: GPL solvers are invoked as separate processes,
 never linked), with the `Solver` ABC unchanged and the existing `loads.py`/`selection.py`
@@ -97,6 +108,33 @@ and what 5.3's sensitivity can then be run over.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-06** — E2/E5/E16 → **rung 3 of the ladder: three more defects, and the one
+  that made the rung impossible rather than hard.** Driving "the plate has to weigh 2.4 kg;
+  adjust the thickness until the measured mass is within 20 grams" found, in order:
+  **(1)** `catia_set_parameter` was **not implemented on the open kernel at all**
+  (`b9b1cb9`), while the system prompt tells the model to prefer it over rebuilding a
+  feature — so the agent had no way to change a dimension, padded the same sketch four
+  times, and reported a stack of seven pads weighing 2.958 kg as the answer. A part built
+  in conversation has no parameter set, so its build log is one: every mutating call is
+  recorded, every numeric argument of one is a dimension addressed as `Pad.1\length_mm`,
+  and setting one rewrites that call and **replays the part from the top** — `app/design/`'s
+  "specification that is compiled" applied to a part assembled call by call, inheriting its
+  property that a recompiled spec has no downstream edit to shatter. The replay builds into
+  a *fresh* document and is swapped in only on success, so a value the geometry cannot carry
+  costs a refusal and nothing else. **(2)** `Sketch.face` turned an inner profile into a
+  **boss instead of a bore** (`71ac1b2`) — OCCT wants an inner wire reversed, an unreversed
+  one is accepted silently and integrates as material, and the docstring had claimed the
+  correct behaviour since the file was written. A 100×100 sketch with a 40 mm circle padded
+  10 mm came back at 112,566 mm³ where the plate minus its bore is 87,434. Containment is
+  now decided by boolean algebra in both directions, so draw order does not matter, and a
+  partial overlap is refused rather than guessed at. **(3)** The parameter name was
+  **untypeable** (`454d780`): the payload is JSON, so `Pad.1\length_mm` is *shown* to the
+  model with the backslash escaped, it types back what it read, and all four of its calls
+  were refused for punctuation. It then abandoned the loop and padded a slab over the part,
+  reaching 2.401 kg — inside the tolerance asked for — with the bore and all four holes
+  filled in. Every separator now folds to one key and a bare unambiguous dimension name is
+  accepted. Coverage 108 → 110 of 201; 82 new tests; every guard verified by breaking it.
 
 - **2026-09-05** — E5/E16 → **rung 2 of the ladder passes, and the part is right**
   (`docs/verification-2026-09-05-night/REPORT.md`). Not "every call returned ok": 18 calls,

@@ -639,6 +639,23 @@ against the real application rather than repeatedly here. So on this machine:
   arguments — is not a test and is worth doing, because shipping code that calls a name
   that is not there wastes a seat session on an `AttributeError`.
 
+**Coding runs in stretches; the expensive verification happens at gates (agreed 2026-09-06).**
+The master plan's *Stop gates* section (Part 2) names them and says which phase opens each one.
+The rule for a session is short:
+
+- **Inside a stretch, `pytest` is the whole of the testing, and Ollama is stopped.** No chatbot
+  run, no CATIA seat, no screenshots. Stop the model and the service (`ollama stop qwen3-coder:30b`,
+  then the `ollama`/`ollama app` processes) so the card is free — a 20.6 GB model on an 8 GB card
+  occupies the GPU and returns four to seven minutes later, and a stretch spent waiting on it is a
+  stretch that wrote nothing. `ruff` and `mypy` still run before finishing; guards are still
+  verified by breaking what they guard.
+- **At a gate, the whole product is driven once, properly**: Ollama back up and confirmed on the
+  GPU, the prompt through the real chat endpoint, the CATIA seat through the bridge, both pictures,
+  a dated report in `docs/verification-<date>/`, and the rung reached recorded.
+- **Say which of the two a claim rests on.** "Tested with pytest, end to end pending G1" is an
+  honest commit line. A phase reported `DONE` on unit tests alone, when its Proof names the
+  product, is the failure mode this arrangement exists to prevent — not a shortcut it licenses.
+
 **An end-to-end test goes through the Ollama chatbot, never through the dispatcher**
 (standing rule, 2026-09-05). "End to end" means the path a user actually takes —
 chat → agent → tool layer → dispatch → backend → CATIA or the open kernel — and a test

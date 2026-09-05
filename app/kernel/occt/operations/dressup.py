@@ -61,16 +61,26 @@ _ORIGIN_PLANES: Final[dict[str, tuple[tuple[float, float, float], tuple[float, f
 }
 
 #: Draft modes the registry allows that this backend does not do, and what each needs.
+#:
+#: Neither is the *parting element*, which is a separate argument and is implemented —
+#: a reflect-line draft pivots about the silhouette OCCT would have to compute, where a
+#: parting element is a plane the design already named.
 _UNSUPPORTED_MODES: Final[dict[str, str]] = {
     "reflect_line": (
         "drafting about a reflect line needs the silhouette curve of the pull direction, "
-        "which is generative-shape work (Phase 2.6)"
+        "which is generative-shape work (Phase 2.6). A draft split at a plane is the "
+        "`parting` argument and does not need this mode"
     ),
     "variable": (
         "a variable-angle draft needs a law along the face, which the operation "
         "vocabulary has no way to carry yet"
     ),
 }
+
+#: How far past the part a parting half-space reaches, as a multiple of the distance from
+#: the parting plane to the furthest corner of the part's bounding box. Only has to clear
+#: the material; the intersection trims it back to the part either way.
+_HALF_SPACE_FACTOR: Final = 1.5
 
 #: Advice appended to a dress-up failure. The dominant real cause by a wide margin, and
 #: naming it turns an opaque kernel refusal into something the agent can act on.
@@ -193,6 +203,11 @@ def draft(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
     the taper along tangent-continuous neighbours of whatever is named. Both are the
     kernel's rules, not this wrapper's; a face it will not take is reported by name
     rather than silently skipped.
+
+    **A `parting` element makes it a two-sided draft**, which is a different part: each
+    side of the parting plane tapers away from it, so the section is widest (or
+    narrowest) *there* rather than at one end. That is what a two-part mould needs — both
+    halves have to release — and it is the case a single taper cannot express at all.
     """
     document = context.require_document()
     source = context.require_shape(DRAFT)
@@ -204,12 +219,6 @@ def draft(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
         raise OperationNotSupported(
             f"{DRAFT} in {mode!r} mode", "the modes this backend knows are: standard"
         )
-    if arguments.get("parting"):
-        raise OperationNotSupported(
-            f"{DRAFT} with a parting element",
-            "splitting the draft at a parting line needs the parting surface resolved "
-            "against the part, which is Phase 2.6 work",
-        )
 
     angle_deg = arguments.get("angle_deg")
     if not isinstance(angle_deg, (int, float)) or isinstance(angle_deg, bool):
@@ -218,7 +227,9 @@ def draft(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
             "typical moulding draft is 1–3°."
         )
 
-    neutral_plane, plane_normal = _neutral_plane(arguments.get("neutral"))
+    neutral_plane, plane_normal = _neutral_plane(
+        document, source, arguments.get("neutral")
+    )
     pull = _pull_direction(arguments.get("pulling_direction"), plane_normal)
 
     selected = select_faces(source, arguments.get("faces"), tool=DRAFT, document=document)
@@ -227,6 +238,17 @@ def draft(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
             f"{DRAFT} matched no faces on this shape. The selector "
             f"{arguments.get('faces')!r} found nothing — check it against the geometry "
             "that exists at this point in the build, not the finished part."
+        )
+
+    if arguments.get("parting"):
+        return _parted_draft(
+            context,
+            document,
+            arguments,
+            source,
+            selected,
+            angle_deg=float(angle_deg),
+            pull=pull,
         )
 
     maker = symbol("BRepOffsetAPI_DraftAngle")(source)
@@ -265,31 +287,212 @@ def draft(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
     return context.result_for(feature)
 
 
-def _neutral_plane(value: Any) -> tuple[Any, tuple[float, float, float]]:
-    """The plane the taper pivots about, and its normal.
-
-    Only the origin planes are accepted. A neutral plane taken from a *face* of the part
-    is the other half of this argument's meaning in CATIA and needs `feature#selector`
-    (Phase 2.2) to name one — so it is refused with that reason rather than approximated
-    by whichever origin plane happens to be nearest, which would tilt the part about the
-    wrong height and change every dimension downstream.
-    """
+def _neutral_plane(
+    document: Any, source: Any, value: Any
+) -> tuple[Any, tuple[float, float, float]]:
+    """The plane the taper pivots about, and its normal."""
     if value is None:
         raise GeometryError(
             f"{DRAFT} needs a neutral plane — the section that keeps its size while "
-            f"everything else tapers about it. Name one of: {', '.join(_ORIGIN_PLANES)}."
+            f"everything else tapers about it. Name one of: {', '.join(_ORIGIN_PLANES)}, "
+            "a plane this design constructed, or a planar face of the part."
         )
-    name = str(value).strip().upper()
-    if name not in _ORIGIN_PLANES:
-        raise OperationNotSupported(
-            f"{DRAFT} with neutral={value!r}",
-            "this backend takes an origin plane as the neutral element "
-            f"({', '.join(sorted(_ORIGIN_PLANES))}). Using a face of the part needs the "
-            "feature#selector syntax (Phase 2.2)",
-        )
-    origin, normal = _ORIGIN_PLANES[name]
-    plane = symbol("gp_Pln")(symbol("gp_Pnt")(*origin), symbol("gp_Dir")(*normal))
+    plane, _, normal = _plane_named(document, source, value, argument="neutral")
     return plane, normal
+
+
+def _plane_named(
+    document: Any, source: Any, value: Any, *, argument: str
+) -> tuple[Any, tuple[float, float, float], tuple[float, float, float]]:
+    """Resolve a plane argument to (plane, origin, normal), in a stated order.
+
+    Origin plane, then a plane the design constructed, then a planar face of the part —
+    the same precedence `sketcher.resolve_support` uses, and for the same reason: `XY` is
+    vocabulary rather than a name, so nothing can shadow it.
+
+    **The face case is resolved, not refused.** It used to be turned away as needing
+    `feature#selector`, which is now built: `slab#top` names one face exactly, and a
+    neutral element taken from the part is how a real draft is set up — the parting face
+    of a moulding is a face of the moulding, not one of the three origin planes.
+    """
+    name = str(value).strip()
+    if name.upper() in _ORIGIN_PLANES:
+        origin, normal = _ORIGIN_PLANES[name.upper()]
+        plane = symbol("gp_Pln")(symbol("gp_Pnt")(*origin), symbol("gp_Dir")(*normal))
+        return plane, origin, normal
+
+    if document.has_plane(name):
+        constructed = document.plane(name)
+        return constructed.plane(), constructed.origin_mm(), constructed.normal()
+
+    faces_named = select_faces(source, value, tool=DRAFT, document=document)
+    planar = [
+        face for face in faces_named if classify.face_surface_type(face) == "Plane"
+    ]
+    if len(planar) != 1:
+        known = ", ".join(document.plane_names()) or "none yet"
+        raise GeometryError(
+            f"{DRAFT} needs {argument}={value!r} to be exactly one plane, and it "
+            f"resolved to {len(planar)} planar face(s) of the part. The origin planes "
+            f"are {', '.join(_ORIGIN_PLANES)}; planes this design has constructed: "
+            f"{known}. Name a single face with the feature#selector syntax, or build a "
+            "plane with catia_plane_offset."
+        )
+
+    surface = symbol("BRepAdaptor_Surface")(planar[0])
+    geometric = surface.Plane()
+    location, direction = geometric.Location(), geometric.Axis().Direction()
+    origin = (location.X(), location.Y(), location.Z())
+    normal = (direction.X(), direction.Y(), direction.Z())
+    return geometric, origin, normal
+
+
+def _parted_draft(
+    context: BuildContext,
+    document: Any,
+    arguments: Mapping[str, Any],
+    source: Any,
+    selected: list[Any],
+    *,
+    angle_deg: float,
+    pull: Any,
+) -> Mapping[str, Any]:
+    """Taper both sides of a parting plane, each away from it.
+
+    **Built by drafting the whole part twice and keeping one half of each**, rather than
+    by cutting the part in two and drafting the pieces. Both readings give the same
+    solid, and this one keeps the face selection honest: the selector is resolved once,
+    against the part the caller was looking at. Splitting first would ask it to match
+    against two halves that did not exist when the design named anything, and a name that
+    resolved on the whole part and not on a half would silently taper less than was
+    asked.
+
+    The join is exact rather than merely close. The parting plane *is* the neutral plane
+    for both drafts, so the section there is the one thing neither taper moves — the two
+    halves meet on identical geometry, and the fuse has nothing to reconcile.
+    """
+    parting = arguments.get("parting")
+    plane, origin, normal = _plane_named(document, source, parting, argument="parting")
+
+    radians = math.radians(angle_deg)
+    reversed_pull = symbol("gp_Dir")(-pull.X(), -pull.Y(), -pull.Z())
+
+    halves = []
+    for direction, side_pull in ((normal, pull), (_negated(normal), reversed_pull)):
+        maker = symbol("BRepOffsetAPI_DraftAngle")(source)
+        for face in selected:
+            maker.Add(face, side_pull, radians, plane)
+        tapered = build_or_raise(
+            maker,
+            tool=f"{DRAFT} at {angle_deg}° about {parting!r} on {len(selected)} face(s)",
+            detail="Only planar, cylindrical and conical faces can be tapered, and a "
+            "taper steep enough to consume a face will fail. Reduce the angle, or "
+            "select fewer faces.",
+        )
+        keep = symbol("BRepAlgoAPI_Common")(
+            tapered, _half_space(source, origin, direction)
+        )
+        kept = build_or_raise(
+            keep,
+            tool=f"{DRAFT} (keeping the material on one side of {parting!r})",
+            detail="The parting plane does not cut the part. Check that it passes "
+            "through the material rather than beside it.",
+        )
+        if not has_solid(kept):
+            raise GeometryError(
+                f"{DRAFT} found no material on one side of the parting element "
+                f"{parting!r}. A parting element splits the part in two, so it has to "
+                "pass through it — a plane that misses the part drafts one side of "
+                "nothing."
+            )
+        halves.append((maker, keep, kept))
+
+    fuse = symbol("BRepAlgoAPI_Fuse")(halves[0][2], halves[1][2])
+    result = build_or_raise(
+        fuse,
+        tool=f"{DRAFT} (rejoining the two sides of {parting!r})",
+        detail="The two drafted halves did not rejoin. They meet on the parting plane, "
+        "which neither taper moves, so this points at a parting element that is not "
+        "planar where it crosses the part.",
+    )
+
+    # Where the drafted faces ended up, followed through every step that touched them.
+    # `descendants_of` reads each algorithm's own history, so chaining it is the whole
+    # answer — a face tapered by one half, trimmed by its intersection and carried
+    # through the fuse arrives as the face it actually became.
+    tapered_faces = [
+        face
+        for taper_maker, keep_maker, _ in halves
+        for face in descendants_of(
+            fuse,
+            descendants_of(
+                keep_maker, descendants_of(taper_maker, selected, kind="face"),
+                kind="face",
+            ),
+            kind="face",
+        )
+    ]
+
+    feature = document.add_feature(feature_name(arguments, "draft"), DRAFT)
+    modified, generated = evolution_of(fuse, halves[0][2])
+    document.set_result(
+        feature,
+        result,
+        contributed=(tapered_faces, edges_bounding(tapered_faces)),
+        evolved_by=fuse,
+    )
+    record_derived(
+        feature.labels,
+        result=result,
+        source=source,
+        modified=modified,
+        generated=generated,
+    )
+    return context.result_for(feature)
+
+
+def _half_space(source: Any, origin: tuple[float, float, float], direction: Any) -> Any:
+    """A box covering everything on one side of a plane, and nothing on the other.
+
+    A box rather than `BRepPrimAPI_MakeHalfSpace`: an intersection against a genuinely
+    infinite solid is where boolean robustness goes, and the box only has to clear the
+    part's own bounding box to mean the same thing.
+    """
+    box = symbol("Bnd_Box")()
+    symbol("BRepBndLib").Add_s(source, box, True)
+    x_min, y_min, z_min, x_max, y_max, z_max = box.Get()
+    reach = _HALF_SPACE_FACTOR * max(
+        math.dist(origin, corner)
+        for corner in (
+            (x_min, y_min, z_min),
+            (x_max, y_max, z_max),
+            (x_min, y_max, z_min),
+            (x_max, y_min, z_max),
+            (x_min, y_min, z_max),
+            (x_max, y_max, z_min),
+            (x_min, y_max, z_max),
+            (x_max, y_min, z_min),
+        )
+    )
+
+    axis = symbol("gp_Ax2")(symbol("gp_Pnt")(*origin), symbol("gp_Dir")(*direction))
+    x_dir, y_dir = axis.XDirection(), axis.YDirection()
+    corner = tuple(
+        origin[index] - (x_dir.Coord(index + 1) + y_dir.Coord(index + 1)) * reach
+        for index in range(3)
+    )
+    placed = symbol("gp_Ax2")(
+        symbol("gp_Pnt")(*corner), symbol("gp_Dir")(*direction), x_dir
+    )
+    return build_or_raise(
+        symbol("BRepPrimAPI_MakeBox")(placed, 2 * reach, 2 * reach, reach),
+        tool=f"{DRAFT} (the half-space on one side of the parting element)",
+        detail="The parting element's own frame could not be built into a half-space.",
+    )
+
+
+def _negated(vector: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (-vector[0], -vector[1], -vector[2])
 
 
 def _pull_direction(value: Any, plane_normal: tuple[float, float, float]) -> Any:

@@ -78,6 +78,7 @@ HANDLERS: Final[dict[str, Handler]] = {
     features.SOLID_COMBINE: features.solid_combine,
     sweeps.RIB: sweeps.rib,
     sweeps.SLOT: sweeps.slot,
+    sweeps.STIFFENER: sweeps.stiffener,
     holes.HOLE: holes.hole,
     holes.HOLE_AT: holes.hole_at,
     # primitives and dress-up

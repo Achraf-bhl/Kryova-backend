@@ -15,19 +15,21 @@ happened.
 
 ## Now
 
-**E2 — Selection & authoring vocabulary.** 2.1–2.4 are done. 2.5 (Part Design
-completion) is the open item and the one that decides the star.
+**E2 — Selection & authoring vocabulary.** 2.1–2.5 are done. **2.6 (surfaces / GSD) is
+the only thing between here and `*E2`**, and the master plan marks it *deferrable within
+the era* — so the next decision is whether 2.6 moves to E-later and the star lands now,
+or whether it is built here.
 
-Remaining before `*E2`:
+What 2.6 is still holding up, named rather than left to be rediscovered — each is a live
+`OperationNotSupported` in the tree today:
 
-1. **`catia_stiffener`** — thicken an open profile into a rib that runs until it meets
-   the surrounding material. The interesting half is the *until*: the plate is grown
-   past the walls and the part is subtracted, which leaves exactly the corner void, and
-   only the piece the profile actually reaches is kept.
-2. **`catia_draft` with a parting line** — currently refused as
-   `_UNSUPPORTED_MODES["reflect_line"]` in `occt/operations/dressup.py`.
-3. Then **2.6 (surfaces / GSD)**, which the master plan marks *deferrable within the
-   era* — so the star may land before it if 2.6 moves to E-later.
+- `catia_draft` in `reflect_line` mode (needs the pull direction's silhouette curve),
+- a thin-walled `catia_rib`/`catia_slot` (`thick=true` needs the profile offset into two
+  walls),
+- `control="reference_surface"` on a swept feature (orienting the section against a
+  surface),
+- the surface half of `catia_thickness` (offsetting a curved face rather than sweeping a
+  planar one along its normal).
 
 Hardware-blocked and **not** counted against the star: the CATIA-seat halves of E1's and
 E3's conformance runs need a Windows seat.
@@ -43,6 +45,25 @@ measurement vocabulary a visual check would assert against already exists.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-05** — E2 → **2.5 DONE**: stiffeners and the parting draft, the two Part
+  Design features whose extent their own arguments do not state. `catia_stiffener`
+  thickens an open profile and grows it past the part, subtracts the part, and keeps the
+  pieces the profile reaches — so the gusset is exactly the void the walls close
+  (½·b·h·t, exact) and stays right when a wall moves. Which way it grows is *stated*
+  (sketch normal × the profile's chord, `reversed` to flip) rather than sniffed for,
+  because the corner a stiffener fills is empty and every cheap material test answers
+  about somewhere the stiffener is not; what replaces the sniffing is a check with a real
+  answer — a piece that reaches the far end of its own sweep never met material and is
+  refused, naming `reversed` as the fix. `catia_draft` gained its `parting` element: both
+  sides taper away from the plane, which is what a two-part mould needs and what one
+  taper cannot express, verified against the frustum closed form per side. Built by
+  drafting the whole part twice and keeping one half of each, *not* by splitting first —
+  splitting would ask the face selector to match halves that did not exist when the
+  design named anything. A `neutral` element may now be a planar face of the part; that
+  refusal had been pointing at Phase 2.2 since before 2.2 was built. Coverage 63 →
+  **64/201**. Both guards were verified by breaking what they protect: removing the
+  overrun check and giving both draft halves the same pull direction each fail exactly
+  one test.
 - **2026-09-05** — E2 → *2.5 partial: swept features, drawn curves, threads*
   (`catia_rib`, `catia_slot`, `catia_thread`, and the open-curve sketch vocabulary —
   line, polyline, arc, three-point arc, ellipse, spline, axis). Coverage 53 → **63/201**.

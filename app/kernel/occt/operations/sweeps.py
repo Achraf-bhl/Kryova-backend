@@ -1,4 +1,4 @@
-"""Features swept along a path: `catia_rib` and `catia_slot`.
+"""Features swept along a path: `catia_rib`, `catia_slot` and `catia_stiffener`.
 
 A rib takes a closed profile and drags it along a guide curve, leaving the solid it
 traced; a slot does the same and removes it. This is how a handle, a pipe run, an O-ring
@@ -14,21 +14,33 @@ to the path, and doing so would make a rib whose section sits somewhere the auth
 not draw it — plausible-looking, and a different part. The registry's own summary says
 the profile belongs on a plane normal to the start of the guide, and this honours that
 instruction rather than repairing it silently.
+
+A stiffener is the third member of the family and the odd one: its profile is **open**,
+and where it stops is not stated at all — it runs until it meets the material it braces.
+That is what makes it survive a wall moving, and it is why the operation is built by
+subtraction rather than by extrusion to a length nobody gave.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any, Final
 
 from app.kernel.errors import GeometryError, OperationNotSupported
 from app.kernel.occt.binding import symbol
-from app.kernel.occt.operations.context import BuildContext
+from app.kernel.occt.operations.context import (
+    BuildContext,
+    as_positive_length,
+    build_or_raise,
+)
 from app.kernel.occt.operations.features import combine_into_part
 from app.kernel.occt.sketching import Sketch
+from app.kernel.occt.topology import SOLID, compound, edges, explore
 
 RIB = "catia_rib"
 SLOT = "catia_slot"
+STIFFENER = "catia_stiffener"
 
 #: How the profile is held as it travels, and what each means to OCCT.
 #:
@@ -56,6 +68,255 @@ def rib(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any
 def slot(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
     """Sweep a closed profile along a guide curve and remove what it traces."""
     return _swept_feature(context, arguments, SLOT, adds_material=False)
+
+
+def stiffener(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Thicken an open profile into a rib that runs until it meets the material.
+
+    The gusset between a wall and a base: draw the diagonal across the corner and this
+    fills the triangle behind it. **The profile is open and its ends are not where the
+    stiffener ends** — the walls decide that, which is the whole point of the feature and
+    why it stays correct when they move. A closed profile is a pad or a rib and is
+    refused as one.
+
+    **Built by subtraction, never by extrusion to a length.** The thickened profile is
+    grown well past the part, the part is cut out of it, and what is left is exactly the
+    voids the profile spans. Extruding "far enough" and trimming would need a length
+    nobody gave, and any length picked here would be this module's guess rather than the
+    part's answer.
+
+    **Which way it grows is stated, not detected.** The sweep runs to the left of the
+    direction the profile was drawn — the sketch normal crossed into the chord from its
+    start to its end — and `reversed` sends it the other way. Sniffing for the material
+    was the alternative and is worse: the corner a stiffener fills is *empty*, so every
+    cheap test (is the midpoint inside the solid, where is the centroid) answers about
+    somewhere the stiffener is not. What replaces the sniffing is a check with a real
+    answer: a stiffener that runs off the end of its own sweep never met material, and
+    that is refused by name with `reversed` offered as the fix.
+    """
+    document = context.require_document()
+    part = document.shape
+    if part is None:
+        raise GeometryError(
+            f"{STIFFENER} braces material that is already there, and this part has none "
+            "yet. Build the walls it stiffens with a pad or a shaft first."
+        )
+
+    sketch = _sketch_named(document, arguments, "profile", STIFFENER)
+    profile, chord = _open_profile(sketch)
+    thickness_mm = as_positive_length(
+        arguments.get("thickness_mm"), argument="thickness_mm", tool=STIFFENER
+    )
+
+    normal = _sketch_normal(sketch)
+    sweep = _sweep_direction(normal, chord, reversed_=bool(arguments.get("reversed")))
+    reach = _reach_over(part, profile)
+
+    # `symmetric` defaults to true, which is CATIA's neutral fibre: the drawn line is the
+    # middle of the plate. `false` puts the whole thickness on the sketch normal's side.
+    offset = (
+        _scaled(normal, -thickness_mm / 2.0)
+        if arguments.get("symmetric") is not False
+        else (0.0, 0.0, 0.0)
+    )
+    base = _translated(profile, offset) if any(offset) else profile
+
+    band = _band(base, normal, sweep, thickness_mm, reach)
+    cap = _prism(_translated(base, _scaled(sweep, reach)), _scaled(normal, thickness_mm))
+    blank = _closed_by_the_part(band, part, profile, cap, reach)
+    return combine_into_part(
+        context, document, arguments, STIFFENER, blank, adds_material=True
+    )
+
+
+# -- the stiffener's own construction -----------------------------------------
+
+#: How far past the part the plate is grown before the part is subtracted from it.
+#:
+#: A multiple of the bounding diagonal rather than a fixed length, and it does not need
+#: tuning: the sweep only has to clear the material for the subtraction to leave the
+#: voids, and everything beyond that is cut away again. Too *short* is the only error
+#: that matters, and it is reported rather than absorbed — a piece that reaches the far
+#: end of the sweep is refused.
+_REACH_FACTOR: Final = 1.5
+
+#: How close a piece must come to the profile to count as reached by it, and to the far
+#: cap to count as having run off the end. Both are contact tests against surfaces the
+#: same boolean produced, so this is a numerical-noise margin, not a modelling choice.
+_CONTACT_TOLERANCE_MM: Final = 1e-6
+
+
+def _open_profile(sketch: Sketch) -> tuple[Any, tuple[float, float, float]]:
+    """The sketch's single open run, and the chord from its start to its end."""
+    if sketch.profiles:
+        raise GeometryError(
+            f"{STIFFENER} needs an open profile — a line, or a chain of them — and "
+            f"sketch {sketch.name!r} holds {len(sketch.profiles)} closed one(s). A "
+            "closed profile states its own boundary, which is what catia_pad and "
+            "catia_rib take; a stiffener finds its boundary against the part."
+        )
+    if len(sketch.curves) != 1:
+        drawn = len(sketch.curves)
+        raise GeometryError(
+            f"{STIFFENER} needs exactly one open profile on sketch {sketch.name!r}, and "
+            f"it holds {drawn}. "
+            + (
+                "Draw the stiffener's line with catia_sketch_line or "
+                "catia_sketch_polyline."
+                if drawn == 0
+                else "Draw each stiffener on a sketch of its own so there is no doubt "
+                "which line is which."
+            )
+        )
+
+    run = sketch.curves[0]
+    start, end = sketch.to_world(run.start), sketch.to_world(run.end)
+    chord = (end[0] - start[0], end[1] - start[1], end[2] - start[2])
+    if _length(chord) < _CONTACT_TOLERANCE_MM:
+        raise GeometryError(
+            f"{STIFFENER} takes the direction it grows from the chord between the "
+            f"profile's ends, and the profile on sketch {sketch.name!r} begins and ends "
+            "at the same place. Draw it as an open line across the corner."
+        )
+    return run.wire, chord
+
+
+def _sketch_normal(sketch: Sketch) -> tuple[float, float, float]:
+    direction = sketch.frame().Direction()
+    return (direction.X(), direction.Y(), direction.Z())
+
+
+def _sweep_direction(
+    normal: tuple[float, float, float],
+    chord: tuple[float, float, float],
+    *,
+    reversed_: bool,
+) -> tuple[float, float, float]:
+    """In the sketch plane, square to the profile's chord — left of it, unless reversed."""
+    across = (
+        normal[1] * chord[2] - normal[2] * chord[1],
+        normal[2] * chord[0] - normal[0] * chord[2],
+        normal[0] * chord[1] - normal[1] * chord[0],
+    )
+    length = _length(across)
+    if length < _CONTACT_TOLERANCE_MM:  # pragma: no cover - a sketch chord is in-plane
+        raise GeometryError(
+            f"{STIFFENER} could not square the profile's chord against its sketch plane. "
+            "The profile appears to run along the plane's own normal."
+        )
+    unit = _scaled(across, 1.0 / length)
+    return _scaled(unit, -1.0) if reversed_ else unit
+
+
+def _band(
+    base: Any,
+    normal: tuple[float, float, float],
+    sweep: tuple[float, float, float],
+    thickness_mm: float,
+    reach: float,
+) -> Any:
+    """The profile grown across the part, one solid per drawn segment, fused.
+
+    Per segment rather than sweeping the wire whole: a prism of an *edge* is a face and a
+    prism of a face is a solid, both of which OCCT states plainly, where a prism of a
+    multi-edge wire is a shell whose promotion to a solid is not.
+    """
+    slabs = [
+        _prism(_prism(edge, _scaled(sweep, reach)), _scaled(normal, thickness_mm))
+        for edge in edges(base)
+    ]
+    band = slabs[0]
+    for extra in slabs[1:]:
+        maker = symbol("BRepAlgoAPI_Fuse")(band, extra)
+        band = build_or_raise(
+            maker,
+            tool=f"{STIFFENER} (joining the segments of its profile)",
+            detail="Two segments of the profile could not be joined into one plate. "
+            "Check that the profile does not double back on itself.",
+        )
+    return band
+
+
+def _closed_by_the_part(band: Any, part: Any, profile: Any, cap: Any, reach: float) -> Any:
+    """What is left of the plate once the part is taken out of it.
+
+    The two rules that make this the stiffener rather than a slab: a piece counts only if
+    the profile actually reaches it, and a piece that also reaches the far end of the
+    sweep is not closed by the part at all — the plate ran past the material instead of
+    into it, which is the wrong-way-round case and is refused rather than built.
+    """
+    maker = symbol("BRepAlgoAPI_Cut")(band, part)
+    remainder = build_or_raise(
+        maker,
+        tool=f"{STIFFENER} (cutting the part out of its plate)",
+        detail="The stiffener's plate could not be subtracted from the part.",
+    )
+
+    pieces = [symbol("TopoDS").Solid_s(shape) for shape in explore(remainder, SOLID)]
+    reached = [
+        piece for piece in pieces if _distance(piece, profile) <= _CONTACT_TOLERANCE_MM
+    ]
+    if not reached:
+        raise GeometryError(
+            f"{STIFFENER} found no void along its profile. The profile lies inside the "
+            "material it was meant to brace, so there is nothing for the stiffener to "
+            "fill — draw it across the corner rather than through the wall."
+        )
+
+    overrun = [
+        piece for piece in reached if _distance(piece, cap) <= _CONTACT_TOLERANCE_MM
+    ]
+    if overrun:
+        raise GeometryError(
+            f"{STIFFENER} swept {reach:.4g} mm from the profile and never met material: "
+            "what it built runs off the end of its own sweep rather than being closed by "
+            "the part. The sweep runs to the left of the direction the profile was "
+            "drawn — pass reversed: true to send it the other way, or check that the "
+            "profile spans the corner it is meant to brace."
+        )
+    return reached[0] if len(reached) == 1 else compound(reached)
+
+
+def _reach_over(part: Any, profile: Any) -> float:
+    """Far enough to clear both the part and the profile, whatever their placement."""
+    box = symbol("Bnd_Box")()
+    add = symbol("BRepBndLib").Add_s
+    add(part, box, True)
+    add(profile, box, True)
+    x_min, y_min, z_min, x_max, y_max, z_max = box.Get()
+    diagonal = _length((x_max - x_min, y_max - y_min, z_max - z_min))
+    return diagonal * _REACH_FACTOR
+
+
+def _prism(shape: Any, vector: tuple[float, float, float]) -> Any:
+    return symbol("BRepPrimAPI_MakePrism")(shape, symbol("gp_Vec")(*vector)).Shape()
+
+
+def _translated(shape: Any, vector: tuple[float, float, float]) -> Any:
+    transformation = symbol("gp_Trsf")()
+    transformation.SetTranslation(symbol("gp_Vec")(*vector))
+    return symbol("BRepBuilderAPI_Transform")(shape, transformation, True).Shape()
+
+
+def _distance(first: Any, second: Any) -> float:
+    """Exact minimum distance, and `inf` when the search has no answer to give.
+
+    Infinity rather than zero on failure, because both callers read a small distance as
+    "these touch": a search that failed would otherwise be counted as contact, which
+    would keep a piece the profile never reached or refuse one that never ran over.
+    """
+    extrema = symbol("BRepExtrema_DistShapeShape")(first, second)
+    if not extrema.IsDone() or extrema.NbSolution() <= 0:  # pragma: no cover - defensive
+        return math.inf
+    return float(extrema.Value())
+
+
+def _scaled(vector: tuple[float, float, float], factor: float) -> tuple[float, float, float]:
+    return (vector[0] * factor, vector[1] * factor, vector[2] * factor)
+
+
+def _length(vector: tuple[float, float, float]) -> float:
+    return math.sqrt(vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2)
 
 
 # -- shared construction ------------------------------------------------------
@@ -217,6 +478,8 @@ __all__ = [
     "REFERENCE_SURFACE",
     "RIB",
     "SLOT",
+    "STIFFENER",
     "rib",
     "slot",
+    "stiffener",
 ]

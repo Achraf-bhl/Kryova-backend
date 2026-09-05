@@ -1691,3 +1691,275 @@ class TestThreadsAreAnnotations:
 
         with pytest.raises(GeometryError, match="not a cylindrical face"):
             runner("catia_thread", {"face": "block#top", "designation": "M10"})
+
+
+class TestStiffenersFindTheirOwnBoundaries:
+    """A stiffener's profile says where it *runs*, never where it stops.
+
+    That is the whole feature: the gusset between a wall and a base is bounded by the
+    wall and the base, so it stays right when either moves. Every test here checks the
+    triangle it fills against ½·b·h·t rather than against a recorded volume, because a
+    stiffener that extrudes to a plausible length looks identical in a screenshot and is
+    a different part.
+    """
+
+    @staticmethod
+    def _bracket() -> object:
+        """An L: base 60×40×10 at the origin, wall 10×40×40 standing on its short end."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Bracket"})
+
+        runner("catia_sketch_create", {"support": "XY", "name": "base"})
+        corners = [(0.0, 0.0), (60.0, 0.0), (60.0, 40.0), (0.0, 40.0)]
+        for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+            runner("catia_sketch_line", {"sketch": "base", "start": start, "end": end})
+        runner("catia_pad", {"sketch": "base", "length_mm": 10.0})
+
+        runner(
+            "catia_plane_offset",
+            {"reference": "XY", "distance_mm": 10.0, "name": "base_top"},
+        )
+        runner("catia_sketch_create", {"support": "base_top", "name": "wall"})
+        corners = [(0.0, 0.0), (10.0, 0.0), (10.0, 40.0), (0.0, 40.0)]
+        for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+            runner("catia_sketch_line", {"sketch": "wall", "start": start, "end": end})
+        runner("catia_pad", {"sketch": "wall", "length_mm": 40.0})
+        return runner
+
+    @staticmethod
+    def _diagonal(runner: object, *, start: tuple[float, float], end: tuple[float, float]) -> None:
+        """A line across the corner, on the plane halfway through the bracket's width.
+
+        Drawn on an offset of `ZX` so the plate sits inside the material it braces: on
+        `ZX` itself half its thickness would hang off the y=0 face, where there is no
+        wall for it to stop against.
+        """
+        runner("catia_plane_offset", {"reference": "ZX", "distance_mm": 20.0, "name": "mid"})  # type: ignore[operator]
+        runner("catia_sketch_create", {"support": "mid", "name": "gusset"})  # type: ignore[operator]
+        runner("catia_sketch_line", {"sketch": "gusset", "start": start, "end": end})  # type: ignore[operator]
+
+    #: The bracket's own volume: 60·40·10 base plus 10·40·40 wall.
+    BRACKET_MM3 = 60.0 * 40.0 * 10.0 + 10.0 * 40.0 * 40.0
+
+    def test_the_gusset_is_the_triangle_the_walls_close(self) -> None:
+        """The profile runs from (10, 30) on the wall to (40, 10) on the base, so the
+        void behind it is a right triangle with legs of 20 and 30 mm."""
+        runner = self._bracket()
+        self._diagonal(runner, start=(30.0, 10.0), end=(10.0, 40.0))
+
+        result = runner("catia_stiffener", {"profile": "gusset", "thickness_mm": 6.0})  # type: ignore[operator]
+
+        assert result["volume_mm3"] == pytest.approx(
+            self.BRACKET_MM3 + 0.5 * 20.0 * 30.0 * 6.0, abs=TOL
+        )
+
+    def test_thickness_scales_the_gusset_and_nothing_else(self) -> None:
+        """Twice the plate is twice the added material — not a different triangle."""
+        volumes = []
+        for thickness in (3.0, 6.0):
+            runner = self._bracket()
+            self._diagonal(runner, start=(30.0, 10.0), end=(10.0, 40.0))
+            volumes.append(
+                runner("catia_stiffener", {"profile": "gusset", "thickness_mm": thickness})[  # type: ignore[operator]
+                    "volume_mm3"
+                ]
+                - self.BRACKET_MM3
+            )
+
+        assert volumes[1] == pytest.approx(2 * volumes[0], abs=TOL)
+
+    def test_a_stiffener_grown_away_from_the_part_is_refused(self) -> None:
+        """The failure this operation is most likely to have, and the one a silent
+        answer would hide: swept the wrong way it meets nothing, and a slab hanging in
+        the air is a part nobody would notice was wrong until it was cut."""
+        from app.kernel.errors import GeometryError
+
+        runner = self._bracket()
+        self._diagonal(runner, start=(30.0, 10.0), end=(10.0, 40.0))
+
+        with pytest.raises(GeometryError, match="never met material"):
+            runner(  # type: ignore[operator]
+                "catia_stiffener",
+                {"profile": "gusset", "thickness_mm": 6.0, "reversed": True},
+            )
+
+    def test_reversed_is_what_a_profile_drawn_backwards_needs(self) -> None:
+        """The sweep is squared against the chord from start to end, so drawing the same
+        line the other way round points it the other way — and `reversed` is the whole of
+        the correction. Same triangle, same volume."""
+        runner = self._bracket()
+        self._diagonal(runner, start=(10.0, 40.0), end=(30.0, 10.0))
+
+        result = runner(  # type: ignore[operator]
+            "catia_stiffener",
+            {"profile": "gusset", "thickness_mm": 6.0, "reversed": True},
+        )
+
+        assert result["volume_mm3"] == pytest.approx(
+            self.BRACKET_MM3 + 0.5 * 20.0 * 30.0 * 6.0, abs=TOL
+        )
+
+    def test_a_closed_profile_is_not_a_stiffener(self) -> None:
+        """A closed profile states its own boundary, which is the one thing a stiffener
+        must not do. Padding it would build something, and something is worse here."""
+        from app.kernel.errors import GeometryError
+
+        runner = self._bracket()
+        runner("catia_sketch_create", {"support": "XY", "name": "closed"})  # type: ignore[operator]
+        corners = [(20.0, 5.0), (30.0, 5.0), (30.0, 15.0), (20.0, 15.0)]
+        for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+            runner("catia_sketch_line", {"sketch": "closed", "start": start, "end": end})  # type: ignore[operator]
+
+        with pytest.raises(GeometryError, match="needs an open profile"):
+            runner("catia_stiffener", {"profile": "closed", "thickness_mm": 6.0})  # type: ignore[operator]
+
+    def test_a_stiffener_needs_material_to_brace(self) -> None:
+        from app.kernel import OcctRunner
+        from app.kernel.errors import GeometryError
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Empty"})
+        runner("catia_sketch_create", {"support": "XY", "name": "gusset"})
+        runner("catia_sketch_line", {"sketch": "gusset", "start": (0.0, 0.0), "end": (10.0, 10.0)})
+
+        with pytest.raises(GeometryError, match="braces material that is already there"):
+            runner("catia_stiffener", {"profile": "gusset", "thickness_mm": 6.0})
+
+
+class TestDraftSplitsAtAPartingElement:
+    """A two-part mould needs both halves to release, which one taper cannot express.
+
+    Checked against the frustum volume h/3·(a²+ab+b²) on each side of the parting plane,
+    so a draft that tapered the whole part one way — the thing this replaced — fails by
+    the difference between the two closed forms rather than by looking slightly off.
+    """
+
+    ANGLE_DEG = 3.0
+    SIDE_MM = 40.0
+    HEIGHT_MM = 20.0
+
+    @staticmethod
+    def _block() -> object:
+        """A 40×40×20 block with a constructed plane through its middle."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Moulding"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        corners = [(0.0, 0.0), (40.0, 0.0), (40.0, 40.0), (0.0, 40.0)]
+        for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+            runner("catia_sketch_line", {"sketch": "outline", "start": start, "end": end})
+        runner("catia_pad", {"sketch": "outline", "length_mm": 20.0})
+        runner(
+            "catia_plane_offset",
+            {"reference": "XY", "distance_mm": 10.0, "name": "parting"},
+        )
+        return runner
+
+    @staticmethod
+    def _frustum(bottom: float, top: float, height: float) -> float:
+        return height / 3.0 * (bottom**2 + bottom * top + top**2)
+
+    def _walls(self) -> dict[str, object]:
+        return {"type": "face", "parallel_to": "z"}
+
+    def test_both_sides_taper_away_from_the_parting_plane(self) -> None:
+        runner = self._block()
+        drop = 2 * (self.HEIGHT_MM / 2) * math.tan(math.radians(self.ANGLE_DEG))
+
+        result = runner(  # type: ignore[operator]
+            "catia_draft",
+            {
+                "faces": self._walls(),
+                "angle_deg": self.ANGLE_DEG,
+                "neutral": "parting",
+                "parting": "parting",
+                "pulling_direction": [0.0, 0.0, 1.0],
+            },
+        )
+
+        assert result["volume_mm3"] == pytest.approx(
+            2 * self._frustum(self.SIDE_MM, self.SIDE_MM - drop, self.HEIGHT_MM / 2),
+            abs=TOL,
+        )
+
+    def test_a_parted_draft_is_not_the_same_part_as_an_unparted_one(self) -> None:
+        """Same faces, same angle, same neutral plane — and a different solid. Without
+        the parting element the taper runs the full height in one direction, which is
+        the mould that locks."""
+        drop = 2 * self.HEIGHT_MM * math.tan(math.radians(self.ANGLE_DEG))
+        runner = self._block()
+
+        result = runner(  # type: ignore[operator]
+            "catia_draft",
+            {
+                "faces": self._walls(),
+                "angle_deg": self.ANGLE_DEG,
+                "neutral": "parting",
+                "pulling_direction": [0.0, 0.0, 1.0],
+            },
+        )
+
+        assert result["volume_mm3"] == pytest.approx(
+            self._frustum(self.SIDE_MM + drop / 2, self.SIDE_MM - drop / 2, self.HEIGHT_MM),
+            abs=1e-5,
+        )
+
+    def test_a_parting_element_that_misses_the_part_is_refused(self) -> None:
+        """It splits nothing, so one 'half' is empty — and drafting one side of nothing
+        would return the part untouched, reported as a successful draft."""
+        from app.kernel.errors import GeometryError
+
+        runner = self._block()
+        runner("catia_plane_offset", {"reference": "XY", "distance_mm": 500.0, "name": "far"})  # type: ignore[operator]
+
+        with pytest.raises(GeometryError, match="no material on one side"):
+            runner(  # type: ignore[operator]
+                "catia_draft",
+                {
+                    "faces": self._walls(),
+                    "angle_deg": self.ANGLE_DEG,
+                    "neutral": "parting",
+                    "parting": "far",
+                },
+            )
+
+    def test_the_neutral_element_may_be_a_face_of_the_part(self) -> None:
+        """It used to be refused as needing `feature#selector`, which is now built. A
+        moulding's neutral element is a face of the moulding far more often than it is
+        one of the three origin planes."""
+        runner = self._block()
+        drop = 2 * self.HEIGHT_MM * math.tan(math.radians(self.ANGLE_DEG))
+
+        result = runner(  # type: ignore[operator]
+            "catia_draft",
+            {
+                "faces": self._walls(),
+                "angle_deg": self.ANGLE_DEG,
+                "neutral": {"type": "face", "axis": "z", "side": "min"},
+            },
+        )
+
+        assert result["volume_mm3"] == pytest.approx(
+            self._frustum(self.SIDE_MM, self.SIDE_MM - drop, self.HEIGHT_MM), abs=1e-5
+        )
+
+    def test_a_reflect_line_draft_still_says_what_it_needs(self) -> None:
+        """The parting element is implemented and the reflect line is not — and the
+        refusal must not now imply the two were the same gap."""
+        from app.kernel.errors import OperationNotSupported
+
+        runner = self._block()
+
+        with pytest.raises(OperationNotSupported, match="silhouette"):
+            runner(  # type: ignore[operator]
+                "catia_draft",
+                {
+                    "faces": self._walls(),
+                    "angle_deg": self.ANGLE_DEG,
+                    "neutral": "XY",
+                    "mode": "reflect_line",
+                },
+            )

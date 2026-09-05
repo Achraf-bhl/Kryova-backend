@@ -95,8 +95,11 @@ dependencies** — create one before claiming any backend test result. `numpy 1.
 `pyproject.toml` configures ruff (`E,F,I`, line length 100) and mypy (`python_version = "3.12"`,
 `mypy_path = "scripts"`), and `.github/` has workflows. Run
 `venv/bin/python -m ruff check app/ tests/` and `venv/bin/python -m mypy app/` before finishing.
-Two **pre-existing** mypy errors in `app/catia/local_bridge.py` (lines 307/309, `Popen | None`
-union-attr) are not yours — leave them or fix them deliberately, but do not be surprised by them.
+**Both are clean, and there is no longer a list of errors to expect.** This paragraph used to
+name two in `app/catia/local_bridge.py`; those went, seven in `app/solve/` took their place and
+were carried for a while as "pre-existing", and on 2026-09-05 the last of them were fixed rather
+than tolerated. A tolerated error is one nobody reads, so the next real one hides behind it —
+if mypy prints anything, it is yours.
 
 **Setup and update are one script**, `scripts/setup.sh` (bash) and `scripts/setup.ps1`
 (PowerShell — **the product ships on Windows**, so that one is the path that matters). Every

@@ -156,6 +156,20 @@ class Fixture(BaseModel):
         object.__setattr__(self, "dofs", implied)
         return self
 
+    @property
+    def held(self) -> list[Literal["x", "y", "z"]]:
+        """The degrees of freedom this fixture holds. Never None.
+
+        `dofs` is optional only at the boundary — None is how "not given" is
+        spelled in a request, and `_resolve_dofs` has replaced it before any
+        solver sees the fixture. Assembly reads this instead, so the invariant
+        is written down once here rather than assumed in three separate places
+        that a type checker was right to object to.
+        """
+        if self.dofs is None:  # only reachable via model_construct()
+            return ["x", "y", "z"]
+        return self.dofs
+
     def _implied_dofs(self) -> list[str] | None:
         """The degrees of freedom `kind` implies, or None when it implies none."""
         if self.kind == "custom":

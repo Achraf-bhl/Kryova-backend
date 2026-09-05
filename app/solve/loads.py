@@ -28,6 +28,7 @@ from app.solve.selection import (
 from app.solve.types import (
     BearingLoad,
     CentrifugalLoad,
+    CylinderSelector,
     ForceLoad,
     GravityLoad,
     Load,
@@ -197,7 +198,11 @@ def _bearing(
     direction = force / magnitude
 
     where = load.where
-    if not hasattr(where, "axis_point"):
+    # By type, not by hasattr: the cylinder is the only selector carrying an
+    # axis, and asking for the attribute would accept anything that happened to
+    # grow one later while telling neither the reader nor the type checker which
+    # selector this actually requires.
+    if not isinstance(where, CylinderSelector):
         raise SolverError(
             "A bearing load must be applied to a cylinder selector — it is the bore's "
             "axis that decides which half of the surface carries the load."

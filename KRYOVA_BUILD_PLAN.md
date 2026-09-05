@@ -83,6 +83,21 @@ measurement vocabulary a visual check would assert against already exists.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-05** — housekeeping, no board row: **mypy is clean, and CLAUDE.md no longer lists
+  errors to expect.** The seven carried in `app/solve/` were two real defects wearing a
+  type-checker's clothes. `_bearing` asked `hasattr(where, "axis_point")` — which accepts
+  anything that later grows the attribute and tells neither the reader nor mypy which selector
+  a bearing load actually needs; it now tests `isinstance(..., CylinderSelector)`. And
+  `Fixture.dofs` is `list | None` only at the boundary, since None is how "not given" is
+  spelled in a request and `_resolve_dofs` fills it before any solver runs — three assembly
+  routines each assumed that silently, so the invariant is now written once as `Fixture.held`.
+  Both verified by breaking them: inverting the selector test fails
+  `test_it_refuses_a_non_cylindrical_region` and both bearing-distribution tests; making
+  `held` return all three axes fails `test_a_roller_really_does_let_the_face_slide` and nine
+  others. 988 offline tests green. Frontend `eslint.config.mjs` also ignores `.remember/**` —
+  flat config does not skip dot-directories the way eslintrc did, so a hook writing a bare
+  timestamp into a file named `last-ndc.ts` was being linted as our source.
+
 - **2026-09-05** — E2 → **2.6 continues: propagation and sewing**. `catia_sew_surface`
   (coverage 106 → **107/201**) and `propagation` on `catia_extract`. Tangent propagation is
   what makes "the rounded end of this part" a selection instead of an enumeration, and the

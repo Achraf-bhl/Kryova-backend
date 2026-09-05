@@ -178,7 +178,7 @@ class LinearBucklingSolver:
         fixed = np.unique(
             np.concatenate(
                 [
-                    _dof_indices(select_nodes(mesh, fixture.where), fixture.dofs)
+                    _dof_indices(select_nodes(mesh, fixture.where), fixture.held)
                     for fixture in case.fixtures
                 ]
             )

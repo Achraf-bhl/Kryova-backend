@@ -104,6 +104,8 @@ def environment() -> dict[str, str]:
     version. Python and platform are included because a kernel is a compiled binary and
     the platform is part of what produced the number.
     """
+    from app.kernel.contract import CONTRACT_VERSION
+
     return {
         "kernel": occt_version() if available() else "unavailable",
         "binding": DISTRIBUTION,
@@ -111,6 +113,12 @@ def environment() -> dict[str, str]:
         "platform": f"{platform.system()}-{platform.machine()}",
         "implementation": sys.implementation.name,
         "digest_decimals": str(DIGEST_DECIMALS),
+        # The measurement contract is part of what produced the numbers: a stored result
+        # is read back by a later version that needs to know which quantities existed and
+        # what they meant. Imported here rather than at module scope because `contract`
+        # imports `interrogation`, which would make every determinism import drag the
+        # interrogation stack in behind it.
+        "contract": CONTRACT_VERSION,
     }
 
 

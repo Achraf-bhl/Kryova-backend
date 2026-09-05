@@ -44,7 +44,7 @@ from app.kernel import interrogation, measurement, provenance
 #: Bumped when a quantity is added (minor) or removed/redefined (major). Recorded into
 #: provenance records so a stored result can be read back by a later version that knows
 #: what changed.
-CONTRACT_VERSION: Final = "1.1"
+CONTRACT_VERSION: Final = "1.3"
 
 _INDEX_SUFFIX: Final = re.compile(r"\[\d+\]$")
 
@@ -364,6 +364,39 @@ QUANTITIES: Final[tuple[Entry, ...]] = (
         since="1.2",
         indexed=True,
     ),
+    Entry(
+        path="thread.nominal_diameter_mm",
+        unit="mm",
+        summary="Nominal diameter the thread designation names — the 10 in M10. Absent "
+        "when the designation is not one this build reads, which is stated in words "
+        "rather than guessed.",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.3",
+    ),
+    Entry(
+        path="thread.pitch_mm",
+        unit="mm",
+        summary="Thread pitch: written into the designation, given explicitly, or taken "
+        "from the ISO 261 coarse series. Absent when none of the three applies.",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.3",
+    ),
+    Entry(
+        path="thread.minor_diameter_mm",
+        unit="mm",
+        summary="Tapping-drill diameter implied by the designation — what an internal "
+        "thread is cut into. Derived from the pitch, so absent whenever pitch_mm is.",
+        typical_basis=provenance.Basis.APPROXIMATED,
+        since="1.3",
+    ),
+    Entry(
+        path="thread.face_diameter_mm",
+        unit="mm",
+        summary="Measured diameter of the cylinder the thread was declared on — the "
+        "number the designation was checked against.",
+        typical_basis=provenance.Basis.MEASURED,
+        since="1.3",
+    ),
 )
 
 _BY_PATH: Final[dict[str, Entry]] = {item.path: item for item in QUANTITIES}
@@ -375,6 +408,21 @@ if len(_BY_PATH) != len(QUANTITIES):  # pragma: no cover - a typo in this file
     raise ValueError(
         f"The measurement contract declares {_duplicates} more than once. Each path must "
         "appear exactly once, or which definition applies depends on table order."
+    )
+
+#: The version must be at least as new as the newest entry, checked at import.
+#:
+#: It had already drifted once — entries declared `since="1.2"` while the constant still
+#: said `1.1`, so a provenance record would have named a contract version in which four
+#: of the quantities it carried did not exist. A version nobody bumps is worse than no
+#: version, because it is believed.
+_NEWEST_SINCE: Final = max(item.since for item in QUANTITIES)
+
+if _NEWEST_SINCE > CONTRACT_VERSION:  # pragma: no cover - a missed bump in this file
+    raise ValueError(
+        f"The measurement contract declares quantities added in {_NEWEST_SINCE} while "
+        f"CONTRACT_VERSION is still {CONTRACT_VERSION}. Bump it: the version travels "
+        "into provenance records and is how a stored result is read back later."
     )
 
 

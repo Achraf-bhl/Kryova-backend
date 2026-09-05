@@ -18,6 +18,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Final
 
 from app.kernel.occt.operations import (
+    annotation_ops,
     booleans,
     document_ops,
     dressup,
@@ -28,6 +29,7 @@ from app.kernel.occt.operations import (
     primitives,
     reference_ops,
     sketcher,
+    sweeps,
     transforms,
 )
 from app.kernel.occt.operations.context import BuildContext
@@ -61,12 +63,21 @@ HANDLERS: Final[dict[str, Handler]] = {
     sketcher.CLOSE: sketcher.sketch_close,
     sketcher.CONSTRAIN: sketcher.sketch_constrain,
     sketcher.POINT: sketcher.sketch_point,
+    sketcher.LINE: sketcher.sketch_line,
+    sketcher.POLYLINE: sketcher.sketch_polyline,
+    sketcher.ARC: sketcher.sketch_arc,
+    sketcher.ARC_THREE_POINT: sketcher.sketch_arc_three_point,
+    sketcher.ELLIPSE: sketcher.sketch_ellipse,
+    sketcher.SPLINE: sketcher.sketch_spline,
+    sketcher.AXIS: sketcher.sketch_axis,
     # sketch-based solid features
     features.PAD: features.pad,
     features.POCKET: features.pocket,
     features.SHAFT: features.shaft,
     features.GROOVE: features.groove,
     features.SOLID_COMBINE: features.solid_combine,
+    sweeps.RIB: sweeps.rib,
+    sweeps.SLOT: sweeps.slot,
     holes.HOLE: holes.hole,
     holes.HOLE_AT: holes.hole_at,
     # primitives and dress-up
@@ -79,6 +90,7 @@ HANDLERS: Final[dict[str, Handler]] = {
     dressup.FILLET_TRITANGENT: dressup.fillet_tritangent,
     dressup.THICKNESS: dressup.thickness,
     dressup.REMOVE_FACE: dressup.remove_face,
+    annotation_ops.THREAD: annotation_ops.thread,
     # whole-body operations
     booleans.BOOLEAN: booleans.boolean,
     booleans.SHELL: booleans.shell,

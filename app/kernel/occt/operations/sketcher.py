@@ -26,12 +26,17 @@ from app.kernel.occt.operations.context import (
 )
 from app.kernel.occt.sketching import (
     Sketch,
+    arc_edge,
+    arc_through_edge,
     circle_wire,
     closed_wire,
+    ellipse_wire,
     frame_of,
+    line_edge,
     polygon_corners,
     rectangle_corners,
     slot_wire,
+    spline_edge,
 )
 
 CREATE = "catia_sketch_create"
@@ -42,6 +47,13 @@ SLOT = "catia_sketch_slot"
 CLOSE = "catia_sketch_close"
 CONSTRAIN = "catia_sketch_constrain"
 POINT = "catia_sketch_point"
+LINE = "catia_sketch_line"
+POLYLINE = "catia_sketch_polyline"
+ARC = "catia_sketch_arc"
+ARC_THREE_POINT = "catia_sketch_arc_three_point"
+ELLIPSE = "catia_sketch_ellipse"
+SPLINE = "catia_sketch_spline"
+AXIS = "catia_sketch_axis"
 
 
 def sketch_create(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -163,6 +175,104 @@ def sketch_point(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
     }
 
 
+def sketch_line(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Draw a straight line, chaining it onto the contour being drawn."""
+    sketch = _target_sketch(context, arguments, LINE)
+    start = _uv(arguments.get("start"), "start")
+    end = _uv(arguments.get("end"), "end")
+    return _add_segment(sketch, line_edge(sketch, start, end), start, end, arguments)
+
+
+def sketch_polyline(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Draw a connected run of straight lines through a list of points.
+
+    Each segment goes through the same chaining as a single line, so a polyline can
+    continue a contour that lines started and a following line can continue it — the
+    two operations are one drawing action, not two kinds of geometry.
+    """
+    sketch = _target_sketch(context, arguments, POLYLINE)
+    corners = _uv_list(arguments.get("points"), "points", minimum=2)
+    if arguments.get("closed"):
+        corners = corners + [corners[0]]
+
+    outcome = ""
+    for start, end in zip(corners, corners[1:], strict=False):
+        outcome = _chain(sketch, line_edge(sketch, start, end), start, end, arguments)
+    return {"feature": sketch.name, "outcome": outcome, **sketch.to_dict()}
+
+
+def sketch_arc(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Draw a circular arc from a centre, a radius and two angles."""
+    sketch = _target_sketch(context, arguments, ARC)
+    edge, start, end = arc_edge(
+        sketch,
+        _uv(arguments.get("centre"), "centre"),
+        as_positive_length(arguments.get("radius_mm"), argument="radius_mm", tool=ARC),
+        float(arguments["start_angle_deg"]),
+        float(arguments["end_angle_deg"]),
+    )
+    return _add_segment(sketch, edge, start, end, arguments)
+
+
+def sketch_arc_three_point(
+    context: BuildContext, arguments: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Draw a circular arc through three points: start, a point on it, end."""
+    sketch = _target_sketch(context, arguments, ARC_THREE_POINT)
+    start = _uv(arguments.get("start"), "start")
+    through = _uv(arguments.get("through"), "through")
+    end = _uv(arguments.get("end"), "end")
+    edge = arc_through_edge(sketch, start, through, end)
+    return _add_segment(sketch, edge, start, end, arguments)
+
+
+def sketch_spline(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Draw a smooth spline through a list of points."""
+    sketch = _target_sketch(context, arguments, SPLINE)
+    through = _uv_list(arguments.get("points"), "points", minimum=2)
+    closed = bool(arguments.get("closed"))
+    edge = spline_edge(sketch, through, closed=closed)
+    end = through[0] if closed else through[-1]
+    return _add_segment(sketch, edge, through[0], end, arguments)
+
+
+def sketch_ellipse(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Draw an ellipse — a closed profile, like a circle."""
+    sketch = _target_sketch(context, arguments, ELLIPSE)
+    wire = ellipse_wire(
+        sketch,
+        _uv(arguments.get("centre"), "centre"),
+        as_positive_length(
+            arguments.get("major_radius_mm"), argument="major_radius_mm", tool=ELLIPSE
+        ),
+        as_positive_length(
+            arguments.get("minor_radius_mm"), argument="minor_radius_mm", tool=ELLIPSE
+        ),
+        float(arguments.get("rotation_deg") or 0.0),
+    )
+    return _add_profile(sketch, wire, arguments)
+
+
+def sketch_axis(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Draw the sketch's revolution axis.
+
+    Recorded on the sketch rather than added to its geometry: an axis is a reference a
+    shaft or groove revolves about, and letting it into `profiles` would put a stray
+    line into the face a pad extrudes. A sketch has exactly one, so drawing a second
+    replaces the first — which is what redrawing an axis means in CATIA.
+    """
+    sketch = _target_sketch(context, arguments, AXIS)
+    start = _uv(arguments.get("start"), "start")
+    end = _uv(arguments.get("end"), "end")
+    if start == end:
+        raise GeometryError(
+            "The axis begins and ends at the same point, so it has no direction. Give "
+            "two different points on the line the profile turns about."
+        )
+    sketch.axis = (start, end)
+    return {"feature": sketch.name, "axis": [list(start), list(end)], **sketch.to_dict()}
+
+
 def sketch_close(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
     """Finish a sketch.
 
@@ -171,7 +281,10 @@ def sketch_close(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
     reports the state so a caller can see what was drawn.
     """
     sketch = _target_sketch(context, arguments, CLOSE)
-    if sketch.is_empty:
+    # An open run counts as something drawn: a rib's spine sketch holds a curve and no
+    # profile at all, and refusing to close it would make every swept feature start with
+    # an error. What is refused is a sketch with *nothing* on it.
+    if sketch.is_empty and not sketch.curves:
         raise GeometryError(
             f"Sketch {sketch.name!r} is being closed with nothing drawn on it. A feature "
             "consuming it would have no profile to build from."
@@ -230,8 +343,52 @@ def _add_profile(sketch: Sketch, wire: Any, arguments: Mapping[str, Any]) -> Map
     return {"feature": sketch.name, **sketch.to_dict()}
 
 
+def _add_segment(
+    sketch: Sketch,
+    edge: Any,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    arguments: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """File one drawn segment and report what it did to the contour."""
+    outcome = _chain(sketch, edge, start, end, arguments)
+    return {"feature": sketch.name, "outcome": outcome, **sketch.to_dict()}
+
+
+def _chain(
+    sketch: Sketch,
+    edge: Any,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    arguments: Mapping[str, Any],
+) -> str:
+    """Add a segment to the sketch, or file it as construction geometry.
+
+    **Construction segments do not chain.** Construction geometry positions other
+    elements — an axis line, a bolt-circle diameter — and is not a contour under
+    construction, so joining two of them into a run would only make the eventual
+    `profiles` promotion fire on geometry that must never become a face.
+    """
+    if arguments.get("construction"):
+        sketch.construction.append(edge)
+        return "construction"
+    return sketch.add_segment(edge, start, end)
+
+
 def _at(arguments: Mapping[str, Any]) -> tuple[float, float]:
     return _uv(arguments.get("at"), "at", default=(0.0, 0.0))
+
+
+def _uv_list(
+    value: Any, argument: str, *, minimum: int
+) -> list[tuple[float, float]]:
+    """A list of sketch-local points, in order."""
+    if not isinstance(value, (list, tuple)) or len(value) < minimum:
+        raise GeometryError(
+            f"{argument} must be a list of at least {minimum} points, each two numbers "
+            f"[u, v] in the sketch's own axes; got {value!r}."
+        )
+    return [_uv(item, f"{argument}[{index}]") for index, item in enumerate(value)]
 
 
 def _uv(
@@ -252,20 +409,34 @@ def _uv(
 
 
 __all__ = [
+    "ARC",
+    "ARC_THREE_POINT",
+    "AXIS",
     "CIRCLE",
     "CLOSE",
     "CONSTRAIN",
     "CREATE",
+    "ELLIPSE",
+    "LINE",
     "POINT",
     "POLYGON",
+    "POLYLINE",
     "RECTANGLE",
     "SLOT",
+    "SPLINE",
+    "sketch_arc",
+    "sketch_arc_three_point",
+    "sketch_axis",
     "sketch_circle",
     "sketch_close",
     "sketch_constrain",
     "sketch_create",
+    "sketch_ellipse",
+    "sketch_line",
     "sketch_point",
     "sketch_polygon",
+    "sketch_polyline",
     "sketch_rectangle",
     "sketch_slot",
+    "sketch_spline",
 ]

@@ -1305,3 +1305,389 @@ class TestFaceSelectiveShell:
         result = runner("catia_shell", {"thickness_mm": 2.0})
 
         assert result["has_solid"] is True
+
+
+class TestDrawnCurvesChainIntoContours:
+    """Lines, arcs and splines drawn one at a time become one profile.
+
+    An agent emits `catia_sketch_line` four times, not one call with four corners, and
+    the registry's own summary promises that chains. Without it each call would leave a
+    loose edge, the sketch would hold no closed profile, and the pad that follows would
+    fail on a square anyone can see is closed.
+    """
+
+    def test_four_lines_close_into_a_profile_a_pad_extrudes(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Chained"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        corners = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]
+        outcomes = [
+            runner(
+                "catia_sketch_line",
+                {"sketch": "outline", "start": list(start), "end": list(end)},
+            )["outcome"]
+            for start, end in zip(corners, corners[1:] + corners[:1], strict=True)
+        ]
+
+        result = runner("catia_pad", {"sketch": "outline", "length_mm": 5.0})
+
+        assert outcomes == ["started", "extended", "extended", "closed"]
+        assert result["volume_mm3"] == pytest.approx(20.0 * 20.0 * 5.0, abs=TOL)
+
+    def test_an_open_run_is_not_a_profile(self) -> None:
+        """Three sides of a square are not a square, and a pad must say so rather than
+        close the gap with an edge nobody drew."""
+        from app.kernel import OcctRunner
+        from app.kernel.errors import GeometryError
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Open"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        for start, end in (
+            ((0.0, 0.0), (20.0, 0.0)),
+            ((20.0, 0.0), (20.0, 20.0)),
+            ((20.0, 20.0), (0.0, 20.0)),
+        ):
+            runner("catia_sketch_line", {"sketch": "outline", "start": start, "end": end})
+
+        with pytest.raises(GeometryError, match="no closed profile"):
+            runner("catia_pad", {"sketch": "outline", "length_mm": 5.0})
+
+    def test_a_line_and_an_arc_close_a_half_disc(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "D"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        runner("catia_sketch_line", {"sketch": "outline", "start": [0.0, -10.0], "end": [0.0, 10.0]})
+        runner(
+            "catia_sketch_arc",
+            {
+                "sketch": "outline",
+                "centre": [0.0, 0.0],
+                "radius_mm": 10.0,
+                "start_angle_deg": 90.0,
+                "end_angle_deg": -90.0,
+            },
+        )
+
+        result = runner("catia_pad", {"sketch": "outline", "length_mm": 4.0})
+
+        assert result["volume_mm3"] == pytest.approx(math.pi * 100.0 / 2 * 4.0, rel=1e-4)
+
+    def test_a_closed_polyline_needs_no_repeated_point(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Poly"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        runner(
+            "catia_sketch_polyline",
+            {
+                "sketch": "outline",
+                "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]],
+                "closed": True,
+            },
+        )
+
+        result = runner("catia_pad", {"sketch": "outline", "length_mm": 5.0})
+
+        assert result["volume_mm3"] == pytest.approx(2000.0, abs=TOL)
+
+    def test_an_ellipse_is_a_closed_profile(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Ellipse"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        runner(
+            "catia_sketch_ellipse",
+            {
+                "sketch": "outline",
+                "centre": [0.0, 0.0],
+                "major_radius_mm": 20.0,
+                "minor_radius_mm": 10.0,
+            },
+        )
+
+        result = runner("catia_pad", {"sketch": "outline", "length_mm": 3.0})
+
+        assert result["volume_mm3"] == pytest.approx(math.pi * 20.0 * 10.0 * 3.0, rel=1e-4)
+
+    def test_a_swapped_pair_of_ellipse_radii_is_named(self) -> None:
+        from app.kernel import OcctRunner
+        from app.kernel.errors import GeometryError
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Ellipse"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+
+        with pytest.raises(GeometryError, match="Swap them"):
+            runner(
+                "catia_sketch_ellipse",
+                {
+                    "sketch": "outline",
+                    "centre": [0.0, 0.0],
+                    "major_radius_mm": 10.0,
+                    "minor_radius_mm": 20.0,
+                },
+            )
+
+    def test_a_drawn_axis_is_what_a_shaft_turns_about(self) -> None:
+        """A profile away from the sketch origin needs an axis, and there is nothing to
+        infer one from: the same profile about two lines is two different parts."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Ring"})
+        runner("catia_sketch_create", {"support": "XY", "name": "section"})
+        runner(
+            "catia_sketch_rectangle",
+            {"sketch": "section", "width_mm": 4.0, "height_mm": 6.0, "at": [20.0, 0.0]},
+        )
+        runner("catia_sketch_axis", {"sketch": "section", "start": [0.0, -10.0], "end": [0.0, 10.0]})
+
+        result = runner("catia_shaft", {"sketch": "section"})
+
+        # Pappus: the 4x6 section sweeps a circle of radius 20 about the drawn axis.
+        assert result["volume_mm3"] == pytest.approx(4.0 * 6.0 * 2 * math.pi * 20.0, rel=1e-4)
+
+
+class TestSweptFeatures:
+    """`catia_rib` and `catia_slot` — a section dragged along a path.
+
+    Verified against Pappus's theorem rather than against recorded output: a section of
+    known area swept along a known path has a volume that can be written down, and a
+    sweep that silently slid or rotated the profile would not reproduce it.
+    """
+
+    @staticmethod
+    def _straight_path(runner):
+        runner("catia_sketch_create", {"support": "XY", "name": "path"})
+        runner("catia_sketch_line", {"sketch": "path", "start": [0.0, 0.0], "end": [50.0, 0.0]})
+
+    def test_a_rib_along_a_straight_guide_is_section_times_length(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Bar"})
+        self._straight_path(runner)
+        runner("catia_sketch_create", {"support": "YZ", "name": "section"})
+        runner(
+            "catia_sketch_rectangle",
+            {"sketch": "section", "width_mm": 10.0, "height_mm": 10.0},
+        )
+
+        result = runner("catia_rib", {"profile": "section", "centre_curve": "path"})
+
+        assert result["volume_mm3"] == pytest.approx(10.0 * 10.0 * 50.0, abs=TOL)
+
+    def test_a_rib_round_a_bend_matches_pappus(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Bend"})
+        runner("catia_sketch_create", {"support": "XY", "name": "path"})
+        runner(
+            "catia_sketch_arc",
+            {
+                "sketch": "path",
+                "centre": [0.0, 0.0],
+                "radius_mm": 30.0,
+                "start_angle_deg": 0.0,
+                "end_angle_deg": 90.0,
+            },
+        )
+        runner("catia_sketch_create", {"support": "ZX", "name": "section"})
+        runner("catia_sketch_circle", {"sketch": "section", "diameter_mm": 10.0, "at": [0.0, 30.0]})
+
+        result = runner("catia_rib", {"profile": "section", "centre_curve": "path"})
+
+        # π·5² × (2π·30 / 4) = 375π².
+        assert result["volume_mm3"] == pytest.approx(375.0 * math.pi**2, rel=1e-4)
+
+    def test_a_second_profile_in_the_sketch_bores_the_sweep(self) -> None:
+        """A sketch's later profiles are holes in its first — the rule a pad already
+        follows — which is what makes a pipe run with a bore one rib rather than two."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Pipe"})
+        runner("catia_sketch_create", {"support": "XY", "name": "path"})
+        runner("catia_sketch_line", {"sketch": "path", "start": [0.0, 0.0], "end": [40.0, 0.0]})
+        runner("catia_sketch_create", {"support": "YZ", "name": "section"})
+        runner("catia_sketch_circle", {"sketch": "section", "diameter_mm": 20.0})
+        runner("catia_sketch_circle", {"sketch": "section", "diameter_mm": 14.0})
+
+        result = runner("catia_rib", {"profile": "section", "centre_curve": "path"})
+
+        assert result["volume_mm3"] == pytest.approx(math.pi * (100.0 - 49.0) * 40.0, rel=1e-4)
+
+    def test_a_slot_removes_exactly_what_the_rib_would_have_added(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Slotted"})
+        runner("catia_sketch_create", {"support": "XY", "name": "base"})
+        runner("catia_sketch_rectangle", {"sketch": "base", "width_mm": 60.0, "height_mm": 40.0})
+        runner("catia_pad", {"sketch": "base", "length_mm": 20.0, "name": "block"})
+        runner("catia_sketch_create", {"support": "XY", "name": "path", "origin": [0.0, 0.0, 20.0]})
+        runner("catia_sketch_line", {"sketch": "path", "start": [-30.0, 0.0], "end": [30.0, 0.0]})
+        # A YZ frame's own axes are (world Y, world Z, world X) and `origin` shifts along
+        # those, so world (-30, 0, 20) is written [0, 20, -30].
+        runner(
+            "catia_sketch_create",
+            {"support": "YZ", "name": "channel", "origin": [0.0, 20.0, -30.0]},
+        )
+        runner("catia_sketch_rectangle", {"sketch": "channel", "width_mm": 8.0, "height_mm": 8.0})
+
+        result = runner("catia_slot", {"profile": "channel", "centre_curve": "path"})
+
+        # Half the 8x8 section is above the top face, so 8x4 is removed over 60 mm.
+        assert result["volume_mm3"] == pytest.approx(60.0 * 40.0 * 20.0 - 8.0 * 4.0 * 60.0, abs=TOL)
+
+    def test_the_section_is_swept_from_where_it_was_drawn(self) -> None:
+        """OCCT will happily slide a profile onto the spine and turn it normal to the
+        path. An eccentric rib — a section deliberately offset from its guide — is a real
+        shape, and repairing it silently would build a different part from the drawing
+        with nothing downstream able to tell."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Eccentric"})
+        self._straight_path(runner)
+        runner("catia_sketch_create", {"support": "YZ", "name": "section"})
+        runner(
+            "catia_sketch_rectangle",
+            {"sketch": "section", "width_mm": 10.0, "height_mm": 10.0, "at": [0.0, 20.0]},
+        )
+
+        result = runner("catia_rib", {"profile": "section", "centre_curve": "path"})
+
+        box = result["bounding_box_mm"]
+        centre_z = (box["min"][2] + box["max"][2]) / 2.0
+        assert centre_z == pytest.approx(20.0, abs=TOL)
+        assert result["volume_mm3"] == pytest.approx(10.0 * 10.0 * 50.0, abs=TOL)
+
+    def test_a_path_sketch_holding_several_curves_is_refused_by_name(self) -> None:
+        """Picking the first of several would build a rib along a path the author did
+        not choose, and nothing downstream could tell."""
+        from app.kernel import OcctRunner
+        from app.kernel.errors import GeometryError
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Ambiguous"})
+        runner("catia_sketch_create", {"support": "XY", "name": "path"})
+        runner("catia_sketch_line", {"sketch": "path", "start": [0.0, 0.0], "end": [50.0, 0.0]})
+        runner("catia_sketch_line", {"sketch": "path", "start": [0.0, 20.0], "end": [50.0, 20.0]})
+        runner("catia_sketch_create", {"support": "YZ", "name": "section"})
+        runner("catia_sketch_rectangle", {"sketch": "section", "width_mm": 10.0, "height_mm": 10.0})
+
+        with pytest.raises(GeometryError, match="needs one curve to follow"):
+            runner("catia_rib", {"profile": "section", "centre_curve": "path"})
+
+
+class TestThreadsAreAnnotations:
+    """A thread drives the callout and the tap, and changes no geometry.
+
+    Modelling the helix would change every measurement the part reports for a shape
+    nobody inspects. What must never happen is the reverse of the honesty rule: a mass
+    that has quietly lost material a helix would have removed, or a pitch invented for a
+    designation this code cannot read.
+    """
+
+    @staticmethod
+    def _tapped_block(runner):
+        runner("catia_new_part", {"name": "Tapped"})
+        runner("catia_sketch_create", {"support": "XY", "name": "base"})
+        runner("catia_sketch_rectangle", {"sketch": "base", "width_mm": 40.0, "height_mm": 40.0})
+        runner("catia_pad", {"sketch": "base", "length_mm": 20.0, "name": "block"})
+        return runner(
+            "catia_hole_at",
+            {
+                "face": "block#top",
+                "at": [0.0, 0.0],
+                "diameter_mm": 8.5,
+                "depth_mm": 15.0,
+                "name": "tap_hole",
+            },
+        )
+
+    def test_declaring_a_thread_leaves_the_mass_alone(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        before = self._tapped_block(runner)
+
+        after = runner(
+            "catia_thread", {"face": {"cylindrical": True}, "designation": "M10"}
+        )
+
+        assert after["volume_mm3"] == pytest.approx(before["volume_mm3"], abs=TOL)
+        assert after["thread"]["pitch_mm"] == pytest.approx(1.5)
+        assert after["thread"]["minor_diameter_mm"] == pytest.approx(8.37625)
+
+    def test_a_designation_that_cannot_fit_the_face_is_refused(self) -> None:
+        from app.kernel import OcctRunner
+        from app.kernel.errors import GeometryError
+
+        runner = OcctRunner()
+        self._tapped_block(runner)
+
+        with pytest.raises(GeometryError, match="tapping drill"):
+            runner("catia_thread", {"face": {"cylindrical": True}, "designation": "M20"})
+
+    def test_an_unreadable_designation_reports_no_pitch_rather_than_a_guess(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        self._tapped_block(runner)
+
+        result = runner(
+            "catia_thread", {"face": {"cylindrical": True}, "designation": "1/4-20 UNC"}
+        )
+
+        assert "pitch_mm" not in result["thread"]
+        assert "ISO metric" in result["thread"]["unrecognised"]
+
+    def test_a_second_thread_on_one_face_replaces_the_first(self) -> None:
+        """A cylinder carries one thread, and a regeneration re-runs the call — appending
+        would give the part one more thread on every rebuild."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        self._tapped_block(runner)
+        runner("catia_thread", {"face": {"cylindrical": True}, "designation": "M10"})
+
+        result = runner(
+            "catia_thread", {"face": {"cylindrical": True}, "designation": "M10x1.25"}
+        )
+
+        assert len(result["threads"]) == 1
+        assert result["threads"][0]["pitch_mm"] == pytest.approx(1.25)
+
+    def test_every_number_a_thread_reports_is_in_the_measurement_contract(self) -> None:
+        """A quantity in a payload that the contract does not describe is one a design
+        can assert on with no stated unit or meaning."""
+        from app.kernel import OcctRunner, contract
+
+        runner = OcctRunner()
+        self._tapped_block(runner)
+
+        result = runner(
+            "catia_thread", {"face": {"cylindrical": True}, "designation": "M10"}
+        )
+
+        assert contract.undocumented_paths(result) == ()
+
+    def test_a_thread_needs_a_cylinder(self) -> None:
+        from app.kernel import OcctRunner
+        from app.kernel.errors import GeometryError
+
+        runner = OcctRunner()
+        self._tapped_block(runner)
+
+        with pytest.raises(GeometryError, match="not a cylindrical face"):
+            runner("catia_thread", {"face": "block#top", "designation": "M10"})

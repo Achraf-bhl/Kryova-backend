@@ -133,7 +133,7 @@ def _prism_feature(
     else:
         blank = _prism(face, normal, -distance if reversed_ else distance, tool)
 
-    return _combine(context, document, arguments, tool, blank, adds_material=adds_material)
+    return combine_into_part(context, document, arguments, tool, blank, adds_material=adds_material)
 
 
 def _revolve_feature(
@@ -152,17 +152,14 @@ def _revolve_feature(
             f"{tool} needs a revolution angle between 0 and 360 degrees; got {angle}."
         )
 
-    frame = sketch.frame()
-    # Revolve about the sketch's local Y axis through its origin — the convention CATIA
-    # uses for a shaft with no explicit axis. An explicit `axis` argument is Phase 2.4,
-    # when constructed axes exist to name.
     if arguments.get("axis"):
         raise OperationNotSupported(
-            f"{tool} with an explicit axis",
-            "Naming a revolution axis needs constructed axis systems (Phase 2.4); the "
-            "sketch's own vertical axis is used meanwhile",
+            f"{tool} with an externally named axis",
+            "Naming an axis built elsewhere in the design is not resolved here yet. "
+            "Draw the axis in the profile's own sketch with catia_sketch_axis, which is "
+            "where CATIA puts it and is honoured",
         )
-    axis = symbol("gp_Ax1")(frame.Location(), frame.YDirection())
+    axis = _revolution_axis(sketch)
 
     maker = symbol("BRepPrimAPI_MakeRevol")(sketch.face(), axis, math.radians(angle))
     blank = build_or_raise(
@@ -171,7 +168,28 @@ def _revolve_feature(
         detail="A profile that crosses its own revolution axis cannot be revolved — "
         "move it clear of the axis.",
     )
-    return _combine(context, document, arguments, tool, blank, adds_material=adds_material)
+    return combine_into_part(context, document, arguments, tool, blank, adds_material=adds_material)
+
+
+def _revolution_axis(sketch: Any) -> Any:
+    """The line a shaft or groove turns about.
+
+    The sketch's own vertical through its origin when the design drew no axis — CATIA's
+    convention, and the right default for a single-profile part sketched about the
+    origin. A drawn axis wins, because a profile placed away from the origin needs one
+    and there is no way to infer it: the same profile revolved about two different lines
+    is two different parts, both plausible.
+    """
+    frame = sketch.frame()
+    if sketch.axis is None:
+        return symbol("gp_Ax1")(frame.Location(), frame.YDirection())
+
+    start, end = sketch.axis
+    tail, head = sketch.to_world(start), sketch.to_world(end)
+    return symbol("gp_Ax1")(
+        symbol("gp_Pnt")(*tail),
+        symbol("gp_Dir")(head[0] - tail[0], head[1] - tail[1], head[2] - tail[2]),
+    )
 
 
 def _translated(shape: Any, normal: Any, distance: float) -> Any:
@@ -196,7 +214,7 @@ def _prism(face: Any, normal: Any, distance: float, tool: str) -> Any:
     )
 
 
-def _combine(
+def combine_into_part(
     context: BuildContext,
     document: Any,
     arguments: Mapping[str, Any],
@@ -488,7 +506,7 @@ def solid_combine(context: BuildContext, arguments: Mapping[str, Any]) -> Mappin
             f"{SOLID_COMBINE} produced no solid: the two profiles, extruded along their "
             "directions, share no volume."
         )
-    return _combine(context, document, arguments, SOLID_COMBINE, blank, adds_material=True)
+    return combine_into_part(context, document, arguments, SOLID_COMBINE, blank, adds_material=True)
 
 
 def _combine_direction(value: Any, sketch: Sketch) -> Any:

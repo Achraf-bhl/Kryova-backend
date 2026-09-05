@@ -27,6 +27,7 @@ correct: it is keyed on the feature and dropped the moment the part changes.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -127,6 +128,14 @@ class PartDocument:
     #: Keyed by name because `catia_pad(sketch=@plate.profile)` addresses it by name;
     #: resolving "the last sketch drawn" is how a second sketch steals a pad.
     _sketches: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    #: Threads declared on the part, in the order they were called for.
+    #:
+    #: Annotations, not geometry: a thread drives the callout and the tapping operation
+    #: and deliberately does not change the mass (see `app.kernel.threads`). They live
+    #: here rather than on a feature because the face a thread sits on may have been made
+    #: by any feature, or by several after a boolean.
+    _threads: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
         require()
@@ -273,6 +282,30 @@ class PartDocument:
 
     def sketch_names(self) -> list[str]:
         return sorted(self._sketches)
+
+    # -- annotations ----------------------------------------------------------
+
+    @property
+    def threads(self) -> list[dict[str, Any]]:
+        """Threads declared on this part, in call order."""
+        return self._threads
+
+    def add_thread(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Declare a thread on a face. A second declaration on that face replaces the first.
+
+        **Keyed on the face alone, not on the face and the designation.** A cylinder
+        carries one thread; keying on both would let M10 and M12 sit on the same hole,
+        which is not a part. Replacement also handles the regeneration case that
+        `add_sketch` handles — the plan re-runs and appending would give a part one more
+        thread every rebuild, a bill of materials that grows while nothing changes.
+        """
+        key = _thread_key(record.get("face"))
+        for index, existing in enumerate(self._threads):
+            if _thread_key(existing.get("face")) == key:
+                self._threads[index] = record
+                return record
+        self._threads.append(record)
+        return record
 
     # -- reference geometry ---------------------------------------------------
 
@@ -494,6 +527,10 @@ class PartDocument:
             # payload is unchanged and no assertion written against it starts failing.
             payload["bodies"] = self.body_names()
             payload["active_body"] = self._active_body
+        if self._threads:
+            # Same rule, same reason: absent on a part with no threads, so this cannot
+            # change any payload a design was already asserting against.
+            payload["threads"] = [dict(record) for record in self._threads]
         return payload
 
     def to_dict(self) -> dict[str, Any]:
@@ -503,6 +540,18 @@ class PartDocument:
             "features": [feature.to_dict() for feature in self._features],
             "named": list(self.names.names()),
         }
+
+
+def _thread_key(face: Any) -> str:
+    """One comparable spelling of a face selector.
+
+    A selector is a word (`boss#all`) or a predicate (`{"cylindrical": true}`), and the
+    second is a dict — unhashable, and unstable under key order if compared by `repr`.
+    Sorting the keys through JSON gives the one form both spellings can be compared in.
+    """
+    if isinstance(face, str):
+        return face
+    return json.dumps(face, sort_keys=True, default=str)
 
 
 __all__ = ["DEFAULT_BODY", "OCAF_FORMAT", "Feature", "PartDocument"]

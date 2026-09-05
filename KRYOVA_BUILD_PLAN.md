@@ -15,32 +15,49 @@ happened.
 
 ## Now
 
-**E2 — Selection & authoring vocabulary.** 2.1–2.5 are done and **2.6 is started**: a
-surface is now a thing the document holds, ten GSD operations build and consume one, and
-both crossings back into material work. The decision recorded here on 2026-09-05 — defer
-2.6 or build it — was answered by building the half that everything else in the phase was
-waiting on.
+**E2 — Selection & authoring vocabulary.** 2.1–2.5 are done and **2.6 is all but
+finished**: a surface is a thing the document holds, the GSD operations build, cut, steer,
+extend and consume one, all three crossings back into material work, and the wireframe
+curve family is complete. The decision recorded here on 2026-09-05 — defer 2.6 or build it
+— was answered by building the half that everything else in the phase was waiting on, and
+then the rest of it.
 
-What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its own reason:
+**What 2.6 still owes for `*E2` is one operation's arguments** — everything else it owed
+is built, and the star is one item away:
 
-- **`catia_extrapolate` is the last operation 2.6 owes**, and it is three cases rather
-  than one: a curve extended along its end tangent (`GeomLib.ExtendCurveToPoint`), a
-  freeform face extended in U or V (`GeomLib.ExtendSurfByLength`, which needs the named
-  boundary edge mapped to a parametric side), and an *analytic* face — a plane, a cylinder
-  — whose surface is unbounded and whose extension is a widened parameter range rather than
-  a new surface at all. `up_to` is a fourth: extending until the result reaches another
-  element is an iterative solve;
-- **`propagation` on `catia_boundary`** — the boundary comes back whole, and a run of
-  tangent edges needs a seed to start from. `limit_from` is the argument for it and is
-  itself still refused;
-- still refused with a stated reason, each of them OCCT's limit or a construction not built
-  here: a loft `closed` along a spine (closure belongs to the section loft), more than one
-  guide (the sweep takes one), `continuity='curvature'` on a fill (`BRepFill_Filling`
-  answers "the continuity is not G0 G1 or G2" and builds nothing), and `catia_draft` in
-  reflect-line mode;
-- **the rest of the trimming family** — `catia_extrapolate`, `catia_sew_surface`, and
-  `propagation` on `catia_extract` / `catia_boundary`. Split, trim, untrim, disassemble
-  and healing shipped 2026-09-05;
+- **`propagation` and `limit_from`/`limit_to` on `catia_boundary`.** The operation returns
+  the whole free boundary; cutting a run of tangent edges out of it needs a seed edge to
+  start from and a walk along shared vertices, crossing only where two edges meet
+  smoothly. The tangency test is the same one `_joins_smoothly` already makes for faces,
+  asked of edges at a shared vertex instead of faces at a shared edge. `catia_split`
+  landed on 2026-09-05 and does the cutting, so this is wiring rather than new geometry —
+  the refusal in `boundary()` now says that, where it used to say "once catia_split
+  lands", which had been false since the day split landed.
+
+`catia_extrapolate` landed 2026-09-05, and **the approach this file recommended for it was
+wrong** — worth leaving written down rather than quietly correcting.
+`GeomLib::ExtendCurveToPoint` and `ExtendSurfByLength` are OCCT's own answer to that job
+and **do nothing through these bindings**: each takes the geometry as `Handle(Geom_...)&`
+and reassigns it, and OCP passes handles by value, so the extension is built and dropped.
+No exception, no return value, bounds and poles and type identical afterwards. A test
+measures that rather than trusting the note. What runs instead is widening the parameter
+range, exact wherever the basis has geometry outside its range, and building the extension
+from the end's own derivatives where it does not.
+
+Still refused, each with a reason raised where it happens:
+
+- each of these is OCCT's own limit or a construction not built here: a loft `closed` along
+  a spine (closure belongs to the section loft), more than one guide (the sweep takes one),
+  `continuity='curvature'` on a fill (`BRepFill_Filling` answers "the continuity is not G0
+  G1 or G2" and builds nothing);
+- **`catia_extrapolate` on a freeform face**, refused with the binding fact above rather
+  than with "not implemented" — a BSpline surface has nothing outside its knot range to
+  widen into, and OCCT's extender is inert here. Rebuilding the surface larger or lofting
+  a strip onto its edge are the two answers that do work;
+- **`catia_extrapolate` with `up_to`** — extending until the result reaches another
+  element is an iterative solve, because the intersection decides how far to go and the
+  extension moves the intersection. Extending generously and cutting back with
+  `catia_split` is the same answer and every step of it is exact;
 - **a reflect line at an angle other than 90°** — the silhouette is exact and shipped;
   the iso-angle contour has to be marched face by face and would come back sampled, which
   this kernel will not report as a constructed curve without saying so. Everything else in
@@ -63,11 +80,17 @@ What 2.6 still owes for `*E2`, each a live `OperationNotSupported` naming its ow
 - the surface half of `catia_thickness` (offsetting a curved face rather than sweeping a
   planar one along its normal).
 
-Five of those reasons have been **corrected** rather than inherited: `up_to_surface`,
+Seven of those reasons have been **corrected** rather than inherited: `up_to_surface`,
 `thick=true` and `reference_surface` all said they were waiting for constructed surfaces,
-which now exist, and `thick=true` plus `catia_curve_spline(support=)` were corrected again
-once `catia_curve_parallel` and `catia_curve_project` landed. A stale "blocked on X"
-outlives X and sends the next reader to rebuild something that is already there.
+which now exist; `thick=true` and `catia_curve_spline(support=)` were corrected again once
+`catia_curve_parallel` and `catia_curve_project` landed; `catia_draft` in reflect-line mode
+stopped being blocked on the silhouette the day it shipped; and on 2026-09-05
+`catia_boundary`'s `limit_from`/`limit_to` stopped saying "once catia_split lands", which
+split had already done. A stale "blocked on X" outlives X and sends the next reader to
+rebuild something that is already there — which is exactly what this file's own note on
+`catia_extrapolate` did, pointing at two OCCT functions that turn out to be inert through
+these bindings. Correcting them is not bookkeeping; it is the difference between a queue
+and a list of rumours.
 
 Hardware-blocked and **not** counted against the star: the CATIA-seat halves of E1's and
 E3's conformance runs need a Windows seat.
@@ -82,6 +105,36 @@ measurement vocabulary a visual check would assert against already exists.
 ## Done
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-05** — E2 → **2.6: `catia_extrapolate`, the last operation the phase owed**.
+  Coverage 107 → **108/201**. Three cases, and the route this file recommended for them
+  was wrong: `GeomLib::ExtendCurveToPoint` and `ExtendSurfByLength` are OCCT's own answer
+  and are **inert through OCP**, which passes their `Handle(Geom_...)&` by value — each
+  builds the extension and drops it, silently, with bounds and poles and type unchanged
+  afterwards. `test_occts_own_extenders_do_nothing_through_these_bindings` measures that,
+  so if a future OCP fixes it the claim in the code fails rather than quietly rotting.
+  What runs instead is **widening the parameter range**, which for a conic or an analytic
+  surface *is* the extension — a quarter of a Ø20 circle extended 5 mm is 5 mm more of
+  that circle, no join, exact — with `GCPnts_AbscissaPoint` turning a length into the
+  right parameter step (a circle's parameter is an angle and an ellipse's is neither).
+  Where the basis stops at its own end, a curve gets a real piece built from its end
+  conditions: a straight segment for `tangent`, an **arc of the osculating circle** for
+  `curvature`, swept by `length/radius` so it is G2 and exactly the length asked for by
+  construction. Analytic faces widen too, gated on the parameter running at **one speed
+  along the boundary** — so a cone extends along its slant to the frustum formula and is
+  refused around its axis quoting both speeds, 5 mm per unit at one end of that edge and
+  20 at the other. Which end of a curve moves is the one facing what `boundary` names, for
+  the reason `catia_curve_connect` states; on a face, `boundary` must pick out exactly one
+  of four sides, and **being past a bound beats lying on one** — a point above a sheet sits
+  exactly on a side edge's extended line when its x happens to be 0, and reading that as
+  "the u edge" widened the face sideways and reported success. Seven guards, each verified
+  by breaking it and watching a named test fail; the seventh (the osculating circle's
+  frame) did *not* bite at first — a backwards arc is exactly as long as a forwards one —
+  so the test now measures where the extension reached, not only how long it is.
+  `curve_chain`/`curve_ends`/`CurveEnd` promoted out of `curves.py`'s privates, since
+  "which end is the end" must have one answer. Two stale refusals corrected: `boundary`'s
+  `limit_*` no longer says "once catia_split lands" (it landed the same day), and the
+  module docstring's list of what is missing is current again.
 
 - **2026-09-05** — housekeeping, no board row: **mypy is clean, and CLAUDE.md no longer lists
   errors to expect.** The seven carried in `app/solve/` were two real defects wearing a

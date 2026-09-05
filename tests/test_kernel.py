@@ -4653,3 +4653,401 @@ class TestPropagationAndSewing:
 
         with pytest.raises(GeometryError, match="clear of"):
             runner("catia_sew_surface", {"surface": "knife", "name": "no"})  # type: ignore[operator]
+
+
+class TestExtendingPastAnEnd:
+    """`catia_extrapolate` — the last operation 2.6 owed, and it is three cases.
+
+    OCCT ships `GeomLib::ExtendCurveToPoint` and `ExtendSurfByLength` for exactly this
+    job and **neither one works through these bindings**: both take the geometry as
+    `Handle(Geom_...)&` and reassign it, and OCP passes handles by value, so the extension
+    is built and dropped. Nothing raises and nothing changes — bounds, poles and type are
+    all identical afterwards. `test_occts_own_extenders_do_nothing_through_these_bindings`
+    is that measured rather than asserted from memory, because it is the reason every
+    other test in this class expects exact arithmetic instead of a tolerance: widening a
+    parameter range is exact, and an iterative extension would not be.
+    """
+
+    @staticmethod
+    def _quarter_arc() -> object:
+        """A quarter circle of radius 10 in XY, from (10, 0, 0) round to (0, 10, 0)."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Arc"})
+        runner(
+            "catia_curve_circle",
+            {
+                "kind": "centre_radius",
+                "centre": [0.0, 0.0, 0.0],
+                "radius_mm": 10.0,
+                "support": "XY",
+                "start_angle_deg": 0.0,
+                "end_angle_deg": 90.0,
+                "name": "arc",
+            },
+        )
+        runner("catia_point_at", {"at": [-20.0, 20.0, 0.0], "name": "past_the_end"})
+        runner("catia_point_at", {"at": [20.0, -20.0, 0.0], "name": "past_the_start"})
+        return runner
+
+    @staticmethod
+    def _sheet() -> object:
+        """A flat 40 × 20 sheet standing in XZ, with a point 40 mm above its top edge."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Sheet"})
+        runner("catia_sketch_create", {"support": "XY", "name": "gen"})
+        runner("catia_sketch_line", {"sketch": "gen", "start": (0.0, 0.0), "end": (40.0, 0.0)})
+        runner(
+            "catia_surface_extrude",
+            {"profile": "gen", "direction": [0, 0, 1], "length_mm": 20.0, "name": "sheet"},
+        )
+        runner("catia_point_at", {"at": [20.0, 0.0, 60.0], "name": "above"})
+        return runner
+
+    @staticmethod
+    def _length(runner: object, name: str) -> float:
+        return float(runner("catia_measure_item", {"element": name})["length_mm"])  # type: ignore[operator]
+
+    @staticmethod
+    def _area(runner: object, name: str) -> float:
+        return float(runner("catia_measure_item", {"element": name})["area_mm2"])  # type: ignore[operator]
+
+    def test_occts_own_extenders_do_nothing_through_these_bindings(self) -> None:
+        """The measurement the rest of this class is built on.
+
+        If a future OCP ever passes these handles back, this test fails and the comment
+        in `extrapolate` explaining why nothing calls them becomes wrong — which is the
+        right way round for a claim about somebody else's library.
+        """
+        from OCP.GC import GC_MakeArcOfCircle
+        from OCP.GeomAPI import GeomAPI_PointsToBSplineSurface
+        from OCP.GeomConvert import GeomConvert
+        from OCP.GeomLib import GeomLib
+        from OCP.gp import gp_Pnt
+        from OCP.TColgp import TColgp_Array2OfPnt
+
+        arc = GC_MakeArcOfCircle(
+            gp_Pnt(10, 0, 0), gp_Pnt(0, 10, 0), gp_Pnt(-10, 0, 0)
+        ).Value()
+        curve = GeomConvert.CurveToBSplineCurve_s(arc)
+        before = (curve.FirstParameter(), curve.LastParameter(), curve.NbPoles())
+        GeomLib.ExtendCurveToPoint_s(curve, gp_Pnt(-10, -5, 0), 1, True)
+        assert (curve.FirstParameter(), curve.LastParameter(), curve.NbPoles()) == before
+
+        grid = TColgp_Array2OfPnt(1, 4, 1, 4)
+        for row in range(1, 5):
+            for column in range(1, 5):
+                grid.SetValue(row, column, gp_Pnt((row - 1) * 10.0, (column - 1) * 10.0, 0.0))
+        surface = GeomAPI_PointsToBSplineSurface(grid).Surface()
+        was = (surface.Bounds(), surface.NbUPoles(), surface.NbVPoles())
+        GeomLib.ExtendSurfByLength_s(surface, 5.0, 1, True, True)
+        assert (surface.Bounds(), surface.NbUPoles(), surface.NbVPoles()) == was
+
+    def test_a_line_extended_tangentially_is_exactly_longer(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Bar"})
+        runner("catia_curve_polyline", {"points": [[0, 0, 0], [10, 0, 0]], "name": "bar"})
+        runner("catia_point_at", {"at": [40.0, 0.0, 0.0], "name": "far"})
+
+        runner(
+            "catia_extrapolate",
+            {"element": "bar", "boundary": "far", "length_mm": 5.0, "name": "longer"},
+        )
+
+        assert self._length(runner, "longer") == pytest.approx(15.0, rel=1e-12)
+
+    def test_an_arc_continued_with_its_own_curvature_stays_the_same_circle(self) -> None:
+        """The point of widening the parameter range rather than grafting a piece on: a
+        quarter of a Ø20 circle extended by 5 mm is 5 mm more of *that circle*, so there
+        is no join for a continuity claim to be about. Exact against πr/2 + 5."""
+        runner = self._quarter_arc()
+
+        runner(
+            "catia_extrapolate",
+            {
+                "element": "arc",
+                "boundary": "past_the_end",
+                "length_mm": 5.0,
+                "continuity": "curvature",
+                "name": "bigger",
+            },
+        )
+
+        assert self._length(runner, "arc") == pytest.approx(math.pi * 5.0, rel=1e-12)
+        assert self._length(runner, "bigger") == pytest.approx(math.pi * 5.0 + 5.0, rel=1e-12)
+
+    def test_the_same_arc_extended_tangentially_gets_a_straight_5_mm(self) -> None:
+        """Tangent continuity on a curved element is a *different shape* from curvature
+        continuity, not a looser version of it — CATIA's two options mean a straight
+        flick off the end and more of the same arc. Both add exactly 5 mm, so length
+        alone cannot tell them apart; the bounding box can."""
+        runner = self._quarter_arc()
+
+        runner(
+            "catia_extrapolate",
+            {"element": "arc", "boundary": "past_the_end", "length_mm": 5.0, "name": "flick"},
+        )
+        runner(
+            "catia_extrapolate",
+            {
+                "element": "arc",
+                "boundary": "past_the_end",
+                "length_mm": 5.0,
+                "continuity": "curvature",
+                "name": "curled",
+            },
+        )
+
+        assert self._length(runner, "flick") == pytest.approx(math.pi * 5.0 + 5.0, rel=1e-12)
+        straight = runner("catia_measure_item", {"element": "flick"})["bounding_box_mm"]  # type: ignore[operator]
+        curled = runner("catia_measure_item", {"element": "curled"})["bounding_box_mm"]  # type: ignore[operator]
+        # The tangent at (0, 10, 0) runs along -x, so a straight extension reaches
+        # x = -5 exactly. The arc curls back and never gets that far.
+        assert straight["min"][0] == pytest.approx(-5.0, abs=1e-6)
+        assert curled["min"][0] > straight["min"][0] + 0.1
+
+    def test_the_end_that_moves_is_the_one_facing_what_was_named(self) -> None:
+        """Not "the end", because which end that is depends on which way somebody drew
+        the curve — the same reasoning `catia_curve_connect` states for the ends it joins.
+        The quarter arc runs +x to +y, so a point off one end grows the curve in -y and a
+        point off the other grows it in -x."""
+        runner = self._quarter_arc()
+
+        for boundary, name in (("past_the_start", "back"), ("past_the_end", "on")):
+            runner(
+                "catia_extrapolate",
+                {
+                    "element": "arc",
+                    "boundary": boundary,
+                    "length_mm": 5.0,
+                    "continuity": "curvature",
+                    "name": name,
+                },
+            )
+
+        back = runner("catia_measure_item", {"element": "back"})["bounding_box_mm"]  # type: ignore[operator]
+        on = runner("catia_measure_item", {"element": "on"})["bounding_box_mm"]  # type: ignore[operator]
+        assert back["min"][1] < -4.0 and back["min"][0] > -1e-6
+        assert on["min"][0] < -4.0 and on["min"][1] > -1e-6
+
+    def test_a_spline_gets_a_real_extension_and_it_is_exactly_the_length_asked(self) -> None:
+        """A BSpline is defined by its knots and has no geometry outside them, so this is
+        the other route: a straight segment for `tangent`, an arc of the osculating circle
+        for `curvature`. Both add 5.000 mm — the osculating arc is swept by `length /
+        radius`, so its arc length is the length asked for by construction rather than by
+        a search that stops when it is close enough."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Wave"})
+        runner(
+            "catia_curve_spline",
+            {"points": [[0, 0, 0], [10, 5, 0], [20, 0, 0], [30, -5, 0]], "name": "wave"},
+        )
+        runner("catia_point_at", {"at": [60.0, -20.0, 0.0], "name": "onward"})
+        before = self._length(runner, "wave")
+
+        reach = {}
+        for continuity, name in (("tangent", "straight"), ("curvature", "curled")):
+            runner(
+                "catia_extrapolate",
+                {
+                    "element": "wave",
+                    "boundary": "onward",
+                    "length_mm": 5.0,
+                    "continuity": continuity,
+                    "name": name,
+                },
+            )
+            assert self._length(runner, name) == pytest.approx(before + 5.0, rel=1e-9)
+            reach[continuity] = runner("catia_measure_item", {"element": name})[  # type: ignore[operator]
+                "bounding_box_mm"
+            ]
+
+        # Length alone cannot see which *way* the extension went: an osculating arc swept
+        # backwards over the curve is exactly as long as one swept forwards. The spline
+        # ends at x = 30 heading +x, so both extensions must reach past it — and the two
+        # must differ, because a curvature extension that came out identical to a tangent
+        # one would mean the osculating circle was never used.
+        for box in reach.values():
+            assert box["max"][0] > 34.0
+        assert reach["curvature"]["min"][1] > reach["tangent"]["min"][1] + 0.5
+
+    def test_a_closed_curve_has_no_end_to_extend_past(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Ring"})
+        runner(
+            "catia_curve_circle",
+            {
+                "kind": "centre_radius",
+                "centre": [0, 0, 0],
+                "radius_mm": 10.0,
+                "support": "XY",
+                "name": "ring",
+            },
+        )
+        runner("catia_point_at", {"at": [40.0, 0.0, 0.0], "name": "away"})
+
+        with pytest.raises(GeometryError, match="closed curve"):
+            runner(
+                "catia_extrapolate",
+                {
+                    "element": "ring",
+                    "boundary": "away",
+                    "length_mm": 5.0,
+                    "continuity": "curvature",
+                    "name": "no",
+                },
+            )
+
+    def test_a_plane_face_is_widened_to_the_exact_area(self) -> None:
+        """40 × 20 extended 5 mm past its top edge is 40 × 25. Exact, because the widened
+        face sits on the surface the original was already on."""
+        runner = self._sheet()
+
+        assert self._area(runner, "sheet") == pytest.approx(800.0, rel=1e-12)
+        runner(
+            "catia_extrapolate",
+            {"element": "sheet", "boundary": "above", "length_mm": 5.0, "name": "taller"},
+        )
+
+        assert self._area(runner, "taller") == pytest.approx(1000.0, rel=1e-12)
+
+    def test_a_cylinder_is_extended_along_its_axis(self) -> None:
+        """2πr(l + 5), and the parameter step is 5 because a cylinder's v is unit-speed.
+        Its u is not — u is an angle — which is what `_parameter_speed` exists to know."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Tube"})
+        runner("catia_sketch_create", {"support": "ZX", "name": "gen"})
+        runner("catia_sketch_line", {"sketch": "gen", "start": (0.0, 10.0), "end": (30.0, 10.0)})
+        runner("catia_surface_revolve", {"profile": "gen", "axis": "Z", "name": "tube"})
+        runner("catia_point_at", {"at": [20.0, 0.0, 60.0], "name": "above"})
+
+        assert self._area(runner, "tube") == pytest.approx(2 * math.pi * 10.0 * 30.0, rel=1e-9)
+        runner(
+            "catia_extrapolate",
+            {"element": "tube", "boundary": "above", "length_mm": 5.0, "name": "taller"},
+        )
+
+        assert self._area(runner, "taller") == pytest.approx(
+            2 * math.pi * 10.0 * 35.0, rel=1e-9
+        )
+
+    def test_a_cone_extends_along_its_slant_and_refuses_to_go_round(self) -> None:
+        """The pair that makes `_parameter_speed` worth having. Along the slant the
+        parameter is unit-speed and the answer is the frustum formula exactly. Around the
+        axis the parameter is the local radius — 5 mm per radian at one end of that
+        boundary and 20 at the other — so no single step extends it by 5 mm everywhere,
+        and the refusal quotes both numbers rather than picking one."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Cone"})
+        runner("catia_sketch_create", {"support": "ZX", "name": "gen"})
+        runner("catia_sketch_line", {"sketch": "gen", "start": (0.0, 5.0), "end": (30.0, 20.0)})
+        runner(
+            "catia_surface_revolve",
+            {"profile": "gen", "axis": "Z", "angle_deg": 90.0, "name": "cone"},
+        )
+        runner("catia_point_at", {"at": [30.0, 0.0, 60.0], "name": "above"})
+        runner("catia_point_at", {"at": [-20.0, -20.0, 15.0], "name": "round_the_back"})
+
+        quarter = math.pi * (5.0 + 20.0) * math.hypot(30.0, 15.0) / 4.0
+        assert self._area(runner, "cone") == pytest.approx(quarter, rel=1e-9)
+
+        runner(
+            "catia_extrapolate",
+            {"element": "cone", "boundary": "above", "length_mm": 5.0, "name": "taller"},
+        )
+        slant = math.hypot(30.0, 15.0)
+        grown = 20.0 + 5.0 * (15.0 / slant)
+        assert self._area(runner, "taller") == pytest.approx(
+            math.pi * (5.0 + grown) * (slant + 5.0) / 4.0, rel=1e-9
+        )
+
+        with pytest.raises(GeometryError, match="mm per unit at one end"):
+            runner(
+                "catia_extrapolate",
+                {
+                    "element": "cone",
+                    "boundary": "round_the_back",
+                    "length_mm": 5.0,
+                    "name": "no",
+                },
+            )
+
+    def test_a_freeform_face_is_refused_with_the_reason_that_is_actually_true(self) -> None:
+        """Not "not implemented": the refusal names OCP's by-value handle passing, which
+        is the fact a reader needs to stop them reaching for `ExtendSurfByLength` and
+        finding that it appears to work."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "Skin"})
+        for offset, name in ((0.0, "near"), (30.0, "far")):
+            runner(
+                "catia_curve_spline",
+                {
+                    "points": [
+                        [0, offset, 0],
+                        [10, offset, 4],
+                        [20, offset, 0],
+                        [30, offset, 5],
+                    ],
+                    "name": name,
+                },
+            )
+        runner("catia_surface_loft", {"sections": ["near", "far"], "name": "skin"})
+        runner("catia_point_at", {"at": [60.0, 15.0, 0.0], "name": "out"})
+
+        with pytest.raises(OperationNotSupported, match="handles by value"):
+            runner(
+                "catia_extrapolate",
+                {"element": "skin", "boundary": "out", "length_mm": 5.0, "name": "no"},
+            )
+
+    def test_it_refuses_a_boundary_that_does_not_pick_out_one_edge(self) -> None:
+        """The whole outline is past none of the four sides and on all of them, which is
+        the same signature a diagonal or a corner has. Extending "the face" by 5 mm is not
+        a question with one answer, so it does not get one."""
+        runner = self._sheet()
+        runner("catia_boundary", {"surface": "sheet", "name": "rim"})
+
+        with pytest.raises(GeometryError, match="which edge of the face"):
+            runner(
+                "catia_extrapolate",
+                {"element": "sheet", "boundary": "rim", "length_mm": 5.0, "name": "no"},
+            )
+
+    def test_up_to_says_why_it_is_not_a_length_in_disguise(self) -> None:
+        runner = self._sheet()
+
+        with pytest.raises(OperationNotSupported, match="iterative solve"):
+            runner(
+                "catia_extrapolate",
+                {"element": "sheet", "boundary": "above", "up_to": "sheet", "name": "no"},
+            )
+
+    def test_an_unknown_continuity_lists_the_ones_there_are(self) -> None:
+        runner = self._sheet()
+
+        with pytest.raises(GeometryError, match="tangent, curvature"):
+            runner(
+                "catia_extrapolate",
+                {
+                    "element": "sheet",
+                    "boundary": "above",
+                    "length_mm": 5.0,
+                    "continuity": "sideways",
+                    "name": "no",
+                },
+            )

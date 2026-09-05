@@ -23,11 +23,15 @@ the block did not error, it was swallowed. `_outward` is where that is fixed, an
 fixed by the definition of the defect, not by taking an absolute value; see its docstring.
 
 **What a surface operation cannot yet do is refused with the reason** — and the reason is
-kept current. Guides on a loft, a spine, and a tangent-continuous fill were all on that
-list and are now built; what is left is tangent propagation on an extract, `extrapolate`,
-`sew_surface`, and G2 filling, which OCCT itself refuses. An ignored argument builds a
-different shape from the one asked for and nothing says so, so nothing here is accepted
-and dropped.
+kept current, which costs a line of editing every time one stops being true and saves the
+next reader from rebuilding something that already exists. Guides on a loft, a spine, a
+tangent-continuous fill, tangent propagation on an extract, `sew_surface` and
+`extrapolate` were all on this list and are all now built. What is left: G2 filling, which
+OCCT itself refuses; `extrapolate` on a freeform face and `up_to`, each refused with its
+own reason where it is raised; and `propagation` and the `limit_*` arguments on
+`catia_boundary`, which need the whole outline cut into runs of edges. An ignored argument
+builds a different shape from the one asked for and nothing says so, so nothing here is
+accepted and dropped.
 
 **And what OCCT reports is not always what it did.** A tangent fill against a support that
 stands square to the opening — a cylinder's wall at its own rim — returns `IsDone()` true
@@ -88,6 +92,7 @@ LOFT = "catia_surface_loft"
 JOIN = "catia_join"
 EXTRACT = "catia_extract"
 BOUNDARY = "catia_boundary"
+EXTRAPOLATE = "catia_extrapolate"
 SPLIT = "catia_split"
 TRIM = "catia_trim"
 UNTRIM = "catia_untrim"
@@ -154,6 +159,49 @@ _EDGE_MATCH_TOLERANCE_MM: Final = 1e-7
 #: Distance below which two offset surfaces are the same surface. Used only to refuse a
 #: zero offset, which is a no-op dressed as an operation.
 MIN_OFFSET_MM: Final = 1e-9
+
+#: How an extension may continue the shape it leaves, as the registry spells it.
+_EXTENSION_CONTINUITY: Final[tuple[str, ...]] = ("tangent", "curvature")
+
+#: Curve bases whose own continuation past the end *is* the extension, so widening the
+#: parameter range extends them exactly and leaves one edge with no join in it. A conic is
+#: C-infinity along its whole length; a BSpline is defined only inside its knot range and
+#: has nothing outside it to widen into.
+_CONIC_CURVES: Final[frozenset[str]] = frozenset(
+    {"Line", "Circle", "Ellipse", "Hyperbola", "Parabola"}
+)
+
+#: Surface bases that can be widened the same way, for the same reason.
+_ANALYTIC_SURFACES: Final[frozenset[str]] = frozenset(
+    {"Plane", "Cylinder", "Cone", "Sphere", "Torus"}
+)
+
+#: Curvature (1/mm) below which a curve leaves its end straight, so a curvature-continuous
+#: extension is the tangent line. Not an approximation: a straight extension of a straight
+#: curve matches its curvature exactly, both being zero.
+_STRAIGHT_CURVATURE: Final = 1e-9
+
+#: Points along a boundary at which the parameter's speed is compared, to decide whether
+#: one length can widen it evenly. Five, because the speeds this rejects (a cone's or a
+#: sphere's around the axis) vary monotonically along the edge rather than locally.
+_SPEED_SAMPLES: Final = 5
+
+#: How far two of those speeds may differ, relatively, and still count as one speed.
+#: Relative because the speed is mm per radian on a cylinder and mm per mm on a plane.
+_SPEED_AGREEMENT: Final = 1e-7
+
+#: How much of a period may be missing and the range still count as closed. In parameter
+#: units, not mm — a full circle's range is exactly its period, give or take rounding.
+_CLOSED_PARAMETER_SLACK: Final = 1e-9
+
+#: Tolerance a widened face is built to. Tight: the surface is the one the original face
+#: already sat on, so the new boundary is exact and nothing needs healing into place.
+_FACE_TOLERANCE_MM: Final = 1e-7
+
+#: How near a parametric bound a projected sample must land to count as lying on that
+#: side, as a fraction of the range. Loose enough for a projection's own residual, far
+#: too tight to mistake one side of a face for the one opposite.
+_ON_A_SIDE: Final = 1e-6
 
 
 # -- creating surfaces --------------------------------------------------------
@@ -776,9 +824,9 @@ def boundary(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str
         if arguments.get(limit):
             raise OperationNotSupported(
                 f"{BOUNDARY} with {limit}",
-                "trimming the boundary between two points needs the curve split at "
-                "each, which catia_split will do once it lands. The whole boundary is "
-                "available now",
+                "the boundary comes back whole and trimming it between two points needs "
+                "it split at each. catia_split has landed and does the cutting, so what "
+                "is left is only the wiring: take the whole boundary and split it",
             )
 
     analyser = symbol("ShapeAnalysis_FreeBounds")(source)
@@ -793,6 +841,431 @@ def boundary(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str
 
     outline = compound(wires)
     return _record(context, document, arguments, BOUNDARY, outline, CURVE, "boundary")
+
+
+# -- extending past an end ----------------------------------------------------
+
+
+def extrapolate(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Extend a curve or a surface past one of its ends, by a length.
+
+    The fix when a surface is a millimetre too small to trim against its neighbour:
+    extend it and trim, rather than rebuilding it larger and re-making everything that
+    referred to it.
+
+    **`boundary` names what to extend towards, and the end nearest it is the one that
+    moves.** It is not a start/end flag, because which end of a curve is its "end" depends
+    on which way somebody drew it — the same reasoning `catia_curve_connect` states for
+    picking the ends it joins. Name the neighbouring surface, the point you are reaching
+    for, or the edge itself.
+
+    **The extension is exact, and where it cannot be exact the operation refuses.** OCCT
+    ships `GeomLib::ExtendCurveToPoint` and `ExtendSurfByLength` for precisely this, and
+    **neither one works through these bindings**: both take the geometry as
+    `Handle(Geom_...)&` and reassign it, while OCP passes handles by value, so the
+    extension is built and dropped on the floor. No exception, no return value, nothing
+    changed — bounds, poles and type all identical afterwards. That is why nothing here
+    calls them, and why the note in the build plan recommending them was wrong.
+
+    What it does instead is widen the parameter range, which for a conic or an analytic
+    surface *is* the extension and is exact to machine precision — a half-circle extended
+    by 5 mm is the same circle over a bigger angle, not a new curve grafted onto the old
+    one, so there is no join to be continuous at. Where the basis has no geometry outside
+    its range (a BSpline is defined by its knots) a curve gets a real extension built from
+    its end conditions, and a surface is refused with the reason above.
+    """
+    document = context.require_document()
+    element = named_geometry(
+        document, arguments.get("element"), tool=EXTRAPOLATE, argument="element"
+    )
+
+    if arguments.get("up_to"):
+        raise OperationNotSupported(
+            f"{EXTRAPOLATE} with up_to",
+            "extending until the result reaches another element is an iterative solve: "
+            "how far to go is what the intersection decides, and the intersection is what "
+            "the extension moves. Extend generously with length_mm and cut back with "
+            "catia_split — same answer, and every step of it exact",
+        )
+
+    length = as_positive_length(
+        arguments.get("length_mm"), argument="length_mm", tool=EXTRAPOLATE
+    )
+    continuity = str(arguments.get("continuity") or "tangent").strip().lower()
+    if continuity not in _EXTENSION_CONTINUITY:
+        raise GeometryError(
+            f"{EXTRAPOLATE} takes continuity of {', '.join(_EXTENSION_CONTINUITY)}; got "
+            f"{arguments.get('continuity')!r}."
+        )
+
+    towards = _towards(document, arguments.get("boundary"))
+
+    if count(element, FACE):
+        extended, kind = _extended_surface(element, towards, length), SURFACE
+    else:
+        extended, kind = _extended_curve(element, towards, length, continuity), CURVE
+    return _record(context, document, arguments, EXTRAPOLATE, extended, kind, "extrapolate")
+
+
+def _extended_curve(
+    curve: Any, towards: Any, length: float, continuity: str
+) -> Any:
+    """A curve carried on past the end nearest `towards`.
+
+    Two routes, and which one runs is decided by whether the basis has any geometry out
+    there to extend into. A line continued tangentially and a conic continued with its own
+    curvature are both **the same curve over a longer parameter range** — one edge, no
+    join, exact. Anything else gets a piece built from the end's own derivatives: a
+    straight segment for `tangent`, an arc of the osculating circle for `curvature`, which
+    is the unique circle matching position, direction and curvature there.
+    """
+    from app.kernel.occt import classify
+    from app.kernel.occt.operations.curves import curve_chain, curve_ends
+
+    chain = curve_chain(curve, tool=EXTRAPOLATE)
+    start, finish = curve_ends(curve, tool=EXTRAPOLATE)
+    at_finish = _distance_to(towards, finish.place) <= _distance_to(towards, start.place)
+    end = finish if at_finish else start
+    adaptor, edge = chain[-1] if at_finish else chain[0]
+
+    basis_type = classify.edge_curve_type(edge)
+    straight = basis_type == "Line"
+    if len(chain) == 1 and basis_type in _CONIC_CURVES and (straight or continuity == "curvature"):
+        return _widened_edge(edge, adaptor, length, at_finish=at_finish)
+
+    extension = _extension_piece(end, length, continuity)
+    maker = symbol("BRepBuilderAPI_MakeWire")()
+    for _, piece in chain:
+        maker.Add(piece)
+    # Edge_s, not the raw Shape build_or_raise hands back: MakeWire.Add is overloaded on
+    # edge-or-wire and refuses a TopoDS_Shape that is really an edge.
+    maker.Add(symbol("TopoDS").Edge_s(extension))
+    return build_or_raise(
+        maker,
+        tool=EXTRAPOLATE,
+        detail=(
+            "The extension did not join the curve it was built from. That usually means "
+            "the curve is not one connected chain — join it with catia_join first."
+        ),
+    )
+
+
+def _widened_edge(edge: Any, adaptor: Any, length: float, *, at_finish: bool) -> Any:
+    """The same conic over a longer parameter range, adding exactly `length` of arc.
+
+    `GCPnts_AbscissaPoint` is what makes this exact rather than a guess: the parameter of
+    a conic is not its arc length — a circle's is an angle, an ellipse's is neither — so
+    stepping the range by `length` would extend a Ø20 arc by 5 radians and an ellipse by
+    an amount that depends on where along it you stopped.
+    """
+    first, last = adaptor.FirstParameter(), adaptor.LastParameter()
+    basis = symbol("BRep_Tool").Curve_s(edge, first, last)
+    over = symbol("GeomAdaptor_Curve")(basis)
+
+    if basis.IsPeriodic() and abs(last - first) >= basis.Period() - _CLOSED_PARAMETER_SLACK:
+        raise GeometryError(
+            f"{EXTRAPOLATE} was given a closed curve, which has no end to extend past — "
+            "it already comes back to where it started. Cut a piece out of it with "
+            "catia_split first if you meant to open it."
+        )
+
+    solver = symbol("GCPnts_AbscissaPoint")(
+        over, length if at_finish else -length, last if at_finish else first
+    )
+    if not solver.IsDone():  # pragma: no cover - defensive
+        raise GeometryError(
+            f"{EXTRAPOLATE} could not find the parameter {length} mm past the end of this "
+            "curve. A hyperbola or parabola runs out of range long before a line does."
+        )
+    reached = float(solver.Parameter())
+    span = (first, reached) if at_finish else (reached, last)
+    return build_or_raise(
+        symbol("BRepBuilderAPI_MakeEdge")(basis, *span),
+        tool=EXTRAPOLATE,
+        detail="The widened parameter range did not make an edge.",
+    )
+
+
+def _extension_piece(end: Any, length: float, continuity: str) -> Any:
+    """The added piece for a curve whose basis stops at its own end.
+
+    `tangent` is the straight segment along the end's direction. `curvature` is an arc of
+    the **osculating circle** — the unique circle through the end with the same tangent
+    and the same curvature — swept by `length / radius`. That is G2 by construction rather
+    than by iteration, and for a curve that is already an arc it reproduces the arc.
+    """
+    place = end.place
+    curvature = end.curvature()
+    if continuity == "tangent" or curvature < _STRAIGHT_CURVATURE:
+        far = _stepped(place, end.outward, length)
+        return build_or_raise(
+            symbol("BRepBuilderAPI_MakeEdge")(symbol("gp_Pnt")(*place), symbol("gp_Pnt")(*far)),
+            tool=EXTRAPOLATE,
+            detail="The straight extension had no length.",
+        )
+
+    radius = 1.0 / curvature
+    # The principal normal, (c' x c'') x c' normalised, points at the centre of curvature.
+    inward = _normalised(_crossed(_crossed(end.first, end.second), end.first))
+    centre = _stepped(place, inward, radius)
+    # gp_Ax2(centre, N, X) puts parameter 0 at centre + R*X with tangent N x X there, so X
+    # is the radius back out to the end and N is whatever makes that tangent run outward.
+    outward_radius = (-inward[0], -inward[1], -inward[2])
+    axis = symbol("gp_Ax2")(
+        symbol("gp_Pnt")(*centre),
+        symbol("gp_Dir")(*_crossed(outward_radius, end.outward)),
+        symbol("gp_Dir")(*outward_radius),
+    )
+    circle = symbol("Geom_Circle")(axis, radius)
+    return build_or_raise(
+        symbol("BRepBuilderAPI_MakeEdge")(circle, 0.0, length / radius),
+        tool=EXTRAPOLATE,
+        detail="The osculating arc could not be built at this curve's end.",
+    )
+
+
+def _extended_surface(element: Any, towards: Any, length: float) -> Any:
+    """An analytic face carried past the boundary nearest `towards`.
+
+    Continuity does not appear here and that is not an omission: the widened face is the
+    *same* surface over a bigger parameter range, so it continues itself to every order.
+    Asking for tangent or for curvature gets the identical exact answer.
+    """
+    from app.kernel.occt import classify
+
+    found = faces(element)
+    if len(found) != 1:
+        raise GeometryError(
+            f"{EXTRAPOLATE} extends one face and was given {len(found)}. Name the face to "
+            "extend — catia_extract will take it off a multi-face surface."
+        )
+    face = found[0]
+    kind = classify.face_surface_type(face)
+    if kind not in _ANALYTIC_SURFACES:
+        raise OperationNotSupported(
+            f"{EXTRAPOLATE} on a {kind} face",
+            "an analytic surface is extended by widening its parameter range, and a "
+            "freeform one has no geometry out there to widen into. OCCT's "
+            "GeomLib::ExtendSurfByLength is the answer to that and does nothing through "
+            "these bindings — it takes the surface as a handle by reference and OCP "
+            "passes handles by value, so the extension is built and discarded silently. "
+            "Rebuild the surface larger, or loft a strip onto its edge",
+        )
+
+    surface = symbol("BRep_Tool").Surface_s(face)
+    adaptor = symbol("BRepAdaptor_Surface")(face)
+    bounds = [
+        adaptor.FirstUParameter(),
+        adaptor.LastUParameter(),
+        adaptor.FirstVParameter(),
+        adaptor.LastVParameter(),
+    ]
+    side = _boundary_side(surface, towards, bounds)
+    in_u = side < 2
+    at_last = side % 2 == 1
+
+    if (surface.IsUPeriodic() if in_u else surface.IsVPeriodic()) and abs(
+        bounds[1] - bounds[0] if in_u else bounds[3] - bounds[2]
+    ) >= (surface.UPeriod() if in_u else surface.VPeriod()) - _CLOSED_PARAMETER_SLACK:
+        raise GeometryError(
+            f"{EXTRAPOLATE} was asked to extend a {kind.lower()} face around a direction "
+            "it already closes in — it comes back to itself, so there is no edge out "
+            "there to move. Extend it along its other parameter instead."
+        )
+
+    speed = _parameter_speed(surface, bounds, side)
+    bounds[side] += (length / speed) * (1.0 if at_last else -1.0)
+    return build_or_raise(
+        symbol("BRepBuilderAPI_MakeFace")(surface, *bounds, _FACE_TOLERANCE_MM),
+        tool=EXTRAPOLATE,
+        detail=f"Widening the {'u' if in_u else 'v'} range of this {kind.lower()} failed.",
+    )
+
+
+def _boundary_side(surface: Any, towards: Any, bounds: Sequence[float]) -> int:
+    """Which of the four parametric sides the named boundary lies on: 0..3 = u0,u1,v0,v1.
+
+    Two spellings, and both are answered here because both are how an engineer says it.
+    Name the **edge** and every sample lands on one side of the parameter box. Name what
+    you are extending *towards* — the neighbouring surface, a point — and every sample
+    lands strictly past one bound. Each must pick out exactly one side or the answer is
+    refused; an element past two bounds is out beyond a *corner*, and there is no honest
+    way to say which of the two edges meeting there was meant.
+
+    **Being past a bound wins over lying on one**, and that ordering is the whole
+    correctness of this function. A point at the far end of a 40 mm face may sit exactly
+    on the line of a side edge extended — u = 0 because its x happens to be 0 — while
+    being 20 mm past the opposite bound. Reading it as "on the u edge" widened the face
+    in the wrong direction and reported success, which is how this was first written.
+
+    A curve has two ends rather than four sides, so `_extended_curve` takes the nearer of
+    them and needs none of this.
+    """
+    spans = (bounds[1] - bounds[0], bounds[3] - bounds[2])
+    slack = [
+        max(abs(spans[index // 2]), _CLOSED_PARAMETER_SLACK) * _ON_A_SIDE for index in range(4)
+    ]
+    on, past = {0, 1, 2, 3}, {0, 1, 2, 3}
+    sampled = 0
+    for place in _sampled_places(towards):
+        projector = symbol("GeomAPI_ProjectPointOnSurf")(symbol("gp_Pnt")(*place), surface)
+        if projector.NbPoints() <= 0:  # pragma: no cover - defensive
+            continue
+        sampled += 1
+        u, v = projector.LowerDistanceParameters()
+        at = (u, u, v, v)
+        on &= {index for index in range(4) if abs(at[index] - bounds[index]) <= slack[index]}
+        past &= {
+            index
+            for index in range(4)
+            if (at[index] - bounds[index]) * (1.0 if index % 2 else -1.0) > slack[index]
+        }
+
+    if sampled:
+        if len(past) == 1:
+            return past.pop()
+        if not past and len(on) == 1:
+            return on.pop()
+    raise GeometryError(
+        f"{EXTRAPOLATE} could not tell which edge of the face to extend from. Name one "
+        "edge of it, or name something that lies past exactly one edge — this lies past "
+        f"{len(past) if sampled else 0} and on {len(on) if sampled else 0} of the four, "
+        "which is what a diagonal, a corner or the whole outline all look like from here."
+    )
+
+
+def _sampled_places(shape: Any) -> list[tuple[float, float, float]]:
+    """Points along a named element, enough to tell an edge of a face from a diagonal."""
+    from app.kernel.occt.topology import VERTEX
+
+    found = edges(shape)
+    if not found:
+        return [
+            (place.X(), place.Y(), place.Z())
+            for place in (
+                symbol("BRep_Tool").Pnt_s(symbol("TopoDS").Vertex_s(vertex))
+                for vertex in explore(shape, VERTEX)
+            )
+        ]
+    places = []
+    for edge in found:
+        adaptor = symbol("BRepAdaptor_Curve")(edge)
+        low, high = adaptor.FirstParameter(), adaptor.LastParameter()
+        for step in range(_SPEED_SAMPLES):
+            at = adaptor.Value(low + (high - low) * step / (_SPEED_SAMPLES - 1))
+            places.append((at.X(), at.Y(), at.Z()))
+    return places
+
+
+def _parameter_speed(surface: Any, bounds: Sequence[float], side: int) -> float:
+    """How many mm one unit of the extending parameter buys, refusing it if it varies.
+
+    This is the whole reason a cone can be extended along its slant and not around its
+    axis. On a plane the speed is 1 in both directions and on a cylinder it is 1 along the
+    axis and R around it — constant, so one length widens the range evenly. On a cone or a
+    sphere the speed *around* the axis is the local radius, which changes from one end of
+    the boundary to the other, and there is no single parameter step that adds `length`
+    everywhere along it. Extending by "a length" is then a question with several answers,
+    which is refused rather than answered with whichever one the midpoint gave.
+    """
+    in_u = side < 2
+    fixed = bounds[side]
+    low, high = (bounds[2], bounds[3]) if in_u else (bounds[0], bounds[1])
+
+    speeds = []
+    for step in range(_SPEED_SAMPLES):
+        along = low + (high - low) * step / (_SPEED_SAMPLES - 1)
+        u, v = (fixed, along) if in_u else (along, fixed)
+        place, d_u, d_v = symbol("gp_Pnt")(), symbol("gp_Vec")(), symbol("gp_Vec")()
+        surface.D1(u, v, place, d_u, d_v)
+        derivative = d_u if in_u else d_v
+        speeds.append(math.sqrt(derivative.SquareMagnitude()))
+
+    widest, narrowest = max(speeds), min(speeds)
+    if narrowest <= _CLOSED_PARAMETER_SLACK:  # pragma: no cover - defensive
+        raise GeometryError(
+            f"{EXTRAPOLATE} found this face degenerate along the edge it was asked to "
+            "extend from — the surface does not move there, so no length can extend it."
+        )
+    if (widest - narrowest) / narrowest > _SPEED_AGREEMENT:
+        raise GeometryError(
+            f"{EXTRAPOLATE} cannot extend this face by a length in that direction: the "
+            f"parameter runs at {narrowest:.6g} mm per unit at one end of the boundary "
+            f"and {widest:.6g} at the other, so one number would extend it further at "
+            "one end than the other. Extend it along its other parameter, or rebuild it "
+            "at the size you want."
+        )
+    return narrowest
+
+
+def _towards(document: Any, reference: Any) -> Any:
+    """What an extension is reaching for: a named element, or a reference point.
+
+    Points are a **fifth** namespace `named_geometry` does not resolve — it answers with
+    shapes and a `ReferencePoint` is a position in the document, not one. They are worth
+    reaching for here because "extend this until it gets near that point" is the ordinary
+    way an engineer says which end they mean, and refusing the most obvious spelling of
+    the argument would make the operation harder to use than it needs to be.
+
+    A name that is both is refused rather than resolved by trying one first, which is the
+    rule `named_geometry` already applies to the four it does resolve, and for the same
+    reason: whichever order is chosen works until the day it silently reads the wrong one.
+    """
+    text = str(reference or "").strip()
+    if text and document.has_point(text):
+        try:
+            named_geometry(document, text, tool=EXTRAPOLATE, argument="boundary")
+        except GeometryError:
+            place = document.point(text).position
+            return symbol("BRepBuilderAPI_MakeVertex")(symbol("gp_Pnt")(*place)).Vertex()
+        raise GeometryError(
+            f"{EXTRAPOLATE} was given boundary={text!r}, which is both a point and a "
+            "surface, curve or sketch in this part. Rename one of them — there is no "
+            "safe way to guess which was meant."
+        )
+    return named_geometry(document, reference, tool=EXTRAPOLATE, argument="boundary")
+
+
+def _distance_to(shape: Any, place: tuple[float, float, float]) -> float:
+    """How far a point is from a named element — which end of a curve faces it."""
+    vertex = symbol("BRepBuilderAPI_MakeVertex")(symbol("gp_Pnt")(*place)).Vertex()
+    return _distance(vertex, shape)
+
+
+def _crossed(
+    first: tuple[float, float, float], second: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    return (
+        first[1] * second[2] - first[2] * second[1],
+        first[2] * second[0] - first[0] * second[2],
+        first[0] * second[1] - first[1] * second[0],
+    )
+
+
+def _normalised(vector: tuple[float, float, float]) -> tuple[float, float, float]:
+    """A unit vector, refusing the zero one rather than dividing by nothing.
+
+    Only reachable with a curvature that passed `_STRAIGHT_CURVATURE` and a second
+    derivative parallel to the first, which cannot both hold — the caller has already
+    established that this curve is turning.
+    """
+    size = math.sqrt(sum(value * value for value in vector))
+    if size < MIN_OFFSET_MM:  # pragma: no cover - excluded by the curvature test above
+        raise GeometryError(
+            f"{EXTRAPOLATE} could not find which way this curve turns at its end, so it "
+            "cannot continue the curvature. Extend it with continuity='tangent' instead."
+        )
+    return (vector[0] / size, vector[1] / size, vector[2] / size)
+
+
+def _stepped(
+    place: tuple[float, float, float], along: tuple[float, float, float], distance: float
+) -> tuple[float, float, float]:
+    return (
+        place[0] + along[0] * distance,
+        place[1] + along[1] * distance,
+        place[2] + along[2] * distance,
+    )
 
 
 # -- cutting surfaces against each other --------------------------------------
@@ -1769,6 +2242,7 @@ __all__ = [
     "DEFAULT_SEWING_TOLERANCE_MM",
     "DISASSEMBLE",
     "EXTRACT",
+    "EXTRAPOLATE",
     "EXTRUDE",
     "FILL",
     "HEALING",
@@ -1787,6 +2261,7 @@ __all__ = [
     "sew_surface",
     "disassemble",
     "extract",
+    "extrapolate",
     "healing",
     "join",
     "named_geometry",

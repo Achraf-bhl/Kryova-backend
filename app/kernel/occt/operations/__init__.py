@@ -130,6 +130,7 @@ HANDLERS: Final[dict[str, Handler]] = {
     surfaces.JOIN: surfaces.join,
     surfaces.EXTRACT: surfaces.extract,
     surfaces.BOUNDARY: surfaces.boundary,
+    surfaces.EXTRAPOLATE: surfaces.extrapolate,
     surfaces.SPLIT: surfaces.split,
     surfaces.TRIM: surfaces.trim,
     surfaces.UNTRIM: surfaces.untrim,

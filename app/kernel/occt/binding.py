@@ -96,12 +96,14 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.GCPnts import GCPnts_AbscissaPoint
     from OCP.Geom import (
         Geom_BezierCurve,
+        Geom_Circle,
         Geom_ConicalSurface,
         Geom_CylindricalSurface,
         Geom_OffsetCurve,
     )
     from OCP.Geom2d import Geom2d_Line
     from OCP.GeomAbs import GeomAbs_JoinType, GeomAbs_Shape
+    from OCP.GeomAdaptor import GeomAdaptor_Curve
     from OCP.GeomAPI import (
         GeomAPI_Interpolate,
         GeomAPI_PointsToBSpline,
@@ -216,7 +218,9 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "GeomAPI_ProjectPointOnSurf": GeomAPI_ProjectPointOnSurf,
         "GeomAbs_JoinType": GeomAbs_JoinType,
         "GeomAbs_Shape": GeomAbs_Shape,
+        "GeomAdaptor_Curve": GeomAdaptor_Curve,
         "Geom_BezierCurve": Geom_BezierCurve,
+        "Geom_Circle": Geom_Circle,
         "Geom_ConicalSurface": Geom_ConicalSurface,
         "Geom_CylindricalSurface": Geom_CylindricalSurface,
         "Geom_OffsetCurve": Geom_OffsetCurve,

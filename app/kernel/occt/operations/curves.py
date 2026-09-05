@@ -1358,7 +1358,7 @@ def _enclosed_area(wire: Any, *, tool: str) -> float:
 
 def start_of_curve(curve: Any, *, tool: str) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
     """The first point of a curve in its own running order, and the tangent there."""
-    chain = _chain_of(curve, tool=tool)
+    chain = curve_chain(curve, tool=tool)
     adaptor = chain[0][0]
     place, derivative = symbol("gp_Pnt")(), symbol("gp_Vec")()
     adaptor.D1(adaptor.FirstParameter(), place, derivative)
@@ -1650,13 +1650,19 @@ def _shared_plane(curves: Sequence[Any], *, tool: str, named: Sequence[Any]) -> 
 
 
 @dataclass(frozen=True)
-class _CurveEnd:
+class CurveEnd:
     """One end of a curve, with everything a join needs to leave or arrive smoothly.
 
     `outward` points *away* from the curve at this end whichever end it is, so a join
     reads the same from a curve's start as from its finish. `first` and `second` are the
     raw derivatives in the source curve's own parameter, kept raw because the
     reparameterisation that makes a second derivative comparable needs `|first|`.
+
+    Public — with `curve_ends` and `curve_chain` — because `surfaces.extrapolate` asks the
+    same question of a curve that a join does: where does it end, which way is it going
+    when it gets there, and how hard is it turning. A second reading of that would be a
+    second answer to "which end is the end", which is exactly the thing both of them go
+    out of their way to decide from the geometry rather than from the drawing order.
     """
 
     place: tuple[float, float, float]
@@ -1676,9 +1682,9 @@ class _CurveEnd:
         return math.sqrt(sum(value * value for value in turn)) / speed**3
 
 
-def _ends_of(curve: Any, *, tool: str) -> tuple[_CurveEnd, _CurveEnd]:
+def curve_ends(curve: Any, *, tool: str) -> tuple[CurveEnd, CurveEnd]:
     """A curve's two ends, in its own running order."""
-    chain = _chain_of(curve, tool=tool)
+    chain = curve_chain(curve, tool=tool)
     made = []
     for adaptor, parameter, sign in (
         (chain[0][0], chain[0][0].FirstParameter(), -1.0),
@@ -1688,7 +1694,7 @@ def _ends_of(curve: Any, *, tool: str) -> tuple[_CurveEnd, _CurveEnd]:
         adaptor.D2(parameter, place, first, second)
         raw = (first.X(), first.Y(), first.Z())
         made.append(
-            _CurveEnd(
+            CurveEnd(
                 place=(place.X(), place.Y(), place.Z()),
                 outward=_stepped((0.0, 0.0, 0.0), _unit(raw, tool=tool), sign),
                 first=raw,
@@ -1698,10 +1704,10 @@ def _ends_of(curve: Any, *, tool: str) -> tuple[_CurveEnd, _CurveEnd]:
     return made[0], made[1]
 
 
-def _nearest_ends(first: Any, second: Any, *, tool: str) -> tuple[_CurveEnd, _CurveEnd]:
+def _nearest_ends(first: Any, second: Any, *, tool: str) -> tuple[CurveEnd, CurveEnd]:
     """The pair of ends a join should use: the two that face each other."""
-    here = _ends_of(first, tool=tool)
-    there = _ends_of(second, tool=tool)
+    here = curve_ends(first, tool=tool)
+    there = curve_ends(second, tool=tool)
     return min(
         ((a, b) for a in here for b in there),
         key=lambda pair: _distance_between(pair[0].place, pair[1].place),
@@ -1709,8 +1715,8 @@ def _nearest_ends(first: Any, second: Any, *, tool: str) -> tuple[_CurveEnd, _Cu
 
 
 def _joining_curve(
-    here: _CurveEnd,
-    there: _CurveEnd,
+    here: CurveEnd,
+    there: CurveEnd,
     chord: float,
     continuity: str,
     tensions: tuple[float, float],
@@ -1756,7 +1762,7 @@ def _joining_curve(
 
 
 def _achieved_continuity(
-    curve: Any, here: _CurveEnd, there: _CurveEnd, continuity: str
+    curve: Any, here: CurveEnd, there: CurveEnd, continuity: str
 ) -> dict[str, float]:
     """What the join actually achieved, measured on the built curve.
 
@@ -1778,7 +1784,7 @@ def _achieved_continuity(
         raw = (first.X(), first.Y(), first.Z())
         wanted = _scaled(end.outward, sign)
         along = sum(a * b for a, b in zip(_unit(raw, tool="connect"), wanted, strict=True))
-        built = _CurveEnd(
+        built = CurveEnd(
             place=(place.X(), place.Y(), place.Z()),
             outward=wanted,
             first=raw,
@@ -2019,7 +2025,7 @@ def point_along_curve(
     proportional to its length, so `ratio: 0.5` read as a parameter lands somewhere that
     is the midpoint of nothing — plausible on a line, wrong on every curve worth the name.
     """
-    chain = _chain_of(curve, tool=tool)
+    chain = curve_chain(curve, tool=tool)
     lengths = [symbol("GCPnts_AbscissaPoint").Length_s(adaptor) for adaptor, _ in chain]
     total = sum(lengths)
     if total < MIN_LENGTH_MM:
@@ -2067,7 +2073,7 @@ def point_along_curve(
     )
 
 
-def _chain_of(curve: Any, *, tool: str) -> list[tuple[Any, Any]]:
+def curve_chain(curve: Any, *, tool: str) -> list[tuple[Any, Any]]:
     """A curve's edges **in the order they connect**, each with its own adaptor.
 
     `topology.edges` returns them in map order, which is the order they were built rather

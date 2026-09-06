@@ -57,6 +57,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app import observe
 from app.solve.types import SolverError
 
 #: The job name every run uses. Fixed, because the directory is ours and holds
@@ -189,23 +190,32 @@ def run_ccx(
             environment["OMP_NUM_THREADS"] = str(int(threads))
 
         started = time.perf_counter()
-        try:
-            completed = subprocess.run(
-                [str(binary), "-i", JOB_NAME],
-                cwd=directory,
-                env=environment,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as expired:
-            raise SolverError(
-                f"CalculiX did not finish within {timeout_s:g} s and was stopped. "
-                "A static solve that runs this long is usually an over-refined "
-                "mesh or a model with far more degrees of freedom than intended — "
-                "coarsen the mesh, or raise the timeout if the size is deliberate."
-            ) from expired
+        # The span brackets the subprocess and nothing else, so a slow solve is
+        # distinguishable from a slow deck write or a slow .frd parse — three
+        # things with three different fixes. It has to *wrap* the call rather
+        # than be entered afterwards: a span entered after the work is over
+        # times an empty block, and a roll-up would then report CalculiX as
+        # taking no time at all while the field beside it said 37 ms.
+        with observe.span("solve.calculix.run", threads=threads) as timing:
+            try:
+                completed = subprocess.run(
+                    [str(binary), "-i", JOB_NAME],
+                    cwd=directory,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_s,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as expired:
+                raise SolverError(
+                    f"CalculiX did not finish within {timeout_s:g} s and was stopped. "
+                    "A static solve that runs this long is usually an over-refined "
+                    "mesh or a model with far more degrees of freedom than intended — "
+                    "coarsen the mesh, or raise the timeout if the size is deliberate."
+                ) from expired
+            timing.set("returncode", completed.returncode)
+
         seconds = time.perf_counter() - started
 
         # stderr after stdout rather than interleaved: the two are separate pipes

@@ -28,6 +28,7 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from numpy.typing import NDArray
 
+from app import observe
 from app.mesh.types import TET10_EDGES, TetMesh
 from app.solve.base import SolveOutput, Solver
 from app.solve.loads import assemble_loads
@@ -295,17 +296,31 @@ class LinearStaticSolver(Solver):
         if len(free) == 0:
             raise SolverError("Every degree of freedom is fixed; there is nothing to solve")
 
-        stiffness = assemble_stiffness(mesh, case.material)
-        k_ff = stiffness[free][:, free].tocsc()
-        k_ff.eliminate_zeros()
+        # Assembly and factorisation get separate spans on purpose: a slow
+        # assembly and a slow solve have different fixes — one is element count,
+        # the other is bandwidth and fill-in — and a single span over both cannot
+        # tell them apart, which is the whole reason to time anything.
+        with observe.span(
+            "solve.linear_static",
+            nodes=mesh.node_count,
+            elements=mesh.tet_count,
+            degrees_of_freedom=int(n_dof),
+        ) as timing:
+            timing.set("stage", "assemble")
+            stiffness = assemble_stiffness(mesh, case.material)
+            k_ff = stiffness[free][:, free].tocsc()
+            k_ff.eliminate_zeros()
 
-        displacements = np.zeros(n_dof, dtype=np.float64)
-        applied = forces[free]
+            displacements = np.zeros(n_dof, dtype=np.float64)
+            applied = forces[free]
 
-        if n_dof > _ITERATIVE_THRESHOLD_DOF:
-            solution = self._solve_iterative(k_ff, applied)
-        else:
-            solution = self._solve_direct(k_ff, applied)
+            timing.set("stage", "factorise")
+            if n_dof > _ITERATIVE_THRESHOLD_DOF:
+                timing.set("method", "iterative")
+                solution = self._solve_iterative(k_ff, applied)
+            else:
+                timing.set("method", "direct")
+                solution = self._solve_direct(k_ff, applied)
 
         if not np.all(np.isfinite(solution)) or not _residual_is_small(k_ff, solution, applied):
             raise _under_constrained("the solution does not satisfy equilibrium")

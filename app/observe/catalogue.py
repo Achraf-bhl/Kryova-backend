@@ -108,48 +108,28 @@ SITES: Final[tuple[Site, ...]] = (
         module="app.solve.calculix.run",
         what="one `ccx` subprocess: argv in, .frd out",
         fields=("degrees_of_freedom", "threads", "returncode"),
-        wired=False,
-        not_wired_because=(
-            "app/solve/ is outside this change's lane. The hook is one `with "
-            "span(...)` around the `subprocess.run` in `run.py`; the runner "
-            "already measures `seconds` itself, so the span only has to carry it."
-        ),
+        wired=True,
     ),
     Site(
         name="solve.linear_static",
         module="app.solve.linear_static",
         what="in-house assembly, factorisation and stress recovery",
         fields=("nodes", "elements", "degrees_of_freedom"),
-        wired=False,
-        not_wired_because=(
-            "app/solve/ is outside this change's lane. Assembly and solve want "
-            "separate spans — a slow factorisation and a slow assembly have "
-            "different fixes, and one span over both cannot tell them apart."
-        ),
+        wired=True,
     ),
     Site(
         name="kernel.rebuild",
         module="app.kernel.occt.document",
         what="one OCCT regeneration of a part from its plan",
         fields=("operations", "faces", "solids"),
-        wired=False,
-        not_wired_because=(
-            "app/kernel/ is outside this change's lane. This is the span an "
-            "optimisation loop needs most — hundreds of rebuilds where only the "
-            "per-rebuild cost says whether a sweep is affordable."
-        ),
+        wired=True,
     ),
     Site(
         name="kernel.measure",
         module="app.kernel.measurement",
         what="computing a measurement payload at a given Detail level",
         fields=("detail", "paths"),
-        wired=False,
-        not_wired_because=(
-            "app/kernel/ is outside this change's lane. `Detail` levels exist "
-            "for latency, and nothing currently measures whether the cheap level "
-            "is actually cheap."
-        ),
+        wired=True,
     ),
 )
 

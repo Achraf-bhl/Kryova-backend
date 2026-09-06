@@ -50,6 +50,7 @@ import re
 from collections.abc import Mapping
 from typing import Any, Final
 
+from app import observe
 from app.kernel.errors import GeometryError
 from app.kernel.occt.operations.context import BuildContext
 
@@ -279,30 +280,38 @@ def _replay(context: BuildContext, *, index: int, argument: str, value: float) -
     from app.kernel.occt.operations import HANDLERS
 
     rebuilt = BuildContext(detail=context.detail)
-    for position, entry in enumerate(context.journal):
-        replacement = dict(entry.arguments)
-        if position == index:
-            replacement[argument] = value
-        handler = HANDLERS.get(entry.tool)
-        if handler is None:  # pragma: no cover - the journal only holds handled tools
-            continue
-        try:
-            # Recorded here rather than by the runner, because a replay calls the
-            # handlers directly — there is no runner in this loop. Every entry in
-            # the journal is by definition a recorded tool, so there is nothing to
-            # test for.
-            rebuilt.record(entry.tool, replacement, handler(rebuilt, replacement))
-        except GeometryError as exc:
+    # The span an optimisation loop needs most. `catia_set_parameter` replays the
+    # whole part, so a sweep of two hundred values is two hundred of these, and
+    # the per-rebuild cost is the only number that says whether a sweep is
+    # affordable at all — which is the argument Decision 1 rests on (OCCT is the
+    # internal engine because a design loop needs tens of rebuilds a minute).
+    with observe.span("kernel.rebuild", operations=len(context.journal)) as timing:
+        for position, entry in enumerate(context.journal):
+            replacement = dict(entry.arguments)
             if position == index:
+                replacement[argument] = value
+            handler = HANDLERS.get(entry.tool)
+            if handler is None:  # pragma: no cover - the journal only holds handled tools
+                continue
+            try:
+                # Recorded here rather than by the runner, because a replay calls the
+                # handlers directly — there is no runner in this loop. Every entry in
+                # the journal is by definition a recorded tool, so there is nothing to
+                # test for.
+                rebuilt.record(entry.tool, replacement, handler(rebuilt, replacement))
+            except GeometryError as exc:
+                if position == index:
+                    raise GeometryError(
+                        f"{value} does not build: {exc} The part is unchanged — nothing "
+                        "was rebuilt, so it is still exactly as it was before this call."
+                    ) from exc
                 raise GeometryError(
-                    f"{value} does not build: {exc} The part is unchanged — nothing "
-                    "was rebuilt, so it is still exactly as it was before this call."
+                    f"Rebuilding with {argument}={value} failed further down the part, at "
+                    f"{entry.tool}: {exc} The part is unchanged. A later feature depends on "
+                    "this dimension and cannot carry the new value."
                 ) from exc
-            raise GeometryError(
-                f"Rebuilding with {argument}={value} failed further down the part, at "
-                f"{entry.tool}: {exc} The part is unchanged. A later feature depends on "
-                "this dimension and cannot carry the new value."
-            ) from exc
+        if rebuilt.document is not None:
+            timing.set("solids", rebuilt.document.measure(detail=context.detail).get("solid_count"))
     return rebuilt
 
 

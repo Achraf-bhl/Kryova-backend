@@ -32,6 +32,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from app import observe
 from app.kernel import measurement
 from app.kernel.errors import GeometryError, NamingError
 from app.kernel.measurement import Detail
@@ -705,7 +706,13 @@ class PartDocument:
             if cached is None:
                 # Deliberately density-free: see the docstring. What is cached must
                 # be a function of the shape alone, or the cache outlives its truth.
-                cached = metrology.measure(shape, density_kg_m3=None, detail=detail)
+                # Timed because `Detail` exists *for latency* — a plan for a
+                # machine is 10^5-10^6 operations and computing the full set
+                # after each would dominate the run — and until now nothing
+                # measured whether the cheap level is actually cheap.
+                with observe.span("kernel.measure", detail=str(detail)) as timing:
+                    cached = metrology.measure(shape, density_kg_m3=None, detail=detail)
+                    timing.set("paths", len(cached))
                 self._measurement_cache[detail] = cached
             payload = self._weighed(dict(cached))
 

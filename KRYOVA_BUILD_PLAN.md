@@ -115,6 +115,26 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E15 → **the four catalogued holes are wired, and Decision 1
+  finally has a number.** `app/observe/` shipped with `solve.calculix.run`,
+  `solve.linear_static`, `kernel.rebuild` and `kernel.measure` declared
+  `wired=False` with the exact change each needed, because they were outside
+  that lane. All four are installed now, and the first measurement out of them
+  is the one the whole OCCT decision rests on: **a parametric rebuild through
+  `catia_set_parameter` costs 0.49 ms**, so a 200-value sweep is about a tenth
+  of a second of rebuilding. The plan has argued since it was written that OCCT
+  is the internal engine because a design loop needs tens of rebuilds a minute
+  and a CATIA seat gives one every few seconds. That was a reasonable belief and
+  is now a measurement.
+  One mistake worth recording: the CalculiX span was first written to be
+  *entered after* `subprocess.run` returned, which timed an empty block — the
+  span read 0.00 ms while the field beside it said 37 ms, so a roll-up would
+  have reported CalculiX as taking no time at all. It brackets the call now, and
+  reads 28.58 ms on the bar-in-tension case. Assembly and factorisation are
+  separate stages within the in-house span, because a slow assembly is an
+  element-count problem and a slow factorisation is a fill-in problem and one
+  span over both cannot tell them apart.
+
 - **2026-09-06** — P2 → **orgs and RLS, and a security test that was passing
   against a database enforcing nothing.** The migration backfills in the right
   order — tables, then a nullable `organisation_id`, then a PL/pgSQL loop giving

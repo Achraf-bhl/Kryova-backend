@@ -245,7 +245,18 @@ class TestTheCatalogueContract:
             assert site.not_wired_because
             assert site.module.startswith("app.")
 
-    def test_the_wired_sites_are_the_ones_this_change_installed(self) -> None:
+    def test_every_wired_site_is_the_set_we_believe_is_wired(self) -> None:
+        """A snapshot, and it is meant to be edited — but only alongside the hook.
+
+        Its value is that wiring a span and forgetting the catalogue, or marking
+        a site wired without installing the hook, both turn this red. The second
+        is the one that matters: a site claiming `wired=True` with no call site
+        makes the report say a span produced nothing, when in truth nothing was
+        ever asked to produce it.
+
+        The four `solve.*` and `kernel.*` entries were installed on 2026-09-06,
+        after the package landed with them catalogued as holes.
+        """
         assert catalogue.wired_names() == {
             "mesh.gmsh.wait",
             "mesh.gmsh.session",
@@ -254,6 +265,10 @@ class TestTheCatalogueContract:
             "media.verify",
             "jobs.wait",
             "jobs.run",
+            "solve.calculix.run",
+            "solve.linear_static",
+            "kernel.rebuild",
+            "kernel.measure",
         }
 
     def test_the_unmeasured_vocabulary_is_the_design_packages_one(self) -> None:

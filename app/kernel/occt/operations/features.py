@@ -284,8 +284,65 @@ def _sketch_argument(context: BuildContext, arguments: Mapping[str, Any], tool: 
     document = context.require_document()
     named = arguments.get("sketch")
     if not named:
-        raise GeometryError(f"{tool} needs a sketch to build from, and none was named.")
+        raise GeometryError(_no_sketch_message(context, arguments, tool))
     return document.sketch(str(named))
+
+
+def _no_sketch_message(
+    context: BuildContext, arguments: Mapping[str, Any], tool: str
+) -> str:
+    """Why there is no sketch — and, when it is obvious, what was meant instead.
+
+    **This message used to cause the wrong recovery, measured at gate G1 on
+    2026-09-06.** Told to adjust a plate's thickness until it weighed 2.4 kg, the
+    agent called `catia_pad {"feature": "Pad.1", "length_mm": 11}` — which is
+    unmistakably *"make Pad.1 eleven millimetres"* — and was told
+    `catia_pad needs a sketch to build from, and none was named.` So it supplied
+    a sketch: it renamed `Pad.1` out of the way and **padded the same sketch a
+    second time**, leaving the document carrying two pads. Every call after the
+    refusal was a correct response to the sentence it was given, and the sentence
+    was answering a different question from the one being asked.
+
+    `CLAUDE.md` says an agent's recovery from a refusal is what turns a refusal
+    into a wrongly built part, and that a message must say what to do next. A
+    `feature` argument naming something that already exists, with no sketch, has
+    exactly one sensible reading, and the tool for it exists — so the message
+    names it, with the parameter spelled the way `catia_list_parameters` spells
+    it, because a name the model cannot type is a tool it cannot call.
+    """
+    wanted = str(arguments.get("feature") or "").strip()
+    document = context.document
+    known = set(document.feature_names()) if document is not None else set()
+
+    if wanted and wanted in known:
+        dimensions = [
+            key
+            for key, value in arguments.items()
+            if key != "feature" and isinstance(value, (int, float))
+        ]
+        dimension = dimensions[0] if dimensions else "length_mm"
+        separator = chr(92)
+        return (
+            f"{tool} builds a new feature from a sketch; it does not change one that "
+            f"already exists, and {wanted!r} already exists. To change a dimension of "
+            f"{wanted!r}, call catia_set_parameter with "
+            f"name='{wanted}{separator}{dimension}' — that rewrites the call that built "
+            "it and rebuilds the part from the top, so everything downstream moves with "
+            "it. Call catia_list_parameters to see the names. Padding the same sketch "
+            "again would leave the part carrying two features instead of one changed one."
+        )
+
+    if wanted:
+        listed = ", ".join(sorted(known)) or "nothing yet"
+        return (
+            f"{tool} needs a sketch to build from, and none was named. It was given "
+            f"feature={wanted!r}, which is not a feature of this part — this part has: "
+            f"{listed}. If you meant to build something new, name the sketch to build "
+            "from; if you meant to change something that exists, call "
+            "catia_list_parameters to see what can be changed."
+        )
+
+    return f"{tool} needs a sketch to build from, and none was named."
 
 
 def _reject_unsupported_limit(arguments: Mapping[str, Any], tool: str) -> None:

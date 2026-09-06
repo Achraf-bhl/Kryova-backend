@@ -764,6 +764,66 @@ def _execute_locally(
 # -- enforcement -------------------------------------------------------------
 
 
+#: A JSON escape that arrived as literal characters, e.g. the six characters
+#: backslash-u-0-0-e-9 where the one character e-acute was meant.
+_LITERAL_ESCAPE_RE = re.compile(r"\\(?:u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|U[0-9a-fA-F]{8})")
+
+
+def _decode_literal_escapes(value: str) -> str:
+    """Undo a double-encoded escape, and only that.
+
+    Measured on ladder prompt S2, 2026-09-06, on a French seat: the agent read
+    the feature list, saw `Revolution.1` with an acute accent, and called
+    `catia_list_faces` with the six literal characters of its escape sequence.
+    The refusal read *No feature named 'R\\u00e9volution.1' in this part.
+    Features: Revolution.1* -- with the accent -- which names two strings that
+    look different and are the same name, and there is nothing the model can do
+    with that. It burned the rest of the turn.
+
+    This is a transport repair, not a spelling guess. CATIA never puts a
+    backslash in a feature name, so a backslash followed by a valid escape body
+    can only be an encoding that survived one round too many. Anything that
+    does not decode is returned untouched, and a name that was already right is
+    unchanged -- there is no escape in it to find.
+    """
+    if "\\" not in value:
+        return value
+
+    def one(match: re.Match[str]) -> str:
+        try:
+            return match.group(0).encode("ascii").decode("unicode_escape")
+        except (UnicodeDecodeError, UnicodeEncodeError):  # pragma: no cover - defensive
+            return match.group(0)
+
+    return _LITERAL_ESCAPE_RE.sub(one, value)
+
+
+def _repair_escapes(arguments: dict[str, Any]) -> dict[str, Any]:
+    """`_decode_literal_escapes` over every string the call carries.
+
+    Every tool, not a list of them: the same double encoding reaches a material
+    name, a component name and a sketch name by exactly the same route, and a
+    list of the tools it has been seen on is a list that is wrong the next time.
+    """
+    repaired: dict[str, Any] | None = None
+    for name, value in arguments.items():
+        if isinstance(value, str):
+            fixed: Any = _decode_literal_escapes(value)
+        elif isinstance(value, list) and any(isinstance(item, str) for item in value):
+            fixed = [
+                _decode_literal_escapes(item) if isinstance(item, str) else item
+                for item in value
+            ]
+        else:
+            continue
+        if fixed == value:
+            continue
+        if repaired is None:
+            repaired = dict(arguments)
+        repaired[name] = fixed
+    return repaired if repaired is not None else arguments
+
+
 def _parse_array_strings(
     arguments: dict[str, Any], schema: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -817,7 +877,10 @@ def _normalise(
 ) -> dict[str, Any]:
     """Fix what the model plainly meant, before the schema is applied.
 
-    Two cases, and both are ones where the intent is not in question:
+    Three cases, and all are ones where the intent is not in question:
+
+    A name that arrived as the literal text of its own escape sequence is that
+    name; see `_decode_literal_escapes`.
 
     `depth_mm` is ignored for a through hole, and its schema refuses zero
     because zero is not a depth. The tool description says to omit it; models
@@ -835,7 +898,7 @@ def _normalise(
     before. Anything that would actually widen what is accepted belongs in the
     schema, where it can be read.
     """
-    arguments = _parse_array_strings(arguments, schema)
+    arguments = _repair_escapes(_parse_array_strings(arguments, schema))
     if tool == "catia_hole" and arguments.get("through_all", True):
         if arguments.get("depth_mm") == 0:
             return {k: v for k, v in arguments.items() if k != "depth_mm"}

@@ -20,11 +20,43 @@ from ._context import ComContext
 
 logger = logging.getLogger("kryova.catia.com.assembly_review")
 
-#: `CatClashComputationType` — what a clash run is being asked to find.
-_CLASH_TYPES = {"contact": 1, "clash": 2, "clearance": 3}
+#: `Clash.ComputationType` is the **scope** of the run, not what it looks for.
+#: Measured on a real V5-R33, 2026-09-06, against two 40x40x30 blocks
+#: overlapping by 20 mm: 1 reports the interference, 2 and 3 report nothing --
+#: 2 is "inside one component" and 3 needs `FirstGroup`/`SecondGroup` set.
+#: The table this replaces read {"contact": 1, "clash": 2, "clearance": 3}, so
+#: the one word an engineer is most likely to use, "clash", selected the value
+#: that finds nothing, and the check reported a clean assembly.
+_SCOPE_BETWEEN_ALL = 1
 
-#: `CatClashResultType` values, keyed to the words a result should report.
-_CLASH_RESULTS = {0: "no_interference", 1: "clash", 2: "contact", 3: "clearance"}
+#: `Clash.InterferenceType` is what counts as a problem. 0 finds solids that
+#: overlap or touch. 1 additionally finds pairs closer than `Clearance` -- at a
+#: 3 mm gap with Clearance = 5, 0 reported nothing and 1 reported 3.0000.
+_INTERFERENCE_CONTACT = 0
+_INTERFERENCE_CLEARANCE = 1
+
+#: How far from zero a reported value still means "touching". DMU computes the
+#: value on a tessellation, not on the exact solids: the same 20 mm overlap came
+#: back as -20.0358 on one run and -19.6484 on another. So the sign is reliable
+#: and the magnitude is an approximation, which is what the payload says.
+_TOUCHING_MM = 1e-6
+
+
+def _classify(value: float | None) -> str:
+    """What a conflict is, from the sign of its value.
+
+    `Conflict.Status` was 0 for every conflict measured -- overlapping, touching
+    and clearance alike -- so it does not discriminate. The previous code read
+    it through {0: "no_interference", ...} and skipped on that word, which would
+    have dropped every real conflict even once the collection was found.
+    """
+    if value is None:
+        return "unknown"
+    if value < -_TOUCHING_MM:
+        return "clash"
+    if value <= _TOUCHING_MM:
+        return "contact"
+    return "clearance"
 
 
 class AssemblyReviewMixin:
@@ -99,9 +131,20 @@ class AssemblyReviewMixin:
 
         This is the one assembly operation that is genuinely slow — DMU tests
         every face pair — which is why it is declared long-running and why the
-        result reports how many pairs it examined. A clash run that reports zero
-        interferences over zero pairs has not proved anything.
+        result reports how many components were in scope. A clash run that
+        reports zero interferences over zero components has not proved anything.
+
+        The three properties this drives were all measured on a real V5-R33 on
+        2026-09-06 rather than taken from the enum names; `_SCOPE_BETWEEN_ALL`
+        and `_classify` record what was wrong before and what the seat answered.
         """
+        if kind == "clearance" and not clearance_mm:
+            raise CatiaOperationError(
+                "A clearance check needs a distance: pass clearance_mm. Without one "
+                "there is nothing to be closer than, and the run would only find "
+                "solids that already touch -- which is kind='clash'."
+            )
+
         document = self._document()
         try:
             workbench = document.GetWorkbench("SPAWorkbench")
@@ -112,23 +155,12 @@ class AssemblyReviewMixin:
             ) from error
 
         clash = workbench.Clashes.Add()
-        clash.ComputationType = _CLASH_TYPES[kind]
-        if clearance_mm is not None:
+        clash.ComputationType = _SCOPE_BETWEEN_ALL
+        if kind == "clearance":
+            clash.InterferenceType = _INTERFERENCE_CLEARANCE
             clash.Clearance = float(clearance_mm)
-
-        if components:
-            selection = document.Selection
-            selection.Clear()
-            for name in components:
-                selection.Add(self._component(name))
-            # Two selected sets means "check these against each other"; without
-            # it DMU checks the whole assembly, which on a large one is minutes
-            # rather than seconds.
-            try:
-                clash.FirstGroup = selection
-            except Exception:  # noqa: BLE001 - not settable on every release
-                logger.debug("Clash scoping not available; checking the whole assembly")
-            selection.Clear()
+        else:
+            clash.InterferenceType = _INTERFERENCE_CONTACT
 
         try:
             clash.Compute()
@@ -137,30 +169,56 @@ class AssemblyReviewMixin:
                 f"CATIA could not complete the interference check. ({error})"
             ) from error
 
-        results = clash.ComputedResults
-        total = int(results.Count)
+        # `Conflicts` is the collection of problems found, not of pairs looked
+        # at -- so its count can never say how much was checked. The scope is
+        # every pair in the assembly, which is a number we hold ourselves.
+        found = clash.Conflicts
+        try:
+            total = int(found.Count)
+        except Exception as error:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA computed the interference check but would not report it. ({error})"
+            ) from error
+
         conflicts: list[dict[str, Any]] = []
         for index in range(1, total + 1):
-            item = results.Item(index)
-            status = _CLASH_RESULTS.get(int(item.Status), "unknown")
-            if status == "no_interference":
-                continue
+            item = found.Item(index)
+            value = _number(item, "Value")
             conflicts.append(
                 {
-                    "status": status,
+                    "status": _classify(value),
                     "components": [
                         _text(item, "FirstProduct"),
                         _text(item, "SecondProduct"),
                     ],
-                    "value_mm": _number(item, "Value"),
+                    "value_mm": value,
+                    "value_is_approximate": True,
                 }
             )
 
+        # Asked about named components, DMU still checks the whole assembly at
+        # this scope, so the narrowing is done here and said out loud. Reporting
+        # a whole-assembly result as if it were the scoped one would name
+        # components the caller never asked about.
+        scope = "whole assembly"
+        if components:
+            wanted = {str(name) for name in components}
+            conflicts = [
+                entry for entry in conflicts if wanted.intersection(entry["components"])
+            ]
+            scope = "filtered to " + ", ".join(sorted(wanted))
+
         return {
             "kind": kind,
-            "pairs_checked": total,
+            "scope": scope,
+            "components_in_assembly": _component_count(self._product()),
             "interferences": conflicts,
             "clear": not conflicts,
+            "note": (
+                "Interference depths and clearances are computed on CATIA's tessellation, "
+                "not on the exact solids: the sign is reliable, the magnitude is "
+                "approximate to about a percent."
+            ),
         }
 
     # -- constraint and structure health -------------------------------------
@@ -376,6 +434,19 @@ def _walk(root: Any) -> list[Any]:  # pragma: no cover - Windows only
         found.extend(_walk(child))
     return found
 
+
+
+def _component_count(product: object) -> int:  # pragma: no cover - Windows only
+    """How many components the scope covered, as the honest denominator.
+
+    Zero conflicts over zero components proves nothing; zero over two is a
+    result. The old payload called `Conflicts.Count` the pairs checked, which made
+    a clean assembly report that nothing had been examined.
+    """
+    try:
+        return int(product.Products.Count)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - not a product, or an empty one
+        return 0
 
 def _text(owner: Any, attribute: str) -> str:  # pragma: no cover - Windows only
     """An optional string property, as "" when the release does not expose it."""

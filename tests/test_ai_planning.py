@@ -255,21 +255,32 @@ class TestItIsNotWiredIn:
         assert "plan_for" not in text
         assert not [name for name in BUILTIN_TOOL_LABELS if "plan" in name]
 
-    def test_nothing_in_the_agent_package_imports_it_yet(self) -> None:
-        import pkgutil
+    def test_its_three_consumers_are_the_ones_that_should_be(self) -> None:
+        """Wired 2026-09-06/07, and this test inverted with it.
+
+        It used to assert that *nothing* imported this module, which was right
+        while the scope note said so. What replaces it is not a weaker claim: a
+        library with no consumer cannot go wrong, and one with three can, so
+        this names exactly which three and fails if a fourth appears without
+        anyone thinking about it.
+
+        `state.py` renders the requirements beside the user's message,
+        `verification.py` decides which of them the measurements confirm, and
+        `agent.py` holds the turn open when the answer is no. Anything else
+        reaching for the requirement list is reaching around one of those.
+        """
         from pathlib import Path
 
         import app.ai
 
         root = Path(next(iter(app.ai.__path__)))
-        importers = [
+        importers = {
             path.name
             for path in root.glob("*.py")
             if path.name != "planning.py" and "ai.planning" in path.read_text(encoding="utf-8")
-        ]
+        }
 
-        assert not importers, f"{importers} import planning; the scope note is now stale"
-        assert pkgutil is not None  # the import is what proves the package resolves
+        assert importers == {"agent.py", "state.py", "verification.py"}, importers
 
 
 class TestPlanSizeIsBoundedByWhatWasSaid:

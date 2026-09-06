@@ -4,13 +4,16 @@
 it. It is not long-horizon planning, and nothing here sequences tools, chooses
 an order, or replans after a failure.** What it does is turn a request into the
 list of requirements it contains, and keep that list somewhere the context
-window cannot trim. Anything more is 16.2 proper and is not written yet. It is
-also **not wired into the agent loop** — no tool calls it, no prompt mentions
-it, and no state block renders it. That is deliberate: a prompt describing a
-tool the model was not given teaches it to hallucinate a call, and half-wiring
-this would either add a schema to the payload 16.1 is busy shrinking or teach
-the model about machinery that is not there. It is a tested library with a
-public surface, waiting for the turn that connects it.
+window cannot trim. Anything more is 16.2 proper.
+
+**Wired 2026-09-07**, and it is still not a tool: no schema was added to the
+payload 16.1 is busy shrinking, and no prompt describes a call the model was not
+given. Three consumers read it, all of them on the server. `state.py` renders
+the requirements beside the user's message; `verification.py` decides which of
+them the conversation's own measurements confirm; `agent.py` refuses to let a
+turn close while a stated number has been measured by nothing. The extraction
+here is regex over the engineer's own words, so all of that costs one model call
+of nothing.
 
 **Why this is the missing piece, measured rather than asserted.** On 2026-09-06
 (`docs/verification-2026-09-06/REPORT.md`, attempt 3) the agent was asked for a

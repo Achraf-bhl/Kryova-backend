@@ -46,9 +46,16 @@ from sqlalchemy.orm import Session
 from app.ai import prompts
 from app.ai.context import build_messages, maybe_summarise
 from app.ai.malformed import correction_for, find_written_tool_calls, is_contentless
+from app.ai.planning import extract_objectives
 from app.ai.provider import LLMError, LLMProvider, TokenUsage
 from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
 from app.ai.tools import ToolBox, ToolError
+from app.ai.verification import (
+    assess,
+    measurements_in,
+    shortfall_note,
+    unverified_footnote,
+)
 from app.core.config import settings
 from app.models import Conversation, ConversationMessage, MessageRole, User
 from app.retrieval import knowledge_service
@@ -437,6 +444,9 @@ def stream_agent(
     )
     known = set(labels)
     corrections = 0
+    #: How many times this turn was held open for unmeasured requirements.
+    #: See MAX_VERIFICATION_NUDGES.
+    nudges = 0
 
     for step in range(budget):
         yield {"type": "thinking", "step": step + 1, "max_steps": budget}
@@ -504,7 +514,33 @@ def stream_agent(
                     "again.\n\n" + turn.text
                 )
 
+            # The model says it is finished. Before that is accepted, compare
+            # what it was asked for against what it actually measured. This is
+            # the check that was missing when a turn closed on six requirements
+            # with three built, and again when the one thing the user asked
+            # about -- was there interference -- was never checked at all.
+            plan = _requirement_plan(conversation, steps)
+            shortfall = shortfall_note(plan)
+            if shortfall and nudges < MAX_VERIFICATION_NUDGES and step + 1 < budget:
+                nudges += 1
+                _append(db, conversation, MessageRole.ASSISTANT, content=turn.text or None)
+                _append(db, conversation, MessageRole.USER, content=shortfall)
+                db.commit()
+                logger.info(
+                    "holding the turn open: %d requirement(s) unverified at step %d/%d",
+                    len(plan.outstanding()) + len(plan.missed),
+                    step + 1,
+                    budget,
+                )
+                yield {"type": "verification", "outstanding": plan.to_dict()}
+                continue
+
             text = turn.text
+            if shortfall:
+                # It was told, and it closed anyway. The answer stands as
+                # written; what it left out is stated beside it, because the
+                # user cannot see the difference between measured and assumed.
+                text += unverified_footnote(plan)
             if turn.truncated:
                 # A cut-off answer presented as a finished one is the worst
                 # outcome here: the user reads a confident half-sentence about
@@ -709,6 +745,48 @@ MAX_IDENTICAL_READS = 2
 #: user a summary and a question, which is Phase 16.4's escalate step, and it
 #: is strictly better than burning the remaining budget in silence.
 MAX_BLOCKED_REPEATS = 3
+
+
+#: How many times in a turn the model may be sent back to measure a requirement
+#: it stated it had met -- or never mentioned again -- before the turn closes
+#: anyway with the omission written into the answer.
+#:
+#: One, and only one. The nudge is not a negotiation: the model is handed the
+#: exact clauses nothing has measured and the tools to measure them. A model
+#: that comes back a second time without having measured them is not going to
+#: on a third, and every extra round is the user watching a spinner. What
+#: happens instead is strictly better than another round -- the answer goes out
+#: with the unverified requirements listed under it, so the user sees what was
+#: skipped even when the model does not say so.
+MAX_VERIFICATION_NUDGES = 1
+
+
+def _requirement_plan(conversation: Conversation, steps: list[AgentStep]) -> Any:
+    """What this conversation asked for, marked against what it measured.
+
+    Both halves are read from records rather than from the transcript, for the
+    reason `resume.py` gives: the window trims from the front and the summary is
+    a paraphrase, so by the time a long turn is closing, the requirement stated
+    in the first message may no longer be in the context at all. The objectives
+    come from every user message; the measurements come from the tool results of
+    this turn, which are the only ones that can have measured anything new.
+    """
+    objectives: list[Any] = []
+    seen: set[str] = set()
+    for message in conversation.messages:
+        if message.role != MessageRole.USER or not message.content:
+            continue
+        for objective in extract_objectives(str(message.content)):
+            key = " ".join(objective.text.lower().split())
+            if key not in seen:
+                seen.add(key)
+                objectives.append(objective)
+
+    measured = []
+    for record in steps:
+        if record.ok:
+            measured.extend(measurements_in(record.result, record.tool))
+    return assess(objectives, measured)
 
 
 def _read_fingerprint(name: str, arguments: Any) -> str:

@@ -107,6 +107,25 @@ and what 5.3's sensitivity can then be run over.
 
 ## Done
 
+- **Ladder prompt H3 passed, and the five defects that were in its way (2026-09-06).** The
+  level-2 prompt "fillet all the vertical edges at R8, then cut a 40 x 20 pocket 10 deep in the
+  middle of the top face, on a 100 x 60 x 30 block" failed four times on the seat, and every
+  failure was ours. `catia_list_edges` could not classify a single edge, because `Measurable`
+  refuses `GetCOG` on an edge and silently writes nothing for `GetDirection` -- so `kind` was
+  `"unknown"` for every edge of every part and the tool's own filter matched nothing; it now
+  measures through `vba.edge_map` and classifies through `scripts/catia_bridge/edges.py`, shared
+  with `catia_fillet` so the two cannot disagree. `catia_select` refused the `Edge.N` ids
+  `catia_list_edges` had just printed and pointed at the one tool that could not resolve them.
+  A sketch left open refused the *next* `catia_sketch_create`, a refusal a person never sees,
+  because leaving the Sketcher is what starting the next thing means. **`HybridBodies.Add()`
+  makes the new geometrical set CATIA's in-work object and `ShapeFactory` inserts after it**, so
+  one `catia_sketch_create(support="top")` left the part unable to take any solid feature at all
+  and the refusal blamed the profile -- measured from bare COM, `part.InWorkObject = body` turned
+  a refused pocket into 172,000 mm3. And a turn out of tool rounds ended by announcing work it
+  could not do instead of reporting what it had built. Run 5: 170,352 mm3 measured against
+  170,352 arithmetic, in 12 of 20 rounds, with both pictures in
+  `docs/verification-2026-09-06/`. Fifteen guards, each verified by breaking what it guards.
+
 - **Seat verification (2026-09-06).** One prompt at a time through the real chat endpoint
   against the real CATIA V5-6R2023 seat, not the dispatcher — per the standing rule that a
   test starting at `dispatch.call_catia` is testing a middle. `qwen3-coder:30b` needed two

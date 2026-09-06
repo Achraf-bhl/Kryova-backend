@@ -108,3 +108,58 @@ def test_none_of_this_reaches_the_prompts_with_no_build_tools() -> None:
     for prompt in (prompts.AGENT_SYSTEM, prompts.AGENT_SYSTEM_DOCS):
         assert "A part needs dimensions before it needs geometry" not in prompt
         assert "Describe the part you built" not in prompt
+
+
+class TestARequirementIsNotAMissingDimension:
+    """The other edge of the same rule, and the one that cost a ladder run.
+
+    Measured on ladder prompt H4, 2026-09-06, after the asking rule went in:
+
+        "I need a bracket that bolts to a wall with two M8 fasteners and
+         carries a 500 N load hanging 150 mm out from the wall, in mild steel,
+         with a safety factor of at least 2. Design it and tell me what it
+         will actually take."
+
+    The agent created the part, opened a sketch, and then asked how wide the
+    mounting plate should be, how tall the bracket, and how thick the
+    material. Every one of those is what the requirement is *for*: 150 mm is
+    the reach, and the load, the material and the factor are what a section
+    thickness is calculated from. Asking hands the user back the engineering
+    they came for -- and this prompt is the register the whole product is
+    aimed at, so getting it wrong here is worse than getting E6 wrong.
+
+    The rule is therefore two-sided, and both sides are asserted, because a
+    prompt that only forbade guessing turns every request into an interview
+    and one that only forbade asking sends an invented bracket to a customer.
+    """
+
+    def test_a_requirement_is_named_as_a_reason_not_to_ask(self) -> None:
+        text = prompts._CATIA_WORKFLOW.lower()
+        assert "a requirement is not a missing dimension" in text
+
+    @pytest.mark.parametrize(
+        "signal",
+        ["load", "reach", "span", "pressure", "speed", "material", "factor of safety", "standard"],
+    )
+    def test_the_signals_that_make_a_request_buildable_are_listed(self, signal: str) -> None:
+        """Named individually, because a small model matches words rather than
+        recognising the category."""
+        assert signal in prompts._CATIA_WORKFLOW.lower()
+
+    def test_it_says_to_choose_the_dimensions_rather_than_ask(self) -> None:
+        text = prompts._CATIA_WORKFLOW.lower()
+        assert "do not ask -- choose the dimensions" in text
+
+    def test_a_chosen_dimension_must_carry_where_it_came_from(self) -> None:
+        """The other half of not asking. A number with no stated origin cannot
+        be argued with, and this system never asks to be trusted."""
+        text = prompts._CATIA_WORKFLOW.lower()
+        assert "which number came from the requirement" in text
+
+    def test_the_blank_request_is_still_a_question(self) -> None:
+        """The rule this one sits beside must survive it: "a mounting bracket
+        with two holes" has no requirement to derive anything from, and is
+        still asked about."""
+        text = prompts._CATIA_WORKFLOW.lower()
+        assert "a mounting bracket with two \nholes" in text or "mounting bracket" in text
+        assert "ask only when there is neither a size nor anything" in text

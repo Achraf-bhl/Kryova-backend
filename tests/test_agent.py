@@ -1645,3 +1645,82 @@ class TestATurnStopsRepeatingItself:
         )
         assert reply.text == "done"
         assert all(s.ok for s in reply.steps)
+
+
+class TestTheSecondPartRefusalIsBackendAccurate:
+    """Naming a tool the backend does not have is worse than naming none.
+
+    Measured on the seat, 2026-09-06, ladder prompt S2. An earlier version of
+    this refusal sent the agent to `catia_assembly_component`, and it came back
+    "There is no tool called 'catia_assembly_component'". That tool is
+    `server_only`: it is the open kernel's way of taking a component out of the
+    conversation, and there is no COM method behind it by design -- on a seat a
+    component is a file.
+
+    A conversation owns one document deliberately (`dispatch` explains why
+    `catia_close_document` keeps the binding), so on a seat there is no route to
+    a second part today and the honest answer says so. Phase 14 is where that
+    changes.
+    """
+
+    def test_the_seat_is_not_sent_to_a_tool_it_does_not_have(self) -> None:
+        import inspect
+
+        from app.ai import tools as tools_module
+
+        source = inspect.getsource(tools_module.ToolBox)
+        seat_branch = source.split("if backends.is_local():")[-1]
+        # The local branch names it; the seat branch that follows must not.
+        assert "catia_assembly_component" not in seat_branch.split("raise ToolError(")[2]
+
+    def test_the_local_branch_still_names_it(self) -> None:
+        import inspect
+
+        from app.ai import tools as tools_module
+
+        source = inspect.getsource(tools_module.ToolBox)
+        assert "catia_assembly_component" in source
+
+    def test_the_seat_message_says_not_to_call_it_again(self) -> None:
+        """The measured failure was seven identical calls in one turn."""
+        import inspect
+
+        from app.ai import tools as tools_module
+
+        source = inspect.getsource(tools_module.ToolBox)
+        assert "Do not call catia_new_part again here" in source
+
+    def test_every_tool_named_in_a_refusal_exists(
+        self, db_session: Session, user: User, project: Project
+    ) -> None:
+        """The general rule the S2 defect broke: a tool named in a refusal has
+        to be a tool that is really there.
+
+        Reads the string literals of every `ToolError(...)` in the file -- not
+        the docstrings, which legitimately discuss names that do not exist as
+        examples of what goes wrong.
+        """
+        import ast
+        import re
+        from pathlib import Path
+
+        from app.ai import tools as tools_module
+
+        box = _toolbox(db_session, user, project)
+        known = {tool["function"]["name"] for tool in box.schemas(include_mutating=True)}
+        # Read the file, not `inspect.getsource`: that goes through linecache,
+        # which serves the source as it was when the module was first imported.
+        # A guard reading a stale copy of the thing it guards passes whatever
+        # you do to the file.
+        tree = ast.parse(Path(tools_module.__file__).read_text(encoding="utf-8"))
+        named: set[str] = set()
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "ToolError"):
+                continue
+            for piece in ast.walk(node):
+                if isinstance(piece, ast.Constant) and isinstance(piece.value, str):
+                    named |= set(re.findall(r"\bcatia_[a-z_]+\b", piece.value))
+        # The one name that is deliberately backend-specific, and the branch
+        # that writes it is guarded on `backends.is_local()`.
+        unreachable = named - known - {"catia_assembly_component"}
+        assert not unreachable, sorted(unreachable)

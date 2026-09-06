@@ -1701,23 +1701,42 @@ class ToolBox:
                 # No live document: the row names something that is gone, so
                 # building it again is the recovery, not a mistake to refuse.
             else:
-                # Two ways forward, and naming only the first is what made
-                # ladder prompt S2 unbuildable. Measured on the seat
-                # 2026-09-06: asked for a shaft and a bushing, the agent
-                # finished the shaft, called catia_new_part for the bushing,
-                # was told to reopen the document it already had, and called
-                # it seven more times. Reopening is right when there is one
-                # part; it is not what "now make the second part" means, and
-                # the tool that does mean that was never mentioned.
+                # The route to a second part is not the same on both backends,
+                # and naming the wrong one is worse than naming none: measured
+                # on the seat 2026-09-06, ladder prompt S2, an earlier version
+                # of this message sent the agent to `catia_assembly_component`,
+                # which is `server_only` -- the open kernel's way of taking a
+                # component out of the conversation, with no COM method behind
+                # it -- and it came back "there is no tool called that".
+                #
+                # On a seat there is no route today, and saying so is the
+                # honest answer. A conversation owns one document by design
+                # (`dispatch` explains why `catia_close_document` keeps the
+                # binding), and an assembly of two parts needs the product
+                # structure of Phase 14. Telling the user that is something
+                # they can act on; sending the agent round the loop again is
+                # not, and that is what seven refused `catia_new_part` calls
+                # in one turn cost.
+                if backends.is_local():
+                    raise ToolError(
+                        f"This conversation already owns the part {bound!r}, so "
+                        "catia_new_part would abandon everything already modelled. "
+                        "To carry on with it, just keep building -- call "
+                        "catia_list_features to see what is there. To start a "
+                        "SECOND part, because this is an assembly, call "
+                        "catia_assembly_component first: it records the part that "
+                        "is open now as a component and closes it, and then "
+                        "catia_new_part starts the next one."
+                    )
                 raise ToolError(
                     f"This conversation already owns the CATIA document {bound!r}, so "
-                    "catia_new_part would abandon everything already modelled. Two "
-                    "ways on, depending on what you meant. To carry on with this "
-                    "part, just keep building -- call catia_list_features to see what "
-                    "is there. To start a SECOND part, because this is an assembly, "
-                    "call catia_assembly_component first: it records the part that is "
-                    "open now as a component and closes it, and then catia_new_part "
-                    "starts the next one."
+                    "catia_new_part would abandon everything already modelled. Keep "
+                    "building on it -- call catia_list_features to see what is "
+                    "there. If you were starting a second part for an assembly: one "
+                    "conversation holds one part on a CATIA seat, so build the "
+                    "second part in a new conversation and tell the user that is "
+                    "why. Do not call catia_new_part again here; it will be refused "
+                    "for this same reason."
                 )
         if name == "catia_open_document" and not bound:
             raise ToolError(

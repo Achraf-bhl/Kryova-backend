@@ -111,6 +111,46 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — **Gate G1 run five times. It did not pass, and produced four
+  fixes.** Rung 3 — measure and correct to 2.4 kg — failed five ways, and every
+  one left a plausible number on a wrong part, which is why none of them was
+  catchable without looking at the render. (1) The part came apart into **five
+  disconnected solids** — a plate with four loose posts standing in its bore —
+  and the mass landed inside the user's 20 g tolerance *by coincidence*
+  (`32bebe1`). (2) Told to resize, the agent was refused with *"needs a sketch to
+  build from"*, so it supplied one and built a **second pad**; the refusal was
+  correct and its message answered a different question from the one being asked
+  (`d5e94bf`). (3) A sketch drawn with four circles in it and **never pocketed**,
+  plus the same sketch padded three times, both silent (`41a742e`). (4) Two of
+  four holes **cut nothing at all** — `BRepAlgoAPI_Cut` returns the target
+  unchanged when tool and target do not overlap, and `IsDone()` is true
+  (`01bfccc`). (5) The advice naming `catia_set_parameter` omitted the `unit` it
+  requires, costing two calls (`2556228`).
+  **The headline is attempt 4: the agent used `catia_set_parameter` for the first
+  time in four sessions, because the refusal message told it to** — and the
+  correction loop then ran properly, 10.11 → 10.24 → 11.24 mm, converging to
+  within 0.8 g with all holes cut and one pad instead of three. Also measured and
+  worth keeping: **Ollama cannot run on this 8 GB card** (30.5B at Q4_K_M is
+  ~18 GB; dropping the context 8× moves the split only 28% → 32%), and
+  **Qwen3.5-9B, which fits at 76% GPU, was slower and worse** than the 30B at
+  72% CPU — it misplaced every hole, re-padded the bore sketch turning the hole
+  into a boss, and gave up. Five independent 2026 benchmarks name it the best
+  8 GB-tier model; for a 40-tool payload with interdependent geometric state they
+  are wrong. Report and eight renders in `docs/verification-2026-09-06/`.
+
+- **2026-09-06** — E7/E9/E10/E12/E13/E17/P4 → **~13,000 lines landed across seven
+  packages, and none of them has tests.** Written in parallel by agents assigned
+  by file; every one imports, ruff and mypy are clean over 297 source files, and
+  the 3,580-test offline suite is green — but the agents were stopped before
+  writing their own tests, so nothing here is verified and the board rows say
+  **TESTS NOT WRITTEN** rather than a status that implies otherwise. Committed
+  rather than discarded because considered design is worth more on a branch than
+  in a lost scratch directory. The next session's first job on any of these is
+  the test file, not more code. Two dependency questions were answered on the
+  way: **pyLife and OpenMDAO both install and import on Python 3.14**, so E8's
+  and E10's federation is real rather than a seam waiting for one. `d64ebb0`,
+  `37a3bf8`.
+
 - **2026-09-06** — **Gate G1 run, and it did not pass.** Rung 3 through the real
   chat endpoint on `qwen3-coder:30b`: *"a 200x150 steel plate, 60 mm bore, four
   12 mm holes 20 mm in from each corner, correct the thickness until it weighs

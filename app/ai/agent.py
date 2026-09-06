@@ -418,6 +418,10 @@ def stream_agent(
     #: Per turn rather than per conversation: re-reading the part on a later
     #: turn is exactly right, because by then something may have changed it.
     reads: dict[str, int] = {}
+    #: Writes that were refused this turn, by fingerprint, with the reason. A
+    #: refused write ran nothing, so repeating it verbatim is the same dead end
+    #: as repeating a read -- see `_refused_before`.
+    refusals: dict[str, str] = {}
     schemas = toolbox.schemas(
         include_mutating=allow_mutations, only=_shown_tools(toolbox, user_message)
     )
@@ -556,9 +560,9 @@ def stream_agent(
                 # not told the first time, and a model that does it three times
                 # is looping rather than working. See MAX_IDENTICAL_READS.
                 looping = (
-                    _looping_on(call.name, call.arguments, reads)
-                    if not toolbox.is_mutating(call.name)
-                    else None
+                    _refused_before(call.name, call.arguments, refusals)
+                    if toolbox.is_mutating(call.name)
+                    else _looping_on(call.name, call.arguments, reads)
                 )
                 if looping is not None:
                     raise ToolError(looping)
@@ -568,6 +572,10 @@ def stream_agent(
                 ok = True
             except ToolError as exc:
                 result, ok = {"error": str(exc)}, False
+                if toolbox.is_mutating(call.name):
+                    refusals.setdefault(
+                        _read_fingerprint(call.name, call.arguments), str(exc)
+                    )
             except Exception as exc:  # noqa: BLE001 - must not kill the turn
                 logger.exception("Tool %s raised", call.name)
                 result, ok = {"error": f"{type(exc).__name__}: {exc}"}, False
@@ -675,10 +683,10 @@ def _read_fingerprint(name: str, arguments: Any) -> str:
 
 
 def _looping_on(name: str, arguments: Any, seen: dict[str, int]) -> str | None:
-    """The refusal for a read that has been made too many times, or None.
+    """The refusal for a call that has been made too many times, or None.
 
     Written as an instruction rather than as a complaint, because the model's
-    response to a bare "no" is to try a neighbouring read, which is the same
+    response to a bare "no" is to try a neighbouring call, which is the same
     loop one tool over.
     """
     key = _read_fingerprint(name, arguments)
@@ -688,9 +696,41 @@ def _looping_on(name: str, arguments: Any, seen: dict[str, int]) -> str | None:
     return (
         f"You have already called {name} with these exact arguments "
         f"{seen[key] - 1} times in this turn, and the answer has not changed -- "
-        "reading something does not alter it. Nothing further will come from "
-        "asking again. Use what you were told the first time: act on it, or say "
-        "what you found and what you are going to do about it."
+        "reading something does not alter it, and a call that was refused "
+        "changed nothing either. Nothing further will come from asking again. "
+        "Use what you were told the first time: act on it, or say what you "
+        "found and what you are going to do about it."
+    )
+
+
+def _refused_before(name: str, arguments: Any, refusals: dict[str, str]) -> str | None:
+    """The refusal for a *write* that was already refused with these arguments.
+
+    The read guard above exempts mutating tools, because a repeated write can be
+    a deliberate second hole. A repeated *refused* write cannot: the call did
+    not run, so nothing about the part is different, and sending it again gets
+    the same answer for the same reason.
+
+    Measured on ladder prompt S1, 2026-09-06, on the seat. `catia_new_part` was
+    refused at step 10 -- "this conversation already owns the CATIA document
+    'Steel counterweight'" -- and sent again, byte for byte, at step 19, for the
+    same refusal. Two of twenty rounds on a call that had already been answered,
+    on a turn that ended out of rounds with a 62.88 kg block against a 2.4 kg
+    target.
+
+    The original refusal is repeated first, because it is the useful half and
+    the model plainly did not act on it the first time.
+    """
+    key = _read_fingerprint(name, arguments)
+    previous = refusals.get(key)
+    if previous is None:
+        return None
+    return (
+        f"{previous}\n\nThis is the second time {name} has been called with "
+        "these exact arguments and it was refused for this reason the first "
+        "time. The call did not run, so nothing has changed and it will not "
+        "run now. Do what the refusal above says, or tell the user what is "
+        "blocking you."
     )
 
 

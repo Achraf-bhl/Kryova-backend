@@ -1435,3 +1435,116 @@ class TestARepeatedReadIsRefused:
         assert box.is_mutating("run_simulation") is True
         assert box.is_mutating("list_projects") is False
         assert ToolBox.is_mutating(box, "no_such_tool") is True
+
+
+class TestARefusedWriteIsNotRepeated:
+    """A refused write ran nothing, so sending it again is the same dead end.
+
+    The read guard exempts mutating tools, because a repeated write can be a
+    deliberate second hole. A repeated *refused* write cannot.
+
+    Measured on ladder prompt S1, 2026-09-06, on the seat. `catia_new_part` was
+    refused at step 10 -- "this conversation already owns the CATIA document
+    'Steel counterweight'" -- and sent again, byte for byte, at step 19, for
+    the same refusal. Two of twenty rounds on a turn that ended out of rounds
+    with a 62.88 kg block against a 2.4 kg target.
+    """
+
+    def _calls(self, times: int) -> list[AssistantTurn]:
+        return [
+            AssistantTurn(
+                tool_calls=[
+                    ToolCall(id=str(i), name="delete_simulation", arguments={"simulation_id": "x"})
+                ]
+            )
+            for i in range(times)
+        ] + [AssistantTurn(text="done")]
+
+    def test_the_second_identical_refusal_does_not_run_the_tool(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        provider = ScriptedProvider(self._calls(2))
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="delete it",
+            allow_mutations=True,
+        )
+        failures = [s for s in reply.steps if not s.ok]
+        assert len(failures) == 2
+        assert "second time delete_simulation" in str(failures[1].result)
+
+    def test_the_original_reason_is_repeated_first(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """It is the useful half, and the model plainly did not act on it."""
+        provider = ScriptedProvider(self._calls(2))
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="delete it",
+            allow_mutations=True,
+        )
+        first, second = (str(s.result) for s in reply.steps if not s.ok)
+        original = first.split("\n")[0][:40]
+        assert original[:20] in second
+
+    def test_a_write_that_succeeded_is_never_blocked(self) -> None:
+        """Two identical holes is a legitimate request, so only *refusals* are
+        remembered. Asserted on the helper because every mutating tool in the
+        toolbox refuses a second identical call on its own grounds -- which is
+        the point: nothing here adds a rule, it only stops a refusal being
+        re-earned."""
+        from app.ai.agent import _refused_before
+
+        assert _refused_before("catia_hole", {"diameter_mm": 9}, {}) is None
+
+    def test_only_a_refusal_is_remembered(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """A successful mutating call leaves nothing behind, so it can be
+        repeated. Verified by running one and reading the record it did not
+        write."""
+        from app.ai.agent import _read_fingerprint, _refused_before
+
+        recorded: dict[str, str] = {}
+        box = _toolbox(db_session, user, project)
+        box.call("update_project", {"project_id": project.id, "name": "Block"},
+                 allow_mutations=True)
+        key = _read_fingerprint("update_project", {"project_id": project.id, "name": "Block"})
+        assert key not in recorded
+        assert _refused_before("update_project", {"project_id": project.id}, recorded) is None
+
+    def test_different_arguments_are_a_different_call(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        provider = ScriptedProvider(
+            [
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(id="1", name="delete_simulation", arguments={"simulation_id": "a"})
+                    ]
+                ),
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(id="2", name="delete_simulation", arguments={"simulation_id": "b"})
+                    ]
+                ),
+                AssistantTurn(text="done"),
+            ]
+        )
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="delete them",
+            allow_mutations=True,
+        )
+        failures = [str(s.result) for s in reply.steps if not s.ok]
+        assert len(failures) == 2
+        assert not any("second time" in f for f in failures)

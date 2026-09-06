@@ -148,6 +148,23 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E10 → **`design/sensitivity.py` has a caller at last.** It has
+  had none outside a test since it was written, listed in this file beside
+  `app/render/` and `app/ai/vision.py` as capability wired to nothing;
+  `objective_gradient` is the caller, and a seam nobody uses is a seam nobody has
+  shown to work. The gradients are checked against functions differentiated by
+  hand, and the test design is the interesting part: every case uses partials
+  that **differ from each other**, because a gradient that swaps two variables is
+  numerically plausible — right magnitudes, right smoothness, wrong answer — and
+  one case uses variables scaled a thousand apart, because a step that is really
+  absolute passes the first kind of test and fails that one. An ungradable point
+  is `available=False` with a reason and **no numbers at all**: a zero gradient
+  tells an optimiser it has arrived, and half a gradient is worse than none,
+  since a driver would use the partials that succeeded and treat the rest as
+  zero. Flipping the sign fails all eight.
+  Also corrected: P4's board row still said the readers were untested, which
+  stopped being true two commits ago.
+
 - **2026-09-06** — E9/P4 → **two findings that are worth more than the 163 tests
   around them.** First: **`pip install pychrono` succeeds and installs the wrong
   package.** The PyPI name is not Project Chrono — it is a 10 kB pure-Python

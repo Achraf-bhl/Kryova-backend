@@ -243,3 +243,66 @@ class TestOnlyCheckableRequirementsHoldATurnOpen:
         turn open for them would mean never closing one; they are what the
         visual check is for."""
         assert unverified(plan_for(request_text)) == []
+
+
+#: `catia_measure`'s real answer for the PRO4 ram, copied from the operation log
+#: on 2026-09-07 rather than written from memory. The shape is the point: the
+#: key that declares the unit holds a *dict*, and the keys inside it name
+#: corners rather than units.
+REAL_MEASURE_RESULT = {
+    "mass_kg": 0.444473,
+    "has_solid": True,
+    "volume_mm3": 56548.6678,
+    "approximate": False,
+    "density_kg_m3": 7860.0,
+    "bounding_box_mm": {
+        "max": [10.0, 10.0, 180.0],
+        "min": [-10.0, -10.0, 0.0],
+        "size": [20.0, 20.0, 180.0],
+    },
+    "material_applied": True,
+    "surface_area_mm2": 11938.0521,
+    "mass_is_provisional": False,
+    "center_of_gravity_mm": [0.0, 0.0, 90.0],
+    "features": [{"name": "Extrusion.1", "type": "Shape"}],
+}
+
+
+class TestAgainstWhatTheSeatActuallyReturns:
+    """The false negative measured on PRO4 turn 2, 2026-09-07.
+
+    The ram was built to 20 mm diameter and 180 mm long, measured, and reported
+    as "Diameter: 20 mm, Length: 180 mm" -- and the footnote underneath said
+    both were unmeasured. Every length in every measurement was being dropped,
+    because the key that declares the unit holds a dict and the collector only
+    walked scalars and lists. A footnote that cries wolf is worse than none.
+    """
+
+    def test_the_lengths_are_found(self) -> None:
+        found = measurements_in(REAL_MEASURE_RESULT, "catia_measure")
+        lengths = {m.value for m in found if m.kind == "length"}
+        assert 20.0 in lengths and 180.0 in lengths
+
+    def test_the_mass_and_volume_are_found(self) -> None:
+        found = measurements_in(REAL_MEASURE_RESULT, "catia_measure")
+        assert 0.444473 in {m.value for m in found if m.kind == "mass"}
+        assert 56548.6678 in {m.value for m in found if m.kind == "volume"}
+
+    def test_the_ram_requirement_confirms(self) -> None:
+        objectives = extract_objectives(
+            "build just the ram: a 20 mm diameter round bar, 180 mm long"
+        )
+        plan = assess(objectives, measurements_in(REAL_MEASURE_RESULT, "catia_measure"))
+        assert not unverified(plan)
+        assert unverified_footnote(plan) == ""
+
+    def test_a_dimension_the_part_does_not_have_is_still_unverified(self) -> None:
+        """The fix must not make everything confirm: a 250 mm bar is not this
+        one, and a collector that swept up every number would say it was."""
+        objectives = extract_objectives("a 250 mm long bar")
+        plan = assess(objectives, measurements_in(REAL_MEASURE_RESULT, "catia_measure"))
+        assert unverified(plan)
+
+    def test_a_flag_beside_the_numbers_is_not_one_of_them(self) -> None:
+        found = measurements_in(REAL_MEASURE_RESULT, "catia_measure")
+        assert 1.0 not in {m.value for m in found if m.kind == "mass"}

@@ -134,21 +134,34 @@ def _kind_of(key: str) -> str | None:
 
 
 def _numbers(value: Any) -> list[float]:
-    """Every finite number in a scalar or a flat list of scalars.
+    """Every finite number under a value, however it is shaped.
 
-    A bounding box arrives as `[60.0, 40.0, 20.0]` under one key, and all three
-    of those are lengths the engineer may have stated.
+    Dictionaries are walked as well as lists, and that is not tidiness -- it was
+    a false negative measured on ladder prompt PRO4 turn 2, 2026-09-07. The ram
+    was built to 20 mm diameter and 180 mm long and measured; the answer said
+    "Diameter: 20 mm, Length: 180 mm"; and the footnote underneath it said both
+    were unmeasured. `catia_measure` reports
+
+        "bounding_box_mm": {"size": [20.0, 20.0, 180.0], "max": [...], ...}
+
+    -- a dict under the key that declares the unit. Reading only scalars and
+    lists meant every length in every measurement was dropped, so no dimensional
+    requirement could ever be confirmed. A footnote that cries wolf is worse
+    than no footnote, which is what `test_an_answer_that_measured_everything_is_
+    left_alone` says in the other direction.
     """
     if isinstance(value, bool):  # bool is an int; a flag is not a measurement
         return []
     if isinstance(value, (int, float)):
         return [float(value)] if math.isfinite(float(value)) else []
-    if isinstance(value, (list, tuple)):
-        found: list[float] = []
+    found: list[float] = []
+    if isinstance(value, dict):
+        for item in value.values():
+            found.extend(_numbers(item))
+    elif isinstance(value, (list, tuple)):
         for item in value:
             found.extend(_numbers(item))
-        return found
-    return []
+    return found
 
 
 def measurements_in(result: Any, source: str, _depth: int = 0) -> list[Measurement]:
@@ -164,9 +177,23 @@ def measurements_in(result: Any, source: str, _depth: int = 0) -> list[Measureme
         for key, value in result.items():
             kind = _kind_of(str(key))
             if kind is not None:
+                # A key that declares a unit declares it for everything under
+                # it: `bounding_box_mm` is millimetres in its `size`, its `max`
+                # and its `min` alike. Descending without carrying the kind
+                # down is how those inner keys -- which name a corner, not a
+                # unit -- came to contribute nothing.
                 found.extend(
                     Measurement(number, kind, source) for number in _numbers(value)
                 )
+            # Deliberately not `continue`. Walking a kind-declaring value again
+            # can only *add* a reading whose own key declares a kind, and that
+            # reading is the more precise of the two -- a nested `mass_kg` under
+            # some future `..._mm` key would otherwise be recorded as a length
+            # and as nothing else. A duplicate is harmless: matching is by
+            # membership within a tolerance, not by counting. This stood as a
+            # `continue` until a break check showed nothing could distinguish
+            # it, which is the same reason the dead `kind == "count"` test came
+            # out of `_canonical`.
             if isinstance(value, (dict, list, tuple)):
                 found.extend(measurements_in(value, source, _depth + 1))
     elif isinstance(result, (list, tuple)):

@@ -113,6 +113,29 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E17.3 → **sheet metal, with no default K-factor anywhere.**
+  `BA=(π/180)·θ·(r+K·t)` gives 6.094689747964199 mm for the 90°/2 mm/r3/K0.44
+  case, `SB=tan(θ/2)(r+t)`=5.0, `BD=2SB−BA`=3.9053102520357994, and a 40+30
+  outside-mould-line part flattens to 66.0946897479642 — each recomputed
+  independently here before the commit rather than taken from the report. The
+  test worth keeping above all the others: **the three length conventions
+  describe one part** — outside 40/30, inside 38/28 and tangent 35/25 all
+  flatten to the same blank *and* place every face identically. The K-factor is
+  the judgement and is treated like one: a `Bend` requires a `KFactor`, a
+  `KFactor` requires a `Source` (reused from `solve.materials`, not a third
+  provenance record), and the only way past that is `assumed()`, which demands a
+  written reason and marks the pattern provisional. K outside `(0, 0.5]` is
+  refused because the neutral axis cannot move outward past the mid-plane, and
+  the message offers the Y-factor conversion since that is what a >0.5 number
+  usually is. **DIN 6935 is verified by its own continuity**: `0.65+0.5·log₁₀5 =
+  0.99948` against the plateau's 1.0, meeting to 2.6e-4 — a property of the
+  *published constants*, so a mistyped 0.65 or 0.5 breaks it, which is a far
+  better check on a transcribed formula than re-reading it. ANSI and DIN differ
+  by 1.211× at r/t=1.5, moving that bend allowance 0.2447 mm. The one guard no
+  input can break — the flat-length cross-check, `Σlength−ΣBD` against
+  `Σleg+ΣBA`, algebraically identical — is pinned by monkeypatching the
+  deduction to be wrong by 0.5 mm, so it is verified rather than unpinned.
+
 - **2026-09-06** — E14 → **the product graph, and the rule that a partial answer
   never gets the headline name.** 14.1–14.4: components and occurrences rather
   than a tree of copies; interface contracts reusing

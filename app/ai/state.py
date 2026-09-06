@@ -328,7 +328,9 @@ def _catia_lines(
             f"{described}. Switch with catia_open_document name=<one of these>; "
             "catia_new_part starts another and makes it active. To assemble them, "
             "catia_product_create then catia_component_add kind=existing "
-            "document=<name> for each part."
+            "document=<name> for each part. A name listed here is refused by "
+            "catia_new_part and catia_product_create: continue that document with "
+            "catia_open_document instead of starting it again."
         )
     state = conversation.catia_state or {}
     # The material is a decision, not a measurement, and it is the one thing the

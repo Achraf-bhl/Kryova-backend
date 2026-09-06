@@ -26,22 +26,35 @@ from pathlib import Path
 from typing import Any
 
 from ..backend import CatiaOperationError
-from ._context import ComContext
+from ._context import ORIGIN_PLANES, ComContext, normalise_origin_plane
 
 logger = logging.getLogger("kryova.catia.com.assembly")
 
-#: `CatConstraintType`. See the module docstring: these are reported back
-#: against CATIA's own naming rather than trusted.
+#: `CatConstraintType`, **measured** on V5-R33 FR (2026-09-02) by reading back
+#: the name CATIA gave each constraint it was asked for: `Coincidence.1`,
+#: `Décalage.2`, `Angle.3`... Until 2026-09-06 every row of this table was a
+#: guess -- coincidence sent 1, which is *offset* -- and the `kind_confirmed`
+#: flag the module docstring promises never got to say so, because the
+#: references were being built wrong and no constraint was ever created (see
+#: `_assembly_reference`). Fix is 0 through `AddMonoEltCst`. Contact is the
+#: nearest measured type, tangency. `fix_together` has no measured value and
+#: is refused before it reaches here: the API cannot reference a component.
 _CONSTRAINT_TYPES = {
-    "coincidence": 1,
-    "contact": 11,
-    "offset": 2,
-    "angle": 4,
-    "parallel": 9,
-    "perpendicular": 10,
-    "fix": 13,
+    "coincidence": 2,
+    "contact": 4,
+    "offset": 1,
+    "angle": 6,
+    "parallel": 8,
+    "perpendicular": 11,
+    "fix": 0,
     "fix_together": 14,
 }
+
+#: The kinds that carry a `Dimension`. Setting one on a coincidence raises
+#: *after* the constraint exists -- measured on ladder prompt S2, where the
+#: model sent `angle_deg=0` with a coincidence -- so the value is ignored and
+#: the result says so, rather than a made constraint being reported as failed.
+_DIMENSIONED = frozenset({"offset", "angle"})
 
 #: How many elements each assembly constraint consumes. `fix` pins one
 #: component; `fix_together` welds a set; the rest relate exactly two faces.
@@ -75,6 +88,32 @@ _SOURCES = {"unknown": 0, "made": 1, "bought": 2}
 
 #: The name of the assembly-constraints connection set on a product.
 _CONSTRAINTS_CONNECTION = "CATIAConstraints"
+
+
+def _reference_path(root_part_number: str, component_name: str, inner: str) -> str:
+    """The one spelling `Product.CreateReferenceFromName` resolves.
+
+    `{root part number}/{instance name}/!{element}` -- measured 2026-09-02 on
+    the seat, building a six-component planetary stage; `!PlaneXY`, a bare
+    component and every axis fail, and the element has to carry the *seat's*
+    localised name, which is why `_assembly_reference` reads it off the part.
+    """
+    return f"{root_part_number}/{component_name}/!{inner}"
+
+
+def _origin_plane_attribute(inner: str) -> str | None:
+    """`'Plan yz'`, `'YZ'`, `'yz plane'` -> `'PlaneYZ'`; other geometry -> None.
+
+    One table for every spelling, the same one the sketch support takes, so a
+    reference spelled the way an English seat prints it still resolves on a
+    French one -- the localised name is read from the part, never guessed.
+    """
+    return ORIGIN_PLANES.get(normalise_origin_plane(inner))
+
+
+def _named_as(catia_name: str, kind: str) -> bool:
+    """Whether CATIA named the constraint after the kind that was asked for."""
+    return any(catia_name.lower().startswith(p) for p in _CONSTRAINT_NAMES.get(kind, ()))
 
 
 class AssemblyMixin:
@@ -398,7 +437,30 @@ class AssemblyMixin:
                 "Name them as component/geometry, e.g. 'Bracket.1/Pad.1'."
             )
 
+        if kind == "fix_together":
+            raise CatiaOperationError(
+                "fix_together is not available on a CATIA seat: the automation API "
+                "cannot reference a whole component (measured 2026-09-02), only "
+                "geometry inside one. Fix one component with kind=fix and locate the "
+                "other against it with coincidence constraints on their origin planes."
+            )
         constraints = product.Connections(_CONSTRAINTS_CONNECTION)
+        if kind == "fix" and "/" not in elements[0]:
+            # There is no reference to a component itself, so a component is
+            # fixed by pinning its three origin planes -- the recipe the
+            # measured planetary stage used.
+            created = [
+                str(constraints.AddMonoEltCst(_CONSTRAINT_TYPES["fix"], reference).Name)
+                for reference in self._origin_plane_references(elements[0])
+            ]
+            product.Update()
+            return {
+                "constraint": created[0],
+                "constraints": created,
+                "kind": kind,
+                "elements": list(elements),
+                "kind_confirmed": all(_named_as(name, kind) for name in created),
+            }
         references = [self._assembly_reference(name) for name in elements]
 
         try:
@@ -418,20 +480,21 @@ class AssemblyMixin:
                 f"({error})"
             ) from error
 
-        if value is not None:
-            constraint.Dimension.Value = float(value)
-        if angle_deg is not None:
-            constraint.Dimension.Value = float(angle_deg)
+        note = ""
+        if kind in _DIMENSIONED:
+            if value is not None:
+                constraint.Dimension.Value = float(value)
+            if angle_deg is not None:
+                constraint.Dimension.Value = float(angle_deg)
+        elif value is not None or angle_deg is not None:
+            note = f"A {kind} constraint has no dimension; value and angle_deg were ignored."
         if orientation:
             _set_orientation(constraint, orientation)
 
         product.Update()
 
         catia_name = str(constraint.Name)
-        confirmed = any(
-            catia_name.lower().startswith(prefix)
-            for prefix in _CONSTRAINT_NAMES.get(kind, ())
-        )
+        confirmed = _named_as(catia_name, kind)
         if not confirmed:
             logger.warning(
                 "Asked CATIA for a %s constraint and it named the result %r — the "
@@ -446,30 +509,61 @@ class AssemblyMixin:
             "elements": list(elements),
             # False means CATIA made something other than what was asked for.
             "kind_confirmed": confirmed,
+            **({"note": note} if note else {}),
         }
 
     def _assembly_reference(self: ComContext, name: str) -> Any:  # pragma: no cover
-        """A reference to a component, or to geometry inside one.
+        """A reference to geometry inside a placed component, `Component/Geometry`.
 
-        `Component/Feature` addresses geometry within a placed part; a bare name
-        is the component itself. Splitting on the slash here is what lets a
-        single string carry both without a second parameter.
+        Built **by name on the product**, never from the part's own object.
+        Measured on ladder prompt S2 (2026-09-06): the previous version found
+        the element with `Part.FindObjectByName` on the component's CATPart and
+        wrapped it with that part's `CreateReferenceFromObject` -- a reference
+        with no instance path, which `AddBiEltCst` refuses ("La méthode
+        AddBiEltCst a échoué") for two origin planes that were exactly the
+        right geometry. Twice, on the two coincidences that make a shaft and a
+        bushing coaxial, and the refusal blamed the geometry.
+
+        What resolves is `_reference_path`: root part number, instance name,
+        `!`, the element's *localised* name -- and only the three origin planes
+        resolve at all. So a plane is looked up by attribute and its name read
+        off the part, which is what makes 'YZ' work on a seat that prints
+        'Plan yz'. A bare component name is refused here: the API cannot
+        reference a whole component, and `fix` pins the three planes instead.
         """
-        if "/" in name:
-            component_name, _, inner = name.partition("/")
-            component = self._component(component_name)
-            document = component.ReferenceProduct.Parent
-            try:
-                element = document.Part.FindObjectByName(inner)
-            except Exception as error:  # noqa: BLE001
-                raise CatiaOperationError(
-                    f"{component_name!r} has nothing named {inner!r} in it. Activate "
-                    "that part and call catia_list_features to see what it contains."
-                ) from error
-            return document.Part.CreateReferenceFromObject(element)
+        if "/" not in name:
+            raise CatiaOperationError(
+                f"{name!r} names a whole component, and CATIA's automation API cannot "
+                "reference a component itself -- only geometry inside it. Spell it "
+                "Component/Geometry with one of the origin planes, e.g. "
+                f"'{name}/YZ'. kind=fix takes a bare component name and pins its "
+                "three origin planes."
+            )
+        root = self._product()
+        component_name, _, inner = name.partition("/")
+        component = self._component(component_name)
+        attribute = _origin_plane_attribute(inner)
+        if attribute is not None:
+            part_document = component.ReferenceProduct.Parent
+            inner = str(getattr(part_document.Part.OriginElements, attribute).Name)
+        path = _reference_path(str(root.PartNumber), str(component.Name), inner)
+        try:
+            return root.CreateReferenceFromName(path)
+        except Exception as error:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA could not resolve {path!r}. In an assembly only a component's "
+                "three origin planes can be referenced by name -- XY, YZ and ZX -- so "
+                f"name one of those inside {component_name!r}, e.g. "
+                f"'{component_name}/YZ'."
+            ) from error
 
-        component = self._component(name)
-        return self._document().Product.CreateReferenceFromName(str(component.Name))
+    def _origin_plane_references(  # pragma: no cover - Windows only
+        self: ComContext, component_name: str
+    ) -> list[Any]:
+        """The three origin-plane references of one component, for fixing it."""
+        return [
+            self._assembly_reference(f"{component_name}/{plane}") for plane in ORIGIN_PLANES
+        ]
 
     def constraint_update(  # pragma: no cover - Windows only
         self: ComContext, *, component: str = ""
@@ -562,22 +656,19 @@ class AssemblyMixin:
         while leaving the group free to move. Every assembly needs at least one
         of the first, or the whole thing floats.
         """
-        constraints = self._product().Connections(_CONSTRAINTS_CONNECTION)
-        references = [self._assembly_reference(name) for name in components]
-
-        created: list[str] = []
         if together:
-            if len(references) < 2:
-                raise CatiaOperationError(
-                    "Fixing components together needs at least two of them."
-                )
-            for other in references[1:]:
-                constraint = constraints.AddBiEltCst(
-                    _CONSTRAINT_TYPES["fix_together"], references[0], other
-                )
-                created.append(str(constraint.Name))
-        else:
-            for reference in references:
+            raise CatiaOperationError(
+                "Fixing components together is not available on a CATIA seat: the "
+                "automation API cannot reference a whole component (measured "
+                "2026-09-02). Fix one and locate the others against it with "
+                "catia_constrain coincidences on their origin planes."
+            )
+        constraints = self._product().Connections(_CONSTRAINTS_CONNECTION)
+        created: list[str] = []
+        # No reference to a component itself exists, so each one is pinned by
+        # its three origin planes -- see `_assembly_reference`.
+        for name in components:
+            for reference in self._origin_plane_references(name):
                 constraint = constraints.AddMonoEltCst(_CONSTRAINT_TYPES["fix"], reference)
                 created.append(str(constraint.Name))
 

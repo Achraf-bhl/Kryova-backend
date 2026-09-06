@@ -450,6 +450,36 @@ product is bound, `catia_open_document name=` switches, and `catia_component_add
 resolves an owned part's name to its real path. S2 is buildable in principle from here
 -- run 4 is the measurement.
 
+**Run 5 (d2a5c96, 22:41-22:53, two turns) -- the first assembly with both parts in it.**
+Screenshot: S2-screen.png; the CATIA window shows Shaft-and-bushing-assembly-3 with
+Part1 (Shaft) and Part2 (Bushing) under it. Turn 1 went past what was asked -- shaft,
+bushing, product, both components -- then two coincidence attempts were refused and the
+twenty rounds were gone. Turn 2 ("now make the bushing as a second part") built a
+*second* Bushing (Bushing-2.CATPart, a padded polyline with a bore rather than a turned
+ring) and a *second* assembly with the same name, because nothing refused a name the
+conversation already owned; it also sent the state block's own annotation back as a
+name ("Shaft and bushing assembly (product)") and was told no such document existed.
+The record is unambiguous that nothing was deleted -- one project, one conversation,
+five owned documents, the shaft in the final product -- but the work started over
+instead of continuing, which to the user watching is the same thing.
+
+Three defects, fixed at the root in the commit after this run and each verified by
+breaking it:
+
+1. catia_new_part and catia_product_create refuse a name the conversation already
+   owns and name the call that continues it (catia_open_document name=...);
+2. the "(part, active)" / "(product)" annotation is stripped before a name is matched;
+3. the coaxial constraint never could have worked: the daemon built its references
+   from the component's own CATPart object -- no instance path, which AddBiEltCst
+   refuses -- where CATIA resolves only "{root}/{instance}/!{localised plane}", the
+   spelling measured on 2026-09-02 and written in the memory; and its
+   CatConstraintType table was guessed on every row (coincidence sent 1, which is
+   offset). References are now built by name on the product, the plane's localised
+   name is read off the part so "Shaft/YZ" works on a French seat, a bare component
+   is fixed through its three origin planes, and fix_together is refused in words.
+
+Not yet re-run on the seat. The next run is the measurement of all three.
+
 ### S3 — Analysis, not geometry
 
 - [ ] **S3**

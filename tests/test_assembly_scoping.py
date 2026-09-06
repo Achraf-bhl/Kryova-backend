@@ -157,7 +157,11 @@ class TestTheConstraintVocabularySaysHowToSpellAReference:
             "description"
         ]
         assert "Component/Geometry" in text
-        assert "Shaft/Plan xy" in text
+        # Canonical spelling is the plane's letters; the seat's own label is
+        # named as accepted, because it is what catia_list_features prints.
+        assert "Shaft/YZ" in text
+        assert "'Plan xy' on a French seat" in text
+        assert "only the origin planes resolve by name" in text
 
     def test_the_coaxial_recipe_is_stated(self) -> None:
         """What the agent guessed at for three rounds."""
@@ -167,8 +171,8 @@ class TestTheConstraintVocabularySaysHowToSpellAReference:
         assert "coaxial" in text
         # The recipe itself, not the plane names loose: two pairs of origin
         # planes, named as component/plane on both sides.
-        assert "Shaft/Plan yz with Bushing/Plan yz" in text
-        assert "Shaft/Plan zx with Bushing/Plan zx" in text
+        assert "Shaft/YZ with Bushing/YZ" in text
+        assert "Shaft/ZX with Bushing/ZX" in text
 
     def test_the_guessed_syntax_is_named_as_wrong(self) -> None:
         text = TOOL_SPECS_BY_NAME["catia_constrain"].parameters["properties"]["elements"][

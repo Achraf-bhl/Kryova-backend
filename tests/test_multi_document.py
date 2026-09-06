@@ -312,3 +312,111 @@ class TestExactlyOneActiveIsEnforcedByTheDatabase:
                 )
             )
         db_session.flush()
+
+
+class TestANameAlreadyOwnedIsRefused:
+    """Measured on ladder prompt S2 turn 2, 2026-09-06. Turn 1 had built the
+    shaft, the bushing and the assembly; turn 2 said "now make the bushing as
+    a second part", the model called `catia_new_part name=Bushing`, the daemon
+    saved `Bushing-2.CATPart` beside the finished one, and a second assembly
+    followed. Nothing was deleted and the user saw the work start over. A name
+    this conversation owns means that document.
+    """
+
+    def _two_parts(self, wired) -> None:
+        wired["connection"].replies["catia_new_part"] = _reply_for("Shaft")
+        run(wired, "catia_new_part", {"name": "Shaft"})
+        wired["connection"].replies["catia_new_part"] = _reply_for("Bushing")
+        run(wired, "catia_new_part", {"name": "Bushing"})
+        wired["connection"].calls.clear()
+
+    def test_a_second_part_with_an_owned_name_is_refused_before_the_daemon(
+        self, wired, db_session
+    ) -> None:
+        self._two_parts(wired)
+        with pytest.raises(dispatch.CatiaError) as raised:
+            run(wired, "catia_new_part", {"name": "Bushing"})
+        message = str(raised.value)
+        assert "already owns a part called 'Bushing'" in message
+        assert "catia_open_document name='Bushing'" in message
+        assert not [c for c in wired["connection"].calls if c["tool"] == "catia_new_part"]
+        assert len(_documents(db_session, wired["conversation"].id)) == 2
+
+    def test_the_match_ignores_case(self, wired) -> None:
+        self._two_parts(wired)
+        with pytest.raises(dispatch.CatiaError, match="already owns a part called 'Bushing'"):
+            run(wired, "catia_new_part", {"name": "bushing"})
+
+    def test_an_assembly_name_is_protected_too(self, wired) -> None:
+        self._two_parts(wired)
+        wired["connection"].replies["catia_product_create"] = _reply_for(
+            "Assembly", ".CATProduct"
+        ) | {"part_number": "Assembly", "components": 0}
+        run(wired, "catia_product_create", {"name": "Assembly"})
+        with pytest.raises(dispatch.CatiaError, match="already owns an assembly called 'Assembly'"):
+            run(wired, "catia_product_create", {"name": "Assembly"})
+
+    def test_a_part_may_not_take_an_assemblys_name_either(self, wired) -> None:
+        """One namespace: `catia_open_document name=` could not tell them apart."""
+        self._two_parts(wired)
+        wired["connection"].replies["catia_product_create"] = _reply_for(
+            "Assembly", ".CATProduct"
+        ) | {"part_number": "Assembly", "components": 0}
+        run(wired, "catia_product_create", {"name": "Assembly"})
+        with pytest.raises(dispatch.CatiaError, match="already owns an assembly"):
+            run(wired, "catia_new_part", {"name": "Assembly"})
+
+    def test_a_new_name_goes_through(self, wired, db_session) -> None:
+        self._two_parts(wired)
+        wired["connection"].replies["catia_new_part"] = _reply_for("Housing")
+        run(wired, "catia_new_part", {"name": "Housing"})
+        assert len(_documents(db_session, wired["conversation"].id)) == 3
+
+
+class TestTheStateBlocksAnnotationIsTolerated:
+    """The state block prints "Assembly (product)" and "Shaft (part, active)";
+    on S2 the model copied the annotation into the name and was told the
+    conversation owned no such document. It meant the document."""
+
+    def _two_parts(self, wired) -> None:
+        wired["connection"].replies["catia_new_part"] = _reply_for("Shaft")
+        run(wired, "catia_new_part", {"name": "Shaft"})
+        wired["connection"].replies["catia_new_part"] = _reply_for("Bushing")
+        run(wired, "catia_new_part", {"name": "Bushing"})
+
+    @pytest.mark.parametrize(
+        "spelled", ["Shaft (part)", "Shaft (part, active)", "shaft (PART)", "Shaft  (part)"]
+    )
+    def test_the_annotation_is_stripped(self, wired, db_session, spelled: str) -> None:
+        self._two_parts(wired)
+        wired["connection"].replies["catia_open_document"] = _reply_for("Shaft")
+        run(wired, "catia_open_document", {"name": spelled})
+        active = [d for d in _documents(db_session, wired["conversation"].id) if d.is_active]
+        assert [d.doc_name for d in active] == ["Shaft"]
+
+    def test_a_product_annotation_too(self, wired, db_session) -> None:
+        self._two_parts(wired)
+        wired["connection"].replies["catia_product_create"] = _reply_for(
+            "Shaft and bushing assembly", ".CATProduct"
+        ) | {"part_number": "Assembly", "components": 0}
+        run(wired, "catia_product_create", {"name": "Shaft and bushing assembly"})
+        wired["connection"].replies["catia_open_document"] = _reply_for("Shaft")
+        run(wired, "catia_open_document", {"name": "Shaft"})
+        wired["connection"].replies["catia_open_document"] = _reply_for(
+            "Shaft and bushing assembly", ".CATProduct"
+        )
+        run(wired, "catia_open_document", {"name": "Shaft and bushing assembly (product)"})
+        active = [d for d in _documents(db_session, wired["conversation"].id) if d.is_active]
+        assert [d.doc_type for d in active] == ["product"]
+
+    def test_parentheses_that_are_part_of_a_name_survive(self, wired, db_session) -> None:
+        """Only our annotation is stripped, not any bracket."""
+        wired["connection"].replies["catia_new_part"] = _reply_for("Bracket (left)")
+        run(wired, "catia_new_part", {"name": "Bracket (left)"})
+        wired["connection"].replies["catia_new_part"] = _reply_for("Bracket (right)")
+        run(wired, "catia_new_part", {"name": "Bracket (right)"})
+        wired["connection"].replies["catia_open_document"] = _reply_for("Bracket (left)")
+        run(wired, "catia_open_document", {"name": "Bracket (left)"})
+        active = [d for d in _documents(db_session, wired["conversation"].id) if d.is_active]
+        assert [d.doc_name for d in active] == ["Bracket (left)"]
+

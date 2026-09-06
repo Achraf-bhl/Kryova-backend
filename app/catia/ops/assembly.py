@@ -278,7 +278,8 @@ OPERATIONS: tuple[Operation, ...] = (
             "Constrain rather than position: a constrained assembly stays correct when "
             "a part changes size, and a positioned one does not. Start by fixing one "
             "component, then constrain everything else to it — an assembly with nothing "
-            "fixed floats and the solver's answer is arbitrary."
+            "fixed floats and the solver's answer is arbitrary. fix_together is not "
+            "available on a CATIA seat: fix one component and constrain the rest to it."
         ),
         tier=Tier.WRITE,
         workbench=_WB,
@@ -289,13 +290,14 @@ OPERATIONS: tuple[Operation, ...] = (
                 name_list(
                     "The geometry to constrain, one element for fix and two for "
                     "everything else, each spelled Component/Geometry -- the component "
-                    "as the assembly names it and the geometry as catia_list_features "
-                    "reports it inside that part, e.g. 'Shaft/Plan xy' on a French seat "
-                    "or 'Shaft/xy plane' on an English one. A bare component name is "
-                    "the component itself, for fix. To make two turned parts coaxial, "
-                    "coincide two pairs of their origin planes: Shaft/Plan yz with "
-                    "Bushing/Plan yz, then Shaft/Plan zx with Bushing/Plan zx. Never "
-                    "invent a path like 'Shaft@axis'; only names that exist resolve."
+                    "as the assembly names it, then one of its origin planes: XY, YZ or "
+                    "ZX (the seat's own label, e.g. 'Plan xy' on a French seat, is "
+                    "accepted too). In an assembly only the origin planes resolve by "
+                    "name. For fix, a bare component name pins its three origin planes. "
+                    "To make two turned parts coaxial, coincide two pairs of origin "
+                    "planes: Shaft/YZ with Bushing/YZ, then Shaft/ZX with Bushing/ZX. "
+                    "Never invent a path like 'Shaft@axis'; only names that exist "
+                    "resolve."
                 ),
             ),
             optional("value", distance("Offset distance, for an offset constraint.")),

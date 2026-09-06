@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -1122,6 +1123,14 @@ def _owned_documents(db: Session, conversation_id: str | None) -> list[CatiaDocu
     )
 
 
+#: The annotation the state block prints after each owned name -- "Shaft (part,
+#: active)", "Assembly (product)". On ladder prompt S2 (2026-09-06) the model
+#: copied it into `catia_open_document name=`, was told the conversation owned
+#: no such document, and spent the round. It meant the document; the
+#: annotation is ours, so it is stripped before the name is matched.
+_ANNOTATION_RE = re.compile(r"\s*\((?:part|product)(?:,\s*active)?\)$", re.IGNORECASE)
+
+
 def _owned_document_named(
     db: Session, conversation_id: str | None, name: str
 ) -> CatiaDocument | None:
@@ -1130,7 +1139,7 @@ def _owned_document_named(
     Exact name first; then the stem of the path the daemon saved it under, so
     `Bracket` still finds the row whose file became `Bracket-2.CATPart`.
     """
-    wanted = name.strip().lower()
+    wanted = _ANNOTATION_RE.sub("", name.strip()).strip().lower()
     if not wanted:
         return None
     owned = _owned_documents(db, conversation_id)
@@ -1256,6 +1265,27 @@ def _enrich(
 
     if spec.name in _UI_TOOLS:
         return _resolve_ui(spec.name, payload, language)
+
+    if spec.name in ("catia_new_part", "catia_product_create"):
+        # Measured on ladder prompt S2 turn 2 (2026-09-06): "now make the
+        # bushing as a second part" -- and the conversation already owned a
+        # finished Bushing from turn 1. `catia_new_part name=Bushing` went
+        # through, the daemon saved Bushing-2.CATPart beside it, a second
+        # assembly with the same name followed, and the user watched the work
+        # start over. Nothing was lost, but nothing was continued either. A
+        # name this conversation owns means that document; refused here,
+        # before the daemon, with the call that continues it.
+        owner = conversation_id or (document.conversation_id if document is not None else None)
+        wanted = str(payload.get("name") or "").strip()
+        taken = _owned_document_named(db, owner, wanted) if wanted else None
+        if taken is not None:
+            kind = "an assembly" if taken.doc_type == "product" else "a part"
+            raise CatiaError(
+                f"This conversation already owns {kind} called {taken.doc_name!r}. To "
+                f"continue it, call catia_open_document name={taken.doc_name!r} -- "
+                "everything built in it so far is kept. To start a different one, "
+                "use a different name."
+            )
 
     if spec.name == "catia_open_document":
         owner = conversation_id or (document.conversation_id if document is not None else None)

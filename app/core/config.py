@@ -159,6 +159,13 @@ class Settings(BaseSettings):
     #: It narrows the *offer* only. `ToolBox.call` still accepts every tool, so
     #: no setting of this can make a capability unreachable.
     ai_tool_limit: int = 0
+    #: Layers to put on the GPU, or "all". Ollama's own estimator keeps a
+    #: margin against a shared card and leaves a layer or two on the CPU;
+    #: measured on the seat, that halved the model's throughput (25.7 -> 59.0
+    #: tok/s at the full 32k window). Empty leaves the split to Ollama, which
+    #: is right for a machine nobody has measured. See
+    #: `app/ai/providers/ollama.py::GPU_LAYERS_ALL`.
+    ai_gpu_layers: str = ""
 
     #: Tokens one user may spend per UTC day. 0 means unlimited.
     #:

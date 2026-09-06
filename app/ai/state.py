@@ -121,7 +121,28 @@ def _local_bridge_supported() -> bool:
 
 
 def _project_lines(db: Session, project: Project) -> list[str]:
+    """The project this conversation is on, and what that rules out.
+
+    The second line is there because of what happened without it, on every
+    ladder run measured on 2026-09-06: the web app opens a conversation with a
+    project already attached and called "New project", the agent's first tool
+    call was `create_project`, and it was refused --
+
+        This conversation is already working on project 'New project'
+        (id a3d67054-...). Use it rather than creating another; call
+        update_project to rename it if the user wants a different name.
+
+    -- which is a correct refusal, arrives as a red step in the user's view,
+    and costs a round of a budget of twenty. The refusal cannot be dropped: a
+    silent no-op would leave the model believing it had made a project it had
+    not. So the model is told the thing it needed one call to discover.
+    """
     lines = [f"project: {_clean(project.name)} (id {project.id})"]
+    lines.append(
+        "project_already_exists: yes -- do NOT call create_project; this "
+        "conversation has the project above. To give it a better name call "
+        "update_project."
+    )
     if project.description:
         lines.append(f"project_description: {_clean(project.description)}")
 

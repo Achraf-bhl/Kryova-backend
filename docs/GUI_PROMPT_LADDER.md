@@ -243,7 +243,38 @@ geometry and says what it assumed — this is the register the whole product is 
 
 **Passes when:** a bracket is built, the assumptions are stated explicitly, and any stress claim
 is either measured or clearly labelled as not yet measured. **Fails** if a safety factor is
-asserted without an analysis behind it. **Screenshot:** `H4.png`
+asserted without an analysis behind it. **Screenshot:**
+`docs/verification-2026-09-06/H4-app.png` and `H4-catia.png`.
+
+**Runs 1-4 (2026-09-06): FAIL, four different ways, all ours.** Recorded here
+because the failures are the measurement -- each named a defect that is now
+fixed and guarded.
+
+1. Twenty rounds, a bare 8 x 120 x 20 strip, no holes, and eight empty sketches
+   in the tree. Behind it: `catia_list_faces` reported every face of every part
+   with centre `[0, 0, 0]`, normal `[0, 0, 0]` and an area a millionth of its
+   real one -- `Area` comes back in square metres and `GetCOG`/`GetPlane`
+   return without writing anything into a Python list. The agent had nothing to
+   place a bolt hole from. `catia_hole_at` then failed on `hole.Depth`, a
+   property this release does not have, with a message blaming the point for
+   being off the face.
+2. A modal `Enregistrer sous` box, raised by the session's own tidy-up script
+   saving onto an existing path, held COM and killed the run from its first
+   call. Not product code, but it cost a run and the fix belongs with the
+   others: the tidy-up now saves to a free path, and there is a Win32 helper
+   that clears whatever is up.
+3. Two rectangles drawn into one sketch (correctly refused: no single profile),
+   then `catia_sketch_line` called with `"[50, 0]"` as a string (correctly
+   refused), then **`catia_select` refused `Sketch.1` -- a name
+   `catia_list_features` had printed two calls earlier.** A sketch lives under
+   the body and the lookup only searched the part.
+4. The agent asked the user for the plate width, the height and the thickness.
+   That is the asking rule added for E6 firing where it must not: this prompt
+   gives a load, a reach, a material and a factor of safety, which is where
+   those dimensions come from. Asking hands back the engineering the user came
+   for. The rule now has both edges.
+
+Run 5 is with all four fixed.
 
 ### H5 — Unit trap
 

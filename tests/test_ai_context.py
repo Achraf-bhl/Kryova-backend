@@ -696,3 +696,64 @@ def test_state_never_leaks_another_users_project(db_session: Session, user: User
     block = build_state_block(db_session, user, conversation)
     assert "Their secret part" not in block
     assert "project: none selected" in block
+
+
+class TestTheProjectLineSavesARound:
+    """Every ladder run measured on 2026-09-06 opened with a refused call.
+
+    The web app attaches a project called "New project" to a fresh
+    conversation. The agent's first tool call was `create_project`, which is
+    refused -- correctly, since a silent no-op would leave it believing it had
+    made a project it had not -- and the refusal arrives as a red step in the
+    user's view and costs one of twenty tool rounds, on every single run.
+
+    Nothing was wrong with the refusal. What was missing was telling the model
+    the thing it spent a call discovering. These assert the state block says
+    it, since that is the one text the model reads before choosing its first
+    tool.
+    """
+
+    def test_the_block_says_a_project_already_exists(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        from app.ai.state import build_state_block
+
+        project = Project(name="Wall bracket", owner_id=user.id)
+        db_session.add(project)
+        db_session.flush()
+        conversation.project_id = project.id
+        db_session.flush()
+
+        block = build_state_block(db_session, user, conversation)
+        assert "project_already_exists: yes" in block
+
+    def test_it_names_the_tool_not_to_call_and_the_one_to_call(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        """"Do not create a project" leaves the model with no way to act on
+        the user asking for a different name. `update_project` is that way."""
+        from app.ai.state import build_state_block
+
+        project = Project(name="Wall bracket", owner_id=user.id)
+        db_session.add(project)
+        db_session.flush()
+        conversation.project_id = project.id
+        db_session.flush()
+
+        block = build_state_block(db_session, user, conversation)
+        assert "do NOT call create_project" in block
+        assert "update_project" in block
+
+    def test_a_conversation_with_no_project_is_not_told_it_has_one(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        """The opposite error, and the worse one: an agent told not to create a
+        project when there is none has no way to start at all."""
+        from app.ai.state import build_state_block
+
+        conversation.project_id = None
+        db_session.flush()
+
+        block = build_state_block(db_session, user, conversation)
+        assert "project_already_exists" not in block
+        assert "project: none selected" in block

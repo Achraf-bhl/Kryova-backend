@@ -386,6 +386,18 @@ def ensure_started(db: Session, user_id: str, *, wait_s: float = 0.0) -> bool:
                 _last_error.pop(user_id, None)
                 logger.info("Started the local CATIA bridge (pid %s)", _process.pid)
 
+            # And CATIA itself, if it is not up. The daemon is spawned with
+            # `--wait-for-catia`, so without this it waits for an application
+            # nobody is going to start: every CATIA tool then fails with "no
+            # workstation is connected", and the assistant's only honest reply
+            # is to ask the user to go and open CATIA. That is a instruction
+            # this product should never have to give -- the whole point is that
+            # the engineer talks to the machine and the machine does the work,
+            # and `open_in_catia` has been able to launch it since it was
+            # written. It just had to be *asked*, and the agent asks only when
+            # it happens to choose that tool first.
+            _ensure_catia_is_running()
+
         if wait_s <= 0:
             return _connected(db, user_id)
 
@@ -404,6 +416,34 @@ def ensure_started(db: Session, user_id: str, *, wait_s: float = 0.0) -> bool:
     except Exception:
         logger.warning("Local CATIA bridge supervision failed", exc_info=True)
         return False
+
+
+def _ensure_catia_is_running() -> None:
+    """Start CATIA if it is not already up. Never raises, never waits long.
+
+    Bounded and best-effort on purpose. `catia_process_is_running` has three
+    answers and only `False` justifies launching: `None` means the check
+    itself failed, and starting a second CATIA because we could not see the
+    first is a worse outcome than doing nothing -- CATIA is single-instance
+    per session, and a second attempt on a busy machine can leave a splash
+    screen holding the display.
+
+    The launch goes through `app.catia.bridge.launch`, the same direct-COM
+    call `open_in_catia` makes. It only starts the application and makes the
+    window visible; it creates no document. That distinction matters: two COM
+    clients each *creating* a part is the defect recorded in `_open_in_catia`,
+    and this deliberately does not do that. The daemon, which is the client
+    every tool goes through, creates every document.
+    """
+    if catia_process_is_running() is not False:
+        return
+    try:
+        from app.catia.bridge import launch as catia_launch
+
+        logger.info("CATIA is not running; starting it for the bridge to attach to")
+        catia_launch(visible=True)
+    except Exception:  # noqa: BLE001 - the caller copes with "no CATIA"
+        logger.warning("Could not start CATIA automatically", exc_info=True)
 
 
 def _terminate(process: subprocess.Popen[bytes]) -> None:

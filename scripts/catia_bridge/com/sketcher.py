@@ -73,24 +73,55 @@ class SketcherMixin:
     def _open_sketch(self: ComContext, name: str = "") -> tuple[Any, Any]:
         """The sketch being drawn into, and its 2D factory.
 
-        Naming one that is not open is a mistake worth catching precisely: it
-        is the difference between "you meant a different sketch" and "you
-        forgot to open this one", and CATIA's own error distinguishes neither.
+        Three cases, and only the last is an error:
+
+        * no name, or the name of the sketch already open -> that one;
+        * the name of another sketch in this part -> switch to it, ending the
+          current edition, which is what double-clicking a sketch in the tree
+          does;
+        * a name this part does not have -> refuse, and say what it does have.
+
+        The middle case used to be the second error. It is the difference
+        between "you meant a different sketch" -- which the caller is entitled
+        to mean -- and "you named something that is not there", which is a
+        mistake worth catching because drawing into the wrong sketch produces
+        a wrong part with every call reporting success.
         """
         state = getattr(self, "_sketch_edition", None)
-        if state is None:
-            raise CatiaOperationError(
-                "No sketch is open. Call catia_sketch_create first — the drawing "
-                "tools add to an open sketch, they do not create one."
+        if state is not None and (not name or str(state[0].Name) == name):
+            return state
+
+        if name:
+            # Naming a sketch that exists is a request to draw into THAT one,
+            # and the answer is to open it -- the way a person double-clicks a
+            # sketch in the tree, which ends the edition they were in. This
+            # used to be refused with "'Sketch.2' is not the open sketch
+            # ('Sketch.3' is). Close that one with catia_sketch_close before
+            # editing another", which is true, correct, and costs a round of a
+            # budget of twenty every time it happens. Measured on ladder
+            # prompt H4, 2026-09-06, twice in one run.
+            #
+            # The refusal survives for a name that is not in the part at all:
+            # that one is a typo or an invention, and drawing into the wrong
+            # sketch is the mistake this whole check exists to catch.
+            existing = next(
+                (s for s in self._sketches_in_part() if str(s.Name) == name), None
             )
-        sketch, factory = state
-        if name and str(sketch.Name) != name:
+            if existing is not None:
+                self._end_sketch_edition()
+                factory = existing.OpenEdition()
+                self._sketch_edition = (existing, factory)
+                return existing, factory
+            known = ", ".join(str(s.Name) for s in self._sketches_in_part()) or "(none)"
             raise CatiaOperationError(
-                f"{name!r} is not the open sketch ({sketch.Name!r} is). Close that one "
-                "with catia_sketch_close before editing another; CATIA edits one "
-                "sketch at a time."
+                f"No sketch named {name!r} in this part. It has: {known}. Create it "
+                "with catia_sketch_create, or use one of those names."
             )
-        return sketch, factory
+
+        raise CatiaOperationError(
+            "No sketch is open. Call catia_sketch_create first — the drawing "
+            "tools add to an open sketch, they do not create one."
+        )
 
     def _end_sketch_edition(self: ComContext) -> str | None:
         """Close whatever sketch is open, and say which one it was.
@@ -213,13 +244,36 @@ class SketcherMixin:
         self: ComContext, *, sketch: str = ""
     ) -> dict[str, Any]:
         state = getattr(self, "_sketch_edition", None)
+
+        if sketch and (state is None or str(state[0].Name) != sketch):
+            # The named sketch is not in edition, which is the state the caller
+            # asked for. Answering "\'Sketch.2\' is not the open sketch
+            # (\'BracketProfile\' is)" was accurate and cost a round of twenty
+            # every time -- measured on ladder prompt H4, 2026-09-06, three
+            # times in one run, because the agent lost track of which sketch it
+            # had opened and closing them one by one is exactly how a careful
+            # caller recovers from that.
+            #
+            # A name the part does not have is still refused: that is a typo or
+            # an invention, and reporting it closed would be a lie about the
+            # part.
+            names = [str(existing.Name) for existing in self._sketches_in_part()]
+            if sketch not in names:
+                raise CatiaOperationError(
+                    f"No sketch named {sketch!r} in this part. It has: "
+                    f"{', '.join(names) or '(none)'}."
+                )
+            result: dict[str, Any] = {"sketch": sketch, "open": False, "already_closed": True}
+            if state is not None:
+                result["note"] = (
+                    f"{sketch} was already closed. {state[0].Name} is the one open now; "
+                    "call catia_sketch_close with no arguments to close it."
+                )
+            return result
+
         if state is None:
             raise CatiaOperationError("No sketch is open, so there is nothing to close.")
         target, _ = state
-        if sketch and str(target.Name) != sketch:
-            raise CatiaOperationError(
-                f"{sketch!r} is not the open sketch ({target.Name!r} is)."
-            )
         target.CloseEdition()
         self._sketch_edition = None
         self._part().Update()

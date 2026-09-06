@@ -49,9 +49,31 @@ class _Sketch:
     def __init__(self, name: str) -> None:
         self.Name = name  # noqa: N815 - COM spelling
         self.closed = 0
+        self.opened = 0
 
     def CloseEdition(self) -> None:  # noqa: N802 - COM spelling
         self.closed += 1
+
+    def OpenEdition(self) -> object:  # noqa: N802 - COM spelling
+        self.opened += 1
+        return object()
+
+
+class _Sketches:
+    def __init__(self, sketches: list[_Sketch]) -> None:
+        self._items = sketches
+
+    @property
+    def Count(self) -> int:  # noqa: N802 - COM spelling
+        return len(self._items)
+
+    def Item(self, index: int) -> _Sketch:  # noqa: N802 - COM spelling
+        return self._items[index - 1]
+
+
+class _Body:
+    def __init__(self, sketches: list[_Sketch]) -> None:
+        self.Sketches = _Sketches(sketches)  # noqa: N815 - COM spelling
 
 
 class _Part:
@@ -65,12 +87,21 @@ class _Part:
 class _Holder(SketcherMixin):
     """Just enough of `CatiaCom` to exercise the edition state."""
 
-    def __init__(self, open_sketch: _Sketch | None = None) -> None:
+    def __init__(
+        self, open_sketch: _Sketch | None = None, others: list[_Sketch] | None = None
+    ) -> None:
         self._sketch_edition = (open_sketch, object()) if open_sketch else None
         self.part = _Part()
+        sketches = list(others or [])
+        if open_sketch is not None and open_sketch not in sketches:
+            sketches.insert(0, open_sketch)
+        self.body = _Body(sketches)
 
     def _part(self) -> _Part:
         return self.part
+
+    def _body(self) -> _Body:
+        return self.body
 
 
 class TestEndingTheEdition:
@@ -119,10 +150,71 @@ class TestDrawingStillRefuses:
             _Holder()._open_sketch()
         assert "catia_sketch_create" in str(raised.value)
 
-    def test_drawing_into_a_different_sketch_is_refused(self) -> None:
+    def test_naming_a_sketch_that_is_not_in_the_part_is_refused(self) -> None:
+        """The case that stays an error, and the reason the check exists:
+        drawing into a sketch that does not exist would otherwise land the
+        geometry somewhere the caller did not mean, with every call reporting
+        success."""
         with pytest.raises(CatiaOperationError) as raised:
-            _Holder(_Sketch("Sketch.1"))._open_sketch("Sketch.2")
-        assert "Sketch.1" in str(raised.value)
+            _Holder(_Sketch("Sketch.1"))._open_sketch("Sketch.9")
+        message = str(raised.value)
+        assert "Sketch.9" in message
+        assert "Sketch.1" in message, "the refusal must say what the part does have"
+
+
+class TestSwitchingSketches:
+    """Naming another sketch is a request to edit it.
+
+    Measured on ladder prompt H4, 2026-09-06, twice in one run: the agent
+    created Sketch.3, then called catia_sketch_polygon with sketch='Sketch.2'
+    and was told "'Sketch.2' is not the open sketch ('Sketch.3' is). Close
+    that one with catia_sketch_close before editing another". True, correct,
+    and a round of twenty each time -- and the recovery it suggests is a call
+    the agent then has to get right as well.
+
+    A person double-clicks the sketch in the tree, and CATIA ends the edition
+    they were in. That is what this does.
+    """
+
+    def test_it_opens_the_named_sketch(self) -> None:
+        wanted = _Sketch("Sketch.2")
+        holder = _Holder(_Sketch("Sketch.3"), others=[wanted])
+        sketch, factory = holder._open_sketch("Sketch.2")
+        assert sketch is wanted
+        assert factory is not None
+        assert wanted.opened == 1
+
+    def test_it_ends_the_edition_it_was_in(self) -> None:
+        """Two open editions is a state CATIA does not have."""
+        was_open = _Sketch("Sketch.3")
+        holder = _Holder(was_open, others=[_Sketch("Sketch.2")])
+        holder._open_sketch("Sketch.2")
+        assert was_open.closed == 1
+        assert holder._sketch_edition[0].Name == "Sketch.2"
+
+    def test_naming_the_one_already_open_changes_nothing(self) -> None:
+        """It must not close and reopen the sketch being drawn into: that is a
+        rebuild per primitive on a part where every call is a network hop."""
+        open_sketch = _Sketch("Sketch.1")
+        holder = _Holder(open_sketch)
+        holder._open_sketch("Sketch.1")
+        assert open_sketch.closed == 0
+        assert open_sketch.opened == 0
+
+    def test_no_name_still_means_the_open_one(self) -> None:
+        open_sketch = _Sketch("Sketch.1")
+        sketch, _ = _Holder(open_sketch, others=[_Sketch("Sketch.2")])._open_sketch()
+        assert sketch is open_sketch
+
+    def test_it_can_open_one_when_nothing_is_open(self) -> None:
+        """After a pad, no sketch is in edition. Naming one is still a request
+        to draw into it, and refusing here would send the agent to
+        catia_sketch_create, which would refuse the duplicate name."""
+        wanted = _Sketch("Sketch.1")
+        holder = _Holder(others=[wanted])
+        sketch, _ = holder._open_sketch("Sketch.1")
+        assert sketch is wanted
+        assert wanted.opened == 1
 
 
 class TestNothingRefusesAnOpenSketchAnyMore:
@@ -212,3 +304,62 @@ class TestCreatingTheNextSketch:
         not, which is worth interrupting for."""
         with pytest.raises(CatiaOperationError):
             SketcherMixin.sketch_close(_Holder())  # type: ignore[arg-type]
+
+
+class TestClosingWhatIsAlreadyClosed:
+    """Asking for a state that already holds is a success, not an error.
+
+    Measured on ladder prompt H4, 2026-09-06: three of twenty rounds went on
+
+        catia_sketch_close: 'Sketch.2' is not the open sketch ('BracketProfile' is)
+
+    The agent had lost track of which sketch it had open -- which happens --
+    and closing them one at a time is exactly how a careful caller recovers.
+    Every one of those calls asked for something that was already true.
+
+    A name the part does not have is still refused, because reporting it
+    closed would be a false statement about the part.
+    """
+
+    def test_closing_a_sketch_that_is_not_open_succeeds(self) -> None:
+        holder = _Holder(_Sketch("BracketProfile"), others=[_Sketch("Sketch.2")])
+        result = SketcherMixin.sketch_close(holder, sketch="Sketch.2")  # type: ignore[arg-type]
+        assert result["open"] is False
+        assert result["already_closed"] is True
+
+    def test_it_says_which_sketch_is_actually_open(self) -> None:
+        """Otherwise the caller has learnt nothing and closes the next one at
+        random."""
+        holder = _Holder(_Sketch("BracketProfile"), others=[_Sketch("Sketch.2")])
+        result = SketcherMixin.sketch_close(holder, sketch="Sketch.2")  # type: ignore[arg-type]
+        assert "BracketProfile" in result["note"]
+
+    def test_the_open_sketch_is_left_open(self) -> None:
+        """Closing Sketch.2 must not close the one being drawn into. That
+        would be a different operation than the one requested, and the caller
+        would find its next drawing call refused."""
+        open_sketch = _Sketch("BracketProfile")
+        holder = _Holder(open_sketch, others=[_Sketch("Sketch.2")])
+        SketcherMixin.sketch_close(holder, sketch="Sketch.2")  # type: ignore[arg-type]
+        assert open_sketch.closed == 0
+        assert holder._sketch_edition is not None
+
+    def test_closing_one_when_nothing_is_open_succeeds(self) -> None:
+        """After a pad, every sketch is closed. Saying so is the truth."""
+        holder = _Holder(others=[_Sketch("Sketch.1")])
+        result = SketcherMixin.sketch_close(holder, sketch="Sketch.1")  # type: ignore[arg-type]
+        assert result["already_closed"] is True
+
+    def test_a_name_the_part_does_not_have_is_still_refused(self) -> None:
+        holder = _Holder(_Sketch("Sketch.1"))
+        with pytest.raises(CatiaOperationError) as raised:
+            SketcherMixin.sketch_close(holder, sketch="Sketch.9")  # type: ignore[arg-type]
+        assert "Sketch.9" in str(raised.value)
+        assert "Sketch.1" in str(raised.value)
+
+    def test_closing_the_open_one_by_name_still_closes_it(self) -> None:
+        open_sketch = _Sketch("Sketch.1")
+        holder = _Holder(open_sketch)
+        result = SketcherMixin.sketch_close(holder, sketch="Sketch.1")  # type: ignore[arg-type]
+        assert open_sketch.closed == 1
+        assert result.get("already_closed") is None

@@ -15,6 +15,7 @@ a hosted API.
 import base64
 import json
 import logging
+import os
 import time
 from collections.abc import Sequence
 from typing import Any, TypeVar
@@ -76,6 +77,35 @@ MIN_CONTEXT_WINDOW = 8_192
 #: fresh sample, and a third try would only add latency to a turn the user is
 #: already waiting on.
 CHAT_ATTEMPTS = 2
+
+#: How many transformer layers to put on the GPU. `None` leaves the decision to
+#: Ollama, which is the safe default for a machine nobody has measured.
+#:
+#: **Measured on the Windows seat, 2026-09-06, and the difference is not
+#: marginal.** An 8 GB RTX 5070 Laptop shared with CATIA, qwen3.5:9b, 34
+#: layers:
+#:
+#:     num_ctx  Ollama's own choice        forced to all 34 layers
+#:     32768    76% GPU, 25.7 tok/s        100% GPU, 59.0 tok/s
+#:     24576    79% GPU, 31.3 tok/s        100% GPU, 58.5 tok/s
+#:     16384    84% GPU, 37.9 tok/s        100% GPU, 57.7 tok/s
+#:
+#: Ollama offloaded 33 of 34 layers and kept one on the CPU, because its
+#: estimator holds a margin against a card it is sharing. One layer on the CPU
+#: is not one thirty-fourth of the cost: every token crosses the bus twice, and
+#: the model ran at 43% of its speed. A CATIA build is tens of turns, so this
+#: is the difference between a usable product and a demo.
+#:
+#: It is opt-in because the risk is real in the other direction: forcing more
+#: layers than the card can hold makes Ollama fail the load, and
+#: `_retry_with_smaller_window` is what catches that. A machine that has not
+#: been measured is better off with Ollama's guess.
+GPU_LAYERS_ALL = "all"
+
+#: What `all` sends. Larger than any model's layer count, because llama.cpp
+#: clamps `n_gpu_layers` to the real total -- see `_gpu_layers` for why this is
+#: a sentinel rather than a count read from the model's metadata.
+EVERY_LAYER = 999
 
 #: Prompt tokens one 1024x768 render is assumed to cost, for sizing `num_ctx`
 #: on a vision call. An estimate and deliberately a generous one: a vision model
@@ -141,6 +171,8 @@ class OllamaProvider(LLMProvider):
         #: Resolved lazily from /api/show and cached: one HTTP round trip per
         #: process, not one per agent step.
         self._num_ctx: int | None = None
+        self._num_gpu: int | None = None
+        self._num_gpu_resolved = False
         #: Same, for the vision capability of `_vision_model or _model`.
         self._can_see: bool | None = None
 
@@ -162,6 +194,58 @@ class OllamaProvider(LLMProvider):
                 f"Ollama is running but the model '{self._model}' is not installed. "
                 f"Run `ollama pull {self._model}`."
             )
+
+    def _gpu_layers(self) -> int | None:
+        """`num_gpu` for this model, or None to leave the split to Ollama.
+
+        `AI_GPU_LAYERS` takes a number of layers, or the word `all`.
+
+        `all` sends `EVERY_LAYER`, a number larger than any model has, because
+        llama.cpp clamps `n_gpu_layers` to the model's own total. Counting the
+        layers here was tried first and was wrong by one: `block_count` in
+        `/api/show` reports 32 for qwen3.5:9b, and Ollama counts 34 -- the
+        repeating blocks, the output layer, and one more it does not name in
+        the metadata. `block_count + 1` left the model at 89% GPU and 48.6
+        tok/s where 34 gives 100% and 58.0. A number that has to be derived
+        from metadata to mean "all of it" is a number that will be wrong again
+        on the next model; asking for more than exists cannot be.
+
+        Measured on the seat, 2026-09-06, qwen3.5:9b at num_ctx=32768:
+
+            num_gpu=33   89% GPU   48.6 tok/s
+            num_gpu=34  100% GPU   58.0 tok/s
+            num_gpu=99  100% GPU   58.9 tok/s
+            num_gpu=999 100% GPU   58.5 tok/s
+        """
+        if self._num_gpu_resolved:
+            return self._num_gpu
+        self._num_gpu_resolved = True
+
+        # `Settings` first, the environment as the documented fallback -- the
+        # same shape `agent.max_steps` uses, and for the same reason: a knob
+        # that silently does nothing is worse than no knob.
+        from app.core.config import settings
+
+        configured = getattr(settings, "ai_gpu_layers", None) or os.environ.get("AI_GPU_LAYERS")
+        if not configured:
+            return None
+        text = str(configured).strip().lower()
+        if text == GPU_LAYERS_ALL:
+            self._num_gpu = EVERY_LAYER
+            logger.info("Offloading every layer of %r to the GPU", self._model)
+            return self._num_gpu
+        try:
+            self._num_gpu = max(0, int(text))
+        except ValueError:
+            logger.warning("Ignoring unusable AI_GPU_LAYERS value %r", configured)
+        return self._num_gpu
+
+    def _with_gpu_layers(self, options: dict[str, Any]) -> dict[str, Any]:
+        """Add `num_gpu` to a request's options when one is configured."""
+        layers = self._gpu_layers()
+        if layers is not None:
+            options["num_gpu"] = layers
+        return options
 
     def _context_window(self) -> int:
         """The `num_ctx` to ask for, resolved from the model itself.
@@ -246,16 +330,18 @@ class OllamaProvider(LLMProvider):
             ],
             # Constrains decoding to the schema rather than asking politely.
             "format": schema.model_json_schema(),
-            "options": {
-                "num_predict": max_tokens,
-                # Room for the answer as well as the prompt: `num_ctx` covers
-                # both, so a window sized to the prompt alone truncates it by
-                # exactly the length of the reply.
-                "num_ctx": max(
-                    self._context_window(),
-                    _EFFORT_PREDICT.get(effort, 4_096) + max_tokens,
-                ),
-            },
+            "options": self._with_gpu_layers(
+                {
+                    "num_predict": max_tokens,
+                    # Room for the answer as well as the prompt: `num_ctx`
+                    # covers both, so a window sized to the prompt alone
+                    # truncates it by exactly the length of the reply.
+                    "num_ctx": max(
+                        self._context_window(),
+                        _EFFORT_PREDICT.get(effort, 4_096) + max_tokens,
+                    ),
+                }
+            ),
         }
 
         try:
@@ -370,7 +456,7 @@ class OllamaProvider(LLMProvider):
                 },
             ],
             "format": schema.model_json_schema(),
-            "options": {"num_predict": max_tokens, "num_ctx": window},
+            "options": self._with_gpu_layers({"num_predict": max_tokens, "num_ctx": window}),
         }
 
         try:
@@ -514,7 +600,7 @@ class OllamaProvider(LLMProvider):
             # `num_ctx` is not optional here -- see `_context_window`. Without
             # it the agent's prompt is silently cut to 4096 tokens and the loop
             # runs on a transcript the model cannot see.
-            "options": {"num_predict": max_tokens, "num_ctx": num_ctx},
+            "options": self._with_gpu_layers({"num_predict": max_tokens, "num_ctx": num_ctx}),
         }
         if tools:
             payload["tools"] = tools

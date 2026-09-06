@@ -74,12 +74,14 @@ class TestTheLadderIsTheMasterPlansLadder:
         """Coverage is measured, not asserted. This number moves as E18 lands.
 
         M2 joined it on 2026-09-06, when `app.assembly` gave the ladder its first
-        rung that is a product rather than a part.
+        rung that is a product rather than a part. M3 joined it the same day, when
+        `app.sheetmetal` gave it the first rung that is folded.
         """
         buildable = [m.rung for m in LADDER if m.buildable]
-        assert buildable == ["M1", "M2"], (
-            "If a rung became buildable, give it a spec or an assembly and its "
-            "assertions, and update this test deliberately — it is the coverage figure."
+        assert buildable == ["M1", "M2", "M3"], (
+            "If a rung became buildable, give it a spec, an assembly or a folded "
+            "design and its assertions, and update this test deliberately — it is the "
+            "coverage figure."
         )
 
     def test_a_rung_that_builds_says_what_it_still_does_not_claim(self) -> None:
@@ -170,10 +172,12 @@ def _runner_returning(payload: Mapping[str, Any]):
 def _harness_ladder() -> tuple[Mission, ...]:
     """M1 and every rung nobody can build — the ladder a fake payload can answer for.
 
-    M2 is left out here, and only here. It is an assembly: its claims are measured
-    off real geometry through `app.assembly`, so a mock payload cannot satisfy it and
-    its entirely correct failure would drown out what these tests are about, which is
-    how a *pending* rung is reported. `tests/test_mission_m2.py` runs it for real.
+    M2 and M3 are left out here, and only here. M2 is an assembly and M3 is a folded
+    sheet: their claims are measured off real geometry through `app.assembly` and
+    `app.sheetmetal`, so a mock payload cannot satisfy either, and their entirely
+    correct failures would drown out what these tests are about, which is how a
+    *pending* rung is reported. `tests/test_mission_m2.py` and
+    `tests/test_mission_m3.py` run them for real.
     """
     return (mission("M1"), *[m for m in LADDER if not m.buildable])
 
@@ -198,9 +202,9 @@ class TestAPendingRungIsNeverAPass:
 
         run_ladder(counting)
 
-        assert calls == ["made"] * 3, (
-            "one runner for M1 and one for each of M2's two members, none for the "
-            "seven pending rungs"
+        assert calls == ["made"] * 4, (
+            "one runner for M1, one for each of M2's two members, one for M3's single "
+            "folded solid, and none for the six pending rungs"
         )
 
     def test_pending_rungs_do_not_make_the_report_red(self) -> None:
@@ -208,7 +212,7 @@ class TestAPendingRungIsNeverAPass:
         report = run_ladder(lambda: _runner_returning(_payload()), _harness_ladder())
 
         assert report.ok
-        assert len(report.pending) == 7
+        assert len(report.pending) == 6
 
     def test_but_the_ladder_is_not_complete(self) -> None:
         """`ok` is the regression question; `complete` is the programme question."""
@@ -222,8 +226,8 @@ class TestAPendingRungIsNeverAPass:
             lambda: _runner_returning(_payload()), _harness_ladder()
         ).summary()
 
-        assert "1/8 rungs pass" in summary
-        assert "7 not yet buildable" in summary
+        assert "1/7 rungs pass" in summary
+        assert "6 not yet buildable" in summary
 
 
 class TestARungThatClaimsToBuildAndDoesNotIsAFailure:
@@ -308,7 +312,7 @@ class TestTheReportSerialises:
 
         assert data["ok"] is True
         assert data["complete"] is False
-        assert data["pending"] == 7
+        assert data["pending"] == 6
         m7 = next(r for r in data["results"] if r["rung"] == "M7")
         assert m7["outcome"] == "pending"
         assert any("E9" in need for need in m7["needs"])

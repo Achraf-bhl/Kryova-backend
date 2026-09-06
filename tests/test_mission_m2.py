@@ -452,26 +452,27 @@ class TestTheLadderItself:
 
         return run_ladder(OcctRunner)
 
-    def test_two_rungs_pass_and_seven_are_not_yet_buildable(self) -> None:
+    def test_three_rungs_pass_and_six_are_not_yet_buildable(self) -> None:
         report = self._ladder()
 
-        assert [r.rung for r in report.passed] == ["M1", "M2"]
-        assert len(report.pending) == 7
+        assert [r.rung for r in report.passed] == ["M1", "M2", "M3"]
+        assert len(report.pending) == 6
         assert report.ok, report.summary()
 
     def test_the_ladder_is_not_complete_even_though_nothing_failed(self) -> None:
-        """Seven rungs unclimbed and M2's welds unsized. `ok` is the regression
-        question; `complete` is the programme question, and they are not the same."""
+        """Six rungs unclimbed, M2's welds unsized and M3's K never bent. `ok` is the
+        regression question; `complete` is the programme question, and they are not
+        the same."""
         report = self._ladder()
 
         assert not report.complete
-        assert [r.rung for r in report.caveated] == ["M2"]
+        assert [r.rung for r in report.caveated] == ["M2", "M3"]
 
     def test_the_sentence_a_human_reads_names_both(self) -> None:
         summary = self._ladder().summary()
 
-        assert "2/9 rungs pass" in summary
-        assert "7 not yet buildable" in summary
+        assert "3/9 rungs pass" in summary
+        assert "6 not yet buildable" in summary
         assert "not claimed" in summary and "weld" in summary
 
 

@@ -68,6 +68,26 @@ as far as it goes, and here is the part nobody has verified". Both are printed i
 every summary, and `LadderReport.complete` is false while either exists —
 otherwise "M2 passes" would quietly come to mean "the welds are sized", which is
 the `UNMEASURED`-is-not-`PASSED` rule applied to a whole rung.
+
+**A rung may also be a folded sheet, which is a third kind of thing again.** M3 is
+the first, so `Mission` carries a `spec` (one machined part), an `assembly` (a
+product), or a `folded` (`FoldedDesign`: one solid *and* the same part declared as
+a fold tree, plus the stock it is cut from). The reason it is a third case rather
+than a `spec` with extra claims is that a sheet-metal part has **two descriptions
+that must agree** — the solid the kernel builds and the blank the press brake
+cuts — and nothing in `app/sheetmetal/` or `app/kernel/` connects them. There is
+no sheet-metal operation in the OCCT backend and no way to compile a
+`SheetMetalPart` into a `DesignSpec`, so M3 holds both and `_folded_payload`
+publishes the one number that ties them together: `flat.volume_mismatch_mm3`, the
+difference between the solid's measured volume and the volume the flat pattern
+accounts for. That residual is where a fold model and a drawn cross-section
+drifting apart shows up, and it is the closest thing to a proof that the blank on
+the drawing makes the part in the picture.
+
+`app.sheetmetal` is imported here and `app.kernel` still is not. The distinction
+is the same one `execute.py` keeps: a flat pattern is arithmetic that runs offline
+in milliseconds, where a kernel is 166 MB of OCP. Nothing in the sheet-metal
+package touches geometry, a solver or a database.
 """
 
 from __future__ import annotations
@@ -97,6 +117,26 @@ from app.design.errors import SpecError
 from app.design.execute import BuildReport, CallRunner, execute_plan
 from app.design.params import Parameter, ParameterSet, Unit
 from app.design.spec import DesignSpec, FeatureSpec, expr, ref
+from app.sheetmetal import (
+    HOLE_EDGE_TO_TANGENT_FACTOR,
+    Bend,
+    BendDirection,
+    Edge,
+    Flange,
+    FlatPattern,
+    FormabilityReport,
+    Hole,
+    Joint,
+    KFactor,
+    LengthConvention,
+    SheetMetalError,
+    SheetMetalPart,
+    check_part,
+    din6935,
+    machinerys_handbook,
+    sheet_material,
+    unfold,
+)
 
 
 class MissionOutcome(StrEnum):
@@ -139,6 +179,7 @@ _RESERVED_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
 #: them quietly.
 _PROVENANCE_KEY: Final = "provenance"
 _BASIS_MEASURED: Final = "measured"
+_BASIS_APPROXIMATED: Final = "approximated"
 _BASIS_UNAVAILABLE: Final = "unavailable"
 
 #: `app.kernel.interrogation`'s spellings for what is measured between two bodies,
@@ -271,14 +312,188 @@ class AssemblyReport:
 
 
 @dataclass(frozen=True)
+class StockSheet:
+    """The sheet a blank is cut from, and which way its grain runs.
+
+    **`app.sheetmetal` has no stock and no nest.** `FlatPattern` reports an extent
+    and an area; nothing in the package knows what sheet the blank is cut from, how
+    many fit, or how much is thrown away. So this lives here, and the arithmetic in
+    `_nest` lives here with it — named as a gap rather than presented as a feature of
+    the package, because a cost or a lead-time claim needs it and will need it from
+    somewhere better than a mission module.
+
+    **The rolling direction is a declaration, not a check**, and that is the sharper
+    half. Every minimum bend radius `material.py` ships carries the same caveat —
+    "for a bend **across the grain**" — and nothing in a `SheetMaterial`, a `Bend` or
+    a `FlatPattern` can express which way the grain runs. So the nest below is
+    computed in **one orientation only**: the blank's bend lines are laid across the
+    sheet's length. Taking the better of two orientations would find more parts per
+    sheet by rotating the blank a quarter turn, which puts every bend along the
+    rolling direction and quietly voids the one material property the formability
+    check is gated on.
+    """
+
+    name: str
+
+    #: Along the rolling direction. Bend lines are laid across this.
+    length_mm: float
+
+    width_mm: float
+
+    def __post_init__(self) -> None:
+        for label, value in (("length_mm", self.length_mm), ("width_mm", self.width_mm)):
+            if not math.isfinite(value) or value <= 0.0:
+                raise SpecError(
+                    f"Stock sheet {self.name!r} has {label}={value!r}, which is not a "
+                    "sheet. Give the sheet size in millimetres; the length is the "
+                    "rolling direction."
+                )
+
+    @property
+    def area_mm2(self) -> float:
+        return self.length_mm * self.width_mm
+
+
+@dataclass(frozen=True)
+class NestReport:
+    """How many blanks come off one sheet, in the one orientation the grain allows."""
+
+    sheet: StockSheet
+    across: int
+    down: int
+    utilisation: float
+    blank_area_mm2: float
+
+    @property
+    def parts_per_sheet(self) -> int:
+        return self.across * self.down
+
+    @property
+    def fits(self) -> bool:
+        return self.parts_per_sheet > 0
+
+    def summary(self) -> str:
+        if not self.fits:
+            return (
+                f"The blank does not fit {self.sheet.name} in the orientation the grain "
+                f"allows: {self.across} across by {self.down} down."
+            )
+        return (
+            f"{self.parts_per_sheet} per {self.sheet.name} "
+            f"({self.across} across x {self.down} down), "
+            f"{self.utilisation * 100:.1f}% of the sheet used."
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sheet": self.sheet.name,
+            "sheet_mm": [self.sheet.length_mm, self.sheet.width_mm],
+            "across": self.across,
+            "down": self.down,
+            "parts_per_sheet": self.parts_per_sheet,
+            "utilisation": self.utilisation,
+            "blank_area_mm2": self.blank_area_mm2,
+        }
+
+
+@dataclass(frozen=True)
+class FoldedDesign:
+    """A rung that is a folded sheet: the solid, the same part as a fold tree, the stock.
+
+    **Two descriptions of one part, held together by arithmetic.** `spec` is what the
+    kernel builds — for M3, the folded cross-section drawn segment by segment and
+    extruded — and `part` is the same object declared as flanges and bends, which is
+    what unfolds and what a press brake is told about. Nothing connects them: the
+    OCCT backend has no sheet-metal operation, and `SheetMetalPart` cannot be compiled
+    into a `DesignSpec`. So both are declared, from one set of dimensions, and
+    `_folded_payload` publishes the residual between what the solid weighs and what
+    the blank accounts for. Until a sheet-metal feature exists in the design IR that
+    residual is the only thing standing between "the drawing and the part agree" and
+    "somebody typed the same numbers twice".
+
+    A part with no bends is refused. Flat sheet is a real thing to make and it is not
+    what this rung is for: everything M3 exists to check — the allowance, the setback,
+    the K-factor's basis, the blank that is shorter than the sum of its legs — is a
+    property of a bend, and a rung that quietly went flat would keep reporting green
+    while checking none of it.
+    """
+
+    spec: DesignSpec
+    part: SheetMetalPart
+    stock: StockSheet | None = None
+
+    #: The V-die the flanges are formed on. `None` takes `app.sheetmetal`'s own
+    #: `AIR_BEND_DIE_RATIO * t`, which is press-brake practice rather than a standard.
+    die_opening_mm: float | None = None
+
+    #: How far a hole's edge must keep from a bend tangent, as a multiple of thickness.
+    hole_factor: float = HOLE_EDGE_TO_TANGENT_FACTOR
+
+    def __post_init__(self) -> None:
+        if not self.part.bends:
+            raise SpecError(
+                f"{self.part.name!r} is declared as a folded rung and has no bends. "
+                "Every claim this rung makes — bend allowance, setback, the K-factor's "
+                "basis, the blank being shorter than the sum of its legs — is a "
+                "property of a bend. A flat blank would report green having checked "
+                "none of them."
+            )
+
+
+@dataclass(frozen=True)
+class FoldedReport:
+    """What building, flattening and assessing a folded part found.
+
+    Everything here is somebody else's data type — `app.design`'s build report,
+    `app.sheetmetal`'s flat pattern and formability report — except `nest`, which
+    exists because that package has none, and `payload`, the one mapping the
+    assertion vocabulary reads.
+    """
+
+    build: BuildReport | None = None
+    pattern: FlatPattern | None = None
+    formability: FormabilityReport | None = None
+    nest: NestReport | None = None
+    payload: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        """Did the part build, flatten, and come back formable?
+
+        Says nothing about the mission's own assertions, for the reason
+        `AssemblyReport.ok` gives: a part that cannot be pressed and a part that came
+        out the wrong size send different people to look.
+        """
+        return (
+            self.build is not None
+            and self.build.ok
+            and self.pattern is not None
+            and self.formability is not None
+            and self.formability.ok
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"measurements": dict(self.payload)}
+        if self.build is not None:
+            out["build"] = self.build.to_dict()
+        if self.pattern is not None:
+            out["flat_pattern"] = self.pattern.to_dict()
+        if self.formability is not None:
+            out["formability"] = self.formability.to_dict()
+        if self.nest is not None:
+            out["nest"] = self.nest.to_dict()
+        return out
+
+
+@dataclass(frozen=True)
 class Mission:
     """One rung: a machine, what makes it hard, and either a design or a reason.
 
-    A rung is buildable exactly when it carries a `spec` **or** an `assembly` —
-    one part, or a product graph of them. The two states are kept apart from
-    "waiting" by validation rather than by convention, because the failure they
-    guard against is a rung drifting into "declared but claiming nothing", which
-    reads as coverage and is not.
+    A rung is buildable exactly when it carries a `spec`, an `assembly` **or** a
+    `folded` — one part, a product graph of them, or a folded sheet. The three
+    states are kept apart from "waiting" by validation rather than by convention,
+    because the failure they guard against is a rung drifting into "declared but
+    claiming nothing", which reads as coverage and is not.
     """
 
     rung: str
@@ -297,6 +512,12 @@ class Mission:
     #: `spec`: a rung is a part or a product, and a mission carrying both would
     #: have two answers to "what did it build".
     assembly: AssemblyDesign | None = None
+
+    #: The folded sheet, when the rung is one. Mutually exclusive with both of the
+    #: above and for the same reason — and note that a `FoldedDesign` carries a
+    #: `DesignSpec` of its own, so a rung setting `spec` *and* `folded` would build
+    #: two different parts and check one set of claims against whichever ran last.
+    folded: FoldedDesign | None = None
 
     #: What must be true of the built part. Checked by `assertions.py` against the
     #: measurement payload the build reports — for an assembly, against the
@@ -321,11 +542,27 @@ class Mission:
                 f"A rung is named M1..M9; got {self.rung!r}. The name is how the "
                 "ladder in the master plan and this suite are kept in step."
             )
-        if self.spec is not None and self.assembly is not None:
+        declared = [
+            label
+            for label, value in (
+                ("a part design", self.spec),
+                ("an assembly", self.assembly),
+                ("a folded sheet", self.folded),
+            )
+            if value is not None
+        ]
+        if len(declared) > 1:
+            # "both" when there are two, which is the only way it can read as English
+            # and is what the message has always said.
+            listed = (
+                f"both {declared[0]} and {declared[1]}"
+                if len(declared) == 2
+                else ", ".join(declared[:-1]) + f" and {declared[-1]}"
+            )
             raise SpecError(
-                f"{self.rung} carries both a part design and an assembly. A rung builds "
-                "one thing; carrying both leaves 'what did it build' with two answers "
-                "and the assertions checked against only one of them."
+                f"{self.rung} carries {listed}. A rung builds one thing; carrying more "
+                "than one leaves 'what did it build' with two answers and the "
+                "assertions checked against only one of them."
             )
         if not self.buildable:
             if not self.needs:
@@ -361,11 +598,17 @@ class Mission:
 
     @property
     def buildable(self) -> bool:
-        return self.spec is not None or self.assembly is not None
+        return (
+            self.spec is not None or self.assembly is not None or self.folded is not None
+        )
 
     @property
     def is_assembly(self) -> bool:
         return self.assembly is not None
+
+    @property
+    def is_folded(self) -> bool:
+        return self.folded is not None
 
     def __str__(self) -> str:
         return f"{self.rung} — {self.title}"
@@ -387,6 +630,12 @@ class MissionResult:
     #: Everything an assembly rung produced: the per-component builds, the clash
     #: report, the mass roll-up, the contract verdicts and the combined payload.
     assembly: AssemblyReport | None = None
+
+    #: Everything a folded rung produced: the flat pattern, the formability findings,
+    #: the nest and the combined payload. The solid's own build is on `build`, where a
+    #: single-part rung's always is — a folded rung builds exactly one part, so putting
+    #: it anywhere else would give "which build is this?" a second answer.
+    folded: FoldedReport | None = None
 
     #: Why, in words, for anything that is not a plain pass.
     reason: str = ""
@@ -429,6 +678,8 @@ class MissionResult:
             out["build"] = self.build.to_dict()
         if self.assembly is not None:
             out["assembly"] = self.assembly.to_dict()
+        if self.folded is not None:
+            out["folded"] = self.folded.to_dict()
         if self.checks is not None:
             out["assertions"] = self.checks.to_dict()
         return out
@@ -541,7 +792,9 @@ def run_mission(
     a finding, and a suite that raised would stop at the first one and never tell
     you about the other eight.
 
-    A single-part rung takes either one `runner` or a `runner_factory` called once.
+    A single-part rung takes either one `runner` or a `runner_factory` called once,
+    and a folded rung is a single-part rung — it builds one solid, and its flat
+    pattern is arithmetic that needs no runner at all.
     **An assembly rung requires the factory**, because its parts each need their own
     document — `OcctRunner`'s own contract is one runner per part. Sharing one would
     not fail loudly, which is the problem: `catia_new_part` *replaces* the document,
@@ -576,6 +829,9 @@ def run_mission(
     if runner is None:
         assert runner_factory is not None  # noqa: S101 - guarded above
         runner = runner_factory()
+
+    if mission.folded is not None:
+        return _run_folded(mission, mission.folded, runner)
 
     assert mission.spec is not None  # noqa: S101 - buildable and not an assembly
     plan = compile_spec(mission.spec)
@@ -981,6 +1237,446 @@ def _boundary_payload(
         )
     )
     return payload
+
+
+# ---------------------------------------------------------------------------
+# Folded rungs
+# ---------------------------------------------------------------------------
+
+
+#: Every path the flat pattern publishes, so provenance can be attached to each of
+#: them rather than to the `flat` root alone. Same reason `_ENVELOPE_PATHS` is
+#: enumerated: `provenance.reason_for` matches a path exactly, and a record on the
+#: root leaves `flat.blank_size_mm[0]` reading as though nobody said anything about it.
+_FLAT_PATHS: Final[tuple[str, ...]] = (
+    "flat.flat_length_mm",
+    "flat.blank_size_mm",
+    "flat.blank_size_mm[0]",
+    "flat.blank_size_mm[1]",
+    "flat.blank_area_mm2",
+    "flat.blank_volume_mm3",
+    "flat.total_bend_allowance_mm",
+    "flat.fold_volume_gain_mm3",
+    "flat.hole_volume_mm3",
+    "flat.reconciled_volume_mm3",
+    "flat.volume_residual_mm3",
+    "flat.volume_mismatch_mm3",
+    "flat.k_factor",
+)
+
+#: Paths the nest publishes.
+_NEST_PATHS: Final[tuple[str, ...]] = (
+    "nest.parts_per_sheet",
+    "nest.across",
+    "nest.down",
+    "nest.utilisation",
+    "nest.waste_mm2",
+    "nest.sheet_mm",
+    "nest.sheet_mm[0]",
+    "nest.sheet_mm[1]",
+)
+
+
+def _run_folded(
+    mission: Mission, design: FoldedDesign, runner: CallRunner
+) -> MissionResult:
+    """Flatten the part, build the solid, assess it, and check what the rung claims.
+
+    **Unfolding comes first, and it is the one step that stops everything.** A blank
+    that does not exist — legs that consume more than the flange has, a flat pattern
+    that overlaps itself — means the part cannot be made from sheet at all, and every
+    number after it would describe a different object. The formability report and the
+    volume reconciliation both read the pattern, so there is nothing to run without it.
+
+    **The solid is built even when the part is unformable**, which is the opposite
+    choice from `_run_assembly` stopping at the first component that would not build,
+    and it is the right one for the opposite reason. A member that did not build
+    leaves a *hole* in the clash check and the mass roll-up, so what follows it is a
+    check of a different machine. A bend tighter than the material takes is a process
+    refusal about geometry that is perfectly well defined: the solid, its mass and its
+    reconciliation against the blank are all still true and are all still worth seeing
+    beside the reason it cannot be pressed.
+
+    **A formability *failure* fails the rung on its own; an *unmeasured* finding does
+    not.** A failure is `app.sheetmetal` refusing — the radius cracks the grade, the
+    flange drops into the die — and a rung that shipped a part the package refused
+    would be reporting on nothing. An unmeasured finding is a gap in the *inputs* (a
+    material with no minimum bend radius on record, a hem the die-shoulder rule cannot
+    be stated for), and whether a rung will accept one is a mission-level judgement.
+    So it is published as `formability.unmeasured_count` and M3 claims it is zero,
+    which is the same verdict arrived at somewhere a reader can see it.
+    """
+    try:
+        pattern = unfold(design.part)
+    except SheetMetalError as exc:
+        return MissionResult(
+            mission=mission,
+            outcome=MissionOutcome.FAILED,
+            folded=FoldedReport(),
+            reason=f"the part does not flatten: {exc}",
+        )
+
+    plan = compile_spec(design.spec)
+    build = execute_plan(plan, runner)
+    if not build.ok:
+        return MissionResult(
+            mission=mission,
+            outcome=MissionOutcome.FAILED,
+            build=build,
+            folded=FoldedReport(build=build, pattern=pattern),
+            reason=f"the build stopped: {build.failure}",
+        )
+
+    try:
+        formability = check_part(
+            design.part,
+            die_opening_mm=design.die_opening_mm,
+            hole_factor=design.hole_factor,
+        )
+    except SheetMetalError as exc:
+        # `check_part` refuses a die opening that is not one, and re-raises whatever
+        # `unfold` raises. The first is a caller's mistake in the declaration and the
+        # second cannot happen here, because the same part unfolded above.
+        return MissionResult(
+            mission=mission,
+            outcome=MissionOutcome.FAILED,
+            build=build,
+            folded=FoldedReport(build=build, pattern=pattern),
+            reason=f"the part could not be assessed for forming: {exc}",
+        )
+
+    nest = _nest(pattern, design.stock)
+    payload = _folded_payload(design, build, pattern, formability, nest)
+
+    # The plan's own resolved parameters, so a bound written as a formula over the
+    # design is evaluated against the values the geometry was built from.
+    checks = check_assertions(mission.assertions, payload, parameters=plan.parameters)
+    built = FoldedReport(
+        build=build,
+        pattern=pattern,
+        formability=formability,
+        nest=nest,
+        payload=payload,
+    )
+
+    problems = [str(finding) for finding in formability.failed]
+    if problems or not checks.ok:
+        reasons = []
+        if not checks.ok:
+            reasons.append(checks.summary())
+        reasons.extend(problems)
+        return MissionResult(
+            mission=mission,
+            outcome=MissionOutcome.FAILED,
+            build=build,
+            folded=built,
+            checks=checks,
+            reason="\n".join(reasons),
+        )
+    return MissionResult(
+        mission=mission,
+        outcome=MissionOutcome.PASSED,
+        build=build,
+        folded=built,
+        checks=checks,
+    )
+
+
+def _nest(pattern: FlatPattern, stock: StockSheet | None) -> NestReport | None:
+    """How many of this blank come off one sheet, grain respected.
+
+    A plain grid, and deliberately not a nesting algorithm: the blanks are laid in
+    rows and columns with no interlocking and no rotation. Two reasons, and the second
+    is the one that matters. A rectangular-extent grid is a **lower bound** on what a
+    real nest achieves, so a parts-per-sheet claim built on it is conservative in the
+    direction a cost estimate must be. And the orientation is fixed by the grain, as
+    `StockSheet` says: the blank's bend lines run along its second axis, so that axis
+    is laid across the sheet's width and the blank's first axis along its length.
+    """
+    if stock is None:
+        return None
+    blank_length, blank_width = pattern.blank_size_mm
+    across = int(stock.length_mm // blank_length) if blank_length > 0.0 else 0
+    down = int(stock.width_mm // blank_width) if blank_width > 0.0 else 0
+    return NestReport(
+        sheet=stock,
+        across=across,
+        down=down,
+        utilisation=across * down * pattern.blank_area_mm2 / stock.area_mm2,
+        blank_area_mm2=pattern.blank_area_mm2,
+    )
+
+
+def _folded_payload(
+    design: FoldedDesign,
+    build: BuildReport,
+    pattern: FlatPattern,
+    formability: FormabilityReport,
+    nest: NestReport | None,
+) -> dict[str, Any]:
+    """One measurement payload for a folded part, from four sources.
+
+    **The solid's own measurement sits at the top level, unprefixed**, for the reason
+    `_combined_payload` puts the mass roll-up there: `mass_kg`, `volume_mm3` and
+    `bounding_box_mm` are `app.kernel.measurement`'s own spellings, and a mass budget
+    or a packaging claim written against a machined part must read a folded one
+    unchanged. Everything the *blank* knows goes under `flat.`, the process findings
+    under `formability.`, the nest under `nest.` — three namespaces for three different
+    questions, so `volume_mm3` is what the part weighs and `flat.blank_volume_mm3` is
+    what the sheet it was cut from weighs, and no claim can read one meaning the other.
+
+    The number this whole rung turns on is `flat.volume_mismatch_mm3`. See
+    `_reconciliation` for what it is and why it is not zero.
+    """
+    payload: dict[str, Any] = dict(build.last_result())
+    sidecar: dict[str, Any] = dict(payload.pop(_PROVENANCE_KEY, {}) or {})
+
+    def merge(chunk: Mapping[str, Any]) -> None:
+        for key, value in chunk.items():
+            if key == _PROVENANCE_KEY:
+                sidecar.update(value)
+                continue
+            payload[key] = value
+
+    merge(_flat_payload(design, pattern, payload.get("volume_mm3")))
+    merge(_namespaced(_formability_payload(formability), "formability"))
+    merge(_nest_payload(nest))
+
+    if sidecar:
+        payload[_PROVENANCE_KEY] = sidecar
+    return payload
+
+
+def _flat_payload(
+    design: FoldedDesign, pattern: FlatPattern, solid_volume_mm3: Any
+) -> dict[str, Any]:
+    """What the blank knows about itself, plus its reconciliation against the solid.
+
+    **`app.sheetmetal` publishes no measurement payload.** `FlatPattern.to_dict()` is
+    a serialisation — nested faces, outlines, point lists — not a flat mapping an
+    assertion path can walk, and it carries no provenance. So the numbers a claim can
+    be written against are selected here, which is the same job `_combined_payload`
+    does for a product and for the same reason: the package's own dict is shaped for
+    a reader, and this one is shaped for `read_measurement`.
+
+    **An assumed K makes every number here `approximated`, not merely footnoted.**
+    `FlatPattern.provisional` is true when any bend's K has no stated basis, and the
+    flat length is a linear function of K, so the blank, its area, its volume and the
+    residual against the solid are all estimates. Writing that into the provenance
+    sidecar is what makes `AssertionReport.approximate` true and puts "(approximate)"
+    beside a claim that passed — the mechanism `app/kernel/` already has, used rather
+    than a second flag nobody reads.
+    """
+    thickness = design.part.material.thickness_mm
+    blank_volume = pattern.blank_area_mm2 * thickness
+    fold_gain = _fold_volume_gain_mm3(pattern, thickness)
+    hole_volume = _hole_volume_mm3(design.part, thickness)
+    reconciled = blank_volume + fold_gain - hole_volume
+
+    body: dict[str, Any] = {
+        "thickness_mm": thickness,
+        "convention": str(pattern.convention),
+        "grade": design.part.material.name,
+        "bend_count": float(len(pattern.bend_lines)),
+        "panel_count": float(len(pattern.faces)),
+        "hole_count": float(len(pattern.holes)),
+        "unstated_k_count": float(len(pattern.assumed_k_factors)),
+        "blank_size_mm": list(pattern.blank_size_mm),
+        "blank_area_mm2": pattern.blank_area_mm2,
+        "blank_volume_mm3": blank_volume,
+        "total_bend_allowance_mm": sum(line.allowance_mm for line in pattern.bend_lines),
+        "fold_volume_gain_mm3": fold_gain,
+        "hole_volume_mm3": hole_volume,
+        "reconciled_volume_mm3": reconciled,
+    }
+    if pattern.flat_length_mm is not None:
+        body["flat_length_mm"] = pattern.flat_length_mm
+
+    values = {line.k.value for line in pattern.bend_lines}
+    if len(values) == 1:
+        body["k_factor"] = next(iter(values))
+
+    out: dict[str, Any] = {"flat": body}
+    record: dict[str, Any]
+    if pattern.provisional:
+        record = {
+            "basis": _BASIS_APPROXIMATED,
+            "method": (
+                "closed-form bend allowance over the declared fold tree, from a "
+                "K-factor with no stated basis on "
+                + ", ".join(pattern.assumed_k_factors)
+                + " — the flat length is a linear function of K"
+            ),
+        }
+    else:
+        record = {
+            "basis": _BASIS_MEASURED,
+            "method": (
+                "closed-form bend allowance, setback and deduction over the declared "
+                "fold tree, every K carrying a cited basis"
+            ),
+        }
+    out.update(_provenance_only(_FLAT_PATHS, record))
+
+    if isinstance(solid_volume_mm3, (int, float)) and not isinstance(
+        solid_volume_mm3, bool
+    ):
+        residual = float(solid_volume_mm3) - reconciled
+        body["volume_residual_mm3"] = residual
+        body["volume_mismatch_mm3"] = abs(residual)
+    else:
+        out.update(
+            _provenance_only(
+                ("flat.volume_residual_mm3", "flat.volume_mismatch_mm3"),
+                {
+                    "basis": _BASIS_UNAVAILABLE,
+                    "reason": (
+                        "the solid reported no volume, so there is nothing to reconcile "
+                        "the blank against. The blank's own numbers stand; the claim "
+                        "that it makes this part does not."
+                    ),
+                },
+            )
+        )
+    return out
+
+
+def _fold_volume_gain_mm3(pattern: FlatPattern, thickness_mm: float) -> float:
+    """How much more the folded solid holds than the blank it was cut from.
+
+    **It is not zero, and a mission that expected it to be would fail on a correct
+    part.** The flat pattern conserves length at the *neutral axis*: a bend consumes
+    `BA = theta * (r + K*t)` of blank. A folded solid of constant thickness holds
+    `theta * t * (r + t/2)` per unit width through the same bend — the area of a
+    quarter annulus between `r` and `r + t`. Subtract, and every bend leaves
+
+        theta * t^2 * (0.5 - K) * width
+
+    of volume the blank never accounted for. It is zero only at `K = 0.5`, where the
+    neutral axis is the mid-plane and nothing is stretched. Below that the real
+    material *thins* through the bend and the constant-thickness solid does not, so
+    this is the modelling gap between the two descriptions written down rather than
+    absorbed into a tolerance — which is the only way a residual can also be used to
+    catch the two descriptions genuinely disagreeing.
+
+    The width of each bend is read off its zone rectangle: the zone is axis-aligned
+    (`unfold` guarantees it), one side is the allowance, and the other is how far the
+    bend runs.
+    """
+    total = 0.0
+    for line in pattern.bend_lines:
+        xs = [point[0] for point in line.zone[:4]]
+        ys = [point[1] for point in line.zone[:4]]
+        sides = sorted((max(xs) - min(xs), max(ys) - min(ys)))
+        # The shorter side is the allowance and the longer is the run — except for a
+        # bend whose run is shorter than its own allowance, where taking the longer
+        # would silently swap them. Match against the allowance instead.
+        width = (
+            sides[1]
+            if abs(sides[0] - line.allowance_mm) <= abs(sides[1] - line.allowance_mm)
+            else sides[0]
+        )
+        radians = math.radians(line.angle_deg)
+        total += radians * thickness_mm**2 * (0.5 - line.k.value) * width
+    return total
+
+
+def _hole_volume_mm3(part: SheetMetalPart, thickness_mm: float) -> float:
+    """Material the holes take out, at full sheet thickness.
+
+    Exact for a hole on a flat face, which is the only place `unfold` allows one — a
+    hole in a bend zone is refused by name, so there is no case here where the bore is
+    longer than the thickness.
+    """
+    total = 0.0
+    for flange, _parent, _joint in part.walk():
+        for hole in flange.holes:
+            total += math.pi * (hole.diameter_mm / 2.0) ** 2 * thickness_mm
+    return total
+
+
+def _formability_payload(report: FormabilityReport) -> dict[str, Any]:
+    """The process findings as numbers, one margin per kind of check.
+
+    **The margins are the point, not the counts.** "Nothing failed" is a verdict and
+    "the tightest bend has 0.5 mm of radius in hand" is a number, and only the second
+    tells anybody how close the part is to being refused. `Finding.margin` is already
+    `measured - limit` in the finding's own unit, so the worst of each check's margins
+    is the honest summary of that check.
+
+    The kinds are derived from the findings rather than listed here, so a check added
+    to `app.sheetmetal.formability` appears in the payload without this function
+    knowing its name — and a check *removed* leaves its path absent, which makes any
+    claim on it UNMEASURED rather than silently satisfied.
+    """
+    body: dict[str, Any] = {
+        "finding_count": float(len(report.findings)),
+        "passed_count": float(len(report.passed)),
+        "failed_count": float(len(report.failed)),
+        "unmeasured_count": float(len(report.unmeasured)),
+    }
+    margins: dict[str, list[float]] = {}
+    for finding in report.findings:
+        margin = finding.margin
+        if margin is None:
+            continue
+        margins.setdefault(_slug(finding.check), []).append(margin)
+    for name, values in margins.items():
+        body[f"{name}_margin_mm"] = min(values)
+    if margins:
+        body["worst_margin_mm"] = min(min(values) for values in margins.values())
+    return body
+
+
+def _slug(text: str) -> str:
+    """A check's name as a payload key: lower case, words joined by underscores."""
+    return "_".join(
+        "".join(character for character in word if character.isalnum()).lower()
+        for word in text.split()
+        if any(character.isalnum() for character in word)
+    )
+
+
+def _nest_payload(nest: NestReport | None) -> dict[str, Any]:
+    """The nest, or the reason there is not one."""
+    if nest is None:
+        return _provenance_only(
+            _NEST_PATHS,
+            {
+                "basis": _BASIS_UNAVAILABLE,
+                "reason": (
+                    "no stock sheet was declared for this part, so nothing says what it "
+                    "is cut from. A blank with no sheet has no yield and no waste — "
+                    "which is not the same as having no waste."
+                ),
+            },
+        )
+    out: dict[str, Any] = {
+        "nest": {
+            "sheet": nest.sheet.name,
+            "sheet_mm": [nest.sheet.length_mm, nest.sheet.width_mm],
+            "across": float(nest.across),
+            "down": float(nest.down),
+            "parts_per_sheet": float(nest.parts_per_sheet),
+            "utilisation": nest.utilisation,
+            "waste_mm2": nest.sheet.area_mm2 - nest.parts_per_sheet * nest.blank_area_mm2,
+        }
+    }
+    out.update(
+        _provenance_only(
+            _NEST_PATHS,
+            {
+                "basis": _BASIS_MEASURED,
+                "method": (
+                    "an axis-aligned grid of the blank's rectangular extent, in the one "
+                    "orientation the rolling direction allows (bend lines across the "
+                    "sheet's length). A lower bound: a real nest interlocks and this "
+                    "does not"
+                ),
+            },
+        )
+    )
+    return out
 
 
 def run_ladder(
@@ -1728,6 +2424,925 @@ _M2_UNPROVEN: Final = (
 )
 
 
+# ---------------------------------------------------------------------------
+# M3 — the sheet-metal enclosure
+# ---------------------------------------------------------------------------
+#
+# A cover: one blank of 1.5 mm cold-rolled mild steel, folded four times into a
+# channel with a return lip down each side. Five panels, four bends, two holes in
+# the roof, and a blank that has to come off a standard sheet. Small enough to build
+# and flatten in about a second, which is the point — the rung tests the machinery
+# for a part that is *folded*, not the size of the enclosure.
+#
+# What makes it a mission rather than a demo, in the four things M1 and M2 have none
+# of:
+#
+# * **Panels that must meet, through material that is not there yet.** The roof and
+#   the walls do not butt: they are joined by a bend that consumes blank and leaves
+#   none of it flat. Every dimension on the folded part is therefore two dimensions —
+#   what it measures when folded, and what it measured when it was flat — and the
+#   whole of `app/sheetmetal/` is the arithmetic between them.
+# * **A blank that has to nest.** A part that cannot be cut from the sheet the shop
+#   buys is a part nobody makes, however well it folds.
+# * **Bends that have to be formable.** Tighter than the grade takes and it cracks;
+#   a lip shorter than the die shoulder and it drops into the die; a hole too near a
+#   tangent line and it comes out oval. Three refusals, each with a source.
+# * **A K-factor, which is a judgement rather than a measurement.** See
+#   `_M3_K_FACTOR` — it is the one input on this rung that two competent engineers
+#   would hand you different numbers for, and the flat length is linear in it.
+#
+# **Two descriptions of one part.** `_m3_part` declares the cover as flanges and
+# bends, which is what unfolds; `_m3_spec` draws the same cover as a closed folded
+# cross-section and extrudes it, which is what the kernel builds. Nothing in the code
+# base connects those two sentences — see `FoldedDesign` — so both are written from
+# the constants below and `flat.volume_mismatch_mm3` is asked to be zero.
+
+_M3_THICKNESS_MM: Final = 1.5
+_M3_RADIUS_MM: Final = 2.0
+
+#: Outside, across the cover: the dimension a caliper reads over the two walls.
+_M3_WIDTH_MM: Final = 200.0
+
+#: Outside, roof to the underside of the lips.
+_M3_HEIGHT_MM: Final = 60.0
+
+#: The return lip, to the outside mould line. It is what the cover is screwed down by.
+_M3_LIP_MM: Final = 20.0
+
+#: Along the bend lines — the length of the channel, and the direction the blank is
+#: *not* folded in.
+_M3_DEPTH_MM: Final = 150.0
+
+_M3_BEND_ANGLE_DEG: Final = 90.0
+
+#: Two clearance holes in the roof, positioned in the roof's own declared coordinates:
+#: `u` from the mould line at the left-hand corner, `v` from the left-hand end.
+_M3_HOLE_MM: Final = 10.0
+_M3_HOLE_U_MM: Final = (60.0, 140.0)
+_M3_HOLE_V_MM: Final = _M3_DEPTH_MM / 2.0
+
+#: The grade in `app.sheetmetal.material`'s vocabulary, and the slug in
+#: `app.solve.materials`' vocabulary, **and nothing checks that they are the same
+#: metal.** The two catalogues are disjoint: one knows minimum bend radii and knows
+#: nothing about density, the other knows density and has never heard of a bend. So
+#: the correspondence — cold-rolled mild sheet is 1018-grade steel for the purpose of
+#: weighing it — is asserted here, by a human, in a comment. A part whose radius was
+#: honoured for mild steel and whose mass was taken from titanium would pass every
+#: check in both packages, which is the strongest argument this rung produces for a
+#: bridge between them.
+_M3_SHEET_GRADE: Final = "steel_mild_cr"
+_M3_MATERIAL_SLUG: Final = "steel-1018"
+_M3_DENSITY_KG_M3: Final = 7870.0
+
+#: The sheet the blank is cut from. See `StockSheet` for why the nest gets one
+#: orientation and not the better of two.
+_M3_STOCK: Final = StockSheet(
+    name="2000 x 1000 x 1.5 mild steel sheet", length_mm=2000.0, width_mm=1000.0
+)
+
+#: What a run of covers has to yield per sheet. A budget, like M2's mass budget and
+#: held apart from the closed forms for the same reason: the arithmetic can be right
+#: and the part still too wasteful to make.
+_M3_PARTS_PER_SHEET_FLOOR: Final = 24.0
+
+#: What the cover is allowed to weigh.
+_M3_MASS_BUDGET_KG: Final = 0.75
+
+
+def _m3_k_factor(
+    *,
+    inside_radius_mm: float = _M3_RADIUS_MM,
+    thickness_mm: float = _M3_THICKNESS_MM,
+    grade: str = _M3_SHEET_GRADE,
+) -> KFactor:
+    """Where the neutral axis is taken to sit, and why from DIN 6935 rather than ANSI.
+
+    **This is the rung's one real judgement.** `app.sheetmetal` ships two traditions
+    and refuses to pick: `machinerys_handbook()` gives K = 0.4469 at this ratio and
+    `din6935()` gives 0.3562, a 25% difference that moves the blank by
+    `_M3_K_SPREAD_MM` over four bends. Neither is wrong. What decides it here is what
+    each one *claims about itself*:
+
+    * DIN 6935 is written for **cold bending of flat steel products**, and this sheet
+      is cold-rolled mild steel. `din6935()` returns `Status.SPECIFIED` for the steel
+      family — the strongest basis in the package short of a test bend, and the only
+      one `app.solve.materials.Status.is_design_basis` accepts without a caveat.
+    * Machinery's Handbook's table covers steel too, but as a general shop table:
+      `Status.TYPICAL`, and its own note says it is "a screening value for a first
+      blank" that a production run should replace with a test bend.
+
+    A specified standard for the exact material class beats a screening table for
+    several, so DIN it is. **What that does not buy is a right answer** — see
+    `_M3_UNPROVEN`. Nothing here has been bent. The correct K for this shop's press,
+    die and coil is `measured()` off a test bend, and until somebody makes one the
+    blank length is a number from a standard rather than from the material.
+
+    `grade` is threaded through because `din6935` demotes itself to
+    `Status.ESTIMATED` off steel, naming the analogy. The *value* is the same either
+    way — the unfolding factor is a function of `r/t` alone — so declaring the cover
+    in aluminium moves the basis and not one dimension of the blank, which is exactly
+    the sort of change that has to stay visible.
+    """
+    return din6935(
+        inside_radius_mm=inside_radius_mm,
+        thickness_mm=thickness_mm,
+        family=sheet_material(grade, thickness_mm=thickness_mm).family,
+    )
+
+
+_M3_K_FACTOR: Final = _m3_k_factor()
+
+#: The other tradition, for the caveat below. Not used to build anything.
+_M3_ALTERNATIVE_K: Final = machinerys_handbook(
+    inside_radius_mm=_M3_RADIUS_MM,
+    thickness_mm=_M3_THICKNESS_MM,
+    family=sheet_material(_M3_SHEET_GRADE, thickness_mm=_M3_THICKNESS_MM).family,
+)
+
+#: How much blank the choice of tradition is worth, over this part's four bends. The
+#: number that makes "K is a judgement" concrete instead of a scruple.
+_M3_K_SPREAD_MM: Final = (
+    4.0
+    * math.radians(_M3_BEND_ANGLE_DEG)
+    * _M3_THICKNESS_MM
+    * abs(_M3_ALTERNATIVE_K.value - _M3_K_FACTOR.value)
+)
+
+# -- the closed forms -------------------------------------------------------
+#
+# Computed from the constants above, so a changed dimension moves the design and its
+# claims together. M1's rule, and it matters more here: a folded part has two sets of
+# numbers and typing either by hand would let them agree with each other and with
+# nothing else.
+
+#: `BA = (pi/180) * theta * (r + K*t)`.
+_M3_BEND_ALLOWANCE_MM: Final = (
+    math.radians(_M3_BEND_ANGLE_DEG)
+    * (_M3_RADIUS_MM + _M3_K_FACTOR.value * _M3_THICKNESS_MM)
+)
+
+#: `SB = tan(theta/2) * (r + t)`, which at 90 degrees is just `r + t`.
+_M3_SETBACK_MM: Final = (
+    math.tan(math.radians(_M3_BEND_ANGLE_DEG) / 2.0) * (_M3_RADIUS_MM + _M3_THICKNESS_MM)
+)
+_M3_BEND_DEDUCTION_MM: Final = 2.0 * _M3_SETBACK_MM - _M3_BEND_ALLOWANCE_MM
+
+#: `sum(declared lengths) - sum(bend deductions)`, over the chain lip-wall-roof-wall-lip.
+_M3_FLAT_LENGTH_MM: Final = (
+    2.0 * _M3_LIP_MM
+    + 2.0 * _M3_HEIGHT_MM
+    + _M3_WIDTH_MM
+    - 4.0 * _M3_BEND_DEDUCTION_MM
+)
+_M3_BLANK_AREA_MM2: Final = _M3_FLAT_LENGTH_MM * _M3_DEPTH_MM
+
+#: Where a bend's tangent line falls, measured in from the mould line. Every straight
+#: run below is a declared length less one or two of these.
+_M3_TANGENT_INSET_MM: Final = _M3_SETBACK_MM
+
+#: The folded cross-section: five straight runs of sheet plus four quarter annuli.
+#: `(pi/4)((r+t)^2 - r^2)` per bend, which is `(pi/4)(2rt + t^2)`.
+_M3_SECTION_AREA_MM2: Final = _M3_THICKNESS_MM * (
+    (_M3_WIDTH_MM - 2.0 * _M3_TANGENT_INSET_MM)
+    + 2.0 * (_M3_HEIGHT_MM - 2.0 * _M3_TANGENT_INSET_MM)
+    + 2.0 * (_M3_LIP_MM - _M3_TANGENT_INSET_MM)
+) + math.pi * _M3_THICKNESS_MM * (2.0 * _M3_RADIUS_MM + _M3_THICKNESS_MM)
+
+_M3_HOLE_VOLUME_MM3: Final = (
+    len(_M3_HOLE_U_MM) * math.pi * (_M3_HOLE_MM / 2.0) ** 2 * _M3_THICKNESS_MM
+)
+_M3_VOLUME_MM3: Final = _M3_SECTION_AREA_MM2 * _M3_DEPTH_MM - _M3_HOLE_VOLUME_MM3
+_M3_MASS_KG: Final = _M3_VOLUME_MM3 * 1e-9 * _M3_DENSITY_KG_M3
+
+#: Volume the blank does not account for: `theta * t^2 * (0.5 - K)` per bend, per mm
+#: of bend. See `_fold_volume_gain_mm3` — it is a property of the fold model, not a
+#: tolerance, which is why it is written out here and asserted rather than absorbed.
+_M3_FOLD_GAIN_MM3: Final = (
+    4.0
+    * math.radians(_M3_BEND_ANGLE_DEG)
+    * _M3_THICKNESS_MM**2
+    * (0.5 - _M3_K_FACTOR.value)
+    * _M3_DEPTH_MM
+)
+
+#: Both surfaces of every straight run, both arcs of every bend, the two free edges
+#: of the lips, the two ends of the channel, and what the holes swap for their bores.
+_M3_SECTION_PERIMETER_MM: Final = (
+    2.0
+    * (
+        (_M3_WIDTH_MM - 2.0 * _M3_TANGENT_INSET_MM)
+        + 2.0 * (_M3_HEIGHT_MM - 2.0 * _M3_TANGENT_INSET_MM)
+        + 2.0 * (_M3_LIP_MM - _M3_TANGENT_INSET_MM)
+    )
+    + 2.0 * _M3_THICKNESS_MM
+    + 4.0
+    * math.radians(_M3_BEND_ANGLE_DEG)
+    * (2.0 * _M3_RADIUS_MM + _M3_THICKNESS_MM)
+)
+_M3_AREA_MM2: Final = (
+    _M3_SECTION_PERIMETER_MM * _M3_DEPTH_MM
+    + 2.0 * _M3_SECTION_AREA_MM2
+    + len(_M3_HOLE_U_MM)
+    * (
+        math.pi * _M3_HOLE_MM * _M3_THICKNESS_MM
+        - 2.0 * math.pi * (_M3_HOLE_MM / 2.0) ** 2
+    )
+)
+
+
+def _m3_centre_y_mm() -> float:
+    """The centroid across the section, measured down from the roof's outer face.
+
+    The one number that knows which way up the cover is: the mass is not symmetric in
+    this axis — a roof at one end, two lips at the other — so a cover built upside
+    down has the same bounding box, the same volume, the same mass and this number
+    reflected. Every other claim on this rung would pass.
+
+    A quarter annulus's centroid is `(2/3) * (R^3 - r^3)/(R^2 - r^2) * sin(a)/a` from
+    the arc centre along the bisector, with `2a` the swept angle. Not the mid-line
+    radius `(R + r)/2`, which is the natural guess and is 0.07 mm out here — enough to
+    move the answer past the tolerance this is asserted to.
+    """
+    t = _M3_THICKNESS_MM
+    inner, outer = _M3_RADIUS_MM, _M3_RADIUS_MM + t
+    inset = _M3_TANGENT_INSET_MM
+    half = math.radians(_M3_BEND_ANGLE_DEG) / 2.0
+    arc_area = math.radians(_M3_BEND_ANGLE_DEG) / 2.0 * (outer**2 - inner**2)
+    arc_centroid = (
+        (2.0 / 3.0)
+        * (outer**3 - inner**3)
+        / (outer**2 - inner**2)
+        * math.sin(half)
+        / half
+    )
+    # The bisector of every one of the four bends is at 45 degrees to the axis, so its
+    # component along it is the centroid distance over root two — upward from the two
+    # roof corners' centres, downward from the two lip corners'.
+    lift = arc_centroid / math.sqrt(2.0)
+    pieces: tuple[tuple[float, float], ...] = (
+        (t * (_M3_WIDTH_MM - 2.0 * inset), -t / 2.0),
+        (t * (_M3_HEIGHT_MM - 2.0 * inset), -_M3_HEIGHT_MM / 2.0),
+        (t * (_M3_HEIGHT_MM - 2.0 * inset), -_M3_HEIGHT_MM / 2.0),
+        (t * (_M3_LIP_MM - inset), -_M3_HEIGHT_MM + t / 2.0),
+        (t * (_M3_LIP_MM - inset), -_M3_HEIGHT_MM + t / 2.0),
+        (arc_area, -inset + lift),
+        (arc_area, -inset + lift),
+        (arc_area, -_M3_HEIGHT_MM + inset - lift),
+        (arc_area, -_M3_HEIGHT_MM + inset - lift),
+    )
+    section_area = sum(area for area, _ in pieces)
+    section_centre = sum(area * centre for area, centre in pieces) / section_area
+    # The holes come out of the roof, so they take material from -t/2 with them.
+    return (
+        section_area * _M3_DEPTH_MM * section_centre
+        - _M3_HOLE_VOLUME_MM3 * (-_M3_THICKNESS_MM / 2.0)
+    ) / _M3_VOLUME_MM3
+
+
+_M3_CENTRE_Y_MM: Final = _m3_centre_y_mm()
+
+#: Two surfaces on each of five panels, two on each of four bends, two free edges,
+#: two ends of the channel, and one cylinder per hole.
+_M3_FACES: Final = 2 * 5 + 2 * 4 + 2 + 2 + len(_M3_HOLE_U_MM)
+
+
+def _m3_part(
+    *,
+    lip_mm: float = _M3_LIP_MM,
+    height_mm: float = _M3_HEIGHT_MM,
+    width_mm: float = _M3_WIDTH_MM,
+    depth_mm: float = _M3_DEPTH_MM,
+    inside_radius_mm: float = _M3_RADIUS_MM,
+    grade: str = _M3_SHEET_GRADE,
+    thickness_mm: float = _M3_THICKNESS_MM,
+    k: KFactor | None = None,
+    hole_u_mm: Sequence[float] = _M3_HOLE_U_MM,
+) -> SheetMetalPart:
+    """The cover as a fold tree: a chain of five flanges, dimensioned to the mould line.
+
+    **The root is a lip, not the roof, and that is load-bearing.** Rooted at the roof
+    the part is a *tree* — two walls off one panel — and `unfold` reports no flat
+    length for a tree, because a branching blank has an extent in two directions and
+    no chain to sum along. Rooted at a lip it is a chain: lip, wall, roof, wall, lip,
+    each hanging off the `FAR` edge of the last. The geometry is identical either way;
+    what the chain buys is `flat_length_mm`, which `unfold` computes twice — once from
+    the bend deductions and once from the bend allowances — and refuses to report if
+    the two disagree. That cross-check is the strongest thing in the package and it is
+    only available to a chain.
+
+    Every argument defaults to the cover as designed and exists so a test can declare
+    it **wrong** — a lip shorter than its own setback, a radius tighter than the grade
+    takes, a hole against a tangent line, a K with no basis — and watch the rung fail.
+    """
+    sheet = sheet_material(grade, thickness_mm=thickness_mm)
+    bend_k = (
+        k
+        if k is not None
+        else _m3_k_factor(
+            inside_radius_mm=inside_radius_mm, thickness_mm=thickness_mm, grade=grade
+        )
+    )
+
+    def bend(name: str) -> Bend:
+        return Bend(
+            angle_deg=_M3_BEND_ANGLE_DEG,
+            inside_radius_mm=inside_radius_mm,
+            # Every fold turns the same way round the section, which is what makes the
+            # blank a plain strip and the part a channel. `direction` changes no
+            # arithmetic — it is what the operator is told.
+            direction=BendDirection.DOWN,
+            k=bend_k,
+            name=name,
+        )
+
+    roof = Flange(
+        name="roof",
+        length_mm=width_mm,
+        holes=tuple(
+            Hole(
+                name=f"gland_{index + 1}",
+                diameter_mm=_M3_HOLE_MM,
+                u_mm=u,
+                v_mm=_M3_HOLE_V_MM,
+            )
+            for index, u in enumerate(hole_u_mm)
+        ),
+        joints=(
+            Joint(
+                edge=Edge.FAR,
+                bend=bend("corner_right"),
+                flange=Flange(
+                    name="wall_right",
+                    length_mm=height_mm,
+                    joints=(
+                        Joint(
+                            edge=Edge.FAR,
+                            bend=bend("return_right"),
+                            flange=Flange(name="lip_right", length_mm=lip_mm),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    return SheetMetalPart(
+        name="M3 enclosure cover",
+        material=sheet,
+        # No default exists and none should: a flange dimension carries nothing to say
+        # which mould line it was measured to, and the three differ by a setback per
+        # bend end — 3.5 mm each here, 14 mm of blank over four bends.
+        convention=LengthConvention.OUTSIDE_MOULD_LINE,
+        root=Flange(
+            name="lip_left",
+            length_mm=lip_mm,
+            # The only flange that declares a width. Every other spans the edge it is
+            # bent from, which is what `width_mm=None` means — see `Flange`.
+            width_mm=depth_mm,
+            joints=(
+                Joint(
+                    edge=Edge.FAR,
+                    bend=bend("return_left"),
+                    flange=Flange(
+                        name="wall_left",
+                        length_mm=height_mm,
+                        joints=(
+                            Joint(
+                                edge=Edge.FAR,
+                                bend=bend("corner_left"),
+                                flange=roof,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def _m3_section_features(
+    *,
+    thickness_mm: float,
+    inside_radius_mm: float,
+    width_mm: float,
+    height_mm: float,
+    lip_mm: float,
+    sketch: str,
+) -> list[FeatureSpec]:
+    """The folded cross-section, drawn segment by segment as one closed contour.
+
+    **This is the part the design IR cannot say.** There is no `catia_wall`, no
+    `catia_flange`, no `catia_bend` and no `catia_unfold` among the operations the
+    OCCT backend implements, so a folded solid has to be drawn the way a draughtsman
+    would have drawn one in 1975: the section, by hand, in twenty segments, and
+    extruded. Everything below is therefore *derived* geometry — the corner tangent
+    points are consequences of the fold, not dimensions somebody chose — which is why
+    the coordinates are computed here from the same constants the fold tree is built
+    from rather than written as parameter expressions. They cannot drift, because
+    there is one set of numbers; they are also not editable, which a sheet-metal
+    feature in the IR would fix.
+
+    The contour is traced once round the material: out along the left lip's underside,
+    round the outside of both bends and over the roof, down the far side and back
+    along the inside. Segment ends are computed the same way at both ends of every
+    join, so the chaining in `app.kernel.occt.sketching` sees exact matches rather
+    than near ones.
+    """
+    t, r = thickness_mm, inside_radius_mm
+    outer = r + t
+    # Where a bend's arc centre sits, in from each outside face.
+    inset = t + r
+    top, floor = 0.0, -height_mm
+    left, right = 0.0, width_mm
+
+    centres = {
+        "return_left": (inset, floor + inset),
+        "corner_left": (inset, top - inset),
+        "corner_right": (right - inset, top - inset),
+        "return_right": (right - inset, floor + inset),
+    }
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def line(start: tuple[float, float], end: tuple[float, float]) -> None:
+        calls.append(("catia_sketch_line", {"start": list(start), "end": list(end)}))
+
+    def arc(centre: tuple[float, float], radius: float, a0: float, a1: float) -> None:
+        calls.append(
+            (
+                "catia_sketch_arc",
+                {
+                    "centre": list(centre),
+                    "radius_mm": radius,
+                    "start_angle_deg": a0,
+                    "end_angle_deg": a1,
+                },
+            )
+        )
+
+    # Outside, anticlockwise from the free edge of the left lip.
+    line((lip_mm, floor), (inset, floor))
+    arc(centres["return_left"], outer, -90.0, -180.0)
+    line((left, floor + inset), (left, top - inset))
+    arc(centres["corner_left"], outer, 180.0, 90.0)
+    line((inset, top), (right - inset, top))
+    arc(centres["corner_right"], outer, 90.0, 0.0)
+    line((right, top - inset), (right, floor + inset))
+    arc(centres["return_right"], outer, 0.0, -90.0)
+    line((right - inset, floor), (right - lip_mm, floor))
+    # Up the free edge of the right lip, then back along the inside.
+    line((right - lip_mm, floor), (right - lip_mm, floor + t))
+    line((right - lip_mm, floor + t), (right - inset, floor + t))
+    arc(centres["return_right"], r, -90.0, 0.0)
+    line((right - t, floor + inset), (right - t, top - inset))
+    arc(centres["corner_right"], r, 0.0, 90.0)
+    line((right - inset, top - t), (inset, top - t))
+    arc(centres["corner_left"], r, 90.0, 180.0)
+    line((left + t, top - inset), (left + t, floor + inset))
+    arc(centres["return_left"], r, 180.0, 270.0)
+    line((inset, floor + t), (lip_mm, floor + t))
+    line((lip_mm, floor + t), (lip_mm, floor))
+
+    return [
+        FeatureSpec(
+            f"cover.seg{index + 1:02d}",
+            tool,
+            {"sketch": ref(sketch), **arguments},
+        )
+        for index, (tool, arguments) in enumerate(calls)
+    ]
+
+
+def _m3_spec(
+    *,
+    lip_mm: float = _M3_LIP_MM,
+    height_mm: float = _M3_HEIGHT_MM,
+    width_mm: float = _M3_WIDTH_MM,
+    depth_mm: float = _M3_DEPTH_MM,
+    inside_radius_mm: float = _M3_RADIUS_MM,
+    thickness_mm: float = _M3_THICKNESS_MM,
+    hole_u_mm: Sequence[float] = _M3_HOLE_U_MM,
+) -> DesignSpec:
+    """The same cover as geometry: one sketch of the section, extruded, then drilled.
+
+    The holes are pocketed from the `ZX` plane — the plane of the roof's outer face —
+    rather than drawn into the section, because they are holes through a *panel* and
+    not features of the profile. On `ZX` the sketch's own axes are `u` along world Z
+    and `v` along world X, so a hole the fold tree places at `(u, v)` on the roof is
+    drawn here at `(v_roof, u_roof)`: the roof's `u` runs along the section, which is
+    world X, and its `v` runs along the bends, which is world Z. Getting that swap
+    wrong puts the holes 80 mm out and every other number on the rung unchanged, which
+    is why the centre of mass is asserted in both of those axes.
+    """
+    return DesignSpec.of(
+        "M3 enclosure cover",
+        material=_M3_MATERIAL_SLUG,
+        parameters=[
+            Parameter("width_mm", Unit.MM, value=width_mm),
+            Parameter("height_mm", Unit.MM, value=height_mm),
+            Parameter("lip_mm", Unit.MM, value=lip_mm),
+            Parameter("depth_mm", Unit.MM, value=depth_mm),
+            Parameter("thickness_mm", Unit.MM, value=thickness_mm),
+            Parameter("radius_mm", Unit.MM, value=inside_radius_mm),
+        ],
+        features=[
+            FeatureSpec("cover.section", "catia_sketch_create", {"support": "XY"}),
+            *_m3_section_features(
+                thickness_mm=thickness_mm,
+                inside_radius_mm=inside_radius_mm,
+                width_mm=width_mm,
+                height_mm=height_mm,
+                lip_mm=lip_mm,
+                sketch="cover.section",
+            ),
+            FeatureSpec(
+                "cover.body",
+                "catia_pad",
+                {"sketch": ref("cover.section"), "length_mm": expr("depth_mm")},
+                note="Extrude the folded section along the bend lines.",
+            ),
+            *[
+                feature
+                for index, u in enumerate(hole_u_mm)
+                for feature in (
+                    FeatureSpec(
+                        f"cover.gland{index + 1}_sketch",
+                        "catia_sketch_create",
+                        {"support": "ZX"},
+                    ),
+                    FeatureSpec(
+                        f"cover.gland{index + 1}_circle",
+                        "catia_sketch_circle",
+                        {
+                            "sketch": ref(f"cover.gland{index + 1}_sketch"),
+                            "diameter_mm": _M3_HOLE_MM,
+                            "at": [_M3_HOLE_V_MM, u],
+                        },
+                    ),
+                    FeatureSpec(
+                        f"cover.gland{index + 1}",
+                        "catia_pocket",
+                        {
+                            "sketch": ref(f"cover.gland{index + 1}_sketch"),
+                            "depth_mm": expr("height_mm"),
+                            "reversed": True,
+                        },
+                        note=(
+                            "Down through the roof. The pocket runs the full height of "
+                            "the cover and meets nothing below, because the lips stop "
+                            "short of the middle."
+                        ),
+                    ),
+                )
+            ],
+        ],
+    )
+
+
+def _m3_design(
+    *,
+    lip_mm: float = _M3_LIP_MM,
+    height_mm: float = _M3_HEIGHT_MM,
+    width_mm: float = _M3_WIDTH_MM,
+    depth_mm: float = _M3_DEPTH_MM,
+    inside_radius_mm: float = _M3_RADIUS_MM,
+    drawn_radius_mm: float | None = None,
+    thickness_mm: float = _M3_THICKNESS_MM,
+    grade: str = _M3_SHEET_GRADE,
+    k: KFactor | None = None,
+    hole_u_mm: Sequence[float] = _M3_HOLE_U_MM,
+    stock: StockSheet | None = _M3_STOCK,
+    die_opening_mm: float | None = None,
+) -> FoldedDesign:
+    """The cover: the solid, the fold tree, and the sheet it comes off.
+
+    Every argument defaults to the cover as designed and exists so a test can build it
+    **wrong** — and `drawn_radius_mm` is the sharpest of them. It changes the radius
+    the *cross-section is drawn to* and leaves the fold tree alone, so the two
+    descriptions of the part quietly stop being descriptions of the same part. Nothing
+    refuses it; nothing about the solid looks odd; the blank is still a blank. The only
+    thing that moves is `flat.volume_mismatch_mm3`, which is the whole reason that
+    number is published and claimed on. `tests/test_mission_m3.py` breaks each of
+    these; a guard nobody has seen fail is a guard nobody has verified.
+    """
+    return FoldedDesign(
+        spec=_m3_spec(
+            lip_mm=lip_mm,
+            height_mm=height_mm,
+            width_mm=width_mm,
+            depth_mm=depth_mm,
+            inside_radius_mm=(
+                inside_radius_mm if drawn_radius_mm is None else drawn_radius_mm
+            ),
+            thickness_mm=thickness_mm,
+            hole_u_mm=hole_u_mm,
+        ),
+        part=_m3_part(
+            lip_mm=lip_mm,
+            height_mm=height_mm,
+            width_mm=width_mm,
+            depth_mm=depth_mm,
+            inside_radius_mm=inside_radius_mm,
+            grade=grade,
+            thickness_mm=thickness_mm,
+            k=k,
+            hole_u_mm=hole_u_mm,
+        ),
+        stock=stock,
+        die_opening_mm=die_opening_mm,
+    )
+
+
+_M3_ASSERTIONS: Final = (
+    # -- the two descriptions are of one part ------------------------------
+    Assertion(
+        name="the blank accounts for the solid",
+        measure="flat.volume_mismatch_mm3",
+        comparison="<=",
+        bound=1e-3,
+        note=(
+            "The whole rung in one number. The solid's measured volume against the "
+            "blank's area times the sheet thickness, plus what every bend adds by "
+            "keeping its thickness while the flat pattern kept its neutral-axis "
+            "length, less the holes. Two independent descriptions of one part; if they "
+            "disagree, one of them is not this part."
+        ),
+    ),
+    Assertion(
+        name="the fold adds what the neutral axis gave away",
+        measure="flat.fold_volume_gain_mm3",
+        comparison="==",
+        bound=_M3_FOLD_GAIN_MM3,
+        tolerance=1e-6,
+        note=(
+            "theta*t^2*(0.5-K) per bend, per mm of bend. Asserted on its own so that a "
+            "residual of zero cannot be reached by two errors of opposite sign."
+        ),
+    ),
+    # -- the blank ---------------------------------------------------------
+    Assertion(
+        name="the blank is the length the bend deductions say",
+        measure="flat.flat_length_mm",
+        comparison="==",
+        bound=_M3_FLAT_LENGTH_MM,
+        tolerance=1e-6,
+        note=(
+            "Five declared lengths less four bend deductions. Unpublished for a "
+            "branching part, so this doubles as the check that the cover is still a "
+            "chain and still gets unfold's own two-way cross-check."
+        ),
+    ),
+    Assertion(
+        name="the blank is as wide as the cover is long",
+        measure="flat.blank_size_mm[1]",
+        comparison="==",
+        bound=_M3_DEPTH_MM,
+        tolerance=1e-6,
+        note="Nothing is folded in this direction, so the blank keeps the full depth.",
+    ),
+    Assertion(
+        name="the blank is the area its length and width give",
+        measure="flat.blank_area_mm2",
+        comparison="==",
+        bound=_M3_BLANK_AREA_MM2,
+        tolerance=1e-3,
+        note=(
+            "Independent of the length above: unfold sums the panels and the bend zones "
+            "separately, so a bend zone left out shortens the blank and this too."
+        ),
+    ),
+    Assertion(
+        name="every bend's K-factor names a source",
+        measure="flat.unstated_k_count",
+        comparison="==",
+        bound=0.0,
+        note=(
+            "The flat length is linear in K, so a blank cut from an assumed K is a "
+            "blank whose length nobody has justified. An assumed K does not fail any "
+            "formability check — it fails this one."
+        ),
+    ),
+    Assertion(
+        name="the cover is four bends and five panels",
+        measure="flat.bend_count",
+        comparison="==",
+        bound=4.0,
+    ),
+    Assertion(
+        name="the blank carries both holes",
+        measure="flat.hole_count",
+        comparison="==",
+        bound=float(len(_M3_HOLE_U_MM)),
+        note="A hole in a bend zone is refused by unfold, so an absent one is silent.",
+    ),
+    # -- it can be pressed --------------------------------------------------
+    Assertion(
+        name="nothing about forming the cover was refused",
+        measure="formability.failed_count",
+        comparison="==",
+        bound=0.0,
+    ),
+    Assertion(
+        name="every forming check had the data it needed",
+        measure="formability.unmeasured_count",
+        comparison="==",
+        bound=0.0,
+        note=(
+            "An unmeasured check is not a pass. A material with no minimum bend radius "
+            "on record makes the one check that stops a part cracking unrunnable, and "
+            "the report would otherwise say 'nothing failed'."
+        ),
+    ),
+    Assertion(
+        name="the bends are inside the grade's minimum radius",
+        measure="formability.minimum_bend_radius_margin_mm",
+        comparison=">=",
+        bound=0.0,
+        note=(
+            "The margin rather than the verdict: 'nothing failed' does not say whether "
+            "the tightest bend has half a millimetre in hand or a hundredth."
+        ),
+    ),
+    Assertion(
+        name="every flange reaches the die shoulder",
+        measure="formability.minimum_flange_length_margin_mm",
+        comparison=">=",
+        bound=0.0,
+        note="A lip that does not reach the shoulder is not held and drops into the die.",
+    ),
+    Assertion(
+        name="the holes keep clear of the bend zones",
+        measure="formability.hole_distance_to_bend_margin_mm",
+        comparison=">=",
+        bound=0.0,
+        note=(
+            "Material within about 2t of a tangent line stretches with the bend, so a "
+            "hole there comes out oval and pulled toward it."
+        ),
+    ),
+    # -- it comes off the sheet --------------------------------------------
+    Assertion(
+        name="the sheet yields the run it has to",
+        measure="nest.parts_per_sheet",
+        comparison=">=",
+        bound=_M3_PARTS_PER_SHEET_FLOOR,
+        note=(
+            "A budget, not a measurement. A blank that folds perfectly and gets six "
+            "covers out of a sheet is a part somebody has to re-draw."
+        ),
+    ),
+    Assertion(
+        name="the blank fits across the sheet",
+        measure="nest.down",
+        comparison=">=",
+        bound=1.0,
+        note=(
+            "Separate from the yield: a blank too wide for the sheet in the one "
+            "orientation the grain allows yields nothing, and 'zero per sheet' does not "
+            "say which way it did not fit."
+        ),
+    ),
+    Assertion(
+        name="the blank fits along the sheet",
+        measure="nest.across",
+        comparison=">=",
+        bound=1.0,
+    ),
+    # -- the solid ----------------------------------------------------------
+    Assertion(
+        name="volume matches the closed form",
+        measure="volume_mm3",
+        comparison="==",
+        bound=_M3_VOLUME_MM3,
+        tolerance=1e-3,
+        note="Five straight runs, four quarter annuli, two bores. The section, extruded.",
+    ),
+    Assertion(
+        name="mass matches the closed form",
+        measure="mass_kg",
+        comparison="==",
+        bound=_M3_MASS_KG,
+        tolerance=1e-9,
+        note=(
+            "Volume times the density of 1018, which is the grade this sheet is taken "
+            "to be. Catches a material that did not attach."
+        ),
+    ),
+    Assertion(
+        name="the cover is inside its mass budget",
+        measure="mass_kg",
+        comparison="<=",
+        bound=_M3_MASS_BUDGET_KG,
+        note="A requirement: the closed form can be right and the cover still too heavy.",
+    ),
+    Assertion(
+        name="surface area matches the closed form",
+        measure="surface_area_mm2",
+        comparison="==",
+        bound=_M3_AREA_MM2,
+        tolerance=1e-3,
+        note=(
+            "Independent of volume: a bend drawn to the wrong radius on one side keeps "
+            "the volume plausible and moves this."
+        ),
+    ),
+    Assertion(
+        name="the cover is as wide as it was drawn",
+        measure="bounding_box_mm.size[0]",
+        comparison="==",
+        bound=_M3_WIDTH_MM,
+        tolerance=1e-4,
+    ),
+    Assertion(
+        name="the cover is as tall as it was drawn",
+        measure="bounding_box_mm.size[1]",
+        comparison="==",
+        bound=_M3_HEIGHT_MM,
+        tolerance=1e-4,
+    ),
+    Assertion(
+        name="the cover is as long as the blank is wide",
+        measure="bounding_box_mm.size[2]",
+        comparison="==",
+        bound=_M3_DEPTH_MM,
+        tolerance=1e-4,
+        note="The pad length, and the one dimension the fold does not touch.",
+    ),
+    Assertion(
+        name="the cover is one solid",
+        measure="solid_count",
+        comparison="==",
+        bound=1.0,
+        note="A section that did not close, or a pocket that split the part, weighs plausibly.",
+    ),
+    Assertion(
+        name="the cover has the faces the fold implies",
+        measure="face_count",
+        comparison="==",
+        bound=float(_M3_FACES),
+        note=(
+            "Two surfaces on each of five panels, two on each of four bends, two lip "
+            "edges, two ends, one bore each. Topology, independent of every size above: "
+            "a bend that came out as a sharp corner has two faces fewer and the same "
+            "bounding box."
+        ),
+    ),
+    Assertion(
+        name="the centre of mass sits on the cover's centreline",
+        measure="centre_of_mass_mm[0]",
+        comparison="==",
+        bound=_M3_WIDTH_MM / 2.0,
+        tolerance=1e-6,
+        note="Symmetry: a lip of the wrong length on one side moves this and little else.",
+    ),
+    Assertion(
+        name="the centre of mass sits at mid-length",
+        measure="centre_of_mass_mm[2]",
+        comparison="==",
+        bound=_M3_DEPTH_MM / 2.0,
+        tolerance=1e-6,
+        note=(
+            "The axis the holes are placed along. A gland drilled at the roof's u where "
+            "its v was meant lands here and nowhere else."
+        ),
+    ),
+    Assertion(
+        name="the centre of mass sits where the fold puts it",
+        measure="centre_of_mass_mm[1]",
+        comparison="==",
+        bound=_M3_CENTRE_Y_MM,
+        tolerance=1e-4,
+        note=(
+            "The one claim that knows which way up the cover is: roof at one end, lips "
+            "at the other, so a cover built upside down passes every other claim here."
+        ),
+    ),
+)
+
+#: What M3 builds and does **not** claim. Its column in the master plan's ladder is
+#: "unfolding, bend allowance, DFM"; the first two are checked here and the third is
+#: three rules out of a shop's list. Printed beside every pass, and it is why the
+#: ladder is not `complete` with M3 green.
+_M3_UNPROVEN: Final = (
+    "E17.3 — K is a standard, not a test bend: DIN 6935 and Machinery's Handbook "
+    f"differ by {_M3_K_SPREAD_MM:.2f} mm of blank over this part's four bends, and "
+    "nothing here has been bent, so the flat length is a number from a document",
+    "E17.3 — no springback: the flat pattern says how much blank a bend consumes and "
+    "nothing says what over-bend the press needs to land at 90 degrees, so this part "
+    "cannot be programmed from what is here",
+    "E17.3 — grain direction is declared and never checked: every shipped minimum bend "
+    "radius is written 'across the grain' and no material, bend or blank in the model "
+    "can say which way the grain runs, so the nest's orientation is a promise",
+    "E13.1 — three design rules, not a rule set: radius, flange reach and hole-to-bend "
+    "are what app/sheetmetal/ checks. Relief notches, tool access, weld and fastener "
+    "clearance, edge distance and burr direction are not checked by anything",
+    "E6 — no load case: a 1.5 mm cover's stiffness, its panel drumming and what the "
+    "lips carry when it is bolted down are unmeasured, so 'it folds' is a manufacturing "
+    "claim and not a structural one",
+    "E17.x — no flat-pattern drawing and no cut list: the blank exists as arithmetic "
+    "and as closed polylines, and nothing has produced the file a laser cuts from",
+)
+
+
 #: The ladder, in tractability order. Every rung of Decision 5's table appears
 #: here; `tests/test_design_missions.py` asserts that, so a rung cannot be
 #: dropped from the programme by being deleted from a list.
@@ -1754,10 +3369,9 @@ LADDER: Final[Sequence[Mission]] = (
         title="Sheet-metal enclosure",
         era="IV",
         hard="Unfolding, bend allowance, DFM",
-        needs=(
-            "E17.3 — sheet metal: wall, bend, flange, unfold, K-factor",
-            "E13.1 — design rules as assertions, per process",
-        ),
+        folded=_m3_design(),
+        assertions=_M3_ASSERTIONS,
+        unproven=_M3_UNPROVEN,
     ),
     Mission(
         rung="M4",
@@ -1830,10 +3444,14 @@ __all__ = [
     "LADDER",
     "AssemblyDesign",
     "AssemblyReport",
+    "FoldedDesign",
+    "FoldedReport",
     "LadderReport",
     "Mission",
     "MissionOutcome",
     "MissionResult",
+    "NestReport",
+    "StockSheet",
     "mission",
     "run_ladder",
     "run_mission",

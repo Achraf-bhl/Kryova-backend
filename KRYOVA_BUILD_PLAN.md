@@ -148,6 +148,25 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E18 → **M3 green, ladder 3/9, and the gap that made it hard.**
+  A 1.5 mm cold-rolled cover folded four times, 0.6166 kg, 28 closed-form claims.
+  **There is no sheet-metal operation anywhere in the OCCT backend** — no wall,
+  flange, bend or unfold among 116 handlers — and `SheetMetalPart` cannot compile
+  to a `DesignSpec`, so M3 has to declare the same cover twice: once as a fold
+  tree and once as a hand-drawn 20-segment section. The only thing holding the
+  two descriptions together is `flat.volume_mismatch_mm3`, and that assertion is
+  the best thing in the mission: a flat pattern conserves *neutral-axis length*
+  while a constant-thickness solid conserves *thickness*, so the residual is
+  **not** zero — it is `θ·t²·(0.5−K)` per mm of bend, 304.9 mm³ here — and a
+  mission expecting zero would fail on a correct part. Measured mismatch 3.2e-10.
+  It is also algebraically **K-invariant**, the K in the allowance cancelling the
+  K in the gain, so it tests the geometry and never the judgement. Six more gaps
+  reported rather than worked around, the sharpest being that
+  `steel_mild_cr` (sheetmetal) and `steel-1018` (`solve.materials`, where density
+  and therefore mass comes from) are **disjoint vocabularies with nothing
+  relating them** — demonstrated by swapping the sheet to aluminium and watching
+  the mass stay at steel density with nothing complaining.
+
 - **2026-09-06** — E10 → **`design/sensitivity.py` has a caller at last.** It has
   had none outside a test since it was written, listed in this file beside
   `app/render/` and `app/ai/vision.py` as capability wired to nothing;

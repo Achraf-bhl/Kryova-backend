@@ -111,6 +111,27 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E14/E15/E16/E17.3/P2 → **five phases opened at once**, chosen
+  because each unblocks something specific rather than because they were next in
+  the list. **E14** is what gate G3 needs and what the ladder cannot pass rung 3
+  without — M2 onwards are all assemblies, and rungs 1–3 are one part. **E17.3**
+  is the sequencing exception the plan already records: M3's enclosure and M5's
+  press both need sheet metal long before the rest of Phase 17. **E15** is
+  observability first and storage later, on the argument that the measurement
+  has to exist *before* the thing being measured — a 5,000-part clash check and
+  an optimisation loop doing hundreds of rebuilds are both landing this week, and
+  nothing today can answer "why was that slow". **P2** is the tenancy layer no
+  external user can be let near the product without. And **E16.1** is the
+  bottleneck the board already names, now with a price on it: 108 tools against
+  an `AI_TOOL_LIMIT` of 40 means 68 the agent cannot see, and the 2026-09-06 gate
+  measured that `qwen3.5:9b` — which fits entirely in this card's 8 GB — fails
+  the 40-tool payload where the 30B model at 72% CPU succeeds. Shrink the payload
+  and the faster model becomes usable, which changes what every future gate
+  costs.
+  All five are being built **with their tests**, which is the correction to
+  2026-09-06's earlier batch: seven packages landed that night with none, and
+  four sessions since have been spent paying that back.
+
 - **2026-09-06** — E7 → **the benchmark layer cannot lie, and now it is proven.**
   `benchmarks.py` is deliberately machinery and no cases, and it is the layer
   that decides whether the cases can lie when they arrive. The failure it exists

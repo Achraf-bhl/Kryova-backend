@@ -22,6 +22,7 @@ from typing import Any
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
+from app.ai.planning import Objective, extract_objectives
 from app.ai.prompts import STATE_CLOSE, STATE_OPEN
 from app.ai.resume import resume_lines
 from app.ai.sanitise import sanitise_untrusted
@@ -400,6 +401,64 @@ def _catia_ui_language(db: Session, user_id: str, conversation: Conversation) ->
     return None
 
 
+#: How many stated requirements the block will carry. A request that names more
+#: than this is a specification, and the tail of it belongs in a document rather
+#: than in every turn's prompt.
+MAX_OBJECTIVES = 8
+
+
+def _requirement_lines(conversation: Conversation) -> list[str]:
+    """What the engineer asked for, held where the context window cannot trim it.
+
+    Master plan 16.2's first step, wired (2026-09-06). `app/ai/planning.py` has
+    been a tested library with no consumer since it was written, for a stated
+    reason -- half-wiring it would add a schema to the payload 16.1 is
+    shrinking. That reason does not apply here: `plan_for` is regex over the
+    user's own words, so this costs one model call of nothing and adds no
+    schema at all.
+
+    What it is for, measured twice on the same day. Attempt 3 (2026-09-06):
+    six stated requirements, three built, and a closing report of success,
+    because nothing was holding the list. Ladder prompt H4 run 9, the same
+    evening: the request states a load, a reach, a material and a factor of
+    safety, and the agent -- twenty rounds in, with the system prompt telling
+    it in as many words that a requirement is not a missing dimension --
+    asked the user for the width, the thickness and the wall thickness. The
+    prompt says the right thing and is read once, at the top of a window that
+    is being trimmed from the front. This is beside the user's message, on
+    every turn, in their own words.
+
+    Built from every user turn, not just the newest: the request is usually
+    the first one, and "yes, go ahead" three turns later must not erase it.
+    """
+    seen: set[str] = set()
+    objectives: list[Objective] = []
+    for message in conversation.messages:
+        if message.role != MessageRole.USER or not message.content:
+            continue
+        for objective in extract_objectives(str(message.content)):
+            key = " ".join(objective.text.lower().split())
+            if key in seen:
+                continue
+            seen.add(key)
+            objectives.append(objective)
+    if not objectives:
+        return []
+
+    lines = ["requirements_stated (from the user's own words, none of them measured yet):"]
+    for objective in objectives[:MAX_OBJECTIVES]:
+        lines.append(f"  - {_clean(objective.text)}")
+    if len(objectives) > MAX_OBJECTIVES:
+        lines.append(f"  - ... and {len(objectives) - MAX_OBJECTIVES} more")
+    lines.append(
+        "These are requirements, not questions to put back to the user. A load, a "
+        "reach, a span, a material or a factor of safety is where a dimension comes "
+        "from -- derive it, say what you derived it from, and build. Not checked is "
+        "not the same as fine: measure each of these before saying the part is done."
+    )
+    return lines
+
+
 def build_state_block(db: Session, user: User, conversation: Conversation) -> str:
     """Render the current truth for one conversation, as fenced text.
 
@@ -444,6 +503,10 @@ def build_state_block(db: Session, user: User, conversation: Conversation) -> st
     # summariser have been trimming, and the loose ends are exactly what they
     # trim first. See `resume.py`.
     lines.extend(resume_lines(db, conversation.id))
+    # What was *asked for*, beside what was done. The two are complements and
+    # neither can be derived from the other -- one is a log of calls, the other
+    # a list of requirements.
+    lines.extend(_requirement_lines(conversation))
     lines.extend(_catia_reference_lines(conversation, seat_language))
 
     body = "\n".join(lines)

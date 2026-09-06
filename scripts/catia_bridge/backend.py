@@ -16,7 +16,7 @@ import inspect
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .generated_tools import TOOL_METHODS
+from .generated_tools import TOOL_METHODS, TOOLS
 
 
 class CatiaOperationError(RuntimeError):
@@ -456,6 +456,59 @@ def implemented_tools(backend: CatiaBackend) -> tuple[str, ...]:
             if callable(getattr(backend, method, None))
         )
     )
+
+
+def narrowed_options(backend: CatiaBackend) -> dict[str, list[str]]:
+    """Per tool, the advertised options this backend's method cannot take.
+
+    The other half of `implemented_tools`. That one answers "can this bridge
+    run this tool at all", and the server uses it so the model is never offered
+    a tool that would fail on the workstation it is connected to. This answers
+    the same question one level down -- "can it take this *argument*" -- and
+    exists because the answer was measured to cost a round.
+
+    Ladder prompt H4 run 9, 2026-09-06, on a real V5-R33 seat:
+
+        CATIA: pad -- CATIA refused catia_pad: catia_pad accepts 'limit' in
+        its schema, but this bridge does not implement that option yet.
+
+    The refusal is a good one -- it says what to do and the retry without
+    `limit` worked. It is still a round of twenty spent discovering something
+    this process knew before the conversation started. Nineteen tools carry
+    that gap today (`tests/test_backend_signatures.py::KNOWN_NARROWER`), so it
+    is not one tool's oversight, it is a seam with no report across it.
+
+    Structural, like `implemented_tools`: the advertised names come from the
+    generated table, the accepted ones from the live signature, so this cannot
+    drift from what the method will actually do -- it *is* what the method will
+    actually do.
+    """
+    narrowed: dict[str, list[str]] = {}
+    for tool, method in TOOL_METHODS.items():
+        function = getattr(backend, method, None)
+        if not callable(function):
+            continue
+        entry = TOOLS.get(tool)
+        if entry is None:
+            continue
+        advertised = set((entry[1] or {}).get("properties") or {})
+        if not advertised:
+            continue
+        try:
+            parameters = inspect.signature(function).parameters
+        except (TypeError, ValueError):  # pragma: no cover - a builtin
+            continue
+        if any(p.kind is p.VAR_KEYWORD for p in parameters.values()):
+            continue
+        accepted = {
+            name
+            for name, p in parameters.items()
+            if p.kind in (p.KEYWORD_ONLY, p.POSITIONAL_OR_KEYWORD)
+        }
+        missing = sorted(advertised - accepted)
+        if missing:
+            narrowed[tool] = missing
+    return narrowed
 
 
 def unimplemented_options(

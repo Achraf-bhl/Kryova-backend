@@ -35,6 +35,7 @@ from .backend import (
     CatiaBackend,
     CatiaOperationError,
     implemented_tools,
+    narrowed_options,
     unimplemented_options,
     unsupported,
 )
@@ -95,6 +96,13 @@ class BridgeSession:
             # and an older daemon connecting to a newer server degrades to
             # "fewer tools" instead of "some tools mysteriously error".
             "tools": list(implemented_tools(self.backend)),
+            # And, per tool, the advertised options this backend's method
+            # cannot take. The server strips them from the schema it offers, so
+            # the model is never shown an argument that would come back as a
+            # refusal. Measured on ladder prompt H4 run 9 (2026-09-06): one of
+            # twenty rounds spent discovering that `catia_pad` has no `limit`
+            # on this build.
+            "narrowed": narrowed_options(self.backend),
         }
 
     def handle_frame(self, raw: str) -> None:

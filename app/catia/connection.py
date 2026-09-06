@@ -181,9 +181,26 @@ class BridgeHello:
     #: offered nothing at all.
     tools: tuple[str, ...] = ()
 
+    #: Per tool, the advertised options this daemon's method cannot take. The
+    #: registry is one declaration read by four consumers and only the backend
+    #: method is hand-written, so it is the only one that can fall behind --
+    #: nineteen operations do today. Reported rather than discovered, because
+    #: discovering it costs a round of the agent's turn: ladder prompt H4 run 9
+    #: (2026-09-06) spent one finding out that `catia_pad` has no `limit` here.
+    #:
+    #: Empty means the daemon predates this field, which is read as "it can
+    #: take everything advertised" -- the same permissive reading `tools` gets,
+    #: and for the same reason: the alternative would silently strip arguments
+    #: from a daemon that supports them.
+    narrowed: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
     def offers(self, tool: str) -> bool:
         """Whether this daemon can run `tool`. Permissive when it did not say."""
         return not self.tools or tool in self.tools
+
+    def unavailable_options(self, tool: str) -> tuple[str, ...]:
+        """Which of `tool`'s advertised options this daemon cannot take."""
+        return self.narrowed.get(tool, ())
 
     @classmethod
     def parse(cls, frame: dict[str, Any]) -> "BridgeHello":
@@ -195,6 +212,14 @@ class BridgeHello:
         tools = frame.get("tools") or []
         if not isinstance(tools, list):
             raise BridgeError("hello.tools must be a list of strings")
+        narrowed_frame = frame.get("narrowed") or {}
+        if not isinstance(narrowed_frame, dict):
+            raise BridgeError("hello.narrowed must be an object")
+        narrowed = {
+            str(tool): tuple(str(option) for option in options)
+            for tool, options in narrowed_frame.items()
+            if isinstance(options, (list, tuple))
+        }
         return cls(
             # Everything here is peer-supplied and lands in the UI and in
             # prompts, so it is truncated at the door. Full sanitising happens
@@ -213,6 +238,14 @@ class BridgeHello:
             # and a peer claiming tens of thousands of tools is cut off rather
             # than believed.
             tools=tuple(str(t)[:120] for t in tools[:1024]),
+            # Bounded the same way, and per tool as well as overall: this is
+            # peer-supplied and every entry becomes a property stripped from a
+            # schema, so a hostile daemon can at worst offer the model fewer
+            # arguments than it has.
+            narrowed={
+                tool[:120]: tuple(option[:120] for option in options[:64])
+                for tool, options in list(narrowed.items())[:1024]
+            },
         )
 
 

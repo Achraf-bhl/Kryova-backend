@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -348,7 +349,42 @@ def offered_tool_specs(db: Session, user_id: str) -> list[CatiaToolSpec]:
     if found is None:
         return list(CATIA_TOOL_SPECS)
     hello = found[1].hello
-    return [spec for spec in CATIA_TOOL_SPECS if hello.offers(spec.name)]
+    return [
+        _without_unavailable_options(spec, hello.unavailable_options(spec.name))
+        for spec in CATIA_TOOL_SPECS
+        if hello.offers(spec.name)
+    ]
+
+
+def _without_unavailable_options(
+    spec: CatiaToolSpec, unavailable: tuple[str, ...]
+) -> CatiaToolSpec:
+    """`spec` with the options this daemon cannot take removed from its schema.
+
+    The tool-level intersection above stops the model being offered a tool that
+    would fail. This is the same argument one level down, and it was measured
+    the same way: on ladder prompt H4 run 9 (2026-09-06) the agent asked
+    `catia_pad` for `limit`, was correctly refused because the COM method has
+    no such parameter, and spent one of its twenty rounds on it. Nineteen tools
+    carry that gap, so it is a seam with no report across it rather than one
+    tool's oversight.
+
+    An option that is *required* is not stripped -- a tool that cannot take a
+    required argument is broken, not narrowed, and hiding the field would turn
+    a clear refusal into a call that fails for a reason nothing names. That
+    case does not occur today and is left visible on purpose.
+    """
+    if not unavailable:
+        return spec
+    parameters = spec.parameters
+    properties = dict(parameters.get("properties") or {})
+    required = set(parameters.get("required") or ())
+    strippable = [name for name in unavailable if name in properties and name not in required]
+    if not strippable:
+        return spec
+    for name in strippable:
+        properties.pop(name)
+    return replace(spec, parameters={**parameters, "properties": properties})
 
 
 def catia_available(db: Session, user_id: str) -> bool:

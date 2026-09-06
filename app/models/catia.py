@@ -30,7 +30,8 @@ from sqlalchemy import (
     String,
     Text,
     TypeDecorator,
-    UniqueConstraint,
+    text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -138,11 +139,26 @@ class CatiaDevice(UUIDPrimaryKey, TimestampMixin, Base):
 
 
 class CatiaDocument(UUIDPrimaryKey, TimestampMixin, Base):
-    """The CATIA document bound to one conversation.
+    """A CATIA document a conversation owns. One of them is active.
 
-    `conversation_id` is unique: a conversation owns at most one document. That
-    is the product mechanic, not an implementation detail -- it is what lets the
-    agent say "open the part we were working on" without the user naming a file.
+    **A conversation owns a set of documents, and exactly one is active**
+    (Phase 14, 2026-09-06). It owned exactly one until then, and the unique
+    constraint on `conversation_id` was the product mechanic that let the
+    agent say "the part we were working on" without naming a file. That
+    mechanic survives -- it is `is_active` now -- and the constraint could not,
+    because an assembly is inherently several documents: a shaft, a bushing and
+    the product that holds them. Measured on ladder prompt S2: with one
+    document per conversation there was no route to a second part on a seat
+    at all, and the agent called `catia_new_part` seven times at a refusal.
+
+    Starting a second part *deactivates* the first rather than replacing it.
+    Every row keeps its path and its checkpoints (they are keyed on
+    `document_id`), so nothing is abandoned and `catia_open_document` can
+    bring any of them back. That is the property `dispatch.py` guards at
+    length for `catia_close_document`, and it holds here for the same reason.
+
+    `doc_type` says what the file is -- a `part` or a `product` -- because the
+    two are activated the same way and assembled differently.
 
     `remote_path` is opaque here on purpose. The daemon resolves every path
     inside its own working directory and the model never sees or supplies one;
@@ -152,13 +168,29 @@ class CatiaDocument(UUIDPrimaryKey, TimestampMixin, Base):
 
     __tablename__ = "catia_documents"
     __table_args__ = (
-        UniqueConstraint("conversation_id", name="uq_catia_document_conversation"),
         Index("ix_catia_documents_device_id", "device_id"),
+        # One active document per conversation. A partial unique index rather
+        # than an application rule, so two rows can never both claim to be
+        # the one every scoped call is sent to -- the failure the binding was
+        # introduced to end, and the one a race between two tabs would produce.
+        Index(
+            "uq_catia_document_active",
+            "conversation_id",
+            unique=True,
+            postgresql_where=text("is_active"),
+            sqlite_where=text("is_active"),
+        ),
     )
 
     conversation_id: Mapped[str] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), index=True
     )
+    #: Whether this is the document every scoped call is sent to. Exactly one
+    #: per conversation, enforced by the partial unique index above.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    #: `part` or `product`. Both are documents to CATIA; only one holds
+    #: geometry of its own.
+    doc_type: Mapped[str] = mapped_column(String(16), default="part", server_default="part")
     #: The device the document lives on. SET NULL rather than CASCADE: revoking
     #: a laptop must not erase the record of what was built on it.
     device_id: Mapped[str | None] = mapped_column(

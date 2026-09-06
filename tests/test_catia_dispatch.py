@@ -471,10 +471,17 @@ def test_new_part_binds_the_document_to_the_conversation(wired, db_session):
     assert document.remote_path == "C:\\work\\Bracket.CATPart"
 
 
-def test_a_second_new_part_rebinds_rather_than_creating_a_second_document(wired, db_session):
+def test_a_second_new_part_adds_a_document_and_keeps_one_active(wired, db_session):
+    """Until Phase 14 (2026-09-06) this asserted one row: a second part
+    *rebound* the conversation. On a seat it now adds a row and deactivates the
+    first, so an assembly has somewhere to put its second part -- see
+    `test_multi_document.py`. The invariant that survives is the one the old
+    constraint was really for: exactly one document is the active one."""
     run(wired, "catia_new_part", {"name": "Bracket"})
     run(wired, "catia_new_part", {"name": "Housing"})
-    assert len(list(db_session.scalars(select(CatiaDocument)))) == 1
+    rows = list(db_session.scalars(select(CatiaDocument)))
+    assert len(rows) == 2
+    assert sum(1 for row in rows if row.is_active) == 1
 
 
 def test_reopening_sends_the_stored_path_the_model_never_supplied(wired):

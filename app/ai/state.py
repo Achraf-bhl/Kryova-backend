@@ -83,9 +83,36 @@ def bound_document_name(db: Session, conversation_id: str | None) -> str | None:
     from sqlalchemy import select as _select
 
     document = db.scalar(
-        _select(CatiaDocument).where(CatiaDocument.conversation_id == conversation_id)
+        _select(CatiaDocument).where(
+            CatiaDocument.conversation_id == conversation_id,
+            CatiaDocument.is_active.is_(True),
+        )
     )
     return document.doc_name if document is not None else None
+
+
+def owned_documents(db: Session, conversation_id: str | None) -> list[tuple[str, str, bool]]:
+    """Every document this conversation owns, as (name, type, active), oldest first.
+
+    Phase 14: a conversation owns a set of documents and one is active. The
+    agent has to be able to see the set, or "now assemble the shaft and the
+    bushing" is a request about two names it cannot know it holds. Same guard
+    as `bound_document_name`, same reason.
+    """
+    if not conversation_id:
+        return []
+    try:
+        from app.models.catia import CatiaDocument
+    except Exception:  # noqa: BLE001 - optional package
+        return []
+    from sqlalchemy import select as _select
+
+    rows = db.scalars(
+        _select(CatiaDocument)
+        .where(CatiaDocument.conversation_id == conversation_id)
+        .order_by(CatiaDocument.created_at)
+    ).all()
+    return [(row.doc_name, row.doc_type, bool(row.is_active)) for row in rows]
 
 
 def _catia_available(db: Session, user_id: str) -> bool | None:
@@ -217,6 +244,7 @@ def _catia_lines(
     available: bool | None,
     document: str | None,
     seat_language: str | None = None,
+    owned: list[tuple[str, str, bool]] | None = None,
 ) -> list[str]:
     if available is None and not document:
         return []
@@ -283,12 +311,25 @@ def _catia_lines(
         return lines
 
     lines.append(
-        f"catia_document: {_clean(document)} -- bound to this conversation. Every "
-        "CATIA tool is sent scoped to it and the bridge activates it first, "
-        "reopening it if CATIA was restarted, so there is nothing to reopen by "
-        "hand. Only call catia_open_document if a tool tells you the file is gone "
-        "from the workstation."
+        f"catia_document: {_clean(document)} -- the active document of this "
+        "conversation. Every CATIA tool is sent scoped to it and the bridge "
+        "activates it first, reopening it if CATIA was restarted, so there is "
+        "nothing to reopen by hand."
     )
+    if owned and len(owned) > 1:
+        # The set, because an assembly is several documents and the agent
+        # cannot assemble names it does not know it holds. Phase 14.
+        described = ", ".join(
+            f"{_clean(name)} ({kind}{', active' if active else ''})"
+            for name, kind, active in owned
+        )
+        lines.append(
+            f"catia_documents: this conversation owns {len(owned)} documents: "
+            f"{described}. Switch with catia_open_document name=<one of these>; "
+            "catia_new_part starts another and makes it active. To assemble them, "
+            "catia_product_create then catia_component_add kind=existing "
+            "document=<name> for each part."
+        )
     state = conversation.catia_state or {}
     # The material is a decision, not a measurement, and it is the one thing the
     # transcript held that nothing here reported. Asked "what material did we
@@ -496,6 +537,7 @@ def build_state_block(db: Session, user: User, conversation: Conversation) -> st
             _catia_available(db, user.id),
             bound_document_name(db, conversation.id),
             seat_language,
+            owned_documents(db, conversation.id),
         )
     )
     # What this conversation already did, read from the operation log rather

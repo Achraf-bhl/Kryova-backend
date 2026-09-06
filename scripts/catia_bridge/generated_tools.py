@@ -47,7 +47,18 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
     ),
     "catia_open_document": (
         WRITE,
-        {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "Which of this conversation's documents to open, by the name it was created with. Omit to reopen the active one.",
+                }
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
         ("doc_name", "remote_path", "fallback_checkpoint"),
     ),
     "catia_close_document": (
@@ -5442,7 +5453,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 120,
-                    "description": "The document to instantiate, for 'existing'.",
+                    "description": "The document to instantiate, for 'existing': the name of a part this conversation built with catia_new_part, or of a document already open in CATIA.",
                 },
                 "source": {
                     "type": "string",

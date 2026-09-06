@@ -544,7 +544,10 @@ def list_checkpoints(
     approval token below is minted.
     """
     document = db.scalar(
-        select(CatiaDocument).where(CatiaDocument.conversation_id == conversation_id)
+        select(CatiaDocument).where(
+            CatiaDocument.conversation_id == conversation_id,
+            CatiaDocument.is_active.is_(True),
+        )
     )
     if document is None or document.conversation.owner_id != current_user.id:
         raise HTTPException(

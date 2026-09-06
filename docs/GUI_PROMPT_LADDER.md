@@ -444,6 +444,12 @@ tool the backend does not have (`b6635ea`). A turn also stops after three
 blocked repeats instead of spending its remaining rounds on them (`04a3679`) --
 run 1 spent seven of twenty calling `catia_new_part` at a refusal.
 
+**Then Phase 14's seat half was built (same evening).** A conversation owns a set of
+documents with one active; a second `catia_new_part` adds rather than replaces, the
+product is bound, `catia_open_document name=` switches, and `catia_component_add`
+resolves an owned part's name to its real path. S2 is buildable in principle from here
+-- run 4 is the measurement.
+
 ### S3 — Analysis, not geometry
 
 - [ ] **S3**

@@ -82,7 +82,14 @@ OPERATIONS: tuple[Operation, ...] = (
                 ),
             ),
             optional("name", new_name("A name for the new component.")),
-            optional("document", vocab.element_reference("The document to instantiate, for 'existing'.")),
+            optional(
+                "document",
+                vocab.element_reference(
+                    "The document to instantiate, for 'existing': the name of a part "
+                    "this conversation built with catia_new_part, or of a document "
+                    "already open in CATIA."
+                ),
+            ),
             optional("source", vocab.element_reference("The component to make another instance of.")),
             optional("parent", vocab.element_reference("The sub-assembly to add it under. Defaults to the root.")),
             optional("at", point3("Where to place it. Defaults to the assembly origin.")),

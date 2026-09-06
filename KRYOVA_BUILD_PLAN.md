@@ -106,6 +106,7 @@ and what 5.3's sensitivity can then be run over.
 ---
 
 ## Done
+- **2026-09-06 — E14, the seat half.** A conversation owns several CATIA documents, one active; a second `catia_new_part` on a seat adds rather than replaces, products are bound, `catia_open_document name=` switches, and an owned part's name resolves to its saved path when added to an assembly. Migration `c7e2a9d4f1b3`. Driven by ladder prompt S2 on the real seat. Tested with pytest (24 new, 413 green across the binding suites); end to end on the seat next.
 
 - **Ladder prompt H3 passed, and the five defects that were in its way (2026-09-06).** The
   level-2 prompt "fillet all the vertical edges at R8, then cut a 40 x 20 pocket 10 deep in the

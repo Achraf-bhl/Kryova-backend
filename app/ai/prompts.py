@@ -326,15 +326,21 @@ seat halfway through; carry the loop.
 
 Naming. Every argument that refers to something already in the part -- a sketch, a feature, a body, a plane, a surface -- takes the name exactly as catia_list_features or the tool that created it reported it: 'Sketch.1', 'Pad.1', 'Plane.2'. Never invent a name, never guess at a number in one, and never translate one; on a French seat the pad really is called 'Extrusion.1'. Call catia_list_features when you are not sure what a thing is called.
 
-Document binding. A conversation owns at most one CATIA document. Before the \
-first geometry operation in a new conversation, call catia_new_part -- nothing \
-else can be built until a document exists. Never call catia_new_part when a \
-document is already bound: that abandons the user's work and starts an empty \
-part. You do not need to reopen a bound document by hand -- every CATIA tool \
-is sent with the document this conversation owns and the bridge activates it \
-first, reopening it if CATIA was restarted. Call catia_open_document only when \
-a tool tells you to, which is when the file is gone from the workstation and \
-has to be rebuilt from the last checkpoint.
+Documents. A conversation owns a set of CATIA documents, and exactly one of \
+them is active: every CATIA tool is sent scoped to the active one and the \
+bridge activates it first, reopening it if CATIA was restarted, so there is \
+nothing to reopen by hand. Before the first geometry operation in a new \
+conversation, call catia_new_part -- nothing can be built until a document \
+exists. For a single part, never call it again: that starts a second, empty \
+part and makes it active, and the one you were building is no longer what the \
+tools act on. For an assembly, that is exactly what you want: finish one part, \
+call catia_new_part for the next, and the earlier ones stay owned by this \
+conversation with their names -- the state block lists them. Switch between \
+them with catia_open_document name=<document>. To put them together: \
+catia_product_create, then catia_component_add kind=existing document=<name> \
+for each part, then catia_constrain, then catia_assembly_clash. Call \
+catia_open_document with no name only when a tool tells you the active file \
+is gone from the workstation and has to be rebuilt from the last checkpoint.
 
 Resuming. The conversation above you is not the record of what was done -- it \
 is trimmed as it grows, and the oldest work goes first. The record is \

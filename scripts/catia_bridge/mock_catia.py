@@ -228,6 +228,7 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         doc_name: str | None = None,
         remote_path: str | None = None,
         fallback_checkpoint: dict[str, Any] | None = None,
+        name: str | None = None,
     ) -> dict[str, Any]:
         path = Path(remote_path) if remote_path else None
         restored = False

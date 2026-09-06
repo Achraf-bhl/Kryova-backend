@@ -1648,47 +1648,47 @@ class TestATurnStopsRepeatingItself:
 
 
 class TestTheSecondPartRefusalIsBackendAccurate:
-    """Naming a tool the backend does not have is worse than naming none.
+    """A refusal may only name a tool the backend actually has, and a seat is
+    no longer refused a second part at all.
 
     Measured on the seat, 2026-09-06, ladder prompt S2. An earlier version of
-    this refusal sent the agent to `catia_assembly_component`, and it came back
-    "There is no tool called 'catia_assembly_component'". That tool is
-    `server_only`: it is the open kernel's way of taking a component out of the
-    conversation, and there is no COM method behind it by design -- on a seat a
-    component is a file.
+    the seat's refusal sent the agent to `catia_assembly_component` -- which is
+    `server_only`, the open kernel's route -- and it came back "there is no
+    tool called that". Then Phase 14 made a conversation own several
+    documents, so on a seat `catia_new_part` with a document already active is
+    simply allowed: it starts the second part and the first stays owned.
 
-    A conversation owns one document deliberately (`dispatch` explains why
-    `catia_close_document` keeps the binding), so on a seat there is no route to
-    a second part today and the honest answer says so. Phase 14 is where that
-    changes.
+    The open kernel still refuses (one live document, replaced on new_part),
+    and its refusal names its own route, which really does exist there.
     """
 
-    def test_the_seat_is_not_sent_to_a_tool_it_does_not_have(self) -> None:
-        import inspect
+    def test_the_kernel_refusal_names_its_own_route(self) -> None:
+        from pathlib import Path
 
         from app.ai import tools as tools_module
 
-        source = inspect.getsource(tools_module.ToolBox)
-        seat_branch = source.split("if backends.is_local():")[-1]
-        # The local branch names it; the seat branch that follows must not.
-        assert "catia_assembly_component" not in seat_branch.split("raise ToolError(")[2]
+        source = Path(tools_module.__file__).read_text(encoding="utf-8")
+        at = source.index("catia_assembly_component")
+        # The only mention in a refusal sits inside the `backends.is_local()`
+        # branch -- that is the guard that makes naming it truthful. Found by
+        # walking back to the nearest such `if`, and asserting no `else:` at
+        # that indentation lies between it and the mention.
+        guard = source.rfind("if backends.is_local():", 0, at)
+        assert guard != -1
+        between = source[guard:at]
+        assert "\n            else:" not in between
+        assert source.count("catia_assembly_component") == 1
 
-    def test_the_local_branch_still_names_it(self) -> None:
-        import inspect
+    def test_a_seat_is_not_refused_a_second_part(self) -> None:
+        """The refusal that cost seven rounds is gone: no ToolError in the
+        seat's path says one conversation holds one part."""
+        from pathlib import Path
 
         from app.ai import tools as tools_module
 
-        source = inspect.getsource(tools_module.ToolBox)
-        assert "catia_assembly_component" in source
-
-    def test_the_seat_message_says_not_to_call_it_again(self) -> None:
-        """The measured failure was seven identical calls in one turn."""
-        import inspect
-
-        from app.ai import tools as tools_module
-
-        source = inspect.getsource(tools_module.ToolBox)
-        assert "Do not call catia_new_part again here" in source
+        source = Path(tools_module.__file__).read_text(encoding="utf-8")
+        assert "one conversation holds one part" not in source
+        assert "Do not call catia_new_part again here" not in source
 
     def test_every_tool_named_in_a_refusal_exists(
         self, db_session: Session, user: User, project: Project

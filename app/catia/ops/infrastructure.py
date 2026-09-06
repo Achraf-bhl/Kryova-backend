@@ -62,7 +62,12 @@ OPERATIONS: tuple[Operation, ...] = (
         summary=(
             "Create a new empty part document and make it the active one.\n"
             "Start here for anything modelled from scratch. Everything that follows "
-            "acts on this document until another is opened."
+            "acts on this document until another is opened. A conversation can own "
+            "several documents: calling this again starts a SECOND part and makes "
+            "it the active one, and the earlier part stays owned, with its name, "
+            "for catia_open_document to bring back and for an assembly to use. "
+            "So for a single part call it once; for an assembly call it once per "
+            "part."
         ),
         tier=Tier.WRITE,
         workbench=_WB,
@@ -71,14 +76,27 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation(
         name="catia_open_document",
         summary=(
-            "Reopen the document this conversation is working on.\n"
-            "Use it when CATIA has been closed and reopened, or when a tool reports "
-            "that no document is active. It restores the conversation's own document, "
-            "not an arbitrary file — the model never names a path."
+            "Open one of the documents this conversation owns and make it the "
+            "active one.\n"
+            "With `name`, switch to that part or product -- the state block lists "
+            "what the conversation owns. Without it, reopen the active document: "
+            "use that when CATIA has been closed and reopened, or when a tool "
+            "reports the file is gone from the workstation, and it is rebuilt from "
+            "the last checkpoint. It only ever opens the conversation's own "
+            "documents — the model never names a path."
         ),
         tier=Tier.WRITE,
         workbench=_WB,
-        params=(),
+        params=(
+            optional(
+                "name",
+                text(
+                    "Which of this conversation's documents to open, by the name it "
+                    "was created with. Omit to reopen the active one.",
+                    maximum=120,
+                ),
+            ),
+        ),
         server_fields=("doc_name", "remote_path", "fallback_checkpoint"),
     ),
     Operation(

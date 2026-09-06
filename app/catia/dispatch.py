@@ -119,6 +119,7 @@ _SERVER_SIDE_TOOLS = frozenset({"catia_status"})
 _NO_AUTO_CHECKPOINT = frozenset(
     {
         "catia_new_part",  # there is nothing yet to snapshot
+        "catia_product_create",  # nor here: an empty assembly is being started
         "catia_open_document",  # nothing is open yet either
         "catia_checkpoint",  # it is the checkpoint
         "catia_export_step",  # reads the model out; does not change it
@@ -165,6 +166,11 @@ _NO_AUTO_CHECKPOINT = frozenset(
 _UNSCOPED_TOOLS = frozenset(
     {
         "catia_new_part",  # creates the binding; there is nothing to return to
+        # Creates a binding too -- a product is a document, and after this call
+        # it is the active one (Phase 14). Scoping it would activate the part
+        # that was current in order to start the assembly that replaces it as
+        # current, which is work done to undo itself.
+        "catia_product_create",
         "catia_open_document",  # restores it, and is the only path that carries
         # the stored checkpoint to rebuild a lost file from
         # The other half of that pair, and unscoped for a reason of its own: a
@@ -469,14 +475,18 @@ def status_payload(db: Session, user_id: str, conversation_id: str | None) -> di
 
     document = None
     if conversation_id:
-        bound = db.scalar(
-            select(CatiaDocument).where(CatiaDocument.conversation_id == conversation_id)
-        )
+        bound = _bound_document(db, conversation_id)
         if bound is not None:
             document = {
                 "doc_name": clean_text(bound.doc_name),
+                "doc_type": bound.doc_type,
                 "latest_checkpoint_id": bound.latest_checkpoint_id,
                 "bound_at": bound.created_at.isoformat(),
+                # The set, so a client can show that an assembly is under way.
+                "owned": [
+                    {"doc_name": clean_text(d.doc_name), "doc_type": d.doc_type, "active": d.is_active}
+                    for d in _owned_documents(db, conversation_id)
+                ],
             }
 
     if not online:
@@ -1079,9 +1089,71 @@ def _send(
 
 
 def _bound_document(db: Session, conversation_id: str | None) -> CatiaDocument | None:
+    """The document every scoped call is sent to: the conversation's *active* one.
+
+    Phase 14 made a conversation own several documents; this is the one that
+    is current. The others are reachable through `_owned_documents`.
+    """
     if not conversation_id:
         return None
-    return db.scalar(select(CatiaDocument).where(CatiaDocument.conversation_id == conversation_id))
+    return db.scalar(
+        select(CatiaDocument).where(
+            CatiaDocument.conversation_id == conversation_id,
+            CatiaDocument.is_active.is_(True),
+        )
+    )
+
+
+def _owned_documents(db: Session, conversation_id: str | None) -> list[CatiaDocument]:
+    """Every document the conversation owns, oldest first."""
+    if not conversation_id:
+        return []
+    return list(
+        db.scalars(
+            select(CatiaDocument)
+            .where(CatiaDocument.conversation_id == conversation_id)
+            .order_by(CatiaDocument.created_at)
+        )
+    )
+
+
+def _owned_document_named(
+    db: Session, conversation_id: str | None, name: str
+) -> CatiaDocument | None:
+    """One of the conversation's documents by name, case-insensitively.
+
+    Exact name first; then the stem of the path the daemon saved it under, so
+    `Bracket` still finds the row whose file became `Bracket-2.CATPart`.
+    """
+    wanted = name.strip().lower()
+    if not wanted:
+        return None
+    owned = _owned_documents(db, conversation_id)
+    for document in owned:
+        if document.doc_name.lower() == wanted:
+            return document
+    for document in owned:
+        stem = (document.remote_path or "").replace("\\", "/").rsplit("/", 1)[-1]
+        stem = stem.rsplit(".", 1)[0].lower()
+        if stem == wanted:
+            return document
+    return None
+
+
+def _activate(db: Session, conversation_id: str | None, target: CatiaDocument) -> None:
+    """Make `target` the conversation's active document.
+
+    Two flushes on purpose. The unit of work issues INSERTs before UPDATEs, and
+    a partial unique index checks every statement as it lands -- so deactivating
+    the current row has to be written before the new active one, or the index
+    sees two for one instant and refuses the second.
+    """
+    for document in _owned_documents(db, conversation_id):
+        if document.is_active and document.id != target.id:
+            document.is_active = False
+    db.flush()
+    target.is_active = True
+    db.flush()
 
 
 def _document_scope(
@@ -1121,6 +1193,23 @@ def _enrich(
         return _resolve_ui(spec.name, payload, language)
 
     if spec.name == "catia_open_document":
+        owner = conversation_id or (document.conversation_id if document is not None else None)
+        wanted = str(payload.get("name") or "").strip()
+        if wanted:
+            # Phase 14: one of this conversation's documents by name, and
+            # opening it makes it the active one. Resolved here, where the
+            # rows are, so the daemon still only ever receives a path it was
+            # itself told to save to.
+            target = _owned_document_named(db, owner, wanted)
+            if target is None:
+                names = ", ".join(d.doc_name for d in _owned_documents(db, owner)) or "none"
+                raise CatiaError(
+                    f"This conversation owns no document called {wanted!r}. It owns: "
+                    f"{names}. Use one of those names, or catia_new_part to start one."
+                )
+            if not target.is_active:
+                _activate(db, owner, target)
+            document = target
         if document is None:
             raise CatiaError(
                 "This conversation has no CATIA document yet. Call catia_new_part to start one."
@@ -1133,6 +1222,17 @@ def _enrich(
         checkpoint = _latest_checkpoint(db, document)
         if checkpoint is not None:
             payload["fallback_checkpoint"] = _checkpoint_payload(db, checkpoint)
+
+    elif spec.name == "catia_component_add" and payload.get("kind") == "existing":
+        # "Add the shaft" names a part this conversation built. The daemon
+        # would look for `shaft.CATPart`, and `new_part` may have saved it as
+        # `shaft-2.CATPart`; the row knows which, so the name becomes the
+        # path here. A name that is not one of ours goes through untouched --
+        # the daemon still resolves an open document or a file of its own.
+        owner = conversation_id or (document.conversation_id if document is not None else None)
+        named = _owned_document_named(db, owner, str(payload.get("document") or ""))
+        if named is not None and named.remote_path:
+            payload["document"] = named.remote_path
 
     elif spec.name == "catia_close_document":
         if document is None:
@@ -1368,7 +1468,8 @@ def _post_process(
     raw: dict[str, Any],
 ) -> dict[str, Any]:
     """Turn a daemon result into what the agent sees, with side effects recorded."""
-    if spec.name == "catia_new_part":
+    if spec.name in ("catia_new_part", "catia_product_create"):
+        kind = "product" if spec.name == "catia_product_create" else "part"
         document = _bind_document(
             db,
             conversation_id=conversation_id,
@@ -1376,14 +1477,31 @@ def _post_process(
             doc_name=str(raw.get("doc_name") or arguments.get("name") or "Part"),
             remote_path=raw.get("remote_path"),
             existing=document,
+            doc_type=kind,
         )
-        return _clean(raw) | {"document_id": document.id}
+        owned = _owned_documents(db, conversation_id)
+        result = _clean(raw) | {"document_id": document.id, "doc_type": kind}
+        if len(owned) > 1:
+            # Say what just happened to the previous document, in the result
+            # the model reads, because "started a new part" and "lost the old
+            # one" look identical from a `Done`.
+            others = ", ".join(d.doc_name for d in owned if d.id != document.id)
+            result["note"] = (
+                f"{document.doc_name!r} is the active document now. This conversation "
+                f"still owns {others}; nothing was discarded. Switch back with "
+                "catia_open_document name=<document>."
+            )
+        return result
 
-    if spec.name == "catia_open_document" and document is not None:
-        if raw.get("remote_path"):
-            document.remote_path = str(raw["remote_path"])
-        db.flush()
-        return _clean(raw) | {"document_id": document.id}
+    if spec.name == "catia_open_document":
+        # `_enrich` may have switched the active document by name, so the row
+        # handed in is not necessarily the one that was opened. Re-read.
+        document = _bound_document(db, conversation_id) or document
+        if document is not None:
+            if raw.get("remote_path"):
+                document.remote_path = str(raw["remote_path"])
+            db.flush()
+            return _clean(raw) | {"document_id": document.id}
 
     # `catia_close_document` deliberately has no branch here: **closing keeps the
     # binding row.** This is the decision that makes the operation safe, and the
@@ -1466,30 +1584,49 @@ def _bind_document(
     doc_name: str,
     remote_path: Any,
     existing: CatiaDocument | None,
+    doc_type: str = "part",
 ) -> CatiaDocument:
-    """Record which document a conversation owns.
+    """Record a document a conversation owns, and make it the active one.
 
-    `device` is None for the open kernel, which holds its documents in this
-    process and has no seat to point at.
+    Two backends, two rules, and the difference is where the document lives:
+
+    * **A seat** (`device` set) keeps every document as a file with a path, so
+      a second `catia_new_part` *adds* a row and deactivates the current one.
+      Nothing is abandoned -- the earlier part keeps its path and its
+      checkpoints and `catia_open_document name=` brings it back. This is what
+      makes an assembly buildable at all (Phase 14; ladder prompt S2).
+    * **The open kernel** (`device` None) holds one live document in this
+      process and `catia_new_part` replaces it, so the row is *updated* in
+      place -- the contract `app/ai/tools.py` relies on for the eviction
+      recovery, where the row names something that is gone and building it
+      again rebinds cleanly rather than leaving a second row.
     """
     if conversation_id is None:
         raise CatiaError(
             "A CATIA document has to belong to a conversation, and this call was made outside one."
         )
-    if existing is not None:
-        # One document per conversation is a unique constraint, so rebinding is
-        # an update, never a second row.
+    if existing is not None and device is None:
         existing.doc_name = clean_text(doc_name, 255)
         existing.remote_path = str(remote_path) if remote_path else None
-        existing.device_id = device.id if device is not None else None
+        existing.device_id = None
+        existing.doc_type = doc_type
         db.flush()
         return existing
+
+    if existing is not None:
+        # Deactivate before inserting: the partial unique index on the active
+        # row checks each statement as it lands, and the unit of work writes
+        # INSERTs ahead of UPDATEs. See `_activate`.
+        existing.is_active = False
+        db.flush()
 
     document = CatiaDocument(
         conversation_id=conversation_id,
         device_id=device.id if device is not None else None,
         doc_name=clean_text(doc_name, 255),
         remote_path=str(remote_path) if remote_path else None,
+        doc_type=doc_type,
+        is_active=True,
     )
     db.add(document)
     db.flush()

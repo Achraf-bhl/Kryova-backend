@@ -182,7 +182,9 @@ def _object(properties: dict[str, Any], required: list[str] | None = None) -> di
 #: binding rule from prompt guidance into something the model cannot skip -- and
 #: does it without a round trip to a workstation that would only answer "no
 #: active document".
-CATIA_NO_DOCUMENT_REQUIRED = frozenset({"catia_status", "catia_new_part", "catia_open_document"})
+CATIA_NO_DOCUMENT_REQUIRED = frozenset(
+    {"catia_status", "catia_new_part", "catia_product_create", "catia_open_document"}
+)
 
 #: Result keys worth caching on the conversation for the next turn's state
 #: block. Everything else a tool returns is either transient or already in the
@@ -1696,48 +1698,20 @@ class ToolBox:
                         f"This conversation already owns the part {bound!r}, and it is "
                         "still open in memory -- there is nothing to reopen. Continue "
                         "building on it directly; call catia_list_features first if "
-                        "you need to see what already exists."
+                        "you need to see what already exists. To start a SECOND part "
+                        "for an assembly on this backend, call catia_assembly_component "
+                        "first: it records the open part as a component and closes "
+                        "it, and then catia_new_part starts the next one."
                     )
                 # No live document: the row names something that is gone, so
                 # building it again is the recovery, not a mistake to refuse.
-            else:
-                # The route to a second part is not the same on both backends,
-                # and naming the wrong one is worse than naming none: measured
-                # on the seat 2026-09-06, ladder prompt S2, an earlier version
-                # of this message sent the agent to `catia_assembly_component`,
-                # which is `server_only` -- the open kernel's way of taking a
-                # component out of the conversation, with no COM method behind
-                # it -- and it came back "there is no tool called that".
-                #
-                # On a seat there is no route today, and saying so is the
-                # honest answer. A conversation owns one document by design
-                # (`dispatch` explains why `catia_close_document` keeps the
-                # binding), and an assembly of two parts needs the product
-                # structure of Phase 14. Telling the user that is something
-                # they can act on; sending the agent round the loop again is
-                # not, and that is what seven refused `catia_new_part` calls
-                # in one turn cost.
-                if backends.is_local():
-                    raise ToolError(
-                        f"This conversation already owns the part {bound!r}, so "
-                        "catia_new_part would abandon everything already modelled. "
-                        "To carry on with it, just keep building -- call "
-                        "catia_list_features to see what is there. To start a "
-                        "SECOND part, because this is an assembly, call "
-                        "catia_assembly_component first: it records the part that "
-                        "is open now as a component and closes it, and then "
-                        "catia_new_part starts the next one."
-                    )
-                raise ToolError(
-                    f"This conversation already owns the CATIA document {bound!r}, so "
-                    "catia_new_part would abandon everything already modelled. Keep "
-                    "building on it -- call catia_list_features to see what is "
-                    "there. If you were starting a second part for an assembly: one "
-                    "conversation holds one part on a CATIA seat, so build the "
-                    "second part in a new conversation and tell the user that is "
-                    "why. Do not call catia_new_part again here; it will be refused "
-                    "for this same reason."
-                )
+            # A seat: allowed. Phase 14 made a conversation own a set of
+            # documents with one active, so `catia_new_part` here starts a
+            # second part and makes it current; `dispatch._bind_document`
+            # deactivates the previous one rather than replacing it, and
+            # the result names what is still owned. Refusing this was measured
+            # on ladder prompt S2 to cost seven identical calls in one turn
+            # and leave no route to an assembly at all.
         if name == "catia_open_document" and not bound:
             raise ToolError(
                 "This conversation has no CATIA document yet, so there is nothing to "

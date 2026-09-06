@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import math
+from pathlib import Path
 from typing import Any
 
 from ..backend import CatiaOperationError
@@ -211,7 +212,23 @@ class AssemblyMixin:
     def _add_existing(  # pragma: no cover - Windows only
         self: ComContext, children: Any, document: str
     ) -> Any:
-        """Add a document that is already open, or one saved under `documents/`."""
+        """Add a document that is already open, or one saved under `documents/`.
+
+        `document` may also be a full path, which is what the server sends when
+        the name is one of the conversation's own parts: `new_part` saves each
+        part under a path that is not always `<name>.CATPart` -- a second
+        `Bracket` lands at `Bracket-2.CATPart` -- and the row the server holds
+        knows which. Resolving a path first is what makes "assemble the shaft
+        and the bushing" reach the files those names were actually saved as.
+        """
+        as_path = Path(document)
+        if as_path.suffix.lower() in {".catpart", ".catproduct"} and as_path.is_file():
+            for index in range(1, int(self._app.Documents.Count) + 1):
+                candidate = self._app.Documents.Item(index)
+                if str(getattr(candidate, "FullName", "")).lower() == str(as_path).lower():
+                    return children.AddComponent(candidate.Product)
+            return children.AddExternalComponent(self._app.Documents.Open(str(as_path)))
+
         for index in range(1, int(self._app.Documents.Count) + 1):
             candidate = self._app.Documents.Item(index)
             if str(candidate.Name).lower() in {document.lower(), f"{document.lower()}.catpart"}:

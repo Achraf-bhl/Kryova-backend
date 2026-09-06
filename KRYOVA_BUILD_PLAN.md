@@ -113,6 +113,30 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E14 → **the product graph, and the rule that a partial answer
+  never gets the headline name.** 14.1–14.4: components and occurrences rather
+  than a tree of copies; interface contracts reusing
+  `assertions.PASSED/FAILED/UNMEASURED` verbatim and adding only *who* — a
+  violation names the counterparty; a conservative broad-phase clash check whose
+  four skip categories are counted separately; and a mass roll-up. Three
+  decisions carry it. **Occurrence numbers are declared, not positional**, so
+  inserting a leg at the head of a list renumbers nothing — the same answer
+  `app/design/spec.py` gives for features, one level up. **Party resolution goes
+  through the graph, never string matching** — and the mutation for that was
+  *initially still green*, because the first test case (`swingarm_pin` vs
+  `swingarm`) was not the realistic bug; replaced with an instance *tagged*
+  `rear` holding component `rear_suspension` beside a different component
+  genuinely named `rear`, and both text- and tag-matching now go red. And **a
+  partial result never gets the headline name**: an incomplete clash publishes
+  `checked_minimum_clearance_mm` with `minimum_clearance_mm` UNAVAILABLE,
+  because a partial clearance and a partial mass both err towards making the
+  machine look safer and lighter. 20 mutations, all red. Geometry verified by
+  hand first: two 20 mm cubes 5 mm apart measure 5.0, at 15 mm pitch overlap
+  2000 mm³ exactly, four steel cubes weigh 0.25184 kg at centre (60, 0, 10).
+  Seam reported and not taken: `dynamics.pose.Frame` has no `compose`/`invert`
+  and is mutable, which is why the frame arithmetic lives in
+  `assembly/placement.py`; making it frozen would help both packages.
+
 - **2026-09-06** — E15 → **the observability half, and a metering bug that was
   losing every job.** `QueueMeter._finished` existed as *both* a counter
   attribute and a method, so `self._meter._finished(...)` called an integer; the

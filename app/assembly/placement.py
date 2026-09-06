@@ -30,7 +30,7 @@ that is never looked at is indistinguishable from one that is not there.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from app.dynamics.pose import (
@@ -56,7 +56,24 @@ from app.dynamics.pose import (
 
 #: The frame every product structure's root sits at. Named rather than spelled inline so
 #: "the root is at the origin, unrotated" is a statement somebody can find and change.
+#:
+#: Read-only by convention, and by convention only: `pose.Frame` has `__slots__` but its
+#: two attributes are settable, so this is a shared object that could in principle be
+#: mutated out from under every default that referenced it. That is why `world()` exists
+#: and why a dataclass field defaults through it rather than through this constant —
+#: `dataclasses` refuses an unhashable default for exactly this reason, and it is right
+#: to.
 WORLD: Frame = Frame(IDENTITY, (0.0, 0.0, 0.0))
+
+
+def world() -> Frame:
+    """A fresh identity frame.
+
+    The `default_factory` for any placement field. Returning a new object rather than
+    the `WORLD` singleton means a caller that mutates a default placement damages only
+    its own instance — and `Frame` is mutable enough to make that a real possibility.
+    """
+    return Frame(IDENTITY, (0.0, 0.0, 0.0))
 
 
 def at(x_mm: float = 0.0, y_mm: float = 0.0, z_mm: float = 0.0) -> Frame:
@@ -147,7 +164,7 @@ class Box:
                 )
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Sequence[float]]) -> Box:
+    def from_payload(cls, payload: Mapping[str, Sequence[float]]) -> Box:
         """From `app.kernel.occt.metrology.bounding_box_mm`'s `{"min", "size"}` form."""
         low = tuple(float(v) for v in payload["min"])
         size = tuple(float(v) for v in payload["size"])
@@ -259,4 +276,5 @@ __all__ = [
     "invert",
     "relative",
     "turned",
+    "world",
 ]

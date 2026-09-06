@@ -215,6 +215,20 @@ def lay_out(
     and the report saying so — which is the right answer for a part that was
     built call by call and has no parameters.
     """
+    if shape is None:
+        # Checked before projecting, not after. The emptiness check below runs
+        # on the *cells*, which means it is reached only once every view has
+        # been projected — and projecting `None` does not return an empty view,
+        # it reaches `HLRBRep_Algo.Add(None)` and raises `TypeError: Add():
+        # incompatible function arguments`. That is an OCCT binding message
+        # about a C++ overload, in a traceback through the render layer, for
+        # what is really "this part has nothing in it yet".
+        raise DrawingError(
+            "There is nothing to draw: this document holds no solid. Build a pad "
+            "or a shaft before asking for a drawing — a part whose last operation "
+            "failed leaves a document that looks open and contains nothing."
+        )
+
     cells = _build_cells(shape, request)
     if not cells:
         raise DrawingError(

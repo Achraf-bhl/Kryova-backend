@@ -111,6 +111,23 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E17 → **the projection convention is real, not decorative,
+  and now proven so.** First and third angle put the views on *opposite sides*
+  of the front view, and a drawing read in the wrong one is manufactured
+  mirrored with nothing about it looking wrong. The pair of tests catches a
+  convention wired to nothing whichever way the default falls: ignoring
+  `projection` fails two, and swapping the two conventions fails two. Also
+  pinned: a dimension traced to the **parameter** that set it is distinguishable
+  from one measured off the solid — the leverage `app/design/` gives this
+  package that a CAD system reverse-engineering a face does not have — and
+  nothing on a sheet built with no traced dimensions may claim a parameter
+  provenance it does not have. One real defect fixed: `lay_out` checked for
+  emptiness *after* projecting, so a document with no solid reached
+  `HLRBRep_Algo.Add(None)` and raised `TypeError: incompatible function
+  arguments` — an OCCT binding message about a C++ overload, for what is really
+  "this part has nothing in it yet". It is refused up front now, in the register
+  the rest of the codebase uses.
+
 - **2026-09-06** — P4 → **document-borne prompt injection stops being a
   hypothetical.** `CLAUDE.md` has described it as *"a tested-against attack
   class here, not a hypothetical"* while `app/documents/` shipped without a

@@ -148,6 +148,27 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E9/P4 → **two findings that are worth more than the 163 tests
+  around them.** First: **`pip install pychrono` succeeds and installs the wrong
+  package.** The PyPI name is not Project Chrono — it is a 10 kB pure-Python
+  wheel for "managing delays, scheduling tasks, timing functions" by an unrelated
+  author, confirmed here against PyPI's own metadata. Chrono ships compiled SWIG
+  bindings through conda and can never be a `py3-none-any` wheel, so anything
+  installing cleanly under that name is something else, and adding it to
+  `requirements.txt` would have shipped a stranger's package into every
+  deployment. Now a named landmine in CLAUDE.md with the general rule: for a
+  dependency chosen by name in the technology register, **a successful import is
+  not evidence you got the thing you meant.**
+  Second: `closures.grashof` compared `s+l == p+q` in floating point, so a
+  change-point linkage of 0.1/0.3/0.5/0.7 was classified *"double-crank: both
+  input and output fully rotate"* in metres and correctly in millimetres — **the
+  answer depended on the unit typed** — and the confident half was the wrong
+  half, since `four_bar` refuses that very linkage at 0°. Fixed with `isclose`; a
+  link 1 mm off 700 mm is still told apart. Three reader defects out too, the
+  worst being that text-bearing DXF entities were silently dropped: MULTILEADER
+  is where "DEBURR ALL EDGES" lives and TOLERANCE *is* a feature control frame,
+  so a drawing's dimensional requirements were being read as an empty document.
+
 - **2026-09-06** — E13 → **the rule engine and GD&T tested, three real bugs
   out.** The one worth the session: `RuleResult.sampled` came only from
   `AssertionResult.approximate`, which resolves *silence* to "not approximate" —

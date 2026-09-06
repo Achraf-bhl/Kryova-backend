@@ -83,6 +83,25 @@ _PDF_METADATA_KEYS: tuple[str, ...] = (
 #: Anything else is a literal the drawing shows *instead of* the measurement.
 _DIMENSION_TEXT_IS_THE_MEASUREMENT = frozenset({"", "<>"})
 
+#: DXF entity types that carry words a person reads off the sheet and that this
+#: reader does not interpret -- with what each one is, so the sentence the user
+#: gets names the thing rather than a four-letter type code.
+#:
+#: **They are named, not skipped, and that is the point.** A LINE has no text
+#: and passing over it costs nothing; a MULTILEADER is where "DEBURR ALL EDGES"
+#: and "HEAT TREAT TO 45 HRC" live on a modern drawing, and a TOLERANCE is a
+#: feature control frame -- a dimensional *requirement*. Dropping those in
+#: silence produces an extraction that looks complete and is missing the
+#: engineering content, which is the failure this package exists to refuse.
+#: Reading them is a later capability; claiming to have read them is never one.
+_TEXT_BEARING_BUT_NOT_INTERPRETED: dict[str, str] = {
+    "MULTILEADER": "a leader note, whose text is held in the entity's own content block",
+    "MLEADER": "a leader note, whose text is held in the entity's own content block",
+    "TOLERANCE": "a GD&T feature control frame, whose content is a formatting-coded string",
+    "ACAD_TABLE": "a drawing table -- a bill of materials or a revision block",
+    "ATTDEF": "a block attribute definition, whose text is a prompt and a default",
+}
+
 
 def read_document(
     path: Path,
@@ -211,13 +230,28 @@ def _pdf_metadata(path: Path, source: SourceRef) -> tuple[list[Fragment], str | 
 
         info = pypdf.PdfReader(str(path)).metadata
     except ImportError:
-        return [], None
+        # Said out loud rather than returned as a quiet `None`. The pages can be
+        # read by poppler with pypdf absent, and the difference between "this
+        # PDF has no /Title" and "nobody looked" is the whole of what this
+        # package promises -- a document that never examined its own metadata
+        # must not read as one that examined it and found nothing.
+        return [], (
+            "The document metadata was not examined -- pypdf is not installed in this "
+            "deployment and it is what reads the information dictionary. The pages "
+            "were read normally. Install pypdf to see the title, author and producer."
+        )
     except Exception as exc:  # noqa: BLE001 - the pages are still worth having
         logger.debug("pypdf could not read the metadata of %s: %s", path.name, exc)
         return [], "The document metadata could not be read; the pages were read normally."
 
     if info is None:
         return [], None
+
+    # The pages may have been read by poppler while the information dictionary
+    # was read here by pypdf, and `SourceRef.reader` exists to answer "which
+    # extractor produced this". Attributing these to the page extractor would
+    # send anyone tracing a puzzling `/Title` to the wrong code.
+    metadata_source = source.read_by("pypdf", Reliability.TRANSCRIBED)
 
     fragments: list[Fragment] = []
     for key in _PDF_METADATA_KEYS:
@@ -226,7 +260,9 @@ def _pdf_metadata(path: Path, source: SourceRef) -> tuple[list[Fragment], str | 
             continue
         fragments.append(
             Fragment(
-                text=UntrustedText(f"{key.lstrip('/')}: {value}", source.at(line=None)),
+                text=UntrustedText(
+                    f"{key.lstrip('/')}: {value}", metadata_source.at(line=None)
+                ),
                 kind=FragmentKind.METADATA,
             )
         )
@@ -326,6 +362,14 @@ def _dxf_entities(
     Yields a pair per interesting entity so that a refusal travels the same path
     as a reading: the caller appends whichever half is present, and a dimension
     that could not be honestly read cannot be silently skipped.
+
+    An entity type this reader does not interpret falls into one of two groups,
+    and they are not treated alike. Geometry -- a LINE, an ARC, a HATCH -- has
+    no words on it and is passed over in silence, because reporting it would
+    bury the real content under thousands of entries. Anything in
+    `_TEXT_BEARING_BUT_NOT_INTERPRETED` *does* carry words a person reads off
+    the sheet, so it is named in an `Unread` instead: the document then says
+    what it did not read, rather than looking complete.
     """
     for entity in drawing.modelspace():
         kind = entity.dxftype()
@@ -363,6 +407,23 @@ def _dxf_entities(
 
         if kind == "DIMENSION":
             yield _dxf_dimension(entity, where)
+            continue
+
+        what_it_is = _TEXT_BEARING_BUT_NOT_INTERPRETED.get(kind)
+        if what_it_is is not None:
+            yield (
+                None,
+                Unread(
+                    where=where,
+                    what=kind,
+                    why=(
+                        f"this is {what_it_is}, and this reader does not interpret that "
+                        "entity type -- so whatever it says is not in the fragments "
+                        "above. Explode it to TEXT/MTEXT in AutoCAD and re-export, or "
+                        "tell me what it says"
+                    ),
+                ),
+            )
 
 
 def _dxf_dimension(entity: Any, where: SourceRef) -> tuple[Fragment | None, Unread | None]:

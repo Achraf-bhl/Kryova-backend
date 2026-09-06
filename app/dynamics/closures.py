@@ -66,7 +66,7 @@ def slider_crank(
 
         x = r*cos(t) + sqrt(l^2 - r^2*sin^2(t))
 
-    whose closed form is what `tests/test_dynamics_closures.py` checks against. The
+    whose closed form is what `tests/test_dynamics_kinematics.py` checks against. The
     offset case is the same loop with the slide axis displaced, which is what a real
     press crank usually is -- it trades a symmetric stroke for a lower side thrust on
     the working stroke.
@@ -280,14 +280,26 @@ def grashof(
     assumed: with `s <= p <= q <= l`, a tie `s == p` turns `s + l < p + q` into `l < q`,
     which contradicts `q <= l`. So the identity tests below cannot be ambiguous, and
     `TestGrashof` pins that with the tie cases.
+
+    **The change-point test is a relative comparison, not `==`, and that is a fix rather
+    than a nicety.** It shipped as exact float equality, and a change-point linkage of
+    0.1 / 0.3 / 0.5 / 0.7 -- s + l = p + q = 0.8 by arithmetic anybody would do in their
+    head -- came back as "Grashof double-crank: both input and output fully rotate",
+    because `0.1 + 0.7` is `0.7999999999999999` and `0.3 + 0.5` is `0.8`. The same
+    linkage in millimetres rather than metres classified correctly, so the answer
+    depended on the unit the designer typed, and the confident half of it was the wrong
+    half: `four_bar` refuses at the collinear angle of that very linkage. `rel_tol` is
+    1e-9, which on a 100 mm link is a tenth of a nanometre -- far below any distinction
+    a drawing can carry, and far above the noise of adding two decimals.
     """
     lengths = sorted([ground_mm, input_mm, coupler_mm, output_mm])
     shortest, second, third, longest = lengths
-    if shortest + longest > second + third:
+    change_point = math.isclose(shortest + longest, second + third, rel_tol=1e-9)
+    if not change_point and shortest + longest > second + third:
         return "non-Grashof: no link fully rotates, so every link is a rocker"
-    if shortest + longest == second + third:
+    if change_point:
         return (
-            "change-point linkage: shortest + longest exactly equals the other two, so "
+            "change-point linkage: shortest + longest equals the other two, so "
             "every link can fully rotate, but all four go collinear once a turn and the "
             "branch it comes out on is not determined -- a parallelogram flips to an "
             "anti-parallelogram unless something prevents it. four_bar refuses at that "

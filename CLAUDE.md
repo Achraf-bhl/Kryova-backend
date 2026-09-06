@@ -551,6 +551,19 @@ not writing, not hashing, not serving. Blobs are content-addressed (SHA-256, sha
 which drops the file only once nothing references it. Small metadata rows go to Neon; a
 400 MB STEP file never crosses the network.
 
+**`pip install pychrono` installs the wrong package, and it succeeds.** The PyPI
+name `pychrono` is not Project Chrono — it is an unrelated 10 kB `py3-none-any`
+wheel for "managing delays, scheduling tasks, timing functions", by a different
+author (github.com/striatp/Pychrono). Verified against PyPI's own metadata on
+2026-09-06. Project Chrono ships compiled SWIG bindings through conda and *can
+never* be a pure-Python wheel, so anything that installs cleanly under that name
+is something else. `app/dynamics/engine.py`'s availability probe therefore checks
+that the imported module really is Chrono rather than trusting the import — which
+is the general rule worth taking from this: **for any dependency chosen by name
+in `KRYOVA_MASTER_PLAN.md`'s technology register, a successful import is not
+evidence you got the thing you meant.** Adding it to `requirements.txt` would
+have shipped a stranger's package into every deployment.
+
 **A Python-side column default does not exist until the flush.** `UUIDPrimaryKey`
 gives `id` a `default=new_uuid`, and SQLAlchemy applies it *during* the flush — so
 anything reading `obj.id` before then gets `None`. This bit three separate times

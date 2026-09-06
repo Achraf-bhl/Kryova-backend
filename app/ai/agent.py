@@ -681,10 +681,23 @@ def stream_agent(
 
     # Out of steps. Ask for a final answer with tools withdrawn, so the user
     # gets the model's best summary instead of a bare "gave up".
+    #
+    # The requirement ledger applies here too, and this is the path where it
+    # matters most. A turn that ends on the round cap has by definition not
+    # finished, and the closing summary is written with the tools already taken
+    # away -- so the model cannot measure anything even if it wanted to, and
+    # what it produces is its best recollection. Measured on ladder prompt PRO4,
+    # 2026-09-07: seventeen steps, a C-frame built, and not one of the stated
+    # requirements -- the punching force, the lever ratio, whether the frame is
+    # stiff enough -- computed or checked. Without this the summary goes out
+    # with nothing saying so.
+    plan = _requirement_plan(conversation, steps)
+    shortfall = shortfall_note(plan)
     try:
         closing = provider.chat(
             system=system + prompts.AGENT_OUT_OF_STEPS,
-            messages=build_messages(db, owner, conversation),
+            messages=build_messages(db, owner, conversation)
+            + ([{"role": "user", "content": shortfall}] if shortfall else []),
             tools=[],
             max_tokens=max_tokens,
         )
@@ -695,6 +708,8 @@ def stream_agent(
             "I used all my tool calls for this turn without reaching an answer. "
             "Try narrowing the question."
         )
+    if shortfall:
+        text += unverified_footnote(plan)
 
     _append(db, conversation, MessageRole.ASSISTANT, content=text)
     db.commit()

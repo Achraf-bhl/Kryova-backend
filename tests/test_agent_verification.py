@@ -18,8 +18,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.ai.agent import MAX_VERIFICATION_NUDGES, run_agent
-from app.ai.provider import AssistantTurn
+from app.ai.agent import DEFAULT_MAX_STEPS, MAX_VERIFICATION_NUDGES, run_agent
+from app.ai.provider import AssistantTurn, ToolCall
 from app.models import Conversation, Project, User
 from tests import test_agent as _agent
 
@@ -144,3 +144,50 @@ class TestWhatTheUserEndsUpSeeing:
             "Which alloy should I use?",
         )
         assert "Not verified in this turn" not in reply.text
+
+
+class TestTheRoundCapClosesHonestlyToo:
+    """The path where it matters most, and the one it was missing.
+
+    A turn that ends on the round cap has by definition not finished, and the
+    closing summary is written with the tools already withdrawn -- the model
+    could not measure anything now even if it wanted to. Measured on ladder
+    prompt PRO4, 2026-09-07: seventeen steps, a C-frame built, and not one of
+    the punching force, the lever ratio or the frame stiffness computed or
+    checked. The summary went out with nothing saying so.
+    """
+
+    def test_the_summary_is_told_what_was_never_measured(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        wants_tools = AssistantTurn(
+            text="", tool_calls=[ToolCall(id="1", name="list_projects", arguments={})]
+        )
+        provider = ScriptedProvider([wants_tools] * (DEFAULT_MAX_STEPS + 1))
+        run_agent(
+            db=db_session,
+            provider=provider,
+            conversation=conversation,
+            toolbox=_toolbox(db_session, user, project),
+            user_message="Punch 6 mm holes through 3 mm steel and tell me the force",
+        )
+        # The last thing the model was shown before writing its summary.
+        assert "6 mm" in provider.last_user_text or "3 mm" in provider.last_user_text
+        assert "Not checked is not the same as fine." in provider.last_user_text
+
+    def test_the_user_sees_the_list_under_the_summary(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        wants_tools = AssistantTurn(
+            text="", tool_calls=[ToolCall(id="1", name="list_projects", arguments={})]
+        )
+        provider = ScriptedProvider([wants_tools] * (DEFAULT_MAX_STEPS + 1))
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            conversation=conversation,
+            toolbox=_toolbox(db_session, user, project),
+            user_message="Punch 6 mm holes through 3 mm steel and tell me the force",
+        )
+        assert reply.truncated is True
+        assert "Not verified in this turn" in reply.text

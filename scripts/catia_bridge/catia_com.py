@@ -911,6 +911,23 @@ class CatiaCom(
             name = name.replace("\\\\", "\\")
         return name
 
+    @staticmethod
+    def _is_measurable(parameters: Any, path: str) -> bool:  # pragma: no cover - Windows only
+        """Whether `path` names a parameter carrying a number with a unit.
+
+        The test that separates a dimension from its own metadata. A length
+        constraint publishes ``Longueur`` (mm), ``Mode`` (an enumeration) and
+        ``Activite`` (a boolean) under one name; only the first is the thing
+        a caller setting a size is talking about. Same rule
+        `list_parameters` already applies when deciding what to report.
+        """
+        try:
+            parameter = parameters.Item(path)
+            float(parameter.Value)
+        except Exception:  # noqa: BLE001 - boolean, string, or gone
+            return False
+        return bool(_unit_of(parameter))
+
     def _find_parameter(self, parameters: Any, name: str) -> Any:  # pragma: no cover
         """The parameter called `name`, by full path or by the part a human says.
 
@@ -947,6 +964,21 @@ class CatiaCom(
             for path in paths
             if wanted in [segment.lower() for segment in path.split("\\")]
         ]
+        if len(matches) > 1:
+            # One CATIA constraint publishes several parameters -- measured on
+            # the seat, S1 run 3: `width` matched `...\width\Longueur`,
+            # `...\width\Mode` and `...\width\Activité`. Those are three
+            # properties of one dimension, not three dimensions, and refusing
+            # them as ambiguous turned a working lookup back into a dead end
+            # one round from the answer.
+            #
+            # The one a caller setting a size means is the one that carries a
+            # size: `Mode` is an enumeration and `Activité` is a boolean, and
+            # neither has a unit. So a measurable match wins outright. Two
+            # measurable matches are a real ambiguity and are still refused.
+            measurable = [path for path in matches if self._is_measurable(parameters, path)]
+            if len(measurable) == 1:
+                matches = measurable
         if len(matches) == 1:
             try:
                 return parameters.Item(matches[0])

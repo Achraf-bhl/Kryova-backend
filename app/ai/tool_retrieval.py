@@ -120,6 +120,13 @@ CORE_TOOLS: Final[frozenset[str]] = frozenset(
         # in the offer that turn, so the shape of every real part -- a frame, a
         # lever, a bracket -- was reachable only by the slowest route there is.
         "catia_sketch_polyline",
+        # A turned part is as basic as a padded one, and its profile is the
+        # one that goes wrong drawn by hand -- the axis has to be on one side
+        # of it. Ladder prompt S2 run 4 (2026-09-06): nineteen rounds and one
+        # refusal drawing a Ø25 x 120 shaft's profile by hand, and then this
+        # tool, found on round eighteen, did it in one call.
+        "catia_sketch_revolve_profile",
+        "catia_shaft",
         "catia_pad",
         "catia_pocket",
         # look at your own work — the prompt requires this after every mutation

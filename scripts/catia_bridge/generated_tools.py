@@ -5618,7 +5618,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
                     "minItems": 1,
                     "maxItems": 50,
                     "items": {"type": "string", "minLength": 1, "maxLength": 120},
-                    "description": "The geometry to constrain: one element for fix, two for everything else. Name a face, edge, axis or plane of a component.",
+                    "description": "The geometry to constrain, one element for fix and two for everything else, each spelled Component/Geometry -- the component as the assembly names it and the geometry as catia_list_features reports it inside that part, e.g. 'Shaft/Plan xy' on a French seat or 'Shaft/xy plane' on an English one. A bare component name is the component itself, for fix. To make two turned parts coaxial, coincide two pairs of their origin planes: Shaft/Plan yz with Bushing/Plan yz, then Shaft/Plan zx with Bushing/Plan zx. Never invent a path like 'Shaft@axis'; only names that exist resolve.",
                 },
                 "value": {
                     "type": "number",

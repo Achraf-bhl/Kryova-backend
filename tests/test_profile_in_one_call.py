@@ -60,7 +60,7 @@ class TestThePolylineIsReachable:
         """The floor is the shortest list a part can be built with. A rule
         broad enough to re-offer the registry gives back the problem 16.1
         exists to solve."""
-        assert len(CORE_TOOLS) <= 16
+        assert len(CORE_TOOLS) <= 18
 
 
 class TestTheToolsSayWhichIsWhich:

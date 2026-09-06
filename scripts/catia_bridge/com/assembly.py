@@ -121,9 +121,22 @@ class AssemblyMixin:
         if found is not None:
             return found
         available = ", ".join(_component_names(root)[:12]) or "(none)"
+        # Measured on ladder prompt S2 turn 2 (2026-09-06): the agent sent
+        # 'Shaft@Revolution.1@axis', 'Shaft@Revolution.2@axis' and
+        # 'Shaft@Revolution.2' in three rounds. Each was refused with the
+        # component list, which was right and said nothing about *how* a
+        # reference is spelled -- so the next guess was another guess.
+        spelling = ""
+        if "@" in name or "." in name.split("/")[0]:
+            spelling = (
+                " A reference is spelled Component/Geometry -- the component as listed "
+                "here and the geometry as catia_list_features reports it inside that "
+                "part, e.g. 'Shaft/Plan xy'. A bare component name is the component "
+                "itself."
+            )
         raise CatiaOperationError(
             f"No component named {name!r} in this assembly. It contains: {available}. "
-            "Use catia_bill_of_materials to see the whole tree."
+            f"Use catia_bill_of_materials to see the whole tree.{spelling}"
         )
 
     # -- structure -----------------------------------------------------------

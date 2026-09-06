@@ -1002,15 +1002,20 @@ def _execute(
     timeout_s: float | None,
 ) -> dict[str, Any]:
     document = _bound_document(db, conversation_id)
+    # The document this call is *for*, chosen once: the checkpoint below and the
+    # send further down must agree on it, or the snapshot filed as this
+    # mutation's undo is of some other part.
+    target = _target_document(db, spec, document, conversation_id)
+    protected = target if target is not None else document
 
-    if spec.mutating and spec.name not in _NO_AUTO_CHECKPOINT and document is not None:
+    if spec.mutating and spec.name not in _NO_AUTO_CHECKPOINT and protected is not None:
         # A mutation that could not be checkpointed does not run. Refusing is
         # the whole reason checkpoints exist: an unrecoverable change made
         # because the safety net was unavailable is the worst of both.
         _auto_checkpoint(
             db,
             connection=connection,
-            document=document,
+            document=protected,
             user_id=user_id,
             label=f"before {spec.name}",
         )
@@ -1036,7 +1041,7 @@ def _execute(
         timeout_s=_timeout_for(spec, timeout_s),
         # Which document this call is for, so the daemon acts on the
         # conversation's own part rather than on whatever CATIA has in front.
-        document=_document_scope(spec, document),
+        document=_envelope(target),
         # Forwarded, not re-derived: the daemon refuses a destructive call that
         # arrives without one, and only the server can supply it.
         approval_token=(
@@ -1156,16 +1161,76 @@ def _activate(db: Session, conversation_id: str | None, target: CatiaDocument) -
     db.flush()
 
 
-def _document_scope(
-    spec: CatiaToolSpec, document: CatiaDocument | None
-) -> dict[str, Any] | None:
-    """The document envelope for one call, or None to leave the call unscoped.
+#: Workbenches whose tools act on a part's geometry and mean nothing on a
+#: product. Sent to the assembly, they are refused here with the parts by name
+#: rather than on the daemon with "activate the CATPart", which names nothing.
+_PART_WORKBENCHES = frozenset({"Sketcher", "Part Design", "Generative Shape Design"})
+
+#: Workbenches whose tools can only ever mean the conversation's product. DMU
+#: is the clash check, and a clash check of a single part is not a thing.
+_ASSEMBLY_WORKBENCHES = frozenset({"Assembly Design", "DMU Navigator"})
+
+
+def _target_document(
+    db: Session,
+    spec: CatiaToolSpec,
+    document: CatiaDocument | None,
+    conversation_id: str | None,
+) -> CatiaDocument | None:
+    """The document one call is *for*, or None to leave the call unscoped.
+
+    Chosen once per call and shared by the checkpoint and the send, because the
+    checkpoint has to snapshot the document the mutation will change and no
+    other -- `_auto_checkpoint` says why that is the worst place to get it
+    wrong.
 
     Note what is *not* here: the model. It never names a document and never sees
-    a path, so this is read straight off the binding row -- which is the only
-    thing that knows which part this conversation has been building.
+    a path, so this is read straight off the binding rows -- which are the only
+    thing that knows which documents this conversation has been building.
+
+    **Which row, by workbench** (Phase 14; measured on ladder prompt S2 turn 2,
+    2026-09-06). With the product active, `catia_constrain` reached the
+    assembly and `catia_list_features` was refused as "not a part"; the agent
+    reopened the shaft to read it, and then `catia_constrain` reported the
+    assembly "contains: (none)", because the scoped document was now the
+    shaft. Six of twenty rounds flip-flopping between two documents that were
+    both there, both owned and both needed.
+
+    So an assembly tool -- Assembly Design, or the DMU clash check -- addresses
+    the conversation's product whatever is active, because it can mean nothing
+    else; and a *mutation* of part geometry sent while a product is active is
+    refused here with the parts by name, which is the one thing the daemon's
+    refusal could not say. Reads are left alone: `catia_measure` on a product
+    is the assembly's mass, and the daemon answers it. Everything else
+    addresses the active document, as it always has.
     """
-    if document is None or spec.name in _UNSCOPED_TOOLS:
+    if spec.name in _UNSCOPED_TOOLS:
+        return None
+    if spec.workbench in _ASSEMBLY_WORKBENCHES:
+        products = [d for d in _owned_documents(db, conversation_id) if d.doc_type == "product"]
+        if products:
+            return products[-1]
+    if document is None:
+        return None
+    # Mutations only. A read on a product is a legitimate question --
+    # `catia_measure` rolls an assembly's mass up through `Product.Analyze` --
+    # and one the daemon can answer or refuse itself. What must not reach it
+    # is a pad, a pocket or a sketch aimed at a document with no Part.
+    if document.doc_type == "product" and spec.workbench in _PART_WORKBENCHES and spec.mutating:
+        parts = [d.doc_name for d in _owned_documents(db, conversation_id) if d.doc_type == "part"]
+        named = ", ".join(parts) or "none yet -- call catia_new_part"
+        raise CatiaError(
+            f"{spec.name} works on a part, and the active document is the assembly "
+            f"{document.doc_name!r}. This conversation's parts are: {named}. Call "
+            "catia_open_document name=<part> to make one of them active, then call "
+            f"{spec.name} again."
+        )
+    return document
+
+
+def _envelope(document: CatiaDocument | None) -> dict[str, Any] | None:
+    """The frame the daemon activates before the operation runs."""
+    if document is None:
         return None
     return {"doc_name": document.doc_name, "remote_path": document.remote_path}
 
@@ -1390,7 +1455,7 @@ def _auto_checkpoint(
             # reattaches and changes the right part -- leaving a checkpoint of
             # some *other* part filed as this one's undo, so restoring it would
             # overwrite the work rather than recover it.
-            document=_document_scope(spec, document),
+            document=_envelope(document),
         )
     except (CatiaError, CatiaUnavailable) as exc:
         raise CatiaError(

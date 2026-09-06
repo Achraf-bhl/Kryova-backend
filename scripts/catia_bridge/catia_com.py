@@ -412,7 +412,8 @@ class CatiaCom(
         except Exception as exc:  # noqa: BLE001
             raise CatiaOperationError(
                 "The active CATIA document is not a part (it may be a product or a "
-                "drawing). Activate the CATPart and try again."
+                "drawing). Call catia_open_document name=<one of this conversation's "
+                "parts> -- the state block lists them -- and try again."
             ) from exc
 
     def _body(self) -> Any:  # pragma: no cover - Windows only
@@ -607,13 +608,31 @@ class CatiaCom(
         else:
             self._app.Documents.Open(str(path))
 
-        return {
+        result: dict[str, Any] = {
             "doc_name": doc_name or path.stem,
             "remote_path": str(path),
             "restored_from_checkpoint": restored,
-            "features": self._feature_list(),
-            **self._measure_solid(),
         }
+        if path.suffix.lower() == ".catproduct":
+            # A product has no Part to list features of or measure. Measured
+            # on ladder prompt S2 turn 2 (2026-09-06): reopening the active
+            # document while that was the assembly was refused as "not a
+            # part", from inside the very tool the agent had been told to use.
+            try:
+                product = self._app.ActiveDocument.Product
+                result["doc_type"] = "product"
+                result["components"] = int(product.Products.Count)
+                result["component_names"] = [
+                    str(product.Products.Item(i).Name)
+                    for i in range(1, int(product.Products.Count) + 1)
+                ]
+            except Exception:  # noqa: BLE001 - an empty product still opened
+                result["doc_type"] = "product"
+            return result
+        result["doc_type"] = "part"
+        result["features"] = self._feature_list()
+        result.update(self._measure_solid())
+        return result
 
     def close_document(  # pragma: no cover - Windows only
         self, *, doc_name: str | None = None, remote_path: str | None = None
@@ -1932,8 +1951,10 @@ class CatiaCom(
         self._update_or_discard(
             shaft,
             f"CATIA could not revolve {sketch} into a shaft. The profile must lie "
-            "entirely on one side of the sketch's vertical axis; redraw it offset "
-            "from the origin, or build the shape with pads instead.",
+            "entirely on one side of the sketch's vertical axis. Draw it with "
+            "catia_sketch_revolve_profile, which places the profile and the axis "
+            "correctly in one call -- that is the part that goes wrong by hand -- "
+            "or redraw it offset from the origin, or build the shape with pads.",
         )
         return self._feature_result(str(shaft.Name))
 

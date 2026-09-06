@@ -110,6 +110,11 @@ class CatiaToolSpec:
     #: Uses `catia_export_timeout_s` instead of `catia_call_timeout_s`. A STEP
     #: export re-tessellates the whole part and legitimately takes minutes.
     long_running: bool = False
+    #: Which CATIA workbench the operation belongs to, as the registry names it.
+    #: Read by `dispatch._target_document`: an Assembly Design tool addresses the
+    #: conversation's product whatever document happens to be active, and a
+    #: part-geometry tool sent to a product is refused with the parts by name.
+    workbench: str = ""
 
     @property
     def mutating(self) -> bool:
@@ -131,6 +136,7 @@ CATIA_TOOL_SPECS: list[CatiaToolSpec] = [
         parameters=operation.json_schema(),
         tier=_TIERS[operation.tier],
         long_running=operation.long_running,
+        workbench=str(operation.workbench),
     )
     for operation in OPERATIONS
 ]

@@ -91,3 +91,4 @@ disable_error_code = ["import-untyped"]
 # share one scripted seat; every test that takes it as a parameter looks like a
 # redefinition to F811 and is not.
 "tests/test_multi_document.py" = ["F811"]
+"tests/test_assembly_scoping.py" = ["F811"]

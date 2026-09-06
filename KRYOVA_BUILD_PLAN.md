@@ -111,6 +111,23 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E7 → **the provenance chain has tests, and writing them found
+  two of my own that were vacuous.** Decision 3 says every result is bound to the
+  geometry, mesh, material, load case and solver version that produced it, and
+  the failure when it is not is silent: a number without its chain looks exactly
+  like a number with one, until somebody needs to know which mesh it came from.
+  The digests are pinned per *input*. That distinction is the finding: deleting
+  the midside nodes from `mesh_digest`, and separately deleting the connectivity,
+  left **all thirteen tests passing** — because `promote_to_tet10` appends the
+  midside nodes to the *node array* too, and refining a mesh moves its nodes, so
+  both of my "this changes the digest" tests were passing on the coordinates
+  alone and proving nothing about the fields they named. Two new tests hold
+  `nodes` fixed and change only `tets`, and only `midside`, and all three
+  mutations now fail. Also pinned: a solver version that could not be read is
+  `None` **with a reason** rather than guessed, and the digest names its own
+  algorithm (`sha256:…`) so an old record stays readable the day the algorithm
+  changes.
+
 - **2026-09-06** — E14/E15/E16/E17.3/P2 → **five phases opened at once**, chosen
   because each unblocks something specific rather than because they were next in
   the list. **E14** is what gate G3 needs and what the ladder cannot pass rung 3

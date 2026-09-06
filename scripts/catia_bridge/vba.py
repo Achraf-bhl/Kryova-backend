@@ -35,7 +35,7 @@ reason: it writes into pywin32's shared `gen_py` cache and changes how every
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 #: `CATScriptLanguage`'s first member. The IDL declares
 #: `enum CATScriptLanguage { CATVBScriptLanguage, CATVBALanguage, ... }`, so
@@ -129,12 +129,69 @@ Function KryovaEdgeMap(part, query, scopeShape)
 End Function
 """
 
+#: Every face of the part in ONE round trip: search, measure, report.
+#:
+#: The twin of `EDGE_MAP`, and it exists for the same two reasons. A face
+#: `Measurable` answers `Area` from Python but *not* `GetCOG` or `GetPlane`:
+#: both take an out-array, pywin32 passes it by value, and both return without
+#: error having written nothing. Measured on V5-R33, 2026-09-06 -- every face
+#: of every part came back centre `[0, 0, 0]` and normal `[0, 0, 0]`, which is
+#: what `catia_list_faces` had been reporting since it was written. Inside
+#: CATIA the same three calls fill their arrays.
+#:
+#: One line per face: `<index>;<area>;<cx>;<cy>;<cz>;<9 plane numbers>`. The
+#: plane is an origin and two in-plane axes; the outward normal is their cross
+#: product, which the caller takes. A face that refuses to be measured is
+#: skipped rather than failing the batch, and a curved face has no plane, so
+#: its nine numbers stay zero -- both are read back as "not planar" rather than
+#: as an error.
+FACE_MAP = """\
+Function KryovaFaceMap(part, query, scopeShape)
+    Dim doc, sel, spa, i, j, out, ref, m, cog(2), pln(8), line, area
+    Set doc = part.Parent
+    Set sel = doc.Selection
+    sel.Clear
+    sel.Add scopeShape
+    sel.Search query
+    Set spa = doc.GetWorkbench("SPAWorkbench")
+    out = ""
+    For i = 1 To sel.Count2
+        On Error Resume Next
+        Err.Clear
+        Set ref = sel.Item2(i).Reference
+        Set m = spa.GetMeasurable(ref)
+        area = m.Area
+        If Err.Number = 0 Then
+            m.GetCOG cog
+            line = CStr(i) & ";" & CStr(area)
+            For j = 0 To 2
+                line = line & ";" & CStr(cog(j))
+            Next
+            For j = 0 To 8
+                pln(j) = 0
+            Next
+            Err.Clear
+            m.GetPlane pln
+            Err.Clear
+            For j = 0 To 8
+                line = line & ";" & CStr(pln(j))
+            Next
+            out = out & line & vbLf
+        End If
+        On Error GoTo 0
+    Next
+    KryovaFaceMap = out
+End Function
+"""
+
+
 #: Every script this module will run, and the function each one exposes.
 #: `run` checks membership, so nothing outside this mapping can be evaluated.
 _ALLOWED: dict[str, str] = {
     CENTRE_OF_GRAVITY: "KryovaCentreOfGravity",
     POINTS_ON_CURVE: "KryovaPointsOnCurve",
     EDGE_MAP: "KryovaEdgeMap",
+    FACE_MAP: "KryovaFaceMap",
 }
 
 
@@ -189,6 +246,14 @@ def centre_of_gravity(app: Any, part: Any, element: Any) -> tuple[float, float, 
 Point = tuple[float, float, float]
 
 
+class FaceFacts(NamedTuple):
+    """What one face measured to. `normal` is None when the face is not planar."""
+
+    area_mm2: float
+    centre: Point
+    normal: Point | None
+
+
 def edge_map(
     app: Any, part: Any, query: str, scope_shape: Any
 ) -> dict[int, tuple[Point, Point, Point]]:
@@ -234,3 +299,47 @@ def points_on_curve(app: Any, part: Any, reference: Any) -> tuple[Point, Point, 
     except ValueError as exc:
         raise VbaUnavailable(f"CATIA returned unparseable coordinates {raw!r}.") from exc
     return tuple(values[0:3]), tuple(values[3:6]), tuple(values[6:9])  # type: ignore[return-value]
+
+
+def face_map(app: Any, part: Any, query: str, scope_shape: Any) -> dict[int, "FaceFacts"]:
+    """Selection index -> what CATIA measured for each face.
+
+    Area arrives in **square metres**, like `Measurable.Volume` arrives in
+    cubic metres, and is converted here at the boundary -- the one place this
+    codebase converts anything, because mm-N-MPa is the system everywhere else
+    and a unit has to land in it where it enters. A 100 x 60 face reads 0.006
+    from CATIA; a caller that trusted that number reported a 6000 mm2 face as
+    0.006 mm2, and `min_area_mm2` then filtered out every face there was.
+
+    `normal` is the cross product of the plane's two in-plane axes, and is
+    None for a face that reported no plane -- a cylinder, a fillet, a spline
+    surface. None means "this face is not planar", not "the normal is unknown".
+    """
+    rows: dict[int, FaceFacts] = {}
+    for line in str(run(app, FACE_MAP, [part, query, scope_shape])).splitlines():
+        parts = line.split(";")
+        if len(parts) != 14:
+            continue
+        try:
+            index = int(parts[0])
+            values = [float(v.strip().replace(",", ".")) for v in parts[1:]]
+        except ValueError:
+            continue
+        area_m2, cog, plane = values[0], values[1:4], values[4:13]
+        u, v = plane[3:6], plane[6:9]
+        normal = (
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        )
+        length = (normal[0] ** 2 + normal[1] ** 2 + normal[2] ** 2) ** 0.5
+        rows[index] = FaceFacts(
+            area_mm2=area_m2 * 1_000_000.0,
+            centre=(cog[0], cog[1], cog[2]),
+            normal=(
+                (normal[0] / length, normal[1] / length, normal[2] / length)
+                if length > 1e-9
+                else None
+            ),
+        )
+    return rows

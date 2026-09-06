@@ -3114,7 +3114,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
                     "minItems": 3,
                     "maxItems": 3,
                     "items": {"type": "number", "minimum": -10000.0, "maximum": 10000.0},
-                    "description": "Where the hole centre sits. [x, y, z] in millimetres, in the part's own frame.",
+                    "description": "Where the hole centre sits. It must be a point ON the named face -- read the face's centre from catia_list_faces and offset from there, because a point in mid-air has nothing to drill into. All THREE coordinates are required: on a top face at z=20 that is [x, y, 20], not [x, y]. [x, y, z] in millimetres, in the part's own frame.",
                 },
                 "diameter_mm": {
                     "type": "number",

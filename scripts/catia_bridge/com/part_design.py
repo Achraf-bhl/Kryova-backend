@@ -47,6 +47,50 @@ _BOOLEANS = {
 }
 
 
+#: The hole types that have a head to describe. `_HOLE_TYPES` above maps every
+#: kind to CATIA's `catHoleType`; this is the subset for which `HeadDiameter`,
+#: `HeadDepth` and `HeadAngle` exist at all.
+_HEADED_HOLE_KINDS = frozenset({"counterbored", "countersunk", "counterdrilled"})
+
+
+def refuse_a_head_this_hole_has_not(
+    kind: str,
+    *,
+    head_diameter_mm: float | None,
+    head_depth_mm: float | None,
+    head_angle_deg: float | None,
+) -> None:
+    """Refuse head dimensions on a hole type that has no head.
+
+    `HeadDiameter` on a plain simple hole raises `La methode HeadDiameter a
+    echoue` -- measured on V5-R33, 2026-09-06. Forwarding that is the failure
+    `com_errors` exists to end: it reads as CATIA breaking, when what happened
+    is that the caller asked for something this hole type does not have. The
+    refusal names the values it saw and the kinds that would accept them.
+
+    A free function rather than a branch inside `hole_at`, because `hole_at`
+    only runs on a seat: the first version of this check could only be tested
+    by asserting that two strings appeared in the source in order, and it went
+    on passing with the condition disabled.
+    """
+    given = [
+        name
+        for name, value in (
+            ("head_diameter_mm", head_diameter_mm),
+            ("head_depth_mm", head_depth_mm),
+            ("head_angle_deg", head_angle_deg),
+        )
+        if value is not None
+    ]
+    if not given or kind in _HEADED_HOLE_KINDS:
+        return
+    raise CatiaOperationError(
+        f"{', '.join(given)} describe the head of a hole, and a {kind!r} hole has "
+        "none. Use kind='counterbored', 'countersunk' or 'counterdrilled', or leave "
+        "them out."
+    )
+
+
 class PartDesignMixin:
     """Holes, dress-up, bodies, booleans and transformations."""
 
@@ -85,8 +129,21 @@ class PartDesignMixin:
                         "Give a depth_mm, or set through_all to drill straight through."
                     )
                 hole.BottomLimit.LimitMode = 0  # catOffsetLimit
-                hole.Depth.Value = float(depth_mm)
+                # NOT `hole.Depth`, which does not exist on this release --
+                # pywin32 reports it as `AddNewHoleFromPoint.Depth`, which
+                # reads like a CATIA error and is an AttributeError. Measured
+                # on V5-R33, 2026-09-06, ladder prompt H4: every catia_hole_at
+                # call failed here, after the hole had already been created,
+                # and the message blamed the point for being off the face. The
+                # depth of a hole is its bottom limit's dimension.
+                hole.BottomLimit.Dimension.Value = float(depth_mm)
 
+            refuse_a_head_this_hole_has_not(
+                kind,
+                head_diameter_mm=head_diameter_mm,
+                head_depth_mm=head_depth_mm,
+                head_angle_deg=head_angle_deg,
+            )
             if head_diameter_mm is not None:
                 hole.HeadDiameter.Value = float(head_diameter_mm)
             if head_depth_mm is not None:

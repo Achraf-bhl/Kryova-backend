@@ -329,7 +329,12 @@ OPERATIONS: tuple[Operation, ...] = (
             "Call this before any operation that acts on a face — draft, shell, "
             "face fillet, an FEA restraint — so you can name the face rather than "
             "guessing at a bounding-box label. The returned ids stay valid until the "
-            "part's topology changes."
+            "part's topology changes.\n"
+            "Areas are mm² and centres are points you can measure a hole position "
+            "from. `normal_is_outward` says whether a planar face's normal has been "
+            "resolved to point OUT of the material: true on the part's outside, false "
+            "where the direction is CATIA's own parameterisation and may point into "
+            "the solid, as on a pocket floor or an inside corner."
         ),
         tier=Tier.READ,
         workbench=Workbench.PART_DESIGN,

@@ -441,7 +441,16 @@ OPERATIONS: tuple[Operation, ...] = (
         workbench=_WB,
         params=(
             required("face", vocab.face_reference("The face to drill into.")),
-            required("at", point3("Where the hole centre sits.")),
+            required(
+                "at",
+                point3(
+                    "Where the hole centre sits. It must be a point ON the named face -- "
+                    "read the face's centre from catia_list_faces and offset from there, "
+                    "because a point in mid-air has nothing to drill into. All THREE "
+                    "coordinates are required: on a top face at z=20 that is "
+                    "[x, y, 20], not [x, y]."
+                ),
+            ),
             required("diameter_mm", feature_length("Diameter of the hole.")),
             optional("depth_mm", length("How deep. Omit with through_all.")),
             optional("through_all", flag("Drill all the way through. Default false.")),

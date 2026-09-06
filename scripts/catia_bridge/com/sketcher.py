@@ -124,10 +124,61 @@ class SketcherMixin:
         self._sketch_edition = None
         return name
 
+    def _empty_sketch_count(self: ComContext) -> int:  # pragma: no cover
+        """How many sketches in this part have nothing drawn in them.
+
+        Reported by `sketch_create`, not acted on. H4 left eight empty sketches
+        in the tree, each created because the previous call had not produced
+        what the agent expected -- and nothing in any result said so, because
+        an empty sketch is a perfectly successful `sketch_create`. Deleting
+        them here was the other option and is worse: a sketch the caller
+        intends to draw into on the next call is empty at exactly this moment.
+        """
+        empty = 0
+        for sketch in self._sketches_in_part():
+            try:
+                if int(sketch.GeometricElements.Count) <= 1:  # the axis only
+                    empty += 1
+            except Exception:  # noqa: BLE001 - unreadable is not empty
+                continue
+        return empty
+
+    def _refuse_a_duplicate_name(self: ComContext, name: str) -> None:
+        """A sketch name has to identify one sketch.
+
+        CATIA will happily hold two sketches called `Sketch.1`, and everything
+        here that resolves a sketch by name takes the first it finds. Measured
+        on ladder prompt H4, 2026-09-06: the agent created `Sketch.1` twice and
+        `Sketch.wall` twice, and `catia_list_features` reported
+
+            Sketch.1 (4 elements), Sketch.2 (0), Sketch.1 (0),
+            Sketch.3 (0), Sketch.wall (0), Sketch.wall (0)
+
+        -- at which point neither it nor the bridge could say which `Sketch.1`
+        a pad would extrude. Refusing costs one round and names the sketch
+        that already exists; silently renaming would leave the agent believing
+        it holds a name it does not.
+        """
+        for existing in self._sketches_in_part():
+            if str(existing.Name) == name:
+                raise CatiaOperationError(
+                    f"This part already has a sketch called {name!r}, and two sketches "
+                    "with one name cannot be told apart by any tool here. Draw into it "
+                    f"with catia_sketch_rectangle(sketch={name!r}, ...), or create this "
+                    "one under a different name."
+                )
+
+    def _sketches_in_part(self: ComContext) -> list[Any]:  # pragma: no cover
+        """Every sketch of the main body, as CATIA objects."""
+        sketches = self._body().Sketches
+        return [sketches.Item(index) for index in range(1, int(sketches.Count) + 1)]
+
     def sketch_create(  # pragma: no cover - Windows only
         self: ComContext, *, support: str, name: str = "", origin: list[float] | None = None
     ) -> dict[str, Any]:
         closed = self._end_sketch_edition()
+        if name:
+            self._refuse_a_duplicate_name(name)
         sketch = self._body().Sketches.Add(resolve_support(self, support))
         if name:
             try:
@@ -149,6 +200,13 @@ class SketcherMixin:
         result: dict[str, Any] = {"sketch": str(sketch.Name), "support": support, "open": True}
         if closed is not None:
             result["closed_previous"] = closed
+        empty = self._empty_sketch_count()
+        if empty > 2:
+            result["note"] = (
+                f"This part now holds {empty} sketches with nothing drawn in them. "
+                "Draw into this one before creating another, or say what is not "
+                "working -- creating more sketches will not make the last one build."
+            )
         return result
 
     def sketch_close(  # pragma: no cover - Windows only

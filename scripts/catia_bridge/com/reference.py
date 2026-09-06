@@ -17,6 +17,7 @@ import logging
 from typing import Any
 
 from .. import edges as edge_geometry
+from .. import vba
 from ..backend import CatiaOperationError
 from ._context import (
     FACE_AXES,
@@ -29,6 +30,19 @@ from ._context import (
 )
 
 logger = logging.getLogger("kryova.catia.com.reference")
+
+
+#: `Selection.Search`'s keywords are localized, the same way the edge grammars
+#: in `catia_com._SEARCH_GRAMMARS` are. Whole rows, tried in order: the prefix
+#: and the keyword are translated together, so a cross product would issue a
+#: dozen failing searches to learn what one row answers.
+_FACE_GRAMMARS: tuple[tuple[str, str], ...] = (
+    ("Topologie", "Face"),
+    ("Topology", "Face"),
+    ("Topologie", "Fl\u00e4che"),
+    ("Topologia", "Cara"),
+    ("Topologia", "Faccia"),
+)
 
 
 class ReferenceMixin:
@@ -339,44 +353,84 @@ class ReferenceMixin:
         kind: str = "all",
         min_area_mm2: float = 0.0,
     ) -> dict[str, Any]:
-        """Every face, with area, centre of gravity and outward normal.
+        """Every face, with area in mm2, centre of gravity and outward normal.
 
-        One `Selection.Search` for the references, then one measurement pass.
-        Faces are reported with a stable id of the form `Face.<n>` in search
-        order; that ordering is CATIA's and holds until the topology changes,
-        which is exactly the lifetime the result claims for it.
+        Measured through `vba.face_map` -- one Evaluate for the whole part --
+        because a face `Measurable` answers almost nothing from Python. `Area`
+        works but arrives in **square metres**, and `GetCOG` and `GetPlane`
+        both return without error having written nothing into the list handed
+        to them. Measured on V5-R33, 2026-09-06, on ladder prompt H4: every
+        face of a 8 x 120 x 20 bracket reported centre [0, 0, 0], normal
+        [0, 0, 0] and an area of 0.001 mm2 against a real 1600. The agent read
+        that, could not place a hole from it, and spent the rest of its budget
+        creating empty sketches.
+
+        **`normal` is the normal of the face's plane, and its sign is CATIA's,
+        not the material's.** Measured on the seat: the bottom face of a block
+        reports [0, 0, 1], pointing up into the solid. Where the face lies on
+        the part's bounding box the outward direction is not a guess -- a face
+        in the z = zmin plane faces -Z, whatever its parameterisation says --
+        so the sign is corrected there and `normal_is_outward` is true. Every
+        other face keeps the plane's own sign with `normal_is_outward` false,
+        because a heuristic that is right on a block and wrong in the notch of
+        an L-bracket is worse than a flag: an unmarked wrong direction is
+        acted on, and a marked unknown one is checked.
+
+        `kind` is CATIA's own classification, read off the search result --
+        it types each hit `PlanarFace`, `CylindricalFace`, `ConicalFace`,
+        `SphericalFace` or a bare `Face`. That replaced deducing the kind from
+        which measurement calls a face answered, which was a guess where a
+        fact was available.
+
+        Ids are `Face.<n>` in search order, which is the order
+        `_face_reference` resolves them in, and holds until the topology
+        changes -- exactly the lifetime the result claims for it.
         """
-        found = self._search_topology("Face", feature)
-        part = self._part()
-        workbench = part.Parent.GetWorkbench("SPAWorkbench")
+        selection, found, scoped_query, scope_shape = self._found_faces(feature or None)
+        # CATIA's own type per hit, read while the search result is still in
+        # the selection. `_bounding_box` below builds and measures reference
+        # planes, which clears it -- so anything read from the selection has to
+        # be read first. That ordering cost a run to find.
+        kinds = {index: _face_kind(selection.Item2(index).Type) for index in found}
+        measured = vba.face_map(self._app, self._part(), scoped_query, scope_shape)
+        box = self._bounding_box()
 
         faces: list[dict[str, Any]] = []
-        for index, reference in enumerate(found, start=1):
-            entry: dict[str, Any] = {"id": f"Face.{index}"}
-            try:
-                measurable = workbench.GetMeasurable(reference)
-                entry["area_mm2"] = round(float(measurable.Area), 4)
-                centre = [0.0] * 3
-                measurable.GetCOG(centre)
-                entry["centre"] = [round(value, 4) for value in centre]
-                entry["kind"] = _surface_kind(measurable)
-                plane = [0.0] * 9
-                try:
-                    measurable.GetPlane(plane)
-                    entry["normal"] = [round(value, 6) for value in plane[6:9]]
-                except Exception:  # noqa: BLE001 - only planar faces have one
-                    pass
-            except Exception:  # noqa: BLE001 - one unmeasurable face is not fatal
-                logger.debug("Could not measure face %s", index, exc_info=True)
-                entry["kind"] = "unknown"
-
-            if entry.get("area_mm2", 0.0) < float(min_area_mm2):
+        unmeasured = 0
+        for position, index in enumerate(found, start=1):
+            facts = measured.get(index)
+            if facts is None:
+                unmeasured += 1
                 continue
-            if kind != "all" and entry.get("kind") != kind:
+            entry: dict[str, Any] = {
+                "id": f"Face.{position}",
+                "area_mm2": round(facts.area_mm2, 4),
+                "centre": [round(value, 4) for value in facts.centre],
+                "kind": kinds[index],
+            }
+            if facts.normal is not None:
+                normal, outward = _outward_normal(facts.normal, facts.centre, box)
+                entry["normal"] = [round(value, 6) for value in normal]
+                entry["normal_is_outward"] = outward
+            if entry["area_mm2"] < float(min_area_mm2):
+                continue
+            if kind != "all" and kind != entry["kind"]:
                 continue
             faces.append(entry)
 
-        return {"faces": faces, "count": len(faces), "feature": feature or None}
+        result: dict[str, Any] = {
+            "faces": faces,
+            "count": len(faces),
+            "feature": feature or None,
+            "kind": kind,
+        }
+        if unmeasured:
+            result["unmeasured"] = unmeasured
+            result["note"] = (
+                f"{unmeasured} face(s) could not be measured by CATIA and are not "
+                "listed; their ids are still counted, so the ids above are valid."
+            )
+        return result
 
     def list_edges(  # pragma: no cover - Windows only
         self: ComContext,
@@ -486,6 +540,60 @@ class ReferenceMixin:
         letter, sign = FACE_AXES[key]
         axis = "xyz".index(letter)
         return axis, (box[axis + 3] if sign > 0 else box[axis])
+
+    def _found_faces(  # pragma: no cover - Windows only
+        self: ComContext, feature: str | None = None
+    ) -> tuple[Any, list[int], str, Any]:
+        """The faces of the part or of one feature, as CATIA's selection.
+
+        The same shape as `_found_edges` and for the same reason: `face_map`
+        repeats the search inside CATIA, so it needs the query and the scope,
+        and the ids handed back to a caller must be positions in *this*
+        enumeration and no other.
+        """
+        selection = self._document().Selection
+        if feature:
+            try:
+                scope_shape = self._body().Shapes.Item(feature)
+            except Exception as exc:  # noqa: BLE001
+                known = ", ".join(entry["name"] for entry in self._feature_list()) or "(none)"
+                raise CatiaOperationError(
+                    f"No feature named {feature!r} in this part. Features: {known}."
+                ) from exc
+        else:
+            scope_shape = self._body()
+
+        errors: list[str] = []
+        for prefix, word in _FACE_GRAMMARS:
+            query = f"{prefix}.{word},sel"
+            selection.Clear()
+            selection.Add(scope_shape)
+            try:
+                selection.Search(query)
+            except Exception as exc:  # noqa: BLE001 - wrong language, try the next
+                errors.append(f"{prefix}: {exc}")
+                continue
+            # A face search answers `PlanarFace`, `CylindricalFace`,
+            # `ConicalFace`, `SphericalFace` or a bare `Face` -- *not* the
+            # `TriDim...` an edge search answers, which is why the edge
+            # filter copied over here matched nothing at all and every part
+            # looked as though it had no faces.
+            found = [
+                index
+                for index in range(1, int(selection.Count2) + 1)
+                if "Face" in str(selection.Item2(index).Type)
+            ]
+            if not found:
+                raise CatiaOperationError(
+                    "This part has no solid faces yet. Pad or revolve something first."
+                )
+            return selection, found, query, scope_shape
+
+        raise CatiaOperationError(
+            "CATIA refused every face-search grammar this bridge knows "
+            f"({'; '.join(errors)}). Its UI language may be one the bridge has no "
+            "query vocabulary for yet -- see _FACE_GRAMMARS in com/reference.py."
+        )
 
     def _face_reference(  # pragma: no cover - Windows only
         self: ComContext, face: str, *, feature: str = ""
@@ -629,24 +737,54 @@ class ReferenceMixin:
         )
 
 
-def _surface_kind(measurable: Any) -> str:  # pragma: no cover - Windows only
-    """Classify a face by which measurement calls it answers.
+def _face_kind(reported: Any) -> str:  # pragma: no cover - Windows only
+    """CATIA's own face type, as the vocabulary the tool's schema offers.
 
-    There is no "what kind of surface is this" call, so the kind is deduced
-    from which of the shape-specific readers succeed. Ordering matters: a
-    cylinder answers `GetAxis`, and so does a cone, so the radius check that
-    separates them runs first.
+    `PlanarFace` -> `planar`, `CylindricalFace` -> `cylindrical`, and so on;
+    anything else -- a bare `Face`, a surface type this table does not name --
+    is `other`, which is what the schema calls it too.
     """
-    for kind, probe in (
-        ("spherical", lambda: measurable.GetCenter([0.0, 0.0, 0.0])),
-        ("cylindrical", lambda: measurable.Radius),
-        ("planar", lambda: measurable.GetPlane([0.0] * 9)),
-    ):
-        try:
-            probe()
-        except Exception:  # noqa: BLE001 - not this kind
-            continue
-        return kind
+    name = str(reported)
+    for kind in ("planar", "cylindrical", "conical", "spherical"):
+        if name.lower().startswith(kind):
+            return kind
     return "other"
 
 
+def _outward_normal(
+    normal: tuple[float, float, float],
+    centre: tuple[float, float, float],
+    box: tuple[float, float, float, float, float, float] | None,
+) -> tuple[tuple[float, float, float], bool]:
+    """The face normal, turned to face out of the material where that is known.
+
+    Decidable exactly when the face sits in one of the bounding box's six
+    planes with its normal along that axis: such a face is on the outside of
+    the part, so it faces away from the box's middle, and no heuristic is
+    involved. Anything else -- a pocket floor, the inner face of an
+    L-bracket, a rib flank -- keeps the plane's own sign and is reported as
+    not outward.
+
+    The sign matters because it is the difference between drilling into a part
+    and drilling away from it, and CATIA's parameterisation says nothing about
+    which side the material is on.
+    """
+    if box is None:
+        return normal, False
+    tolerance = 1e-6
+    for axis in range(3):
+        if abs(abs(normal[axis]) - 1.0) > tolerance:
+            continue  # not axis-aligned along this one
+        if any(abs(normal[other]) > tolerance for other in range(3) if other != axis):
+            continue  # not axis-aligned at all
+        low, high = box[axis], box[axis + 3]
+        if abs(centre[axis] - high) < 1e-4:
+            sign = 1.0
+        elif abs(centre[axis] - low) < 1e-4:
+            sign = -1.0
+        else:
+            return normal, False
+        turned = [0.0, 0.0, 0.0]
+        turned[axis] = sign
+        return (turned[0], turned[1], turned[2]), True
+    return normal, False

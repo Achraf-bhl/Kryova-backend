@@ -124,6 +124,54 @@ and what 5.3's sensitivity can then be run over.
   true)` followed by the model's own `catia_new_part` leaves an orphaned empty first document
   open (`Part1`) beside the one actually built into (`Steel-Plate-2.CATPart` / `Part2`) —
   worth a dedup or a clearer tool description, not a correctness bug.
+- **Seat verification, continued (2026-09-06) — two real, unfixed bridge defects, found by
+  continuing the same conversation rather than starting fresh each time.** Asked to change a
+  built part's bore diameter, the model reached for `catia_run_command("Edit Sketch")`
+  instead of `catia_set_parameter`; that call wedged the bridge daemon's COM-calling thread
+  indefinitely (clean logging up to the checkpoint before it, then nothing at all, while the
+  process stayed alive) and the server's auto-spawn-on-demand logic then collided with the
+  wedged daemon's still-held lock, surfacing to the model as "bridge not connected." A
+  restarted daemon fixed the daemon; it did nothing for CATIA itself, which is a separate
+  process and had been carrying whatever the command opened the whole time. The next turn
+  proved it: `catia_run_command` kept refusing with *"a dialog is already open"* even after
+  `catia_describe_dialog` correctly read it (`"Entrée clavier"`, a keyboard-input prompt) and
+  `catia_dialog_action("ok")` reported pressing OK successfully — **the documented recovery
+  path reported success and did not actually recover the seat.** Unable to proceed, the model
+  then reopened the already-consumed sketch backing the existing pad (`catia_sketch_create`
+  raised no complaint about the name collision), drew a redundant second rectangle and a new
+  circle into it, and padded it as a "new" feature — which reported `ok` with a fabricated-
+  looking plausible payload while `catia_measure` and the window screenshot both confirmed the
+  document had not changed at all (the new circle sat entirely inside the old, larger hole it
+  was padded from, so the new material was swallowed by the hole already there). Two defects
+  named for whoever picks this up: (1) `catia_dialog_action` needs to verify the dialog is
+  actually gone before reporting success, not just that the click was sent; (2)
+  `catia_sketch_create` should refuse a name already backing a built feature the way
+  `catia_new_part` already refuses to abandon an owned document, and padding a sketch already
+  consumed by an existing feature should be refused for the same reason a boolean cut that
+  changes nothing already is. Also recorded: `scripts/shot.ps1`'s window capture cannot see a
+  modal dialog that is a separate top-level window rather than a child of CNEXT's main frame —
+  a "the window looks fine" screenshot proved the viewport was fine, not that nothing was
+  stuck, and both need checking after any interactive-command failure. Full write-up, with the
+  exact tool-call sequence, in `docs/verification-2026-09-06/REPORT.md`.
+- **Seat verification, continued again (2026-09-06) — a precise root cause, and a correction
+  to the entry above.** A third fresh attempt at the same parametric-change test crashed
+  nothing: `catia_sketch_create` raised `pywintypes.com_error: 'Le serveur RPC n'est pas
+  disponible.'` from `scripts/catia_bridge/com/sketcher.py:98`, inside `_require_closed()`'s
+  own error-message construction — `ComContext._sketch_edition` (the sketch a previous
+  `catia_sketch_create` left "open") is never cleared when the model abandons that document
+  for a new one (`open_in_catia(new_part: true)` followed by its own separate `catia_new_part`,
+  a habit seen in four of seven runs), so reading `.Name` off the orphaned sketch's now-invalid
+  COM reference throws instead of naming it cleanly. **Checked, not assumed: the daemon caught
+  this, logged it, and kept serving calls normally afterward** — confirmed by the process list
+  and by five further successful calls in the same run. The entry above's "wedged the daemon"
+  framing for the *first* incident was wrong to call a crash and has been corrected in the
+  report; what actually disrupts the connection is `catia_run_command` blocking its full 30 s
+  against an interactive command (three occurrences now: "Edit Sketch", "Hole", "Rectangle"),
+  and the daemon's own reconnect loop appears to recover from that on its own, given time —
+  this session never actually tested waiting instead of restarting. Two precise, unfixed
+  defects for whoever takes this on: clear `_sketch_edition` on a document switch and guard the
+  `.Name` read against `com_error`; and give `catia_run_command` its own bounded timeout on the
+  COM call itself rather than only on the daemon's reply to the caller.
 - **P8 — usage metering wired to its first real consumer (2026-09-06).** Billing has existed
   as a schema and an API with nothing filling it; `app.simulation.runner` now posts every
   job's meshing and solve time to the ledger through `usage_scope`, `finally`-scoped so a

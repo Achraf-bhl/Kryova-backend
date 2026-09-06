@@ -429,43 +429,206 @@ already owned) → `catia_list_features` (ERR, bridge not connected) →
 starting").
 
 **Read from the daemon's own logs (`local-bridge.log`, and the manually-run
-daemon's stderr), this is a real defect, not a model mistake.** The manually-run
-daemon logged every call cleanly up to the `catia_checkpoint` that preceded
-`catia_run_command("Edit Sketch")`, then produced **no further output at all**
-— not even a failure — while the process itself stayed alive (confirmed by
-process list). `catia_run_command` calling an interactive command
-(`"Edit Sketch"`, not one of the published `COMMAND_IDS`) on a sketch that a
-Pad already consumed appears to have wedged the daemon's COM-calling thread
-indefinitely, even though **CATIA's own window was not actually stuck** — a
-screenshot taken afterward showed a perfectly normal, responsive part view with
-no dialog open. With the daemon's worker thread hung, the server's
-`app.catia.local_bridge` auto-spawn-on-demand logic then tried repeatedly to
-launch a *second* daemon, which correctly refused (`bridge.lock` still held by
-the wedged one) and exited immediately — which is what the model's tool errors
-were reporting as "the bridge is not connected."
+daemon's stderr), the daemon itself wedged.** It logged every call cleanly up
+to the `catia_checkpoint` that preceded `catia_run_command("Edit Sketch")`,
+then produced **no further output at all** — not even a failure — while the
+process stayed alive (confirmed by process list). `catia_run_command` calling
+an interactive command (`"Edit Sketch"`, not one of the published
+`COMMAND_IDS`) on a sketch a Pad had already consumed appears to have wedged
+the daemon's COM-calling thread indefinitely. A screenshot taken right after
+showed a perfectly normal, responsive part view — **but see Run 5's correction
+below: that screenshot did not prove no dialog was open, it proved
+`scripts/shot.ps1` cannot see one that is not owned by CNEXT's main window.**
+With the daemon's worker thread hung, the server's `app.catia.local_bridge`
+auto-spawn-on-demand logic then tried repeatedly to launch a *second* daemon,
+which correctly refused (`bridge.lock` still held by the wedged one) and
+exited immediately — which is what the model's tool errors were reporting as
+"the bridge is not connected."
 
-**Recovery required a manual bridge restart** (kill the wedged process, clear
-the stale lock, relaunch) — the interactive-dialog recovery tools
-(`catia_describe_dialog`/`catia_dialog_action`) were never reached because
-nothing in the model's tool sequence tried them, and in any case the CATIA GUI
-itself showed no dialog to dismiss; the problem was inside the daemon's own
-blocked call, not a visible modal.
+Recovery at the time: kill the wedged process, clear the stale lock, relaunch.
+That fixed the *daemon*. It did nothing for CATIA itself, which is a separate
+process and had been carrying whatever `"Edit Sketch"` opened the entire time.
 
-**Not fixed in this session** — this is a genuine COM-threading issue in
-`scripts/catia_bridge/catia_com.py` / `session.py` worth its own investigation,
-not a one-line patch. Recorded here so it is not silently reproduced and
-mis-attributed to "CATIA not connected" again. The immediate, low-risk mitigation
-worth considering: `catia_run_command` should have its own hard timeout that
-kills and restarts the underlying COM connection rather than leaving the
-daemon's worker thread blocked forever.
-
-## Run 5 — retried after a clean bridge restart
+## Run 5 — retried after a clean bridge restart, and the actual cause surfaces
 
 Prompt: *"The bridge should be reconnected now. Please change the bore diameter
 to 25 mm using catia_set_parameter on the existing part, and tell me the new
 mass."*
 
-See the outcome appended below once the run completed.
+27 tool calls, 532.7 s — by far the longest and most revealing run. The
+prompt names `catia_set_parameter` explicitly and **the model never called it,
+not once**, across 27 calls. That is worth stating plainly: this is not "the
+model forgot a tool it wasn't offered" (E16.1's lexical selector would have
+included it — the prompt contains the literal string). It is offered, named,
+and unused.
+
+**What actually happened, reconstructed from the full transcript:**
+
+1. `catia_select`, `catia_switch_workbench("Part Design")` — ok.
+2. `catia_run_command("Edit")`, then `("Hole")` — both refused: *"A CATIA
+   dialog is already open and waiting for input."* This is the Run 4 wedge
+   showing its real face: CATIA had a dialog open the whole time, left over
+   from Run 4's `"Edit Sketch"`. Restarting the daemon (Run 4's fix) cannot
+   close a dialog that lives in CATIA's own process.
+3. `catia_describe_dialog()` correctly read it: `{"title": "Entrée clavier",
+   "buttons": ["OK"], "fields": []}` — a Windows keyboard-input prompt, in
+   French ("keyboard entry"), with **no fields reported**, which is itself
+   suspicious for an input dialog.
+4. `catia_dialog_action("ok")` reported success (`"pressed": "OK"`) — **and
+   the very next `catia_run_command` still refused with the identical "a
+   dialog is already open" message.** Either the click did not really land,
+   or a second, identical dialog was stacked behind the first and immediately
+   took its place. Either way, the documented recovery path
+   (`catia_describe_dialog` → `catia_dialog_action`) did not actually recover
+   the seat, even though it reported that it had.
+5. Unable to proceed, the model gave up on `catia_run_command` and did
+   something worse: rather than retry `catia_set_parameter` (never attempted),
+   it **reused the existing, already-consumed `Plate_Sketch`** —
+   `catia_sketch_create({"name": "Plate_Sketch", ...})` against a name that
+   already existed in the document returned `ok` with no complaint — drew a
+   *second*, redundant 100×100 rectangle and a new 25 mm circle into it
+   (alongside the original rectangle and 40 mm circle still sitting there from
+   the first build), and padded it, which reported success as a brand-new
+   feature `Extrusion.2`.
+6. `catia_measure` immediately after reported **exactly the original numbers**
+   — `0.824674 kg`, `104920.3553 mm³`, the 40 mm-bore geometry, unchanged to
+   the last decimal digit. The window screenshot taken after the run confirms
+   this by eye: the part on screen is still the 40 mm-bore plate; there is no
+   second body, no visible change, and the tree shows nothing under
+   `Corps principal` beyond what was already there.
+
+**Two real product defects here, neither fixed in this session, both worth
+their own investigation:**
+
+- **A dialog that `catia_dialog_action` reports dismissing can still block the
+  next `catia_run_command`.** Either the click is not reaching the real
+  dialog, or a duplicate is stacked behind it and the tool has no way to know.
+  This makes the documented recovery path unreliable exactly when it matters
+  most — a session already in trouble.
+- **Reopening an already-consumed sketch and padding it again is accepted
+  silently, with no effect other than a fabricated-looking new feature name.**
+  `catia_sketch_create` should refuse (or version) a name collision the way
+  `catia_new_part` already refuses to abandon an owned document; and a Pad
+  built from a sketch already backing an existing feature is exactly the kind
+  of state the G1 report's "same sketch built three times" guard was aimed at,
+  but does not catch here because the second pad is not textually identical to
+  the first — it is a superset (old geometry plus new) with the new material
+  entirely swallowed by the old, larger hole it sits inside. The result is a
+  tool call that reports `ok` and a plausible, well-formed, internally
+  consistent payload — bounding box, mass, feature name — for an operation
+  that changed nothing on the actual document.
+
+**A caveat about the screenshot tool itself, discovered by this contradiction.**
+`scripts/shot.ps1` captures via `PrintWindow` against CNEXT's *main* window
+handle. A modal Win32 dialog is very often a separate top-level window, owned
+by but distinct from the main frame, and `PrintWindow` on the main frame alone
+will not render it. Run 4's "the window looks fine, so nothing is stuck" read
+was consequently wrong — it proved the main viewport was fine, not that no
+dialog existed. The tool's own docstring already warns that the *window*
+screenshot exists because the viewport render "cannot show" a modal dialog;
+this run shows the window screenshot has the same blind spot for a dialog that
+is not a child of the captured handle. Worth a `-FullScreen` capture as routine
+practice whenever a tool result mentions a dialog, not just when the main
+window looks wrong.
+
+CATIA and the bridge were left in this contaminated state (a redundant
+`Extrusion.2`, extra sketch geometry, and possibly still a stuck dialog) at
+the end of the run; CATIA was closed outright and restarted clean before
+further one-by-one testing continued, rather than trying to salvage it.
+
+## Run 6 — a fresh conversation, `catia_set_parameter` on a pad length, not a sketch
+
+New conversation, new prompt, deliberately avoiding sketch-editing entirely:
+*"Open CATIA with a new part, build an aluminium plate 80 mm square and 10 mm
+thick, then use catia_set_parameter to change the thickness from 10 mm to
+18 mm. Tell me the mass before and after."*
+
+CATIA had just been closed (the Run 5 cleanup). The model **skipped
+`open_in_catia` again** and called `catia_new_part` directly — the identical
+pattern from Run 1, correctly refused three times in a row (`catia_new_part`,
+`catia_open_document`, `catia_new_part` again) with the named reason each
+time. Not a new finding; the same known weak-model tendency recurring, and the
+validation held again. A follow-up telling it explicitly to call
+`open_in_catia` first continued in the same conversation — see Run 7.
+
+## Run 7 — the retry, and the root cause of Runs 4/5's daemon crashes
+
+14 tool calls, 233.1 s. `open_in_catia` created a fresh `Part1`; the model
+then called `catia_new_part("Aluminium Plate")` anyway — the same
+orphaned-document pattern as Run 2 — abandoning `Part1` before it was ever
+used. The *second* `catia_sketch_create` after that (against the new
+document) **crashed the daemon outright**, and this time the daemon's own
+stderr caught the exact traceback rather than going silent:
+
+    File ".../catia_bridge/com/sketcher.py", line 106, in sketch_create
+        self._require_closed()
+    File ".../catia_bridge/com/sketcher.py", line 98, in _require_closed
+        f"The sketch {state[0].Name!r} is still open. Call catia_sketch_close "
+    File ".../win32com/client/dynamic.py", line 620, in __getattr__
+        ret = self._oleobj_.Invoke(retEntry.dispid, 0, invoke_type, 1)
+    pywintypes.com_error: (-2147023174, 'Le serveur RPC n'est pas disponible.', None, None)
+
+**Root cause, precisely.** `ComContext._sketch_edition` is a Python-side
+reference the daemon keeps to whatever sketch was last opened via
+`catia_sketch_create`, so a later call can refuse a 3D operation while a
+sketch is still being edited. It is **never cleared when the document it
+belongs to is abandoned** — here, `Part1`'s sketch state survived the switch
+to `Part2` ("Aluminium Plate"). When the next `catia_sketch_create` correctly
+found `_sketch_edition` still set and tried to name the offending sketch in
+its error message, reading `.Name` off that stale COM object raised a raw
+`pywintypes.com_error` ("the RPC server is not available" — the object's
+owning document no longer exists on the CATIA side) instead of the intended
+clean message.
+
+**Correction, checked rather than assumed: this did NOT crash the daemon.**
+The first version of this section, written right after seeing the traceback,
+said it did. It does not survive checking the process list: both daemon
+processes from this run (PIDs unchanged since launch) were still alive and
+responsive afterward, and the log itself shows exactly why — the exception
+was caught at the session-dispatch layer and returned to the model as an
+ordinary tool error (`"CATIA refused catia_sketch_create: com_error while
+running catia_sketch_create: ..."`), logged at `ERROR` with a full traceback,
+and the daemon went straight back to handling calls normally (`catia_open_document`,
+`catia_set_material`, `catia_list_features`, `catia_switch_workbench` all
+`ok` immediately after). So the bug is real and precisely as diagnosed above
+— a stale reference producing a wrong, unfriendly error message — but it is
+milder than first reported: one confusing error, not a crash.
+
+**What actually produced this run's "bridge exited immediately after
+starting" symptom was a separate call**, later in the same run:
+`catia_run_command("Rectangle")` timed out after CATIA's usual 30 s
+("did not answer... most often a modal dialog waiting for a click") —
+the same failure class as Run 4's `"Edit Sketch"` timeout, not the sketch-
+reference bug above. The very next call, `catia_measure`, got the "bridge
+exited immediately" error; by the time this report was being written, minutes
+later, the same daemon processes had reconnected on their own with no
+manual intervention (the daemon already retries its websocket connection on
+failure, logged elsewhere in this session as `"Reconnecting in 0.8s"`). That
+casts real doubt on whether Run 4's manual restart was actually *necessary*,
+as opposed to just faster than waiting — this session did not test waiting it
+out there, and should have before reaching for the kill switch.
+
+**Two distinct, real defects, neither fixed in this session:**
+
+- **The stale `_sketch_edition` reference** (`sketcher.py:98`), confirmed by
+  a precise traceback: needs clearing whenever a document changes underneath
+  it, and the `.Name` read (or any property read off a possibly-stale COM
+  reference) needs a guard against `pywintypes.com_error` rather than
+  surfacing the raw exception text to the model.
+- **`catia_run_command` against certain interactive commands blocks for the
+  full 30 s and appears to disrupt the daemon's connection to the server
+  when it does** — seen three times now (`"Edit Sketch"`, `"Hole"` by
+  implication in Run 5, `"Rectangle"`), always against a command that
+  presumably wants keyboard or mouse input the automation cannot supply. This
+  is the more disruptive of the two, since every one of these seven runs that
+  reached for `catia_run_command` on a geometry-editing command hit it, and
+  it is what actually costs a session its bridge connection, however
+  temporarily.
+
+Both are Windows-only code (`# pragma: no cover`) with their own interactive
+test harness (`mock_ui.py`, both `en`/`de`) and belong to a dedicated
+investigation, not a fix attempted mid-session. Recorded here with exact
+files, lines and reproduction steps so neither has to be rediscovered.
 
 ## Rung reached
 
@@ -473,7 +636,23 @@ Runs 1–3 confirm, for the first time, that the exact plan the OCCT backend
 builds correctly also builds correctly on the **real** CATIA seat: same shape,
 matching mass to the closed form, correct French feature/menu names, right way
 up. That is new information G1 above explicitly could not provide (it ran
-OCCT-only). Run 4 is not a ladder result — it is an infrastructure finding, and
-one that would have been invisible to a batched multi-prompt run, which is the
-whole argument for doing this one prompt at a time with a look at the real
-window after each one.
+OCCT-only). Runs 4–7 are not a ladder result — they are a chain of
+infrastructure findings that only came apart by continuing the same failure
+one prompt at a time instead of resetting after the first sign of trouble:
+a stale COM reference that survives a document switch and surfaces as a
+confusing raw error instead of the intended clean one, pinned to a file and
+line; a separate and more disruptive pattern where `catia_run_command`
+against an interactive geometry command blocks for its full 30 s timeout and
+appears to cost the daemon its connection to the server, transiently, without
+(on the evidence gathered here) actually requiring the manual restart this
+session reached for each time; a dialog-dismissal path that reports success
+without confirming it; and a modelling-quality finding (a tool named
+explicitly in the prompt never attempted, with a fallback that fabricated a
+no-op feature instead). None of this would have been visible from a batched
+multi-prompt run, from `catia_measure`'s own reported numbers alone, or
+without going back to correct an early conclusion once later evidence
+disagreed with it — the daemon "crash" in Run 7 was the most confident wrong
+statement of the whole session, and it did not survive checking the process
+list. That is the whole argument for doing this one prompt at a time and
+looking at the real window and the real process table, not just the tool
+result or the model's own paraphrase of it, after each one.

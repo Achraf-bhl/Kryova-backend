@@ -611,6 +611,24 @@ class RequirementSet:
         """
         return tuple(one.assertion() for one in self.active if one.measurable)
 
+    def scans_needed(self) -> tuple[str, ...]:
+        """Which `catia_analysis_part` analyses this set needs run before verifying.
+
+        A measurement payload does not contain wall thickness, draft or
+        continuity until somebody asks for them — `measure()` never interrogates,
+        because a ray-cast scan costs thousands of kernel calls. So a set that
+        constrains `minimum_wall_mm` verifies UNMEASURED against a plain
+        measurement, correctly and unhelpfully, and this is how a caller learns
+        what to run instead of having to know.
+
+        Empty is the normal answer: it means nothing in the set needs more than
+        the base measurement. It does **not** mean everything is measurable —
+        `verify_requirements` is still the thing that says that, per requirement.
+        """
+        return vocabulary.scans_for(
+            str(one.measure) for one in self.active if one.measurable
+        )
+
     # -- persistence ---------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:

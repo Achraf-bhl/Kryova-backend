@@ -2,13 +2,13 @@
 
 Master plan 7.1, **the machinery only**. This module defines what a benchmark
 is, what a target may claim, and how a run is classified. It contains **no
-benchmark instances**: there is no NAFEMS catalogue in this codebase yet, and
-7.4's published validation register does not exist either. Both are named
-throughout the plan and neither has been written, so nothing here should be read
-as evidence that any analysis has been validated against a published source. The
-words "catalogue" and "register" below describe the consumer this module is
-shaped for, not a module you can import. Writing that catalogue is 7.1's
-remaining work, and the rule it must obey is the first one in this list.
+benchmark instances**: there is no NAFEMS catalogue in this codebase yet, so
+nothing here should be read as evidence that any analysis has been validated
+against a published source. 7.4's register *is* now a module you can import
+(`app.verify.register`), and with no cases to roll up it reports every analysis
+as unvalidated — which is the correct output and not a placeholder. Writing the
+catalogue is 7.1's remaining work, and the rule it must obey is the first one in
+this list.
 
 A benchmark is a published problem with a published answer. The
 value of running one comes entirely from the answer having been arrived at by

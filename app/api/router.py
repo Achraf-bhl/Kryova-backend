@@ -4,6 +4,7 @@ from app.api.routes import (
     admin,
     ai,
     auth,
+    billing,
     catia,
     geometry,
     kernel,
@@ -12,6 +13,7 @@ from app.api.routes import (
     organisations,
     projects,
     simulations,
+    trust,
 )
 
 api_router = APIRouter()
@@ -19,6 +21,7 @@ api_router.include_router(auth.router)
 api_router.include_router(admin.router)
 api_router.include_router(admin.organisation_audit_router)
 api_router.include_router(organisations.router)
+api_router.include_router(billing.router)
 api_router.include_router(projects.router)
 api_router.include_router(geometry.router)
 api_router.include_router(simulations.router)
@@ -27,3 +30,5 @@ api_router.include_router(materials.router)
 api_router.include_router(ai.router)
 api_router.include_router(catia.router)
 api_router.include_router(kernel.router)
+# Public and unauthenticated on purpose -- see the module docstring.
+api_router.include_router(trust.router)

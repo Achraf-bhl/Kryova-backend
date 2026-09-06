@@ -48,6 +48,7 @@ document arriving before any geometry does. After the first call it is a
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Final
@@ -119,6 +120,42 @@ MACHINE_LEAVES: Final[dict[str, tuple[str, str]]] = {
 }
 
 
+#: Which `catia_analysis_part` analysis has to be *run* before each interrogation
+#: path is in a measurement payload at all.
+#:
+#: The gap this closes: `measure()` never interrogates — that is deliberate and
+#: documented, because a ray-cast scan costs thousands of kernel calls — so a
+#: requirement on `minimum_wall_mm` checked against a plain measurement payload
+#: comes back UNMEASURED, correctly and unhelpfully. Until this table existed the
+#: only place that knew a wall thickness comes from `kind="thickness"` was the
+#: caller's head, so a caller who forgot lost coverage and was told nothing about
+#: how to get it back.
+#:
+#: A path missing from here is not a refusal: it is either part of the base
+#: `catia_measure` payload (`mass_kg`, the bounding box, the counts), or it comes
+#: from something that is not one part at all — a clash check, a solver, a machine
+#: check. `verify_requirements` still reports it UNMEASURED with a reason if
+#: nothing produced it, which stays the honest fallback.
+ANALYSIS_KINDS: Final[dict[str, str]] = {
+    "minimum_wall_mm": "thickness",
+    "thinnest_point_mm": "thickness",
+    "minimum_draft_deg": "draft",
+    "undrafted_face_count": "draft",
+    "undercut_face_count": "draft",
+    "pull_direction": "draft",
+    "minimum_concave_radius_mm": "curvature",
+    "minimum_dihedral_deg": "curvature",
+    "sharp_edge_count": "curvature",
+    "tangent_edge_count": "curvature",
+    # Continuity, which `analysis_part` reports alongside curvature rather than
+    # under `validity` — where a reader would reasonably look for it, and where
+    # this table said it was until a real part was asked.
+    "open_edge_count": "curvature",
+    "is_valid": "validity",
+    "invalid_subshape_count": "validity",
+}
+
+
 def normalise(path: str) -> str:
     """Strip an index suffix, so `bounding_box_mm.size[2]` finds its documented term.
 
@@ -181,6 +218,24 @@ def _refuse(where: str, path: str) -> Term:
         "('machine.<check>.<leaf>'). If the thing genuinely cannot be measured yet, "
         "write the requirement with no measure and a `needs` saying what would make "
         "it checkable — that is counted as uncovered, which is the truth."
+    )
+
+
+def scans_for(paths: Iterable[str]) -> tuple[str, ...]:
+    """The `catia_analysis_part` analyses these paths need, in a stable order.
+
+    What a caller does with it: run each named kind against the part it just
+    built, merge the payloads, and verify. Nothing here runs anything — this
+    package still measures nothing (see the package docstring, rule 3) — it says
+    *what to run*, which is the one piece of that sentence a caller previously
+    had to know without being told.
+
+    Sorted rather than in call order: the analyses are independent, and a stable
+    order is what makes a provenance record of "which scans were run" comparable
+    between runs.
+    """
+    return tuple(
+        sorted({found for path in paths if (found := ANALYSIS_KINDS.get(normalise(path)))})
     )
 
 
@@ -271,6 +326,7 @@ def _contract() -> Any:
 
 
 __all__ = [
+    "ANALYSIS_KINDS",
     "CONTRACT_ORIGIN",
     "MACHINE_LEAVES",
     "MACHINE_NAMESPACE",
@@ -281,4 +337,5 @@ __all__ = [
     "normalise",
     "require",
     "resolve",
+    "scans_for",
 ]

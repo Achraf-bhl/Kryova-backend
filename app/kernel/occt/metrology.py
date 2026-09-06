@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Final
 
+from app.kernel import interrogation
 from app.kernel import measurement as spec
 from app.kernel.errors import MeasurementError
 from app.kernel.interrogation import OrientedBox
@@ -196,6 +197,28 @@ def measure(
     else:
         payload["density_kg_m3"] = density_kg_m3
         payload[spec.MASS_KG] = spec.mass_kg(volume, density_kg_m3)
+
+    # The billet question, and it was documented in `contract.py` for months while
+    # nothing emitted it. `oriented_bounding_box` existed, was exported, and had no
+    # caller — so a requirement on `oriented_bounding_box_mm.size` was accepted at
+    # construction (the vocabulary allows a documented path) and then verified
+    # UNMEASURED for ever. That is exactly the "wish with a number on it" the
+    # vocabulary refusal claims to prevent, arriving through the front door.
+    #
+    # At FULL rather than at a coarser level because it costs an orientation
+    # search, and `Detail` exists for latency.
+    oriented = oriented_bounding_box(shape)
+    # `size` and `volume_mm3` only, because those are the two paths `contract.py`
+    # documents. The box also knows its centre and its axes — which is what you
+    # need to actually orient the stock — and emitting them turned
+    # `test_every_quantity_a_scan_emits_is_documented` red immediately, which is
+    # that guard doing its job on the same commit that fixed the converse.
+    # Publishing them is a contract change and belongs with the `source` field
+    # discussed in `tests/test_oriented_bounding_box.py`.
+    payload[interrogation.ORIENTED_BOUNDING_BOX_MM] = {
+        "size": list(oriented.size),
+        "volume_mm3": oriented.size[0] * oriented.size[1] * oriented.size[2],
+    }
 
     if detail.includes(Detail.INERTIA):
         matrix = properties.MatrixOfInertia()

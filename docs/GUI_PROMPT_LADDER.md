@@ -232,7 +232,7 @@ Four earlier runs failed, and each named a real defect rather than a limit of th
 
 ### H4 — Requirement-driven, no dimensions given
 
-- [ ] **H4**
+- [x] **H4** — PASSED, run 11, 2026-09-06
 
 **Style:** states a *duty*, not a shape. Tests whether the agent turns a requirement into
 geometry and says what it assumed — this is the register the whole product is aimed at.
@@ -275,6 +275,43 @@ fixed and guarded.
    for. The rule now has both edges.
 
 Run 5 is with all four fixed.
+
+**Run 11 (2026-09-06): PASS.** Twenty rounds, and the shape of the run is the
+result:
+
+    catia_new_part -> sketch_create -> sketch_rectangle -> catia_pad ->
+    set_material -> catia_hole -> catia_hole -> catia_fillet ->
+    catia_export_step -> draft_load_case -> catia_measure -> export_step ->
+    run_simulation -> get_simulation
+
+40 x 80 x 150 mm in steel-1018, 3.746 kg, 476,650 mm3, two M8 holes, 2 mm
+fillets. The analysis **ran**: `get_simulation` returned *succeeded, factor of
+safety 422.68*, and the agent reported 423 against the stated minimum of 2 and
+said plainly that the part is over-designed, offering to reduce the section.
+That is the pass condition -- the safety factor is measured, not asserted --
+and it is the first time the prompt has produced an analysed part.
+
+The screenshots are `H4-screen.png` (whole desktop) and the flow list in the
+app. What made the difference, in the order the defects were found:
+
+* the load-case schema flattened (f7ac14f);
+* the seat now reports which arguments it cannot take, so `catia_pad` is never
+  offered a `limit` it would refuse (aa64623);
+* the requirements the user stated held in the per-turn block, so the agent
+  stopped asking for dimensions it had been given (aa64623);
+* the naming rule stated once instead of 182 times, taking 2,122 tokens off
+  every step -- the model went from 15-26 s a step to 5-12 s (45c137f);
+* a blank the model recovered from no longer spends the correction budget
+  (45c137f);
+* a read repeated verbatim three times is refused, which is where nine of the
+  previous run's twenty rounds had gone (005b396);
+* and thinking turned off for schema-constrained calls: `qwen3.5:9b` keeps
+  reasoning in `message.thinking`, which the JSON grammar does not constrain,
+  so it reasoned until the token budget ran out and never began the answer.
+  Measured three ways on the same request -- thinking on at 1024 tokens gave
+  20.7 s and an empty answer, thinking on at 4096 gave 82.0 s and a valid one,
+  `think: false` gave **8.9 s** and a valid one.
+
 
 **Runs 5-8 (2026-09-06): FAIL, and the failures moved up the stack each time.**
 By run 8 the bracket was built, a view captured, the STEP exported, a load case

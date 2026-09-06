@@ -276,3 +276,107 @@ class TestTheAnswerBudget:
         monkeypatch.setattr(httpx, "post", fake.post)
         _complete(provider)
         assert fake.payloads[0]["options"]["num_predict"] == _EFFORT_PREDICT["low"]
+
+
+class TestThinkingIsOffForStructuredOutput:
+    """Reasoning and the answer share one token budget, and reasoning goes first.
+
+    Measured on the seat, 2026-09-06, ladder prompt H4 run 11 -- the same
+    request, schema and model, three ways:
+
+        thinking on,  num_predict 1024 -> 20.7 s, 1024 tokens of thinking,
+                                          content '', done_reason 'length'
+        thinking on,  num_predict 4096 -> 82.0 s, 4220 tokens, valid answer
+        think: false, num_predict 1024 ->  8.9 s,  280 tokens, valid answer
+
+    Nine times faster and correct. `qwen3.5:9b` keeps its reasoning in
+    `message.thinking`, which the JSON grammar does not constrain, so the model
+    reasons until the budget runs out and never starts the JSON. That is the
+    whole history of the drafting defect: 146 s against a 13,510-character
+    grammar, then 42 s of "empty response" after the schema was flattened.
+    """
+
+    def test_the_flag_is_sent(
+        self, provider: OllamaProvider, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = _Ollama(['{"value": 1}'])
+        monkeypatch.setattr(httpx, "post", fake.post)
+        _complete(provider)
+        assert fake.payloads[0]["think"] is False
+
+    def test_the_vision_call_sends_it_too(
+        self, provider: OllamaProvider, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = _Ollama(['{"value": 1}'])
+        monkeypatch.setattr(httpx, "post", fake.post)
+        monkeypatch.setattr(provider, "_sees", lambda: True)
+        provider.look(
+            system="s", user="u", images=[b"png"], schema=_Answer, effort="low", max_tokens=100
+        )
+        assert fake.payloads[-1]["think"] is False
+
+    def test_chat_does_not_send_it(
+        self, provider: OllamaProvider, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Choosing a tool is exactly the decision reasoning helps with, and
+        there is no grammar competing with it there."""
+        fake = _Ollama(["ok"])
+        monkeypatch.setattr(httpx, "post", fake.post)
+        provider.chat(
+            system="s", messages=[{"role": "user", "content": "hi"}], tools=[], max_tokens=100
+        )
+        assert "think" not in fake.payloads[-1]
+
+
+class TestAnEmptyAnswerIsDiagnosed:
+    """"Ollama returned an empty response" was reported for three different
+    conditions, and described the common one worst."""
+
+    def test_a_thinking_model_cut_off_says_so(self) -> None:
+        from app.ai.providers.ollama import _no_content_reason
+
+        problem = _no_content_reason(
+            {"done_reason": "length", "message": {"content": "", "thinking": "a b c d"}}
+        )
+        assert "still reasoning" in problem
+        assert "num_predict" in problem
+
+    def test_a_plain_truncation_says_truncation(self) -> None:
+        from app.ai.providers.ollama import _no_content_reason
+
+        problem = _no_content_reason({"done_reason": "length", "message": {"content": ""}})
+        assert "token limit" in problem
+        assert "reasoning" not in problem
+
+    def test_reasoning_that_simply_stopped_is_a_retry(self) -> None:
+        from app.ai.providers.ollama import _no_content_reason
+
+        problem = _no_content_reason({"done_reason": "stop", "message": {"thinking": "hmm"}})
+        assert "Retrying" in problem
+
+    def test_a_genuinely_empty_answer_still_says_that(self) -> None:
+        from app.ai.providers.ollama import _no_content_reason
+
+        assert _no_content_reason({"done_reason": "stop", "message": {}}) == (
+            "Ollama returned an empty response."
+        )
+
+    def test_it_is_what_reaches_the_caller(
+        self, provider: OllamaProvider, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A helper nothing calls diagnoses nothing."""
+
+        class _Truncated(_Ollama):
+            def post(self, url, *, json, timeout):
+                response = super().post(url, json=json, timeout=timeout)
+                if url.endswith("/api/chat"):
+                    body = response.json()
+                    body["done_reason"] = "length"
+                    body["message"] = {"content": "", "thinking": "one two three"}
+                    return httpx.Response(200, json=body, request=response.request)
+                return response
+
+        fake = _Truncated(["", ""])
+        monkeypatch.setattr(httpx, "post", fake.post)
+        with pytest.raises(LLMError, match="still reasoning"):
+            _complete(provider)

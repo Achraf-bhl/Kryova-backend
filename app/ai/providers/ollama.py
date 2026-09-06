@@ -191,6 +191,61 @@ def _refuse_if_truncated(body: dict[str, Any], num_ctx: int) -> None:
         )
 
 
+#: Sent on every schema-constrained call. `qwen3.5:9b` is a thinking model, and
+#: Ollama keeps reasoning in `message.thinking` while the JSON grammar applies
+#: only to `message.content` -- so the two compete for one `num_predict` budget
+#: and the reasoning always goes first.
+#:
+#: Measured on the seat, 2026-09-06, ladder prompt H4 run 11. The same request,
+#: same schema, same model:
+#:
+#:     thinking on,  num_predict 1024 -> 20.7 s, 1024 tokens of thinking,
+#:                                       content '', done_reason 'length'
+#:     thinking on,  num_predict 4096 -> 82.0 s, 4220 tokens, valid answer
+#:     think: false, num_predict 1024 ->  8.9 s,  280 tokens, valid answer
+#:
+#: Nine times faster and correct. Reasoning buys nothing here anyway: the
+#: grammar already forces the shape, and what is left is reading two numbers
+#: out of a sentence. This is also the whole history of the drafting defect --
+#: the 146 s attempts were a thinking model against a 13,510-character grammar,
+#: and the 42 s "empty response" that followed the flat schema was the thinking
+#: budget being spent before the answer began.
+#:
+#: `chat` deliberately does not set it: choosing a tool is exactly the decision
+#: reasoning helps with, and it is not competing with a grammar there.
+THINKING_OFF = False
+
+def _no_content_reason(body: dict[str, Any]) -> str:
+    """Why `message.content` is empty, in words that name the actual remedy.
+
+    "Ollama returned an empty response" was reported for three different
+    conditions, and the one that kept happening was the one it described worst:
+    a thinking model that spent its whole token budget reasoning and stopped
+    before writing any JSON. That reads as "the model failed" when it is
+    "the model was cut off", and the two have different fixes.
+    """
+    reason = str(body.get("done_reason") or "")
+    thinking = str((body.get("message") or {}).get("thinking") or "")
+    if reason == "length":
+        if thinking:
+            return (
+                "Ollama stopped at its token limit while the model was still "
+                f"reasoning ({len(thinking.split())} words of it) and never began "
+                "the answer. Reasoning and the answer share one budget, so raise "
+                "num_predict or turn thinking off for this call."
+            )
+        return (
+            "Ollama stopped at its token limit before the answer was complete. "
+            "Raise num_predict, or ask for less in one call."
+        )
+    if thinking:
+        return (
+            "Ollama returned reasoning but no answer, which is a model that "
+            "stopped between the two. Retrying is the right response."
+        )
+    return "Ollama returned an empty response."
+
+
 def _answer_budget(effort: str, max_tokens: int) -> int:
     """How many tokens a structured answer may run to.
 
@@ -399,6 +454,10 @@ class OllamaProvider(LLMProvider):
             "messages": messages,
             # Constrains decoding to the schema rather than asking politely.
             "format": grammar,
+            # See THINKING_OFF: reasoning and the answer share one token budget,
+            # and against a grammar the reasoning wins and the answer never
+            # starts.
+            "think": THINKING_OFF,
             "options": self._with_gpu_layers(
                 {
                     "num_predict": _answer_budget(effort, max_tokens),
@@ -438,7 +497,7 @@ class OllamaProvider(LLMProvider):
             usage += _usage(body)
             content = body.get("message", {}).get("content", "")
             if not content.strip():
-                problem = "Ollama returned an empty response."
+                problem = _no_content_reason(body)
             else:
                 try:
                     return Completion(value=schema.model_validate_json(content), usage=usage)
@@ -563,6 +622,7 @@ class OllamaProvider(LLMProvider):
                 },
             ],
             "format": grammar,
+            "think": THINKING_OFF,
             "options": self._with_gpu_layers({"num_predict": max_tokens, "num_ctx": window}),
         }
 
@@ -582,7 +642,7 @@ class OllamaProvider(LLMProvider):
         _refuse_if_truncated(body, window)
         content = body.get("message", {}).get("content", "")
         if not content.strip():
-            raise LLMError("Ollama returned an empty response.")
+            raise LLMError(_no_content_reason(body))
 
         try:
             return Completion(value=schema.model_validate_json(content), usage=_usage(body))

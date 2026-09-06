@@ -53,6 +53,7 @@ from .com import (
     SurfacesMixin,
     WireframeMixin,
 )
+from .com._context import resolve_element
 from .tool_table import not_in_this_part
 
 logger = logging.getLogger("kryova.catia.com")
@@ -1320,6 +1321,7 @@ class CatiaCom(
             "inside it is fine). Overlapping or crossing shapes in one sketch are "
             "not, and neither is an open profile. Read the sketch with "
             "catia_list_features, and draw one profile per sketch if in doubt.",
+            profile=sketch,
         )
         return self._feature_result(str(pad.Name))
 
@@ -1399,6 +1401,7 @@ class CatiaCom(
             pocket,
             f"CATIA could not cut the pocket from {sketch}. The profile usually does "
             "not overlap the solid, or the depth runs past the material.",
+            profile=sketch,
         )
 
         # A sketch on an origin plane can sit on the far side of the solid, in
@@ -1618,7 +1621,24 @@ class CatiaCom(
             result["features"] = created
         return result
 
-    def _update_or_discard(self, shape: Any, advice: str) -> None:  # pragma: no cover
+    def _profile_survived(self, sketch: str) -> bool:  # pragma: no cover - Windows only
+        """Whether the named sketch is still in the part after a discard.
+
+        CATIA absorbs a profile into the feature built from it: a sketch that
+        has been padded becomes a child of the pad in the tree. So deleting a
+        failed pad deletes the sketch with it, and the caller's drawing is
+        gone -- which is not obvious from anywhere, least of all from a
+        refusal that says "check the sketch".
+        """
+        if not sketch:
+            return True
+        try:
+            return resolve_element(self._part(), sketch) is not None
+        except Exception:  # noqa: BLE001 - unresolvable is gone
+            return False
+
+    def _update_or_discard(self, shape: Any, advice: str, profile: str = "") -> None:
+        # pragma: no cover
         """`part.Update()`, and if it fails remove `shape` before refusing.
 
         Every feature-creating operation must go through this rather than
@@ -1649,10 +1669,24 @@ class CatiaCom(
             self._part().Update()
         except Exception as exc:  # noqa: BLE001
             self._discard_failed_feature(shape)
+            # Measured on ladder prompt PRO1 run 3, 2026-09-06. A pad from an
+            # invalid profile was refused, the refusal said "check the sketch
+            # with catia_list_features" -- and the next call came back "No
+            # sketch named 'CBody Profile' in this part. It has: (none)".
+            # CATIA had absorbed the sketch into the pad, so discarding the pad
+            # took the drawing too. The advice pointed at something that no
+            # longer existed, and the agent spent a round finding that out.
+            lost = "" if self._profile_survived(profile) else (
+                f" The sketch {profile!r} went with it: CATIA makes a profile a "
+                "child of the feature built from it, so removing the failed "
+                "feature removed the drawing as well. Draw it again -- "
+                "catia_sketch_polyline takes the whole outline in one call -- "
+                "and fix what was wrong with it before padding."
+            )
             raise CatiaOperationError(
                 f"{advice} CATIA reported: {exc}. The failed feature has been "
                 "removed, so the part is still buildable -- carry on from what "
-                "is already there rather than starting again."
+                f"is already there rather than starting again.{lost}"
             ) from exc
 
     @staticmethod

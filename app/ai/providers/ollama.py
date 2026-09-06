@@ -121,6 +121,39 @@ IMAGE_PROMPT_TOKENS = 1_600
 RETRY_BACKOFF_S = 0.5
 
 
+def _log_generation_speed(model: str, body: dict[str, Any], wall_seconds: float) -> None:
+    """How fast the model actually generated, from its own counters.
+
+    Ollama reports `eval_count` and `eval_duration` per response, which is the
+    only honest measure of whether the model is on the GPU: wall time mixes in
+    the prompt, the queue and the network, and a slow turn on a fast model
+    looks the same as a fast turn on a slow one.
+
+    This is what makes an offload regression visible. Measured on the seat,
+    the same model was 25.7 tok/s with one layer on the CPU and 59.0 tok/s
+    with none -- a number nobody was printing, on a defect that survived
+    weeks of use because every turn merely felt slow.
+
+    Never raises and never blocks: a missing counter means no line, not an
+    error on the agent's path.
+    """
+    try:
+        tokens = int(body.get("eval_count") or 0)
+        nanoseconds = int(body.get("eval_duration") or 0)
+    except (TypeError, ValueError):
+        return
+    if not tokens or not nanoseconds:
+        return
+    rate = tokens / (nanoseconds / 1e9)
+    logger.info(
+        "%s generated %d tokens at %.1f tok/s (%.1f s wall)",
+        model,
+        tokens,
+        rate,
+        wall_seconds,
+    )
+
+
 def _refuse_if_truncated(body: dict[str, Any], num_ctx: int) -> None:
     """Turn a silently truncated prompt into a loud failure.
 
@@ -605,7 +638,9 @@ class OllamaProvider(LLMProvider):
         if tools:
             payload["tools"] = tools
 
+        started = time.perf_counter()
         body = self._post_chat(payload)
+        _log_generation_speed(self._model, body, time.perf_counter() - started)
         _refuse_if_truncated(body, num_ctx)
         message = body.get("message") or {}
         calls = []

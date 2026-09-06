@@ -3,6 +3,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -268,6 +269,67 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
+#: Above this, a request is called out as slow rather than merely logged. 2 s
+#: is not a target -- it is the point past which a person notices waiting, and
+#: an endpoint that crosses it wants a reason recorded next to it.
+SLOW_REQUEST_MS = 2_000
+
+
+class AccessLogMiddleware(BaseHTTPMiddleware):
+    """One line per request: method, path, status, milliseconds.
+
+    Uvicorn's own access log gives the first three and never the fourth, so
+    until now the only latency this service reported was the per-step number
+    in the agent's own UI. That is the wrong half: the steps a user watches
+    are the slow ones by construction, and the requests that quietly cost
+    200 ms each -- the status poll, the conversation list, the CATIA
+    heartbeat -- are invisible precisely because nobody is watching them.
+
+    The path is the *route template* where there is one (`/projects/{id}`,
+    not `/projects/8f3c...`), so lines for one endpoint aggregate instead of
+    being unique per id. Falling back to the raw path keeps a 404 legible.
+
+    Timed with `perf_counter` around `call_next`, which is the whole
+    downstream stack including the handler, the database and any tool call it
+    makes -- what the client actually waited for.
+    """
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            logger.warning(
+                "%s %s failed after %.0f ms",
+                request.method,
+                request.url.path,
+                elapsed_ms,
+                extra={"request_id": getattr(request.state, "request_id", None)},
+            )
+            raise
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+
+        route = request.scope.get("route")
+        path = getattr(route, "path", None) or request.url.path
+        # `Server-Timing` is the standard header for this, and the browser's
+        # own network panel renders it -- so the number is in front of whoever
+        # is looking at the frontend, not only in a log file on the server.
+        response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
+        level = logging.WARNING if elapsed_ms >= SLOW_REQUEST_MS else logging.INFO
+        logger.log(
+            level,
+            "%s %s -> %d in %.0f ms%s",
+            request.method,
+            path,
+            response.status_code,
+            elapsed_ms,
+            " (slow)" if elapsed_ms >= SLOW_REQUEST_MS else "",
+            extra={"request_id": getattr(request.state, "request_id", None)},
+        )
+        return response
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
@@ -300,6 +362,9 @@ app.add_middleware(
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(SecurityHeadersMiddleware)
+# Order matters: middleware added last runs first, so `RequestIdMiddleware`
+# wraps `AccessLogMiddleware` and every access line already carries the id.
+app.add_middleware(AccessLogMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)

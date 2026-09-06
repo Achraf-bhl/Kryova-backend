@@ -28,8 +28,9 @@ import difflib
 import logging
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -113,6 +114,11 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     "list_geometry": "Checking geometry versions",
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
+    # Says what it produces, not how. A user watching the step list should
+    # read that the loading is being worked out, which is the true and useful
+    # description; that a model call turns the sentence into a load case is an
+    # implementation detail.
+    "draft_load_case": "Working out the loads",
     "run_simulation": "Submitting the analysis",
     "delete_simulation": "Deleting the run",
     # The direct-COM tools. They carry no `catia_` prefix, so `catia_label`
@@ -208,6 +214,68 @@ def _catia_dispatch() -> Any | None:
     return dispatch
 
 
+#: A load case that is definitely valid, in the fewest words. Shown in the
+#: refusal because the shape is the hard part: a model that gets it wrong does
+#: not need to be told it is wrong, it needs to see one that is right.
+_LOAD_CASE_EXAMPLE: Final[str] = (
+    '{"name": "Tip load", '
+    '"material": {"name": "steel", "youngs_modulus_mpa": 210000, "poissons_ratio": 0.3, '
+    '"density_kg_m3": 7850, "yield_strength_mpa": 250}, '
+    '"fixtures": [{"where": {"type": "face", "axis": "x", "side": "min"}}], '
+    '"loads": [{"type": "force", "where": {"type": "face", "axis": "x", "side": "max"}, '
+    '"force_n": [0, 0, -500]}]}'
+)
+
+
+def _load_case_problem(error: ValidationError) -> str:
+    """What is wrong with a load case, in words, with a working example.
+
+    Pydantic's own text was what reached the model before:
+
+        That load case is not valid: 3 validation errors for LoadCase
+        material
+          Field required [type=missing, input_value={...}, input_type=dict]
+            For further information visit https://errors.pydantic.dev/2.13/v/missing
+
+    Measured on ladder prompt H4, 2026-09-06: the agent read that four times,
+    sent four more variations, and never produced a valid case -- so a bracket
+    that was correctly built was never analysed, on a prompt whose whole point
+    is the analysis. The failure is not that the model is small. Every line of
+    that message is about pydantic; none of it says what a load case *is*, and
+    the one thing that would fix it in a single round -- an example of the
+    right shape -- was nowhere.
+
+    So: the field paths, said plainly, and one valid case in full. Truncated
+    to the first few, because a model that got the shape wrong has one problem
+    and not seven, and a wall of them buries the example underneath.
+    """
+    missing: list[str] = []
+    wrong: list[str] = []
+    for item in error.errors():
+        where = ".".join(str(part) for part in item.get("loc", ())) or "the load case"
+        if item.get("type") == "missing":
+            missing.append(where)
+        else:
+            wrong.append(f"{where} ({item.get('msg', 'is not valid')})")
+
+    parts = ["That load case cannot be run."]
+    if missing:
+        parts.append("Missing: " + ", ".join(missing[:6]) + ".")
+    if wrong:
+        parts.append("Wrong: " + "; ".join(wrong[:4]) + ".")
+    parts.append(
+        "A load case needs a name, a material with its properties, at least one "
+        "fixture and at least one load; a fixture and a load are each a `where` "
+        "selector plus their values, and a force is a vector in newtons. "
+        f"This one is valid: {_LOAD_CASE_EXAMPLE}"
+    )
+    parts.append(
+        "Or call draft_load_case with the loading in plain words and it will "
+        "build one against this part's real bounding box."
+    )
+    return " ".join(parts)
+
+
 @dataclass
 class ToolBox:
     """The tool set bound to one user and one database session."""
@@ -228,6 +296,11 @@ class ToolBox:
     session_scope: SessionScope | None = None
     media_store: LocalMediaStore | None = None
     media: MediaService | None = None
+    #: Injected so `draft_load_case` can turn a sentence into a load case. The
+    #: same provider serving the conversation, so a draft costs one model call
+    #: on the machine already answering. Absent in contexts with no model; the
+    #: tool is then withheld rather than offered and refused.
+    provider: Any = None
     _tools: dict[str, Tool] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
@@ -520,6 +593,43 @@ class ToolBox:
                     {"simulation_id": {"type": "string"}}, required=["simulation_id"]
                 ),
                 handler=self._get_simulation,
+            ),
+            Tool(
+                name="draft_load_case",
+                description=(
+                    "Turn a sentence about how a part is loaded into a load case the "
+                    "solver will accept, measured against this project's real geometry. "
+                    "Say what is applied and where in ordinary words -- '500 N hanging "
+                    "off the free end, bolted to the wall at the other, mild steel' -- "
+                    "and it returns the load case plus the assumptions it had to make "
+                    "and anything it could not resolve.\n"
+                    "Use this rather than writing a load case by hand: the shape is "
+                    "fiddly and this one is built against the part's own bounding box, "
+                    "so 'the top face' and 'the far end' mean something. Show the user "
+                    "the assumptions before running it -- they are the numbers you chose "
+                    "and they did not.\n"
+                    "The part must have been exported to Kryova first "
+                    "(catia_export_step or sync_geometry_from_catia); a load case cannot "
+                    "be resolved against geometry that is only open in CATIA."
+                ),
+                parameters=_object(
+                    {
+                        "description": {
+                            "type": "string",
+                            "description": (
+                                "How the part is loaded and held, in plain words. "
+                                "Include the material if you know it."
+                            ),
+                        },
+                        "project_id": {"type": "string"},
+                        "geometry_version": {
+                            "type": "integer",
+                            "description": "Omit for the project's latest version.",
+                        },
+                    },
+                    required=["description"],
+                ),
+                handler=self._draft_load_case,
             ),
             Tool(
                 name="run_simulation",
@@ -960,6 +1070,69 @@ class ToolBox:
             "error": job.error,
         }
 
+    def _draft_load_case(
+        self,
+        description: str,
+        project_id: str | None = None,
+        geometry_version: int | None = None,
+    ) -> dict[str, Any]:
+        """A load case from a sentence, against this project's real geometry.
+
+        The drafting itself has existed since the load-case route was written
+        and was reachable only from the web form. Measured on ladder prompt H4,
+        2026-09-06: the agent built the bracket correctly, then tried four
+        times to hand-write a `LoadCase` for it, failed pydantic validation
+        every time, and the run the prompt was actually asking for never
+        happened. The capability was in the product and not in the tool set.
+
+        Returned as a *draft*, with its assumptions and its unresolved
+        questions attached and no run started. That is the contract the route
+        already had, and it is the honest one: the numbers in here are choices,
+        and the user has to see which ones were theirs.
+        """
+        from app.ai.service import draft_load_case as draft
+
+        project = self._project(project_id)
+        if self.provider is None:
+            raise ToolError(
+                "No model is available to draft a load case here. Write the load "
+                "case out and pass it to run_simulation."
+            )
+
+        stmt = select(GeometryVersion).where(GeometryVersion.project_id == project.id)
+        if geometry_version is None:
+            stmt = stmt.order_by(GeometryVersion.version_number.desc())
+        else:
+            stmt = stmt.where(GeometryVersion.version_number == geometry_version)
+        version = self.db.scalars(stmt).first()
+        if version is None:
+            raise ToolError(
+                "This project has no geometry to resolve a load case against. Export "
+                "the part from CATIA first with catia_export_step, then call this again."
+            )
+
+        box = (version.stats or {}).get("bounding_box")
+        if not box:
+            raise ToolError(
+                f"Geometry version {version.version_number} has no bounding box, so "
+                "'the top face' and 'the far end' cannot be resolved. Re-export the "
+                "part and try again."
+            )
+
+        completion = draft(self.provider, description=description, bounding_box=box)
+        draft_result = completion.value
+        return {
+            "load_case": draft_result.load_case.model_dump(mode="json"),
+            "assumptions": draft_result.assumptions,
+            "unresolved": draft_result.unresolved,
+            "geometry_version": version.version_number,
+            "note": (
+                "A draft. Show the assumptions to the user before running it, and "
+                "say which numbers you chose. Pass load_case straight to "
+                "run_simulation when they are happy."
+            ),
+        }
+
     def _run_simulation(
         self,
         load_case: dict[str, Any],
@@ -989,6 +1162,8 @@ class ToolBox:
         # tool error the model can read and correct, rather than a 500 later.
         try:
             validated = LoadCase.model_validate(load_case)
+        except ValidationError as exc:
+            raise ToolError(_load_case_problem(exc)) from exc
         except Exception as exc:
             raise ToolError(
                 f"That load case is not valid: {exc}. Fix it and call run_simulation again."

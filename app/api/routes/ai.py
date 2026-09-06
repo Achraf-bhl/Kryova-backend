@@ -344,6 +344,7 @@ def _build_toolbox(
     session_scope: Any,
     store: Any,
     media: Any,
+    provider: Any = None,
 ) -> ToolBox:
     """Wire the toolbox with everything a mutating tool actually needs.
 
@@ -360,6 +361,7 @@ def _build_toolbox(
         session_scope=session_scope,
         media_store=store,
         media=media,
+        provider=provider,
     )
 
 
@@ -440,6 +442,7 @@ def chat(
         session_scope=session_scope,
         store=store,
         media=media,
+        provider=provider,
     )
 
     try:
@@ -526,6 +529,7 @@ def chat_stream(
         session_scope=session_scope,
         store=store,
         media=media,
+        provider=provider,
     )
     conversation_id = conversation.id
 

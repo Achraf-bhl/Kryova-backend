@@ -408,13 +408,21 @@ def stream_agent(
 
     for step in range(budget):
         yield {"type": "thinking", "step": step + 1, "max_steps": budget}
+        # A turn is the model thinking plus the tools running, and the two are
+        # optimised in completely different places -- one is GPU offload and
+        # context size, the other is COM round trips to CATIA. Timed
+        # separately, because a total tells you a turn was slow and nothing
+        # about which half to look at.
+        thinking_started = time.perf_counter()
         turn = provider.chat(
             system=system,
             messages=build_messages(db, owner, conversation),
             tools=schemas,
             max_tokens=max_tokens,
         )
+        thinking_ms = (time.perf_counter() - thinking_started) * 1000.0
         usage += turn.usage
+        step_timings: list[tuple[str, float]] = []
 
         if not turn.wants_tools:
             # A turn with no tool calls is the model saying it is finished, and
@@ -530,6 +538,7 @@ def stream_agent(
                 logger.exception("Tool %s raised", call.name)
                 result, ok = {"error": f"{type(exc).__name__}: {exc}"}, False
             elapsed_ms = int((time.monotonic() - started) * 1000)
+            step_timings.append((call.name, float(elapsed_ms)))
 
             steps.append(AgentStep(tool=call.name, arguments=call.arguments, ok=ok, result=result))
             _append(
@@ -554,7 +563,20 @@ def stream_agent(
             }
 
         db.commit()
-        logger.debug("agent step %d: %d tool call(s)", step + 1, len(turn.tool_calls))
+        # INFO, not DEBUG. This is the one line that says where a turn's time
+        # went, and a number nobody can see is a number nobody optimises --
+        # the whole reason the GPU offload defect survived as long as it did.
+        logger.info(
+            "agent step %d/%d: model %.0f ms, %d tool call(s)%s, %d prompt tokens",
+            step + 1,
+            budget,
+            thinking_ms,
+            len(step_timings),
+            (" [" + ", ".join(f"{name} {ms:.0f}ms" for name, ms in step_timings) + "]")
+            if step_timings
+            else "",
+            turn.usage.prompt_tokens,
+        )
 
     # Out of steps. Ask for a final answer with tools withdrawn, so the user
     # gets the model's best summary instead of a bare "gave up".

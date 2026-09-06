@@ -1273,3 +1273,65 @@ class TestTheOpenKernelBindingSurvivesTheAgentLayer:
         with pytest.raises(ToolError) as refused:
             box._call_catia("catia_pad", {"sketch": "profile", "length_mm": 20.0})
         assert "catia_open_document" not in str(refused.value)
+
+
+class TestTheCorrectionBudgetIsConsecutive:
+    """A blank the model recovered from is not evidence of a stuck model.
+
+    Measured on ladder prompt H4 turn 2, 2026-09-06, on the seat. The model
+    went blank at step 3 and again at step 6. Both were corrected, and both
+    recovered immediately -- the steps after them ran real CATIA calls. That
+    spent a lifetime budget of two, so the blank at step 11 had nothing left
+    and ended the turn: five tool calls of work done, no write-up, and nine of
+    the twenty steps never used.
+    """
+
+    def test_a_blank_between_two_working_steps_does_not_use_up_the_budget(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """Three blanks, each recovered by a real tool call, then an answer.
+        On a lifetime budget the third blank ends the turn with no text."""
+        provider = ScriptedProvider(
+            [
+                AssistantTurn(tool_calls=[ToolCall(id="1", name="list_projects", arguments={})]),
+                AssistantTurn(text=""),
+                AssistantTurn(tool_calls=[ToolCall(id="2", name="list_projects", arguments={})]),
+                AssistantTurn(text=""),
+                AssistantTurn(tool_calls=[ToolCall(id="3", name="list_projects", arguments={})]),
+                AssistantTurn(text=""),
+                AssistantTurn(tool_calls=[ToolCall(id="4", name="list_projects", arguments={})]),
+                AssistantTurn(text="Here is what I found."),
+            ]
+        )
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="look around",
+        )
+        assert reply.text == "Here is what I found."
+        assert "did not manage to write up" not in reply.text
+
+    def test_two_blanks_in_a_row_still_stop(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """The budget still does its job: a model that is actually stuck gets
+        two corrections and no more, because nothing resets the count."""
+        provider = ScriptedProvider(
+            [
+                AssistantTurn(tool_calls=[ToolCall(id="1", name="list_projects", arguments={})]),
+                AssistantTurn(text=""),
+                AssistantTurn(text=""),
+                AssistantTurn(text=""),
+                AssistantTurn(text="too late"),
+            ]
+        )
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="look around",
+        )
+        assert "did not manage to write up" in reply.text

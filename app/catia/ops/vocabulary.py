@@ -180,13 +180,29 @@ def edge_reference(description: str) -> dict[str, Any]:
 
 
 def element_reference(description: str) -> dict[str, Any]:
-    """Any named element: a sketch, feature, body, surface, curve or point."""
+    """Any named element: a sketch, feature, body, surface, curve or point.
+
+    **The naming rule is stated once, in the system prompt, and not here.**
+    It used to be appended to every one of these -- "Name it exactly as
+    catia_list_features or the tool that created it reported it (e.g.
+    'Sketch.1', 'Pad.1', 'Plane.2')" -- which is 118 characters repeated 182
+    times across the registry.
+
+    Measured on ladder prompt H4 turn 2, 2026-09-06, on the seat: the model's
+    prompt was 24,798 tokens, of which the tool schemas were **14,866 -- 60% of
+    it** -- and each step cost 15-26 s against 0.3-1.1 s for the CATIA calls.
+    The model, not COM, is the whole latency of a turn, and the schemas are the
+    bulk of the model's prompt. The repetition was also pushing a 32,768-token
+    window to 76% full, which is where Ollama starts truncating from the front
+    in silence.
+
+    A rule that applies to every reference belongs in the frozen system prefix,
+    where it is stated once and cached, not in the per-turn payload where it is
+    re-sent on every step of every turn.
+    """
     return {
         "type": "string",
         "minLength": 1,
         "maxLength": limits.MAX_NAME_CHARS,
-        "description": (
-            f"{description} Name it exactly as catia_list_features or the tool that "
-            "created it reported it (e.g. 'Sketch.1', 'Pad.1', 'Plane.2')."
-        ),
+        "description": description,
     }

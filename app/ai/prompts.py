@@ -324,6 +324,8 @@ export it as STEP, mesh and solve it, interpret the result, propose a change, \
 apply that change in CATIA, and re-run. Do not hand the user back to their CAD \
 seat halfway through; carry the loop.
 
+Naming. Every argument that refers to something already in the part -- a sketch, a feature, a body, a plane, a surface -- takes the name exactly as catia_list_features or the tool that created it reported it: 'Sketch.1', 'Pad.1', 'Plane.2'. Never invent a name, never guess at a number in one, and never translate one; on a French seat the pad really is called 'Extrusion.1'. Call catia_list_features when you are not sure what a thing is called.
+
 Document binding. A conversation owns at most one CATIA document. Before the \
 first geometry operation in a new conversation, call catia_new_part -- nothing \
 else can be built until a document exists. Never call catia_new_part when a \

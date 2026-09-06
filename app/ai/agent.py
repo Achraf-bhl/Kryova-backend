@@ -62,10 +62,24 @@ logger = logging.getLogger(__name__)
 #: stuck, and more steps will not unstick it.
 DEFAULT_MAX_STEPS = 20
 
-#: How many times in one turn the model may be told to re-issue a tool call it
+#: How many times *in a row* the model may be told to re-issue a tool call it
 #: wrote as prose, or to answer at all after returning nothing. Two is enough to
 #: clear a one-off formatting slip; a model that needs more is not going to get
 #: there, and every retry is time the user spends watching a spinner.
+#:
+#: **Consecutive, not lifetime.** It was a lifetime count until 2026-09-06, and
+#: ladder prompt H4 turn 2 measured what that costs. The model went blank at
+#: step 3 and again at step 6; both were corrected and both recovered
+#: immediately, doing real work on the steps that followed. That spent the
+#: whole budget, so the blank at step 11 had nothing left and ended the turn --
+#: with five tool calls of work done and no write-up, on a turn that had nine
+#: of its twenty steps still unused.
+#:
+#: The budget exists to stop a stuck model looping, and a blank the model
+#: recovered from is not evidence of a stuck model. So a step that actually
+#: calls a tool clears the count, and only blanks with nothing in between add
+#: up. A genuinely stuck model still stops after two, because it never gets a
+#: successful step to reset it.
 MAX_CORRECTIONS = 2
 
 
@@ -494,6 +508,12 @@ def stream_agent(
                 "completion_tokens": usage.completion_tokens,
             }
             return
+
+        # The model asked for tools, so whatever went wrong on an earlier step
+        # is behind it. See MAX_CORRECTIONS: the budget counts consecutive
+        # failures, because a blank the model recovered from says nothing about
+        # whether it is stuck now.
+        corrections = 0
 
         # Persist the assistant turn *including* its tool calls before running
         # them: if a tool crashes the process, the transcript still shows what

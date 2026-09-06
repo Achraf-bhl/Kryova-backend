@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 from sqlalchemy import func, select
 
-from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject
+from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject, ReadableProject
 from app.models import Project
 from app.schemas import ProjectCreate, ProjectPage, ProjectRead, ProjectUpdate
 
@@ -43,7 +43,10 @@ def list_projects(
 
 
 @router.get("/{project_id}", response_model=ProjectRead)
-def read_project(project: OwnedProject) -> Project:
+def read_project(project: ReadableProject) -> Project:
+    """Read is the one verb a viewer has (P2.2). Every other route on a project
+    -- here and in geometry, simulations, media and CATIA -- keeps
+    `OwnedProject`, which is member-or-better."""
     return project
 
 

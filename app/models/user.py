@@ -8,6 +8,7 @@ from app.core.database import Base
 from app.models.base import TimestampMixin, UTCDateTime, UUIDPrimaryKey
 
 if TYPE_CHECKING:
+    from app.models.organisation import Membership
     from app.models.project import Project
     from app.models.session import UserSession
 
@@ -30,6 +31,12 @@ class User(UUIDPrimaryKey, TimestampMixin, Base):
 
     projects: Mapped[list["Project"]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
+    )
+
+    #: Every tenant this person belongs to. The rows here -- not `projects` --
+    #: are what authorises access to anything since P2.
+    memberships: Mapped[list["Membership"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )
 
     #: Every device this person is signed in on, live or revoked. Revoked rows

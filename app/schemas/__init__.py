@@ -8,6 +8,18 @@ from app.schemas.auth import (
 )
 from app.schemas.geometry import GeometryVersionRead
 from app.schemas.media import MediaRead, UploadSessionCreate, UploadSessionRead
+from app.schemas.organisation import (
+    InvitationAccept,
+    InvitationCreate,
+    InvitationIssued,
+    InvitationRead,
+    MemberRead,
+    MemberUpdate,
+    OrganisationCreate,
+    OrganisationMembershipRead,
+    OrganisationRead,
+    OrganisationUpdate,
+)
 from app.schemas.pagination import (
     GeometryVersionPage,
     MediaPage,
@@ -27,9 +39,19 @@ __all__ = [
     "DeviceSessionRead",
     "GeometryVersionPage",
     "GeometryVersionRead",
+    "InvitationAccept",
+    "InvitationCreate",
+    "InvitationIssued",
+    "InvitationRead",
     "MaterialList",
     "MediaPage",
     "MediaRead",
+    "MemberRead",
+    "MemberUpdate",
+    "OrganisationCreate",
+    "OrganisationMembershipRead",
+    "OrganisationRead",
+    "OrganisationUpdate",
     "Page",
     "PasswordReset",
     "PasswordResetRequest",

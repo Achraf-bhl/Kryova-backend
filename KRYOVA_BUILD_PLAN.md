@@ -107,11 +107,40 @@ and what 5.3's sensitivity can then be run over.
 
 ## Done
 
+- **P2 — organisations, roles and RLS tenancy (2026-09-06).** Projects are owned by an organisation, not a person; `owner_id` stays as provenance and stops being a permission. Migration `1b07f4f27e89` **backfills**: a personal organisation per user, its creator as `owner`, `projects.organisation_id` added nullable, filled, and only then made NOT NULL — 24 users, 24 organisations, 82 projects placed, 0 orphans on the live database, with the migration raising rather than continuing if any row were left behind. A `before_flush` hook extends the guarantee forward, so `app/ai/tools.py` building a `Project` directly gets a tenant without knowing organisations exist. Roles are one ordered ladder and every check is `at_least`, in `api/deps.py` alone. Invitations hash their token like the password reset does, are single-use, and are bound to the address they were sent to. Every cross-tenant miss is a 404 byte-identical to a miss. RLS is enabled **and FORCEd** on six tables, fed only by `set_config(..., is_local => true)` republished on each transaction the request opens — proved by breaking it to `false`, which leaves the tenant on the connection after COMMIT and fails the test. **The one thing that is not true yet:** Neon's `neondb_owner` holds `BYPASSRLS`, which outranks FORCE and made the first run of the isolation suite pass vacuously; it cannot alter itself to drop it. The suite now runs as a `NOBYPASSRLS` probe role so the policies are genuinely tested, and `test_the_application_role_must_not_bypass_row_level_security` is `xfail` with the fix in its reason. Thirteen guards verified by breaking what they guard.
+
 - **E16.1 — the tool the prompt promised and the offer withheld (2026-09-06).** Tool *selection* rebuilt in `app/ai/tool_retrieval.py` and measured against the real 110-tool OCCT registry rather than a synthetic one: the shipped selector was withholding five to nine tools the frozen system prompts *name* on every realistic message, `catia_set_parameter` on all five measured — the tool rung 3 is entirely about and the one the agent failed to find for three sessions running. Prompt-named tools are now a floor, scanned out of the prompt text so it cannot fall behind an edit. Four more rules, each explaining itself: `catia_kb.recognise` supplies the domain layer (*bore* → Hole, in French too), intent families cover tasks whose words are disjoint from the tool that serves them, a registry-derived common-word filter and a name-beats-prose rule kill the noise those widenings would otherwise let in. Offers 17–39 of 110 per turn; every inclusion carries the rule and evidence that produced it, logged per turn. **Unproven until a gate: no chat run has been driven against the narrowed offer.** `app/ai/planning.py` lands 16.2's seam and one first step — the requirements of a request, held where the context window cannot trim them — tested and deliberately unwired.
 
 - **P9.1 — CI that is honest about the database (2026-09-06).** Backend CI split into `lint` / `offline` / `database`: the offline half (3,327 tests) gates every push and reports the 430 it deliberately skipped, the database half runs against a PostgreSQL 17 service container with `alembic upgrade head` + `alembic check`, and `scripts/pytest_split.py --database-only` refuses to start without a real PostgreSQL so conftest's SQLite fallback can never again be reported as the database suite. Fixed two things that were red on main: `mypy app tests` aborted on a duplicate module name and had been checking nothing, and `.env.example` was missing `AI_TOOL_LIMIT` / `AI_DAILY_TOKEN_BUDGET`. Frontend CI already existed (the plan was wrong about that) and was upgraded: SHA-pinned actions, `.nvmrc`, and a three-dependency guard. Decided against a tagged MSI release — the installer bakes build-machine paths, so it would ship broken.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-06** — P2 → **orgs and RLS, and a security test that was passing
+  against a database enforcing nothing.** The migration backfills in the right
+  order — tables, then a nullable `organisation_id`, then a PL/pgSQL loop giving
+  every user a personal org and every project a home, then `SET NOT NULL`, then
+  the policies — and raises rather than continuing if a project is left
+  unplaced. Verified on the live database: **24 users → 24 organisations → 24
+  memberships, 82 projects, 0 orphans.** A `before_flush` hook carries the
+  guarantee forward, because `app/ai/tools.py` constructs a `Project` directly
+  and requiring every call site to remember the tenant is how one of them
+  forgets.
+  **The finding that matters: Neon's `neondb_owner` holds `BYPASSRLS`, which
+  outranks both ENABLE and FORCE — so the first run of the isolation suite
+  passed vacuously, every assertion green against a database enforcing nothing.**
+  Confirmed here independently (`rolbypassrls = True` for `current_user`). The
+  policies are correct and deployed and do nothing until `DATABASE_URL` points at
+  a `NOBYPASSRLS` role, which the owner cannot grant itself. Tracked as a
+  non-strict `xfail` so it flips to XPASS the day it is fixed rather than being
+  quietly absent.
+  `tenant_scope()` uses `set_config(..., true)` — `SET LOCAL` in function form,
+  because `SET` takes no bind parameters and the value is user-derived — and it
+  is **republished on `after_begin`** rather than set once, since `db.commit()`
+  discards it, which is exactly the property that makes it safe on the pooled
+  endpoint. Thirteen guards broken to verify; the thirteenth did **not** fail and
+  says so: deleting `WITH CHECK` changes nothing because PostgreSQL defaults it
+  to the `USING` expression on a `FOR ALL` policy. The clause is kept anyway,
+  since that default disappears the moment anyone splits it per-command.
 
 - **2026-09-06** — E17.3 → **sheet metal, with no default K-factor anywhere.**
   `BA=(π/180)·θ·(r+K·t)` gives 6.094689747964199 mm for the 90°/2 mm/r3/K0.44

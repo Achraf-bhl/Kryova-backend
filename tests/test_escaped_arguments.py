@@ -130,3 +130,77 @@ class TestItRunsInNormalise:
     def test_the_hole_repair_still_runs(self) -> None:
         out = _normalise("catia_hole", {"through_all": True, "depth_mm": 0}, None)
         assert "depth_mm" not in out
+
+
+class TestAListWrittenOneItemPerLine:
+    """The call that lost ladder prompt PRO4, 2026-09-07, on the seat.
+
+    The model sent the punch press's C-frame outline as twelve `[x, y]` pairs,
+    one per line -- the right profile, correctly ordered, for the frame the
+    prompt asks for. `json.loads` refuses it: no outer brackets, newlines where
+    the commas should be. The call came back `points must be array, got str`
+    and the agent did not recover -- it padded an empty sketch, failed, created
+    two more sketches it could not use, and the turn ended on the round cap with
+    no machine built.
+
+    The bar is unchanged: the repaired string still has to parse as JSON and
+    still has to yield a list, and the schema still runs afterwards.
+    """
+
+    #: Copied from the operation log, not retyped from memory.
+    C_FRAME = (
+        "[0, 0]\n[200, 0]\n[200, 150]\n[150, 150]\n[150, 180]\n[200, 180]\n"
+        "[200, 350]\n[0, 350]\n[0, 180]\n[50, 180]\n[50, 150]\n[0, 150]"
+    )
+    SCHEMA = {"properties": {"points": {"type": "array"}}}
+
+    def test_the_c_frame_profile_is_recovered(self) -> None:
+        out = _normalise("catia_sketch_polyline", {"points": self.C_FRAME}, self.SCHEMA)
+        assert out["points"][0] == [0, 0]
+        assert out["points"][-1] == [0, 150]
+        assert len(out["points"]) == 12
+
+    def test_trailing_commas_per_line_are_tolerated(self) -> None:
+        out = _normalise(
+            "catia_sketch_polyline", {"points": "[0, 0],\n[10, 0],\n[10, 5]"}, self.SCHEMA
+        )
+        assert out["points"] == [[0, 0], [10, 0], [10, 5]]
+
+    def test_plain_numbers_one_per_line(self) -> None:
+        out = _normalise("catia_pattern", {"points": "1\n2\n3"}, self.SCHEMA)
+        assert out["points"] == [1, 2, 3]
+
+    def test_strict_json_still_wins(self) -> None:
+        out = _normalise(
+            "catia_sketch_polyline", {"points": "[[0, 0], [10, 0]]"}, self.SCHEMA
+        )
+        assert out["points"] == [[0, 0], [10, 0]]
+
+    def test_prose_is_left_alone_for_the_validator_to_refuse(self) -> None:
+        """The repair must not turn an explanation into a list. Anything that
+        does not parse as JSON arrives exactly as it was sent."""
+        for text in ("a rectangle 200 by 350", "the outline of the frame", "200 x 350"):
+            out = _normalise("catia_sketch_polyline", {"points": text}, self.SCHEMA)
+            assert out["points"] == text
+
+    def test_multi_line_prose_is_left_alone_too(self) -> None:
+        """The dangerous shape: several lines, which is what the repair looks
+        for, and none of them JSON. Wrapping this would hand the daemon a list
+        of sentences and turn a clear refusal into a confusing one."""
+        text = "start at the origin\nrun 200 across\nthen 350 up"
+        out = _normalise("catia_sketch_polyline", {"points": text}, self.SCHEMA)
+        assert out["points"] == text
+
+    def test_a_single_line_is_not_wrapped_into_a_list(self) -> None:
+        """`"[0, 0]"` is one point, not a profile. Wrapping it would invent a
+        one-point polyline out of what is far more likely a mistake."""
+        out = _normalise("catia_sketch_polyline", {"points": "0, 0"}, self.SCHEMA)
+        assert out["points"] == "0, 0"
+
+    def test_a_field_the_schema_does_not_call_an_array_is_untouched(self) -> None:
+        out = _normalise(
+            "catia_sketch_polyline",
+            {"note": "[0, 0]\n[10, 0]"},
+            {"properties": {"note": {"type": "string"}}},
+        )
+        assert out["note"] == "[0, 0]\n[10, 0]"

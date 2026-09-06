@@ -824,6 +824,51 @@ def _repair_escapes(arguments: dict[str, Any]) -> dict[str, Any]:
     return repaired if repaired is not None else arguments
 
 
+def _as_list(value: str) -> list[Any] | None:
+    """`value` read as a JSON list, or None when it is not one.
+
+    Two spellings, and the second is the one that lost a whole run. Measured on
+    ladder prompt PRO4, 2026-09-07, on the seat: the model sent the punch
+    press's C-frame outline as
+
+        "[0, 0]\n[200, 0]\n[200, 150]\n[150, 150]\n ... \n[0, 150]"
+
+    -- twelve correct points, the right profile for the frame, one pair per
+    line. `json.loads` refuses that because the outer brackets are missing and
+    the separators are newlines, so the call was rejected as `points must be
+    array, got str`. The agent did not recover: it padded an empty sketch,
+    failed, made two more sketches it could not use, and the turn ended on the
+    round cap with no machine.
+
+    Nothing is guessed. A list of items is glued together with the commas that
+    are missing and wrapped in the brackets that are missing, and the result has
+    to parse *as JSON* and yield a list -- exactly the bar the strict path
+    already sets. Anything that does not parse is returned untouched and refused
+    by the validator as before, and the schema still runs afterwards, so a list
+    of the wrong length or of strings where numbers are wanted is still refused.
+
+    `ast.literal_eval` is still deliberately not used, for the reason the caller
+    gives: it would also accept Python tuples, sets and expressions.
+    """
+    try:
+        strict = json.loads(value)
+    except (ValueError, TypeError):
+        strict = None
+    if isinstance(strict, list):
+        return strict
+
+    # One item per line, or per line with trailing commas already there.
+    items = [line.strip().rstrip(",") for line in value.strip().splitlines()]
+    items = [item for item in items if item]
+    if len(items) < 2:
+        return None
+    try:
+        joined = json.loads("[" + ",".join(items) + "]")
+    except (ValueError, TypeError):
+        return None
+    return joined if isinstance(joined, list) else None
+
+
 def _parse_array_strings(
     arguments: dict[str, Any], schema: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -838,8 +883,10 @@ def _parse_array_strings(
     tells it nothing it can act on differently.
 
     Nothing is guessed here. The string has to parse as JSON and has to yield
-    a list; anything else is left exactly as it arrived and refused by the
-    validator as before. A list of the wrong length, or of strings where
+    a list -- see `_as_list`, which also accepts the same list written one item
+    per line, because that is how a model writes a twelve-point profile.
+    Anything else is left exactly as it arrived and refused by the validator as
+    before. A list of the wrong length, or of strings where
     numbers are wanted, is still refused too -- validation runs afterwards,
     against the same schema, unchanged. What this removes is one specific
     round trip whose outcome was never in doubt.
@@ -860,11 +907,8 @@ def _parse_array_strings(
         wanted = types if isinstance(types, list) else [types]
         if "array" not in wanted:
             continue
-        try:
-            candidate = json.loads(value)
-        except (ValueError, TypeError):
-            continue
-        if not isinstance(candidate, list):
+        candidate = _as_list(value)
+        if candidate is None:
             continue
         if parsed is None:
             parsed = dict(arguments)

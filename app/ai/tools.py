@@ -1701,10 +1701,23 @@ class ToolBox:
                 # No live document: the row names something that is gone, so
                 # building it again is the recovery, not a mistake to refuse.
             else:
+                # Two ways forward, and naming only the first is what made
+                # ladder prompt S2 unbuildable. Measured on the seat
+                # 2026-09-06: asked for a shaft and a bushing, the agent
+                # finished the shaft, called catia_new_part for the bushing,
+                # was told to reopen the document it already had, and called
+                # it seven more times. Reopening is right when there is one
+                # part; it is not what "now make the second part" means, and
+                # the tool that does mean that was never mentioned.
                 raise ToolError(
-                    f"This conversation already owns the CATIA document {bound!r}. Call "
-                    "catia_open_document to work on it; creating a new part here would "
-                    "abandon everything already modelled."
+                    f"This conversation already owns the CATIA document {bound!r}, so "
+                    "catia_new_part would abandon everything already modelled. Two "
+                    "ways on, depending on what you meant. To carry on with this "
+                    "part, just keep building -- call catia_list_features to see what "
+                    "is there. To start a SECOND part, because this is an assembly, "
+                    "call catia_assembly_component first: it records the part that is "
+                    "open now as a component and closes it, and then catia_new_part "
+                    "starts the next one."
                 )
         if name == "catia_open_document" and not bound:
             raise ToolError(

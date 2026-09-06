@@ -422,6 +422,10 @@ def stream_agent(
     #: refused write ran nothing, so repeating it verbatim is the same dead end
     #: as repeating a read -- see `_refused_before`.
     refusals: dict[str, str] = {}
+    #: How many calls this turn were turned back for being repeats. See
+    #: MAX_BLOCKED_REPEATS: past a few, the budget is better spent ending the
+    #: turn than on more of them.
+    blocked = 0
     schemas = toolbox.schemas(
         include_mutating=allow_mutations, only=_shown_tools(toolbox, user_message)
     )
@@ -565,6 +569,7 @@ def stream_agent(
                     else _looping_on(call.name, call.arguments, reads)
                 )
                 if looping is not None:
+                    blocked += 1
                     raise ToolError(looping)
                 result: Any = toolbox.call(
                     call.name, call.arguments, allow_mutations=allow_mutations
@@ -605,6 +610,18 @@ def stream_agent(
             }
 
         db.commit()
+        if blocked >= MAX_BLOCKED_REPEATS:
+            # Out of patience rather than out of budget. Ending here leaves the
+            # remaining rounds unspent and gets the user a summary and a
+            # question, instead of the same refusal until the cap.
+            logger.info(
+                "ending the turn after %d blocked repeat(s) at step %d/%d",
+                blocked,
+                step + 1,
+                budget,
+            )
+            break
+
         # INFO, not DEBUG. This is the one line that says where a turn's time
         # went, and a number nobody can see is a number nobody optimises --
         # the whole reason the GPU offload defect survived as long as it did.
@@ -672,6 +689,20 @@ def stream_agent(
 #: Only reads. A repeated *write* is a different question -- it may be a
 #: deliberate second hole -- and the mutating tools have their own guards.
 MAX_IDENTICAL_READS = 2
+
+#: How many calls a turn may spend being turned back by the two guards above
+#: before the turn ends instead of spending the rest of its budget.
+#:
+#: The guards stop the *work*; they do not stop the *rounds*. Measured on the
+#: seat 2026-09-06, ladder prompt S2: `catia_new_part` was refused, correctly,
+#: and then called six more times. Each refusal took 0 ms and cost a round, so
+#: a guard written to save rounds spent seven of twenty.
+#:
+#: A model that has been told three times that a call is already answered is
+#: not going to be told a fourth time to any effect. Ending the turn hands the
+#: user a summary and a question, which is Phase 16.4's escalate step, and it
+#: is strictly better than burning the remaining budget in silence.
+MAX_BLOCKED_REPEATS = 3
 
 
 def _read_fingerprint(name: str, arguments: Any) -> str:

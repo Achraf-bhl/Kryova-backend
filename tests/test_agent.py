@@ -161,10 +161,20 @@ class TestTermination:
     def test_a_model_that_never_stops_is_cut_off(
         self, db_session: Session, user: User, project: Project, conversation: Conversation
     ) -> None:
-        """The loop must terminate even against a model stuck in a tool loop."""
+        """The loop must terminate even against a model that never answers.
+
+        The calls vary, because a model repeating one call verbatim is stopped
+        sooner and for a different reason -- see
+        `TestATurnStopsRepeatingItself`. This is the backstop underneath that:
+        a model doing genuinely new work forever still stops at the budget.
+        """
         budget = max_steps()
         looping = [
-            AssistantTurn(tool_calls=[ToolCall(id=f"c{i}", name="list_projects", arguments={})])
+            AssistantTurn(
+                tool_calls=[
+                    ToolCall(id=f"c{i}", name="list_projects", arguments={"limit": i + 1})
+                ]
+            )
             for i in range(budget + 5)
         ]
         provider = ScriptedProvider(looping)
@@ -418,9 +428,16 @@ class TestContextWindow:
         from app.ai.context import window
 
         budget = max_steps()
+        # Varied arguments, so the turn runs its full length rather than being
+        # stopped early as a repeat -- what is under test here is the window,
+        # not the loop guard.
         provider = ScriptedProvider(
             [
-                AssistantTurn(tool_calls=[ToolCall(id=f"c{i}", name="list_projects", arguments={})])
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(id=f"c{i}", name="list_projects", arguments={"limit": i + 1})
+                    ]
+                )
                 for i in range(budget)
             ]
         )
@@ -1548,3 +1565,83 @@ class TestARefusedWriteIsNotRepeated:
         failures = [str(s.result) for s in reply.steps if not s.ok]
         assert len(failures) == 2
         assert not any("second time" in f for f in failures)
+
+
+class TestATurnStopsRepeatingItself:
+    """The repeat guards stop the work; they have to stop the rounds too.
+
+    Measured on the seat, 2026-09-06, ladder prompt S2 -- a shaft and a bushing
+    with a clash check. The agent finished the shaft, called `catia_new_part`
+    for the bushing, was refused because a conversation owns one document, and
+    called it **six more times**. Each refusal took 0 ms and cost a round, so a
+    guard written to save rounds spent seven of twenty.
+    """
+
+    def _hammering(self, times: int) -> list[AssistantTurn]:
+        return [
+            AssistantTurn(
+                tool_calls=[
+                    ToolCall(id=str(i), name="delete_simulation", arguments={"simulation_id": "x"})
+                ]
+            )
+            for i in range(times)
+        ] + [AssistantTurn(text="I could not do that.")] * 3
+
+    def test_the_turn_ends_rather_than_spending_the_budget(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        from app.ai.agent import MAX_BLOCKED_REPEATS
+
+        provider = ScriptedProvider(self._hammering(12))
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="delete it",
+            allow_mutations=True,
+        )
+        # The first call runs and is refused on its own merits; the repeats
+        # after it are what the counter counts.
+        assert len(reply.steps) <= MAX_BLOCKED_REPEATS + 2
+        assert len(reply.steps) < 12
+
+    def test_the_user_still_gets_an_answer(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """Ending early must not end silently."""
+        provider = ScriptedProvider(self._hammering(4))
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="delete it",
+            allow_mutations=True,
+        )
+        assert reply.text.strip()
+
+    def test_a_turn_with_no_repeats_runs_its_full_course(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """The counter must not fire on ordinary work."""
+        provider = ScriptedProvider(
+            [
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(id=str(i), name="get_project", arguments={"project_id": project.id})
+                    ]
+                )
+                for i in range(2)
+            ]
+            + [AssistantTurn(text="done")]
+        )
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="look",
+        )
+        assert reply.text == "done"
+        assert all(s.ok for s in reply.steps)

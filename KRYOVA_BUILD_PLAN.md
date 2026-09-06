@@ -111,6 +111,22 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E13 → **tolerance stack-up has tests, and the design they
+  found is better than the phase asked for.** Worst case and RSS are checked
+  against arithmetic done in the test — a three-part ±0.10 chain closes at 0.30
+  worst case and √0.03 = 0.1414 RSS, and the two differ by an amount nobody
+  could mistake for rounding. But the half worth having is the refusal:
+  **`stack()` will not hand over an anonymous RSS number.** Every assumption in
+  `Risk` must be established from declared capability data or acknowledged by a
+  named person, because an assumption nobody signed for is an assumption nobody
+  made — and `Risk.INDEPENDENCE` can never be established from numbers at all,
+  since two dimensions cut on the same machine in the same setup are not
+  independent and only somebody who knows how the parts are made can say so. An
+  unavailable statistical result carries `half_width_mm = None` rather than a
+  number a caller would use. Mutations: accepting an unsigned acknowledgement
+  fails a test, granting RSS with nothing acknowledged fails a test, and giving
+  worst case the statistical arithmetic fails ten of fifteen.
+
 - **2026-09-06** — E9 → **clearance through a motion range has tests, and the
   defect they were written for.** The agent building `app/dynamics/` found,
   before a rate limit killed it, that `measured_poses` was

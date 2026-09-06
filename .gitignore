@@ -56,3 +56,8 @@ Thumbs.db
 # Same class of accident as the `.env` note at the top of this file: an
 # untracked scratch file one `git add -A` away from being a published secret.
 test _api_latancy.py
+
+# Scratch probes. Agents sometimes drop one at the repo root while working out
+# an API; they belong in the session scratchpad, and one that reaches a commit
+# is noise nobody later can tell from a real module.
+_probe*.py

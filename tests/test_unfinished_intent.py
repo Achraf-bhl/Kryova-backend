@@ -212,3 +212,110 @@ class TestBuildingTheSameSketchTwice:
         built = runner("catia_pad", {"sketch": "b", "length_mm": 10.0})
 
         assert built["has_solid"] is True
+
+
+class TestAFeatureThatChangedNothing:
+    """The third door the same failure takes — gate G1, fourth rung-3 attempt.
+
+    Asked for four 12 mm clearance holes on a **200 mm bolt circle** in a
+    200x150 plate, the agent drew four circles at a 100 mm radius and pocketed
+    them. On a plate spanning x +/- 100 and y +/- 75, two of those sit centred on
+    the left and right *edges* — half in the material, half in the air — and the
+    other two, at y = +/- 100, are entirely off the part. The call returned `ok`.
+    The finished plate has two small notches in its edges and no clearance holes,
+    and the volume confirms it to the last digit:
+
+        200*150*11.24 - pi*30^2*11.24 - 2*(half a 12 mm circle, 5 mm deep)
+          = 304854.16 mm^3   — exactly what was measured.
+
+    `BRepAlgoAPI_Cut` succeeds when the tool and the target do not overlap: the
+    answer is the target, unchanged, and `IsDone()` is true. Nothing said the
+    holes had missed.
+
+    Refused rather than noted, unlike the abandoned sketch above, because there
+    is no reading under which a caller meant a feature that changes no material.
+    """
+
+    def _plate(self):
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "p"})
+        runner("catia_sketch_create", {"support": "XY", "name": "o"})
+        runner("catia_sketch_rectangle", {"sketch": "o", "width_mm": 200.0, "height_mm": 150.0})
+        runner("catia_pad", {"sketch": "o", "length_mm": 11.24})
+        return runner
+
+    def test_a_cut_that_misses_the_part_is_refused(self) -> None:
+        runner = self._plate()
+        runner("catia_sketch_create", {"support": "XY", "name": "miss"})
+        runner(
+            "catia_sketch_circle",
+            {"sketch": "miss", "diameter_mm": 12.0, "at_radius_mm": 100.0, "at_angle_deg": 90.0},
+        )
+
+        with pytest.raises(GeometryError, match="removed no material"):
+            runner("catia_pocket", {"sketch": "miss", "depth_mm": 5.0})
+
+    def test_the_refusal_explains_why_a_miss_looks_like_a_success(self) -> None:
+        """The half nobody would guess: an OCCT cut with no overlap is not an
+        error, it returns the part unchanged."""
+        runner = self._plate()
+        runner("catia_sketch_create", {"support": "XY", "name": "miss"})
+        runner(
+            "catia_sketch_circle",
+            {"sketch": "miss", "diameter_mm": 12.0, "at_radius_mm": 100.0, "at_angle_deg": 90.0},
+        )
+
+        with pytest.raises(GeometryError) as refused:
+            runner("catia_pocket", {"sketch": "miss", "depth_mm": 5.0})
+
+        message = str(refused.value)
+        assert "does not overlap" in message
+        assert "bolt circle" in message
+
+    def test_a_boss_buried_inside_the_part_is_refused(self) -> None:
+        """The adding half of the same rule: material that is already there."""
+        runner = self._plate()
+        runner("catia_sketch_create", {"support": "XY", "name": "buried"})
+        runner("catia_sketch_circle", {"sketch": "buried", "diameter_mm": 10.0})
+
+        with pytest.raises(GeometryError, match="added no material"):
+            runner("catia_pad", {"sketch": "buried", "length_mm": 5.0})
+
+    def test_a_hole_that_hits_still_works(self) -> None:
+        runner = self._plate()
+        runner("catia_sketch_create", {"support": "XY", "name": "hit"})
+        runner("catia_sketch_circle", {"sketch": "hit", "diameter_mm": 12.0, "at": [60.0, 40.0]})
+
+        built = runner("catia_pocket", {"sketch": "hit", "through_all": True})
+
+        assert built["volume_mm3"] < 200.0 * 150.0 * 11.24
+
+    def test_a_boss_that_protrudes_still_works(self) -> None:
+        runner = self._plate()
+        runner("catia_sketch_create", {"support": "XY", "name": "boss"})
+        runner("catia_sketch_circle", {"sketch": "boss", "diameter_mm": 20.0})
+
+        built = runner("catia_pad", {"sketch": "boss", "length_mm": 20.0})
+
+        assert built["volume_mm3"] > 200.0 * 150.0 * 11.24
+
+    def test_a_partial_miss_is_NOT_caught_and_that_is_stated(self) -> None:
+        """**The honest limit of this guard.** Two of gate G1's four circles did
+        overlap the plate, so the pocket as a whole removed 565 mm^3 and this
+        guard stays silent — the part still ends with notches instead of holes.
+        Catching a partial miss needs a per-profile check against the material,
+        which is a larger piece of work and is not pretended here. Pinned so the
+        gap is visible rather than discovered again at the next gate.
+        """
+        runner = self._plate()
+        runner("catia_sketch_create", {"support": "XY", "name": "partial"})
+        runner(
+            "catia_sketch_circle",
+            {"sketch": "partial", "diameter_mm": 12.0, "at_radius_mm": 100.0, "at_angle_deg": 0.0},
+        )
+
+        built = runner("catia_pocket", {"sketch": "partial", "depth_mm": 5.0})
+
+        assert built["volume_mm3"] < 200.0 * 150.0 * 11.24

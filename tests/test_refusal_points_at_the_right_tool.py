@@ -158,10 +158,18 @@ class TestTheOtherTwoCases:
         assert "catia_set_parameter" not in str(refused.value)
 
     def test_building_normally_is_untouched(self) -> None:
+        """A boss that protrudes, not one buried in the plate.
+
+        This test originally padded the circle 5 mm into a 10 mm plate, which
+        adds no material at all — and the no-op guard added later caught it
+        immediately, which is the guard earning its keep on the day it landed.
+        15 mm stands 5 mm proud of the plate and is a real second feature.
+        """
         runner = _plate()
         runner("catia_sketch_create", {"support": "XY", "name": "second"})
         runner("catia_sketch_circle", {"sketch": "second", "diameter_mm": 10.0})
 
-        built = runner("catia_pad", {"sketch": "second", "length_mm": 5.0})
+        built = runner("catia_pad", {"sketch": "second", "length_mm": 15.0})
 
         assert built["has_solid"] is True
+        assert built["volume_mm3"] > 60.0 * 40.0 * 10.0

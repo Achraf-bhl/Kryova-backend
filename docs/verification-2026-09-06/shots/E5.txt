@@ -1,0 +1,83 @@
+# E5
+url: http://localhost:3000/dashboard/c/5a003396-e16d-4c8e-b29e-ef3014b64df7
+finished: true
+seconds: 107.3
+
+--- prompt ---
+Build a 100 x 100 x 25 block in steel, then tell me its mass and its bounding box.
+
+--- transcript ---
+New conversation
+Steel block 100x100x25
+Open project
+
+Build a 100 x 100 x 25 block in steel, then tell me its mass and its bounding box.
+
+WHAT THE ASSISTANT IS DOING
+
+7 steps
+
+Creating a CATIA part
+— Done
+1208 ms
+CATIA: sketch create
+— Done
+732 ms
+CATIA: sketch rectangle
+— Done
+899 ms
+CATIA: pad
+— Extrusion.1, 0.25 kg
+1277 ms
+CATIA: set material
+— 1.965 kg
+5918 ms
+Measuring the part
+— 1.965 kg
+918 ms
+Looking at the part
+— Done
+727 ms
+iso view — 100 x 100 x 25 mm steel block
+83.9 KB
+
+Done. The 100 x 100 x 25 mm steel block (steel-1018) has:
+
+Mass: 1.965 kg
+Bounding box: 100 × 100 × 25 mm
+Copy
+
+Done. The 100 x 100 x 25 mm steel block (steel-1018) has: Mass: 1.965 kg. Bounding box: 100 × 100 × 25 mm
+
+Message the Kryova agent
+Deep analysis
+Attach
+CATIA
+Steel block 100x100x25
+. This workstation is connected, running V5-R33.
+
+--- browser problems (24) ---
+[8.5s] console.warning: The resource http://localhost:3000/_next/static/media/70bc3e132a0a741e-s.p.3t6q91iet4nsy.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[8.5s] console.warning: The resource http://localhost:3000/_next/static/media/0c89a48fa5027cee-s.p.2cyn07wtgehh0.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[8.5s] console.warning: The resource http://localhost:3000/_next/static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[13.2s] console.warning: The resource http://localhost:3000/_next/static/media/70bc3e132a0a741e-s.p.3t6q91iet4nsy.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[13.2s] console.warning: The resource http://localhost:3000/_next/static/media/0c89a48fa5027cee-s.p.2cyn07wtgehh0.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[13.2s] console.warning: The resource http://localhost:3000/_next/static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[27.2s] console.warning: The resource http://localhost:3000/_next/static/media/70bc3e132a0a741e-s.p.3t6q91iet4nsy.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[27.2s] console.warning: The resource http://localhost:3000/_next/static/media/0c89a48fa5027cee-s.p.2cyn07wtgehh0.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[27.2s] console.warning: The resource http://localhost:3000/_next/static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[47.3s] console.warning: The resource http://localhost:3000/_next/static/media/70bc3e132a0a741e-s.p.3t6q91iet4nsy.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[47.3s] console.warning: The resource http://localhost:3000/_next/static/media/0c89a48fa5027cee-s.p.2cyn07wtgehh0.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[47.3s] console.warning: The resource http://localhost:3000/_next/static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[67.3s] console.warning: The resource http://localhost:3000/_next/static/media/70bc3e132a0a741e-s.p.3t6q91iet4nsy.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[67.3s] console.warning: The resource http://localhost:3000/_next/static/media/0c89a48fa5027cee-s.p.2cyn07wtgehh0.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[67.3s] console.warning: The resource http://localhost:3000/_next/static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[87.3s] console.warning: The resource http://localhost:3000/_next/static/media/70bc3e132a0a741e-s.p.3t6q91iet4nsy.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[87.3s] console.warning: The resource http://localhost:3000/_next/static/media/0c89a48fa5027cee-s.p.2cyn07wtgehh0.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[87.3s] console.warning: The resource http://localhost:3000/_next/static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[93.7s] console.warning: The resource http://localhost:3000/_next/static/media/70bc3e132a0a741e-s.p.3t6q91iet4nsy.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[93.7s] console.warning: The resource http://localhost:3000/_next/static/media/0c89a48fa5027cee-s.p.2cyn07wtgehh0.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[93.7s] console.warning: The resource http://localhost:3000/_next/static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[106.9s] console.warning: The resource http://localhost:3000/_next/static/media/70bc3e132a0a741e-s.p.3t6q91iet4nsy.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[106.9s] console.warning: The resource http://localhost:3000/_next/static/media/0c89a48fa5027cee-s.p.2cyn07wtgehh0.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+[106.9s] console.warning: The resource http://localhost:3000/_next/static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.

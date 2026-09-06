@@ -131,7 +131,7 @@ class AssemblyMixin:
         self: ComContext, *, name: str, part_number: str = ""
     ) -> dict[str, Any]:
         """Start a new, empty assembly and make it the active document."""
-        self._require_closed()
+        self._end_sketch_edition()
         document = self._app.Documents.Add("Product")
         path = self._free_document_path(name, suffix=".CATProduct")
         document.SaveAs(str(path))

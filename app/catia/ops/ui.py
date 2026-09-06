@@ -78,7 +78,14 @@ OPERATIONS: tuple[Operation, ...] = (
         params=(
             required("command", text("The command's English name, e.g. 'Edge Fillet'.", maximum=120)),
         ),
-        server_fields=("candidates", "command_name", "command_key", "menu_hint"),
+        # `command_ids` is enriched by `dispatch._enrich` alongside the rest.
+        # It was added on 2026-09-06 without this line, which refused **every**
+        # `catia_run_command` call on the seat -- the daemon strips the declared
+        # server fields before validating and rejects whatever is left over, so
+        # an un-declared enrichment is not ignored, it is fatal. Measured on
+        # ladder prompt H3: two refusals reading "unknown field(s): command_ids",
+        # from a server that had put the field there itself.
+        server_fields=("candidates", "command_ids", "command_name", "command_key", "menu_hint"),
     ),
     Operation(
         name="catia_describe_dialog",

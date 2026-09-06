@@ -12,10 +12,12 @@ constrained profile expressible, and it is the reason `_open` exists as state
 rather than being derived — CATIA's `Sketch` object has no "am I in edition"
 property to read back.
 
-The one hazard of holding a sketch open is that every *other* COM call fails
-oddly while one is. `_require_closed` is called by the operations that would
-trip on it, so the error names the real cause instead of surfacing whatever
-CATIA says about a feature it could not build.
+The hazard of holding a sketch open used to be met with a refusal, and the
+refusal cost more than the hazard: see `_end_sketch_edition`. The 3D
+operations now end the open edition themselves, the way leaving the Sketcher
+is implicit in clicking Pad. The drawing tools are the other way round --
+`_open_sketch` refuses a sketch that is not open, because drawing into the
+wrong sketch is the mistake worth catching.
 """
 
 from __future__ import annotations
@@ -90,20 +92,42 @@ class SketcherMixin:
             )
         return sketch, factory
 
-    def _require_closed(self: ComContext) -> None:
-        """Refuse a 3D operation while a sketch is still in edition."""
+    def _end_sketch_edition(self: ComContext) -> str | None:
+        """Close whatever sketch is open, and say which one it was.
+
+        This used to be `_require_closed`, which *refused* the call instead:
+        "The sketch 'Sketch.1' is still open. Call catia_sketch_close before
+        building a feature from it". Measured on ladder prompt H3 three runs
+        running (2026-09-06): the agent drew a rectangle, padded it -- which
+        CATIA accepted with the sketch in edition -- rounded the edges, and was
+        then refused a *second sketch* with a message about building a feature
+        from the first. Two rounds went on closing it. On an earlier run the
+        recovery was worse: the agent passed "Close Sketch" to
+        catia_run_command, CATIA raised its unknown-command box, and the seat
+        was dead until a human pressed OK (`tests/test_catia_unavailable_states.py`).
+
+        A person does not get this refusal, because leaving the Sketcher is
+        what starting the next thing *means*. So the 3D operations, and
+        `sketch_create`, end the open edition themselves. Nothing about the
+        sketch changes -- CloseEdition ends editing, it does not alter
+        geometry -- and the drawing tools still refuse a sketch that is not
+        open, which is the mistake worth catching.
+
+        Returns the closed sketch's name so a result can say it happened.
+        """
         state = getattr(self, "_sketch_edition", None)
-        if state is not None:
-            raise CatiaOperationError(
-                f"The sketch {state[0].Name!r} is still open. Call catia_sketch_close "
-                "before building a feature from it — CATIA cannot use a profile it is "
-                "still editing."
-            )
+        if state is None:
+            return None
+        sketch, _ = state
+        name = str(sketch.Name)
+        sketch.CloseEdition()
+        self._sketch_edition = None
+        return name
 
     def sketch_create(  # pragma: no cover - Windows only
         self: ComContext, *, support: str, name: str = "", origin: list[float] | None = None
     ) -> dict[str, Any]:
-        self._require_closed()
+        closed = self._end_sketch_edition()
         sketch = self._body().Sketches.Add(resolve_support(self, support))
         if name:
             try:
@@ -122,7 +146,10 @@ class SketcherMixin:
             sketch.SetAbsoluteAxisData(current)
 
         self._sketch_edition = (sketch, sketch.OpenEdition())
-        return {"sketch": str(sketch.Name), "support": support, "open": True}
+        result: dict[str, Any] = {"sketch": str(sketch.Name), "support": support, "open": True}
+        if closed is not None:
+            result["closed_previous"] = closed
+        return result
 
     def sketch_close(  # pragma: no cover - Windows only
         self: ComContext, *, sketch: str = ""

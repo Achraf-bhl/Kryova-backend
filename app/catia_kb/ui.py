@@ -281,9 +281,25 @@ def menu_title(english: str, language: str | None = None) -> str:
 #: vocabulary resolves through translated labels and the live menu, which is
 #: slower and always correct. Do not add one from memory -- see the module
 #: docstring for why a wrong id is worse than a missing one.
+#:
+#: **The key must name an entry that exists**, and `test_command_ids.py`
+#: asserts it does. This table shipped for weeks keyed on
+#: `infrastructure.open_in_new_window` and `infrastructure.expand_selection`,
+#: neither of which was ever written -- there is no `infrastructure` module in
+#: `app/catia_kb/commands/` at all. `resolve_command` looks an id up by the
+#: *resolved entry's* key, so both lookups missed, `command_ids` came back
+#: empty for every phrasing on the seat, and the `StartCommand` fallback was
+#: unreachable code that read as though it were being exercised. Nothing was
+#: broken by it -- the live-menu path is the verifiable one and is unaffected
+#: -- but a fallback nobody can reach is a fallback nobody is testing.
+#:
+#: `SpecificationsLevelSelect` is deliberately **not** carried over. Its
+#: command is not in the reference under any name, and inventing an entry so an
+#: id has somewhere to hang is precisely the guess the module docstring
+#: forbids: a wrong id fails the same silent way a wrong translation does. It
+#: goes back in the day someone writes the entry from a source.
 COMMAND_IDS: Final[dict[str, str]] = {
-    "infrastructure.open_in_new_window": "OpenInNewWnd",
-    "infrastructure.expand_selection": "SpecificationsLevelSelect",
+    "ui.new_window": "OpenInNewWnd",
 }
 
 #: Entry key -> the id `Application.StartWorkbench` takes. Also language-

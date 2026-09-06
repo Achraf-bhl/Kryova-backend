@@ -16,8 +16,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .. import edges as edge_geometry
 from ..backend import CatiaOperationError
 from ._context import (
+    FACE_AXES,
     ComContext,
     append_and_name,
     direction_of,
@@ -384,47 +386,106 @@ class ReferenceMixin:
         kind: str = "all",
         min_length_mm: float = 0.0,
     ) -> dict[str, Any]:
-        """Every edge, with length, midpoint and orientation.
+        """Every solid edge, measured the one way this seat will measure them.
 
-        `convex`/`concave` is the property worth having and the one CATIA does
-        not report directly. It is inferred from whether the edge's midpoint
-        lies inside the material: an inside corner's midpoint is enclosed by
-        the solid and an outside corner's is not. That inference is right for
-        the ordinary cases and is reported as `convexity` rather than asserted
-        as fact, so a caller can see when it is absent.
+        The first version asked `Measurable` per edge for `GetCOG` and
+        `GetDirection`, and every edge of every part came back
+        `kind: "unknown"` with no midpoint: `GetCOG` raises E_NOTIMPL on an
+        edge and `GetDirection` cannot fill a Python list (see `edges.py`).
+        Measured on ladder prompt H3, 2026-09-06 -- 16 edges, 16 unknowns, and
+        a `kind` filter that could match nothing. Now it runs `vba.edge_map`
+        -- one Evaluate, three points per edge -- and shares its classifier
+        with `_select_edges`, so the edges this lists as vertical are the edges
+        `catia_fillet edges='vertical'` rounds.
+
+        Ids are positions in the search result, and `_edge_references`
+        resolves them from the same enumeration, so an id read here is the id
+        `catia_fillet_edges` acts on -- as long as both are scoped the same
+        way. A `feature=` scope renumbers, and the result says so.
+
+        `convex`/`concave` are refused rather than returned empty: nothing
+        here measures them, and an empty list reads as "there are none".
         """
-        found = self._search_topology("Edge", feature)
-        part = self._part()
-        workbench = part.Parent.GetWorkbench("SPAWorkbench")
+        if kind in ("convex", "concave"):
+            raise CatiaOperationError(edge_geometry.UNMEASURED_CONVEXITY)
+        on_plane = self._face_plane(face) if face else None
+        selection, found, measured = self._measured_edges(feature or None)
+        z_top, z_bottom = edge_geometry.z_extent(list(measured.values()))
+        workbench = self._part().Parent.GetWorkbench("SPAWorkbench")
 
         edges: list[dict[str, Any]] = []
-        for index, reference in enumerate(found, start=1):
-            entry: dict[str, Any] = {"id": f"Edge.{index}"}
-            try:
-                measurable = workbench.GetMeasurable(reference)
-                entry["length_mm"] = round(float(measurable.Length), 4)
-                midpoint = [0.0] * 3
-                measurable.GetCOG(midpoint)
-                entry["midpoint"] = [round(value, 4) for value in midpoint]
-                entry["kind"] = _curve_kind(measurable)
-                if entry["kind"] == "circular":
-                    entry["radius_mm"] = round(float(measurable.Radius), 4)
-            except Exception:  # noqa: BLE001 - one unmeasurable edge is not fatal
-                logger.debug("Could not measure edge %s", index, exc_info=True)
-                entry["kind"] = "unknown"
-
-            if entry.get("length_mm", 0.0) < float(min_length_mm):
+        unmeasured = 0
+        for position, index in enumerate(found, start=1):
+            triple = measured.get(index)
+            if triple is None:
+                unmeasured += 1
                 continue
-            if kind not in {"all", entry.get("kind")} and kind not in {"convex", "concave"}:
+            radius: float | None = None
+            if not edge_geometry.is_linear(triple):
+                # `Radius` is the one per-edge Measurable call that works over
+                # COM, and it refuses on anything that is not an arc -- which
+                # is exactly the question.
+                try:
+                    reference = selection.Item2(index).Reference
+                    radius = float(workbench.GetMeasurable(reference).Radius)
+                except Exception:  # noqa: BLE001 - not an arc, and that is the answer
+                    radius = None
+            entry: dict[str, Any] = {"id": f"Edge.{position}"}
+            entry.update(edge_geometry.describe(triple, z_top, z_bottom, radius_mm=radius))
+            if float(entry["length_mm"]) < float(min_length_mm):
+                continue
+            if on_plane is not None:
+                axis, value = on_plane
+                if not all(abs(p[axis] - value) < edge_geometry.TOLERANCE for p in triple):
+                    continue
+            if kind != "all" and kind != entry["kind"] and kind not in entry["orientation"]:
                 continue
             edges.append(entry)
 
-        return {
+        result: dict[str, Any] = {
             "edges": edges,
             "count": len(edges),
             "feature": feature or None,
             "face": face or None,
+            "kind": kind,
         }
+        if unmeasured:
+            result["unmeasured"] = unmeasured
+            result["note"] = (
+                f"{unmeasured} edge(s) could not be measured by CATIA and are not "
+                "listed; their ids are still counted, so the ids above are valid."
+            )
+        if feature:
+            result["id_scope"] = (
+                f"Ids are numbered within {feature}'s edges. catia_fillet_edges numbers "
+                "the whole part: call catia_list_edges without feature= before naming "
+                "ids to it, or use catia_fillet with feature= and an edge group."
+            )
+        return result
+
+    def _face_plane(self: ComContext, face: str) -> tuple[int, float]:  # pragma: no cover
+        """(axis index, coordinate) of a named bounding-box face, for filtering.
+
+        Only the six named faces: a `Face.N` id would need the face's own
+        geometry, which `_search_topology` returns as an element and not as a
+        plane, and pretending to support it would return every edge or none.
+        """
+        key = face.strip().casefold()
+        if key not in FACE_AXES:
+            raise CatiaOperationError(
+                f"face={face!r}: catia_list_edges filters by the named faces only "
+                f"({', '.join(FACE_AXES)}). A Face.N id cannot be used as a filter "
+                "here yet; list the edges of the whole part or of one feature instead."
+            )
+        box = self._bounding_box()
+        if box is None:
+            raise CatiaOperationError(
+                "The part's bounding box could not be measured, so its edges cannot "
+                "be filtered by face. Try again without face=."
+            )
+        letter, sign = FACE_AXES[key]
+        axis = "xyz".index(letter)
+        return axis, (box[axis + 3] if sign > 0 else box[axis])
 
     def _face_reference(  # pragma: no cover - Windows only
         self: ComContext, face: str, *, feature: str = ""
@@ -482,8 +543,15 @@ class ReferenceMixin:
     def _edge_references(  # pragma: no cover - Windows only
         self: ComContext, edges: list[str], *, feature: str = ""
     ) -> list[Any]:
-        """Topological references for edges named `Edge.<n>` by `list_edges`."""
-        found = self._search_topology("Edge", feature)
+        """Topological references for edges named `Edge.<n>` by `list_edges`.
+
+        Resolved through `_found_edges`, the enumeration `list_edges` numbers
+        over, and pulled as `Item2(...).Reference` -- the form the seat's own
+        fillet has been verified to accept. Resolving through a different
+        search than the one that produced the ids is how 'Edge.4' comes to
+        mean a different edge on the way back.
+        """
+        selection, found, _, _ = self._found_edges(feature or None)
         references = []
         for name in edges:
             if not (name.startswith("Edge.") and name[5:].isdigit()):
@@ -491,13 +559,13 @@ class ReferenceMixin:
                     f"{name!r} is not an edge id. Call catia_list_edges and use the "
                     "ids it reports, such as 'Edge.4'."
                 )
-            index = int(name[5:])
-            if not 1 <= index <= len(found):
+            position = int(name[5:])
+            if not 1 <= position <= len(found):
                 raise CatiaOperationError(
                     f"{name!r} is out of range: this part has {len(found)} edges. "
                     "Call catia_list_edges again — the topology has changed."
                 )
-            references.append(found[index - 1])
+            references.append(selection.Item2(found[position - 1]).Reference)
         return references
 
     def _search_topology(  # pragma: no cover - Windows only
@@ -582,15 +650,3 @@ def _surface_kind(measurable: Any) -> str:  # pragma: no cover - Windows only
     return "other"
 
 
-def _curve_kind(measurable: Any) -> str:  # pragma: no cover - Windows only
-    try:
-        measurable.Radius
-    except Exception:  # noqa: BLE001 - not a circle
-        pass
-    else:
-        return "circular"
-    try:
-        measurable.GetDirection([0.0, 0.0, 0.0])
-    except Exception:  # noqa: BLE001 - not a straight line
-        return "other"
-    return "linear"

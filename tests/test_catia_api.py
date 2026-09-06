@@ -297,8 +297,10 @@ def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client
     # which took it from 39 to the sketcher, reference-geometry, surface,
     # assembly, drafting and knowledge operations the manuals document; 203
     # since `catia_assembly_component` and `catia_assembly_place` landed
-    # (E14) without this pin being moved with them.
-    assert len(tools) == 203
+    # (E14) without this pin being moved with them; 204 since
+    # `catia_close_document`, so the agent can put a part away rather than
+    # leaving a window open per conversation.
+    assert len(tools) == 204
     by_name = {tool["name"]: tool for tool in tools}
 
     # The original 39 by name, not just by count. The registry rewrite could
@@ -320,6 +322,15 @@ def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client
     assert by_name["catia_list_commands"]["tier"] == "read"
     assert by_name["catia_run_command"]["tier"] == "write"
     assert by_name["catia_dialog_action"]["mutating"] is True
+    # Closing is a write, not a destructive: the backend saves the document
+    # before it closes it and the conversation keeps the binding, so there is no
+    # state a user can lose and nothing for an approval token to protect. Pinned
+    # at the surface the interface reads, because raising it to `destructive`
+    # would put a human click in front of every window the agent tidies away and
+    # the capability would go unused -- which is how the seat filled up with
+    # windows in the first place.
+    assert by_name["catia_close_document"]["tier"] == "write"
+    assert by_name["catia_close_document"]["mutating"] is True
 
 
 def _drain(response, count: int, timeout: float = 5.0) -> list[str]:

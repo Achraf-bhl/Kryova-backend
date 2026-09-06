@@ -478,7 +478,7 @@ class SurfacesMixin:
     def close_surface(  # pragma: no cover - Windows only
         self: ComContext, *, surface: str
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         feature = part.ShapeFactory.AddNewCloseSurface(resolve_element(part, surface))
         try:
@@ -500,7 +500,7 @@ class SurfacesMixin:
         second_thickness_mm: float = 0.0,
         reversed: bool = False,  # noqa: A002
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         first = float(second_thickness_mm) if reversed else float(thickness_mm)
         second = float(thickness_mm) if reversed else float(second_thickness_mm)
@@ -524,7 +524,7 @@ class SurfacesMixin:
         remove: bool = False,
         reversed: bool = False,  # noqa: A002
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         feature = part.ShapeFactory.AddNewSewSurface(
             resolve_element(part, surface), not remove, bool(reversed)

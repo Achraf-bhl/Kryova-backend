@@ -353,7 +353,12 @@ OPERATIONS: tuple[Operation, ...] = (
             "This is what turns 'fillet the top edges' into 'fillet these four edges at "
             "3 mm and that one at 1 mm'. Convexity matters: an outside corner takes a "
             "round, an inside corner takes a different radius and often a different "
-            "sign of intent."
+            "sign of intent.\n"
+            "kind='vertical' (or horizontal, top, bottom) lists exactly the edges "
+            "catia_fillet edges='vertical' would round, so this is how to preview a "
+            "group before rounding it. Needs no catia_select first. The ids it "
+            "reports are what catia_fillet_edges takes; they are NOT feature names "
+            "and cannot be given to catia_select."
         ),
         tier=Tier.READ,
         workbench=Workbench.PART_DESIGN,
@@ -363,8 +368,20 @@ OPERATIONS: tuple[Operation, ...] = (
             optional(
                 "kind",
                 one_of(
-                    ("all", "linear", "circular", "convex", "concave"),
-                    "Only report edges of this kind. Default all.",
+                    (
+                        "all",
+                        "linear",
+                        "circular",
+                        "vertical",
+                        "horizontal",
+                        "top",
+                        "bottom",
+                        "convex",
+                        "concave",
+                    ),
+                    "Only report edges of this kind: by curve (linear, circular) or by "
+                    "orientation (vertical, horizontal, top, bottom -- the same groups "
+                    "catia_fillet takes). Default all.",
                 ),
             ),
             optional("min_length_mm", length("Ignore edges shorter than this. Default 0.")),

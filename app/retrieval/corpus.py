@@ -17,10 +17,19 @@ no index: it loads, it answers, and the answers are wrong. The build writes to a
 sibling directory and swaps it in only once every file is complete, so a crash
 or a full disk leaves the previous index serving.
 
-**Staleness is detected, not assumed.** The manifest records a fingerprint of
-every source file (name, size, modification time). `is_stale` compares it to
-what is on disk now, which is what lets the setup flow say "you added two
-manuals, rebuild" instead of silently serving an index that predates them.
+**Staleness is detected, not assumed, and the documents are only half of it.**
+The manifest records a fingerprint of every source file (name, size,
+modification time), which is what lets the setup flow say "you added two
+manuals, rebuild" instead of silently serving an index that predates them. It
+also records a digest of the *code that built it*, because an index is a
+function of both and a chunker change invalidates it exactly as thoroughly as a
+new PDF does. That second half was missing until 2026-09-06 and cost a measured
+2.6 points of precision@1 on the Windows seat: the heading rules tightened on
+2026-09-03, nothing rebuilt, `--check` reported "up to date" because every PDF
+was untouched, and the shipped index went on scoring 92.1% / 97.4% / 0.953
+where the same documents through the same code score 94.7% / 100% / 0.974.
+Fingerprinting the sources alone answers "are these the right documents?" and
+was read as though it answered "is this the right index?".
 
 **Nothing here raises into a request.** A missing index, a corrupt index, an
 index written by an incompatible version -- all of them resolve to "no results",
@@ -30,6 +39,7 @@ an answer and must never be the reason there is no answer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -117,6 +127,71 @@ class Passage:
             parts.append(self.heading)
         parts.append(f"p. {self.page}")
         return " — ".join(parts)
+
+
+#: The modules whose source text decides what an index *contains*.
+#:
+#: Every one of them runs between a PDF and a row in `passages.jsonl`:
+#: `extract` produces the page text, `chunking` cuts it into passages and
+#: decides their headings, `analyze` turns those into terms, `language` labels
+#: each passage, `bm25` lays the arrays out on disk, and `corpus` writes the
+#: record. Change any of them and the bytes on disk stop being what the code
+#: would produce today.
+#:
+#: `build.py` and `service.py` are deliberately absent: the first is a CLI and
+#: the second is the query side, and neither can alter a stored passage. Adding
+#: them would mark every index stale for a change that cannot affect it.
+_BUILDER_MODULES: tuple[str, ...] = (
+    "analyze",
+    "bm25",
+    "chunking",
+    "corpus",
+    "extract",
+    "language",
+)
+
+
+def builder_fingerprint(package: Path | None = None) -> str | None:
+    """A digest of the code that turns documents into an index, or None.
+
+    Hashing the source rather than maintaining a hand-bumped format version,
+    because the failure this exists to prevent *is* a hand-bump being forgotten:
+    the chunker's heading rules were tightened and no constant went with them.
+    A rule that depends on someone remembering has already been shown not to
+    hold here.
+
+    The cost of hashing is a false positive -- editing a comment in this package
+    marks every index stale -- and it is worth paying at this ratio. A rebuild
+    of the shipped corpus is nine seconds; an index that quietly disagrees with
+    its own chunker costs precision nobody measures again until somebody
+    re-derives it by hand.
+
+    Returns None when the source cannot be read, which is a real deployment
+    (bytecode-only, a zipapp) rather than a hypothetical. None means *cannot
+    tell*, and the caller must treat it as such -- never as a mismatch, because
+    an environment with no readable source would otherwise demand a rebuild it
+    can never satisfy.
+
+    `package` overrides where the modules are read from, and exists so that the
+    tests can prove this responds to a changed byte by changing one -- in a
+    copy, rather than by editing the running source of the suite that is
+    checking it. A guard asserted only on its shape is a guard nobody has seen
+    fail. Production never passes it.
+    """
+    package = (package or Path(__file__).parent).resolve()
+    digest = hashlib.sha256()
+    for name in _BUILDER_MODULES:
+        try:
+            payload = (package / f"{name}.py").read_bytes()
+        except OSError:
+            return None
+        # The name goes in with the bytes so that moving code between two of
+        # these modules changes the digest. Concatenating the bodies alone
+        # would not.
+        digest.update(name.encode("utf-8"))
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -283,6 +358,10 @@ def build(
             json.dumps(
                 {
                     "built_at": time.time(),
+                    # Which code wrote this. See `builder_fingerprint`: an
+                    # index is a function of the documents *and* the chunker,
+                    # and only one of those was being recorded.
+                    "builder": builder_fingerprint(),
                     "sources": [fingerprint.as_dict() for fingerprint in fingerprints],
                     "extractors": extractors,
                     "skipped": skipped,
@@ -544,14 +623,31 @@ class Corpus:
         stats["built_at"] = self._manifest.get("built_at")
         return stats
 
-    def is_stale(self, sources: Sequence[Path], *, exclude: Sequence[Path] = ()) -> bool:
-        """Whether the files on disk differ from the ones this index was built from.
+    def stale_reason(self, sources: Sequence[Path], *, exclude: Sequence[Path] = ()) -> str | None:
+        """Why this index needs rebuilding, in words, or None when it is current.
 
-        Compares the full fingerprint set, so an added, removed, edited or
-        replaced document all register. A source that has vanished counts as a
-        change too -- the index still contains its passages, and citing a
-        document the user deleted is a bug.
+        Two independent reasons, and the wording matters because they call for
+        different reading. "The documents changed" is routine -- somebody added
+        a manual. "The code changed" means the index on disk and the code that
+        would read it no longer agree about what a passage is, which is the
+        quieter and more expensive of the two: every document is present, every
+        count looks right, and the ranking is a little worse than it should be.
+
+        The code check is skipped, not failed, when the running source cannot be
+        hashed. `builder_fingerprint` returning None is "cannot tell", and a
+        deployment that can never tell would otherwise be told to rebuild
+        forever. A recorded fingerprint that is absent or different, measured
+        against a digest we *can* compute, is a real mismatch -- including the
+        absent case, which is an index built before this was recorded at all and
+        is exactly the state that hid a chunker change for three days.
         """
+        current_builder = builder_fingerprint()
+        if current_builder is not None and self._manifest.get("builder") != current_builder:
+            return (
+                "the code that builds the index has changed since this one was written; "
+                "its passages and headings are not what the current chunker would produce"
+            )
+
         recorded = {
             (entry["name"], entry["size"], entry["modified"])
             for entry in self._manifest.get("sources", [])
@@ -566,8 +662,25 @@ class Corpus:
             }
         except OSError:
             # Cannot tell; assume fresh rather than triggering a rebuild loop.
-            return False
-        return recorded != current
+            return None
+        if recorded != current:
+            return "the documents on disk have changed since this index was built"
+        return None
+
+    def is_stale(self, sources: Sequence[Path], *, exclude: Sequence[Path] = ()) -> bool:
+        """Whether this index no longer matches its inputs.
+
+        Its inputs are the documents *and* the code. The document half compares
+        the full fingerprint set, so an added, removed, edited or replaced
+        manual all register -- a source that has vanished counts too, because
+        the index still contains its passages and citing a document the user
+        deleted is a bug. The code half is `builder_fingerprint`.
+
+        Kept as a bool because that is what the exit code of `--check` needs;
+        `stale_reason` is the same question answered in a sentence a human can
+        act on.
+        """
+        return self.stale_reason(sources, exclude=exclude) is not None
 
 
 def merge_adjacent(passages: Iterable[Passage]) -> list[Passage]:

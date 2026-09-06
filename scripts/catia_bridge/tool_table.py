@@ -60,6 +60,7 @@ __all__ = [
     "WRITE",
     "ToolRefused",
     "check_call",
+    "not_in_this_part",
     "tier_of",
 ]
 
@@ -78,6 +79,57 @@ FACE_POSITIONS = _enum_of("catia_hole", "position")
 EDGE_SELECTORS = _enum_of("catia_fillet", "edges")
 VIEWPOINTS = _enum_of("catia_capture_view", "view")
 PARAMETER_UNITS = _enum_of("catia_set_parameter", "unit")
+
+
+def _is_topology_id(name: str) -> bool:
+    """`Edge.4` / `Face.2` as `catia_list_edges` and `catia_list_faces` number them."""
+    head, dot, tail = name.strip().partition(".")
+    return dot == "." and head in ("Edge", "Face") and tail.isdigit()
+
+
+def not_in_this_part(missing: list[str]) -> str:
+    """`catia_select`'s refusal, with the way out included.
+
+    Ladder prompt H3 spent four rounds here, cycling through `all`, `vertical`
+    and `front_left` -- the selector words `catia_fillet` and `catia_hole` take
+    -- because the message said only that they were not features. They are not,
+    and they are also not nonsense: they are the right words on the wrong tool.
+
+    The vocabularies come from the generated schemas above, so this says what
+    those tools accept today rather than what a docstring remembers.
+    """
+    named = ", ".join(missing)
+    selectors = {name.casefold() for name in (*EDGE_SELECTORS, *FACE_POSITIONS, *NAMED_FACES)}
+    hint = ""
+    ids = [name for name in missing if _is_topology_id(name)]
+    if ids:
+        # The second H3 run, after the selector-word fix below: the agent read
+        # the edges with catia_list_edges, got 'Edge.1' ... 'Edge.11', and
+        # handed them here -- where they were refused with a pointer to
+        # catia_list_features, the one tool that could not help. An id one
+        # tool reports and another refuses without saying which tool takes it
+        # is a dead end the system built itself.
+        shown = ", ".join(ids[:4]) + (", ..." if len(ids) > 4 else "")
+        hint += (
+            f" {shown}: these are topology ids from catia_list_edges / catia_list_faces, "
+            "and CATIA's selection cannot be filled from them here. To round edges by "
+            "id call catia_fillet_edges with edges=[{'edge': 'Edge.1', 'radius_mm': 8}, "
+            "...]; to round a whole group at once call catia_fillet with "
+            "edges='vertical' (or 'horizontal', 'top', 'bottom', 'all'). Neither needs "
+            "a selection."
+        )
+    if any(name.strip().casefold() in selectors for name in missing):
+        hint += (
+            " Those are edge and face selectors, not feature names, and they belong to "
+            "another tool's own argument rather than here. catia_select takes what "
+            f"catia_list_features reports -- 'Pad.1', 'Sketch.2'. To round edges call "
+            f"catia_fillet with edges={EDGE_SELECTORS[0]!r}, which needs no selection at "
+            "all; to place a hole call catia_hole with face= and position=."
+        )
+    return (
+        f"Not in this part: {named}. Call catia_list_features to see what is there; "
+        "names are case-sensitive and end in a number." + hint
+    )
 
 
 class ToolRefused(Exception):

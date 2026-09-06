@@ -58,6 +58,11 @@ class ComContext(Protocol):
     def _bounding_box(self) -> tuple[float, float, float, float, float, float] | None: ...
     def _discard(self, document: Any, part: Any, feature: Any) -> None: ...
     def _solid_volume(self) -> float: ...
+    def _end_sketch_edition(self) -> str | None: ...
+    def _found_edges(self, feature: str | None = None) -> tuple[Any, list[int], str, Any]: ...
+    def _measured_edges(
+        self, feature: str | None = None
+    ) -> tuple[Any, list[int], dict[int, tuple[Any, Any, Any]]]: ...
 
 
 def direction_of(part: Any, vector: Any) -> Any:  # pragma: no cover - Windows only
@@ -82,6 +87,23 @@ def geometrical_set(part: Any, name: str = "") -> Any:  # pragma: no cover - Win
     Wireframe and surfaces cannot live loose in a part the way solid features
     can — they need a hybrid body to hold them. Reusing one rather than creating
     a set per element is what keeps the tree readable after fifty operations.
+
+    **`HybridBodies.Add()` makes the new set CATIA's in-work object, and that
+    breaks every solid feature after it.** `ShapeFactory` inserts a pad or a
+    pocket after the in-work object, a geometrical set cannot hold one, and the
+    creation call fails with nothing but `La methode AddNewPad a echoue`.
+    Measured on the seat, 2026-09-06, on ladder prompt H3:
+
+        AddNewPad (block)                            -> Extrusion.1, 180000 mm3
+        HybridBodies.Add()                           -> in work: Kryova Construction
+        AddNewPocket (40x20 on the top face)         -> FAILED
+        part.InWorkObject = body; AddNewPocket       -> Poche.1, 172000 mm3
+
+    A single `catia_sketch_create` with `support="top"` builds an offset plane
+    through here, so from that call onwards the part could take no further
+    solid feature at all -- and the message said the profile was wrong. So the
+    in-work object is put back exactly as it was found. Creating construction
+    geometry is not a statement about where the next pad belongs.
     """
     bodies = part.HybridBodies
     wanted = name or "Kryova Construction"
@@ -89,11 +111,20 @@ def geometrical_set(part: Any, name: str = "") -> Any:  # pragma: no cover - Win
         body = bodies.Item(index)
         if str(body.Name) == wanted:
             return body
+    try:
+        was_in_work = part.InWorkObject
+    except Exception:  # noqa: BLE001 - then there is nothing to restore
+        was_in_work = None
     created = bodies.Add()
     try:
         created.Name = wanted
     except Exception:  # noqa: BLE001 - a name clash is cosmetic, not fatal
         pass
+    if was_in_work is not None:
+        try:
+            part.InWorkObject = was_in_work
+        except Exception:  # noqa: BLE001 - see `_body`, which asserts it again
+            pass
     return created
 
 
@@ -118,6 +149,58 @@ def resolve_element(part: Any, name: str) -> Any:  # pragma: no cover - Windows 
     )
 
 
+#: Spellings of the three origin planes that mean exactly one thing.
+#:
+#: Measured on the seat, 2026-09-06: a 9B model asked for a 60x40 rectangle
+#: sent `support="Plane.XY"`, was told to use 'XY', and instead of retrying
+#: abandoned the tool and never built anything. `Plane.XY` is not an ambiguous
+#: request -- it is the CATIA-ish name for the plane the model plainly meant,
+#: and refusing it bought nothing but a failed part.
+#:
+#: This is deliberately a table of *exact* alternative spellings rather than a
+#: fuzzy match. Accepting "the flat one on top" would be guessing; accepting
+#: "Plane.XY", "XY plane" or the French "Plan xy" that this seat prints in its
+#: own tree is reading. The distinction matters because a wrong plane is a part
+#: built in the wrong orientation with every tool result saying `ok` -- so the
+#: rule is that a spelling gets in here only when it cannot mean anything else.
+_ORIGIN_PLANE_ALIASES = {
+    alias: canonical
+    for canonical in ("XY", "YZ", "ZX")
+    for alias in (
+        canonical,
+        f"PLANE.{canonical}",
+        f"PLANE{canonical}",
+        f"PLANE {canonical}",
+        f"{canonical} PLANE",
+        f"PLAN {canonical}",  # the French seat's own tree spelling
+        f"{canonical}PLANE",
+    )
+}
+#: The two planes CATIA also answers to with the axes the other way round. XZ
+#: and ZX are the same plane; a model that writes XZ is not making a mistake a
+#: refusal would teach it out of.
+_ORIGIN_PLANE_ALIASES.update(
+    {alias: "ZX" for alias in ("XZ", "PLANE.XZ", "PLANEXZ", "PLANE XZ", "XZ PLANE", "PLAN XZ")}
+)
+_ORIGIN_PLANE_ALIASES.update(
+    {alias: "YZ" for alias in ("ZY", "PLANE.ZY", "PLANEZY", "PLANE ZY", "ZY PLANE", "PLAN ZY")}
+)
+_ORIGIN_PLANE_ALIASES.update(
+    {alias: "XY" for alias in ("YX", "PLANE.YX", "PLANEYX", "PLANE YX", "YX PLANE", "PLAN YX")}
+)
+
+
+def normalise_origin_plane(support: str) -> str:
+    """`'Plane.XY'` -> `'XY'`. Anything unrecognised is returned upper-cased.
+
+    Returning the input rather than raising keeps this a *widening* of what
+    `resolve_support` accepts: a string that is not an origin-plane spelling
+    falls through to the named-element and bounding-box-face lookups exactly as
+    it did before, and only then to the refusal.
+    """
+    return _ORIGIN_PLANE_ALIASES.get(support.strip().upper(), support.upper())
+
+
 def resolve_support(context: ComContext, support: str) -> Any:  # pragma: no cover - Windows only
     """A plane reference from an origin-plane name, an element name, or a face.
 
@@ -139,6 +222,17 @@ def resolve_support(context: ComContext, support: str) -> Any:  # pragma: no cov
 
     if support.lower() in FACE_PLANES:
         return named_face_plane(context, support.lower())
+
+    # Alternative spellings of the origin planes are tried *last*, after every
+    # lookup that existed before. That ordering is the whole safety argument:
+    # nothing that resolved to a user-created plane or a bounding-box face
+    # yesterday can be captured by an alias today, so this widens what is
+    # accepted and changes nothing that already worked. A part named
+    # "Plane.XY" by hand still wins over the alias for the origin plane.
+    aliased = normalise_origin_plane(support)
+    attribute = ORIGIN_PLANES.get(aliased)
+    if attribute is not None:
+        return getattr(part.OriginElements, attribute)
 
     raise CatiaOperationError(
         f"{support!r} is not a plane. Use 'XY', 'YZ' or 'ZX', the name of a plane you "

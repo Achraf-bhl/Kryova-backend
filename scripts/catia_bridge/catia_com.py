@@ -35,6 +35,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from . import edges as edge_geometry
 from . import gear, ui_policy, vba
 from . import ui_automation as ui
 from .backend import CatiaBackend, CatiaOperationError
@@ -52,6 +53,7 @@ from .com import (
     SurfacesMixin,
     WireframeMixin,
 )
+from .tool_table import not_in_this_part
 
 logger = logging.getLogger("kryova.catia.com")
 
@@ -212,7 +214,7 @@ class CatiaCom(
     abstract ones; the methods defined in this class body come first in
     resolution order and stay authoritative for the tools they already cover.
 
-    `SketcherMixin` leads because it owns `_require_closed`, which the feature
+    `SketcherMixin` leads because it owns `_end_sketch_edition`, which the feature
     mixins call before building anything from a profile.
     """
 
@@ -413,8 +415,34 @@ class CatiaCom(
             ) from exc
 
     def _body(self) -> Any:  # pragma: no cover - Windows only
+        """The part's main body, and the place a new solid feature will land.
+
+        The second half is the reason this is not a one-liner. `ShapeFactory`
+        inserts after the part's **in-work object**, which is not necessarily
+        the body: `HybridBodies.Add()` moves it to the new geometrical set, and
+        so does a person clicking "Define In Work Object" on the seat. With it
+        on a geometrical set every solid feature fails at creation with a bare
+        `La methode AddNewPad a echoue` -- measured on ladder prompt H3, where
+        one sketch on a named face left the part unable to take another pad or
+        pocket for the rest of the session.
+
+        `geometrical_set` restores it too, which is the fix at the cause. This
+        is the guarantee: whatever else has moved it -- our code, a human, a
+        macro -- the body this returns is where the next feature goes.
+
+        Setting it is not a modelling change. It is where CATIA's cursor sits
+        in the tree, it is what the seat would show a user anyway, and it
+        writes nothing to the geometry, so a READ-tier tool reaching this is
+        not mutating the part.
+        """
         part = self._part()
-        return part.MainBody
+        body = part.MainBody
+        try:
+            if part.InWorkObject is not body and str(part.InWorkObject.Name) != str(body.Name):
+                part.InWorkObject = body
+        except Exception:  # noqa: BLE001 - some documents have no in-work object
+            pass
+        return body
 
     def _document_key(self) -> str | None:  # pragma: no cover - Windows only
         """Identity of the active document, for state that must not outlive it.
@@ -583,6 +611,97 @@ class CatiaCom(
             "restored_from_checkpoint": restored,
             "features": self._feature_list(),
             **self._measure_solid(),
+        }
+
+    def close_document(  # pragma: no cover - Windows only
+        self, *, doc_name: str | None = None, remote_path: str | None = None
+    ) -> dict[str, Any]:
+        """Save the conversation's document and close its window.
+
+        Windows accumulate. A day of Kryova work on one seat leaves a part per
+        conversation open, plus every import, and CATIA's own window list stops
+        being usable long before its memory does -- so the agent needs to be able
+        to put a part away when it is done with one, without a human clicking
+        anything. That is the whole of this operation.
+
+        The order is the safety property and it is not negotiable: **find, save,
+        close**, and no step runs if the one before it failed.
+
+        * *Find* by the same rules `ensure_document` matches on -- path when there
+          is one, stem otherwise -- and never by `ActiveDocument`. Closing what
+          happens to be on screen is the exact failure the document binding was
+          introduced to end, and it is worse here than anywhere else: a pad on the
+          wrong part can be deleted, a closed window cannot be un-closed.
+        * *Save* through `Document.Save`, and refuse to close when it raises.
+          `Document.Close` does not prompt and does not save, so closing after a
+          failed save discards whatever the engineer typed in by hand since the
+          last write. A document CATIA has never written has no path to save to
+          and would put up the Save As dialog, which blocks the automation
+          surface and wedges the bridge -- so that case is refused before the
+          call rather than discovered by the watchdog. `new_part` saves
+          immediately, so it should not arise; it is guarded because "should not"
+          is not a property.
+        * *Close* only then, and report the count of what is left open, which is
+          the number the engineer actually asked about.
+
+        A document that is not open is reported, not raised: the end state the
+        caller wanted is already true. See the base class for why.
+        """
+        wanted = Path(remote_path) if remote_path else None
+        name = doc_name or (wanted.stem if wanted else "")
+
+        target = None
+        for index in range(1, int(self._app.Documents.Count) + 1):
+            existing = self._app.Documents.Item(index)
+            if _same_document(existing, name, wanted):
+                target = existing
+                break
+
+        if target is None:
+            return {
+                "doc_name": name,
+                "remote_path": str(wanted) if wanted else "",
+                "closed": False,
+                "saved": False,
+                "open_documents": int(self._app.Documents.Count),
+                "note": (
+                    f"{name!r} is not open in CATIA, so there was no window to close. "
+                    "Nothing was changed."
+                ),
+            }
+
+        full_name = str(getattr(target, "FullName", "") or "")
+        if not full_name:
+            raise CatiaOperationError(
+                f"{name!r} has never been written to disk, so closing it would either "
+                "lose it or leave CATIA waiting on a Save As dialog. Save it in CATIA "
+                "once, then close it."
+            )
+        try:
+            target.Save()
+        except Exception as exc:  # noqa: BLE001 - the message is for the agent
+            raise CatiaOperationError(
+                f"{name!r} could not be saved, so it has been left open rather than "
+                f"closed -- closing it now would discard the unsaved work ({exc}). "
+                "Check that the file is not read-only or open elsewhere."
+            ) from exc
+
+        target.Close()
+        # `self._density_kg_m3` is deliberately left alone. It is tagged with the
+        # document it belongs to (`_density_document`), so it cannot follow the
+        # engineer into the next part, and reopening this one must weigh it at the
+        # density it was set with rather than at CATIA's 1000 kg/m3 default.
+        return {
+            "doc_name": name,
+            "remote_path": full_name,
+            "closed": True,
+            "saved": True,
+            "open_documents": int(self._app.Documents.Count),
+            "note": (
+                f"{name!r} was saved to disk and its window closed. The part is not "
+                "lost -- catia_open_document reopens it, and any modelling call "
+                "reopens it by itself."
+            ),
         }
 
     # -- material ------------------------------------------------------------
@@ -858,6 +977,14 @@ class CatiaCom(
         return str(sketch.Name)
 
     def _find_sketch(self, name: str) -> Any:  # pragma: no cover - Windows only
+        """The named sketch, with any open sketch edition ended first.
+
+        Every solid built from a sketch comes through here, so this is where
+        the sketch the agent was drawing stops being edited -- the way clicking
+        Pad leaves the Sketcher. See `SketcherMixin._end_sketch_edition` for
+        the three ladder runs that paid for the refusal this replaces.
+        """
+        self._end_sketch_edition()
         sketches = self._body().Sketches
         for index in range(1, int(sketches.Count) + 1):
             sketch = sketches.Item(index)
@@ -878,13 +1005,35 @@ class CatiaCom(
         reversed: bool = False,  # noqa: A002 - protocol field name
     ) -> dict[str, Any]:
         factory = self._part().ShapeFactory
-        pad = factory.AddNewPad(self._find_sketch(sketch), float(length_mm))
-        if symmetric:
-            # VERIFY: on some releases this is `pad.IsSymmetric = True` instead.
-            pad.IsSymmetric = True
-        if reversed:
-            pad.DirectionOrientation = 1
-        self._part().Update()
+        pad = None
+        try:
+            pad = factory.AddNewPad(self._find_sketch(sketch), float(length_mm))
+            if symmetric:
+                # VERIFY: on some releases this is `pad.IsSymmetric = True` instead.
+                pad.IsSymmetric = True
+            if reversed:
+                pad.DirectionOrientation = 1
+        except Exception as exc:  # noqa: BLE001
+            self._discard_failed_feature(pad)
+            raise CatiaOperationError(
+                f"CATIA would not build a pad from {sketch} ({exc}). Check the sketch "
+                "exists and is closed."
+            ) from exc
+        # The advice matters more here than anywhere else, because CATIA's own
+        # message for the common case is `La methode Update a echoue` and
+        # nothing more. Measured on H2: the sketch held a rectangle *and* two
+        # circles, so there was no single unambiguous profile to extrude, and
+        # the agent -- given only the COM error -- retried the same call twice
+        # and then tried to pocket the same sketch.
+        self._update_or_discard(
+            pad,
+            f"CATIA could not extrude {sketch} into a solid {length_mm:g} mm thick. "
+            "Almost always the profile: it has to be ONE closed loop, or a set of "
+            "loops nested cleanly inside one another (an outer circle with a bore "
+            "inside it is fine). Overlapping or crossing shapes in one sketch are "
+            "not, and neither is an open profile. Read the sketch with "
+            "catia_list_features, and draw one profile per sketch if in doubt.",
+        )
         return self._feature_result(str(pad.Name))
 
     def pocket(  # pragma: no cover - Windows only
@@ -897,11 +1046,34 @@ class CatiaCom(
         part = self._part()
         factory = part.ShapeFactory
         before = self._solid_volume()
-        pocket = factory.AddNewPocket(self._find_sketch(sketch), float(depth_mm or 1.0))
-        if through_all:
-            # 1 = catUpToLast in CATIA's length-type enumeration.
-            pocket.FirstLimit.LimitMode = 1
-        part.Update()
+        pocket = None
+        try:
+            pocket = factory.AddNewPocket(self._find_sketch(sketch), float(depth_mm or 1.0))
+            if through_all:
+                # 1 = catUpToLast in CATIA's length-type enumeration.
+                pocket.FirstLimit.LimitMode = 1
+        except Exception as exc:  # noqa: BLE001
+            self._discard_failed_feature(pocket)
+            raise CatiaOperationError(
+                f"CATIA would not start a pocket from {sketch} ({exc}). The profile "
+                "has to be one closed loop that CATIA can sweep: an open profile, a "
+                "self-crossing one, or two overlapping shapes in the same sketch are "
+                "all refused here rather than at the update. Check the sketch with "
+                "catia_list_features -- its element count tells you whether it holds "
+                "more than you drew -- and draw one profile per sketch."
+            ) from exc
+        # The same wreckage rule `_discard_failed_feature` documents for fillet,
+        # and it was missing here. Measured 2026-09-06 on ladder prompt H1: a
+        # refused hole -- which is a sketched circle and a pocket -- left its
+        # broken `Poche.1` in the tree, and from then on *every* Update failed.
+        # The part reported 0 mm3 with a perfectly good pad still in it, the
+        # next hole was refused with "the part has no solid body", and the run
+        # could not recover. A refusal has to take its wreckage with it.
+        self._update_or_discard(
+            pocket,
+            f"CATIA could not cut the pocket from {sketch}. The profile usually does "
+            "not overlap the solid, or the depth runs past the material.",
+        )
 
         # A sketch on an origin plane can sit on the far side of the solid, in
         # which case the cut goes away from the material and takes nothing with
@@ -911,15 +1083,28 @@ class CatiaCom(
         # and the part came back at 112000 mm3, its full solid volume, with the
         # assistant reporting the holes as cut.
         if before and self._solid_volume() >= before:
-            pocket.DirectionOrientation = 1
-            part.Update()
+            self._reverse_direction(pocket)
+            # Guarded too, and not only for symmetry: this update is the one
+            # that is *more* likely to fail, because it has just been told to
+            # cut the other way and may now run off the end of the material.
+            # It was a bare `part.Update()` until 2026-09-06.
+            self._update_or_discard(
+                pocket,
+                f"The pocket from {sketch} cut away from the solid, and reversing it "
+                "failed as well.",
+            )
 
         if before and self._solid_volume() >= before:
+            # `hole` has always removed the useless feature here and said so;
+            # `pocket` did not, so a refusal that reads "nothing was cut" left
+            # a `Poche.1` in the tree that the next Update had to carry.
+            self._discard_failed_feature(pocket)
             raise CatiaOperationError(
                 f"The pocket from {sketch} removed no material, so it missed the "
-                "solid entirely. Check that the sketch overlaps the part -- a profile "
-                "drawn on an origin plane the solid does not straddle cuts into empty "
-                "space."
+                "solid entirely -- tried both directions. It has been removed again, "
+                "so nothing was changed. The profile does not overlap the part: check "
+                "it against the bounding box, and remember a sketch on an origin plane "
+                "sits at the origin, not on the face you are looking at."
             )
         return self._feature_result(str(pocket.Name))
 
@@ -967,6 +1152,16 @@ class CatiaCom(
                 point[first], point[second], float(diameter_mm) / 2.0
             ),
         )
+        # `pocket` is bound before the try so the failure path can remove it.
+        # This is the defect that killed ladder prompt H1 on 2026-09-06: the
+        # handler below raised without discarding, so a refused hole left a
+        # broken `Poche.1` in the tree. After that every Update failed, the
+        # part measured 0 mm3 with a perfectly good pad still in it, and the
+        # next hole was refused with "the part has no solid body" -- a true
+        # statement about a part the previous refusal had broken.
+        # `_discard_failed_feature`'s docstring has said why since it was
+        # written for fillet; `hole` and `pocket` simply never called it.
+        pocket = None
         try:
             pocket = part.ShapeFactory.AddNewPocket(
                 self._find_sketch(sketch), float(depth_mm or 1.0)
@@ -982,19 +1177,24 @@ class CatiaCom(
             # which way is "into the material" from the bounding box, do it and
             # look: no material gone means it went the wrong way.
             if self._solid_volume() >= before:
-                pocket.DirectionOrientation = 1
+                self._reverse_direction(pocket)
                 part.Update()
         except Exception as exc:  # noqa: BLE001
+            self._discard_failed_feature(pocket)
             raise CatiaOperationError(
                 f"CATIA could not cut a {diameter_mm:g} mm hole in the {face} face at "
-                f"{position}: {exc}. Check that the hole fits inside the part."
+                f"{position}: {exc}. The failed feature has been removed, so the part "
+                "is still buildable. Check that the hole fits inside the part."
             ) from exc
 
         if self._solid_volume() >= before:
+            # A pocket that cut nothing is not broken, but the call is being
+            # refused, and "nothing was changed" has to be true when it is said.
+            self._discard_failed_feature(pocket)
             raise CatiaOperationError(
                 f"The {diameter_mm:g} mm hole at {position} on the {face} face removed "
-                "no material, so it missed the part. Check the diameter against the "
-                "part's bounding box."
+                "no material, so it missed the part. It has been removed again, so "
+                "nothing was changed. Check the diameter against the part's bounding box."
             )
         return self._feature_result(str(pocket.Name))
 
@@ -1010,29 +1210,143 @@ class CatiaCom(
             return 0.0
 
     def fillet(  # pragma: no cover - Windows only
-        self, *, radius_mm: float, feature: str | None = None, edges: str = "all"
+        self,
+        *,
+        radius_mm: float | list[float],
+        feature: str | None = None,
+        edges: str = "all",
     ) -> dict[str, Any]:
+        """Round a group of edges, at one radius or one radius per edge.
+
+        The list form is not an extra: `catia_fillet`'s server-side schema says
+        in words that "radius_mm may be a list, one per selected edge in
+        selection order", and this method used to take `float(radius_mm)`. On
+        2026-09-06 a model read the schema, sent the list it was promised, and
+        got `TypeError: unsupported format string passed to list.__format__` --
+        the `float()` raised, and then the *error handler* raised again trying
+        to render `{radius_mm:g}` for a list, so the real cause never reached
+        anyone. A schema that advertises a capability the bridge does not
+        implement is worse than one that does not offer it: the model is being
+        told the truth by one half of the system and refused by the other.
+
+        Distinct radii are applied as one feature per radius, largest first,
+        for the reason `part_design.fillet_edges` records: a small fillet
+        applied first removes the material a larger one needs to bite into.
+        """
         part = self._part()
         selected = self._select_edges(edges, feature)
-        edge_fillet = None
-        try:
-            # 1 = catTangencyFilletEdgePropagation, which follows a chain of
-            # tangent edges -- the behaviour a user means by "round that corner".
-            edge_fillet = part.ShapeFactory.AddNewEdgeFilletWithConstantRadius(
-                selected[0], 1, float(radius_mm)
-            )
-            for reference in selected[1:]:
-                edge_fillet.AddObjectToFillet(reference)
-            part.Update()
-        except Exception as exc:  # noqa: BLE001
-            self._discard_failed_feature(edge_fillet)
+        if not selected:
             raise CatiaOperationError(
-                f"CATIA refused a {radius_mm:g} mm fillet on the {edges} edges "
-                f"({exc}). The radius is usually too large for the adjacent faces "
-                "-- try a smaller one -- or two of the selected edges meet in a "
-                "corner the fillet cannot resolve; fillet fewer edges at once."
+                f"No {edges} edges were found to fillet. Call catia_list_edges to "
+                "see which edge groups this part actually has."
+            )
+
+        radii = [float(r) for r in radius_mm] if isinstance(radius_mm, list) else None
+        if radii is not None and len(radii) != len(selected):
+            raise CatiaOperationError(
+                f"radius_mm has {len(radii)} value(s) but the {edges} selection "
+                f"matched {len(selected)} edge(s). Give one radius for every "
+                "selected edge, or a single number for all of them. "
+                "catia_list_edges reports what the selection contains."
+            )
+
+        # Group by radius so each distinct value costs one CATIA feature, not
+        # one per edge. A single number is simply the one-group case.
+        by_radius: dict[float, list[Any]] = {}
+        if radii is None:
+            by_radius[float(radius_mm)] = list(selected)  # type: ignore[arg-type]
+        else:
+            for radius, reference in zip(radii, selected, strict=True):
+                by_radius.setdefault(radius, []).append(reference)
+
+        created: list[str] = []
+        for radius in sorted(by_radius, reverse=True):
+            references = by_radius[radius]
+            edge_fillet = None
+            try:
+                # 1 = catTangencyFilletEdgePropagation, which follows a chain of
+                # tangent edges -- the behaviour a user means by "round that corner".
+                edge_fillet = part.ShapeFactory.AddNewEdgeFilletWithConstantRadius(
+                    references[0], 1, radius
+                )
+                for reference in references[1:]:
+                    edge_fillet.AddObjectToFillet(reference)
+                part.Update()
+            except Exception as exc:  # noqa: BLE001
+                self._discard_failed_feature(edge_fillet)
+                raise CatiaOperationError(
+                    f"CATIA refused a {radius:g} mm fillet on {len(references)} of "
+                    f"the {edges} edges ({exc}). The radius is usually too large "
+                    "for the adjacent faces -- try a smaller one -- or two of the "
+                    "selected edges meet in a corner the fillet cannot resolve; "
+                    "fillet fewer edges at once."
+                ) from exc
+            created.append(str(edge_fillet.Name))
+
+        result = self._feature_result(created[-1])
+        if len(created) > 1:
+            # Name every feature, not just the last: a caller that has to edit
+            # or delete one needs the name CATIA invented for it.
+            result["features"] = created
+        return result
+
+    def _update_or_discard(self, shape: Any, advice: str) -> None:  # pragma: no cover
+        """`part.Update()`, and if it fails remove `shape` before refusing.
+
+        Every feature-creating operation must go through this rather than
+        calling `Update` itself. `AddNew...` puts the feature in the tree
+        *before* the update evaluates it, so a failed update leaves a feature
+        behind in an error state -- and CATIA fails every subsequent `Update`
+        on that body, whatever it is for. One refused call becomes a dead part.
+
+        That is not a hypothetical. It has now been measured three times on
+        three different operations: a refused 200 mm fillet killed a following
+        1 mm one; a refused hole on ladder prompt H1 left `Poche.1` behind and
+        the part measured 0 mm3 with a good pad still in it; and a pad from an
+        invalid sketch on H2 took the rest of the run with it -- sketch_close,
+        pad and pocket all came back with the same bare
+        `La methode Update a echoue`, which names nothing and suggests nothing.
+
+        Twice it was fixed at the call site, and twice the next operation had
+        the same hole. So the cleanup is no longer something to remember: it is
+        the only route to `Update` after creating a feature.
+
+        `advice` is the caller's sentence about what to try instead. What gets
+        appended here is the part the caller cannot know: CATIA's own error,
+        and the fact that the part is still buildable -- which matters, because
+        an agent told only "it failed" reasonably concludes the part is ruined
+        and starts again.
+        """
+        try:
+            self._part().Update()
+        except Exception as exc:  # noqa: BLE001
+            self._discard_failed_feature(shape)
+            raise CatiaOperationError(
+                f"{advice} CATIA reported: {exc}. The failed feature has been "
+                "removed, so the part is still buildable -- carry on from what "
+                "is already there rather than starting again."
             ) from exc
-        return self._feature_result(str(edge_fillet.Name))
+
+    @staticmethod
+    def _reverse_direction(feature: Any) -> None:  # pragma: no cover - Windows only
+        """Turn a pocket or hole round, so it cuts into the material.
+
+        Not `DirectionOrientation = 1`. Measured on a real V5-R33 on
+        2026-09-06: a fresh `Pocket` reports `DirectionOrientation` as 1
+        already, so assigning 1 changes nothing and the update that follows
+        produces exactly the volume it did before. Assigning 0 removed the
+        expected 8,000 mm3.
+
+        It is written as a toggle rather than as `= 0` because the default
+        being 1 is an observation about this release, and hard-coding the
+        opposite of an observation is how the original line came to exist. Read
+        what CATIA chose, write the other one.
+        """
+        try:
+            current = int(feature.DirectionOrientation)
+        except Exception:  # noqa: BLE001 - fall back to the documented flip
+            current = 1
+        feature.DirectionOrientation = 0 if current == 1 else 1
 
     def _discard_failed_feature(self, shape: Any) -> None:  # pragma: no cover
         """Remove a feature whose Update failed, so the part stays buildable.
@@ -1087,28 +1401,28 @@ class CatiaCom(
             ) from exc
         return self._feature_result(str(chamfer.Name))
 
-    def _select_edges(self, edges: str, feature: str | None = None) -> list[Any]:  # pragma: no cover
-        """References for the edges the caller means by "top", "vertical", ...
+    def _found_edges(  # pragma: no cover - Windows only
+        self, feature: str | None = None
+    ) -> tuple[Any, list[int], str, Any]:
+        """The solid edges of the part or of one feature, as CATIA's selection.
+
+        Returns (selection, indices, scoped query, scope shape): the selection
+        holds the search result, `indices` are the `Item2` positions in it that
+        are real solid edges, and the query and scope are what `vba.edge_map`
+        needs to repeat the search inside CATIA.
 
         `Selection.Search` is the one automation route to real topological
-        references, and two things about it shaped this method:
+        references, and its query keywords are **localized to the UI language**
+        -- a French V5-R33 refuses "Topology.Edge,all" with the same bare COM
+        error it gives malformed queries, and answers "Topologie.Arête,tout"
+        with every edge in the part. Two sessions concluded Search was broken;
+        it was the grammar. The working one is detected once and cached.
 
-        * Its query keywords are **localized to the UI language** -- a French
-          V5-R33 refuses "Topology.Edge,all" with the same bare COM error it
-          gives malformed queries, and answers "Topologie.Arête,tout" with
-          every edge in the part. Two sessions concluded Search was broken;
-          it was the grammar. The working one is detected once and cached.
-        * Measuring the found edges one Evaluate call at a time is O(edges)
-          COM round trips, and a padded gear has a thousand solid edges --
-          classifying it that way blew through the daemon's 30 s watchdog on a
-          live request. `vba.edge_map` searches AND measures in one Evaluate,
-          then this method pulls references only for the edges it keeps.
-
-        Classification is against the part's Z axis with a 1e-6 mm tolerance --
-        these are exact machine coordinates, not floating measurements.
+        This is the enumeration `catia_list_edges` numbers its ids over and
+        `_edge_references` resolves them from, so the two cannot disagree.
         """
         selection = self._document().Selection
-        if feature is not None:
+        if feature:
             try:
                 scope_shape = self._body().Shapes.Item(feature)
             except Exception as exc:  # noqa: BLE001
@@ -1124,7 +1438,8 @@ class CatiaCom(
 
         grammar = getattr(self, "_search_grammar", None)
         errors: list[str] = []
-        found = None
+        found: list[int] | None = None
+        scoped_query = ""
         for query, language in _SEARCH_GRAMMARS:
             if grammar is not None and grammar != language:
                 continue
@@ -1154,65 +1469,62 @@ class CatiaCom(
             raise CatiaOperationError(
                 "This part has no solid edges yet. Pad or revolve something first."
             )
+        return selection, found, scoped_query, scope_shape
 
-        if edges == "all":
-            # No classification, so no measurement: references come straight
-            # off the live selection, whatever the edge count.
-            return [selection.Item2(index).Reference for index in found]
+    def _measured_edges(  # pragma: no cover - Windows only
+        self, feature: str | None = None
+    ) -> tuple[Any, list[int], dict[int, edge_geometry.Triple]]:
+        """`_found_edges` plus (start, middle, end) for each, in one Evaluate.
 
-        # Classifying means measuring, and the cost is CATIA's measurable
-        # construction itself (~0.1 s per edge, in-process or not), so it is
-        # capped where the daemon's 30 s call budget still holds. A padded
-        # gear has over a thousand solid edges; classifying it took 138 s
-        # live, well past the watchdog.
+        Measuring means CATIA constructing a measurable per edge (~0.1 s each,
+        in-process or not), so it is capped where the daemon's 30 s call budget
+        still holds. A padded gear has over a thousand solid edges; classifying
+        it took 138 s live, well past the watchdog.
+        """
+        selection, found, scoped_query, scope_shape = self._found_edges(feature)
         if len(found) > _EDGE_CLASSIFY_LIMIT:
             raise CatiaOperationError(
-                f"This selection has {len(found)} solid edges, and working out "
-                f"which are {edges!r} means measuring each one -- too slow for a "
-                "part this detailed. Use edges='all', or narrow the selection "
-                "with feature=<name> first."
+                f"This selection has {len(found)} solid edges, and measuring each one "
+                "is too slow for a part this detailed. Narrow it with feature=<name>, "
+                "or use edges='all' where a whole-part fillet is what you mean."
             )
-
         measured = vba.edge_map(self._app, self._part(), scoped_query, scope_shape)
         if not measured:
             raise CatiaOperationError(
-                f"No edge of this part could be measured, so {edges!r} cannot be "
-                "resolved. Use edges='all' instead."
+                "No edge of this part could be measured, so edges cannot be classified. "
+                "Use edges='all' instead."
             )
+        # The selection now holds the edge-map's search result; indices are
+        # stable because the script ran the same scoped query.
+        return selection, found, measured
 
-        z_values = [p[2] for triple in measured.values() for p in triple]
-        z_top, z_bottom = max(z_values), min(z_values)
-        tolerance = 1e-6
+    def _select_edges(self, edges: str, feature: str | None = None) -> list[Any]:  # pragma: no cover
+        """References for the edges the caller means by "top", "vertical", ...
 
-        def matches(triple: tuple) -> bool:
-            start, middle, end = triple
-            points = (start, middle, end)
-            if edges == "top":
-                return all(abs(p[2] - z_top) < tolerance for p in points)
-            if edges == "bottom":
-                return all(abs(p[2] - z_bottom) < tolerance for p in points)
-            if edges == "horizontal":
-                return (
-                    abs(start[2] - end[2]) < tolerance
-                    and abs(start[2] - middle[2]) < tolerance
-                )
-            if edges == "vertical":
-                return (
-                    abs(start[0] - end[0]) < tolerance
-                    and abs(start[1] - end[1]) < tolerance
-                    and abs(start[2] - end[2]) > tolerance
-                )
-            return False
+        Classification lives in `edges.py`, shared with `catia_list_edges`, so
+        what that tool lists as vertical is what this rounds. `all` measures
+        nothing: references come straight off the live selection, whatever the
+        edge count.
+        """
+        if edges == "all":
+            selection, found, _, _ = self._found_edges(feature)
+            return [selection.Item2(index).Reference for index in found]
+        if edges in ("convex", "concave"):
+            raise CatiaOperationError(edge_geometry.UNMEASURED_CONVEXITY)
 
-        chosen = {index: triple for index, triple in measured.items() if matches(triple)}
+        selection, _, measured = self._measured_edges(feature)
+        z_top, z_bottom = edge_geometry.z_extent(list(measured.values()))
+        chosen = [
+            index
+            for index in sorted(measured)
+            if edges in edge_geometry.orientations(measured[index], z_top, z_bottom)
+        ]
         if not chosen:
             raise CatiaOperationError(
                 f"No {edges} edges on this part. Try edges='all', or a "
                 "different selector."
             )
-        # The selection still holds the edge-map's search result; indices are
-        # stable because the script ran the same scoped query.
-        return [selection.Item2(index).Reference for index in sorted(chosen)]
+        return [selection.Item2(index).Reference for index in chosen]
 
     def _sketch_with_axis(self, name: str) -> Any:  # pragma: no cover - Windows only
         """The named sketch, with a revolution axis drawn along its V axis.
@@ -1243,18 +1555,23 @@ class CatiaCom(
     ) -> dict[str, Any]:
         part = self._part()
         profile = self._sketch_with_axis(sketch)
+        shaft = None
         try:
             shaft = part.ShapeFactory.AddNewShaft(profile)
             if angle_deg < 360.0:
                 shaft.FirstAngle.Value = float(angle_deg)
                 shaft.SecondAngle.Value = 0.0
-            part.Update()
         except Exception as exc:  # noqa: BLE001
+            self._discard_failed_feature(shaft)
             raise CatiaOperationError(
-                f"CATIA could not revolve {sketch} into a shaft ({exc}). The profile "
-                "must lie entirely on one side of the sketch's vertical axis; redraw "
-                "it offset from the origin, or build the shape with pads instead."
+                f"CATIA would not start a shaft from {sketch} ({exc})."
             ) from exc
+        self._update_or_discard(
+            shaft,
+            f"CATIA could not revolve {sketch} into a shaft. The profile must lie "
+            "entirely on one side of the sketch's vertical axis; redraw it offset "
+            "from the origin, or build the shape with pads instead.",
+        )
         return self._feature_result(str(shaft.Name))
 
     def groove(  # pragma: no cover - Windows only
@@ -1263,18 +1580,22 @@ class CatiaCom(
         part = self._part()
         profile = self._sketch_with_axis(sketch)
         before = self._solid_volume()
+        groove = None
         try:
             groove = part.ShapeFactory.AddNewGroove(profile)
             if angle_deg < 360.0:
                 groove.FirstAngle.Value = float(angle_deg)
                 groove.SecondAngle.Value = 0.0
-            part.Update()
         except Exception as exc:  # noqa: BLE001
+            self._discard_failed_feature(groove)
             raise CatiaOperationError(
-                f"CATIA could not cut the groove from {sketch} ({exc}). The profile "
-                "must overlap solid material and stay on one side of the sketch's "
-                "vertical axis."
+                f"CATIA would not start a groove from {sketch} ({exc})."
             ) from exc
+        self._update_or_discard(
+            groove,
+            f"CATIA could not cut the groove from {sketch}. The profile must overlap "
+            "solid material and stay on one side of the sketch's vertical axis.",
+        )
         if self._solid_volume() >= before:
             raise CatiaOperationError(
                 f"The groove from {sketch} removed no material, so it missed the "
@@ -1286,14 +1607,19 @@ class CatiaCom(
         part = self._part()
         origin = part.OriginElements
         reference = part.CreateReferenceFromObject(getattr(origin, _ORIGIN_PLANE[plane]))
+        mirror = None
         try:
             mirror = part.ShapeFactory.AddNewMirror(reference)
-            part.Update()
         except Exception as exc:  # noqa: BLE001
+            self._discard_failed_feature(mirror)
             raise CatiaOperationError(
-                f"CATIA could not mirror the solid about the {plane} plane ({exc}). "
-                "The part needs solid material on one side of that plane first."
+                f"CATIA would not start a mirror about the {plane} plane ({exc})."
             ) from exc
+        self._update_or_discard(
+            mirror,
+            f"CATIA could not mirror the solid about the {plane} plane. The part "
+            "needs solid material on one side of that plane first.",
+        )
         return self._feature_result(str(mirror.Name))
 
     def sketch_revolve_profile(  # pragma: no cover - Windows only
@@ -1422,21 +1748,25 @@ class CatiaCom(
                 "or the second row lands on top of the first."
             )
 
+        first_axis, second_axis = _PATTERN_PLANE_AXES[plane]
+        pattern = None
         try:
             pattern = part.ShapeFactory.AddNewRectPattern(
                 target, int(count), second, float(spacing_mm), step2, 1, 1,
                 reference, reference, True, True, 0.0,
             )
-            part.Update()
         except Exception as exc:  # noqa: BLE001
-            first_axis, second_axis = _PATTERN_PLANE_AXES[plane]
+            self._discard_failed_feature(pattern)
             raise CatiaOperationError(
-                f"CATIA could not repeat {target.Name} {count} times along "
-                f"{first_axis} ({exc}). Check the count and spacing against the "
-                f"part's size along {first_axis}"
-                + (f" and {second_axis}" if second > 1 else "")
-                + "."
+                f"CATIA would not start a rectangular pattern of {target.Name} ({exc})."
             ) from exc
+        self._update_or_discard(
+            pattern,
+            f"CATIA could not repeat {target.Name} {count} times along {first_axis}. "
+            f"Check the count and spacing against the part's size along {first_axis}"
+            + (f" and {second_axis}" if second > 1 else "")
+            + ".",
+        )
         return self._pattern_result(pattern, int(count) * second)
 
     def _pattern_result(self, pattern: Any, instances: int) -> dict[str, Any]:
@@ -1492,26 +1822,35 @@ class CatiaCom(
             factory.CreatePoint(0.0, 0.0)
         finally:
             sketch.CloseEdition()
-        part.Update()
+        self._update_or_discard(
+            sketch,
+            f"CATIA would not accept the centre point for a circular pattern on the "
+            f"{plane} plane.",
+        )
 
         centre = part.CreateReferenceFromObject(sketch)
         axis = part.CreateReferenceFromObject(getattr(part.OriginElements, _ORIGIN_PLANE[plane]))
         step_deg = float(total_angle_deg) / int(count)
 
         before = self._solid_volume()
+        pattern = None
         try:
             pattern = part.ShapeFactory.AddNewCircPattern(
                 target, 1, int(count), 0.0, step_deg, 1, 1, centre, axis, True, 0.0, False
             )
-            part.Update()
         except Exception as exc:  # noqa: BLE001
+            self._discard_failed_feature(pattern)
             raise CatiaOperationError(
-                f"CATIA could not repeat {target.Name} {count} times around the "
-                f"{plane} plane ({exc}). Two things cause this: the feature sits on "
-                "the axis, so every copy lands on top of it -- give it an off-centre "
-                "position first, with catia_hole's inset_mm -- or the copies swing "
-                "off the edge of the material, which fails rather than trimming."
+                f"CATIA would not start a circular pattern of {target.Name} ({exc})."
             ) from exc
+        self._update_or_discard(
+            pattern,
+            f"CATIA could not repeat {target.Name} {count} times around the {plane} "
+            "plane. Two things cause this: the feature sits on the axis, so every "
+            "copy lands on top of it -- give it an off-centre position first, with "
+            "catia_hole's inset_mm -- or the copies swing off the edge of the "
+            "material, which fails rather than trimming.",
+        )
 
         result = self._pattern_result(pattern, int(count))
         if isinstance(result.get("volume_mm3"), (int, float)) and before and count > 1:
@@ -1555,15 +1894,20 @@ class CatiaCom(
         """
         part = self._part()
         before = self._solid_volume()
+        feature = None
         try:
             feature = part.ShapeFactory.AddNewShell(None, float(thickness_mm), 0.0)
-            part.Update()
         except Exception as exc:  # noqa: BLE001
+            self._discard_failed_feature(feature)
             raise CatiaOperationError(
-                f"CATIA could not hollow the part to a {thickness_mm:g} mm wall ({exc}). "
-                "The wall is usually thicker than half the part's smallest dimension; "
-                "try a thinner wall."
+                f"CATIA would not start a {thickness_mm:g} mm shell ({exc})."
             ) from exc
+        self._update_or_discard(
+            feature,
+            f"CATIA could not hollow the part to a {thickness_mm:g} mm wall. The wall "
+            "is usually thicker than half the part's smallest dimension; try a "
+            "thinner wall.",
+        )
         if self._solid_volume() >= before:
             raise CatiaOperationError(
                 f"A {thickness_mm:g} mm wall removed no material, so the part was "
@@ -1601,9 +1945,33 @@ class CatiaCom(
             **self._measure_solid(),
         }
 
-    def list_features(self) -> dict[str, Any]:  # pragma: no cover - Windows only
+    def list_features(  # pragma: no cover - Windows only
+        self,
+        *,
+        body: str | None = None,
+        kind: str | None = None,
+        include_sketches: bool = True,
+    ) -> dict[str, Any]:
         self._document()
-        return {"features": self._feature_list()}
+        features = self._feature_list(body=body, include_sketches=include_sketches)
+        if kind:
+            wanted = kind.strip().casefold()
+            features = [f for f in features if str(f["type"]).casefold() == wanted]
+            if not features:
+                # A filter that matches nothing is the caller's next question,
+                # so answer it rather than returning an empty list they have to
+                # re-query to understand.
+                present = sorted(
+                    {str(f["type"]) for f in self._feature_list(body=body, include_sketches=True)}
+                )
+                return {
+                    "features": [],
+                    "note": (
+                        f"No feature of type {kind!r} in this part. Types present: "
+                        + (", ".join(present) if present else "(none -- the part is empty)")
+                    ),
+                }
+        return {"features": features}
 
     def update(self) -> dict[str, Any]:  # pragma: no cover - Windows only
         # A product updates too, and updating one is how its constraints get
@@ -1677,18 +2045,106 @@ class CatiaCom(
             **self._measure_solid(),
         }
 
-    def _feature_list(self) -> list[dict[str, Any]]:  # pragma: no cover - Windows only
+    def _feature_list(  # pragma: no cover - Windows only
+        self, *, body: str | None = None, include_sketches: bool = False
+    ) -> list[dict[str, Any]]:
+        """Solids and, optionally, sketches in one body, in tree order.
+
+        `include_sketches` defaults to False here and True at the tool
+        boundary, deliberately: the callers inside this module -- every
+        `_feature_result` after a mutation -- want the solid features they just
+        changed, while an agent asking the *tool* what is in a document wants
+        everything it can name. Both are "the features", and they are not the
+        same list.
+
+        A sketch row carries `elements`, the number of geometric elements in
+        it. That is what answers the question the agent was actually asking on
+        H2 -- it had put a rectangle and two circles in one sketch, and a pad
+        needs one profile. `Sketch.1 (3 elements)` says that; a bare
+        `Sketch.1` does not, and the pad failure that follows says only
+        `La methode Update a echoue`.
+        """
+        part = self._part()
         try:
-            shapes = self._body().Shapes
-        except Exception:  # noqa: BLE001
-            return []
-        return [
-            {
-                "name": str(shapes.Item(i).Name),
-                "type": str(getattr(shapes.Item(i), "Type", "Shape")),
-            }
-            for i in range(1, int(shapes.Count) + 1)
-        ]
+            target = part.Bodies.Item(body) if body else self._body()
+        except Exception as exc:  # noqa: BLE001
+            known = ", ".join(
+                str(part.Bodies.Item(i).Name) for i in range(1, int(part.Bodies.Count) + 1)
+            )
+            raise CatiaOperationError(
+                f"No body named {body!r} in this part. Bodies here: {known or '(none)'}."
+            ) from exc
+
+        rows: list[dict[str, Any]] = []
+        try:
+            shapes = target.Shapes
+            for i in range(1, int(shapes.Count) + 1):
+                item = shapes.Item(i)
+                rows.append(
+                    {"name": str(item.Name), "type": str(getattr(item, "Type", "Shape"))}
+                )
+        except Exception:  # noqa: BLE001 - an empty body has no Shapes collection
+            pass
+
+        if include_sketches:
+            try:
+                sketches = target.Sketches
+                for i in range(1, int(sketches.Count) + 1):
+                    item = sketches.Item(i)
+                    row: dict[str, Any] = {"name": str(item.Name), "type": "Sketch"}
+                    drawn = self._sketch_element_count(item)
+                    if drawn is not None:
+                        row["elements"] = drawn
+                    rows.append(row)
+            except Exception:  # noqa: BLE001 - a body with no sketches
+                pass
+        return rows
+
+    @staticmethod
+    def _sketch_element_count(sketch: Any) -> int | None:  # pragma: no cover - Windows only
+        """How many curves this sketch actually draws.
+
+        Not `GeometricElements.Count`, which is one higher: the collection
+        includes the sketch's own absolute axis system. Verified on the seat --
+        the two-circle profile on the H2 flange reported three, listing as
+        `Repere`, `Cercle.1`, `Cercle.2`.
+
+        The axis is told apart by shape, not by name. It is a `CATIAAxis2D`,
+        which has no `Construction` property and raises when one is read; every
+        element that can be drawn answers True or False. The name is `Repere`
+        on this French seat and something else on every other one, so matching
+        it would be the localised-string mistake `api.localisation` exists to
+        warn about.
+
+        Construction geometry is excluded too. It is drawn as scaffolding and
+        is not part of the profile, so counting it would put the number back
+        out of step with what a pad is going to try to extrude.
+
+        The number is a count of *curves*, not of closed profiles -- a
+        rectangle is four. It is here so an agent can notice a sketch holds
+        more than it drew, which is what went wrong on H2, and it is not enough
+        on its own to predict whether a pad will succeed. `pad`'s own refusal
+        says that part.
+        """
+        try:
+            elements = sketch.GeometricElements
+            total = int(elements.Count)
+        except Exception:  # noqa: BLE001 - report the sketch without a count
+            return None
+
+        drawn = 0
+        for i in range(1, total + 1):
+            try:
+                item = elements.Item(i)
+            except Exception:  # noqa: BLE001
+                continue
+            try:
+                construction = bool(item.Construction)
+            except Exception:  # noqa: BLE001 - the axis system, which draws nothing
+                continue
+            if not construction:
+                drawn += 1
+        return drawn
 
     # -- inspection ----------------------------------------------------------
 
@@ -2162,6 +2618,7 @@ class CatiaCom(
         *,
         command: str,
         candidates: list[str] | None = None,
+        command_ids: list[str] | None = None,
         command_name: str = "",
         command_key: str = "",
         menu_hint: list[str] | None = None,
@@ -2210,10 +2667,26 @@ class CatiaCom(
                 window, command_name or command, match.label, "menu", " > ".join(match.path)
             )
 
-        # Not on a menu: a toolbar-only command, or a label this seat words
-        # differently. `StartCommand` is the fallback and its silence is
-        # reported honestly rather than dressed up as success.
-        for candidate in wanted:
+        # Not on a menu. `StartCommand` is the only remaining route and it is
+        # now taken **only for a published command id**, never for a display
+        # label.
+        #
+        # CLAUDE.md used to say `StartCommand` fails silently on a name CATIA
+        # does not know. It does not. Measured twice on a French V5-R33 on
+        # 2026-09-06 ("Close Sketch", then "Fastener Pattern"): CATIA raises a
+        # modal information box, and that box holds COM. Heartbeats stop, the
+        # device drops offline, and every later call fails -- including
+        # `catia_describe_dialog`, the tool whose entire job is to clear a
+        # stuck dialog. The seat is dead until a human clicks OK.
+        #
+        # It cannot be cleaned up after the fact either: the modal is raised
+        # *synchronously*, so `StartCommand` never returns and no code on this
+        # thread runs again. There is no recovery, only prevention. Hence: a
+        # candidate is sent only if the server marked it as an id with a
+        # published source (`COMMAND_IDS`), and a guess is refused in words
+        # rather than gambled with the session.
+        safe = [c for c in (command_ids or []) if c]
+        for candidate in safe:
             try:
                 self._app.StartCommand(candidate)
             except Exception:  # noqa: BLE001 - an unknown name is not an error to CATIA
@@ -2221,6 +2694,17 @@ class CatiaCom(
             result = self._after_command(window, command_name or command, candidate, "command", "")
             if result["dialog_open"]:
                 return result
+
+        if not safe:
+            raise CatiaOperationError(
+                f"{command_name or command!r} is not on this seat's menus, and Kryova "
+                "has no published command id for it, so there is nothing safe to send. "
+                "It is not refused for being dangerous -- an unrecognised name makes "
+                "CATIA raise a modal error box that blocks the whole session, so "
+                "guessing costs far more than it can win. Read the seat's own labels "
+                "with catia_list_commands and use one of those, or do this with a "
+                "modelling tool instead of by driving the interface."
+            )
         return self._after_command(
             window, command_name or command, wanted[0] if wanted else command, "command", ""
         ) | {
@@ -2232,6 +2716,79 @@ class CatiaCom(
                 "label with catia_list_commands."
             ),
         }
+
+    @staticmethod
+    def _is_unknown_command_box(dialog: Any, candidate: str) -> bool:
+        """Is this CATIA's "I do not know that command" box for `candidate`?
+
+        Recognised by **the command name appearing in the dialog's own text**,
+        not by its wording. The wording is localised -- this seat says
+        `Entrée clavier` / `Commande inconnue : Close Sketch` -- and a table of
+        translations would be one more thing to rot, in a file whose whole
+        design (`ui_policy`, `ButtonRole`, `STANDARD_CONTROL_IDS`) exists to
+        avoid exactly that. The string we just sent is the same on every
+        language install, so echoing it back is the language-proof signal.
+
+        Narrow on purpose. A real command dialog also carries a title, and it
+        would be a serious bug to dismiss one of those: it might be a save
+        prompt. So this also insists the box has no input fields and offers at
+        most one button, which is what an information box looks like and what a
+        working command dialog never does.
+        """
+        if dialog is None:
+            return False
+        folded_candidate = ui_policy.fold(candidate)
+        if not folded_candidate:
+            return False
+        text = " ".join(
+            [dialog.title, *(c.label or "" for c in dialog.controls), *(str(c.value or "") for c in dialog.controls)]
+        )
+        if folded_candidate not in ui_policy.fold(text):
+            return False
+        return not dialog.fields() and len(dialog.buttons()) <= 1
+
+    def _dismiss_unknown_command_box(  # pragma: no cover - Windows only
+        self, window: int, candidate: str
+    ) -> bool:
+        """Clear CATIA's unknown-command box. True if that is what was showing.
+
+        This is not tidiness, it is the difference between a failed call and a
+        dead seat. Measured 2026-09-06: `catia_run_command` was given a name
+        CATIA does not know, the modal it raised held COM, heartbeats stopped,
+        and every later tool -- including `catia_describe_dialog`, the very tool
+        meant to diagnose a stuck dialog -- failed with "no bridge is
+        connected". The agent could not recover and neither could the user
+        without clicking OK by hand.
+
+        CLAUDE.md says `StartCommand` "fails silently" and that is why the
+        fallback was considered safe to gamble on. On a real V5-R33 seat it
+        does not: it answers with this box. The doc has been corrected.
+        """
+        try:
+            dialog = ui.active_dialog(window)
+        except ui.UiUnavailable:
+            return False
+        if not self._is_unknown_command_box(dialog, candidate):
+            return False
+        assert dialog is not None  # noqa: S101 - narrowed by the check above
+        buttons = dialog.buttons()
+        try:
+            if buttons:
+                ui.click(dialog.handle, buttons[0])
+            else:
+                # No button this code can read. Enter is what a human presses on
+                # a one-button information box, and leaving it up is not an
+                # option.
+                ui.press_key(dialog.handle, "Enter")
+        except ui.UiUnavailable:
+            logger.warning(
+                "Could not dismiss CATIA's unknown-command box for %r; the seat may "
+                "stay blocked until someone clicks it",
+                candidate,
+            )
+            return False
+        time.sleep(_DIALOG_POLL_S)
+        return True
 
     def _after_command(  # pragma: no cover - Windows only
         self, window: int, command: str, label: str, how: str, path: str
@@ -2457,10 +3014,7 @@ class CatiaCom(
             selection.Add(element)
             selected.append(name)
         if missing:
-            raise CatiaOperationError(
-                f"Not in this part: {', '.join(missing)}. Call catia_list_features to "
-                "see what is there; names are case-sensitive and end in a number."
-            )
+            raise CatiaOperationError(not_in_this_part(missing))
         return {"selected": selected, "count": _selection_count(selection, len(selected))}
 
 

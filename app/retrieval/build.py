@@ -67,7 +67,12 @@ def _check(service) -> int:  # noqa: ANN001 - internal, one call site
         f"from {stats['sources']} document(s), {stats['terms']:,} terms"
     )
     if stats.get("stale"):
-        print("\nThe documents on disk have changed since this index was built.", file=sys.stderr)
+        # The reason, not a fixed sentence: "the documents changed" and "the
+        # chunker changed" both need a rebuild and mean very different things
+        # to whoever is reading this, and printing the first for the second is
+        # how a code change goes unnoticed for three days.
+        reason = stats.get("stale_reason") or "this index no longer matches its inputs"
+        print(f"\nA rebuild is needed: {reason}.", file=sys.stderr)
         return 1
     print("Index is up to date.")
     return 0

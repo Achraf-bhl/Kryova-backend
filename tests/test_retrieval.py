@@ -15,6 +15,7 @@ takes the whole build down". Those are the cases written out longhand below.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -31,11 +32,13 @@ from app.retrieval.chunking import (
     chunk_terms,
 )
 from app.retrieval.corpus import (
+    _BUILDER_MODULES,
     MANIFEST_FILENAME,
     PASSAGES_FILENAME,
     Corpus,
     Passage,
     build,
+    builder_fingerprint,
     discover_sources,
     merge_adjacent,
 )
@@ -690,6 +693,149 @@ class TestCorpus:
         corpus = Corpus.open(index_dir)
         assert corpus is not None
         assert not corpus.is_stale([sources])
+
+    # -- staleness against the *code*, not only the documents ---------------
+    #
+    # The half that was missing. Fingerprinting the sources answers "are these
+    # the right documents?", and it was being read as though it answered "is
+    # this the right index?". On 2026-09-06 the Windows seat was serving an
+    # index built before the chunker's heading rules were tightened: every PDF
+    # untouched, `--check` reporting "up to date", and precision@1 measuring
+    # 92.1% where the same documents through the same code measure 94.7%.
+
+    @staticmethod
+    def _rewrite_manifest(index_dir: Path, **changes: object) -> None:
+        """Edit the manifest in place. `None` as a value deletes the key."""
+        path = index_dir / MANIFEST_FILENAME
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        for key, value in changes.items():
+            if value is None:
+                manifest.pop(key, None)
+            else:
+                manifest[key] = value
+        path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    def test_a_fresh_build_records_the_code_that_wrote_it(self, tmp_path: Path):
+        sources, index_dir = tmp_path / "src", tmp_path / "index"
+        sources.mkdir()
+        _write_corpus(sources)
+        build(sources=[sources], destination=index_dir)
+
+        manifest = json.loads((index_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+        assert manifest["builder"] == builder_fingerprint()
+
+    def test_staleness_is_detected_when_the_builder_changes(self, tmp_path: Path):
+        """The regression this guard exists for, with the documents untouched.
+
+        Nothing on disk has changed but the code, which is precisely the case
+        the source fingerprints cannot see and precisely the one that shipped.
+        """
+        sources, index_dir = tmp_path / "src", tmp_path / "index"
+        sources.mkdir()
+        _write_corpus(sources)
+        build(sources=[sources], destination=index_dir)
+
+        corpus = Corpus.open(index_dir)
+        assert corpus is not None
+        assert not corpus.is_stale([sources])
+
+        self._rewrite_manifest(index_dir, builder="a" * 64)
+        rebuilt_view = Corpus.open(index_dir)
+        assert rebuilt_view is not None
+        assert rebuilt_view.is_stale([sources])
+        reason = rebuilt_view.stale_reason([sources])
+        assert reason is not None and "code" in reason, reason
+
+    def test_an_index_written_before_the_builder_was_recorded_is_stale(self, tmp_path: Path):
+        """The state the seat was actually in: a manifest with no `builder` key.
+
+        Treated as a mismatch rather than as "cannot tell", because it *is* one
+        -- the index was written by code nobody can identify -- and because the
+        cure is one rebuild, after which the question is answerable forever.
+        """
+        sources, index_dir = tmp_path / "src", tmp_path / "index"
+        sources.mkdir()
+        _write_corpus(sources)
+        build(sources=[sources], destination=index_dir)
+        self._rewrite_manifest(index_dir, builder=None)
+
+        corpus = Corpus.open(index_dir)
+        assert corpus is not None
+        assert corpus.is_stale([sources])
+
+    def test_a_deployment_that_cannot_read_its_source_is_not_told_to_rebuild(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """None means "cannot tell", and must never be reported as a mismatch.
+
+        A bytecode-only install can never compute a digest, so treating None as
+        a difference would demand a rebuild it can never satisfy -- and would
+        then also mask the document check behind a permanent code complaint.
+        """
+        sources, index_dir = tmp_path / "src", tmp_path / "index"
+        sources.mkdir()
+        _write_corpus(sources)
+        build(sources=[sources], destination=index_dir)
+        self._rewrite_manifest(index_dir, builder="a" * 64)
+
+        monkeypatch.setattr("app.retrieval.corpus.builder_fingerprint", lambda *_, **__: None)
+        corpus = Corpus.open(index_dir)
+        assert corpus is not None
+        assert not corpus.is_stale([sources]), "a mismatch that cannot be measured is not a claim"
+
+        # And the document half still works underneath it.
+        (sources / "new_manual.md").write_text("Drafting\n" + "content " * 40, encoding="utf-8")
+        reason = corpus.stale_reason([sources])
+        assert reason is not None and "documents" in reason, reason
+
+    def test_the_fingerprint_moves_when_a_builder_module_changes(self, tmp_path: Path):
+        """Break the thing the guard guards: change one byte of the chunker.
+
+        Done against a copy of the package rather than the running source, so
+        the suite cannot leave the repository edited if it dies here.
+        """
+        package = tmp_path / "retrieval"
+        package.mkdir()
+        real = Path(builder_fingerprint.__globals__["__file__"]).resolve().parent
+        for name in _BUILDER_MODULES:
+            shutil.copy2(real / f"{name}.py", package / f"{name}.py")
+
+        before = builder_fingerprint(package)
+        assert before is not None
+
+        target = package / "chunking.py"
+        target.write_bytes(target.read_bytes() + b"\n# one more comment\n")
+        assert builder_fingerprint(package) != before
+
+    @pytest.mark.parametrize("module", _BUILDER_MODULES)
+    def test_every_named_builder_module_is_actually_hashed(self, tmp_path: Path, module: str):
+        """A module listed but not read is a listing that lies.
+
+        Parametrised over the whole set on purpose: the cheap way to write this
+        guard is to hash one file and name six, and the cheap way to test it is
+        to check the one that happens to work.
+        """
+        package = tmp_path / "retrieval"
+        package.mkdir()
+        real = Path(builder_fingerprint.__globals__["__file__"]).resolve().parent
+        for name in _BUILDER_MODULES:
+            shutil.copy2(real / f"{name}.py", package / f"{name}.py")
+
+        before = builder_fingerprint(package)
+        changed = package / f"{module}.py"
+        changed.write_bytes(changed.read_bytes() + b"\n# touched\n")
+        assert builder_fingerprint(package) != before, f"{module}.py is listed but not hashed"
+
+    def test_an_unreadable_package_yields_no_fingerprint_rather_than_a_partial_one(
+        self, tmp_path: Path
+    ):
+        """A digest over five of six modules would be wrong and look right."""
+        package = tmp_path / "retrieval"
+        package.mkdir()
+        real = Path(builder_fingerprint.__globals__["__file__"]).resolve().parent
+        for name in _BUILDER_MODULES[:-1]:
+            shutil.copy2(real / f"{name}.py", package / f"{name}.py")
+        assert builder_fingerprint(package) is None
 
     def test_a_missing_index_is_absent_not_an_exception(self, tmp_path: Path):
         assert Corpus.open(tmp_path / "never-built") is None

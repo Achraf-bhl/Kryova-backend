@@ -190,7 +190,7 @@ class DraftingMixin:
         document afterwards gives the empty drawing rather than the part it is
         supposed to be a drawing *of*.
         """
-        self._require_closed()
+        self._end_sketch_edition()
         model = self._app.ActiveDocument if not source else self._find_document(source)
 
         document = self._app.Documents.Add("Drawing")

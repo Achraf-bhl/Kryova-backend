@@ -172,6 +172,17 @@ class Settings(BaseSettings):
     #: the budget had the same hole and no workaround.
     ai_daily_token_budget: int = 2_000_000
 
+    #: Verbosity of the application's own logs, as a level name.
+    #:
+    #: Declared as a real field for the reason the budget above documents:
+    #: `Settings` is `extra="ignore"`, so a `LOG_LEVEL` variable with no field
+    #: behind it is accepted and silently dropped. INFO rather than WARNING
+    #: because the interesting lines in this codebase -- which tool the agent
+    #: reached for, which document the bridge activated, why a corpus file was
+    #: skipped -- are all logged at INFO, and a server that prints none of them
+    #: is one you debug by adding print statements.
+    log_level: str = "INFO"
+
     ai_max_tokens: int = 8_000
     # A 7B model on CPU can take a minute; the default is generous on purpose.
     ai_timeout_seconds: float = 120.0

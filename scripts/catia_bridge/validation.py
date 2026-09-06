@@ -83,6 +83,57 @@ def _validate_number(value: float, schema: dict[str, Any], where: str) -> None:
         raise SchemaError(f"{where} must be at most {maximum}")
 
 
+def _type_phrase(subschema: dict[str, Any]) -> str:
+    """How a field's type reads in a refusal: `array of number`, `string`."""
+    expected = subschema.get("type")
+    if expected is None:
+        return "any"
+    names = expected if isinstance(expected, list) else [expected]
+    phrase = " or ".join(str(name) for name in names)
+    items = subschema.get("items")
+    if phrase == "array" and isinstance(items, dict):
+        item_type = items.get("type")
+        if isinstance(item_type, str):
+            phrase = f"array of {item_type}"
+    if "enum" in subschema:
+        phrase += " (one of: " + ", ".join(repr(o) for o in subschema["enum"]) + ")"
+    return phrase
+
+
+def describe_properties(schema: dict[str, Any]) -> str:
+    """Every accepted field with its type and whether it is required.
+
+    Naming the *keys* was already an improvement over naming nothing, and the
+    comment below records why. It did not go far enough. Measured on the seat
+    on 2026-09-06 with a 9B model, every attempt to build any geometry died in
+    the same place, taking one round trip per fact:
+
+        catia_sketch_create: unknown field(s): plane. Accepted: name, origin, support
+        catia_sketch_create: arguments.support is required; you sent: name, origin
+        catia_sketch_create: origin must be array, got str
+
+    Each of those messages is correct and each carries exactly one fact, so the
+    model fixed one thing and broke another, three turns running, and never
+    built anything. The fields, their types and their required-ness are all
+    known here at the moment of the first refusal; withholding two thirds of it
+    is what turned one recoverable mistake into an unrecoverable loop.
+
+    `(none)` is spelled out as a sentence for the same reason: `Accepted:
+    (none)` was read by the model as "you may not call this", and it responded
+    by trying a different tool, when what it needed was to call the same one
+    with `{}`.
+    """
+    properties: dict[str, Any] = schema.get("properties", {})
+    if not properties:
+        return "this tool takes no arguments at all -- call it with {}"
+    required = set(schema.get("required", []))
+    return ", ".join(
+        f"{name} ({_type_phrase(subschema)}, "
+        f"{'required' if name in required else 'optional'})"
+        for name, subschema in sorted(properties.items())
+    )
+
+
 def _validate_object(value: dict[str, Any], schema: dict[str, Any], path: str) -> None:
     where = path or "arguments"
     properties: dict[str, Any] = schema.get("properties", {})
@@ -102,15 +153,18 @@ def _validate_object(value: dict[str, Any], schema: dict[str, Any], path: str) -
             # Naming the accepted keys turns "rejected" into "here is the call
             # you meant", which is the difference between a model that recovers
             # on the next turn and one that repeats itself.
-            allowed = ", ".join(sorted(properties)) or "(none)"
             raise SchemaError(
-                f"{where} has unknown field(s): {', '.join(unknown)}. Accepted: {allowed}"
+                f"{where} has unknown field(s): {', '.join(unknown)}. "
+                f"Accepted: {describe_properties(schema)}"
             )
 
     for name in schema.get("required", []):
         if name not in value:
             supplied = ", ".join(sorted(value)) or "(nothing)"
-            raise SchemaError(f"{where}.{name} is required; you sent: {supplied}")
+            raise SchemaError(
+                f"{where}.{name} is required; you sent: {supplied}. "
+                f"Accepted: {describe_properties(schema)}"
+            )
 
     for name, subschema in properties.items():
         if name in value:

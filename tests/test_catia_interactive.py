@@ -149,9 +149,14 @@ class TestTheInteractiveLoop:
         # The command has not run yet, and the result says so rather than
         # letting the model believe a Pad exists.
         assert "not" in started["data"]["next"] or "until" in started["data"]["next"]
-        assert call(session, "catia_list_features")["data"]["features"] == [
-            {"name": "Sketch.1", "type": "Sketch"}
-        ]
+        # By name and type, not by whole row: what these three assertions mean
+        # is "the sketch is all there is -- no Pad was built", and pinning the
+        # exact dict made them fail the day `catia_list_features` started
+        # reporting a sketch's element count, which is not what they are about.
+        assert [
+            (f["name"], f["type"])
+            for f in call(session, "catia_list_features")["data"]["features"]
+        ] == [("Sketch.1", "Sketch")]
 
         described = call(session, "catia_describe_dialog")["data"]
         assert described["dialog_open"] is True
@@ -187,9 +192,14 @@ class TestTheInteractiveLoop:
         assert cancelled["ok"], cancelled
         assert cancelled["data"]["dialog_open"] is False
         assert cancelled["data"]["pressed"] == SEAT[language]["cancel"]
-        assert call(session, "catia_list_features")["data"]["features"] == [
-            {"name": "Sketch.1", "type": "Sketch"}
-        ]
+        # By name and type, not by whole row: what these three assertions mean
+        # is "the sketch is all there is -- no Pad was built", and pinning the
+        # exact dict made them fail the day `catia_list_features` started
+        # reporting a sketch's element count, which is not what they are about.
+        assert [
+            (f["name"], f["type"])
+            for f in call(session, "catia_list_features")["data"]["features"]
+        ] == [("Sketch.1", "Sketch")]
 
     @pytest.mark.parametrize("language", LANGUAGES)
     def test_escape_abandons_the_dialog_like_a_keyboard_would(self, tmp_path, language):
@@ -296,9 +306,14 @@ class TestTheInteractiveLoop:
         previewed = press(session, "preview", "en")
         assert previewed["ok"], previewed
         assert previewed["data"]["dialog_open"] is True
-        assert call(session, "catia_list_features")["data"]["features"] == [
-            {"name": "Sketch.1", "type": "Sketch"}
-        ]
+        # By name and type, not by whole row: what these three assertions mean
+        # is "the sketch is all there is -- no Pad was built", and pinning the
+        # exact dict made them fail the day `catia_list_features` started
+        # reporting a sketch's element count, which is not what they are about.
+        assert [
+            (f["name"], f["type"])
+            for f in call(session, "catia_list_features")["data"]["features"]
+        ] == [("Sketch.1", "Sketch")]
 
 
 # ---------------------------------------------------------------------------

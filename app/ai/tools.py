@@ -598,12 +598,14 @@ class ToolBox:
                     Tool(
                         name="open_in_catia",
                         description=(
-                            "Start CATIA, bring its window to the screen, and optionally open a "
-                            "fresh empty part for the user to model in. This is how a project "
-                            "gets its geometry in this product: the user models in CATIA rather "
-                            "than hunting for a file to upload. Call it right after creating a "
-                            "project, once the user has said what they are building. Takes up to "
-                            "a few minutes if CATIA is cold."
+                            "Start CATIA, bring its window to the screen, and open one fresh "
+                            "empty part to build in. This is how a project gets its geometry in "
+                            "this product: the part is modelled in CATIA rather than hunting for "
+                            "a file to upload. Call it right after creating a project, once the "
+                            "user has said what they are building. It creates and claims the "
+                            "part itself, so the next call is the first modelling step "
+                            "(catia_sketch_create, usually) -- not catia_new_part. Takes up to a "
+                            "few minutes if CATIA is cold."
                         ),
                         parameters=_object(
                             {
@@ -613,7 +615,14 @@ class ToolBox:
                                         "True to add a new empty CATPart. False to just bring up "
                                         "CATIA with whatever the user already has open."
                                     ),
-                                }
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": (
+                                        "What to call the part, e.g. 'Titanium bracket'. Name it "
+                                        "here rather than creating a second one later."
+                                    ),
+                                },
                             }
                         ),
                         handler=self._open_in_catia,
@@ -1539,8 +1548,8 @@ class ToolBox:
         long_running = bool(getattr(spec, "long_running", False))
         timeout = settings.catia_export_timeout_s if long_running else settings.catia_call_timeout_s
 
-        try:
-            result = dispatch.call_catia(
+        def run() -> Any:
+            return dispatch.call_catia(
                 self.db,
                 user_id=self.user.id,
                 conversation_id=conversation.id if conversation is not None else None,
@@ -1548,17 +1557,74 @@ class ToolBox:
                 arguments=arguments,
                 timeout_s=timeout,
             )
-        except dispatch.CatiaUnavailable as exc:
-            raise ToolError(
-                f"No CATIA bridge is connected: {exc} Tell the user to start the "
-                "Kryova CATIA bridge on their Windows machine, and stop calling CATIA "
-                "tools until they say it is running."
-            ) from exc
-        except dispatch.CatiaError as exc:
-            raise ToolError(f"CATIA refused {name}: {exc}") from exc
+
+        def as_tool_error(exc: Exception) -> ToolError:
+            if isinstance(exc, dispatch.CatiaUnavailable):
+                return ToolError(
+                    f"No CATIA bridge is connected: {exc} Tell the user to start the "
+                    "Kryova CATIA bridge on their Windows machine, and stop calling CATIA "
+                    "tools until they say it is running."
+                )
+            return ToolError(f"CATIA refused {name}: {exc}")
+
+        try:
+            result = run()
+        except (dispatch.CatiaUnavailable, dispatch.CatiaError) as exc:
+            # CATIA not being open is not a refusal. It is the one failure this
+            # product can fix by itself -- `open_in_catia` has always been able
+            # to start CATIA -- and refusing instead told the model to ask the
+            # *user* to go and start it, which is the single thing the tool
+            # notes everywhere else in this file tell it never to do.
+            #
+            # Measured on the seat, run 11 of 2026-09-06: seven tool calls
+            # ending in "CATIA is not running on this workstation. Start CATIA,
+            # open or create a part", after which the model dutifully asked the
+            # user to start CATIA and gave up on a part it was perfectly able to
+            # build. The model had already recovered from its own earlier
+            # mistakes by then and called `catia_new_part` correctly; this
+            # refusal is what actually lost the run.
+            #
+            # So bring CATIA up and run the call again, once.
+            if not self._start_catia_once():
+                raise as_tool_error(exc) from exc
+            try:
+                result = run()
+            except (dispatch.CatiaUnavailable, dispatch.CatiaError) as retry:
+                raise as_tool_error(retry) from retry
 
         self._record_catia_state(result)
         return result
+
+    def _start_catia_once(self) -> bool:
+        """Start CATIA when a call failed only because it was not running.
+
+        Returns True only when CATIA was genuinely absent and is now up, which
+        is the one case where retrying the call can change the answer. Every
+        other case is False on purpose:
+
+        * the open kernel, which has no CATIA to start;
+        * a CATIA that is *already* running -- the failure was then a real
+          refusal, and retrying it would do nothing but repeat it;
+        * a launch that did not work.
+
+        Never raises: this runs inside the handler for somebody else's error,
+        and an exception here would replace a precise, actionable message with
+        whatever went wrong during recovery.
+        """
+        if backends.is_local():
+            return False
+        try:
+            from app.catia.bridge import get_status
+            from app.catia.bridge import launch as catia_launch
+
+            if get_status().running:
+                return False
+            catia_launch(visible=True)
+        except Exception:  # noqa: BLE001 - recovery must not mask the original failure
+            return False
+        # Bounded, and never raises. CATIA being up is what the daemon waits for.
+        self._attach_local_bridge()
+        return True
 
     def _record_catia_state(self, result: Any) -> None:
         """Cache the post-state the bridge reported, for the next turn's block.
@@ -1597,14 +1663,35 @@ class ToolBox:
         except Exception as exc:
             return {"running": False, "detail": str(exc)}
 
-    def _open_in_catia(self, new_part: bool = True) -> dict[str, Any]:
+    def _open_in_catia(self, new_part: bool = True, name: str | None = None) -> dict[str, Any]:
+        """Start CATIA and give the conversation exactly one document to build in.
+
+        **One document, created by one COM client.** This used to launch CATIA
+        and immediately create a part through the server's *own* direct-COM
+        client (`app.catia.bridge.new_part`), which is a different COM client in
+        a different OS process from the paired daemon every `catia_*` tool goes
+        through. The model would then call `catia_new_part` for a document it
+        could actually build into -- `open_in_catia`'s was bound to nothing --
+        and CATIA ended up carrying two documents, one of them orphaned, with
+        two unsynchronised COM clients driving one single-apartment application.
+        Seat testing on 2026-09-06 measured what that costs: the daemon's first
+        real call on the second document returned a raw `com_error` ("the RPC
+        server is not available"), and it stayed broken on retry -- runs 8-10 in
+        `docs/verification-2026-09-06/REPORT.md`, with a window screenshot
+        showing both documents open at once.
+
+        So when the daemon is up, the document is created *through it*, by the
+        same `catia_new_part` path the model would have called itself: one
+        document, one client, bound to the conversation. The direct-COM call
+        survives only as the fallback for what it was written for -- a machine
+        with nothing paired yet, where no `catia_*` tool would work at all.
+        """
         from app.catia.bridge import CATIABridgeError
         from app.catia.bridge import launch as catia_launch
-        from app.catia.bridge import new_part as catia_new_part
+        from app.catia.bridge import new_part as catia_new_part_directly
 
         try:
             status = catia_launch(visible=True)
-            document = catia_new_part() if new_part else None
         except CATIABridgeError as exc:
             raise ToolError(str(exc)) from exc
 
@@ -1615,23 +1702,80 @@ class ToolBox:
         # user for help. It is bounded and never raises.
         bridge_ready = self._attach_local_bridge()
 
+        created: str | None = None
+        bound = False
+        problem: str | None = None
+
+        if new_part:
+            existing = self._bound_document()
+            if existing:
+                # Re-entrant call. Creating anything here would abandon work the
+                # conversation already owns -- and adding a second window is the
+                # exact bug this method was rewritten to stop.
+                created, bound = existing, True
+            elif bridge_ready:
+                try:
+                    result = self._call_catia(
+                        "catia_new_part", {"name": (name or "Part").strip() or "Part"}
+                    )
+                except ToolError as exc:
+                    # CATIA *is* open, and saying so is worth more than failing
+                    # the whole call: a bare refusal here reads to the model as
+                    # "CATIA is not running", which is how three seat runs ended
+                    # with the model asking the user to model the part by hand.
+                    problem = str(exc)
+                else:
+                    created = str(result.get("doc_name") or name or "Part")
+                    bound = True
+            else:
+                try:
+                    document = catia_new_part_directly()
+                except CATIABridgeError as exc:
+                    raise ToolError(str(exc)) from exc
+                created = document.name if document else None
+
         return {
             "running": True,
             "version": status.version,
-            "created_document": document.name if document else None,
+            "created_document": created,
+            "document_bound": bound,
             "bridge_connected": bridge_ready,
-            "note": (
+            **({"document_error": problem} if problem else {}),
+            "note": self._open_in_catia_note(
+                bridge_ready=bridge_ready, created=created, bound=bound, problem=problem
+            ),
+        }
+
+    @staticmethod
+    def _open_in_catia_note(
+        *, bridge_ready: bool, created: str | None, bound: bool, problem: str | None
+    ) -> str:
+        """What the model should do next, given what actually happened."""
+        if problem:
+            return (
+                "CATIA is open and the bridge is attached, but starting the part "
+                f"failed: {problem} Call catia_new_part yourself to try again. Do "
+                "not ask the user to model the part or to upload a file."
+            )
+        if bound and created:
+            return (
+                f"CATIA is open and the part {created!r} already belongs to this "
+                "conversation -- do not call catia_new_part, it is already done. "
+                "Build straight on it with the catia_* tools (catia_sketch_create "
+                "next, usually). Do not ask the user to model it or to upload "
+                "anything."
+            )
+        if bridge_ready:
+            return (
                 "CATIA is open and the Kryova bridge is attached to it. Build the "
                 "part yourself with the catia_* tools -- do not ask the user to "
                 "model it, and do not ask them to upload anything."
-                if bridge_ready
-                else (
-                    "CATIA is open. The bridge is still attaching; call the catia_* "
-                    "tool you need anyway, it waits for the connection. Do not ask "
-                    "the user to model the part or to upload a file."
-                )
-            ),
-        }
+            )
+        return (
+            "CATIA is open. The bridge is still attaching; call the catia_* "
+            "tool you need anyway, it waits for the connection. Do not ask "
+            "the user to model the part or to upload a file."
+        )
 
     def _attach_local_bridge(self) -> bool:
         """Wait, briefly, for this machine's bridge daemon to connect."""

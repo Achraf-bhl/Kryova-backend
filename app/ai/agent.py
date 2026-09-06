@@ -289,6 +289,44 @@ class AgentReply:
     usage: TokenUsage = field(default_factory=TokenUsage)
 
 
+def _blank_turn_message(steps: list[AgentStep], labels: dict[str, str]) -> str:
+    """What to say when the model finished with no text of its own.
+
+    The distinction this draws is the whole point. A turn that called nothing
+    and wrote nothing produced nothing, and saying so is accurate. A turn that
+    built a part and then wrote nothing produced a part -- and telling that user
+    "I did not manage to produce an answer" is a false statement about their
+    workstation, which they will act on by asking again and getting a second
+    copy of the part.
+
+    Measured on ladder prompt H2, 2026-09-06: twelve steps, a correct flange,
+    and that sentence.
+
+    The work is listed rather than summarised because summarising it is exactly
+    what the model just failed to do; repeating the step labels is something
+    this function can be sure is true.
+    """
+    done = [step for step in steps if step.ok]
+    if not done:
+        return (
+            "I did not manage to produce an answer for that. Nothing was run, so "
+            "nothing has changed. Try asking again, or more specifically."
+        )
+
+    performed = []
+    for step in done:
+        label = labels.get(step.tool, step.tool.replace("_", " "))
+        if label not in performed:
+            performed.append(label)
+
+    return (
+        "**The work below ran, but I did not manage to write up the result.** "
+        "Nothing needs redoing -- ask me to describe what I built, or to check "
+        "it, rather than asking for it again.\n\n"
+        + "\n".join(f"- {label}" for label in performed)
+    )
+
+
 def _serialise(value: Any) -> str:
     """Render a tool result as fenced, untrusted text.
 
@@ -393,7 +431,13 @@ def stream_agent(
                     db,
                     conversation,
                     MessageRole.USER,
-                    content=correction_for(written) if written else prompts.AGENT_EMPTY_TURN,
+                    content=(
+                        correction_for(written)
+                        if written
+                        else prompts.AGENT_EMPTY_TURN_AFTER_WORK
+                        if any(s.ok for s in steps)
+                        else prompts.AGENT_EMPTY_TURN
+                    ),
                 )
                 db.commit()
                 logger.info(
@@ -405,11 +449,10 @@ def stream_agent(
                 continue
             if blank:
                 # Out of corrections and still nothing. Say so, rather than
-                # closing the turn with an empty chat bubble.
-                turn.text = (
-                    "I did not manage to produce an answer for that. Try asking "
-                    "again, or more specifically."
-                )
+                # closing the turn with an empty chat bubble -- but say it
+                # about the *writing up*, not about the work, because those
+                # are not the same thing and only one of them failed.
+                turn.text = _blank_turn_message(steps, labels)
             elif written:
                 # Out of corrections, and the text still describes work that was
                 # never done. Showing it as written would tell the user their

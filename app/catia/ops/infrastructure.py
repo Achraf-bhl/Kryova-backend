@@ -82,6 +82,45 @@ OPERATIONS: tuple[Operation, ...] = (
         server_fields=("doc_name", "remote_path", "fallback_checkpoint"),
     ),
     Operation(
+        name="catia_close_document",
+        summary=(
+            "Save this conversation's document and close its window in CATIA.\n"
+            "Use it when the part is finished with, or when the seat has collected "
+            "more open windows than the engineer wants to look at. Nothing is lost: "
+            "the document is written to disk before it is closed, and this "
+            "conversation keeps it — catia_open_document brings it straight back, "
+            "and any later modelling call reopens it by itself.\n"
+            "It cannot discard changes. To deliberately throw work away, roll back "
+            "to a checkpoint with catia_restore instead."
+        ),
+        # WRITE rather than DESTRUCTIVE, and the reasoning is the whole design of
+        # this operation rather than a judgement about how risky closing feels.
+        #
+        # DESTRUCTIVE costs a server-signed approval token that only a human click
+        # can produce. That is right for `catia_restore`, which discards work by
+        # definition. Closing, *as implemented here*, cannot: the backend saves the
+        # document before it closes it and refuses to close when the save fails, the
+        # file stays on the workstation, and the conversation keeps its binding row.
+        # There is no state the user can lose, so there is nothing for an approval
+        # to protect — and putting a human click in front of every window close
+        # would make the capability unusable for the thing it was asked for, which
+        # is an agent tidying up after itself. The answer would be twelve open
+        # windows again.
+        #
+        # The destructive variant — close and throw the changes away — is simply not
+        # offered. That is stronger than gating it behind approval: a capability
+        # that does not exist cannot be reached by a confused model at all. It is
+        # also why there is no `save` argument. Offering `save: false` would be a
+        # promise this vocabulary cannot keep.
+        tier=Tier.WRITE,
+        workbench=_WB,
+        params=(),
+        # The model never names a document, exactly as for catia_open_document
+        # above: the server resolves the conversation's own binding row. Closing
+        # an arbitrary file by name is not a capability the agent gets.
+        server_fields=("doc_name", "remote_path"),
+    ),
+    Operation(
         name="catia_import",
         summary=(
             "Import a CAD file the user has uploaded into the current document.\n"

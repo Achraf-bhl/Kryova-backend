@@ -101,7 +101,10 @@ OPERATIONS: tuple[Operation, ...] = (
         summary=(
             "Put things into CATIA's selection, which is what most commands act on.\n"
             "Select a sketch then run Pad; select a face then run Pocket. Name features "
-            "exactly as catia_list_features reported them.\n"
+            "exactly as catia_list_features reported them -- tree features only. Edge "
+            "and face ids from catia_list_edges / catia_list_faces cannot be selected "
+            "here; they go to catia_fillet_edges. Edge groups (vertical, top, ...) go to "
+            "catia_fillet, which needs no selection.\n"
             "Selecting changes nothing on its own and is always safe. Call it with an "
             "empty list to clear the selection, which is how you recover when a command "
             "reports the wrong input."

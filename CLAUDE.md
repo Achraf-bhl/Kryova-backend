@@ -476,10 +476,21 @@ Full contract in `docs/CATIA_BRIDGE_PROTOCOL.md` ("Driving the interface").
   dialog can only run when no dialog is stuck. `catia_run_command` is the deliberate
   exception — it starts things, COM is alive by definition when it does, and it stays
   checkpointed.
-- **`StartCommand` fails silently.** Hand it a name CATIA does not know and it does nothing,
-  raises nothing, and returns nothing. So the daemon tries the **live menu first** (an item
-  either exists or does not, and a greyed one can be reported as greyed) and falls back to
-  `StartCommand` with `verified: false`. Never report an unverified `StartCommand` as success.
+- ~~**`StartCommand` fails silently.**~~ **Corrected 2026-09-06 — it does not, and the
+  belief that it did cost two seat sessions.** Hand a real V5-R33 a name it does not know
+  and it raises a **modal information box** (`Entrée clavier: Commande inconnue : <name>`),
+  which holds COM. Heartbeats stop, the device goes offline, and every later tool fails —
+  *including `catia_describe_dialog` and `catia_dialog_action`*, the two whose whole job is
+  to clear a stuck dialog. Measured twice, on ladder prompts E6 (`Close Sketch`) and H1
+  (`Fastener Pattern`): the agent correctly tried `catia_describe_dialog` three times and
+  could not reach it; the seat stayed dead until a human pressed OK.
+  `catia_com._is_unknown_command_box` now recognises that box — by **the command name being
+  echoed in the dialog's own text**, which is language-proof where the wording is not, and
+  only when the box has no input fields and at most one button, so a real command dialog or
+  a save prompt is never dismissed — clears it, and refuses the call in words. The daemon
+  still tries the **live menu first** (an item either exists or does not, and a greyed one
+  can be reported as greyed) and still falls back to `StartCommand` with `verified: false`.
+  Never report an unverified `StartCommand` as success.
 - **Command labels are localised; internal command ids are not, and are undocumented.**
   `COMMAND_IDS` holds only ids with a published source. Do not add one from memory: a wrong
   id fails the same silent way and burns the candidate that would have worked.
@@ -825,6 +836,48 @@ pass/fail**, and expect the local model to be the limit long before the geometry
   index is built (fresh clone, CI) and skips any individual case whose subject matter is not
   indexed, so curating the manuals cannot turn it red. Thresholds are floors with headroom,
   not the measured numbers pinned — currently P@1 94.7%, P@3 100%, MRR 0.974.
+
+## Driving the GUI directly — a session can, and for an end-to-end claim it must
+
+**A session on this Windows machine has hands on the real product**, not just on the API. The
+standing rule above says an end-to-end test goes through the Ollama chatbot and never through
+the dispatcher; this is how that is actually done, so no session has to rediscover it.
+
+- **Account.** `claude.admin@kryova.dev` / `KryovaGui!2026`, created through the ordinary
+  `POST /api/v1/auth/register`, then given a `StaffGrant` of `platform_admin` **out of band** —
+  there is deliberately no API that mints staff (`app/models/audit.py`), so a script through
+  `SessionLocal` is the sanctioned route and `scripts/` is where one belongs if it is needed
+  again. A fresh account has no memberships; the personal organisation is created on demand by
+  the `before_flush` hook when the first project is made.
+- **Browser.** Edge is launched **once**, by hand, with `--remote-debugging-port=9222` and its
+  own persistent `--user-data-dir`; the driver then attaches with `playwright-core`'s
+  `chromium.connectOverCDP` and runs one batch of actions per invocation. The persistent profile
+  is what keeps the login cookie and the open conversation alive between tool calls.
+  **Never call `browser.close()` on a CDP-attached browser** — it shuts Edge down and signs the
+  session out; exiting the process is the whole of the detach.
+- **Scope every DOM read to `main`.** A document-wide text or element scan returns Next.js's RSC
+  `self.__next_f.push` payload and floods the context with megabytes of build output.
+- **The backend spawns its own CATIA bridge.** `app/catia/local_bridge.py` auto-pairs a device
+  row named "This workstation" for the requesting user and runs `catia_bridge run
+  --wait-for-catia` with the token passed by environment. A hand-paired second daemon cannot
+  start beside it — `bridge.lock` is held, one daemon per machine — so pairing by hand here is
+  not just unnecessary, it fails.
+- **The prompts to drive it with live in [docs/GUI_PROMPT_LADDER.md](docs/GUI_PROMPT_LADDER.md)**:
+  twenty-four, six each at easy / hard / super-hard / professional, every one in a different
+  interaction style, each with the conditions it passes under and a checkbox. That file is the
+  run log as well as the script — tick a box only against a screenshot, and keep the failures.
+  One prompt, one project: open a new project for each and close the previous one, or a pass is
+  really a pass for two prompts at once.
+
+**The model that drives it is `qwen3.5:9b`** (2026-09-06), configured in `.env.local`. It was
+chosen over `qwen3-coder:30b` on the grounds that matter here: the 30b is 22 GB on an 8 GB card,
+runs 72% on the CPU, and took two and a half minutes to answer with a single word — a CATIA
+build is tens of turns of that. The 9b was probed the way the technology-register rule demands,
+against `/api/chat` with the full 108-tool payload as well as a small one, and returns a correct
+structured `tool_call` both times in 8–15 s. It sits 81% on the GPU at `num_ctx=32768` with
+`OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0`; dropping the window to 16k only
+reaches 86%, because the weights are the bulk and not the KV cache, so the full window is kept —
+a truncated prompt is refused loudly by `app/ai/providers/ollama.py` and would end a long run.
 
 ## Conventions
 

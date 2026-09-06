@@ -28,6 +28,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from . import com_errors
 from .backend import (
     OUT_OF_BAND_TOOLS,
     TOOL_METHODS,
@@ -145,9 +146,14 @@ class BridgeSession:
                     "type": "result",
                     "id": call_id,
                     "ok": False,
-                    # Type included because COM errors are frequently unhelpful
-                    # on their own, and the type is often the only clue.
-                    "error": f"{type(exc).__name__} while running {tool}: {exc}",
+                    # A raw COM error names no cause and suggests nothing, and
+                    # the agent's response to one is to retry it -- measured on
+                    # ladder prompt H3, where an unhandled
+                    # `AddNewSolidEdgeFilletWithConstantRadius a echoue` cost
+                    # the rest of the run. `com_errors.explain` keeps CATIA's
+                    # own words and adds what to try, keyed on the API method
+                    # name, which is the same on every language install.
+                    "error": com_errors.explain(tool, exc),
                 }
             )
             return

@@ -511,6 +511,98 @@ def test_validator_rejects_unknown_fields_and_names_the_accepted_ones():
         validate({"a": 1, "b": 2}, schema)
 
 
+# ---------------------------------------------------------------------------
+# What a refusal has to teach the model, measured on the seat 2026-09-06.
+#
+# With the message naming only the accepted *keys*, a 9B model driving the real
+# GUI failed to build any geometry at all, three prompts running, because each
+# refusal carried exactly one fact and it fixed one thing while breaking
+# another:
+#
+#   unknown field(s): plane. Accepted: name, origin, support
+#   arguments.support is required; you sent: name, origin
+#   origin must be array, got str
+#
+# The type and the required-ness are both known at the first refusal. These
+# tests pin that they are said out loud.
+# ---------------------------------------------------------------------------
+
+_SKETCH_LIKE = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "name": {"type": "string"},
+        "origin": {"type": "array", "items": {"type": "number"}},
+        "support": {"type": "string"},
+    },
+    "required": ["support"],
+}
+
+
+def test_an_unknown_field_refusal_gives_types_and_required_ness():
+    with pytest.raises(SchemaError) as caught:
+        validate({"plane": "xy"}, _SKETCH_LIKE)
+    message = str(caught.value)
+    assert "unknown field(s): plane" in message
+    # Everything needed to get the call right next time, in one message.
+    assert "support (string, required)" in message
+    assert "origin (array of number, optional)" in message
+    assert "name (string, optional)" in message
+
+
+def test_a_missing_required_field_refusal_also_gives_the_whole_shape():
+    """The second turn of the observed loop. Naming only the missing field is
+    what sent the model back for the next one."""
+    with pytest.raises(SchemaError) as caught:
+        validate({"name": "s1", "origin": "0,0"}, _SKETCH_LIKE)
+    message = str(caught.value)
+    assert "support is required" in message
+    assert "you sent: name, origin" in message
+    assert "origin (array of number, optional)" in message
+
+
+def test_a_tool_taking_no_arguments_says_so_in_words():
+    """`Accepted: (none)` was read as "you may not call this", and the model
+    went looking for a different tool. It needed to call the same one with {}."""
+    with pytest.raises(SchemaError) as caught:
+        validate({"name": "plate"}, {"type": "object", "additionalProperties": False,
+                                     "properties": {}})
+    message = str(caught.value)
+    assert "takes no arguments" in message
+    assert "{}" in message
+    assert "(none)" not in message
+
+
+def test_an_enum_field_is_described_with_its_options():
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"side": {"type": "string", "enum": ["min", "max"]}},
+    }
+    with pytest.raises(SchemaError) as caught:
+        validate({"nope": 1}, schema)
+    assert "'min'" in str(caught.value)
+
+
+def test_the_daemon_copy_of_the_validator_says_exactly_the_same_thing():
+    """The duplication is load-bearing (docs/CATIA_BRIDGE_PROTOCOL.md); two
+    copies that refuse differently are worse than one copy, because the seat
+    and the server would teach the model contradictory signatures."""
+    import sys
+    from pathlib import Path as _Path
+
+    scripts = str(_Path(__file__).resolve().parents[1] / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from catia_bridge.validation import describe_properties as daemon_describe
+
+    from app.catia.validation import describe_properties as server_describe
+
+    assert daemon_describe(_SKETCH_LIKE) == server_describe(_SKETCH_LIKE)
+    empty = {"type": "object", "properties": {}}
+    assert daemon_describe(empty) == server_describe(empty)
+
+
 def test_validator_does_not_accept_a_boolean_as_a_number():
     # `bool` subclasses `int`, so the naive check passes `true` as a length.
     with pytest.raises(SchemaError):

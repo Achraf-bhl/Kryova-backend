@@ -5,7 +5,7 @@
 backend object and using only what `_context` declares.
 
 Order matters in the class bases. `SketcherMixin` must come before the modules
-that call `_require_closed` or `_open_sketch`, because those live on it; Python
+that call `_end_sketch_edition` or `_open_sketch`, because those live on it; Python
 resolves left to right, so a mixin that provides a helper goes before the ones
 that use it. `SketchEditMixin` is therefore after `SketcherMixin`, and
 `AssemblyReviewMixin` after `AssemblyMixin` for `_product` and `_component`.

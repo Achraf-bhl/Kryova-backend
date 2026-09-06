@@ -79,17 +79,80 @@ class JsonLogFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-def _configure_logging() -> None:
-    """JSON logs in production, human-readable in development."""
-    if not settings.is_production:
-        return
+class HumanLogFormatter(logging.Formatter):
+    """One readable line per record, with the request id when there is one.
 
+    The request id is appended rather than given a column, because most lines
+    do not have one -- a startup message, a bridge reconnect, a corpus build --
+    and a column that is empty four times out of five is a column that pushes
+    the message off the terminal.
+    """
+
+    default_time_format = "%H:%M:%S"
+
+    def format(self, record: logging.LogRecord) -> str:
+        base = (
+            f"{self.formatTime(record)} {record.levelname:<7} "
+            f"{record.name}: {record.getMessage()}"
+        )
+        request_id = getattr(record, "request_id", None)
+        if request_id:
+            base = f"{base}  [{request_id}]"
+        if record.exc_info:
+            base = f"{base}\n{self.formatException(record.exc_info)}"
+        return base
+
+
+#: Third-party loggers that say nothing worth a line at INFO. `httpx` logs one
+#: line per request, which on the agent path means one per model round trip;
+#: `python_multipart` narrates its parser token by token.
+_NOISY_AT_INFO = ("httpx", "httpcore", "python_multipart", "watchfiles", "urllib3")
+
+
+def _configure_logging() -> None:
+    """JSON logs in production, human-readable in development.
+
+    The development half of that sentence used to be a lie, and it is the kind
+    this codebase has a rule against: the function returned immediately when
+    `is_production` was false, so a dev server installed no root handler at
+    all. The consequences were not subtle. Root defaults to WARNING with no
+    handlers, so **every `logger.info` in `app/**` was discarded** -- which is
+    most of the diagnostics in the CATIA dispatch, the bridge, the agent loop
+    and the retrieval build -- and every warning and exception fell through to
+    `logging.lastResort`, which writes the bare message to stderr with no
+    timestamp, no level and no logger name. A real "refresh token reuse
+    detected; session family revoked" was found in the log jammed onto the end
+    of an unrelated line, attributable to nothing.
+
+    Uvicorn's own loggers are left alone: its `LOGGING_CONFIG` gives `uvicorn`
+    and `uvicorn.access` their own handlers with `propagate` off, so adding a
+    root handler here does not double up the access log.
+    """
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonLogFormatter())
+    handler.setFormatter(
+        JsonLogFormatter() if settings.is_production else HumanLogFormatter()
+    )
+
+    level = getattr(logging, settings.log_level.strip().upper(), None)
+    if not isinstance(level, int):
+        # A typo in LOG_LEVEL must not silence the server it was meant to make
+        # louder, so fall back and say so once the handler is installed.
+        level, bad_level = logging.INFO, settings.log_level
+    else:
+        bad_level = None
+
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
-    root.setLevel(logging.INFO)
+    root.setLevel(level)
+
+    for name in _NOISY_AT_INFO:
+        logging.getLogger(name).setLevel(max(level, logging.WARNING))
+
+    if bad_level is not None:
+        logging.getLogger(__name__).warning(
+            "Unusable LOG_LEVEL %r; logging at INFO instead", bad_level
+        )
 
 
 _configure_logging()

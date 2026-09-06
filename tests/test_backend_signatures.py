@@ -92,7 +92,12 @@ KNOWN_NARROWER: dict[str, list[str]] = {
     "catia_delete_feature": ["with_children"],
     "catia_fillet": ["propagation"],
     "catia_groove": ["axis", "second_angle_deg"],
-    "catia_list_features": ["body", "include_sketches", "kind"],
+    # catia_list_features was here until 2026-09-06. Closed rather than carried
+    # because it is the highest-traffic entry on this list -- the tool describes
+    # itself as "the first call to make on any document you did not just build
+    # yourself" -- and because ladder prompt H2 measured what carrying it cost:
+    # the agent, having drawn three profiles into one sketch, asked for
+    # include_sketches to find out what was in it, and was refused.
     "catia_list_parameters": ["filter", "include_dimensions"],
     "catia_measure": ["body", "include_inertia"],
     "catia_mirror": ["feature"],

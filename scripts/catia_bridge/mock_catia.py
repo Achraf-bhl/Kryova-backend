@@ -40,6 +40,7 @@ from .mock import MockKnowledgeMixin
 from .mock_ui import MockUi
 from .png_writer import Canvas
 from .step_writer import write_box_step
+from .tool_table import not_in_this_part
 from .ui_automation import UiUnavailable
 
 #: Steel, matching the solver's library so a mock mass is at least plausible.
@@ -47,6 +48,9 @@ _DENSITY_KG_PER_MM3 = 7850e-9
 
 _PLANE_AXES = {"XY": (0, 1, 2), "YZ": (1, 2, 0), "ZX": (2, 0, 1)}
 
+
+#: The one body a mock part has. See list_features.
+_MOCK_BODY = "PartBody"
 
 class _Sketch:
     def __init__(
@@ -175,6 +179,20 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
             "up_to_date": True,
         }
 
+    def _holds_document(self, doc_name: str | None, wanted: Path | None) -> bool:
+        """Whether the document in hand is the one the server named.
+
+        By path when the server recorded one, because a path is unambiguous and a
+        name is not -- the same rule `catia_com._same_document` follows, so the two
+        backends decide "is this the conversation's part?" identically. The name
+        fallback is only for a binding row written before paths were stored.
+        """
+        if wanted is not None and self.doc_path is not None:
+            return str(self.doc_path).lower() == str(wanted).lower()
+        if wanted is None and self.doc_name is not None and doc_name:
+            return self.doc_name.lower() == doc_name.lower()
+        return False
+
     def ensure_document(self, *, doc_name: str, remote_path: str | None) -> bool:
         """Load this conversation's part if it is not the one in hand.
 
@@ -185,14 +203,8 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         refusal names the same tool.
         """
         wanted = Path(remote_path) if remote_path else None
-        if wanted is not None and self.doc_path is not None:
-            if str(self.doc_path).lower() == str(wanted).lower():
-                return False
-        elif wanted is None and self.doc_name is not None:
-            # No path was ever recorded -- a row written before paths were
-            # stored. The name is all there is to compare.
-            if self.doc_name.lower() == doc_name.lower():
-                return False
+        if self._holds_document(doc_name, wanted):
+            return False
 
         if wanted is None:
             raise CatiaOperationError(
@@ -243,6 +255,67 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
             "restored_from_checkpoint": restored,
             "features": self._feature_names(),
             **self._solid_summary(),
+        }
+
+    def close_document(
+        self, *, doc_name: str | None = None, remote_path: str | None = None
+    ) -> dict[str, Any]:
+        """Save the part and put it away, so nothing is open afterwards.
+
+        The mock holds one document at a time, which is what a single CATIA
+        session effectively does, so "the open documents" here is a set of at most
+        one and `open_documents` is 0 or 1. Everything that matters about the real
+        operation is still exercised: the document is written before it is
+        dropped, a document that is not the conversation's own is left alone, and
+        a part that was already closed is reported rather than raised.
+
+        `_reset` is what actually closes it -- the same call `new_part` makes to
+        start a fresh one, so a closed part leaves exactly the state a bridge that
+        had never opened one is in, and `_require_document` refuses every
+        subsequent operation with the message that names how to get it back. The
+        assembly (`self.product`) and the interface language survive, because
+        closing a part window changes neither.
+        """
+        wanted = Path(remote_path) if remote_path else None
+        name = doc_name or (wanted.stem if wanted else "")
+
+        if not self._holds_document(doc_name, wanted):
+            # Either nothing is open, or what is open belongs to someone else.
+            # Both are "no window of yours to close", and neither is a failure.
+            held = self.doc_name
+            return {
+                "doc_name": name,
+                "remote_path": str(wanted) if wanted else "",
+                "closed": False,
+                "saved": False,
+                "open_documents": 0 if held is None else 1,
+                "note": (
+                    f"{name!r} is not open, so there was no window to close."
+                    if held is None
+                    else (
+                        f"{name!r} is not the document in hand ({held!r} is), so "
+                        "nothing was closed."
+                    )
+                ),
+            }
+
+        # Saved before it is dropped, exactly as the COM backend does: this file
+        # is what `catia_open_document` and every checkpoint read back.
+        self._write_document()
+        closed_name = self.doc_name
+        closed_path = self.doc_path
+        self._reset()
+        return {
+            "doc_name": closed_name,
+            "remote_path": str(closed_path) if closed_path else "",
+            "closed": True,
+            "saved": True,
+            "open_documents": 0,
+            "note": (
+                f"{closed_name!r} was saved and closed. The part is not lost -- "
+                "catia_open_document reopens it, and any modelling call reopens it "
+                "by itself."
+            ),
         }
 
     # -- parameters ----------------------------------------------------------
@@ -616,18 +689,41 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         return self._mutation_result(name)
 
     def fillet(
-        self, *, radius_mm: float, feature: str | None = None, edges: str = "all"
+        self,
+        *,
+        radius_mm: float | list[float],
+        feature: str | None = None,
+        edges: str = "all",
     ) -> dict[str, Any]:
         self._require_solid()
         assert self.size is not None  # noqa: S101
-        if radius_mm > min(self.size) / 2:
+        count = {"all": 12, "vertical": 4, "horizontal": 8, "top": 4, "bottom": 4}[edges]
+        # A list is one radius per selected edge. The mock has no real edge
+        # references to zip against, so it checks the count it would have
+        # selected and removes the volume the whole set accounts for -- which is
+        # what makes a wrong-length list fail here the same way it fails on a
+        # seat, instead of passing in the mock and failing on the customer's.
+        if isinstance(radius_mm, list):
+            radii = [float(r) for r in radius_mm]
+            if len(radii) != count:
+                raise CatiaOperationError(
+                    f"radius_mm has {len(radii)} value(s) but the {edges} selection "
+                    f"matched {count} edge(s). Give one radius for every selected "
+                    "edge, or a single number for all of them."
+                )
+        else:
+            radii = [float(radius_mm)] * count
+
+        largest = max(radii)
+        if largest > min(self.size) / 2:
             raise CatiaOperationError(
-                f"A {radius_mm:g} mm fillet is larger than half the part's smallest "
+                f"A {largest:g} mm fillet is larger than half the part's smallest "
                 f"dimension ({min(self.size):g} mm) and would consume the face."
             )
         # (2 - pi/2) r^2 per unit length is the corner material a round removes.
-        count = {"all": 12, "vertical": 4, "horizontal": 8, "top": 4, "bottom": 4}[edges]
-        removed = (2 - math.pi / 2) * radius_mm**2 * (sum(self.size) / 3) * count / 12
+        removed = sum(
+            (2 - math.pi / 2) * r**2 * (sum(self.size) / 3) / 12 for r in radii
+        )
         self._remove_volume(removed, "fillet")
         name = self._name("EdgeFillet")
         self.features.append(
@@ -924,9 +1020,36 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
             **self._solid_summary(),
         }
 
-    def list_features(self) -> dict[str, Any]:
+    def list_features(
+        self,
+        *,
+        body: str | None = None,
+        kind: str | None = None,
+        include_sketches: bool = True,
+    ) -> dict[str, Any]:
         self._require_document()
-        return {"features": self._feature_names()}
+        # The mock models a single body, the way a part built by these tools
+        # actually is; naming any other one is refused rather than silently
+        # ignored, so a caller that has invented a body name finds out here
+        # instead of on the seat.
+        if body and body.strip().casefold() != _MOCK_BODY.casefold():
+            raise CatiaOperationError(
+                f"No body named {body!r} in this part. Bodies here: {_MOCK_BODY}."
+            )
+        features = self._feature_names(include_sketches=include_sketches)
+        if kind:
+            wanted = kind.strip().casefold()
+            features = [f for f in features if str(f["type"]).casefold() == wanted]
+            if not features:
+                present = sorted({str(f["type"]) for f in self._feature_names(include_sketches=True)})
+                return {
+                    "features": [],
+                    "note": (
+                        f"No feature of type {kind!r} in this part. Types present: "
+                        + (", ".join(present) if present else "(none -- the part is empty)")
+                    ),
+                }
+        return {"features": features}
 
     def update(self) -> dict[str, Any]:
         # A product resolves its constraints on update, so this dispatches the
@@ -1143,6 +1266,9 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         *,
         command: str,
         candidates: list[str] | None = None,
+        #: Published command ids only -- see `catia_com.run_command` for why a
+        #: display label must never reach `StartCommand`.
+        command_ids: list[str] | None = None,
         command_name: str = "",
         command_key: str = "",
         menu_hint: list[str] | None = None,
@@ -1261,10 +1387,7 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         known = {f["name"] for f in self.features} | set(self.sketches)
         missing = [name for name in features if name not in known]
         if missing:
-            raise CatiaOperationError(
-                f"Not in this part: {', '.join(missing)}. Call catia_list_features to "
-                "see what is there; names are case-sensitive and end in a number."
-            )
+            raise CatiaOperationError(not_in_this_part(missing))
         self.selection = ([*self.selection, *features] if add else list(features))
         return {"selected": list(self.selection), "count": len(self.selection)}
 
@@ -1322,8 +1445,37 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
 
     # -- persistence ---------------------------------------------------------
 
-    def _feature_names(self) -> list[dict[str, Any]]:
-        return [{"name": f["name"], "type": f["type"]} for f in self.features]
+    def _feature_names(self, *, include_sketches: bool = True) -> list[dict[str, Any]]:
+        """The tree, filtered the way `CatiaCom._feature_list` composes it.
+
+        The two backends reach the same list from opposite directions, and it
+        is worth being explicit about why rather than making them look alike.
+        The COM side reads `Body.Shapes`, which is solids only, and *adds*
+        sketches when asked. The mock keeps one ordered `features` list that
+        has always held sketches too -- that is what makes
+        `test_list_features_reports_the_build_order` able to assert
+        `["Sketch.1", "Pad.1"]`, which is the build order and the point of the
+        test. So the mock *removes* them instead.
+
+        Hence the default is True here and False on the COM side: each is the
+        no-op for its own storage, and both tool boundaries pass the caller's
+        value explicitly, so the defaults never decide anything an agent sees.
+
+        A sketch row carries `elements` to match the seat's answer. It is
+        always 1: the mock has no way to draw two profiles into one sketch,
+        which is exactly the case the field exists to report on the real
+        backend. The shape of the answer matches; the number does not pretend
+        to mean anything here.
+        """
+        rows: list[dict[str, Any]] = []
+        for feature in self.features:
+            if feature["type"] == "Sketch":
+                if not include_sketches:
+                    continue
+                rows.append({"name": feature["name"], "type": "Sketch", "elements": 1})
+            else:
+                rows.append({"name": feature["name"], "type": feature["type"]})
+        return rows
 
     def _record_extent_parameters(self) -> None:
         if self.size is None:

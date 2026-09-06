@@ -60,7 +60,13 @@ from app.catia.transfer import (
     receive_inline_file,
 )
 from app.catia.validation import SchemaError, validate
-from app.catia_kb.ui import ButtonRole, button_labels, resolve_command, resolve_workbench
+from app.catia_kb.ui import (
+    COMMAND_IDS,
+    ButtonRole,
+    button_labels,
+    resolve_command,
+    resolve_workbench,
+)
 from app.core.config import settings
 from app.geometry import backends
 from app.media import MediaService, get_media_store
@@ -114,6 +120,21 @@ _NO_AUTO_CHECKPOINT = frozenset(
         "catia_open_document",  # nothing is open yet either
         "catia_checkpoint",  # it is the checkpoint
         "catia_export_step",  # reads the model out; does not change it
+        # Saves the document itself before closing it, so a checkpoint taken
+        # first would snapshot a state the close does not alter -- it protects
+        # nothing, and costs a full file upload on every window the agent tidies
+        # away. Worse, `_auto_checkpoint` *refuses the call* when the snapshot
+        # fails, which would make the one tool whose job is to clean up a
+        # cluttered seat unavailable in exactly the conditions that clutter it.
+        # Nothing becomes unrecoverable: the earlier checkpoints still exist, the
+        # file stays on the workstation, and the binding row is kept.
+        #
+        # Note that `Operation.no_auto_checkpoint` is *not* what decides this.
+        # The field exists and `registry.no_auto_checkpoint_names()` reads it,
+        # but nothing consumes that anywhere -- this set is the only thing that
+        # takes effect, so declaring the flag as well would be a second statement
+        # of one fact with only one of them true.
+        "catia_close_document",
         # The interactive tools, for one reason that applies to all four: a
         # checkpoint is a COM save, and these run precisely when a modal dialog
         # has COM blocked. Requiring one would mean the tools that dismiss a
@@ -144,6 +165,15 @@ _UNSCOPED_TOOLS = frozenset(
         "catia_new_part",  # creates the binding; there is nothing to return to
         "catia_open_document",  # restores it, and is the only path that carries
         # the stored checkpoint to rebuild a lost file from
+        # The other half of that pair, and unscoped for a reason of its own: a
+        # scoped call is *activated* first, and `ensure_document` reopens a
+        # document CATIA no longer has open. Scoping the close would therefore
+        # open a window in order to close it -- absurd on its face, and the exact
+        # opposite of what the tool is for. It takes the same `doc_name` /
+        # `remote_path` `catia_open_document` does (see `_enrich`) and finds the
+        # window itself, so it can report "it was not open" instead of creating
+        # one to report closing.
+        "catia_close_document",
         # Opens the imported file, which is not the bound one. Note what that
         # leaves unresolved: nothing rebinds the conversation to the imported
         # document, so the next scoped call reattaches to the part that was
@@ -224,12 +254,38 @@ def _resolve_connection(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceC
 
     if local_bridge.is_supported():
         detail = local_bridge.last_error(user_id)
+        if detail:
+            raise CatiaUnavailable(
+                f"The CATIA bridge on this machine is not connected yet: {detail}. "
+                "Call open_in_catia to start CATIA -- the bridge attaches to it by "
+                "itself within a few seconds -- then run this tool again. Do not ask "
+                "the user to pair a workstation or to upload a CAD file."
+            )
+
+        # CATIA alive but not answering is a third state, and telling the model
+        # to start what is already running is worse than saying nothing: it
+        # spends the rest of the turn on an instruction that cannot succeed,
+        # and it passes that instruction on to the user. The overwhelmingly
+        # common cause is a modal dialog holding COM -- which is exactly what
+        # the interactive tools exist to clear, and they are in
+        # `OUT_OF_BAND_TOOLS` so they still run while COM is blocked.
+        if local_bridge.catia_process_is_running():
+            raise CatiaUnavailable(
+                "CATIA is running on this machine but is not answering, which "
+                "almost always means a modal dialog is waiting for someone to "
+                "click it -- an error box, a save prompt, an unknown-command "
+                "warning. Do NOT ask the user to start CATIA or the bridge: both "
+                "are already running. Call catia_describe_dialog to see what is "
+                "on screen, then catia_dialog_action to dismiss it, and run this "
+                "tool again. Those tools keep working while COM is blocked, "
+                "which is the only time they matter."
+            )
+
         raise CatiaUnavailable(
-            "The CATIA bridge on this machine is not connected yet"
-            + (f": {detail}" if detail else ", because CATIA itself is not running")
-            + ". Call open_in_catia to start CATIA -- the bridge attaches to it by "
-            "itself within a few seconds -- then run this tool again. Do not ask "
-            "the user to pair a workstation or to upload a CAD file."
+            "The CATIA bridge on this machine is not connected yet, because CATIA "
+            "itself is not running. Call open_in_catia to start CATIA -- the bridge "
+            "attaches to it by itself within a few seconds -- then run this tool "
+            "again. Do not ask the user to pair a workstation or to upload a CAD file."
         )
 
     raise CatiaUnavailable(
@@ -743,9 +799,20 @@ def _resolve_ui(tool: str, arguments: dict[str, Any], language: str | None) -> d
     """
     if tool == "catia_run_command":
         target = resolve_command(str(arguments.get("command", "")), language=language)
+        # `candidates` mixes two different kinds of string: published command
+        # *ids* (`OpenInNewWnd`) and display *labels* ("Edge Fillet", and the
+        # seat's translation of it). Only the first kind may be handed to
+        # `StartCommand`. Measured 2026-09-06: a display label CATIA does not
+        # recognise as an id does not fail silently -- it raises a modal error
+        # box that holds COM and takes the whole seat down, twice in one
+        # session. Labels are still sent, because matching them against the
+        # live menu is safe and is how the daemon finds the command; they are
+        # simply no longer gambled on through StartCommand.
+        published = COMMAND_IDS.get(target.key or "")
         payload = {
             **arguments,
             "candidates": list(target.candidates),
+            "command_ids": [published] if published else [],
             "command_name": target.name,
             "command_key": target.key or "",
         }
@@ -970,6 +1037,17 @@ def _enrich(
         checkpoint = _latest_checkpoint(db, document)
         if checkpoint is not None:
             payload["fallback_checkpoint"] = _checkpoint_payload(db, checkpoint)
+
+    elif spec.name == "catia_close_document":
+        if document is None:
+            raise CatiaError(
+                "This conversation has no CATIA document, so there is nothing to close."
+            )
+        # Identity only. No `fallback_checkpoint`: that field exists to *rebuild*
+        # a file the workstation lost, and rebuilding a file in order to close its
+        # window would be work done to undo itself.
+        payload["doc_name"] = document.doc_name
+        payload["remote_path"] = document.remote_path
 
     elif spec.name == "catia_restore":
         if document is None:
@@ -1210,6 +1288,37 @@ def _post_process(
             document.remote_path = str(raw["remote_path"])
         db.flush()
         return _clean(raw) | {"document_id": document.id}
+
+    # `catia_close_document` deliberately has no branch here: **closing keeps the
+    # binding row.** This is the decision that makes the operation safe, and the
+    # other way round deadlocks or loses work, so it is worth the paragraph.
+    #
+    # Clearing the row would leave the CATPart sitting on the workstation with
+    # nothing pointing at it: `catia_open_document` is refused without a binding
+    # ("this conversation has no CATIA document yet"), so the only tool left is
+    # `catia_new_part`, which starts a *different* part. The first part is not
+    # deleted -- it is worse than deleted, it is unreachable, and every checkpoint
+    # taken of it is orphaned with it (they are keyed on `document_id`). An agent
+    # closing a window would silently abandon the work, which is the failure this
+    # tool is written not to have.
+    #
+    # Keeping it is what makes closing reversible: `catia_open_document` reopens
+    # from `remote_path`, and any later scoped call reopens it through
+    # `ensure_document` without the model having to think about it. Closing is
+    # putting the part away, not forgetting it.
+    #
+    # The deadlock the other direction warns about (`app/ai/tools.py::_call_catia`,
+    # where refusing `catia_new_part` on the strength of a stale row wedged a
+    # conversation for good) does not apply, and the difference is worth naming: on
+    # a seat the row is *not* stale after a close -- the file is still there and
+    # `catia_open_document` is offered, so there is always a way back to it. That
+    # guard's problem was the open kernel, where the row named a live object that
+    # a restart had destroyed and no tool could reopen. This operation is not in
+    # `app.kernel.occt.operations.HANDLERS`, so it is never offered on that
+    # backend and cannot reach that state -- there is no window there to close,
+    # and dropping the in-process document would mean discarding the part rather
+    # than putting it away, which is a different operation and must not borrow
+    # this one's name.
 
     if spec.name == "catia_checkpoint":
         if document is None:

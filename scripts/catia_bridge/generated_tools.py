@@ -50,6 +50,11 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
         ("doc_name", "remote_path", "fallback_checkpoint"),
     ),
+    "catia_close_document": (
+        WRITE,
+        {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        ("doc_name", "remote_path"),
+    ),
     "catia_import": (
         WRITE,
         {
@@ -2341,8 +2346,18 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
                 },
                 "kind": {
                     "type": "string",
-                    "enum": ["all", "linear", "circular", "convex", "concave"],
-                    "description": "Only report edges of this kind. Default all.",
+                    "enum": [
+                        "all",
+                        "linear",
+                        "circular",
+                        "vertical",
+                        "horizontal",
+                        "top",
+                        "bottom",
+                        "convex",
+                        "concave",
+                    ],
+                    "description": "Only report edges of this kind: by curve (linear, circular) or by orientation (vertical, horizontal, top, bottom -- the same groups catia_fillet takes). Default all.",
                 },
                 "min_length_mm": {
                     "type": "number",
@@ -6855,7 +6870,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
             "required": ["command"],
             "additionalProperties": False,
         },
-        ("candidates", "command_name", "command_key", "menu_hint"),
+        ("candidates", "command_ids", "command_name", "command_key", "menu_hint"),
     ),
     "catia_describe_dialog": (
         READ,
@@ -7054,6 +7069,7 @@ SERVER_ONLY: frozenset[str] = frozenset(
 TOOL_METHODS: dict[str, str] = {
     "catia_new_part": "new_part",
     "catia_open_document": "open_document",
+    "catia_close_document": "close_document",
     "catia_import": "import_file",
     "catia_export": "export",
     "catia_export_step": "export_step",

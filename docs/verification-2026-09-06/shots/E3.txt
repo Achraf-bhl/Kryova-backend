@@ -1,0 +1,94 @@
+# E3
+url: http://localhost:3000/dashboard/c/810ce555-4083-499a-b57e-3401096b7a60
+finished: true
+seconds: 76.8
+
+--- prompt ---
+In CATIA V5, what is the difference between an Edge Fillet and a Tritangent Fillet, and when would I reach for the second one?
+
+--- transcript ---
+New conversation
+Open project
+
+In CATIA V5, what is the difference between an Edge Fillet and a Tritangent Fillet, and when would I reach for the second one?
+
+WHAT THE ASSISTANT IS DOING
+
+2 steps
+
+Checking the CATIA reference
+— Done
+0 ms
+Checking the CATIA reference
+— Done
+0 ms
+
+Edge Fillet vs Tritangent Fillet in CATIA V5
+
+Edge Fillet (part_design.edge_fillet)
+
+What it does: Rolls a constant-radius ribbon along selected edges or around a face.
+
+Key properties:
+
+You specify the radius (or use variable/face fillets)
+Works on edges, faces, or entire features
+Can fillet every edge of a face in one go
+Has Propagation options: Tangency (follows tangent chain), Minimal, Intersection
+Includes extra controls like Trim ribbons, Conic parameter, Edges to keep
+
+When to use it:
+
+Standard rounding of edges on a part
+Filleting a boss, web, or bracket edge
+Creating a face fillet around holes
+Breaking sharp corners on machined parts
+
+Tritangent Fillet (part_design.tritangent_fillet)
+
+What it does: Blends between three faces and removes the middle one. The radius is computed automatically—you don't specify it.
+
+Key properties:
+
+You give exactly three faces and say which one to remove
+CATIA finds the unique fillet that touches all three
+Removes (consumes) the "middle" face entirely
+Part Design > Dress-Up Features / Surface-Based Features
+
+When to use it:
+
+Rounding off the end of a rib or stiffener where three surfaces meet (two walls + floor/ceiling)
+Blending a pocket corner where the bottom and side walls converge
+Any situation with three intersecting planar faces where you want a smooth blend that naturally "eats away" a face
+
+Why they're different
+
+Aspect	Edge Fillet	Tritangent Fillet
+Input	Edges, faces, or features	Three faces (exact count)
+Radius	Specified by you	Computed by CATIA
+Removed geometry	None (adds rounded ribbon)	The "middle" face is consumed
+Typical use	Standard edge rounding	Rib end blending, corner removal
+
+Practical example: Rib end
+
+If you have a rib terminating against the side walls of an enclosure:
+
+The three faces are: top wall + bottom wall + side wall
+You want to round where they meet
+An Edge Fillet would try to fillet two edges separately or one face at a time
+A Tritangent Fillet removes the intersection face and blends all three into one smooth surface—exactly what you want for rib end fairing
+
+That's why the documentation calls it "how the end of a rib is rounded off."
+
+Copy
+
+Edge Fillet vs Tritangent Fillet in CATIA V5 Edge Fillet (part_design.edge_fillet) What it does: Rolls a constant-radius ribbon along selected edges or around a face. Key properties: You specify the radius (or use variable/face fillets). Works on edges, faces, or entire features. Can fillet every edge of a face in one go. Has Propagation options: Tangency (follows tangent chain), Minimal, Intersection. Includes extra controls like Trim ribbons, Conic parameter, Edges to keep When to use it: Standard rounding of edges on a part. Filleting a boss, web, or bracket edge. Creating a face fillet around holes. Breaking sharp corners on machined parts Tritangent Fillet (part_design.tritangent_fillet) What it does: Blends between three faces and removes the middle one. The radius is computed automatically—you don't specify it. Key properties: You give exactly three faces and say which one to remove. CATIA finds the unique fillet that touches all three. Removes (consumes) the "middle" face entirely. Part Design > Dress-Up Features / Surface-Based Features When to use it: Rounding off the end of a rib or stiffener where three surfaces meet (two walls + floor/ceiling). Blending a pocket corner where the bottom and side walls converge. Any situation with three intersecting planar faces where you want a smooth blend that naturally "eats away" a face Why they're different Aspect, Edge Fillet, Tritangent Fillet. Input, Edges, faces, or features, Three faces (exact count). Radius, Specified by you, Computed by CATIA. Removed geometry, None (adds rounded ribbon), The "middle" face is consumed. Typical use, Standard edge rounding, Rib end blending, corner removal Practical example: Rib end If you have a rib terminating against the side walls of an enclosure: The three faces are: top wall + bottom wall + side wall. You want to round where they meet. An Edge Fillet would try to fillet two edges separately or one face at a time. A Tritangent Fillet removes the intersection face and blends all three into one smooth surface—exactly what you want for rib end fairing That's why the documentation calls it "how the end of a rib is rounded off."
+
+Message the Kryova agent
+Deep analysis
+Attach
+CATIA
+. This workstation is connected, running V5-R33.
+
+--- browser problems (0) ---
+(none)

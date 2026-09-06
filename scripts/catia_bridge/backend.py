@@ -105,6 +105,39 @@ class CatiaBackend(ABC):
         fallback_checkpoint: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
+    def close_document(
+        self, *, doc_name: str | None = None, remote_path: str | None = None
+    ) -> dict[str, Any]:
+        """Save the named document and close its window. The other half of `open_document`.
+
+        Takes the same server-resolved identity `open_document` does, and for the
+        same reason: the model never names a file, so the conversation can only
+        ever close the document it owns.
+
+        **Save first, and do not close if the save fails.** Two hazards point the
+        same way and neither is worth relying on the absence of. CATIA V5's
+        `Document.Close` is documented as closing without saving, so a bare close
+        silently discards whatever the engineer typed into the part by hand since
+        the last write; and where a seat instead puts up a "save changes?" prompt,
+        that modal blocks the automation surface and wedges the daemon until
+        somebody walks over to the workstation — the same failure
+        `_free_document_path` exists to avoid. Saving first removes both, and an
+        implementation that closes anyway after a failed save has reintroduced the
+        first one.
+
+        **Not finding the document is not an error.** The document may already be
+        closed, or CATIA may have been restarted since. The desired end state is
+        that the window is gone, and it is; so this reports `closed: false` with a
+        note saying why, rather than raising. Raising would push the agent into a
+        recovery loop over a job that is already done. Nothing here ever *opens* a
+        document in order to close it — that would defeat the point of the tool.
+
+        Must return `closed`, `saved`, `doc_name`, `remote_path` and
+        `open_documents`, so the agent can tell "I closed it" from "it was not
+        there" without reading prose.
+        """
+
     # -- parameters ----------------------------------------------------------
 
     @abstractmethod
@@ -164,7 +197,14 @@ class CatiaBackend(ABC):
 
     @abstractmethod
     def fillet(
-        self, *, radius_mm: float, feature: str | None = None, edges: str = "all"
+        self,
+        *,
+        # A list is one radius per selected edge, in selection order -- the
+        # server's `catia_fillet` schema promises it in words, so the contract
+        # has to admit it or the two halves of the system disagree.
+        radius_mm: float | list[float],
+        feature: str | None = None,
+        edges: str = "all",
     ) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -299,6 +339,9 @@ class CatiaBackend(ABC):
         *,
         command: str,
         candidates: list[str] | None = None,
+        #: Published command ids only -- see `catia_com.run_command` for why a
+        #: display label must never reach `StartCommand`.
+        command_ids: list[str] | None = None,
         command_name: str = "",
         command_key: str = "",
         menu_hint: list[str] | None = None,

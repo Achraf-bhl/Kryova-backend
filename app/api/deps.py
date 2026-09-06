@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Cookie, Depends, HTTPException, Path, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.audit import (
     SAFE_METHODS,
@@ -28,7 +28,10 @@ from app.models.audit import (
     StaffRole,
     live_staff_grant,
 )
-from app.models.organisation import membership_for, organisation_ids_for
+from app.models.organisation import (
+    membership_for_user,
+    organisation_ids_for_user,
+)
 from app.simulation.runner import SessionScope
 
 DbSession = Annotated[Session, Depends(get_db)]
@@ -82,6 +85,33 @@ def get_audit_service(scope: SessionScopeDep) -> AuditService:
 AuditDep = Annotated[AuditService, Depends(get_audit_service)]
 
 
+def _load_user(db: Session, user_id: str) -> User | None:
+    """Fetch a user together with the tenancy rows every request then needs.
+
+    One round trip instead of three. Authentication has to read the user, then
+    the memberships behind the RLS tenant context, then -- on any project or
+    organisation route -- the one membership that authorises the call; and
+    creating a project reads the memberships a fourth time looking for the
+    personal organisation. Against Neon each of those was ~80 ms of latency for
+    rows that all hang off the user just fetched.
+
+    `joinedload`, deliberately not `selectinload`: selectin issues a second
+    statement, which is the round trip this exists to remove. The extra rows
+    are one per membership, which is small by construction -- a person belongs
+    to a handful of organisations, not thousands.
+
+    Nothing downstream *depends* on the eager load: `membership_for_user`,
+    `organisation_ids_for_user` and `personal_organisation` all fall back to
+    their own queries when the collection is not loaded. This is an
+    optimisation, not a new precondition.
+    """
+    return db.get(
+        User,
+        user_id,
+        options=[joinedload(User.memberships).joinedload(Membership.organisation)],
+    )
+
+
 def get_current_user(
     request: Request,
     db: DbSession,
@@ -128,7 +158,7 @@ def get_current_user(
         user_id = decode_access_token(token)
         if user_id is None:
             raise credentials_error
-        found = db.get(User, user_id)
+        found = _load_user(db, user_id)
         if found is None:
             raise credentials_error
         user = found
@@ -141,7 +171,7 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF failure")
 
     request.state.principal = principal
-    with tenant_scope(db, organisation_ids_for(db, user.id)):
+    with tenant_scope(db, organisation_ids_for_user(db, user)):
         yield user
 
 
@@ -180,7 +210,10 @@ def _impersonated_principal(
         raise credentials_error
 
     actor = db.get(User, claims.actor_id)
-    subject = db.get(User, claims.subject_id)
+    # The subject is the identity every guard downstream reads, so it gets the
+    # same eager load an ordinary sign-in does. The actor is only ever an
+    # identity on the audit row and needs none of it.
+    subject = _load_user(db, claims.subject_id)
     if actor is None or subject is None or not actor.is_active:
         raise credentials_error
     if live_staff_grant(db, actor.id) is None:
@@ -288,7 +321,9 @@ def require_organisation(
         current_user: CurrentUser,
         organisation_id: Annotated[str, Path()],
     ) -> Organisation:
-        membership = membership_for(db, current_user.id, organisation_id)
+        membership = membership_for_user(db, current_user, organisation_id)
+        # Free when the membership came from the session: the eager load in
+        # `_load_user` put the organisation in the identity map already.
         organisation = db.get(Organisation, organisation_id) if membership else None
         if membership is None or organisation is None:
             raise _not_found(_ORGANISATION_NOT_FOUND)
@@ -312,7 +347,7 @@ def require_membership(
         current_user: CurrentUser,
         organisation_id: Annotated[str, Path()],
     ) -> Membership:
-        membership = membership_for(db, current_user.id, organisation_id)
+        membership = membership_for_user(db, current_user, organisation_id)
         if membership is None or not membership.role.at_least(minimum):
             raise _not_found(_ORGANISATION_NOT_FOUND)
         return membership
@@ -336,7 +371,7 @@ def _project_for_role(
     # the row genuinely is not visible to the database either.
     if project is None:
         raise _not_found(_PROJECT_NOT_FOUND)
-    membership = membership_for(db, current_user.id, project.organisation_id)
+    membership = membership_for_user(db, current_user, project.organisation_id)
     if membership is None or not membership.role.at_least(minimum):
         raise _not_found(_PROJECT_NOT_FOUND)
     return project

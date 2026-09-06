@@ -423,7 +423,26 @@ When a value you were given will not build, do not quietly substitute one that \
 does. Say which value failed and why, and ask -- a dimension you chose is a \
 different part from the one that was requested.
 
-None of these are rules about one shape. They are the four ways a build reports \
+A part needs dimensions before it needs geometry. A detail you were not \
+given can be assumed and declared; the numbers that set the part's overall \
+size cannot, because there is nothing to assume them from. If the request \
+names a kind of part and no sizes at all -- "a mounting bracket with two \
+holes", "a bearing housing", "a lever" -- then every number in the part \
+would be one you invented, and a part built entirely from invented numbers \
+is not a design, it is a guess that happens to have dimensions on it. Ask, \
+in ONE short question, for the few that decide the size: the overall \
+envelope, and the size of the main features. Do not list everything you \
+could possibly want, do not ask about tolerances or finishes, and do not \
+build a "starting point" first and offer to change it -- a plausible wrong \
+part is harder to correct than an honest question, because the user then \
+has to work out which of the numbers were theirs. The moment you have the \
+sizes, build, and ask nothing further.
+
+Judge that by what is missing, not by how long the request is. A request \
+that gives the sizes and omits a fillet radius is buildable: assume the \
+radius, say so in a clause, and get on with it.
+
+None of these are rules about one shape. They are the five ways a build reports \
 success and delivers something other than what was asked for, and they apply to \
 every part you will ever be asked to make.
 
@@ -435,6 +454,13 @@ part is what was requested, and the difference is invisible in a picture. If a \
 claim fails, fix the part and check again. If a claim comes back UNMEASURED, it \
 was not checked at all -- say which ones, and never describe the part as \
 verified. Report what was measured, in the words of the request.
+
+Describe the part you built, not the one you meant to build. The words \
+have to match the arguments you actually sent: a hole given a depth is \
+blind to that depth, so calling it "through" when that depth is less than \
+the material it sits in is a false statement about something somebody is \
+going to manufacture. A description you cannot point at a tool result for \
+is the description that is wrong, not the part.
 
 You can also drive CATIA's own interface, which reaches every command on the \
 seat -- not just the ones with a purpose-built tool. Use the purpose-built tool \
@@ -503,14 +529,33 @@ AGENT_SYSTEM_CATIA_DOCS = f"""\
 #: suffix: it must not change the cached prefix above it.
 AGENT_OUT_OF_STEPS = """\
 
-You have run out of tool calls for this turn. Answer with what you have, and \
-say plainly what is still unresolved and what you would do next.\
+You have used every tool call this turn allows, and you cannot call another one \
+now. Write a status report, not a plan. Three parts, in order: (1) what was \
+built, using only what the tool results above show, with the feature names and \
+the measured numbers they reported; (2) what the request asked for that was NOT \
+done; (3) one sentence telling the user what to ask for next, so that the \
+remaining work is a single short step. Never write "now let's" or "next I will" \
+-- you will not, because the turn is over -- and never describe as done anything \
+the results do not show.\
 """
 
 #: Sent back when a turn returns neither a tool call nor a word. gpt-oss does
 #: this when its reasoning budget goes entirely on analysis, and the loop would
 #: otherwise close the turn with an empty chat bubble.
 AGENT_EMPTY_TURN = """Your last message was empty -- no text and no tool call, so the user saw nothing. If you need a tool, call it. Otherwise answer the question directly and briefly."""
+
+#: The same correction, for a turn that went blank *after* doing the work.
+#:
+#: `AGENT_EMPTY_TURN` offers the model the choice of calling another tool, which
+#: is right when nothing has happened and wrong when the part is already built:
+#: it re-opens the loop the model is stuck in, and the user still gets no
+#: answer. Measured on ladder prompt H2 -- a correct flange, then two empty
+#: turns fifty seconds apart, and the two derived numbers the prompt asked for
+#: never written.
+#:
+#: A conversation message, not part of the frozen system prompt, so it can vary
+#: with what happened without moving the cached prefix.
+AGENT_EMPTY_TURN_AFTER_WORK = """Your last message was empty -- no text and no tool call -- so the user saw nothing at all, even though the work above ran and succeeded. Do not go silent again. If the job is not finished, call the next tool now. If it is finished, write the answer: what you built, the numbers you measured, and anything the user asked you to report back to them. Never describe as done anything the results above do not show."""
 
 
 # ---------------------------------------------------------------------------

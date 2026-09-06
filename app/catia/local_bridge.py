@@ -150,6 +150,46 @@ def last_error(user_id: str | None = None) -> str | None:
     return _last_error.get(user_id)
 
 
+#: The CATIA V5 executable. One name, not a search: this is only ever asked on
+#: the machine the daemon runs on, and a wrong answer here is reported as a
+#: hint, never acted on.
+_CATIA_IMAGE = "CNEXT.exe"
+
+
+def catia_process_is_running() -> bool | None:
+    """Is CATIA's process alive on this machine? `None` when we cannot tell.
+
+    Three states exist and the code used to model two. "No connection" was
+    reported as "CATIA itself is not running", and on 2026-09-06 that sent a
+    whole session the wrong way: a modal dialog -- CATIA's own "Commande
+    inconnue : Close Sketch", raised because the model passed a command name
+    CATIA does not know -- blocked COM, heartbeats stopped, and the agent told
+    the user to *start the bridge on their Windows machine* while the bridge
+    and CATIA were both running, one dialog away from working. The user cannot
+    act on that instruction, because it describes a situation that is not true.
+
+    So the third state gets named. `None` rather than `False` when the check
+    itself fails, because "I could not tell" and "it is not running" are
+    different claims and only one of them is honest here.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        finished = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {_CATIA_IMAGE}", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if finished.returncode != 0:
+        return None
+    # tasklist prints an "INFO: No tasks..." line rather than failing on a miss.
+    return _CATIA_IMAGE.lower() in finished.stdout.lower()
+
+
 def _log_path() -> Path:
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     directory = Path(base) / "Kryova" / "catia"

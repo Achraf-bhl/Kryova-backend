@@ -184,9 +184,15 @@ class KnowledgeService:
         stats: dict[str, Any] = {"available": True, "index_dir": str(self._index_dir)}
         stats.update(corpus.stats())
         try:
-            stats["stale"] = corpus.is_stale(self._source_dirs, exclude=self._exclude)
+            # One call, two facts: `--check` needs the boolean for its exit
+            # code and a human needs the sentence. Asking twice would walk the
+            # source tree twice for the same answer.
+            reason = corpus.stale_reason(self._source_dirs, exclude=self._exclude)
+            stats["stale"] = reason is not None
+            stats["stale_reason"] = reason
         except Exception:  # noqa: BLE001 - a stat() failure is not a health failure
             stats["stale"] = None
+            stats["stale_reason"] = None
         return stats
 
     @property

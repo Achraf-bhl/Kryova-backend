@@ -68,7 +68,7 @@ class PartDesignMixin:
         thread: str = "",
         thread_depth_mm: float | None = None,
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         x, y, z = (float(value) for value in at)
         reference = self._face_reference(face)
@@ -164,7 +164,7 @@ class PartDesignMixin:
         left_handed: bool = False,
         tap: bool = True,
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         reference = self._face_reference(face)
         feature = part.ShapeFactory.AddNewThreadWithOutRef(reference)
@@ -211,7 +211,7 @@ class PartDesignMixin:
         the failure that produces names the *second* feature, which is the wrong
         place to look.
         """
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         factory = part.ShapeFactory
         mode = {"tangency": 1, "minimal": 2, "intersection": 3}.get(propagation, 1)
@@ -250,7 +250,7 @@ class PartDesignMixin:
     def fillet_variable(  # pragma: no cover - Windows only
         self: ComContext, *, edge: str, radii: list[dict[str, Any]], variation: str = "cubic"
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         reference = self._edge_references([edge])[0]
         ordered = sorted(radii, key=lambda entry: float(entry["at_ratio"]))
@@ -279,7 +279,7 @@ class PartDesignMixin:
         radius_mm: float,
         hold_curve: str = "",
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         fillet = part.ShapeFactory.AddNewSolidFaceFillet(
             self._face_reference(first_face),
@@ -304,7 +304,7 @@ class PartDesignMixin:
     def fillet_tritangent(  # pragma: no cover - Windows only
         self: ComContext, *, faces: list[str], removed_face: str
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         if len(faces) != 3:
             raise CatiaOperationError(
                 f"A tritangent fillet needs exactly three faces, not {len(faces)}."
@@ -337,7 +337,7 @@ class PartDesignMixin:
         parting: str = "",
         mode: str = "standard",
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         feature = part.ShapeFactory.AddNewDraft(
             # `AddNewDraft` wants the neutral element, the parting element, the
@@ -375,7 +375,7 @@ class PartDesignMixin:
         produces a sealed hollow with no way in, which is what the original
         `catia_shell` could do and almost never what was wanted.
         """
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         inner = 0.0 if outward else float(thickness_mm)
         outer = float(thickness_mm) if outward else 0.0
@@ -405,7 +405,7 @@ class PartDesignMixin:
     def thickness(  # pragma: no cover - Windows only
         self: ComContext, *, faces: list[str], thickness_mm: float
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         feature = part.ShapeFactory.AddNewThickness(
             self._face_reference(faces[0]), float(thickness_mm)
@@ -422,7 +422,7 @@ class PartDesignMixin:
     def remove_face(  # pragma: no cover - Windows only
         self: ComContext, *, faces: list[str], keep_faces: list[str] | None = None
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         feature = part.ShapeFactory.AddNewRemoveFace(
             self._face_reference(faces[0]), None
@@ -444,7 +444,7 @@ class PartDesignMixin:
     def replace_face(  # pragma: no cover - Windows only
         self: ComContext, *, faces: list[str], surface: str, reversed: bool = False  # noqa: A002
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         feature = part.ShapeFactory.AddNewReplaceFace(
             resolve_element(part, surface), self._face_reference(faces[0])
@@ -466,7 +466,7 @@ class PartDesignMixin:
     def body_create(  # pragma: no cover - Windows only
         self: ComContext, *, name: str = "", activate: bool = True
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         body = part.Bodies.Add()
         if name:
@@ -499,7 +499,7 @@ class PartDesignMixin:
         consumed. `remove` with them swapped leaves the cavity and deletes the
         part, which looks like a catastrophic failure and is merely backwards.
         """
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         tool = resolve_element(part, tool_body)
         target = resolve_element(part, target_body) if target_body else self._body()
@@ -582,7 +582,7 @@ class PartDesignMixin:
         axis_system: str = "",
         body: str = "",
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         frame = resolve_element(part, axis_system) if axis_system else None
         feature = part.ShapeFactory.AddNewAffinity2(
@@ -607,7 +607,7 @@ class PartDesignMixin:
         cannot update leaves a broken feature in the tree, and leaving it there
         makes every later operation fail with an error about *this* one.
         """
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         if body:
             part.InWorkObject = resolve_element(part, body)
@@ -735,7 +735,7 @@ class PartDesignMixin:
         *,
         thick: bool,
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         feature = getattr(part.ShapeFactory, call_name)(
             resolve_element(part, profile), resolve_element(part, centre_curve)
@@ -768,7 +768,7 @@ class PartDesignMixin:
         symmetric: bool = True,
         reversed: bool = False,  # noqa: A002
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         feature = part.ShapeFactory.AddNewStiffener(resolve_element(part, profile))
         try:
@@ -794,7 +794,7 @@ class PartDesignMixin:
         closed: bool = False,
         remove: bool = False,
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         factory = part.ShapeFactory
         feature = factory.AddNewRemovedLoft() if remove else factory.AddNewLoft()
@@ -825,7 +825,7 @@ class PartDesignMixin:
         first_direction: list[float] | None = None,
         second_direction: list[float] | None = None,
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         feature = part.ShapeFactory.AddNewSolidCombine(
             resolve_element(part, first_profile), resolve_element(part, second_profile)
@@ -862,7 +862,7 @@ class PartDesignMixin:
         drafted face, and if the draft angle later changes, a separate fillet
         can fail where this one simply recomputes.
         """
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         profile = resolve_element(part, sketch)
         neutral_element = resolve_support(self, neutral) if neutral else None
@@ -906,7 +906,7 @@ class PartDesignMixin:
     def pattern_user(  # pragma: no cover - Windows only
         self: ComContext, *, positions: str, feature: str = "", anchor: str = ""
     ) -> dict[str, Any]:
-        self._require_closed()
+        self._end_sketch_edition()
         part = self._part()
         shape = self._shape_or_last(feature or None)
         pattern = part.ShapeFactory.AddNewUserPattern(shape, 1)

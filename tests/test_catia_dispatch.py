@@ -563,6 +563,106 @@ def test_reopening_without_a_bound_document_says_what_to_do(wired):
         run(wired, "catia_open_document", {})
 
 
+# -- closing a document ------------------------------------------------------
+#
+# The policy half of `catia_close_document`. What the daemon does with the call
+# is covered offline in `test_catia_close_document.py`; what is under test here
+# is the three server-side decisions, each of which has a way of being wrong
+# that no daemon test could see.
+
+_CLOSED = {
+    "doc_name": "Bracket",
+    "remote_path": "C:\\work\\Bracket.CATPart",
+    "closed": True,
+    "saved": True,
+    "open_documents": 0,
+}
+
+
+def test_closing_keeps_the_binding_so_the_part_can_be_reopened(wired, db_session):
+    """The decision this operation turns on, and the one that had two answers.
+
+    Clearing the row on close would leave the CATPart on the workstation with
+    nothing pointing at it: `catia_open_document` is refused without a binding,
+    so the only tool left would be `catia_new_part`, which starts a *different*
+    part -- and the checkpoints of the first, keyed on `document_id`, would be
+    orphaned with it. Closing a window would silently abandon the work.
+    """
+    created = run(wired, "catia_new_part", {"name": "Bracket"})
+    wired["connection"].replies["catia_close_document"] = _CLOSED
+    run(wired, "catia_close_document", {})
+
+    document = db_session.get(CatiaDocument, created["document_id"])
+    assert document is not None
+    assert document.conversation_id == wired["conversation"].id
+    assert document.remote_path == "C:\\work\\Bracket.CATPart"
+
+    # And the way back is open, which is the whole point of keeping it: this
+    # call raises "no CATIA document yet" the moment the row stops existing.
+    wired["connection"].replies["catia_open_document"] = {"doc_name": "Bracket"}
+    run(wired, "catia_open_document", {})
+
+
+def test_closing_never_opens_a_window_in_order_to_close_one(wired):
+    """Unscoped, and for a reason of its own rather than by analogy.
+
+    A scoped call is activated before it runs, and `ensure_document` *reopens* a
+    document CATIA no longer has open. Scoping this one would therefore open a
+    window so that it could be closed -- on a seat where the complaint is the
+    number of open windows.
+    """
+    run(wired, "catia_new_part", {"name": "Bracket"})
+    wired["connection"].replies["catia_close_document"] = _CLOSED
+    wired["connection"].calls.clear()
+
+    run(wired, "catia_close_document", {})
+
+    sent = wired["connection"].calls[-1]
+    assert sent["document"] is None
+    # Identity still travels, so the daemon closes this conversation's window
+    # and not whatever the seat happens to be showing.
+    assert sent["arguments"]["doc_name"] == "Bracket"
+    assert sent["arguments"]["remote_path"] == "C:\\work\\Bracket.CATPart"
+    # Not the checkpoint bytes: `fallback_checkpoint` exists to *rebuild* a file
+    # the workstation lost, and rebuilding one to close its window would be work
+    # done only to undo itself.
+    assert "fallback_checkpoint" not in sent["arguments"]
+
+
+def test_closing_is_not_checkpointed_because_it_saves_the_document_itself(wired):
+    """A checkpoint here would protect nothing and could refuse the call.
+
+    The backend saves before it closes, so the snapshot would be of a state the
+    close does not alter -- and `_auto_checkpoint` refuses the operation when the
+    snapshot fails, which would make the one tool for tidying up a cluttered seat
+    unavailable in exactly the conditions that clutter it.
+    """
+    run(wired, "catia_new_part", {"name": "Bracket"})
+    wired["connection"].replies["catia_close_document"] = _CLOSED
+    wired["connection"].calls.clear()
+
+    run(wired, "catia_close_document", {})
+
+    assert wired["connection"].tools_called == ["catia_close_document"]
+
+
+def test_the_model_cannot_choose_which_document_is_closed(wired):
+    """`doc_name` is a server field, so a model that names one is refused.
+
+    Without this the agent could close a part belonging to another conversation,
+    or any file it could guess the name of. The schema carries no properties at
+    all and `additionalProperties: false` does the rest.
+    """
+    run(wired, "catia_new_part", {"name": "Bracket"})
+    with pytest.raises(CatiaError):
+        run(wired, "catia_close_document", {"doc_name": "SomeoneElse"})
+
+
+def test_closing_without_a_bound_document_says_so_rather_than_guessing(wired):
+    with pytest.raises(CatiaError, match="nothing to close"):
+        run(wired, "catia_close_document", {})
+
+
 # -- screenshots -------------------------------------------------------------
 
 

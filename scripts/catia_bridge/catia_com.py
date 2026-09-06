@@ -2747,6 +2747,98 @@ class CatiaCom(
             return False
         return not dialog.fields() and len(dialog.buttons()) <= 1
 
+    @staticmethod
+    def _is_update_diagnosis_box(dialog: Any, document: str) -> bool:
+        """Is this CATIA's update-diagnosis modal for `document`?
+
+        Measured on the seat 2026-09-06, ladder prompt H4 run 7. A feature went
+        into error, the next `Update` raised
+
+            Diagnostic de la mise a jour : Part1
+
+        with eight buttons (Fermer, Editer, Desactiver, Isoler, Supprimer,
+        Mettre a niveau, Mettre a niveau : tout, Sous-elements...) and **no
+        exception**. It is a modal, so it holds COM: heartbeats stopped, the
+        device went offline, and every remaining tool call in the run failed.
+        The seat stayed dead until a human clicked. That is the same class of
+        incident as the unknown-command box, and it is recognised the same way.
+
+        **The document's name in the dialog's own title is the signal**, not
+        the wording. `Diagnostic de la mise a jour` is French, `Update
+        Diagnosis` is English, and a table of translations is the thing this
+        file's whole design avoids. The document name is ours -- we opened it
+        -- and it is identical on every language install.
+
+        Narrow, for the same reason the command box check is: it must have no
+        input fields, and it must offer several buttons. A save prompt has two
+        and a real command dialog has fields, so neither is matched.
+        """
+        if dialog is None or not document:
+            return False
+        folded = ui_policy.fold(document)
+        if not folded or folded not in ui_policy.fold(dialog.title or ""):
+            return False
+        return not dialog.fields() and len(dialog.buttons()) >= 3
+
+    def _dismiss_update_diagnosis_box(self, window: int) -> bool:  # pragma: no cover
+        """Close the update-diagnosis modal, if that is what is blocking COM.
+
+        **Close, and nothing else.** Every other button on that box changes the
+        part: Deactivate, Isolate, Delete and the two Upgrade actions all edit
+        the tree, and doing any of them because a dialog was in the way would
+        be this product silently altering an engineer's model. Closing changes
+        nothing -- the feature stays in error, which is true, and the next
+        operation reports it as an error the caller can act on.
+
+        **Escape, not a button.** The daemon has no button-role table -- that
+        lives on the server, which is not reachable from here -- and choosing
+        by position on a box whose first button happens to be `Fermer` is a
+        guess that would one day press `Supprimer` on a seat that orders them
+        differently. Escape cancels a modal on every Windows dialog and can
+        never invoke an action. The button is only tried if Escape did not
+        clear it, and then only one whose label folds to a known close word.
+        """
+        try:
+            dialog = ui.active_dialog(window)
+        except ui.UiUnavailable:
+            return False
+        document = ""
+        try:
+            document = str(self._document().Name)
+        except Exception:  # noqa: BLE001 - no document is not this box
+            return False
+        if not self._is_update_diagnosis_box(dialog, document):
+            return False
+        assert dialog is not None  # noqa: S101 - narrowed above
+        try:
+            ui.press_key(dialog.handle, "Escape")
+        except ui.UiUnavailable:
+            closer = next(
+                (
+                    button
+                    for button in dialog.buttons()
+                    if ui_policy.fold(getattr(button, "label", "") or "") in _CLOSE_WORDS
+                ),
+                None,
+            )
+            if closer is None:
+                logger.warning(
+                    "Could not close CATIA's update-diagnosis box; the seat may stay "
+                    "blocked until someone clicks it"
+                )
+                return False
+            try:
+                ui.click(dialog.handle, closer)
+            except ui.UiUnavailable:
+                return False
+        time.sleep(_DIALOG_POLL_S)
+        logger.warning(
+            "Closed CATIA's update-diagnosis box for %r -- a feature is in error and "
+            "the part will not rebuild until it is fixed or removed",
+            document,
+        )
+        return True
+
     def _dismiss_unknown_command_box(  # pragma: no cover - Windows only
         self, window: int, candidate: str
     ) -> bool:
@@ -3023,6 +3115,11 @@ class CatiaCom(
 #: How long to wait for a command's dialog to appear before reporting that none
 #: did. CATIA opens one in well under a second on a warm session; the ceiling is
 #: for a cold one that is still loading the workbench's resources.
+#: Labels that mean "close this and change nothing", folded. Only reached
+#: when Escape does not clear a box -- never to choose between buttons that
+#: act, which on the update-diagnosis modal include Delete and Deactivate.
+_CLOSE_WORDS = {"fermer", "close", "schliessen", "cerrar", "chiudi", "annuler", "cancel"}
+
 _DIALOG_WAIT_S = 3.0
 _DIALOG_POLL_S = 0.15
 

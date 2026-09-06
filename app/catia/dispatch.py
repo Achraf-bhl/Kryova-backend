@@ -23,6 +23,7 @@ somebody else wrote, and it goes straight into a prompt. See `sanitize.py`.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
@@ -528,7 +529,7 @@ def call_catia(
             known = ", ".join(sorted(s.name for s in CATIA_TOOL_SPECS))
             raise CatiaError(f"{tool!r} is not a CATIA tool. Available tools: {known}.")
 
-        arguments = _normalise(tool, arguments)
+        arguments = _normalise(tool, arguments, spec.parameters)
         try:
             validate(arguments, spec.parameters)
         except SchemaError as exc:
@@ -716,8 +717,60 @@ def _execute_locally(
 # -- enforcement -------------------------------------------------------------
 
 
-def _normalise(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Drop a field the model was told to omit, rather than failing the call.
+def _parse_array_strings(
+    arguments: dict[str, Any], schema: dict[str, Any] | None
+) -> dict[str, Any]:
+    """`"[50, 0]"` where an array is declared is that array, sent as text.
+
+    Measured on ladder prompts H4 and H5 on 2026-09-06, on three separate
+    runs: the model sent `catia_sketch_line(start="[0, 0]", end="[150, 0]")`
+    and was refused with `start must be array, got str`. It then sent the same
+    thing again, twice, and one run lost four of its twenty rounds to it. The
+    refusal is accurate and it does not help: the model already believes it
+    sent a list, because what it wrote *is* the list, and reading the message
+    tells it nothing it can act on differently.
+
+    Nothing is guessed here. The string has to parse as JSON and has to yield
+    a list; anything else is left exactly as it arrived and refused by the
+    validator as before. A list of the wrong length, or of strings where
+    numbers are wanted, is still refused too -- validation runs afterwards,
+    against the same schema, unchanged. What this removes is one specific
+    round trip whose outcome was never in doubt.
+
+    `ast.literal_eval` is deliberately not used: it would also accept Python
+    tuples, sets and expressions, and the point is to accept exactly the thing
+    the model meant to send and nothing more.
+    """
+    if not schema:
+        return arguments
+    properties = schema.get("properties") or {}
+    parsed: dict[str, Any] | None = None
+    for name, value in arguments.items():
+        if not isinstance(value, str):
+            continue
+        declared = properties.get(name) or {}
+        types = declared.get("type")
+        wanted = types if isinstance(types, list) else [types]
+        if "array" not in wanted:
+            continue
+        try:
+            candidate = json.loads(value)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(candidate, list):
+            continue
+        if parsed is None:
+            parsed = dict(arguments)
+        parsed[name] = candidate
+    return parsed if parsed is not None else arguments
+
+
+def _normalise(
+    tool: str, arguments: dict[str, Any], schema: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Fix what the model plainly meant, before the schema is applied.
+
+    Two cases, and both are ones where the intent is not in question:
 
     `depth_mm` is ignored for a through hole, and its schema refuses zero
     because zero is not a depth. The tool description says to omit it; models
@@ -726,9 +779,16 @@ def _normalise(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     depth. A zero depth alongside `through_all` is not ambiguous -- the value is
     unused either way -- so it is dropped here instead of being argued about.
 
-    This only ever removes a field. Anything that could weaken a check belongs
-    in the schema, not in a normaliser that runs before it.
+    And a coordinate sent as the *text* of a list is that list; see
+    `_parse_array_strings`.
+
+    Neither weakens a check. The first removes a field that is unused; the
+    second changes a value's Python type to the one the schema already
+    demands, and then that schema runs and refuses everything it refused
+    before. Anything that would actually widen what is accepted belongs in the
+    schema, where it can be read.
     """
+    arguments = _parse_array_strings(arguments, schema)
     if tool == "catia_hole" and arguments.get("through_all", True):
         if arguments.get("depth_mm") == 0:
             return {k: v for k, v in arguments.items() if k != "depth_mm"}

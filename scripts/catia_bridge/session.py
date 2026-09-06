@@ -296,6 +296,25 @@ class BridgeSession:
         watchdog.start()
         watchdog.join(_HEALTH_TIMEOUT_S)
         if watchdog.is_alive():
+            # A wedged CATIA is almost always a modal, and one of them is
+            # ours to clear: the update-diagnosis box, which CATIA raises with
+            # no exception when a feature is in error. Measured on ladder
+            # prompt H4 run 7 -- it held COM, the heartbeats stopped, and every
+            # remaining call in the run failed. Telling the user to go and
+            # click it is the instruction this product exists not to give.
+            #
+            # Win32, not COM, so it works precisely when COM does not; the
+            # same reason the interactive tools are out of band. It refuses
+            # anything that is not that box, so a save prompt or a real
+            # command dialog is still left for a human.
+            if self._clear_a_dialog_we_can_own():
+                raise CatiaOperationError(
+                    f"CATIA had an update-diagnosis dialog open, so {tool} was not "
+                    "attempted. It has been closed. A feature in this part is in "
+                    "error and the part will not rebuild until it is fixed or "
+                    "removed: call catia_list_features to see what is there, and "
+                    "remove or rebuild the feature that failed."
+                )
             raise CatiaOperationError(
                 f"CATIA is not responding to automation, so {tool} was not attempted. "
                 "This is almost always a modal dialog waiting for a click -- switch to "
@@ -303,6 +322,26 @@ class BridgeSession:
             )
         if failure:
             raise CatiaOperationError(str(failure[0]))
+
+    def _clear_a_dialog_we_can_own(self) -> bool:
+        """Close a blocking dialog this bridge knows is safe to close. Never raises.
+
+        Only the update-diagnosis box today. "Safe" means one specific thing:
+        closing it changes nothing about the part. Every other button on that
+        modal edits the tree -- Deactivate, Isolate, Delete, Upgrade -- and a
+        product that pressed one of those because a dialog was in its way
+        would be silently altering an engineer's model.
+        """
+        dismiss = getattr(self.backend, "_dismiss_update_diagnosis_box", None)
+        window = getattr(self.backend, "_main_window", None)
+        if dismiss is None or window is None:
+            return False
+        try:
+            handle = window()
+            return bool(handle) and bool(dismiss(handle))
+        except Exception:  # noqa: BLE001 - a failed rescue is not a new failure
+            logger.debug("Could not clear a CATIA dialog", exc_info=True)
+            return False
 
 
 #: How long the liveness probe may take before CATIA counts as wedged.

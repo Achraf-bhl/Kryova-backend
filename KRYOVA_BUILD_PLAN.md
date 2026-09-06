@@ -111,6 +111,30 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E10/E7/E12 → **the first of the missing tests, and the defect
+  they were written for.** The agent building `app/optimise/` found, before a
+  rate limit killed it, that **an optimum sitting on an active constraint was
+  reported as `NO_FEASIBLE_POINT`** — telling the user that no design in the
+  space satisfies a requirement the design in front of them satisfies to fifteen
+  digits. Measured: on x = y = 1 subject to x + y >= 2, SLSQP stops at
+  2 − 3.3e-15; on the OCCT plate whose answer is 100×100 subject to
+  surface_area <= 24000, it stops 4.1e-4 mm² over, one part in 6e7 and exactly
+  the size its own tolerance permits. Nearly every real constrained run would
+  have said it, because nearly every real constrained optimum is on a
+  constraint. The agent had fixed it — a back-off in the **target** the driver
+  aims at, never slack in the **check** — and had not tested it.
+  `tests/test_optimise_honesty.py` now pins both halves: the algebraic optimum is
+  found and reported as converged, and the constraint is still evaluated exactly
+  as written so a design that genuinely misses is still a miss. Removing the
+  back-off reproduces the original defect and three tests fail.
+  One expectation of mine was wrong and the code was right: `NO_FEASIBLE_POINT`
+  means the driver *converged* on an infeasible design, while running out of
+  budget is `BUDGET_SPENT`. The distinction is worth keeping, so the test pins
+  the honesty rule — not converged, and `solution` is `None` — rather than a
+  particular stop code that would break the day the driver changed.
+  `tests/test_verify_convergence.py` and `tests/test_materials.py` also survived
+  the cull (160 tests). Four of the seven packages are still `TESTS NOT WRITTEN`.
+
 - **2026-09-06** — E6 → **the solver federation is reachable from the product.**
   `app/solve/calculix/` had been able to solve a real model since earlier that
   day and **nothing could ask it to**: `simulation/runner.py` constructed

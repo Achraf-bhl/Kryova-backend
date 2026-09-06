@@ -174,6 +174,21 @@ def typical_basis_is_approximated(path: str) -> bool:
     return entry is not None and entry.typical_basis is provenance.Basis.APPROXIMATED
 
 
+def payload_states_a_basis(payload: Mapping[str, Any], path: str) -> bool:
+    """Whether a measurement payload's sidecar says anything about this path at all.
+
+    Deliberately three-valued collapsed to two: `app.kernel.provenance.basis_of`
+    returns `None` for a path the payload makes no claim about, and its own
+    docstring is emphatic that `None` is not `MEASURED`. Callers here need to
+    tell "the backend said how it got this" from "the backend said nothing",
+    because the second is the case where the contract's `typical_basis` is the
+    only thing left to read.
+    """
+    from app.kernel import provenance
+
+    return provenance.basis_of(payload, path) is not None
+
+
 def bound_direction(path: str) -> BoundDirection:
     """Which way a sampled value of this quantity errs.
 
@@ -197,6 +212,7 @@ __all__ = [
     "bound_direction",
     "describe",
     "is_measurable",
+    "payload_states_a_basis",
     "require_measurable",
     "typical_basis_is_approximated",
     "unit",

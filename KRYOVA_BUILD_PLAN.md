@@ -148,6 +148,23 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E13 → **the rule engine and GD&T tested, three real bugs
+  out.** The one worth the session: `RuleResult.sampled` came only from
+  `AssertionResult.approximate`, which resolves *silence* to "not approximate" —
+  correct for an assertion, wrong for a rule. It is reachable with the real
+  kernel, because `ThicknessReport.to_payload` writes `thinnest_point_mm` with no
+  sidecar entry of its own, so **a rule on the thin spot was reading a sampled
+  number as a proof**. The fallback now consults the contract's `typical_basis`
+  when the payload says nothing, and can only make a verdict *more* provisional,
+  never less. Also out: a refusal message that printed a literal `{listed}`
+  because one of three concatenated strings had lost its `f` prefix, so the datum
+  letter came out as the placeholder; and delegated messages printing the rule
+  name twice. 26 mutations run, 25 caught, one a deliberate control. Recorded and
+  not fixed: `FeatureControlFrame(tolerance_mm=True)` is accepted as a 1 mm zone,
+  because `True` is an `int` — `engine.Rule` refuses a boolean limit for exactly
+  this reason and `gdt.py` does not, which is an inconsistency rather than a test
+  to write around. And **neither module has a consumer anywhere in `app/`**.
+
 - **2026-09-06** — **gate G1, attempt 6: the tool-selection fix works, and a
   through bore silently became a blind one.** Re-running rung 3 after E16.1
   landed, the agent called `catia_list_parameters` **unprompted** as its fourth

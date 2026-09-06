@@ -39,6 +39,12 @@ the two together:
 * `minimum_wall_mm <= 6.0` measuring **2.6** — same number, same sampling, and
   now the pass *is* proved, because the claim runs the same way as the bound.
 
+A payload that says **nothing** about how it arrived at a quantity the contract
+marks as normally sampled is read as sampled, not as exact. That silence is real
+— `thinnest_point_mm` is written into an OCCT payload with no sidecar entry of
+its own — and reading it the other way would print `proven` beside a ray-cast
+number. `_rests_on_a_bound` is where the three sources are ordered.
+
 So `ok` and `proven` are different questions and both are on the report. Calling
 a provisional pass `UNMEASURED` instead was considered and rejected for the
 reason `app/design/missions.py` records about its pending rungs: every ray-cast
@@ -68,7 +74,14 @@ from app.design.assertions import (
 )
 from app.design.errors import SpecError
 from app.rules.errors import RuleError, SourceError
-from app.rules.vocabulary import BoundDirection, bound_direction, require_measurable, unit
+from app.rules.vocabulary import (
+    BoundDirection,
+    bound_direction,
+    payload_states_a_basis,
+    require_measurable,
+    typical_basis_is_approximated,
+    unit,
+)
 
 #: Comparisons whose claim is "the truth is at least this much".
 _CLAIMS_AT_LEAST = frozenset({">=", ">"})
@@ -140,7 +153,10 @@ class Rule:
         try:
             self._assertion = self._build_assertion()
         except SpecError as exc:
-            raise RuleError(f"{name}: {exc}") from exc
+            # Not re-prefixed with the name: the assertion is built with this rule's
+            # name, so every message it can raise here already opens with it, and
+            # adding it again printed "wall: wall: …" at the user.
+            raise RuleError(str(exc)) from exc
 
     def _build_assertion(self) -> Assertion:
         note = "; ".join(part for part in (self.rationale, f"source: {self.source}") if part)
@@ -402,11 +418,40 @@ def check_rules(rules: Iterable[Rule], measurements: Mapping[str, Any]) -> RuleR
             rule=rule,
             result=result,
             direction=bound_direction(rule.measure),
-            sampled=result.approximate,
+            sampled=_rests_on_a_bound(measurements, rule.measure, result),
         )
         for rule, result in zip(ordered, report.results, strict=True)
     ]
     return RuleReport(results, report)
+
+
+def _rests_on_a_bound(
+    measurements: Mapping[str, Any], measure: str, result: AssertionResult
+) -> bool:
+    """Whether this verdict rests on a bound rather than on a number.
+
+    The payload's own sidecar is consulted first and is the truth for the run: a
+    backend that measures wall thickness exactly says `MEASURED` and is never
+    penalised for the fact that another one samples it.
+
+    **A payload that says nothing at all about a normally-sampled quantity is
+    the case this function exists for**, and it is not hypothetical.
+    `ThicknessReport.to_payload` writes `thinnest_point_mm` with no sidecar
+    entry of its own, so `app.design.assertions` — which resolves silence to
+    "not approximate", correctly, because an assertion only reports what the
+    payload claims — hands back `approximate=False` for a ray-cast location.
+    Reading that silence as exact here would print `proven` on a number nobody
+    measured, which is the one failure this module exists to prevent.
+    `app.kernel.provenance` is explicit that no entry is *not* `MEASURED`, so
+    the contract's `typical_basis` is the last thing left to read; it decides
+    nothing about the number's quality, only whether a verdict on it may be
+    called proved.
+    """
+    if result.approximate:
+        return True
+    if payload_states_a_basis(measurements, measure):
+        return False
+    return typical_basis_is_approximated(measure)
 
 
 __all__ = [

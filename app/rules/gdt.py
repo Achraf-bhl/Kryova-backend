@@ -482,7 +482,7 @@ class FeatureControlFrame:
             raise GdtError(
                 f"{where}: a {grammar.category} control takes no datum reference, and "
                 f"this one names {listed}. Form is a claim about a feature against "
-                "itself. If the intent was to relate it to {listed}, the characteristic "
+                f"itself. If the intent was to relate it to {listed}, the characteristic "
                 "meant is an orientation or a location one."
             )
         if grammar.datums is DatumRule.REQUIRED and not self.datums:

@@ -173,3 +173,64 @@ class TestTheOtherTwoCases:
 
         assert built["has_solid"] is True
         assert built["volume_mm3"] > 60.0 * 40.0 * 10.0
+
+
+class TestTheAdviceIsCompleteEnoughToFollow:
+    """`catia_set_parameter` requires `unit`, and requires it for a real reason —
+    a parameter is typed, and setting a length in degrees is a silent no-op that
+    leaves the model looking unchanged with nothing to explain why.
+
+    Measured at gate G1: told to use the tool and given the name but not the
+    unit, the agent called it without one, was refused, and only got it right on
+    its third attempt. Advice that is *nearly* complete costs a call, and on a
+    model this size a wasted call is a minute.
+    """
+
+    def test_the_message_carries_the_unit_as_well_as_the_name(self) -> None:
+        runner = _plate()
+
+        with pytest.raises(GeometryError) as refused:
+            runner("catia_pad", {"feature": "Pad.1", "length_mm": 11.0})
+
+        assert "unit='mm'" in str(refused.value)
+
+    def test_the_whole_suggested_call_passes_dispatch_validation(self) -> None:
+        """The strongest form of this test: take the name and the unit out of the
+        message and put them through the same validator a real tool call meets.
+        A message that suggests a call the validator rejects is worse than one
+        that suggests nothing.
+        """
+        import re
+
+        from app.catia.dispatch import validate
+
+        runner = _plate()
+        with pytest.raises(GeometryError) as refused:
+            runner("catia_pad", {"feature": "Pad.1", "length_mm": 11.0})
+        message = str(refused.value)
+
+        name = re.search(r"name='([^']+)'", message).group(1)
+        unit = re.search(r"unit='([^']*)'", message).group(1)
+
+        validate("catia_set_parameter", {"name": name, "value": 11.0, "unit": unit})
+
+    def test_and_then_actually_resizes_the_part(self) -> None:
+        import re
+
+        runner = _plate()
+        with pytest.raises(GeometryError) as refused:
+            runner("catia_pad", {"feature": "Pad.1", "length_mm": 11.0})
+        message = str(refused.value)
+
+        runner(
+            "catia_set_parameter",
+            {
+                "name": re.search(r"name='([^']+)'", message).group(1),
+                "value": 11.0,
+                "unit": re.search(r"unit='([^']*)'", message).group(1),
+            },
+        )
+
+        measured = runner("catia_measure", {})
+        assert measured["bounding_box_mm"]["size"][2] == pytest.approx(11.0, abs=1e-5)
+        assert measured["features"] == ["Pad.1"]

@@ -410,11 +410,27 @@ def _refuse_a_second_identical_build(
             f"call differs from that one only in its size. Building it again would "
             f"leave the part carrying two features where one was meant, and the "
             f"second would sit on top of the first. To change the size, call "
-            f"catia_set_parameter with name='{owner}{separator}{dimension}' — it "
+            f"catia_set_parameter with name='{owner}{separator}{dimension}' and "
+            f"unit='{_unit_for(dimension)}' — it "
             "rewrites the call that built the feature and rebuilds the part from the "
             "top. If you did mean a second, separate feature, say what makes it "
             "different: a direction, an offset, or a different limit."
         )
+
+
+def _unit_for(argument: str) -> str:
+    """The unit `catia_set_parameter` will demand for this argument.
+
+    Included in the advice because that tool requires `unit` and requires it for
+    a real reason — a parameter is typed, and setting a length in degrees is a
+    silent no-op that leaves the model looking unchanged with nothing to explain
+    why. Measured at gate G1: told to use catia_set_parameter and given the name
+    but not the unit, the agent called it without one, was refused, and only got
+    it right on the third attempt. Advice that is nearly complete costs a call.
+    """
+    from app.kernel.occt.operations.parameters import unit_of
+
+    return unit_of(argument)
 
 
 def _no_sketch_message(
@@ -455,7 +471,8 @@ def _no_sketch_message(
             f"{tool} builds a new feature from a sketch; it does not change one that "
             f"already exists, and {wanted!r} already exists. To change a dimension of "
             f"{wanted!r}, call catia_set_parameter with "
-            f"name='{wanted}{separator}{dimension}' — that rewrites the call that built "
+            f"name='{wanted}{separator}{dimension}', unit='{_unit_for(dimension)}' — "
+            "that rewrites the call that built "
             "it and rebuilds the part from the top, so everything downstream moves with "
             "it. Call catia_list_parameters to see the names. Padding the same sketch "
             "again would leave the part carrying two features instead of one changed one."

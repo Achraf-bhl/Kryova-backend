@@ -134,9 +134,13 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation(
         name="catia_sketch_line",
         summary=(
-            "Draw a straight line between two points in the sketch.\n"
-            "Chain these to build an open or closed contour; close the contour exactly "
-            "on the start point or the pad will refuse it."
+            "Draw ONE straight line between two points in the sketch.\n"
+            "For a contour of several segments use catia_sketch_polyline instead, "
+            "which takes the whole list of points in a single call. Drawing a "
+            "profile line by line costs one call per segment, and a C-frame or a "
+            "bracket outline will exhaust a turn before it is closed. Use this "
+            "when you genuinely want one line -- an axis, a single edge added to "
+            "an existing profile."
         ),
         tier=Tier.WRITE,
         workbench=_WB,
@@ -149,9 +153,13 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation(
         name="catia_sketch_polyline",
         summary=(
-            "Draw a connected run of straight lines through a list of points.\n"
-            "This is the fast way to lay down a profile outline. Repeat the first "
-            "point as the last to close it, or set `closed`."
+            "Draw a whole profile outline in one call, through a list of points.\n"
+            "**This is how a non-rectangular profile is drawn.** A C-frame, a "
+            "bracket, a lever, a gib -- give every vertex in order and set "
+            "`closed`, and the contour is one call rather than one per segment. "
+            "Set `closed` rather than repeating the first point at the end; both "
+            "work, but a repeated point is easy to get a fraction wrong and a "
+            "profile that does not close exactly is refused by the pad."
         ),
         tier=Tier.WRITE,
         workbench=_WB,

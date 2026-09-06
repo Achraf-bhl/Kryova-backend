@@ -112,6 +112,14 @@ CORE_TOOLS: Final[frozenset[str]] = frozenset(
         "catia_sketch_create",
         "catia_sketch_rectangle",
         "catia_sketch_circle",
+        # The profile that is not a rectangle or a circle, which is most of
+        # them. Measured on ladder prompt PRO1 (2026-09-06): asked for an arbor
+        # press, the agent spent all twenty rounds drawing the C-frame with
+        # `catia_sketch_line`, one segment per round, and never padded it.
+        # `catia_sketch_polyline` does the same profile in one call and was not
+        # in the offer that turn, so the shape of every real part -- a frame, a
+        # lever, a bracket -- was reachable only by the slowest route there is.
+        "catia_sketch_polyline",
         "catia_pad",
         "catia_pocket",
         # look at your own work — the prompt requires this after every mutation

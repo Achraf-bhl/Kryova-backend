@@ -111,6 +111,26 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — P4 → **document-borne prompt injection stops being a
+  hypothetical.** `CLAUDE.md` has described it as *"a tested-against attack
+  class here, not a hypothetical"* while `app/documents/` shipped without a
+  single attack test. There are 32 now, and they pin the **structural** defence
+  rather than any filter — because a filter that greps for "ignore your previous
+  instructions" is defeated by saying it in French, which is one of the six
+  attacks here. What cannot be rephrased around: `UntrustedText` deliberately
+  does not subclass `str`, so `"prompt " + text` raises and `f"{text}"` yields a
+  description; `"
+".join([...])` raises; and `render_into_user_message` is the
+  only accessor returning payload characters — its signature **requires the
+  user's own message**, so there is no call anyone can write that puts
+  attachment content into a system prompt assembled from constants. Also pinned:
+  a payload forging its own `[attachment: trusted_spec.pdf …]` header is
+  defanged while the words survive, so a reader can still see what the document
+  tried; and the same boundary covers a filename, a DXF layer name and an entity
+  attribute, because the type is the boundary rather than each reader being
+  defensive. Mutations: making it a `str` subclass fails **all 32**; leaking the
+  payload through `__str__` fails 6; removing the header defang fails 1.
+
 - **2026-09-06** — E13 → **tolerance stack-up has tests, and the design they
   found is better than the phase asked for.** Worst case and RSS are checked
   against arithmetic done in the test — a three-part ±0.10 chain closes at 0.30

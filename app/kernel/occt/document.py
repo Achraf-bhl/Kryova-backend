@@ -136,6 +136,10 @@ class PartDocument:
     _document: Any = field(default=None, repr=False)
     _names: NameRegistry | None = field(default=None, repr=False)
     _features: list[Feature] = field(default_factory=list, repr=False)
+    #: Sketches something has actually been built from. A sketch is a drawing
+    #: until a feature consumes it, and an abandoned one is silent by
+    #: construction — see `unused_sketches` for what that cost.
+    _consumed_sketches: set[str] = field(default_factory=set, repr=False)
     _by_name: dict[str, Feature] = field(default_factory=dict, repr=False)
     #: Bodies by name, each holding its own shape. `PartBody` is CATIA's default name
     #: for the one every part starts with, and a design that never mentions bodies uses
@@ -707,6 +711,11 @@ class PartDocument:
 
         payload["features"] = self.feature_names()
         _note_if_in_pieces(payload)
+        unused = self.unused_sketches()
+        if unused:
+            # Absent on a part where every sketch was used, so no payload a
+            # design already asserts against changes. See `unused_sketches`.
+            payload["unused_sketches"] = unused
         if self.material is not None:
             payload["material"] = self.material
         if len(self._bodies) > 1:
@@ -725,6 +734,30 @@ class PartDocument:
                 self._construction[name].to_dict() for name in self.construction_names()
             ]
         return payload
+
+    def note_sketch_used(self, name: str) -> None:
+        """Record that a feature has built from this sketch."""
+        self._consumed_sketches.add(name)
+
+    def unused_sketches(self) -> list[str]:
+        """Sketches that were drawn and never built into anything.
+
+        **Measured at gate G1 on 2026-09-06.** Asked for a plate with a bore and
+        four clearance holes, the agent created a sketch called
+        `Hole Positions`, drew all four circles into it correctly — and then
+        never pocketed it. It padded the outline, measured, reported the mass,
+        and said the holes were done. They were not: the finished part has no
+        holes in it, and every tool call in the run returned `ok`.
+
+        A sketch is not geometry. Drawing one changes nothing about the part, so
+        an abandoned sketch is silent by construction — there is no failed
+        operation anywhere to notice. It is, though, an unusually clear
+        statement of intent: nobody draws four circles for no reason. So a
+        measurement that reports one says so, which is the same rule
+        `assertions.py` applies to an assertion it could not measure — the
+        absence is the finding, and it must not be reported as nothing.
+        """
+        return [name for name in self._sketches if name not in self._consumed_sketches]
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -285,7 +285,75 @@ def _sketch_argument(context: BuildContext, arguments: Mapping[str, Any], tool: 
     named = arguments.get("sketch")
     if not named:
         raise GeometryError(_no_sketch_message(context, arguments, tool))
-    return document.sketch(str(named))
+    _refuse_a_second_identical_build(context, arguments, tool, str(named))
+    resolved = document.sketch(str(named))
+    # Recorded here, at the one place every feature resolves its sketch, so a
+    # new operation cannot forget to.
+    document.note_sketch_used(str(named))
+    return resolved
+
+
+#: Arguments that only *size* a feature. Two calls differing in nothing but one
+#: of these are the same feature at two sizes, which is a parameter change.
+#: Anything else differing — a direction, an offset, a limit — makes the second
+#: call a genuinely different feature and it is allowed through.
+_DIMENSION_ARGUMENTS = frozenset(
+    {"length_mm", "depth_mm", "angle_deg", "radius_mm", "thickness_mm", "name"}
+)
+
+
+def _refuse_a_second_identical_build(
+    context: BuildContext, arguments: Mapping[str, Any], tool: str, sketch: str
+) -> None:
+    """Building the same sketch the same way twice is a resize, not a feature.
+
+    **Measured at gate G1 on 2026-09-06, twice, by two different routes.** Asked
+    to correct a plate's thickness to hit 2.4 kg, the agent padded the same
+    sketch at 10 mm, then at 11 mm, then at 11.5 mm. All three succeeded. The
+    pads are coincident so they fuse and the *geometry* comes out right — the
+    part really is 11.5 mm thick — but the document ends carrying `Pad.1`,
+    `Pad.2` and `Pad.3` where one pad was meant, and the design has no parameter
+    to change any more. On the previous attempt the same intent arrived through
+    `catia_pad {"feature": "Pad.1"}` and was caught by the message above; this is
+    the door it takes when it phrases the request legally.
+
+    The rule is narrow on purpose. Only a call that differs from an earlier one
+    in **nothing but a dimension** is refused: pad the same profile in another
+    direction, or with an offset, or to a different limit, and it is a real
+    second feature and passes. `CLAUDE.md` is explicit that an over-refusal is
+    not safe, because the agent's recovery from one becomes a wrongly built part
+    — so this refuses only the case where there is a right answer to point at,
+    and it points at it.
+    """
+    for entry in context.journal:
+        if entry.tool != tool:
+            continue
+        if str(entry.arguments.get("sketch") or "") != sketch:
+            continue
+        distinguishing = {
+            key
+            for key in set(entry.arguments) | set(arguments)
+            if key not in _DIMENSION_ARGUMENTS
+            and entry.arguments.get(key) != arguments.get(key)
+        }
+        if distinguishing:
+            continue
+        owner = entry.feature or tool.removeprefix("catia_")
+        dimension = next(
+            (key for key in arguments if key in _DIMENSION_ARGUMENTS and key != "name"),
+            "length_mm",
+        )
+        separator = chr(92)
+        raise GeometryError(
+            f"{sketch!r} has already been built into {owner!r} by {tool}, and this "
+            f"call differs from that one only in its size. Building it again would "
+            f"leave the part carrying two features where one was meant, and the "
+            f"second would sit on top of the first. To change the size, call "
+            f"catia_set_parameter with name='{owner}{separator}{dimension}' — it "
+            "rewrites the call that built the feature and rebuilds the part from the "
+            "top. If you did mean a second, separate feature, say what makes it "
+            "different: a direction, an offset, or a different limit."
+        )
 
 
 def _no_sketch_message(

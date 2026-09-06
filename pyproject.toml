@@ -36,6 +36,18 @@ module = [
   # and falls through when it is missing.
   "pdfminer",
   "pdfminer.*",
+  # pyLife (E8, fatigue) and OpenMDAO (E10, optimisation) are the federated
+  # libraries Decision 2 requires rather than hand-written solvers. Neither
+  # ships a py.typed marker, and pandas comes in through pyLife's own API. They
+  # are real dependencies, not optional ones -- this override says only that
+  # they are untyped upstream, which is a fact about them and not a decision of
+  # ours.
+  "pylife",
+  "pylife.*",
+  "openmdao",
+  "openmdao.*",
+  "pandas",
+  "pandas.*",
   "bcrypt.*",
   # pywin32, which `app/catia/bridge.py` imports to drive CATIA over COM. It is
   # installed only on Windows (see the marker in requirements.txt), so CI --
@@ -63,4 +75,13 @@ ignore_missing_imports = true
 # across the package, and `occ()` hands the rest of the kernel plain `Any`.
 [[tool.mypy.overrides]]
 module = ["app.kernel.occt"]
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+# Same treatment, same reason, for the two federated physics libraries. Decision
+# 2 says physics is integrated and never re-implemented, so these imports are the
+# point rather than an accident -- and neither upstream ships a py.typed marker.
+# `ignore_missing_imports` does not cover this: it suppresses import-not-found,
+# and an installed-but-untyped package raises import-untyped instead.
+module = ["app.fatigue.backend", "app.optimise.drivers"]
 disable_error_code = ["import-untyped"]

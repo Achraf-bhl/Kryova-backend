@@ -530,7 +530,37 @@ class SketcherMixin:
         plane: str = "",
         sketch: str = "",
         construction: bool = False,
+        dimension_names: list[str] | None = None,
     ) -> dict[str, Any]:
+        """Draw a rectangle, and give its width and height drivable names.
+
+        **Why the constraints are here and not optional.** Measured on the seat
+        2026-09-06, ladder prompt S1 -- "get it to 2.4 kg by adjusting only its
+        width and height". A rectangle drawn as four free lines has no
+        dimensions: `catia_list_parameters` on a 40 x 40 x 200 block returned
+
+            Extrusion.1\\Première limite\\Longueur   200 mm
+            Extrusion.1\\Sketch.1\\Contact.1\\Activité   1
+            ... and nine more booleans
+
+        The pad length is drivable. The rectangle's width and height do not
+        exist as anything at all, so there is nothing for `catia_set_parameter`
+        to move and no way to converge on a mass target by changing the
+        section. The agent invented a parameter called `WidthHeight`, was
+        correctly refused, and had no way forward.
+
+        Two length constraints on the two perpendicular sides fix that. They
+        leave the rectangle under-constrained in position and rotation, which
+        is deliberate -- it is what it was before, so nothing that already
+        works can become over-constrained -- and they make the two numbers the
+        user actually named into parameters with names.
+
+        **Best-effort, and never fatal.** A release that will not take the
+        constraint, or a profile that is already dimensioned some other way,
+        must not turn a working rectangle into a failed call: ladder prompt H4
+        passes through this exact path. A failure is reported in
+        `dimensions_named` and the geometry is exactly what it was.
+        """
         cu, cv = (float(at[0]), float(at[1])) if at else (0.0, 0.0)
         half_w, half_h = float(width_mm) / 2.0, float(height_mm) / 2.0
         corners = _rotate_about(
@@ -538,13 +568,28 @@ class SketcherMixin:
             math.radians(float(rotation_deg)),
             (cu, cv),
         )
+        wanted = [str(one) for one in (dimension_names or ["width", "height"])][:2]
+        drawn: list[Any] = []
 
         def draw(factory: Any) -> Any:
             for (u1, v1), (u2, v2) in zip(corners, corners[1:] + corners[:1], strict=False):
-                _mark(factory.CreateLine(u1, v1, u2, v2), construction)
+                drawn.append(_mark(factory.CreateLine(u1, v1, u2, v2), construction))
             return None
 
-        return self._draw(draw, plane=plane, sketch=sketch, at=[cu, cv], corners=corners)
+        result = self._draw(draw, plane=plane, sketch=sketch, at=[cu, cv], corners=corners)
+        if not construction and len(drawn) == 4 and len(wanted) == 2:
+            named = _name_the_sides(
+                self, result.get("sketch", ""), drawn, wanted, (float(width_mm), float(height_mm))
+            )
+            result["dimensions_named"] = named
+            if named.get("named"):
+                result["note"] = (
+                    "The width and height are named parameters now: "
+                    + ", ".join(named["named"])
+                    + ". Drive them with catia_set_parameter and re-measure, rather "
+                    "than redrawing the sketch."
+                )
+        return result
 
     def sketch_parallelogram(  # pragma: no cover - Windows only
         self: ComContext,
@@ -816,6 +861,46 @@ class SketcherMixin:
         return result
 
 
+def _name_the_sides(  # pragma: no cover - Windows only
+    context: Any, sketch_name: str, lines: list[Any], names: list[str], sizes: tuple[float, float]
+) -> dict[str, Any]:
+    """Put a named length constraint on one horizontal and one vertical side.
+
+    Returns what happened rather than raising. The caller has already drawn
+    valid geometry, and a rectangle nobody can drive is worth strictly more
+    than a call that failed.
+
+    `lines` arrive in draw order -- bottom, right, top, left -- so index 0 is
+    the width and index 1 is the height whatever the rotation, because both are
+    measured along the shape's own sides rather than along the sketch axes.
+    """
+    report: dict[str, Any] = {"named": [], "skipped": ""}
+    try:
+        part = context._part()
+        sketch = context._sketch_edition[0] if context._sketch_edition else None
+        if sketch is None or str(sketch.Name) != sketch_name:
+            sketch = resolve_element(part, sketch_name) if sketch_name else None
+        if sketch is None:
+            report["skipped"] = "the sketch could not be resolved after drawing"
+            return report
+        constraints = sketch.Constraints
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        report["skipped"] = f"the sketch offered no constraint collection ({exc})"
+        return report
+
+    for line, name, size in zip(lines[:2], names, sizes, strict=False):
+        try:
+            reference = part.CreateReferenceFromObject(line)
+            constraint = constraints.AddMonoEltCst(_LENGTH_CONSTRAINT, reference)
+            constraint.Dimension.Value = float(size)
+            constraint.Name = name
+            report["named"].append(str(constraint.Name))
+        except Exception as exc:  # noqa: BLE001 - reported, never fatal
+            report["skipped"] = f"{name}: {exc}"
+            break
+    return report
+
+
 def _mark(element: Any, construction: bool) -> Any:  # pragma: no cover - Windows only
     """Flag an element as construction geometry when asked.
 
@@ -829,6 +914,12 @@ def _mark(element: Any, construction: bool) -> Any:  # pragma: no cover - Window
         except Exception:  # noqa: BLE001 - not every 2D element supports it
             pass
     return element
+
+
+#: `catCstTypeLength`. The length of one element, which is what a rectangle's
+#: side is. Published in CATIA's own automation enumeration and stable across
+#: releases -- and, unlike a command label, not localised.
+_LENGTH_CONSTRAINT = 5
 
 
 def _add_constraint(  # pragma: no cover - Windows only

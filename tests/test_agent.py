@@ -1335,3 +1335,103 @@ class TestTheCorrectionBudgetIsConsecutive:
             user_message="look around",
         )
         assert "did not manage to write up" in reply.text
+
+
+class TestARepeatedReadIsRefused:
+    """A read that has been answered cannot answer anything new.
+
+    Measured on ladder prompt H4, 2026-09-06, on the seat. From step 12 the
+    agent ran catia_select -> design_history -> catia_list_features ->
+    catia_select -> design_history -> catia_select -> design_history: nine of
+    its twenty rounds, every call succeeding, every call returning exactly what
+    it had returned before, and no geometry built. The turn ended on the round
+    cap with a rectangle and a polygon in one sketch and nothing extruded.
+    """
+
+    def _read(self, times: int) -> list[AssistantTurn]:
+        return [
+            AssistantTurn(tool_calls=[ToolCall(id=str(i), name="list_projects", arguments={})])
+            for i in range(times)
+        ] + [AssistantTurn(text="done")]
+
+    def test_the_third_identical_read_does_not_run(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        provider = ScriptedProvider(self._read(4))
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="look",
+        )
+        errors = [s for s in reply.steps if not s.ok]
+        assert errors, "the loop was never broken"
+        assert "already called list_projects" in str(errors[0].result)
+
+    def test_two_are_allowed_because_a_re_read_is_legitimate(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """Check a list, act, check it again is normal. Three with nothing in
+        between is not."""
+        provider = ScriptedProvider(self._read(2))
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="look",
+        )
+        assert all(s.ok for s in reply.steps)
+
+    def test_the_refusal_says_what_to_do_instead(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """A bare refusal sends the model to a neighbouring read, which is the
+        same loop one tool over."""
+        provider = ScriptedProvider(self._read(4))
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="look",
+        )
+        message = str([s for s in reply.steps if not s.ok][0].result)
+        assert "act on it" in message
+        assert "reading something does not alter it" in message
+
+    def test_different_arguments_are_a_different_read(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        provider = ScriptedProvider(
+            [
+                AssistantTurn(
+                    tool_calls=[ToolCall(id=str(i), name="get_project", arguments={"project_id": p})]
+                )
+                for i, p in enumerate([project.id] * 2 + [project.id] * 2)
+            ]
+            + [AssistantTurn(text="done")]
+        )
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="look",
+        )
+        # Same arguments four times: the guard fires. This is the control for
+        # the fingerprint being about arguments and not only about the name.
+        assert any(not s.ok for s in reply.steps)
+
+    def test_a_mutating_tool_is_never_blocked_by_it(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """A repeated write may be a deliberate second hole. Writes have their
+        own guards and this is not one of them."""
+        from app.ai.tools import ToolBox
+
+        box = _toolbox(db_session, user, project)
+        assert box.is_mutating("run_simulation") is True
+        assert box.is_mutating("list_projects") is False
+        assert ToolBox.is_mutating(box, "no_such_tool") is True

@@ -414,6 +414,10 @@ def stream_agent(
     usage += maybe_summarise(db, provider, conversation)
 
     steps: list[AgentStep] = []
+    #: Read-only calls made this turn, by fingerprint, so a loop is caught.
+    #: Per turn rather than per conversation: re-reading the part on a later
+    #: turn is exactly right, because by then something may have changed it.
+    reads: dict[str, int] = {}
     schemas = toolbox.schemas(
         include_mutating=allow_mutations, only=_shown_tools(toolbox, user_message)
     )
@@ -548,6 +552,16 @@ def stream_agent(
             }
             started = time.monotonic()
             try:
+                # A read repeated verbatim cannot tell the model anything it was
+                # not told the first time, and a model that does it three times
+                # is looping rather than working. See MAX_IDENTICAL_READS.
+                looping = (
+                    _looping_on(call.name, call.arguments, reads)
+                    if not toolbox.is_mutating(call.name)
+                    else None
+                )
+                if looping is not None:
+                    raise ToolError(looping)
                 result: Any = toolbox.call(
                     call.name, call.arguments, allow_mutations=allow_mutations
                 )
@@ -627,6 +641,57 @@ def stream_agent(
         "prompt_tokens": usage.prompt_tokens,
         "completion_tokens": usage.completion_tokens,
     }
+
+
+#: How many times one read-only call may be repeated, byte for byte, inside a
+#: single turn before the tool layer refuses it.
+#:
+#: Measured on ladder prompt H4, 2026-09-06, on the seat. From step 12 the
+#: agent ran `catia_select` -> `design_history` -> `catia_list_features` ->
+#: `catia_select` -> `design_history` -> `catia_select` -> `design_history`.
+#: Nine of its twenty rounds, every call succeeding, every call returning
+#: exactly what it had returned before, and no geometry built. The turn ended
+#: on the round cap with a rectangle and a polygon in one sketch and nothing
+#: extruded.
+#:
+#: A read that has already been answered cannot answer anything new -- the part
+#: has not changed, because reading it changed nothing. So the second identical
+#: call is served with a note, and the third is refused in words that say what
+#: to do instead. Two, not one, because a legitimate re-read does happen: a
+#: model checks a list, acts, and checks it again. What never happens
+#: legitimately is the same read three times with nothing between them.
+#:
+#: Only reads. A repeated *write* is a different question -- it may be a
+#: deliberate second hole -- and the mutating tools have their own guards.
+MAX_IDENTICAL_READS = 2
+
+
+def _read_fingerprint(name: str, arguments: Any) -> str:
+    """A stable key for one read-only call and its arguments."""
+    try:
+        return name + ":" + json.dumps(arguments, sort_keys=True, default=str)
+    except (TypeError, ValueError):  # pragma: no cover - arguments are JSON already
+        return name + ":" + repr(arguments)
+
+
+def _looping_on(name: str, arguments: Any, seen: dict[str, int]) -> str | None:
+    """The refusal for a read that has been made too many times, or None.
+
+    Written as an instruction rather than as a complaint, because the model's
+    response to a bare "no" is to try a neighbouring read, which is the same
+    loop one tool over.
+    """
+    key = _read_fingerprint(name, arguments)
+    seen[key] = seen.get(key, 0) + 1
+    if seen[key] <= MAX_IDENTICAL_READS:
+        return None
+    return (
+        f"You have already called {name} with these exact arguments "
+        f"{seen[key] - 1} times in this turn, and the answer has not changed -- "
+        "reading something does not alter it. Nothing further will come from "
+        "asking again. Use what you were told the first time: act on it, or say "
+        "what you found and what you are going to do about it."
+    )
 
 
 def run_agent(

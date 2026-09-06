@@ -2143,6 +2143,16 @@ class ToolBox:
             if (include_mutating or not tool.mutating) and (only is None or name in only)
         ]
 
+    def is_mutating(self, name: str) -> bool:
+        """Whether `name` changes something. Unknown names count as mutating.
+
+        The safe default in both directions: an unknown name is refused by
+        `call` anyway, and treating it as a read would let it slip past the
+        repeat guard on its way there.
+        """
+        tool = self._tools.get(name)
+        return True if tool is None else tool.mutating
+
     def call(self, name: str, arguments: dict[str, Any], *, allow_mutations: bool) -> Any:
         tool = self._tools.get(name)
         if tool is None:

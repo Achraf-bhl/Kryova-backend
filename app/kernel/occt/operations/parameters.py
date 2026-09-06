@@ -143,15 +143,23 @@ def set_parameter(
     value = _as_number(arguments.get("value"), name)
     _check_unit(arguments.get("unit"), argument, name)
 
+    before = (
+        context.document.measure(detail=context.detail) if context.document else {}
+    )
+
     rebuilt = _replay(context, index=index, argument=argument, value=value)
 
     # Only now, with a complete part in hand, is the old one let go of.
     context.document = rebuilt.document
     context.journal = rebuilt.journal
 
+    after = rebuilt.document.measure(detail=context.detail) if rebuilt.document else {}
+    reshaped = _topology_changed(before, after, argument=argument, value=value)
+
     return {
         "parameter": {"name": name, "value": value, "unit": unit_of(argument)},
         "previous_value": previous,
+        **({"advisory": reshaped} if reshaped else {}),
         "features": rebuilt.document.feature_names() if rebuilt.document else [],
         **(rebuilt.document.measure(detail=context.detail) if rebuilt.document else {}),
     }
@@ -313,6 +321,54 @@ def _replay(context: BuildContext, *, index: int, argument: str, value: float) -
         if rebuilt.document is not None:
             timing.set("solids", rebuilt.document.measure(detail=context.detail).get("solid_count"))
     return rebuilt
+
+
+def _topology_changed(
+    before: Mapping[str, Any], after: Mapping[str, Any], *, argument: str, value: float
+) -> str:
+    """Say so when a rebuild changed the part's *shape*, not just its size.
+
+    **Measured at gate G1 on 2026-09-06.** A plate was padded 10 mm and pocketed
+    with `depth_mm: 10` — a through bore, correctly. The agent then set
+    `Pad.1\\length_mm` to 11.22 to hit a mass target, which replays the part from
+    the top. The pocket's depth is a *literal* in its recorded call, so it stayed
+    at 10 mm in an 11.22 mm plate: **the through bore silently became a blind
+    one**, with 1.22 mm of floor left in it. The render showed the bore dashed —
+    a hidden line — and every number in the run was correct. The mass came to
+    2.4005 kg against a 2.4 kg target, which is 0.5 g, and the part had a hole
+    that does not go through it.
+
+    This tool's own docstring promises that changing a dimension "rebuilds the
+    part from the top, so every feature that depends on it moves with it". A
+    literal does not move, and that is exactly the gap. Making depths follow the
+    material is a real design change — `through_all` already exists and is the
+    right answer for a clearance hole — but the *silence* is fixable now.
+
+    Face count is the signal, and it is exact rather than heuristic: a through
+    hole contributes one cylindrical face, a blind one contributes a cylinder
+    **and a floor**. Seven faces became eight in the measured case. A change in
+    `solid_count` matters more still — the part came apart or fused — and is
+    reported first.
+    """
+    was_solids, now_solids = before.get("solid_count"), after.get("solid_count")
+    was_faces, now_faces = before.get("face_count"), after.get("face_count")
+
+    if isinstance(was_solids, int) and isinstance(now_solids, int) and was_solids != now_solids:
+        return (
+            f"Setting {argument} to {value} changed the part from {was_solids} solid(s) "
+            f"to {now_solids}. A rebuild that splits or merges a part is almost never "
+            "what a dimension change was meant to do."
+        )
+    if isinstance(was_faces, int) and isinstance(now_faces, int) and was_faces != now_faces:
+        return (
+            f"Setting {argument} to {value} changed the part's face count from "
+            f"{was_faces} to {now_faces}, so the rebuild changed its *shape* and not "
+            "only its size. The usual cause is a pocket or hole whose depth is a "
+            "literal: it does not grow with the material, so a cut that went through "
+            "now stops inside. Check it, and use through_all for a hole that must "
+            "always break out."
+        )
+    return ""
 
 
 __all__ = ["LIST", "SET", "list_parameters", "set_parameter", "unit_of"]

@@ -278,9 +278,49 @@ Recorded here rather than quietly corrected in the board, because this report is
 the evidence somebody would go back to, and it blamed a model for something the
 product was doing.
 
+## Attempt 6 — after the tool-selection fix. **CLOSEST YET, still failed**
+
+Re-run once E16.1 landed, because the correction above says tool selection had
+been withholding `catia_set_parameter` on this very prompt. 20 calls, 357 s.
+
+**The behaviour changed exactly as predicted.** The agent called
+`catia_list_parameters` *unprompted* as its fourth call — it has never done that
+— then `catia_set_parameter`, twice with a guessed name (`thickness_mm`, refused
+both times), then correctly with `Pad.1\length_mm` after re-listing. It also
+reached for `catia_pattern_rectangular` instead of drawing four circles. That is
+the fix working: the tools were there to be found.
+
+Final mass **2.400500 kg** against a 2.4 kg target — **0.5 grams**, the closest
+any attempt has come.
+
+And the part is still wrong, for two reasons, one of them ours.
+
+**Theirs:** `catia_pattern_rectangular(count=2, spacing_mm=50, second_count=2,
+second_spacing_mm=50)` from a hole at (25, 25) puts all four holes in **one
+quadrant**, two of them clipped by the top edge. Not "25 mm in from each corner".
+
+**Ours, and it is the more interesting one.** The bore is drawn **dashed** in
+`g1-run6-top.png` — a hidden line, because it is a *blind* hole. The pocket was
+created with `depth_mm: 10` when the plate was 10 mm thick, which was correct.
+Setting `Pad.1\length_mm` to 11.22 replays the part from the top, and the
+pocket's depth is a **literal** in its recorded call, so it stayed at 10 mm in an
+11.22 mm plate. A through bore silently became a blind one with 1.22 mm of floor.
+
+`catia_set_parameter`'s own docstring promises that changing a dimension
+"rebuilds the part from the top, so every feature that depends on it moves with
+it". A literal does not move. Every number in the run was correct and the mass
+landed 0.5 g from target on a plate whose main hole does not go through it.
+
+Fixed to the extent it can be without a design change: face count is an exact
+signal — a through hole contributes one cylindrical face, a blind one a cylinder
+*and a floor*, so seven became eight — and the result now carries an advisory
+naming the likely cause and pointing at `through_all`, which is immune and is
+tested to be. Making depths follow the material is a larger change and is not
+pretended here.
+
 ## Rung reached
 
-**Rung 2 comfortably; rung 3 not passed.** Rung 3 has now failed three times, for
+**Rung 2 comfortably; rung 3 not passed, six attempts.** The trend is real though: attempt 6 came within 0.5 g with the correction loop running properly and the parameter tool used unprompted, and its two remaining faults are a pattern the model placed wrongly and a literal depth that our own replay does not update. Rung 3 has now failed three times, for
 three different reasons, and each attempt has produced a real fix: the parameter
 tool that did not exist, the inner profile padded as a boss, and tonight the part
 that came apart without saying so. That is the ladder working as intended.

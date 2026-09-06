@@ -148,6 +148,24 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — **gate G1, attempt 6: the tool-selection fix works, and a
+  through bore silently became a blind one.** Re-running rung 3 after E16.1
+  landed, the agent called `catia_list_parameters` **unprompted** as its fourth
+  call — it has never done that — then used `catia_set_parameter` correctly, and
+  reached for `catia_pattern_rectangular` rather than drawing four circles. Final
+  mass **2.400500 kg** against 2.4 kg: **0.5 grams**, the closest any attempt has
+  come. The part is still wrong, and the new reason is ours. The bore was
+  pocketed `depth_mm: 10` into a 10 mm plate — correct — and then
+  `Pad.1\length_mm` was set to 11.22, which replays the part; the pocket's depth
+  is a **literal** in its recorded call, so it stayed at 10 in an 11.22 mm plate
+  and **a through bore became blind with 1.22 mm of floor**. The render shows it
+  dashed. `catia_set_parameter` promises that "every feature that depends on it
+  moves with it", and a literal does not move. Face count is the exact signal — a
+  through hole is one cylindrical face, a blind one a cylinder *and a floor*, so
+  seven became eight — and the result now says so, names the cause and points at
+  `through_all`, which is immune and tested to be. Making depths follow the
+  material is a design change and is not pretended.
+
 - **2026-09-06** — two snapshot tests corrected rather than re-pinned, after
   adding the assembly tools broke both. `test_only_two_queue_implementations_exist`
   asserted over `JobQueue.__subclasses__()`, which is every subclass alive in the

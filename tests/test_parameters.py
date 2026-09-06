@@ -458,3 +458,106 @@ class TestEverySpellingAModelCanProduceIsAccepted:
             runner("catia_set_parameter",
                    {"name": "Pad.1" + chr(92) + "nonsense_mm", "value": 1.0,
                     "unit": "mm"})
+
+
+class TestARebuildThatChangedTheShapeSaysSo:
+    """Gate G1, 2026-09-06: a through bore silently became a blind one.
+
+    A plate padded 10 mm and pocketed `depth_mm: 10` has a through bore.
+    Setting `Pad.1\length_mm` to 11.22 to hit a mass target replays the part —
+    and the pocket's depth is a *literal* in its recorded call, so it stayed at
+    10 mm in an 11.22 mm plate. The bore now stops 1.22 mm short of the far face.
+
+    Every number in that run was right. The mass came to 2.4005 kg against a
+    2.4 kg target — 0.5 g — on a plate with a hole that does not go through it.
+    Only the render gave it away, drawn dashed because it is a hidden line.
+
+    `catia_set_parameter` promises that "every feature that depends on it moves
+    with it". A literal does not move. Making depths follow the material is a
+    design change and `through_all` already exists for a hole that must break
+    out; what is fixed here is the **silence**.
+
+    Face count is the exact signal: a through hole contributes one cylindrical
+    face, a blind one a cylinder *and* a floor.
+    """
+
+    def _plate_with_a_through_bore(self):
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "p"})
+        runner("catia_sketch_create", {"support": "XY", "name": "o"})
+        runner("catia_sketch_rectangle", {"sketch": "o", "width_mm": 200.0, "height_mm": 150.0})
+        runner("catia_pad", {"sketch": "o", "length_mm": 10.0})
+        runner("catia_sketch_create", {"support": "XY", "name": "bore"})
+        runner("catia_sketch_circle", {"sketch": "bore", "diameter_mm": 60.0})
+        runner("catia_pocket", {"sketch": "bore", "depth_mm": 10.0})
+        return runner
+
+    def test_growing_the_plate_turns_the_through_bore_blind(self) -> None:
+        """The defect itself, pinned so it cannot come back unnoticed."""
+        runner = self._plate_with_a_through_bore()
+        before = runner("catia_measure", {})["face_count"]
+
+        runner("catia_set_parameter", {"name": "Pad.1\length_mm", "value": 11.22, "unit": "mm"})
+
+        assert runner("catia_measure", {})["face_count"] == before + 1
+
+    def test_the_result_says_the_shape_changed(self) -> None:
+        runner = self._plate_with_a_through_bore()
+
+        out = runner(
+            "catia_set_parameter", {"name": "Pad.1\length_mm", "value": 11.22, "unit": "mm"}
+        )
+
+        assert "advisory" in out
+        assert "face count" in out["advisory"]
+
+    def test_it_names_the_likely_cause_and_the_fix(self) -> None:
+        """A flag the agent cannot act on is a flag it will ignore."""
+        runner = self._plate_with_a_through_bore()
+
+        out = runner(
+            "catia_set_parameter", {"name": "Pad.1\length_mm", "value": 11.22, "unit": "mm"}
+        )
+
+        assert "literal" in out["advisory"]
+        assert "through_all" in out["advisory"]
+
+    def test_through_all_is_immune(self) -> None:
+        """The recommended fix must actually work, or the advice is noise."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "p"})
+        runner("catia_sketch_create", {"support": "XY", "name": "o"})
+        runner("catia_sketch_rectangle", {"sketch": "o", "width_mm": 200.0, "height_mm": 150.0})
+        runner("catia_pad", {"sketch": "o", "length_mm": 10.0})
+        runner("catia_sketch_create", {"support": "XY", "name": "bore"})
+        runner("catia_sketch_circle", {"sketch": "bore", "diameter_mm": 60.0})
+        runner("catia_pocket", {"sketch": "bore", "through_all": True})
+        before = runner("catia_measure", {})["face_count"]
+
+        out = runner(
+            "catia_set_parameter", {"name": "Pad.1\length_mm", "value": 11.22, "unit": "mm"}
+        )
+
+        assert runner("catia_measure", {})["face_count"] == before
+        assert "advisory" not in out
+
+    def test_a_plain_resize_carries_no_advisory(self) -> None:
+        """The guard must cost a legitimate change nothing, or it stops meaning
+        anything."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        runner("catia_new_part", {"name": "p"})
+        runner("catia_sketch_create", {"support": "XY", "name": "o"})
+        runner("catia_sketch_rectangle", {"sketch": "o", "width_mm": 60.0, "height_mm": 40.0})
+        runner("catia_pad", {"sketch": "o", "length_mm": 10.0})
+
+        out = runner(
+            "catia_set_parameter", {"name": "Pad.1\length_mm", "value": 12.0, "unit": "mm"}
+        )
+
+        assert "advisory" not in out

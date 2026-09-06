@@ -207,6 +207,7 @@ class SketcherMixin:
     def sketch_create(  # pragma: no cover - Windows only
         self: ComContext, *, support: str, name: str = "", origin: list[float] | None = None
     ) -> dict[str, Any]:
+        self._refuse_to_pile_up_empty_sketches()
         closed = self._end_sketch_edition()
         if name:
             self._refuse_a_duplicate_name(name)
@@ -232,13 +233,56 @@ class SketcherMixin:
         if closed is not None:
             result["closed_previous"] = closed
         empty = self._empty_sketch_count()
-        if empty > 2:
+        if empty > 1:
             result["note"] = (
                 f"This part now holds {empty} sketches with nothing drawn in them. "
                 "Draw into this one before creating another, or say what is not "
                 "working -- creating more sketches will not make the last one build."
             )
         return result
+
+    def _refuse_to_pile_up_empty_sketches(self: ComContext) -> None:  # pragma: no cover
+        """Refuse a new sketch while empty ones are already stacking up.
+
+        Reported and not acted on until 2026-09-06, and the report was not
+        enough. Measured twice on the seat:
+
+        * ladder prompt H4 run 1 -- eight empty sketches in the tree and a bare
+          strip of a part;
+        * ladder prompt PRO1 run 2 -- `Frame profile`, `C-Frame outline` and
+          `Frame outline`, created and closed without a line in any of them,
+          while the turn ran out of rounds.
+
+        An empty sketch is a perfectly successful `sketch_create`, so nothing
+        failed and nothing said stop. But creating a second one before drawing
+        in the first is never the way out of anything: whatever went wrong with
+        the last sketch is still wrong, and the tree fills with names that
+        `catia_list_features` then has to report and the agent has to read past.
+
+        The threshold is two, not one. One empty sketch is the ordinary state
+        between `sketch_create` and the first line, and a caller that creates a
+        sketch, thinks again and creates another on a different plane is doing
+        something reasonable. Three is a loop.
+
+        Deleting them instead was the other option and is worse: the sketch the
+        caller means to draw into on the very next call is empty at exactly
+        this moment.
+        """
+        empty = self._empty_sketch_count()
+        if empty < 2:
+            return
+        names = [
+            str(sketch.Name)
+            for sketch in self._sketches_in_part()
+            if _is_empty(sketch)
+        ]
+        raise CatiaOperationError(
+            f"This part already holds {empty} sketches with nothing drawn in them "
+            f"({', '.join(names[:4])}), so another one was not created. Nothing was "
+            "changed. Draw into one of them -- catia_sketch_polyline takes a whole "
+            "profile in one call -- or close it with catia_sketch_close. Creating "
+            "more sketches will not make the last one build."
+        )
 
     def sketch_close(  # pragma: no cover - Windows only
         self: ComContext, *, sketch: str = ""
@@ -899,6 +943,14 @@ def _name_the_sides(  # pragma: no cover - Windows only
             report["skipped"] = f"{name}: {exc}"
             break
     return report
+
+
+def _is_empty(sketch: Any) -> bool:  # pragma: no cover - Windows only
+    """Whether a sketch holds nothing but its own axis system."""
+    try:
+        return int(sketch.GeometricElements.Count) <= 1
+    except Exception:  # noqa: BLE001 - unreadable is not empty
+        return False
 
 
 def _mark(element: Any, construction: bool) -> Any:  # pragma: no cover - Windows only

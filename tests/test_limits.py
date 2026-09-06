@@ -68,7 +68,7 @@ class TestElementCountEstimate:
         monkeypatch.setattr(settings, "max_elements", 1_000)
         with pytest.raises(MeshError) as caught:
             check_mesh_request(BAR, element_size_mm=1.0)
-        assert "Increase element_size_mm" in str(caught.value)
+        assert "Use at least" in str(caught.value)
 
     def test_a_reasonable_request_passes(self) -> None:
         check_mesh_request(BAR, element_size_mm=10.0)
@@ -97,3 +97,52 @@ class TestSilentCases:
     def test_a_zero_extent_box_is_not_refused(self) -> None:
         flat = {"bounding_box": {"size": [0, 0, 0]}}
         check_mesh_request(flat, element_size_mm=0.0001)
+
+
+class TestTheSizeThatWouldFit:
+    """The refusal names a usable size. Measured on ladder prompt H4 run 8
+    (2026-09-06): "increase element_size_mm" cost the agent a queued run, a
+    failed run, a poll and a resubmission to reach a number the check already
+    knew."""
+
+    def test_it_is_computed_from_the_element_budget(self, monkeypatch) -> None:
+        from app.simulation.limits import finest_element_size_mm
+
+        monkeypatch.setattr(settings, "max_elements", 1_000)
+        finest = finest_element_size_mm(BAR)
+        assert finest is not None
+        # 24,000 mm^3 * 6 / 1,000 = 144 mm^3 per tet -> h = 5.24 mm, rounded up.
+        assert finest == pytest.approx(5.3)
+
+    def test_it_is_rounded_up_never_down(self, monkeypatch) -> None:
+        """A size rounded down is one the estimate then refuses by a hair."""
+        from app.simulation.limits import finest_element_size_mm
+
+        monkeypatch.setattr(settings, "max_elements", 1_000)
+        check_mesh_request(BAR, finest_element_size_mm(BAR))
+
+    def test_the_diagonal_floor_wins_when_it_is_coarser(self, monkeypatch) -> None:
+        from app.simulation.limits import finest_element_size_mm
+
+        monkeypatch.setattr(settings, "max_elements", 10**12)
+        monkeypatch.setattr(settings, "max_elements_along_diagonal", 10)
+        finest = finest_element_size_mm(BAR)
+        assert finest is not None
+        assert finest >= (20**2 + 20**2 + 60**2) ** 0.5 / 10
+
+    def test_no_box_means_no_number(self) -> None:
+        from app.simulation.limits import finest_element_size_mm
+
+        assert finest_element_size_mm({}) is None
+
+    def test_both_refusals_carry_it(self, monkeypatch) -> None:
+        monkeypatch.setattr(settings, "max_elements", 1_000)
+        with pytest.raises(MeshError, match="Use at least 5.3 mm"):
+            check_mesh_request(BAR, element_size_mm=1.0)
+        with pytest.raises(MeshError, match="Use at least 5.3 mm"):
+            check_mesh_request(BAR, element_size_mm=0.001)
+
+    def test_the_refusal_offers_the_automatic_size(self, monkeypatch) -> None:
+        monkeypatch.setattr(settings, "max_elements", 1_000)
+        with pytest.raises(MeshError, match="omit element_size_mm"):
+            check_mesh_request(BAR, element_size_mm=1.0)

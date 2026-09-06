@@ -13,8 +13,9 @@ written for the model, not for a docs page.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from app.solve.materials import MATERIALS
 from app.solve.types import LoadCase
 
 Verdict = Literal["safe", "marginal", "yields"]
@@ -157,3 +158,101 @@ class LoadCaseDraft(BaseModel):
             "the run. Empty when the description was complete."
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# The load-case sketch: what a small local model is asked to fill in.
+# ---------------------------------------------------------------------------
+
+#: The six faces of a part's bounding box, by the words an engineer uses. +Z is
+#: up, +X is to the right, +Y is away from the viewer; `load_case_sketch.py`
+#: turns each into the `FaceSelector` the solver reads.
+FaceName = Literal["top", "bottom", "left", "right", "front", "back"]
+
+#: Every material the solver's library holds, by slug. Built from the library
+#: rather than typed, so adding a material to `solve/materials.py` adds it to
+#: the schema's `enum` and to the validator with no edit here.
+MATERIAL_NAMES: tuple[str, ...] = tuple(sorted(MATERIALS))
+
+
+class Support(BaseModel):
+    """One face that is held."""
+
+    face: FaceName = Field(description="Which face of the part is held.")
+    kind: Literal["clamp", "roller", "symmetry"] = Field(
+        default="clamp",
+        description=(
+            "'clamp' holds the face completely (bolted, welded, glued) and is right "
+            "unless the description clearly says a sliding support or a symmetry plane."
+        ),
+    )
+
+
+class AppliedLoad(BaseModel):
+    """One load on one face: a total force vector, or a pressure."""
+
+    face: FaceName = Field(description="Which face carries the load.")
+    force_n: list[float] = Field(
+        default_factory=list,
+        max_length=3,
+        description=(
+            "Total force over the face as [x, y, z] in newtons. A 500 N weight "
+            "hanging down is [0, 0, -500]. Leave empty when giving a pressure."
+        ),
+    )
+    pressure_mpa: float = Field(
+        default=0.0,
+        description="Uniform pressure on the face in MPa, or 0 when giving a force.",
+    )
+
+
+class LoadCaseSketch(BaseModel):
+    """A load case in the words of the description, before the solver's shape.
+
+    This is what the model fills in, and it is deliberately not `LoadCase`.
+    Measured on ladder prompt H4, 2026-09-06: handing the solver's own type --
+    two discriminated unions, fourteen definitions, 14,445 characters of JSON
+    Schema -- to a 9B model as a decoding grammar cost 146 s, 146 s and 38 s
+    for one empty answer and two that did not match the schema. Every field
+    here is a word from a short list or a number, no field is a union, and the
+    whole schema is under 3k characters; `load_case_sketch.realise` builds the
+    real `LoadCase` from it in Python, where the shape can never be wrong.
+    """
+
+    name: str = Field(description="A short name for this loading, e.g. 'Tip load'.")
+    material: str = Field(
+        description="The library material, by slug. 'mild steel' is steel-1018.",
+        # An enum in the grammar, so the model cannot spell one that is not
+        # there; the validator below is the same rule for a hosted provider
+        # that treats the enum as advice.
+        json_schema_extra={"enum": list(MATERIAL_NAMES)},
+    )
+    supports: list[Support] = Field(min_length=1, max_length=4)
+    loads: list[AppliedLoad] = Field(min_length=1, max_length=4)
+    self_weight: bool = Field(
+        default=False, description="True when the part's own weight is part of the loading."
+    )
+    assumptions: list[str] = Field(
+        max_length=6,
+        description=(
+            "Every value you chose that the user did not state -- material, direction "
+            "convention, which face was fixed. One short sentence each."
+        ),
+    )
+    unresolved: list[str] = Field(
+        max_length=6,
+        description=(
+            "Anything genuinely ambiguous that the engineer must confirm before trusting "
+            "the run. Empty when the description was complete."
+        ),
+    )
+
+    @field_validator("material")
+    @classmethod
+    def _in_the_library(cls, value: str) -> str:
+        if value not in MATERIALS:
+            raise ValueError(
+                f"{value!r} is not in the material library; choose one of "
+                + ", ".join(MATERIAL_NAMES)
+            )
+        return value

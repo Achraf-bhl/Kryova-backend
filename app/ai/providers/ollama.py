@@ -33,6 +33,7 @@ from app.ai.provider import (
     ToolCall,
     VisionUnsupported,
 )
+from app.ai.providers._json_schema import local_decoding_problem
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,15 @@ EVERY_LAYER = 999
 #: truth.
 IMAGE_PROMPT_TOKENS = 1_600
 
+#: How many times a structured answer is asked for again when the first one
+#: came back empty or did not match its schema, with the problem fed back as
+#: the next user message. One. Phase 16.4's rule -- diagnose, repair, bounded
+#: retry -- applied at the smallest scale there is: a second attempt that sees
+#: what was wrong with the first is a different request, a third that does not
+#: is the same one. Measured on ladder prompt H4 (2026-09-06): three failures
+#: in a row at 146 s each, none of which was told what the previous one did.
+STRUCTURED_ATTEMPTS = 2
+
 #: Pause before the retry. Short -- Ollama is a local process, so this is not
 #: backing off a rate limit, just not hammering a server mid-hiccup.
 RETRY_BACKOFF_S = 0.5
@@ -179,6 +189,29 @@ def _refuse_if_truncated(body: dict[str, Any], num_ctx: int) -> None:
             "before the model saw them. Start a new conversation, or switch to a "
             "model with a larger window."
         )
+
+
+def _answer_budget(effort: str, max_tokens: int) -> int:
+    """How many tokens a structured answer may run to.
+
+    The effort level's own budget, capped by the caller's. `max_tokens` is the
+    product-wide ceiling (8,000) and was being sent as `num_predict` for every
+    structured call; a 9B model walking a grammar it cannot satisfy generates
+    until it hits that ceiling, which at ~30 tokens/s is the 146 s measured on
+    ladder prompt H4. A load case is a few hundred tokens of JSON; "low"
+    effort's 1,024 is room for three of them.
+    """
+    return max(1, min(max_tokens, _EFFORT_PREDICT.get(effort, max_tokens)))
+
+
+def _repair_message(problem: str) -> str:
+    """The second attempt's brief: what was wrong, and the one rule that fixes it."""
+    first_line = problem.splitlines()[0] if problem else "The answer was empty."
+    return (
+        f"Your previous answer could not be used: {first_line} Answer again with "
+        "only the JSON object, every required field present, no field left as a "
+        "placeholder, and nothing outside the object."
+    )
 
 
 class OllamaProvider(LLMProvider):
@@ -351,21 +384,24 @@ class OllamaProvider(LLMProvider):
         effort: str,
         max_tokens: int,
     ) -> Completion[T]:
-        payload: dict[str, Any] = {
-            "model": self._model,
-            "stream": False,
+        grammar = schema.model_json_schema()
+        self._refuse_an_undecodable_schema(grammar, schema.__name__)
+        messages: list[dict[str, Any]] = [
             # System first: the same ordering every hosted provider wants for
             # prefix caching, and Ollama reuses its own KV cache across calls
             # that share one.
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "stream": False,
+            "messages": messages,
             # Constrains decoding to the schema rather than asking politely.
-            "format": schema.model_json_schema(),
+            "format": grammar,
             "options": self._with_gpu_layers(
                 {
-                    "num_predict": max_tokens,
+                    "num_predict": _answer_budget(effort, max_tokens),
                     # Room for the answer as well as the prompt: `num_ctx`
                     # covers both, so a window sized to the prompt alone
                     # truncates it by exactly the length of the reply.
@@ -377,32 +413,68 @@ class OllamaProvider(LLMProvider):
             ),
         }
 
-        try:
-            response = httpx.post(f"{self._base_url}/api/chat", json=payload, timeout=self._timeout)
-            response.raise_for_status()
-        except httpx.TimeoutException as exc:
-            raise LLMError(
-                f"Ollama did not respond within {self._timeout:g}s. A larger model on "
-                "CPU can exceed this -- raise AI_TIMEOUT_SECONDS or use a smaller model."
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise LLMError(f"Ollama request failed: {exc}") from exc
+        problem = ""
+        usage = TokenUsage()
+        for attempt in range(STRUCTURED_ATTEMPTS):
+            if problem:
+                # The repair brief. A retry that repeats the request verbatim
+                # draws another sample from the same distribution; one that
+                # names the defect is a different, easier question.
+                messages.append({"role": "user", "content": _repair_message(problem)})
+            try:
+                response = httpx.post(
+                    f"{self._base_url}/api/chat", json=payload, timeout=self._timeout
+                )
+                response.raise_for_status()
+            except httpx.TimeoutException as exc:
+                raise LLMError(
+                    f"Ollama did not respond within {self._timeout:g}s. A larger model on "
+                    "CPU can exceed this -- raise AI_TIMEOUT_SECONDS or use a smaller model."
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise LLMError(f"Ollama request failed: {exc}") from exc
 
-        body = response.json()
-        content = body.get("message", {}).get("content", "")
-        if not content.strip():
-            raise LLMError("Ollama returned an empty response.")
+            body = response.json()
+            usage += _usage(body)
+            content = body.get("message", {}).get("content", "")
+            if not content.strip():
+                problem = "Ollama returned an empty response."
+            else:
+                try:
+                    return Completion(value=schema.model_validate_json(content), usage=usage)
+                except ValidationError as exc:
+                    # Schema-constrained decoding makes this rare, but a small
+                    # quantised model can still stop early and truncate the JSON.
+                    problem = (
+                        "Ollama returned output that does not match the expected "
+                        f"schema: {exc}"
+                    )
+                except json.JSONDecodeError:
+                    problem = "Ollama returned malformed JSON."
+            if attempt + 1 < STRUCTURED_ATTEMPTS:
+                logger.warning(
+                    "Structured answer for %s failed (%s); retrying %d of %d with the "
+                    "problem fed back",
+                    schema.__name__,
+                    problem.splitlines()[0],
+                    attempt + 1,
+                    STRUCTURED_ATTEMPTS - 1,
+                )
+        raise LLMError(problem)
 
-        try:
-            return Completion(value=schema.model_validate_json(content), usage=_usage(body))
-        except ValidationError as exc:
-            # Schema-constrained decoding makes this rare, but a small quantised
-            # model can still stop early and truncate the JSON.
-            raise LLMError(
-                f"Ollama returned output that does not match the expected schema: {exc}"
-            ) from exc
-        except json.JSONDecodeError as exc:
-            raise LLMError("Ollama returned malformed JSON.") from exc
+    @staticmethod
+    def _refuse_an_undecodable_schema(grammar: dict[str, Any], name: str) -> None:
+        """Fail in no time with the reason, rather than in minutes without one.
+
+        Measured on ladder prompt H4 (2026-09-06): the solver's own `LoadCase`
+        schema handed to qwen3.5:9b as a grammar cost 146 s per attempt and
+        never produced a valid answer. The budget in `_json_schema.py` is the
+        line; this is where a schema that crosses it is turned back with the
+        number that put it over, before any GPU time is spent.
+        """
+        problem = local_decoding_problem(grammar, name=name)
+        if problem is not None:
+            raise LLMError(problem)
 
     def _sees(self) -> bool:
         """Whether the model a visual check would run against can take an image.
@@ -477,6 +549,8 @@ class OllamaProvider(LLMProvider):
             + max_tokens
             + IMAGE_PROMPT_TOKENS * len(images),
         )
+        grammar = schema.model_json_schema()
+        self._refuse_an_undecodable_schema(grammar, schema.__name__)
         payload: dict[str, Any] = {
             "model": model,
             "stream": False,
@@ -488,7 +562,7 @@ class OllamaProvider(LLMProvider):
                     "images": [base64.b64encode(one).decode("ascii") for one in images],
                 },
             ],
-            "format": schema.model_json_schema(),
+            "format": grammar,
             "options": self._with_gpu_layers({"num_predict": max_tokens, "num_ctx": window}),
         }
 

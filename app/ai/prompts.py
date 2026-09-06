@@ -719,34 +719,40 @@ did not.
 
 {_UNITS_AND_INTEGRITY}
 
-The geometry's bounding box is supplied with each request. Use it to resolve \
-words like "the top" or "the left end" into an axis and a side. Assume +Z is up \
-and gravity acts along -Z unless the description says otherwise, and record \
-that as an assumption whenever you rely on it.
+The geometry's bounding box is supplied with each request. Use it to work out \
+which face is which: the long direction of a cantilever is the axis with the \
+largest size, and its free end is the face at the far end of that axis. +Z is \
+up, +X is to the right, +Y is away from the viewer, and gravity acts along -Z \
+unless the description says otherwise; record that as an assumption whenever \
+you rely on it.
 
-Selectors:
+Faces are named, not computed. Every support and every load names one of six \
+faces of the bounding box: `top` (+Z), `bottom` (-Z), `right` (+X), `left` \
+(-X), `back` (+Y), `front` (-Y). "The base" is `bottom`; "the wall end" of a \
+bracket lying along X is `left`; "the free end" is the opposite face. Choose \
+the face the words point at and say in `assumptions` which words you read \
+that way.
 
-- A `face` selector takes the extreme face along one axis -- axis x/y/z, side \
-min/max. This is what "the top face", "the base", "the far end" mean.
-- A `box` selector takes every node inside an axis-aligned box in millimetres. \
-Use it only when the description points at a region that is not a whole face, \
-such as a bolt pattern or a pad partway along a beam.
+Supports and loads:
 
-Fixtures and loads:
-
-- A fixture with all three dofs is a fully welded or bolted clamp. Restrain a \
-subset only when the description clearly describes a roller, a sliding support \
-or a symmetry plane.
-- `force_n` is the total force over the region as a vector in newtons; the \
-solver spreads it by tributary area. A downward 500 N is `[0, 0, -500]`.
+- A `clamp` holds the face completely -- bolted, welded, glued, built in. It \
+is right unless the description clearly says a roller, a sliding support or \
+a symmetry plane.
+- `force_n` is the total force over the face as `[x, y, z]` in newtons; the \
+solver spreads it over the face. A downward 500 N is `[0, 0, -500]`. Give a \
+force *or* a pressure on each load, never both and never neither.
+- Set `self_weight` true only when the description says the part's own weight \
+matters.
 - A mass in kilograms hanging under gravity is a force of mass * 9.81 N. This \
 is the one arithmetic step you are permitted, because it is a unit bridge \
 rather than a physics result -- record it as an assumption.
 
 Material selection:
 
-- Use the exact library name when the engineer names a material or an obvious \
-synonym ("aluminium" -> aluminium-6061-t6, "steel" -> steel-1018).
+- `material` is one of the library slugs below, exactly as written. Use the \
+obvious one when the engineer names a material or a synonym ("aluminium" -> \
+aluminium-6061-t6, "steel" or "mild steel" -> steel-1018, "stainless" -> \
+stainless-304).
 - When no material is stated, use aluminium-6061-t6 and record that choice as \
 an assumption. Never invent property values for a material outside the library; \
 if they describe one that is not here, put it in `unresolved`.
@@ -757,9 +763,11 @@ Library:
 Every value the engineer did not state goes in `assumptions`. Anything you \
 genuinely cannot resolve -- an unstated magnitude, a direction that could be \
 read two ways, an unsupported part -- goes in `unresolved` rather than being \
-guessed into the load case. A model with at least one fixture and one load is \
-required; if the description supports neither, say so in `unresolved` and use \
-the most defensible reading you can for the structured fields.
+guessed into the load case. At least one support and one load are required; \
+if the description supports neither, say so in `unresolved` and use the most \
+defensible reading you can for the structured fields. Keep `assumptions` and \
+`unresolved` to a few short sentences each -- they are read by an engineer, \
+not filed.
 """
 
 

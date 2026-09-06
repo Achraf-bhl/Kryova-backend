@@ -11,9 +11,10 @@ import json
 from typing import Any
 
 from app.ai import prompts
+from app.ai.load_case_sketch import SketchProblem, realise
 from app.ai.provider import Completion, LLMError, LLMProvider, TokenUsage
 from app.ai.sanitise import sanitise_untrusted
-from app.ai.schemas import LoadCaseDraft, ResultInterpretation
+from app.ai.schemas import LoadCaseDraft, LoadCaseSketch, ResultInterpretation
 from app.core.config import settings
 
 #: Titles are one short line; anything more is the model ignoring the prompt.
@@ -94,17 +95,32 @@ def draft_load_case(
     The result is a *draft*: it comes back with its assumptions and unresolved
     questions attached, and the caller is expected to show both rather than
     submitting it straight to the solver.
+
+    The model is asked for a `LoadCaseSketch` -- six face words, a material
+    slug, numbers -- and never for `LoadCase` itself. The solver's type is two
+    discriminated unions and 14k characters of schema, and measured on
+    qwen3.5:9b (ladder prompt H4, 2026-09-06) it cost 146 s per attempt and
+    failed three times running; the sketch is under 3.5k and has no fork in
+    it. `realise` builds the real case in Python, where the shape cannot be
+    wrong. `SketchProblem` -- a description with no load magnitude in it --
+    is an `LLMError` here because to every caller it is the same thing: the
+    draft did not come, and this is why.
     """
-    return provider.complete(
+    completion = provider.complete(
         system=prompts.PARSE_LOAD_CASE_SYSTEM,
         user=prompts.parse_load_case_user_message(
             description=description,
             bounding_box=json.dumps(bounding_box, indent=2, sort_keys=True, default=str),
         ),
-        schema=LoadCaseDraft,
+        schema=LoadCaseSketch,
         effort=settings.ai_effort_parse,
         max_tokens=settings.ai_max_tokens,
     )
+    try:
+        draft = realise(completion.value)
+    except SketchProblem as exc:
+        raise LLMError(str(exc)) from exc
+    return Completion(value=draft, usage=completion.usage)
 
 
 def _fallback_title(user_message: str) -> str:

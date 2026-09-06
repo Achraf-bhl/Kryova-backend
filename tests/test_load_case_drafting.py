@@ -214,3 +214,73 @@ class TestTheTool:
         unread."""
         spec = named(ToolBox(db=db_session, user=user))["draft_load_case"]
         assert "assumptions" in spec["description"]
+
+
+class TestAMeshThatCannotFitIsRefusedAtSubmit:
+    """Measured on H4 run 8 (2026-09-06): the agent asked for 2 mm elements
+    on a bracket that would need 1.68 million of them. The runner refused --
+    as a *failed job*, discovered by polling, answered by resubmitting: three
+    of the twenty rounds. Here the refusal is the tool's own answer, in the
+    same round, with the size that fits."""
+
+    @pytest.fixture
+    def geometry(self, db_session: Session, project: Project, user: User):
+        from app.models import GeometryVersion, Media, MediaKind
+
+        media = Media(
+            owner_id=user.id,
+            kind=MediaKind.CAD,
+            filename="bracket.stl",
+            content_type="model/stl",
+            size_bytes=128,
+            sha256="0" * 64,
+        )
+        db_session.add(media)
+        db_session.flush()
+        version = GeometryVersion(
+            project_id=project.id,
+            media_id=media.id,
+            version_number=1,
+            filename="bracket.stl",
+            file_format="stl",
+            stats={
+                "bounding_box": {"min": [0, 0, 0], "max": [150, 40, 10], "size": [150, 40, 10]}
+            },
+        )
+        db_session.add(version)
+        db_session.flush()
+        return version
+
+    def test_the_refusal_comes_from_run_simulation_with_a_usable_size(
+        self, db_session: Session, user: User, project: Project, geometry
+    ) -> None:
+        submitted: list[object] = []
+
+        class _Queue:
+            def submit(self, job):  # pragma: no cover - must never run
+                submitted.append(job)
+
+        box = ToolBox(
+            db=db_session,
+            user=user,
+            project_id=project.id,
+            job_queue=_Queue(),
+            session_scope=object(),
+            media_store=object(),
+        )
+        with pytest.raises(ToolError) as raised:
+            box.call(
+                "run_simulation",
+                {"load_case": json.loads(_LOAD_CASE_EXAMPLE), "element_size_mm": 0.01},
+                allow_mutations=True,
+            )
+        message = str(raised.value)
+        assert "Use at least" in message
+        assert "omit element_size_mm" in message
+        # Verified by breaking it: nothing was queued and no job row exists.
+        assert submitted == []
+        from sqlalchemy import select
+
+        from app.models import SimulationJob
+
+        assert db_session.scalars(select(SimulationJob)).first() is None

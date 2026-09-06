@@ -49,12 +49,42 @@ def estimate_element_count(volume_mm3: float, element_size_mm: float) -> float:
     return volume_mm3 / (element_size_mm**3 / _TETS_PER_CUBE)
 
 
+def finest_element_size_mm(stats: dict[str, Any] | None) -> float | None:
+    """The smallest element size this geometry can be meshed at within the limits.
+
+    The size that lands exactly on the element budget, rounded *up* to two
+    significant figures so the number in the message is one the request can
+    actually use -- `4.2 mm` rather than `4.1837 mm`, and never a value that
+    the estimate then refuses by a rounding hair. None when the geometry has
+    no recorded box to estimate from.
+    """
+    extents = bounding_box_size(stats)
+    if extents is None:
+        return None
+    diagonal = float(np.linalg.norm(np.asarray(extents, dtype=np.float64)))
+    if diagonal <= 0.0:
+        return None
+    volume = _solid_volume(stats) or float(np.prod(np.asarray(extents, dtype=np.float64)))
+    by_count = (volume * _TETS_PER_CUBE / settings.max_elements) ** (1.0 / 3.0)
+    by_diagonal = diagonal / settings.max_elements_along_diagonal
+    finest = max(by_count, by_diagonal)
+    if finest <= 0.0:
+        return None
+    magnitude = 10.0 ** (np.floor(np.log10(finest)) - 1)
+    return float(np.ceil(finest / magnitude) * magnitude)
+
+
 def check_mesh_request(stats: dict[str, Any] | None, element_size_mm: float | None) -> None:
     """Raise `MeshError` for a request that cannot end well.
 
     Silent when the geometry has no recorded bounding box or the element size is
     automatic -- the automatic size is derived from that same box and is safe by
     construction.
+
+    The refusal names the size that would fit. Measured on ladder prompt H4 run
+    8 (2026-09-06): "increase element_size_mm to coarsen it" cost the agent a
+    queued run, a failed run, a poll and a resubmission -- three of its twenty
+    rounds -- to arrive at a number this function already knew.
     """
     if element_size_mm is None:
         return
@@ -66,12 +96,15 @@ def check_mesh_request(stats: dict[str, Any] | None, element_size_mm: float | No
     if diagonal <= 0.0:
         return
 
+    finest = finest_element_size_mm(stats)
+    advice = f" Use at least {finest:g} mm, or omit element_size_mm for an automatic size."
+
     floor = diagonal / settings.max_elements_along_diagonal
     if element_size_mm < floor:
         raise MeshError(
             f"An element size of {element_size_mm:g} mm is finer than "
             f"{settings.max_elements_along_diagonal:,} elements across the part's "
-            f"{diagonal:,.1f} mm diagonal. Use at least {floor:.4g} mm."
+            f"{diagonal:,.1f} mm diagonal.{advice}"
         )
 
     # A solid volume, where the format gives one, beats the bounding box: a
@@ -82,8 +115,7 @@ def check_mesh_request(stats: dict[str, Any] | None, element_size_mm: float | No
     if estimate > settings.max_elements:
         raise MeshError(
             f"An element size of {element_size_mm:g} mm would produce roughly "
-            f"{estimate:,.0f} elements, over the {settings.max_elements:,} limit. "
-            "Increase element_size_mm to coarsen it."
+            f"{estimate:,.0f} elements, over the {settings.max_elements:,} limit.{advice}"
         )
 
 

@@ -276,6 +276,46 @@ fixed and guarded.
 
 Run 5 is with all four fixed.
 
+**Runs 5-8 (2026-09-06): FAIL, and the failures moved up the stack each time.**
+By run 8 the bracket was built, a view captured, the STEP exported, a load case
+drafted and a simulation queued that **succeeded** (`dc16b12f`, 4 mm elements,
+~63k). The turn still died on the round cap, and the three rounds it was short
+of are accounted for exactly:
+
+5. `catia_hole_at` put the two M8 holes on the part but the update went into
+   error, and CATIA raised `Diagnostic de la mise a jour` -- a modal, so it held
+   COM. Heartbeats stopped, the device went offline, every later call failed
+   with "no CATIA workstation is connected", and the seat stayed dead until a
+   human clicked. Now recognised by the document's own name in the title (never
+   by wording, which is translated), cleared with **Escape** and never a button
+   -- that box carries Delete, Deactivate and Isolate.
+6. Faces read as `PlanarFace`, not `TriDim`; the edge filter had been copied to
+   the face path and matched nothing.
+7. `catia_select` and the in-work object, both fixed and re-run.
+8. **Drafting the load case cost 5m 31s and three of the twenty rounds** --
+   146,768 ms (empty answer), 145,988 ms and 38,269 ms (two answers that did
+   not match the schema) -- and then **three more rounds** went on a mesh: a
+   2 mm request queued, failed in the worker with "increase element_size_mm",
+   was discovered by a poll, and was resubmitted at 4 mm.
+
+   Both were ours, and neither was really about this prompt:
+
+   * `draft_load_case` handed the model `LoadCaseDraft`, which wraps the
+     solver's own `LoadCase` -- 13,510 characters of JSON Schema with twelve
+     choices between object shapes. A 9B model decoding against that grammar
+     walks it for thousands of tokens and then guesses. Replaced by
+     `LoadCaseSketch`: six face words, a material slug, numbers, 3,386
+     characters, no fork; `app/ai/load_case_sketch.py` builds the real
+     `LoadCase` in Python, where the shape cannot be wrong. The rule is now
+     general -- `local_decoding_problem` refuses *any* over-budget schema
+     before a request is sent, and `tests/test_local_schema_budget.py` asserts
+     it over every schema the product ships.
+   * a mesh request too fine for the element budget was refused by the worker,
+     which the agent can only learn by polling. It is refused by
+     `run_simulation` itself now, in the same round, and the message carries
+     the size that would have fitted.
+
+
 ### H5 — Unit trap
 
 - [ ] **H5**

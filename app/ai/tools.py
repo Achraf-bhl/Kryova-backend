@@ -42,6 +42,7 @@ from app.geometry import backends
 from app.geometry.formats import GEOMETRY_FORMATS
 from app.jobs import JobQueue
 from app.media import LocalMediaStore, MediaService
+from app.mesh.types import MeshError
 from app.models import (
     Conversation,
     ConversationMessage,
@@ -53,6 +54,7 @@ from app.models import (
     User,
 )
 from app.retrieval import knowledge_service
+from app.simulation.limits import check_mesh_request
 from app.simulation.runner import SessionScope, run_simulation
 from app.solve.linear_static import LinearStaticSolver
 from app.solve.materials import MATERIALS
@@ -1177,6 +1179,17 @@ class ToolBox:
         version = self.db.scalars(stmt).first()
         if version is None:
             raise ToolError("No matching geometry version. Call list_geometry to see what exists.")
+
+        # Before the queue, not in the worker. The runner makes the same check,
+        # but a refusal from there arrives as a *failed job* -- which the agent
+        # discovers only by polling, and answers by resubmitting. Ladder prompt
+        # H4 run 8 (2026-09-06) spent three of its twenty rounds on exactly
+        # that. Here it is one round, and the message carries the size that
+        # would have fitted.
+        try:
+            check_mesh_request(version.stats, element_size_mm)
+        except MeshError as exc:
+            raise ToolError(str(exc)) from exc
 
         # Refuse a duplicate rather than silently burning compute on a run the
         # user already has -- the agent cannot see cost, so the tool enforces it.

@@ -999,6 +999,176 @@ class CatiaCom(
             "'...\\Sketch.1\\width\\Longueur'."
         )
 
+    def drive_to(  # pragma: no cover - Windows only
+        self,
+        *,
+        name: str,
+        measurement: str,
+        target: float,
+        tolerance: float = 0.01,
+        also: list[str] | None = None,
+        max_attempts: int = 8,
+    ) -> dict[str, Any]:
+        """Adjust a parameter until a measured property reaches `target`.
+
+        **Why this is a tool and not a prompt.** Measured on the seat
+        2026-09-06, ladder prompt S1 -- "get it to 2.4 kg by adjusting only its
+        width and height, keeping them equal". Once the dimensions were
+        drivable and findable, the agent did run the loop, and this is what it
+        produced:
+
+            set parameter -> 2.391014 kg
+            set parameter -> 2.418087 kg
+            set parameter -> 2.464193 kg
+            set parameter -> 2.537374 kg
+            set parameter -> 2.464195 kg
+
+        The 1% band around 2.4 kg is 2.376 to 2.424. It landed inside twice,
+        did not notice, and wandered out again -- then ran out of rounds. A
+        small model cannot hold a numerical search across tool calls: it has no
+        stable memory of the bracket it is inside, and every step costs a
+        round of a budget of twenty.
+
+        The search is arithmetic, so it belongs in arithmetic. Secant on
+        (value, measurement) pairs, which converges in two or three rebuilds
+        for anything monotonic -- and mass against a dimension always is.
+        Every iteration is a local COM round trip, about 1.3 s, so the whole
+        thing costs one tool call and a few seconds instead of one round each.
+
+        **It reports what it measured, never what it aimed at.** The returned
+        value is the last real measurement, `reached` says whether it is inside
+        the tolerance, and a run that does not converge says so and leaves the
+        part at the best value it found. An unconverged number reported as a
+        result is the failure this product exists to prevent.
+        """
+        drivers = [name, *(also or [])]
+        reader = self._measure_reader(measurement)
+        tolerance = abs(float(tolerance)) or 0.01
+        band = abs(float(target)) * tolerance
+        history: list[dict[str, float]] = []
+
+        current = self._parameter_value(drivers[0])
+        measured = reader()
+        history.append({"value": current, measurement: measured})
+        best = (abs(measured - target), current, measured)
+
+        if abs(measured - target) <= band:
+            return self._drive_result(
+                drivers, measurement, target, band, history, current, measured, True
+            )
+
+        # A 5% nudge to get a second point. Small enough to stay in the
+        # neighbourhood the derivative describes, large enough that a rounded
+        # measurement still moves.
+        previous_value, previous_measured = current, measured
+        current = current * 1.05 if current else 1.0
+
+        for _ in range(int(max_attempts)):
+            for driver in drivers:
+                self._set_parameter_value(driver, current)
+            self._part().Update()
+            measured = reader()
+            history.append({"value": current, measurement: measured})
+            error = abs(measured - target)
+            if error < best[0]:
+                best = (error, current, measured)
+            if error <= band:
+                return self._drive_result(
+                    drivers, measurement, target, band, history, current, measured, True
+                )
+
+            slope = (measured - previous_measured) / (current - previous_value or 1e-9)
+            previous_value, previous_measured = current, measured
+            if abs(slope) < 1e-12:
+                # The measurement does not respond to this parameter. Stepping
+                # again divides by nothing and produces an absurd value; saying
+                # so is the useful answer.
+                break
+            step = (target - measured) / slope
+            nxt = current + step
+            if not (nxt > 0.0) or nxt > 1e7:
+                break
+            current = nxt
+
+        # Leave the part at the best value actually measured, not at whatever
+        # the last extrapolation happened to be.
+        for driver in drivers:
+            self._set_parameter_value(driver, best[1])
+        self._part().Update()
+        return self._drive_result(
+            drivers, measurement, target, band, history, best[1], best[2], False
+        )
+
+    def _measure_reader(self, measurement: str):  # pragma: no cover - Windows only
+        """A callable returning the named measurement of the whole part."""
+        allowed = {"mass_kg", "volume_mm3", "area_mm2"}
+        if measurement not in allowed:
+            raise CatiaOperationError(
+                f"{measurement!r} is not something this can drive to. "
+                f"Choose one of: {', '.join(sorted(allowed))}."
+            )
+
+        def read() -> float:
+            payload = self.measure()
+            value = payload.get(measurement)
+            if not isinstance(value, (int, float)):
+                raise CatiaOperationError(
+                    f"The part reports no {measurement}, so there is nothing to drive "
+                    "to. Assign a material first if you are aiming at a mass."
+                )
+            return float(value)
+
+        return read
+
+    def _parameter_value(self, name: str) -> float:  # pragma: no cover - Windows only
+        parameter = self._find_parameter(self._part().Parameters, name)
+        try:
+            return float(parameter.Value)
+        except (TypeError, ValueError) as exc:
+            raise CatiaOperationError(
+                f"Parameter {name!r} holds no number, so it cannot be driven."
+            ) from exc
+
+    def _set_parameter_value(self, name: str, value: float) -> None:  # pragma: no cover
+        parameter = self._find_parameter(self._part().Parameters, name)
+        parameter.Value = float(value)
+
+    @staticmethod
+    def _drive_result(  # pragma: no cover - Windows only
+        drivers: list[str],
+        measurement: str,
+        target: float,
+        band: float,
+        history: list[dict[str, float]],
+        value: float,
+        measured: float,
+        reached: bool,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "parameters": drivers,
+            "value": value,
+            "measurement": measurement,
+            measurement: measured,
+            "target": target,
+            "reached": reached,
+            "attempts": len(history) - 1,
+            "history": history,
+        }
+        if reached:
+            result["note"] = (
+                f"Measured, not calculated: {measurement} is {measured:.6g} with "
+                f"{', '.join(drivers)} at {value:.6g}, inside the {band:.4g} tolerance "
+                "of the target. Report the measured value."
+            )
+        else:
+            result["note"] = (
+                f"NOT reached. The closest measured {measurement} was {measured:.6g} "
+                f"against a target of {target:.6g}, with {', '.join(drivers)} at "
+                f"{value:.6g}, and the part has been left there. Say that it did not "
+                "converge -- do not report the target as though it were achieved."
+            )
+        return result
+
     def set_parameter(  # pragma: no cover - Windows only
         self, *, name: str, value: float, unit: str
     ) -> dict[str, Any]:

@@ -76,6 +76,72 @@ OPERATIONS: tuple[Operation, ...] = (
         ),
     ),
     Operation(
+        name="catia_drive_to",
+        summary=(
+            "Adjust a parameter until a measured property of the part reaches a "
+            "target, and report what it converged on.\n"
+            "Use this for every 'make it weigh X' or 'get the volume to Y' "
+            "request instead of setting a value, measuring, and setting again: "
+            "the search runs here, on the workstation, so it costs one call "
+            "rather than one call per guess, it stops the moment it is inside "
+            "the tolerance, and it cannot talk itself into a number it did not "
+            "measure.\n"
+            "Give the parameter by the name catia_list_parameters reports, or by "
+            "one unique part of it -- 'width' finds the width dimension of a "
+            "rectangle. The part must already build: this changes a number and "
+            "rebuilds, it does not repair a feature that is in error."
+        ),
+        tier=Tier.WRITE,
+        workbench=_WB,
+        params=(
+            required("name", vocab.element_reference("The parameter to adjust.")),
+            required(
+                "measurement",
+                one_of(
+                    ("mass_kg", "volume_mm3", "area_mm2"),
+                    "Which measured property of the part to drive to the target.",
+                ),
+            ),
+            required(
+                "target",
+                raw(
+                    {
+                        "type": "number",
+                        "description": (
+                            "The value to reach, in the measurement's own unit -- "
+                            "kilograms, cubic millimetres or square millimetres. "
+                            "Nothing here converts units."
+                        ),
+                    }
+                ),
+            ),
+            optional(
+                "tolerance",
+                raw(
+                    {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": (
+                            "How close counts as reached, as a fraction of the "
+                            "target. Default 0.01, which is 1%."
+                        ),
+                    }
+                ),
+            ),
+            optional(
+                "also",
+                name_list(
+                    "Other parameters to hold equal to the one being driven, by "
+                    "name. 'keeping the width and height equal' is this."
+                ),
+            ),
+            optional(
+                "max_attempts",
+                count("How many rebuilds to allow. Default 8.", minimum=2, maximum=20),
+            ),
+        ),
+    ),
+    Operation(
         name="catia_parameter_create",
         summary=(
             "Create a new named parameter — a length, angle, integer, real, boolean, "

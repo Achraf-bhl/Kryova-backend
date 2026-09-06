@@ -299,8 +299,10 @@ def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client
     # since `catia_assembly_component` and `catia_assembly_place` landed
     # (E14) without this pin being moved with them; 204 since
     # `catia_close_document`, so the agent can put a part away rather than
-    # leaving a window open per conversation.
-    assert len(tools) == 204
+    # leaving a window open per conversation; 205 since `catia_drive_to`,
+    # which converges a parameter on a measured target inside one call rather
+    # than costing the agent a round per guess (ladder prompt S1, 2026-09-06).
+    assert len(tools) == 205
     by_name = {tool["name"]: tool for tool in tools}
 
     # The original 39 by name, not just by count. The registry rewrite could

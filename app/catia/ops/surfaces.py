@@ -182,15 +182,24 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation(
         name="catia_surface_primitive",
         summary=(
-            "Create a analytic surface primitive — a sphere or a cylinder — from its "
+            "Create an analytic primitive — a sphere, a cylinder or a box — from its "
             "centre or axis and its radius.\n"
-            "Faster and more robust than revolving a curve when the shape genuinely is "
-            "a sphere or a cylinder."
+            "Faster and more robust than revolving or padding a profile when the shape "
+            "genuinely is one of these. For a box, radius_mm is the half-width of a "
+            "square cross-section and length_mm is the height."
         ),
         tier=Tier.WRITE,
         workbench=_WB,
         params=(
-            required("kind", one_of(("sphere", "cylinder"), "Which primitive.")),
+            # "box" was implemented in the OCCT handler for months and never
+            # declared here. Nothing failed: `validate()` does not enforce an
+            # enum, so a call would have worked — but the model is only ever
+            # shown this schema, so it could not know the kind existed. A
+            # working capability the product did not have, which is the same
+            # shape as the OCCT kernel being unreachable from `dispatch.py`,
+            # two orders of magnitude smaller. `TestEveryImplementedKindIsDeclared`
+            # keeps the two in step.
+            required("kind", one_of(("sphere", "cylinder", "box"), "Which primitive.")),
             required("radius_mm", length("Radius.")),
             optional("centre", vocab.element_reference("Centre point, for a sphere.")),
             optional("axis", vocab.element_reference("Axis line, for a cylinder.")),

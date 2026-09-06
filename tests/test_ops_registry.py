@@ -252,3 +252,45 @@ def test_required_and_optional_land_in_the_right_half_of_the_schema() -> None:
     schema = operation.json_schema()
     assert schema["required"] == ["length_mm"]
     assert set(schema["properties"]) == {"length_mm", "thin"}
+
+
+class TestEveryImplementedKindIsDeclared:
+    """A handler branch the model is never shown is a capability nobody has.
+
+    `catia_surface_primitive`'s OCCT handler has implemented `kind="box"` since
+    it was written, and the registry declared only `sphere` and `cylinder`.
+    Nothing failed: `dispatch.validate()` does not enforce an enum, so a call
+    would have worked. But the model is only ever shown the declared schema, so
+    it could not know the kind existed — the same shape as the OCCT kernel being
+    green on 108 operations while `dispatch.py` had no way to reach it, two
+    orders of magnitude smaller.
+
+    Found by an agent whose test fixture used `kind="box"` and had to be
+    rewritten to sketch-and-pad instead. It is pinned here rather than fixed and
+    forgotten, because the next primitive will be added to one of the two places
+    first.
+    """
+
+    def test_the_declared_kinds_are_the_implemented_ones(self) -> None:
+        import inspect
+        import re
+
+        from app.catia.tool_specs import get_spec
+        from app.kernel.occt.operations import primitives
+
+        declared = set(
+            get_spec("catia_surface_primitive").parameters["properties"]["kind"]["enum"]
+        )
+        implemented = set(
+            re.findall(r'kind == "(\w+)"', inspect.getsource(primitives))
+        )
+
+        assert implemented, "the handler should branch on kind; the regex found nothing"
+        assert implemented <= declared, (
+            f"implemented but not declared, so the model can never ask for it: "
+            f"{sorted(implemented - declared)}"
+        )
+        assert declared <= implemented, (
+            f"declared but not implemented, so the model will ask and be refused: "
+            f"{sorted(declared - implemented)}"
+        )

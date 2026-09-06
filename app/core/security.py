@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -88,3 +89,69 @@ def decode_refresh_token(token: str) -> str | None:
 def decode_access_token(token: str) -> str | None:
     """Return the subject of an access token, or None if it is not one."""
     return _decode_typed(token, ACCESS_TOKEN_TYPE)
+
+
+# ---------------------------------------------------------------------------
+# Impersonation (P3.3)
+# ---------------------------------------------------------------------------
+
+IMPERSONATION_TOKEN_TYPE = "impersonation"
+
+
+@dataclass(frozen=True)
+class ImpersonationClaims:
+    """The two identities a staff token carries, and the session behind them.
+
+    `subject` is who the work runs as; `actor` is who is really doing it. They
+    are separate claims, never one "effective user": a token that carried only
+    the subject would be indistinguishable from that user's own credential, and
+    every row it produced would libel them.
+
+    `session_id` is what makes the token revocable. The mode is *not* carried
+    here on purpose -- it is read from `impersonation_sessions` on every
+    request, so ending or escalating a session takes effect at once and cannot
+    be outvoted by a token minted before the change.
+    """
+
+    actor_id: str
+    subject_id: str
+    session_id: str
+
+
+def create_impersonation_token(
+    *, actor_id: str, subject_id: str, session_id: str, expires_at: datetime
+) -> str:
+    """Mint a token that runs as `subject_id` while naming `actor_id`.
+
+    Signed with the same key as everything else, and distinguished by `type` --
+    which is exactly why `_decode_typed` refuses to accept one anywhere an
+    access token is expected. Without that check an impersonation token would
+    be a normal login as the subject, with the actor's name silently dropped.
+    """
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "sub": subject_id,
+            "act": actor_id,
+            "sid": session_id,
+            "exp": expires_at,
+            "iat": now,
+            "type": IMPERSONATION_TOKEN_TYPE,
+        },
+        settings.secret_key,
+        algorithm=ALGORITHM,
+    )
+
+
+def decode_impersonation_token(token: str) -> ImpersonationClaims | None:
+    """Both identities, or None if this is not a valid impersonation token."""
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+    except JWTError:
+        return None
+    if payload.get("type") != IMPERSONATION_TOKEN_TYPE:
+        return None
+    actor, subject, session_id = payload.get("act"), payload.get("sub"), payload.get("sid")
+    if not (isinstance(actor, str) and isinstance(subject, str) and isinstance(session_id, str)):
+        return None
+    return ImpersonationClaims(actor_id=actor, subject_id=subject, session_id=session_id)

@@ -9,6 +9,16 @@ The distinction that matters throughout: a **reference** is the part itself, an
 **instance** is one placement of it in an assembly. Editing a reference changes
 every instance; moving an instance changes only that one. Confusing the two is
 how a change intended for one bolt silently moves all forty.
+
+**Two of these operations have no CATIA command behind them**, and they are
+marked `server_only` rather than tucked into the family above:
+`catia_assembly_component` and `catia_assembly_place`. Every other operation here
+positions files against each other on a seat; those two compose an assembly out
+of parts built in the conversation itself, which is what the open geometry kernel
+has instead of files. The comment above them says what a seat does instead and
+why the two paths are not merged. `app/assembly/` is the module they reach —
+product structure, clash and mass roll-up — and `app/kernel/occt/operations/
+assembly_ops.py` is what executes them.
 """
 
 from __future__ import annotations
@@ -24,6 +34,7 @@ from app.catia.ops.spec import (
     flag,
     length,
     name_list,
+    name_of,
     new_name,
     one_of,
     optional,
@@ -147,6 +158,108 @@ OPERATIONS: tuple[Operation, ...] = (
             optional("nomenclature", text("Descriptive name for the BOM.", maximum=200)),
             optional("instance_name", text("Name for this particular placement.", maximum=120)),
             optional("source", one_of(("made", "bought", "unknown"), "Made in-house or bought in.")),
+        ),
+    ),
+    # -- composing an assembly from parts built in this conversation ---------
+    #
+    # Two operations the family above cannot express, for one reason that
+    # applies to both: **on a seat a component is a file.**
+    # `catia_component_add(kind="existing", document=...)` names a CATPart on
+    # disk, and `catia_constrain` positions it against other files. The open
+    # geometry kernel has no disk — a part is live in memory and the next
+    # `catia_new_part` replaces it — so a component has to be *taken* from the
+    # conversation at the moment it is finished, rather than pointed at later.
+    #
+    # They are `server_only` because of that and not as a category: there is no
+    # COM method behind either, and there is not meant to be. On a seat the
+    # equivalent sequence is `catia_save_part` then `catia_component_add`, which
+    # is a different sequence and stays that one — so a bridge never sees these
+    # and the daemon refuses them if one ever arrives.
+    Operation(
+        name="catia_assembly_component",
+        summary=(
+            "Record the part that is open now as a component of the assembly, and "
+            "close it so the next component can be started.\n"
+            "A component is defined once and placed many times: this stores the "
+            "part's shape, material and mass under `name`, and leaves no part open, "
+            "so the next call is catia_new_part for the next component. Nothing "
+            "appears in the assembly until you place an instance of it with "
+            "catia_assembly_place — recording a component and never placing it is "
+            "reported as a component defined and never used, not as an error."
+        ),
+        tier=Tier.WRITE,
+        workbench=_WB,
+        server_only=True,
+        params=(
+            required(
+                "name",
+                new_name(
+                    "What to call this component. Lowercase letters, digits and "
+                    "underscores — 'leg', 'top_rail'. It is the name every "
+                    "occurrence path, clash finding and bill-of-materials line "
+                    "uses afterwards."
+                ),
+            ),
+            optional(
+                "description",
+                text("What the component is, for the bill of materials.", maximum=200),
+            ),
+        ),
+    ),
+    Operation(
+        name="catia_assembly_place",
+        summary=(
+            "Place an instance of a component in the assembly, at a position and an "
+            "orientation.\n"
+            "One component, many instances: four legs are one "
+            "catia_assembly_component and four of these. Give the position with "
+            "`at`, and where the part has to be turned give `turn_axis` and "
+            "`turn_deg` — do not work out the rotated position yourself. Each "
+            "instance gets its own occurrence path ('frame/leg.2'), and that path "
+            "is what a clash report and a mass roll-up name."
+        ),
+        tier=Tier.WRITE,
+        workbench=_WB,
+        server_only=True,
+        params=(
+            required(
+                "component",
+                name_of(
+                    "Which component to place. It must already have been recorded "
+                    "with catia_assembly_component."
+                ),
+            ),
+            optional(
+                "tag",
+                new_name(
+                    "What to call this run of instances in the occurrence path — "
+                    "'leg' gives leg.1, leg.2, leg.3. Defaults to the component's "
+                    "own name. The number is allocated here and never renumbered, "
+                    "so a path written down today still means the same part."
+                ),
+            ),
+            optional(
+                "at",
+                point3("Where the component's own origin goes in the assembly."),
+            ),
+            optional(
+                "turn_axis",
+                one_of(
+                    ("x", "y", "z"),
+                    "Turn the component about this assembly axis, through the "
+                    "assembly origin, before moving it to `at`. Omit for a part "
+                    "that is not rotated.",
+                ),
+            ),
+            optional(
+                "turn_deg",
+                signed_angle(
+                    "How far to turn the component about turn_axis. Requires "
+                    "turn_axis; a rail lying along X becomes one lying along Y at "
+                    "90 about z."
+                ),
+            ),
+            optional("note", text("Why this instance is here.", maximum=200)),
         ),
     ),
     # -- constraints ---------------------------------------------------------

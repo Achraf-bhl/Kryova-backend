@@ -4923,7 +4923,7 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
             "properties": {
                 "kind": {
                     "type": "string",
-                    "enum": ["sphere", "cylinder"],
+                    "enum": ["sphere", "cylinder", "box"],
                     "description": "Which primitive.",
                 },
                 "radius_mm": {
@@ -7045,7 +7045,9 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
 
 #: Answered by the server. A frame carrying one of these arrived from
 #: somewhere it should not have, and is refused rather than guessed at.
-SERVER_ONLY: frozenset[str] = frozenset(["catia_status"])
+SERVER_ONLY: frozenset[str] = frozenset(
+    ["catia_assembly_component", "catia_assembly_place", "catia_status"]
+)
 
 #: Tool -> backend method. Kept as data so `session.py` cannot reach a
 #: method that is not on this list, whatever arrives on the wire.

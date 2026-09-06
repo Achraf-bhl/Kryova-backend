@@ -70,13 +70,22 @@ class TestTheLadderIsTheMasterPlansLadder:
         with pytest.raises(KeyError, match="M1"):
             mission("M42")
 
-    def test_exactly_one_rung_is_buildable_today(self) -> None:
-        """Coverage is measured, not asserted. This number moves as E18 lands."""
+    def test_the_rungs_that_are_buildable_today(self) -> None:
+        """Coverage is measured, not asserted. This number moves as E18 lands.
+
+        M2 joined it on 2026-09-06, when `app.assembly` gave the ladder its first
+        rung that is a product rather than a part.
+        """
         buildable = [m.rung for m in LADDER if m.buildable]
-        assert buildable == ["M1"], (
-            "If a rung became buildable, give it a spec and assertions and update "
-            "this test deliberately — it is the coverage figure."
+        assert buildable == ["M1", "M2"], (
+            "If a rung became buildable, give it a spec or an assembly and its "
+            "assertions, and update this test deliberately — it is the coverage figure."
         )
+
+    def test_a_rung_that_builds_says_what_it_still_does_not_claim(self) -> None:
+        """M2's geometry is checked and its welds are not sized. Both are facts."""
+        assert mission("M1").unproven == ()
+        assert any("E6" in caveat for caveat in mission("M2").unproven)
 
     def test_every_pending_rung_names_a_phase_that_owns_the_gap(self) -> None:
         """"Not yet buildable" with no reason is indistinguishable from forgotten."""
@@ -158,6 +167,17 @@ def _runner_returning(payload: Mapping[str, Any]):
     return runner
 
 
+def _harness_ladder() -> tuple[Mission, ...]:
+    """M1 and every rung nobody can build — the ladder a fake payload can answer for.
+
+    M2 is left out here, and only here. It is an assembly: its claims are measured
+    off real geometry through `app.assembly`, so a mock payload cannot satisfy it and
+    its entirely correct failure would drown out what these tests are about, which is
+    how a *pending* rung is reported. `tests/test_mission_m2.py` runs it for real.
+    """
+    return (mission("M1"), *[m for m in LADDER if not m.buildable])
+
+
 class TestAPendingRungIsNeverAPass:
     """`assertions.UNMEASURED` one level up: a rung nobody climbed is not green."""
 
@@ -178,27 +198,32 @@ class TestAPendingRungIsNeverAPass:
 
         run_ladder(counting)
 
-        assert calls == ["made"], "one runner for M1, none for the eight pending rungs"
+        assert calls == ["made"] * 3, (
+            "one runner for M1 and one for each of M2's two members, none for the "
+            "seven pending rungs"
+        )
 
     def test_pending_rungs_do_not_make_the_report_red(self) -> None:
         """A suite red until M9 lands is a suite somebody switches off."""
-        report = run_ladder(lambda: _runner_returning(_payload()))
+        report = run_ladder(lambda: _runner_returning(_payload()), _harness_ladder())
 
         assert report.ok
-        assert len(report.pending) == 8
+        assert len(report.pending) == 7
 
     def test_but_the_ladder_is_not_complete(self) -> None:
         """`ok` is the regression question; `complete` is the programme question."""
-        report = run_ladder(lambda: _runner_returning(_payload()))
+        report = run_ladder(lambda: _runner_returning(_payload()), _harness_ladder())
 
         assert not report.complete
 
     def test_the_sentence_a_human_reads_never_claims_full_coverage(self) -> None:
         """The failure this prevents: "9/9" read off a suite that ran one rung."""
-        summary = run_ladder(lambda: _runner_returning(_payload())).summary()
+        summary = run_ladder(
+            lambda: _runner_returning(_payload()), _harness_ladder()
+        ).summary()
 
-        assert "1/9 rungs pass" in summary
-        assert "8 not yet buildable" in summary
+        assert "1/8 rungs pass" in summary
+        assert "7 not yet buildable" in summary
 
 
 class TestARungThatClaimsToBuildAndDoesNotIsAFailure:
@@ -277,11 +302,13 @@ class TestEachRungGetsItsOwnRunner:
 class TestTheReportSerialises:
     def test_a_report_carries_the_pending_reasons_into_its_dict(self) -> None:
         """Whatever renders this must be able to say *why* a rung is not green."""
-        data = run_ladder(lambda: _runner_returning(_payload())).to_dict()
+        data = run_ladder(
+            lambda: _runner_returning(_payload()), _harness_ladder()
+        ).to_dict()
 
         assert data["ok"] is True
         assert data["complete"] is False
-        assert data["pending"] == 8
+        assert data["pending"] == 7
         m7 = next(r for r in data["results"] if r["rung"] == "M7")
         assert m7["outcome"] == "pending"
         assert any("E9" in need for need in m7["needs"])

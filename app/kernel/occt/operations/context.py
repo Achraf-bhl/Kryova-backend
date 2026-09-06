@@ -64,6 +64,23 @@ class BuildContext:
     #: runner that never sets a parameter simply carries a list.
     journal: list[JournalEntry] = field(default_factory=list)
 
+    #: The assembly this conversation is composing, or None — an
+    #: `app.kernel.occt.operations.assembly_ops.AssemblyState`.
+    #:
+    #: It lives here rather than beside the document because it **outlives** the
+    #: document: `catia_assembly_component` hands the open part to the assembly and
+    #: leaves nothing open, which is what lets `catia_new_part` start the next
+    #: component. `catia_set_parameter` swaps `document` and `journal` for a
+    #: rebuilt pair and leaves this one alone, which is exactly right — a replay
+    #: rebuilds the part being edited, not the assembly around it.
+    #:
+    #: Typed `Any` on purpose, and it is the reason this stays a three-line field
+    #: rather than an import: `AssemblyState` reaches `app.assembly`, which reaches
+    #: `app.design`, which reaches the CATIA operation registry — the import
+    #: `operations/__init__.py` deliberately defers so that a geometry-only import
+    #: does not drag it in. The handler module owns the type and narrows on it.
+    assembly: Any = None
+
     def record(self, tool: str, arguments: Mapping[str, Any], result: Any) -> None:
         """Note a call that changed the part. Never raises.
 

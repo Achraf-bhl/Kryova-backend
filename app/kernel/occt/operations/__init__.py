@@ -19,6 +19,7 @@ from typing import Any, Final
 
 from app.kernel.occt.operations import (
     annotation_ops,
+    assembly_ops,
     booleans,
     curves,
     document_ops,
@@ -163,6 +164,13 @@ HANDLERS: Final[dict[str, Handler]] = {
     inspection.ANALYSIS: inspection.analysis_part,
     inspection.LIST_FACES: inspection.list_faces,
     inspection.LIST_EDGES: inspection.list_edges,
+    # assemblies — the surface over `app/assembly/`
+    assembly_ops.PRODUCT_CREATE: assembly_ops.product_create,
+    assembly_ops.COMPONENT: assembly_ops.component,
+    assembly_ops.PLACE: assembly_ops.place,
+    assembly_ops.BILL_OF_MATERIALS: assembly_ops.bill_of_materials,
+    assembly_ops.CLASH: assembly_ops.clash,
+    assembly_ops.ANALYSIS: assembly_ops.analysis,
 }
 
 
@@ -174,6 +182,16 @@ HANDLERS: Final[dict[str, Handler]] = {
 #: `catia_set_parameter` itself is excluded and must stay excluded: it *is* the
 #: rewrite, and recording it would make a replay re-apply every past edit on top
 #: of the one being made.
+#:
+#: The three mutating assembly operations are excluded for a related reason. A
+#: replay rebuilds the part into a *fresh* context, and `catia_assembly_component`
+#: hands the open document to the assembly and leaves nothing open — so replaying
+#: one would empty the rebuild half way through and every entry after it would fail
+#: with "no document is open". They change the assembly, not the part, and the part
+#: is what a replay rebuilds.
+_NOT_RECORDED: Final[frozenset[str]] = frozenset({parameters.SET}) | assembly_ops.MUTATING
+
+
 def _recorded() -> frozenset[str]:
     from app.catia.ops import registry
     from app.catia.ops.spec import Tier
@@ -181,7 +199,7 @@ def _recorded() -> frozenset[str]:
     return frozenset(
         name
         for name in HANDLERS
-        if name != parameters.SET
+        if name not in _NOT_RECORDED
         and (operation := registry.get(name)) is not None
         and operation.tier is not Tier.READ
     )

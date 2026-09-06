@@ -19,6 +19,8 @@ checked with no CATIA, no database and no network, which is why all of it tests
 offline.
 """
 
+from typing import TYPE_CHECKING, Any, Final
+
 from app.design.assertions import (
     Assertion,
     AssertionReport,
@@ -56,16 +58,6 @@ from app.design.execute import (
     CallRunner,
     execute_plan,
 )
-from app.design.missions import (
-    LADDER,
-    LadderReport,
-    Mission,
-    MissionOutcome,
-    MissionResult,
-    mission,
-    run_ladder,
-    run_mission,
-)
 from app.design.names import NameTable, SemanticName
 from app.design.params import (
     Dimension,
@@ -77,7 +69,55 @@ from app.design.params import (
 )
 from app.design.spec import DesignSpec, FeatureSpec, expr, ref, refs
 
+if TYPE_CHECKING:  # pragma: no cover - for type checkers and readers, never at runtime
+    from app.design.missions import (
+        AssemblyDesign,
+        AssemblyReport,
+        LadderReport,
+        Mission,
+        MissionOutcome,
+        MissionResult,
+    )
+
+#: Names that live in `app.design.missions` and are re-exported **lazily**.
+#:
+#: A layering fact rather than a taste. `missions.py` reaches *up* into
+#: `app.assembly` — every rung above M1 is a product, not a part — while
+#: `app.assembly.structure` reaches back down into `app.design.names` and
+#: `app.design.errors`. Importing missions in this file would make `import
+#: app.assembly` execute it, which would execute missions, which would import
+#: `app.assembly.clash` while `app.assembly` was still half-built: an ImportError
+#: that depends on which package a process happens to import first, which is the
+#: worst kind. PEP 562 defers the import to the first attribute access, by which
+#: time whichever package started is finished. `import app.design.missions` and
+#: `from app.design import run_ladder` both still work; only the moment changes.
+_MISSION_EXPORTS: Final[frozenset[str]] = frozenset(
+    {
+        "LADDER",
+        "AssemblyDesign",
+        "AssemblyReport",
+        "LadderReport",
+        "Mission",
+        "MissionOutcome",
+        "MissionResult",
+        "mission",
+        "run_ladder",
+        "run_mission",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _MISSION_EXPORTS:
+        from app.design import missions
+
+        return getattr(missions, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
+    "AssemblyDesign",
+    "AssemblyReport",
     "Assertion",
     "AssertionReport",
     "AssertionResult",

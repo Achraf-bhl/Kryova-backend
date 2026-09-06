@@ -551,6 +551,19 @@ not writing, not hashing, not serving. Blobs are content-addressed (SHA-256, sha
 which drops the file only once nothing references it. Small metadata rows go to Neon; a
 400 MB STEP file never crosses the network.
 
+**A Python-side column default does not exist until the flush.** `UUIDPrimaryKey`
+gives `id` a `default=new_uuid`, and SQLAlchemy applies it *during* the flush — so
+anything reading `obj.id` before then gets `None`. This bit three separate times
+on 2026-09-06: `personal_slug` built an organisation slug from a user id in a
+`before_flush` hook (every user created inside one flush raised `AttributeError`,
+and only `test_startup.py` caught it, because the tenancy tests flush first and
+act second); `AuditService.record` hashed the id before the flush and wrote a
+different one after, so **every audit entry failed its own verification on
+read-back**; and both were fixed the same way. The fix is to *materialise* the id
+rather than read it — `if obj.id is None: obj.id = new_uuid()` — which is not a
+second source of truth, because it is the same callable the column default would
+have used moments later. Reading it and hoping is what fails.
+
 **Migrations** live only in `migrations/versions/`. Run `alembic check` before finishing any
 model change.
 

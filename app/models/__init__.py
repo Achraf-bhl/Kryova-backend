@@ -1,3 +1,14 @@
+from app.models.audit import (
+    AuditAction,
+    AuditEvent,
+    AuditOutcome,
+    ImpersonationMode,
+    ImpersonationSession,
+    StaffGrant,
+    StaffRole,
+    live_staff_grant,
+    verify_chain,
+)
 from app.models.catia import (
     CatiaCheckpoint,
     CatiaDevice,
@@ -31,6 +42,9 @@ from app.models.user import User
 __all__ = [
     "REUSE_GRACE_SECONDS",
     "AITokenUsage",
+    "AuditAction",
+    "AuditEvent",
+    "AuditOutcome",
     "CatiaCheckpoint",
     "CatiaDevice",
     "CatiaDeviceStatus",
@@ -40,6 +54,8 @@ __all__ = [
     "ConversationMessage",
     "DomainRole",
     "GeometryVersion",
+    "ImpersonationMode",
+    "ImpersonationSession",
     "JobStatus",
     "Media",
     "MediaKind",
@@ -52,10 +68,14 @@ __all__ = [
     "Project",
     "SessionRevocation",
     "SimulationJob",
+    "StaffGrant",
+    "StaffRole",
     "UploadStatus",
     "User",
     "UserSession",
+    "live_staff_grant",
     "membership_for",
     "organisation_ids_for",
     "personal_organisation",
+    "verify_chain",
 ]

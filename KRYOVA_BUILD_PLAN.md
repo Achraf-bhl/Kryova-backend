@@ -172,6 +172,32 @@ and what 5.3's sensitivity can then be run over.
   defects for whoever takes this on: clear `_sketch_edition` on a document switch and guard the
   `.Name` read against `com_error`; and give `catia_run_command` its own bounded timeout on the
   COM call itself rather than only on the daemon's reply to the caller.
+- **Seat verification, continued a third time (2026-09-06) — a third distinct
+  bridge defect, this time architectural.** Testing moved to STEP export
+  (rung 2, untested until now): the model skipped `open_in_catia` for a third
+  time (Runs 1, 6, 8 — a confirmed weakness at this tool count, not a fluke),
+  then, told explicitly to call it, did — and the very next `catia_sketch_create`
+  on a **brand-new** document (zero prior features, so not Run 7's stale
+  `_sketch_edition`) raised the same `com_error: 'Le serveur RPC n'est pas
+  disponible.'` Root cause, code-grounded: `open_in_catia`'s `new_part: true`
+  creates its document through the **server's own** direct-COM client
+  (`app/catia/bridge.py::new_part`, a fresh `CoInitialize`/`CoUninitialize`
+  apartment per call, serialised only by an in-process `threading.Lock` that
+  cannot and does not reach across a process boundary), while every
+  `catia_*` modelling tool drives CATIA through the **paired daemon**'s own
+  separate, persistent COM connection (`app/catia/dispatch.py::call_catia`).
+  Two independent, unsynchronised COM clients legally touch one single-
+  instance, single-apartment CATIA process, and in this run the daemon's
+  first real call landed moments after the server's client tore its apartment
+  down mid-document-creation. Not yet reproduced under controlled timing —
+  offered as the best-evidenced explanation, confirmable by retrying with
+  `open_in_catia(new_part: false)`, which never invokes the contending
+  client. Third defect named for whoever picks up the bridge work: give
+  `open_in_catia` and the daemon a single cross-process lock (or route
+  `open_in_catia`'s document creation through the daemon when one is already
+  paired) instead of the process-local lock that exists today. STEP export
+  itself remains untested. Full sequence in
+  `docs/verification-2026-09-06/REPORT.md`, Runs 8–9.
 - **P8 — usage metering wired to its first real consumer (2026-09-06).** Billing has existed
   as a schema and an API with nothing filling it; `app.simulation.runner` now posts every
   job's meshing and solve time to the ledger through `usage_scope`, `finally`-scoped so a

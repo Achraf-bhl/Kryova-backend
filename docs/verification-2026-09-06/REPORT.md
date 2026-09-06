@@ -630,6 +630,118 @@ test harness (`mock_ui.py`, both `en`/`de`) and belong to a dedicated
 investigation, not a fix attempted mid-session. Recorded here with exact
 files, lines and reproduction steps so neither has to be rediscovered.
 
+## Run 8 — STEP export test, the model skips `open_in_catia` a third time
+
+New prompt, new conversation: "Open CATIA with a new part. Build a titanium
+bracket: a 60 mm by 40 mm by 8 mm plate with two 6 mm clearance holes, 10 mm
+in from each short edge on the centreline. Then export it to STEP and confirm
+the file was written." — rung 2 territory (several features that must agree)
+plus the STEP-export path, not yet tested this session.
+
+The model's first tool call was `catia_new_part({"name": "Titanium
+bracket"})`, skipping `open_in_catia` even though it is the prompt's literal
+first sentence. Refused cleanly (`"CATIA is not running on this
+workstation..."`). The model gave up and told the user to start CATIA
+manually rather than calling `open_in_catia` itself. **This is the third
+confirmed occurrence of the same pattern** (Runs 1 and 6 also skipped it) —
+consistent enough now to call a real weakness of this model at this tool
+count, not a fluke, and worth a system-prompt or tool-description change
+rather than another retry.
+
+## Run 9 — retried in the same conversation, and a third distinct bridge defect
+
+Continuing the same conversation, told explicitly: "Call the open_in_catia
+tool now, then build the bracket." This time it complied — and surfaced a
+defect neither of Runs 4–7's two findings explains.
+
+Exact sequence, from the conversation's own tool-call log
+(`GET /ai/conversations/{id}`, not the model's paraphrase):
+
+    [ok ] open_in_catia {"new_part": true}
+      -> created_document: "Part1.CATPart", bridge_connected: false
+    [ERR] catia_sketch_create {"support": "XY", "name": "BracketSketch"}
+      -> "No CATIA document is bound to this conversation..."
+    [ERR] catia_open_document {}
+      -> "This conversation has no CATIA document yet..."
+    [ok ] catia_new_part {"name": "TitaniumBracket"}
+      -> document_id: 9d4d08a3-..., remote_path: .../TitaniumBracket.CATPart
+    [ERR] catia_sketch_create {"support": "XY", "name": "BracketSketch"}
+      -> "CATIA refused catia_sketch_create: com_error while running
+          catia_sketch_create: (-2147023174, 'Le serveur RPC n'est pas
+          disponible.', None, None)"
+    [ok ] design_history {}
+    [ok ] catia_list_commands {"search": "Sketch"}
+    [ok ] catia_set_material {"material": "titanium-ti6al4v"}
+
+The first two refusals are correct behaviour, not a bug: `open_in_catia`'s
+`new_part: true` creates `Part1.CATPart` through the **server's own** direct
+COM client (`app/catia/bridge.py::new_part`), which has nothing to do with
+this conversation's `CatiaDocument` binding — that binding is only created by
+the *tool* `catia_new_part`, dispatched to the daemon
+(`app/catia/dispatch.py::call_catia`, `_UNSCOPED_TOOLS`: "creates the binding;
+there is nothing to return to"). So the model correctly had to call
+`catia_new_part` itself to get a bound document, and did.
+
+The `com_error` on the very next call is not correct behaviour, and it is
+**not** the `_sketch_edition` staleness bug from Run 7: that bug requires a
+sketch left open on a document the model has since abandoned, and
+`TitaniumBracket` was brand new with zero prior features — there is nothing
+for `_sketch_edition` to be stale *about*. This is a different failure with
+the same visible symptom.
+
+**Root cause, code-grounded but not yet reproduced under controlled
+conditions.** `open_in_catia` and every `catia_*` modelling tool drive the
+same single CATIA.exe instance through **two independent, unsynchronised COM
+sessions in two different OS processes**:
+
+- The FastAPI server's own client (`app/catia/bridge.py`), used only by
+  `open_in_catia` and `sync_geometry_from_catia`. Its own docstring says each
+  call "gets a fresh thread that calls `CoInitialize`, creates its own CATIA
+  reference, finishes with it, and calls `CoUninitialize`" — a full COM
+  apartment stood up and torn down per call — and `_CATIA_LOCK`
+  (`threading.Lock`) is scoped to serialise only *this process's* calls
+  ("so two requests cannot drive the GUI at once"), which a `threading.Lock`
+  cannot do across a process boundary in any case.
+- The paired daemon (`scripts/catia_bridge/`), a separate long-lived OS
+  process holding its own persistent COM connection, which is what every
+  `catia_*` tool actually calls through the websocket bridge.
+
+In this run, `open_in_catia`'s direct-COM call created and (per its own
+documented lifecycle) tore down a COM apartment on `Part1.CATPart` moments
+before the model's next call reached the daemon and created a second
+document, `TitaniumBracket.CATPart`, over the daemon's own separate,
+already-open COM session. The daemon's very next call —
+`catia_sketch_create`, the first real modelling call on the new document —
+is the one that got "RPC server not available." Two independent COM clients
+touching one single-instance, single-threaded-apartment CATIA process within
+the same second, one of them mid-teardown, is exactly the shape of thing that
+produces a transient RPC failure on the other. This is offered as the
+best-evidenced explanation, not a confirmed one: nothing here instrumented
+exact call timestamps on both sides, and the hypothesis has not been
+confirmed by reproducing the failure with `open_in_catia(new_part: false)`
+(which never touches the server's direct-COM `new_part()` and so would not
+create the second, contending document).
+
+**A third distinct, unfixed defect for whoever takes this on**: `open_in_catia`'s
+`new_part: true` path should not create a document through a second,
+unsynchronised COM client when a daemon is already paired and about to be
+asked to create its own — either route it through the daemon when one is
+connected, or gate both clients behind a single cross-process lock (a named
+Win32 mutex, or a lock file the daemon and the server both hold) rather than
+the process-local `threading.Lock` that exists today. This is additive to,
+not a restatement of, the two Run 4–7 findings: the stale `_sketch_edition`
+reference needs clearing on a document switch, `catia_run_command` needs its
+own bounded timeout on interactive commands, and now — a third, separate
+mechanism — the two COM clients that can both legally touch CATIA at once
+need to not do so within the same instant.
+
+The model gave up gracefully after the `com_error` (same pattern as every
+other run that hit an infrastructure wall: no fabricated success, a plain
+statement of what worked and what didn't), so no picture was taken — nothing
+built. `catia_set_material` still succeeded despite the failed sketch,
+confirming (again) that a material can be applied to a document with no
+solid in it yet.
+
 ## Rung reached
 
 Runs 1–3 confirm, for the first time, that the exact plan the OCCT backend
@@ -656,3 +768,21 @@ statement of the whole session, and it did not survive checking the process
 list. That is the whole argument for doing this one prompt at a time and
 looking at the real window and the real process table, not just the tool
 result or the model's own paraphrase of it, after each one.
+
+Runs 8–9, testing STEP export (rung 2, untested until now), never reached the
+export call: Run 8 repeats the "skips `open_in_catia`" weakness for a third
+time (Runs 1, 6, 8), and Run 9 — the same prompt, told explicitly to call
+`open_in_catia` first — hit a **third** distinct bridge defect, on a document
+with no prior state to be stale about, so it cannot be explained by either
+Run 4–7 finding. The best-evidenced explanation is architectural rather than
+a one-line bug: `open_in_catia` drives CATIA through the server's own direct
+COM client while every `catia_*` tool drives it through the daemon's
+separate, persistent one, and nothing synchronises the two across the process
+boundary. Three sessions in, the pattern across all of Runs 4, 5, 7 and 9 is
+the same shape: CATIA is a single-instance, single-apartment COM server, and
+every defect found so far is some version of two things touching it, or one
+thing touching it while a previous reference to it is no longer valid.
+STEP export itself remains untested; it is next once whichever of these three
+gets picked up, or after confirming (by trying `open_in_catia(new_part:
+false)`, which never invokes the server's own direct-COM client) that Run 9's
+failure really does need both clients active to reproduce.

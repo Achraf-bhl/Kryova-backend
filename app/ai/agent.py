@@ -276,6 +276,12 @@ def _catia_summary(result: dict[str, Any]) -> str:
         parts.append(str(result["feature"]))
     if result.get("document"):
         parts.append(str(result["document"]))
+    if result.get("cut"):
+        # A cut's reach, in the flow list, because "Done" is what let a 25 mm
+        # bore be described as going through a 45 mm part -- ladder prompt S5
+        # turn 2, 2026-09-06. The user reads this line; the model reads the
+        # payload; both now say the same thing.
+        parts.append(str(result["cut"]))
     if result.get("mass_kg") is not None:
         parts.append(f"{result['mass_kg']} kg")
     if result.get("geometry_version") is not None:

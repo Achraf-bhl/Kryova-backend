@@ -1323,6 +1323,45 @@ class CatiaCom(
         )
         return self._feature_result(str(pad.Name))
 
+    @staticmethod
+    def _cut_report(
+        through_all: bool, depth_mm: float | None, before: float | None, after: float | None
+    ) -> dict[str, Any]:
+        """What a cut actually did, in the words a later claim can be checked against.
+
+        Measured on the seat 2026-09-06, ladder prompt S5 turn 2 -- "add a
+        60 x 60 boss 25 mm tall in the centre, with a 20 mm diameter bore
+        through the whole thing". The agent cut a 25 mm pocket, which is the
+        boss and not the plate under it, and then wrote:
+
+            Central bore: 20 mm diameter hole through the entire boss and base
+            plate. All requirements met.
+
+        The measured volume said otherwise -- 377,057 mm3 is the plate plus the
+        boss minus a bore 25 mm deep, and a real through bore would have left
+        370,773. `through_all` exists on this tool and would have done it; the
+        agent passed a depth instead.
+
+        The tool cannot stop it choosing a depth. What it can stop is the
+        choice being invisible: the result said `Done`, so nothing in the
+        transcript the model re-reads contradicted the sentence it went on to
+        write. Now the result says `blind, 25 mm` or `through`, and how much
+        material went, which is a fact the closing claim has to agree with.
+        """
+        report: dict[str, Any] = {"through": bool(through_all)}
+        if depth_mm is not None and not through_all:
+            report["depth_mm"] = float(depth_mm)
+        if before is not None and after is not None:
+            report["removed_mm3"] = round(before - after, 4)
+        report["cut"] = (
+            "through the material"
+            if through_all
+            else f"blind to {float(depth_mm):g} mm -- it does not break out of the far side"
+            if depth_mm is not None
+            else "blind"
+        )
+        return report
+
     def pocket(  # pragma: no cover - Windows only
         self, *, sketch: str, depth_mm: float | None = None, through_all: bool = False
     ) -> dict[str, Any]:
@@ -1393,7 +1432,9 @@ class CatiaCom(
                 "it against the bounding box, and remember a sketch on an origin plane "
                 "sits at the origin, not on the face you are looking at."
             )
-        return self._feature_result(str(pocket.Name))
+        return self._feature_result(str(pocket.Name)) | self._cut_report(
+            through_all, depth_mm, before, self._solid_volume()
+        )
 
     def hole(  # pragma: no cover - Windows only
         self,

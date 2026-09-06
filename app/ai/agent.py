@@ -156,7 +156,7 @@ def _shown_tools(toolbox: Any, user_message: str) -> set[str] | None:
     if not limit:
         return None
     try:
-        from app.ai.tool_retrieval import select_tool_names
+        from app.ai.tool_retrieval import select
 
         specs = [
             SimpleNamespace(name=tool.name, description=tool.description)
@@ -164,8 +164,20 @@ def _shown_tools(toolbox: Any, user_message: str) -> set[str] | None:
         ]
         if len(specs) <= limit:
             return None
-        recent = toolbox.recent_tool_names()
-        return select_tool_names(specs, user_message, recent=recent, limit=limit)
+        selection = select(
+            specs,
+            user_message,
+            recent=toolbox.recent_tool_names(),
+            context=toolbox.recent_user_messages(),
+            limit=limit,
+        )
+        # Logged rather than discarded, because the failure this can cause is
+        # silent: a needed tool is absent, the model does something else, and
+        # the part comes out wrong with every call returning `ok`. The only way
+        # that gets diagnosed after the fact is from a record of what the offer
+        # was and which rule shaped it.
+        logger.info("tool retrieval: %s", selection.to_dict())
+        return selection.names()
     except Exception:  # pragma: no cover - retrieval must never break a turn
         logger.exception("tool retrieval failed; offering the whole registry")
         return None

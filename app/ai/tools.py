@@ -46,6 +46,7 @@ from app.models import (
     ConversationMessage,
     GeometryVersion,
     JobStatus,
+    MessageRole,
     Project,
     SimulationJob,
     User,
@@ -1756,6 +1757,37 @@ class ToolBox:
             if name:
                 seen.setdefault(name, None)
         return list(seen)
+
+    def recent_user_messages(self, limit: int = 4) -> str:
+        """The last few things the *user* said, newest first, as one blob.
+
+        Fed to the tool selector (16.1) so a thin turn keeps the vocabulary the
+        thick turn established: an engineer who said "four M8 holes on a bolt
+        circle" two turns ago and now says "go on" must not lose the hole tools
+        because this message carries no nouns.
+
+        **User turns only.** Scoring the assistant's own replies would let the
+        model widen its own offer by talking about tools, which is a loop with
+        no floor — and the assistant's text is the one part of the transcript
+        that is not evidence of what the engineer wants.
+
+        Bounded and indexed on `(conversation_id, sequence)`, the same lookup
+        the context window already does. Empty rather than raising when there is
+        no conversation, because the introspection paths build a toolbox
+        without one.
+        """
+        if self.conversation is None:
+            return ""
+        rows = self.db.scalars(
+            select(ConversationMessage.content)
+            .where(
+                ConversationMessage.conversation_id == self.conversation.id,
+                ConversationMessage.role == MessageRole.USER,
+            )
+            .order_by(ConversationMessage.sequence.desc())
+            .limit(limit)
+        ).all()
+        return " ".join(text for text in rows if text)
 
     def schemas(
         self, include_mutating: bool, *, only: Collection[str] | None = None

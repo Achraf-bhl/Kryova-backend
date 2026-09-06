@@ -240,6 +240,44 @@ evidence they are not tuned to one model's mistakes.
   5.7e-16 against the real solver — but *through the chatbot* it is unproven.
 - **Ollama was not on the GPU**, and on this card with this model it cannot be.
 
+## Correction, 2026-09-06 later the same day — Finding 3 was ours, not the model's
+
+Attempt 4's headline above says the agent used `catia_set_parameter` "for the
+first time in four sessions, and it did so because the refusal told it to".
+That is true and it is not the whole cause, and the rest of the cause is ours.
+
+`AI_TOOL_LIMIT=40` was set on the gate server, which turns **tool selection** on.
+Probing the selector that was shipped at the time against the real 110-tool OCCT
+registry, with the prompts from this report:
+
+| message | tools offered | `catia_set_parameter` |
+|---|---:|---|
+| rung 3, "change the thickness until it weighs 2.4 kg" | 13 / 110 | **withheld** |
+| "put four M8 clearance holes on a 70 mm bolt circle" | 11 / 110 | withheld |
+| "check it clears through the travel" | 8 / 110 | withheld |
+
+**The tool the rung-3 prompt is entirely about was not being offered to the
+model.** For three sessions this report and its predecessors recorded "the agent
+still will not use `catia_set_parameter`" as a limitation of the model. It was
+not. It was our own tool selection hiding the tool.
+
+And the mechanism behind attempt 4's success is now exact rather than inferred.
+The refusal message added in `d5e94bf` names the tool *in prose*. The selector is
+lexical. So:
+
+| the agent's context | tools offered | `catia_set_parameter` |
+|---|---:|---|
+| the request alone | 9 | withheld |
+| the request plus the refusal text naming the tool | 43 | **present** |
+
+The refusal fix worked, and it worked by putting the tool's name into the text
+the selector reads — not by teaching the model anything. Both fixes were worth
+making and neither was understood at the time.
+
+Recorded here rather than quietly corrected in the board, because this report is
+the evidence somebody would go back to, and it blamed a model for something the
+product was doing.
+
 ## Rung reached
 
 **Rung 2 comfortably; rung 3 not passed.** Rung 3 has now failed three times, for

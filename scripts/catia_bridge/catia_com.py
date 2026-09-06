@@ -876,17 +876,102 @@ class CatiaCom(
             )
         return {"parameters": found}
 
+    @staticmethod
+    def _parameter_paths(parameters: Any) -> list[str]:  # pragma: no cover - Windows only
+        """Every parameter name in the part, in order."""
+        names: list[str] = []
+        for index in range(1, int(parameters.Count) + 1):
+            try:
+                names.append(str(parameters.Item(index).Name))
+            except Exception:  # noqa: BLE001 - a parameter that will not name itself
+                continue
+        return names
+
+    @staticmethod
+    def _unescape_path(name: str) -> str:
+        """Undo the backslash doubling a name picks up crossing JSON.
+
+        Measured on the seat 2026-09-06, ladder prompt S1 run 2. The agent read
+        a name out of `catia_list_parameters`, whose result reached it as JSON,
+        and sent back
+
+            'Part1\\\\Corps principal\\\\Extrusion.2\\\\EpaisFin2'
+
+        -- four backslashes where CATIA has one. Nothing in the chain is wrong
+        on its own: the tool result is JSON, JSON escapes a backslash, and a
+        model copying the rendered string copies what it was shown. CATIA's
+        parameter paths are the only names in this product that contain a
+        backslash, so this is the only place it bites, and the fix belongs
+        here rather than in every model that will ever read one.
+
+        Collapsing runs of backslashes is safe because a CATIA path never
+        contains an empty segment: two separators in a row cannot be meaningful.
+        """
+        while "\\\\" in name:
+            name = name.replace("\\\\", "\\")
+        return name
+
+    def _find_parameter(self, parameters: Any, name: str) -> Any:  # pragma: no cover
+        """The parameter called `name`, by full path or by the part a human says.
+
+        CATIA's real parameter names are long, localised paths --
+        `Part1\\Corps principal\\Extrusion.2\\Sketch.3\\width\\Longueur` -- and
+        that is what `catia_list_parameters` honestly reports. Requiring it
+        verbatim was measured on the seat (S1 run 2) to be unusable in
+        practice: the agent asked for `width`, which is the name it had just
+        given the dimension itself, and was refused.
+
+        So three ways in, in order, and the order matters:
+
+        1. **The exact name**, unchanged. Always tried first, so a caller that
+           does have the full path can never be surprised by a guess.
+        2. **The same name with JSON's backslash doubling undone.**
+        3. **A unique trailing segment.** `width` matches
+           `...\\Sketch.3\\width\\Longueur` because `width` is one of its path
+           components. Unique or nothing -- two matches is an ambiguity the
+           caller has to resolve, and picking one would silently drive the
+           wrong dimension, which is the failure this whole layer exists to
+           prevent. The refusal names the candidates so the next call can be
+           right.
+        """
+        for candidate in (name, self._unescape_path(name)):
+            try:
+                return parameters.Item(candidate)
+            except Exception:  # noqa: BLE001 - not found under that spelling
+                pass
+
+        wanted = self._unescape_path(name).strip().lower().strip("\\")
+        paths = self._parameter_paths(parameters)
+        matches = [
+            path
+            for path in paths
+            if wanted in [segment.lower() for segment in path.split("\\")]
+        ]
+        if len(matches) == 1:
+            try:
+                return parameters.Item(matches[0])
+            except Exception as exc:  # noqa: BLE001
+                raise CatiaOperationError(
+                    f"The parameter {matches[0]!r} is listed but could not be opened."
+                ) from exc
+        if len(matches) > 1:
+            raise CatiaOperationError(
+                f"{name!r} matches {len(matches)} parameters in this part: "
+                + "; ".join(matches[:6])
+                + ". Name the one you mean in full."
+            )
+        raise CatiaOperationError(
+            f"No parameter named {name!r} in this part. Call catia_list_parameters "
+            "to see the real names. A name may be given in full, or as one segment "
+            "of the path when that segment is unique -- 'width' finds "
+            "'...\\Sketch.1\\width\\Longueur'."
+        )
+
     def set_parameter(  # pragma: no cover - Windows only
         self, *, name: str, value: float, unit: str
     ) -> dict[str, Any]:
         parameters = self._part().Parameters
-        try:
-            parameter = parameters.Item(name)
-        except Exception as exc:  # noqa: BLE001
-            raise CatiaOperationError(
-                f"No parameter named {name!r} in this part. Call catia_list_parameters "
-                "to see the real names."
-            ) from exc
+        parameter = self._find_parameter(parameters, name)
 
         actual = _unit_of(parameter)
         if actual and actual != unit:

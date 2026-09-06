@@ -111,6 +111,24 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E7 → **the benchmark layer cannot lie, and now it is proven.**
+  `benchmarks.py` is deliberately machinery and no cases, and it is the layer
+  that decides whether the cases can lie when they arrive. The failure it exists
+  to prevent would be catastrophic in the one part of the codebase whose whole
+  purpose is to be trusted: **a target that looks published and is not** — a
+  NAFEMS number recalled from memory, or reverse-engineered from what our own
+  solver happened to return, converts "we have not validated this" into "we
+  validated this and it passed". So `PUBLISHED` requires a citation, `UNKNOWN`
+  **forbids a value** and must say what would make it known, and a tolerance
+  must carry a justification, because an unjustified band is one somebody widens
+  the first time a run misses it — and the only move available to a person who
+  does not know what the band was covering is to widen it. Exactly one `Outcome`
+  is a pass: `MEASURED` ("we ran it, there was nothing to compare against") and
+  `UNCONVERGED` are real results and are not validation. Five mutations, all
+  caught — and two of them revealed that **two of my own tests were passing for
+  the wrong reason**: they omitted `tolerance_reason`, so they raised on the
+  missing justification rather than on the guard they named, and both are fixed.
+
 - **2026-09-06** — E12 → **bought-in parts that say what they do not know.** A
   bolt whose mass is known but whose proof load is not cannot be checked, and
   that is the whole difference between a parts library an engineer can sign off

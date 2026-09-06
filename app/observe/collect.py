@@ -31,6 +31,23 @@ parent finished ten minutes ago is a misleading picture of what nested in what.
 every path, including `GeneratorExit` — which is how an abandoned streaming read
 shows up as a partial one, rather than as a read that never happened.
 
+**A listener sees every span, whether or not anything is collecting.** Added
+for P8: metering has to be *always on* — a bill that only counts what an
+operator remembered to enable is not a bill — while a trace stays opt-in for the
+reason above. So `add_listener` is the seam, and it is the only thing that can
+make `span()` do work when no `collect()` is running. With no listener
+registered the disabled path is byte-for-byte what it was: a module-global read
+and the shared `INERT` object.
+
+Two consequences worth stating. **A listener is called on the instrumented
+thread, inside the `with` block's exit**, so it must be quick — the metering
+listener accumulates into a context-local scope and defers every database write
+to the end of the scope. And **a listener that raises breaks the code it was
+observing**; that is deliberate and matches `app.observe.queue`'s refusal to
+wrap itself in a blanket `except`. Swallowing belongs to whoever needs it, where
+it can be counted and reported — `app.core.metering` does exactly that and
+records a `MeteringFault` for every failure it absorbs.
+
 **A recorder is bounded and says when it dropped.** Ten thousand spans is a
 generous trace and a bounded one; past that, spans are counted by name and
 discarded, and the report refuses to present the affected numbers as measured.
@@ -43,7 +60,7 @@ from __future__ import annotations
 import itertools
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from types import MappingProxyType, TracebackType
@@ -158,9 +175,12 @@ class LiveSpan:
         "sequence",
     )
 
-    def __init__(self, name: str, fields: dict[str, Any], recorder: Recorder) -> None:
+    def __init__(self, name: str, fields: dict[str, Any], recorder: Recorder | None) -> None:
         self.name = name
         self._fields = fields
+        #: `None` when the span exists only because a listener is registered —
+        #: metering is on, tracing is not. Everything below tolerates it rather
+        #: than branching at the call site.
         self._recorder = recorder
         self._failure = ""
         self._start = 0.0
@@ -192,7 +212,7 @@ class LiveSpan:
 
     def __enter__(self) -> LiveSpan:
         parent = _CURRENT.get()
-        self.sequence = self._recorder._opened(id(self), self.name)
+        self.sequence = 0 if self._recorder is None else self._recorder._opened(id(self), self.name)
         self._parent_name = parent.name if parent is not None else None
         self._depth = 0 if parent is None else parent._depth + 1
         self._token = _CURRENT.set(self)
@@ -208,24 +228,25 @@ class LiveSpan:
         seconds = time.perf_counter() - self._start
         if self._token is not None:
             _CURRENT.reset(self._token)
-        self._recorder._closed(id(self))
         failure = self._failure
         if exc_type is not None:
             failure = _describe(exc_type, exc)
-        self._recorder.record(
-            Span(
-                name=self.name,
-                seconds=seconds,
-                ok=not failure,
-                failure=failure,
-                fields=MappingProxyType(dict(self._fields)),
-                depth=self._depth,
-                parent=self._parent_name,
-                started_at=time.time() - seconds,
-                sequence=self.sequence,
-                thread=threading.current_thread().name,
-            )
+        finished = Span(
+            name=self.name,
+            seconds=seconds,
+            ok=not failure,
+            failure=failure,
+            fields=MappingProxyType(dict(self._fields)),
+            depth=self._depth,
+            parent=self._parent_name,
+            started_at=time.time() - seconds,
+            sequence=self.sequence,
+            thread=threading.current_thread().name,
         )
+        if self._recorder is not None:
+            self._recorder._closed(id(self))
+            self._recorder.record(finished)
+        _notify(finished)
         return False
 
 
@@ -264,7 +285,13 @@ class _InertSpan:
 #: the disabled path as allocation-free: `span("x") is INERT`.
 INERT: Final = _InertSpan()
 
+#: What a listener is handed: one finished span, already frozen.
+SpanListener = Callable[[Span], None]
+
 _RECORDER: Recorder | None = None
+#: A tuple rather than a list so `span()` reads it without a lock and can never
+#: see a half-mutated sequence; every mutation replaces it wholesale.
+_LISTENERS: tuple[SpanListener, ...] = ()
 _SWAP = threading.Lock()
 _CURRENT: ContextVar[LiveSpan | None] = ContextVar("kryova_observe_current_span", default=None)
 
@@ -278,7 +305,7 @@ def span(name: str, /, **fields: Any) -> LiveSpan | _InertSpan:
     a site it knows exists.
     """
     recorder = _RECORDER
-    if recorder is None:
+    if recorder is None and not _LISTENERS:
         return INERT
     return LiveSpan(name, fields, recorder)
 
@@ -293,6 +320,7 @@ def record(span_record: Span) -> None:
     recorder = _RECORDER
     if recorder is not None:
         recorder.record(span_record)
+    _notify(span_record)
 
 
 def note(text: str, **fields: Any) -> None:
@@ -300,6 +328,44 @@ def note(text: str, **fields: Any) -> None:
     recorder = _RECORDER
     if recorder is not None:
         recorder.note(text, **fields)
+
+
+def _notify(finished: Span) -> None:
+    """Hand a finished span to every listener.
+
+    Deliberately not wrapped in `try`. A listener that raises breaks the block
+    it was observing, and that is the same judgement `app.observe.queue` records
+    about its own metering: a swallowed instrumentation bug is one that ships.
+    A listener that needs to survive its own failures owns that responsibility
+    and has to be able to say it failed — `app.core.metering` counts, logs and
+    persists every error it absorbs.
+    """
+    for listener in _LISTENERS:
+        listener(finished)
+
+
+def add_listener(listener: SpanListener) -> None:
+    """Watch every span from now on, whether or not a collection is running.
+
+    Registering the first listener is what turns `span()` from a module-global
+    read into a real measurement, so it is not free — add one for something that
+    must be always on (metering), never to avoid calling `collect()`.
+    """
+    global _LISTENERS
+    with _SWAP:
+        if listener not in _LISTENERS:
+            _LISTENERS = (*_LISTENERS, listener)
+
+
+def remove_listener(listener: SpanListener) -> None:
+    """Stop watching. A listener that was never added is not an error."""
+    global _LISTENERS
+    with _SWAP:
+        _LISTENERS = tuple(existing for existing in _LISTENERS if existing != listener)
+
+
+def listeners() -> tuple[SpanListener, ...]:
+    return _LISTENERS
 
 
 def is_collecting() -> bool:

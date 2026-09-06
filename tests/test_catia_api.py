@@ -295,8 +295,10 @@ def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client
     # A deliberate count, so adding or losing a tool is never silent. 201 since
     # the vocabulary moved into the declarative registry (`app/catia/ops/`),
     # which took it from 39 to the sketcher, reference-geometry, surface,
-    # assembly, drafting and knowledge operations the manuals document.
-    assert len(tools) == 201
+    # assembly, drafting and knowledge operations the manuals document; 203
+    # since `catia_assembly_component` and `catia_assembly_place` landed
+    # (E14) without this pin being moved with them.
+    assert len(tools) == 203
     by_name = {tool["name"]: tool for tool in tools}
 
     # The original 39 by name, not just by count. The registry rewrite could

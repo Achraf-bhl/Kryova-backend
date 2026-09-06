@@ -246,9 +246,25 @@ class Dimension:
     leader_deg: float | None = None
     parameter: str | None = None
     feature: str | None = None
+    #: The feature argument this number came from — `length_mm`, `radius_mm[2]`.
+    #: The same key `TracedDimension` and `Unplaced` carry, so the three buckets
+    #: of `DimensionReport` can be shown to be disjoint rather than asserted to
+    #: be. Without it a placed dimension is identified only by its feature, and a
+    #: feature with two numbers in it could be in two buckets with nothing able
+    #: to see that it was.
+    argument: str | None = None
     note: str = ""
 
     def __post_init__(self) -> None:
+        if self.source is DimensionSource.PARAMETER and not self.parameter:
+            raise DrawingError(
+                f"A dimension on {self.view} claims a design parameter set it but does "
+                "not say which one. A drawing that asserts a provenance it cannot name "
+                "is worse than one that admits the number was measured — the whole "
+                "value of the distinction is that a reviewer can go and look at the "
+                "parameter. Use DimensionSource.GEOMETRY for a literal typed straight "
+                "into a feature."
+            )
         linear = self.kind in LINEAR_KINDS
         if linear and (self.start is None or self.end is None):
             raise DrawingError(
@@ -280,6 +296,8 @@ class Dimension:
             out["parameter"] = self.parameter
         if self.feature:
             out["feature"] = self.feature
+        if self.argument:
+            out["argument"] = self.argument
         return out
 
 
@@ -439,7 +457,14 @@ class DimensionReport:
 
     @property
     def untraced_placed(self) -> tuple[Dimension, ...]:
-        """Placed dimensions measured off the solid, with no parameter behind them."""
+        """Placed dimensions with no design parameter behind them.
+
+        Two different things land here and they deserve the same warning: a
+        number measured off the solid, and a number typed as a literal straight
+        into a feature. Neither is controlled by anything — edit the design and
+        nothing moves them — which is the only property the sheet's reader cares
+        about, so they are one bucket rather than two.
+        """
         return tuple(one for one in self.placed if one.source is DimensionSource.GEOMETRY)
 
     @property
@@ -478,8 +503,9 @@ class DimensionReport:
                 lines.append("Ambiguous: " + "; ".join(self.ambiguous) + ".")
         if self.untraced_placed:
             lines.append(
-                f"{len(self.untraced_placed)} dimension(s) were measured from the model "
-                "rather than declared by the design, and no design parameter controls them."
+                f"{len(self.untraced_placed)} dimension(s) have no design parameter "
+                "behind them - the number was measured from the model or typed straight "
+                "into the feature, and nothing would move it if the design changed."
             )
         if self.suppressed:
             lines.append(

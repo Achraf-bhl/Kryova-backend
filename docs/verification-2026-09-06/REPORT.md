@@ -326,3 +326,154 @@ tool that did not exist, the inner profile padded as a boss, and tonight the par
 that came apart without saying so. That is the ladder working as intended.
 
 G1 re-runs after the fix, on the model that fits the card.
+
+---
+
+# Later the same day — one-by-one CATIA-seat verification, first real seat build
+
+A separate, deliberately narrower pass, run per an explicit session instruction:
+stop batching prompts, run the real chat endpoint **one prompt at a time**,
+against the **real CATIA seat** (not OCCT, which is what every rung above used),
+and screenshot whatever CATIA finishes. This is not a G1 re-run and does not
+touch rung 3's correction loop — it is the first confirmation that a build
+which works on OCCT also works, end to end, on the licensed seat.
+
+## Environment
+
+- CATIA V5-6R2023 (CNEXT), French UI, running locally.
+- Bridge daemon re-paired this session to a dedicated `seat-verify@kryova-e2e.dev`
+  account (its `CatiaDevice` holds the pairing; the real account
+  `bouhlel@gmail.com` was not touched — its password was not available to this
+  session and was not guessed; see the memory note left for future sessions).
+  The daemon's single-instance lock had two stale duplicate processes left over
+  from a prior stretch; both were killed and one clean instance relaunched.
+- Server: `GEOMETRY_BACKEND=catia`, `AI_MODEL=qwen3-coder:30b` via Ollama.
+- `ollama ps` showed no model resident at the start of the run (it had timed out
+  since the last stretch, per the stop-gate policy); the first chat call loaded
+  it on demand.
+
+## Run 1 — build without opening CATIA first
+
+Prompt: *"Build me a steel plate 100 mm square and 12 mm thick, with a 40 mm
+diameter bore through the middle. Then measure it and tell me the mass."*
+
+- 90.7 s, 1 tool call: `catia_new_part` — **refused**, named reason: no CATIA
+  session bound yet.
+- This is the weak-model behaviour CLAUDE.md documents ("it calls tools before
+  their prerequisites") working as intended: a named refusal from validation,
+  not a wrongly built part. Not a defect.
+
+## Run 2 — same conversation, told to open CATIA first
+
+Prompt: *"Please open CATIA first with a new empty part, then build the plate
+as I described."*
+
+- 155.9 s, 9 tool calls:
+
+  | tool | result |
+  |---|---|
+  | `open_in_catia` | ok |
+  | `catia_sketch_create` | ERR (no part bound yet — same class of refusal as run 1) |
+  | `catia_open_document` | ERR |
+  | `catia_new_part` | ok |
+  | `catia_sketch_create` | ok |
+  | `catia_sketch_rectangle` (100×100) | ok |
+  | `catia_sketch_circle` (Ø40) | ok |
+  | `catia_pad` (12 mm) | ok |
+  | `catia_set_material` (steel-1018) | ok |
+
+- Reported: mass 0.824674 kg, volume 104,920.3553 mm³.
+- Closed-form check: `100×100×12 − π·20²·12 = 120,000 − 15,079.6447 =
+  104,920.3553 mm³`; `104,920.3553 mm³ × 7,860 kg/m³ × 1e-9 = 0.824675 kg`.
+  Matches to the sixth decimal digit reported.
+
+**Minor finding, not fixed.** `open_in_catia(new_part: true)` creates an empty
+part (`Part1` / `Steel-Plate-1.CATPart`), and the model's own subsequent
+`catia_new_part` created a *second*, separate document (`Part2` /
+`Steel-Plate-2.CATPart`) and built into that one — leaving the first orphaned
+and empty, visible as a greyed inactive tab in the window screenshot. Not a
+correctness bug (the built part is right), but wasteful, and worth either
+deduplicating or steering the model away from calling both in one turn.
+
+## Run 3 — same conversation, capture a view
+
+Prompt: *"Capture an isometric view of the part so I can see it."*
+
+- 60.5 s, 1 tool call: `catia_capture_view(view=iso)` — ok.
+
+## Pictures (runs 1–3)
+
+Both required, because they fail to show different things (CLAUDE.md):
+
+- [`seat-01-viewport.png`](seat-01-viewport.png) — the part itself, taken
+  through `catia_capture_view`, the product's own tool. Square plate, centred
+  round bore, right way up, proportions match the request.
+- [`seat-01-window.png`](seat-01-window.png) — the whole application window
+  via `scripts/shot.ps1`. Confirms the French seat (`Plan xy`, `Corps
+  principal`, `Démarrer`/`Fichier`/`Edition` menus) and shows the orphaned
+  `Part1` tab noted above, which the viewport render cannot show.
+
+## Run 4 — parametric change, and a real infrastructure defect
+
+Prompt: *"Now change the bore diameter to 25 mm and tell me the new mass."*
+
+The model never attempted `catia_set_parameter` at all. 10 tool calls, 257.2 s:
+
+`catia_list_features` (ok) → `catia_list_parameters` (ok) → `catia_select`
+(ok) → `catia_run_command("Edit Sketch")` (**ERR**, 30 s timeout) →
+`catia_update` (**ERR**, "could not save a checkpoint — stopped responding to
+heartbeats") → `catia_new_part` (ERR, correctly refused — a document is
+already owned) → `catia_list_features` (ERR, bridge not connected) →
+`open_in_catia` (ok, but `bridge_connected: false`) → `catia_list_features`
+(ERR) → `catia_open_document` (ERR, "the bridge exited immediately after
+starting").
+
+**Read from the daemon's own logs (`local-bridge.log`, and the manually-run
+daemon's stderr), this is a real defect, not a model mistake.** The manually-run
+daemon logged every call cleanly up to the `catia_checkpoint` that preceded
+`catia_run_command("Edit Sketch")`, then produced **no further output at all**
+— not even a failure — while the process itself stayed alive (confirmed by
+process list). `catia_run_command` calling an interactive command
+(`"Edit Sketch"`, not one of the published `COMMAND_IDS`) on a sketch that a
+Pad already consumed appears to have wedged the daemon's COM-calling thread
+indefinitely, even though **CATIA's own window was not actually stuck** — a
+screenshot taken afterward showed a perfectly normal, responsive part view with
+no dialog open. With the daemon's worker thread hung, the server's
+`app.catia.local_bridge` auto-spawn-on-demand logic then tried repeatedly to
+launch a *second* daemon, which correctly refused (`bridge.lock` still held by
+the wedged one) and exited immediately — which is what the model's tool errors
+were reporting as "the bridge is not connected."
+
+**Recovery required a manual bridge restart** (kill the wedged process, clear
+the stale lock, relaunch) — the interactive-dialog recovery tools
+(`catia_describe_dialog`/`catia_dialog_action`) were never reached because
+nothing in the model's tool sequence tried them, and in any case the CATIA GUI
+itself showed no dialog to dismiss; the problem was inside the daemon's own
+blocked call, not a visible modal.
+
+**Not fixed in this session** — this is a genuine COM-threading issue in
+`scripts/catia_bridge/catia_com.py` / `session.py` worth its own investigation,
+not a one-line patch. Recorded here so it is not silently reproduced and
+mis-attributed to "CATIA not connected" again. The immediate, low-risk mitigation
+worth considering: `catia_run_command` should have its own hard timeout that
+kills and restarts the underlying COM connection rather than leaving the
+daemon's worker thread blocked forever.
+
+## Run 5 — retried after a clean bridge restart
+
+Prompt: *"The bridge should be reconnected now. Please change the bore diameter
+to 25 mm using catia_set_parameter on the existing part, and tell me the new
+mass."*
+
+See the outcome appended below once the run completed.
+
+## Rung reached
+
+Runs 1–3 confirm, for the first time, that the exact plan the OCCT backend
+builds correctly also builds correctly on the **real** CATIA seat: same shape,
+matching mass to the closed form, correct French feature/menu names, right way
+up. That is new information G1 above explicitly could not provide (it ran
+OCCT-only). Run 4 is not a ladder result — it is an infrastructure finding, and
+one that would have been invisible to a batched multi-prompt run, which is the
+whole argument for doing this one prompt at a time with a look at the real
+window after each one.

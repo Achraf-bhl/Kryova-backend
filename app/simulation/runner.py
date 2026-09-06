@@ -3,6 +3,15 @@
 Everything here happens off the request thread and owns its own database
 session. Failures are recorded on the job row rather than raised, because there
 is no caller left to raise to.
+
+**A job is also the unit that gets billed** (Phase P8). `usage_scope` puts the
+tenant and the job on a context variable for the length of the run, and every
+`app.observe` span that finishes inside it — the gmsh critical section, the
+in-house solver, the `ccx` subprocess — is metered from the timing that was
+already being taken. Nothing here times anything twice, and nothing here can
+fail because of metering: `app.core.metering` absorbs its own errors, counts
+them and writes them down. The scope posts its batch in a `finally`, so a solve
+that raised after nine minutes is still billed for the nine minutes.
 """
 
 import logging
@@ -16,6 +25,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.metering import Cause, LedgerSink, UsageScope, record_storage, usage_scope
 from app.media import LocalMediaStore, MediaService
 from app.mesh.gmsh_mesher import generate_tet_mesh
 from app.mesh.types import MeshError, TetMesh
@@ -59,34 +69,73 @@ def run_simulation(
         job.started_at = datetime.now(timezone.utc)
         db.commit()
 
-        try:
-            mesh, mesh_stats, output = _execute(job, media, solver)
-        except (MeshError, SolverError, ValueError) as exc:
-            # Expected, explainable failures: a bad mesh or an ill-posed model.
-            _fail(db, job, str(exc))
-            return
-        except Exception as exc:  # noqa: BLE001 - a crashed job must still be recorded
-            logger.exception("Simulation job %s crashed", job_id)
-            _fail(db, job, f"Unexpected solver failure: {exc}")
-            return
+        # `LedgerSink(session_scope)`, not the session above: a metering write
+        # inside this transaction could roll back the result it was measuring,
+        # which is the one thing P8 says metering must never do.
+        with usage_scope(
+            _usage_cause(job), LedgerSink(session_scope), fault_scope=session_scope
+        ) as usage:
+            try:
+                mesh, mesh_stats, output = _execute(job, media, solver, usage)
+            except (MeshError, SolverError, ValueError) as exc:
+                # Expected, explainable failures: a bad mesh or an ill-posed model.
+                _fail(db, job, str(exc))
+                return
+            except Exception as exc:  # noqa: BLE001 - a crashed job must still be recorded
+                logger.exception("Simulation job %s crashed", job_id)
+                _fail(db, job, f"Unexpected solver failure: {exc}")
+                return
 
-        # Recorded from the solver that *ran*, not from the name the route wrote
-        # when the job was queued. Decision 3 binds a result to what produced it,
-        # and a row naming a solver nobody consulted is provenance in name only.
-        # The version is `None` when it could not be read, and stored as None:
-        # an unmeasured version must not be guessed at.
-        job.solver = solver.name
-        version = solver_version(solver.name, settings.calculix_path or None)
-        if version:
-            job.solver_version = version
+            # Recorded from the solver that *ran*, not from the name the route wrote
+            # when the job was queued. Decision 3 binds a result to what produced it,
+            # and a row naming a solver nobody consulted is provenance in name only.
+            # The version is `None` when it could not be read, and stored as None:
+            # an unmeasured version must not be guessed at.
+            job.solver = solver.name
+            version = solver_version(solver.name, settings.calculix_path or None)
+            if version:
+                job.solver_version = version
+            usage.annotate(solver=solver.name, solver_version=version or "unavailable")
 
-        fields = _store_fields(media, job, mesh, output)
-        job.fields_media_id = fields.id
-        job.mesh_stats = mesh_stats
-        job.result = output.result.model_dump()
-        job.status = JobStatus.SUCCEEDED
-        job.finished_at = datetime.now(timezone.utc)
-        db.commit()
+            fields = _store_fields(media, job, mesh, output)
+            record_storage(
+                usage,
+                size_bytes=fields.size_bytes,
+                media_id=fields.id,
+                sha256=fields.sha256,
+                deduplicated=bool((fields.meta or {}).get("deduplicated")),
+            )
+            job.fields_media_id = fields.id
+            job.mesh_stats = mesh_stats
+            job.result = output.result.model_dump()
+            job.status = JobStatus.SUCCEEDED
+            job.finished_at = datetime.now(timezone.utc)
+            db.commit()
+
+
+def _usage_cause(job: SimulationJob) -> Cause:
+    """Bind this job's usage to everything a person could open to check it.
+
+    The tenant comes from the project, which is the only place it lives (P2):
+    `SimulationJob` has no organisation of its own, and denormalising one here
+    would be a second answer to a question `Project.organisation_id` already
+    answers.
+    """
+    project = job.project
+    return Cause(
+        organisation_id=project.organisation_id,
+        source="simulation.runner",
+        subject_type="simulation_job",
+        subject_id=job.id,
+        project_id=job.project_id,
+        simulation_job_id=job.id,
+        geometry_version_id=job.geometry_version_id,
+        user_id=project.owner_id,
+        detail={
+            "element_order": job.element_order,
+            "element_size_mm": job.element_size_mm,
+        },
+    )
 
 
 def _fail(db: Session, job: SimulationJob, error: str) -> None:
@@ -96,7 +145,7 @@ def _fail(db: Session, job: SimulationJob, error: str) -> None:
     db.commit()
 
 
-def _execute(job: SimulationJob, media: MediaService, solver: Solver):
+def _execute(job: SimulationJob, media: MediaService, solver: Solver, usage: UsageScope):
     version = job.geometry_version
     case = LoadCase.model_validate(job.load_case)
 
@@ -111,6 +160,12 @@ def _execute(job: SimulationJob, media: MediaService, solver: Solver):
     mesh, mesh_stats = generate_tet_mesh(
         path, version.file_format, job.element_size_mm, element_order=job.element_order
     )
+    # Annotated here rather than after the solve, so a run that fails *in* the
+    # solver is still billed for the meshing it really did. The gmsh span
+    # declares no fields (`app.observe.catalogue`), so without this the
+    # element-seconds meter has no multiplier and reports a gap instead of a
+    # number — which is the honest outcome, and not the one we want.
+    usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
 
     if mesh.tet_count > settings.max_elements:
         raise MeshError(

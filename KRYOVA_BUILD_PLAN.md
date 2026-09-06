@@ -107,6 +107,45 @@ and what 5.3's sensitivity can then be run over.
 
 ## Done
 
+- **Seat verification (2026-09-06).** One prompt at a time through the real chat endpoint
+  against the real CATIA V5-6R2023 seat, not the dispatcher — per the standing rule that a
+  test starting at `dispatch.call_catia` is testing a middle. `qwen3-coder:30b` needed two
+  turns to get there: turn one called `catia_new_part` before anything was open and got a
+  clean named refusal (`open_in_catia` had not run yet — a real instance of "calls tools
+  before their prerequisites," caught by our own validation rather than becoming a wrongly
+  built part); turn two, told explicitly to open CATIA first, built a 100×100×12 mm steel
+  plate with a 40 mm bore end to end (`open_in_catia` → `catia_new_part` → sketch → rectangle
+  → circle → pad → `catia_set_material`) and reported 0.824674 kg against the closed-form
+  104,920.3553 mm³ × 7860 kg/m³ exactly. Both required pictures taken and kept in
+  `docs/verification-2026-09-06/`: the viewport through `catia_capture_view` itself (the
+  product's own tool, exercised rather than bypassed) and the whole application window via
+  `scripts/shot.ps1`, confirming the French seat (`Plan xy`, `Corps principal`) and a
+  right-side-up, correctly-bored part. **Minor finding, not fixed**: `open_in_catia(new_part:
+  true)` followed by the model's own `catia_new_part` leaves an orphaned empty first document
+  open (`Part1`) beside the one actually built into (`Steel-Plate-2.CATPart` / `Part2`) —
+  worth a dedup or a clearer tool description, not a correctness bug.
+- **P8 — usage metering wired to its first real consumer (2026-09-06).** Billing has existed
+  as a schema and an API with nothing filling it; `app.simulation.runner` now posts every
+  job's meshing and solve time to the ledger through `usage_scope`, `finally`-scoped so a
+  solve that fails after nine minutes still bills the nine minutes, and through its own
+  session (`LedgerSink`) so a metering fault can never roll back the result it measured.
+  `app.observe.collect` gained a listener seam (`add_listener`/`remove_listener`) so
+  metering is *always on* independent of tracing — a bill gated on an operator having
+  enabled tracing for the request that happened to be billable would be a bill with holes in
+  it — while the disabled path stays exactly what it was (`span()` returns `INERT` with no
+  listener registered, unchanged allocation cost). AI tokens, CATIA seat time and kernel
+  operations are declared in the schema and report a gap rather than a number until
+  something calls them; no Stripe integration.
+- **E17 — a test-design bug in the mirror-orientation check, found running the drawing
+  suite for the first time since P8 (2026-09-06).** `TestWhereAKnownFeatureLands` checks
+  that a bore's line work is round at its true centre and not at three mirrored ones; the
+  "not round" checks used the single nearest line-work point to a candidate radius, and the
+  bore (r=15 at (20,10)) and the deliberately-wrong probe at (20,-10) are only 20 mm apart —
+  close enough that two circles of the same radius **intersect**, so a genuine vertex of the
+  real bore near that intersection satisfied the wrong probe's "round" check too, with
+  nothing actually circular at (20,-10). Fixed by sampling twelve angles around the
+  candidate circle and taking the worst match rather than the single best one: a real
+  circle satisfies all twelve, and one or two coincidental intersection points cannot.
 - **P3 — the admin console and an audit log that cannot be edited (2026-09-06).** The append-only
   property is **structural in four layers, and the report says which one is worth what**: a
   `BEFORE UPDATE OR DELETE` row trigger (the one that counts — it applies to the ORM, to raw SQL,

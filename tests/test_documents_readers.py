@@ -36,6 +36,7 @@ cannot — pypdf absent, an extractor that finds no text layer.
 
 from __future__ import annotations
 
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,6 +50,13 @@ from app.documents.quoted import UntrustedText
 from app.documents.readers import MAX_FRAGMENTS, MAX_TEXT_BYTES, read_document
 
 ezdxf = pytest.importorskip("ezdxf", reason="ezdxf is a listed dependency; a DXF cannot be read")
+
+#: These two tests exercise the poppler (`pdftotext`) path deliberately, with
+#: pypdf knocked out -- per `requirements.txt`, poppler is "preferred when
+#: present" but explicitly "cannot be assumed", so a machine that genuinely
+#: lacks it must skip rather than fail. Skipped rather than xfail: a missing
+#: system binary is an environment fact, not a code defect to track.
+_HAS_POPPLER = shutil.which("pdftotext") is not None
 
 
 # -- fixtures a reader can actually be pointed at ------------------------------
@@ -717,6 +725,7 @@ class TestPdfMetadataIsQuotedNotTrusted:
         assert document.source.filename == "bracket-spec.pdf"
         assert "SYSTEM" not in document.summary()
 
+    @pytest.mark.skipif(not _HAS_POPPLER, reason="needs pdftotext (poppler) on PATH")
     def test_a_damaged_information_dictionary_does_not_lose_the_pages(
         self, pdf: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -734,6 +743,7 @@ class TestPdfMetadataIsQuotedNotTrusted:
         assert any("Bolt torque 42 Nm" in text for text in raw(document, FragmentKind.PROSE))
         assert any("metadata could not be read" in note for note in document.notes)
 
+    @pytest.mark.skipif(not _HAS_POPPLER, reason="needs pdftotext (poppler) on PATH")
     def test_pypdf_missing_is_said_out_loud_rather_than_skipped(
         self, pdf: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

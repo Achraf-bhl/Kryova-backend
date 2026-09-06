@@ -60,6 +60,7 @@ from app.manufacture.errors import DrawingError
 from app.manufacture.locate import MATCH_TOLERANCE_MM, CircleGroup, find_circles
 from app.manufacture.sheet import (
     DEFAULT_PROJECTION,
+    SHEET_SIZES,
     TITLE_BLOCK_HEIGHT_MM,
     Projection,
     SheetSize,
@@ -68,7 +69,6 @@ from app.manufacture.sheet import (
     drawing_area,
     scale_text,
     sheet_named,
-    smallest_sheet_for,
 )
 
 #: Space between two views on the sheet, in sheet millimetres. Wide enough that
@@ -122,6 +122,11 @@ _VIEW_CELLS: Final[dict[str, tuple[int, int]]] = {
 #: row or a column with an orthographic view and cannot be read as one.
 _ISO_CELL: Final[tuple[int, int]] = (2, 2)
 
+#: The smallest reduction a sheet is chosen at *automatically*. Past 1:10 a
+#: fillet radius stops being visible and the drawing stops answering the question
+#: it was made for; a caller who wants 1:50 names the sheet.
+MINIMUM_AUTOMATIC_SCALE: Final = 0.1
+
 #: The column sections and details start in — under the front view rather than
 #: under whatever happens to be leftmost, so the sheet reads down the middle.
 _EXTRA_COL: Final = 1
@@ -134,6 +139,16 @@ class DetailRequest:
     `centre_mm` and `radius_mm` are in the parent view's own millimetres, which
     is the only frame in which "the top-left corner of the flange" can be said
     without knowing the sheet scale.
+
+    `magnification` is a factor **relative to the sheet**, not an absolute scale:
+    2.0 means twice the size everything else on this sheet is drawn at. It has to
+    be relative, because the sheet's own scale is not chosen until every view
+    exists — including this one, whose size on paper is part of what decides it.
+    The consequence is that a 2x detail on a 1:2 sheet is drawn 1:1 and on a 1:5
+    sheet at 1:2.5, so the caption is written from the scale the view was
+    actually drawn at rather than from this number. It said this number once, and
+    a caption reading "(2:1)" over line work at full size is the wrong-scale
+    failure this module exists to avoid.
     """
 
     parent: str
@@ -238,13 +253,23 @@ def lay_out(
         )
 
     sheet = _pick_sheet(request, cells)
-    area_width, area_height = drawing_area(sheet)
     columns, rows = _grid(cells)
     content = (sum(columns), sum(rows))
-    usable = (
-        area_width - NOTES_WIDTH_MM - 2.0 * DIMENSION_ALLOWANCE_MM - VIEW_GAP_MM * (len(columns) - 1),
-        area_height - 2.0 * DIMENSION_ALLOWANCE_MM - VIEW_GAP_MM * (len(rows) - 1),
-    )
+    usable = _usable(sheet, columns, rows)
+    if usable[0] <= 0.0 or usable[1] <= 0.0:
+        # Refused here rather than in `choose_scale`, which can only see the two
+        # numbers and blames the title block for them. What has actually
+        # happened is that the gaps between the views eat the sheet before any
+        # geometry is drawn on it, and the fix is a bigger sheet or fewer views —
+        # neither of which the reader would guess from "the drawing area is
+        # 131 x 0 mm".
+        raise DrawingError(
+            f"{len(rows)} rows and {len(columns)} columns of views need "
+            f"{VIEW_GAP_MM * (len(rows) - 1):g} mm of gaps down and "
+            f"{VIEW_GAP_MM * (len(columns) - 1):g} mm across, which leaves no room on "
+            f"an {sheet.name} sheet before any geometry is drawn. Ask for a larger "
+            "sheet, or for fewer views, sections and details on this one."
+        )
     scale = choose_scale(content, usable)
 
     placed = _place(cells, columns, rows, scale, sheet, request.projection)
@@ -456,7 +481,14 @@ def _detail_cells(request: LayoutRequest, existing: list[_Cell]) -> list[_Cell]:
                 row=row - index // 2,
                 col=_EXTRA_COL + index % 2,
                 name=f"detail_{letter.lower()}",
-                label=f"DETAIL {letter} ({scale_text(detail.magnification)})",
+                # No scale in the label yet: `magnification` is a factor
+                # *relative to the sheet*, and the sheet's own scale is not
+                # chosen until every cell exists. Printing the factor here
+                # labelled a detail drawn 1:1 on a 1:2 sheet as "(2:1)" — a
+                # caption claiming twice full size on line work at full size,
+                # which is the wrong-scale failure this package's own docstring
+                # calls the one people cut metal from. `_place` finishes it.
+                label=f"DETAIL {letter}",
                 kind=ViewKind.DETAIL,
                 visible=visible,
                 hidden=hidden,
@@ -556,16 +588,53 @@ def _detail_letter(index: int) -> str:
 # -- placement --------------------------------------------------------------
 
 
+def _usable(
+    sheet: SheetSize, columns: list[float], rows: list[float]
+) -> tuple[float, float]:
+    """How much of `sheet` the views themselves may occupy, in sheet millimetres.
+
+    The one expression both `_pick_sheet` and `lay_out` ask, because they used to
+    ask different ones. `sheet.smallest_sheet_for` cannot answer this: it takes a
+    single content size and knows nothing about the notes column, the dimension
+    allowance, or how many gaps this particular arrangement needs — and those are
+    *sheet* millimetres, which do not scale with the part, so folding them into
+    the content and letting `choose_scale` shrink them is wrong in kind. Doing
+    exactly that picked an A4 for a sheet needing an A3, and `lay_out` then
+    refused it with a message about the title block.
+    """
+    area_width, area_height = drawing_area(sheet)
+    return (
+        area_width
+        - NOTES_WIDTH_MM
+        - 2.0 * DIMENSION_ALLOWANCE_MM
+        - VIEW_GAP_MM * (len(columns) - 1),
+        area_height - 2.0 * DIMENSION_ALLOWANCE_MM - VIEW_GAP_MM * (len(rows) - 1),
+    )
+
+
 def _pick_sheet(request: LayoutRequest, cells: tuple[_Cell, ...]) -> SheetSize:
+    """The smallest sheet this arrangement reads well on.
+
+    Walks the sizes smallest first and asks each the question `lay_out` will ask
+    it, rather than a cheaper approximation of it. `MINIMUM_AUTOMATIC_SCALE` is
+    the floor: past 1:10 a fillet radius stops being visible and the drawing
+    stops answering the question it was made for. A caller who genuinely wants
+    1:50 says so by naming a sheet, and a named sheet is never second-guessed.
+    """
     if request.sheet is not None:
         return sheet_named(request.sheet)
     columns, rows = _grid(cells)
-    return smallest_sheet_for(
-        (
-            sum(columns) + NOTES_WIDTH_MM + 2.0 * DIMENSION_ALLOWANCE_MM,
-            sum(rows) + 2.0 * DIMENSION_ALLOWANCE_MM,
-        )
-    )
+    content = (sum(columns), sum(rows))
+    for sheet in SHEET_SIZES:
+        usable = _usable(sheet, columns, rows)
+        if usable[0] <= 0.0 or usable[1] <= 0.0:
+            continue
+        try:
+            if choose_scale(content, usable) >= MINIMUM_AUTOMATIC_SCALE:
+                return sheet
+        except DrawingError:
+            continue
+    return SHEET_SIZES[-1]
 
 
 def _grid(cells: tuple[_Cell, ...]) -> tuple[list[float], list[float]]:
@@ -630,13 +699,22 @@ def _place(
             if first_angle
             else block_y + before_y
         )
+        view_scale = scale * cell.magnify
         placed.append(
             DrawnView(
                 name=cell.name,
-                label=cell.label,
+                # A detail is the one view allowed to be drawn at a scale of its
+                # own, so it is the one view that has to say what that scale is —
+                # written from the factor it was actually drawn at, never from
+                # the factor that was asked for.
+                label=(
+                    f"{cell.label} ({scale_text(view_scale)})"
+                    if cell.kind is ViewKind.DETAIL
+                    else cell.label
+                ),
                 kind=cell.kind,
                 origin_mm=(left + column_mm[cell.col] / 2.0, bottom + row_mm[cell.row] / 2.0),
-                scale=scale * cell.magnify,
+                scale=view_scale,
                 visible=cell.visible,
                 hidden=cell.hidden,
                 extent=cell.extent,
@@ -701,6 +779,13 @@ def _dimension(
     second looking merely unplaced, hiding the fact that the drawing could not
     tell two design parameters apart.
     """
+    # The predicate lives in the module that owns the classification, so "does
+    # `_mm` make it a dimension" has one answer. Imported inside the function
+    # because `dimensions.py` pulls in `app.design.compile`, and `layout.py`
+    # itself needs nothing from the design package — the same reason the render
+    # and kernel imports in this file are local.
+    from app.manufacture.dimensions import is_dimensional
+
     state = _Placement()
     by_name = {cell.name: cell for cell in cells}
     lengths = [one for one in traced if one.kind is DimensionKind.LINEAR and one.unit]
@@ -749,10 +834,24 @@ def _dimension(
         for view in views
     )
 
+    # Anything traced that is not a dimension is bucketed here rather than
+    # falling through the three filters above into nothing. It used to: a
+    # pattern's `count` is a number with no dimensional suffix, so it matched
+    # neither `lengths` nor `rounds` nor `angles` and left no trace anywhere —
+    # and "the report did not mention it" and "the report decided it did not
+    # matter" read identically to somebody checking. A caller that has already
+    # partitioned still passes its own list; this adds only what it did not.
+    already = {(one.feature, one.argument) for one in non_dimensional}
+    combined = tuple(non_dimensional) + tuple(
+        one
+        for one in traced
+        if not is_dimensional(one) and (one.feature, one.argument) not in already
+    )
+
     report = DimensionReport(
         placed=tuple(state.placed),
         tabled=tuple(state.tabled),
-        non_dimensional=tuple(non_dimensional),
+        non_dimensional=combined,
         suppressed=tuple(suppressed),
         ambiguous=tuple(state.ambiguous),
     )
@@ -868,17 +967,28 @@ def _add_linear(
     matches = [one for one in lengths if abs(one.value - value) <= MATCH_TOLERANCE_MM]
     if len(matches) == 1:
         traced = matches[0]
+        # `is_traced`, not "the design mentioned it". A literal typed straight
+        # into a feature — `{"length_mm": 12.0}` rather than `=thick_mm` — is a
+        # number the design states and nothing controls: edit the design and it
+        # does not move. Calling that a PARAMETER dimension put a provenance on
+        # the sheet that nothing stood behind, and made `fully_traced` true for a
+        # part with no parameters at all, which is the one claim this package
+        # exists to be able to make honestly. `_place_rounds` had it right; this
+        # did not, and the two disagreeing is how it survived.
         state.placed.append(
             Dimension(
                 view=cell.name,
                 kind=kind,
-                source=DimensionSource.PARAMETER,
+                source=(
+                    DimensionSource.PARAMETER if traced.is_traced else DimensionSource.GEOMETRY
+                ),
                 value=traced.value,
                 start=start,
                 end=end,
                 offset_mm=offset_mm,
                 parameter=", ".join(traced.parameters) or None,
                 feature=traced.feature,
+                argument=traced.argument,
                 note=traced.note,
             )
         )
@@ -976,6 +1086,7 @@ def _place_rounds(
                 leader_deg=_LEADER_ANGLES[index % len(_LEADER_ANGLES)],
                 parameter=", ".join(traced.parameters) or None,
                 feature=traced.feature,
+                argument=traced.argument,
                 note=traced.note,
             )
         )

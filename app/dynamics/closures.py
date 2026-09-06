@@ -261,15 +261,38 @@ def grashof(
 ) -> str:
     """Which four-bar this is, in the words a mechanism designer uses.
 
-    Grashof's condition -- shortest + longest <= the other two -- decides whether any
-    link can fully rotate, which decides whether the linkage can be motor-driven at all.
-    Returned as a phrase rather than a boolean because "crank-rocker" and
-    "double-rocker" are different machines and the distinction is the useful half.
+    Grashof's condition -- shortest + longest **strictly less than** the other two --
+    decides whether any link can fully rotate, which decides whether the linkage can be
+    motor-driven at all. Returned as a phrase rather than a boolean because
+    "crank-rocker" and "double-rocker" are different machines and the distinction is the
+    useful half.
+
+    **The equality is its own case and must not be folded into either side.** This
+    shipped folded into the Grashof branch, and it made every parallelogram linkage --
+    the commonest four-bar there is -- come back as "crank-rocker: the output rocks",
+    which is wrong twice over: the output fully rotates, and the linkage has an
+    uncertainty configuration where all four links go collinear and it can flip to the
+    anti-parallelogram branch on its own. A change point is a real property of the link
+    lengths and it is what `four_bar` refuses at, so it is named here rather than
+    smoothed into a classification that reads like a working machine.
+
+    In the strict branch the shortest link is unique, and that is provable rather than
+    assumed: with `s <= p <= q <= l`, a tie `s == p` turns `s + l < p + q` into `l < q`,
+    which contradicts `q <= l`. So the identity tests below cannot be ambiguous, and
+    `TestGrashof` pins that with the tie cases.
     """
     lengths = sorted([ground_mm, input_mm, coupler_mm, output_mm])
     shortest, second, third, longest = lengths
     if shortest + longest > second + third:
         return "non-Grashof: no link fully rotates, so every link is a rocker"
+    if shortest + longest == second + third:
+        return (
+            "change-point linkage: shortest + longest exactly equals the other two, so "
+            "every link can fully rotate, but all four go collinear once a turn and the "
+            "branch it comes out on is not determined -- a parallelogram flips to an "
+            "anti-parallelogram unless something prevents it. four_bar refuses at that "
+            "angle rather than picking a branch"
+        )
     if shortest == input_mm:
         return "Grashof crank-rocker: the input link fully rotates, the output rocks"
     if shortest == ground_mm:

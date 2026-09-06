@@ -247,17 +247,44 @@ def bolt_for_clamp(
     )
 
 
+#: bolt property class -> the ISO 898-2 nut class that suits it. A nut must be
+#: at least its bolt's class: a weaker nut strips instead of the bolt breaking,
+#: and a stripped thread gives no warning.
+#:
+#: There is deliberately no 12.9 row. This used to read
+#: ``"8" if grade == "8.8" else "10"``, which handed a class 10 nut to a 12.9
+#: bolt — under-strength, silently, and the exact substitution the rest of this
+#: module refuses to make. ISO 898-2 numbers a nut class after the bolt class it
+#: suits, so a 12.9 bolt needs a class 12 nut and this catalogue holds none.
+_NUT_CLASS_FOR_BOLT_CLASS: Mapping[str, str] = {"8.8": "8", "10.9": "10"}
+
+
 def nut_for(bolt: StandardPart, *, catalogue: Catalogue = CATALOGUE) -> StandardPart:
     """The ISO 4032 nut that matches a bolt, at a property class that suits it.
 
-    Class 8 for an 8.8 bolt, class 10 for 10.9 and 12.9 — a nut below its bolt's
-    class strips before the bolt breaks, and stripped threads give no warning.
+    Class 8 for an 8.8 bolt, class 10 for a 10.9 — a nut below its bolt's class
+    strips before the bolt breaks, and stripped threads give no warning. A class
+    this catalogue cannot match is refused rather than served the next one down.
     """
     if bolt.kind is not PartKind.BOLT:
         raise ValueError(
             f"{bolt.designation} is a {bolt.kind}, not a bolt, so it has no matching nut."
         )
-    grade = "8" if bolt.designation.grade == "8.8" else "10"
+    grade = _NUT_CLASS_FOR_BOLT_CLASS.get(bolt.designation.grade)
+    if grade is None:
+        needed = bolt.designation.grade.split(".")[0]
+        pairs = ", ".join(
+            f"{bolt_class} with nut class {nut_class}"
+            for bolt_class, nut_class in _NUT_CLASS_FOR_BOLT_CLASS.items()
+        )
+        raise UnknownPart(
+            f"No nut held here matches a class {bolt.designation.grade} bolt. ISO 898-2 "
+            f"numbers a nut class after the bolt class it suits, so this one needs class "
+            f"{needed}, and the catalogue holds {pairs} only. Nothing weaker is "
+            f"substituted: a nut below its bolt's class strips before the bolt breaks, "
+            f"and a stripped thread gives no warning. Add a class {needed} nut to a part "
+            f"source, or specify the joint with a class this catalogue holds."
+        )
     return catalogue.find(Designation("ISO 4032", bolt.designation.size, None, grade))
 
 

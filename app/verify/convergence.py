@@ -286,12 +286,26 @@ def observed_order(
 ) -> float | None:
     """Solve Celik's transcendental equation for the observed order `p`.
 
-        p = |ln|e32/e21| + q(p)| / ln(r21),
+        p = (ln|e32/e21| + q(p)) / ln(r21),
         q(p) = ln((r21^p - s) / (r32^p - s)),   s = sign(e32/e21)
 
     Fixed-point iteration from `q = 0`, which is the exact answer when the two
     refinement ratios are equal — so on a constant-ratio study this converges on
     the first pass and reduces to the textbook three-grid formula.
+
+    **The order returned is signed, and that is a deliberate departure from the
+    published form.** Celik writes the numerator inside an absolute value,
+    because his equation is posed for a sequence that is already known to be
+    converging. Taking it literally is a trap: on a *diverging* sequence — one
+    where refining the mesh moves the answer further each time, so
+    `|e32| < |e21|` — the logarithm is negative and the absolute value mirrors it
+    back onto a perfectly plausible positive order. Measured on this codebase
+    before the sign was restored: the sequence 100.03 -> 100.02 -> 100.00, whose
+    steps *grow* under refinement, came back `CONVERGED` at "observed order 1.00,
+    ±0.03% (GCI)" and permitted the value to be stated. A diverging sequence must
+    produce a negative order, which `assess` refuses; the absolute value made
+    `assess`'s own "not positive" branch dead code and turned divergence into
+    exactly the confident wrong number this module exists to prevent.
 
     Returns `None` when the iteration cannot be carried out at all: a zero
     denominator, a non-finite step, or a runaway `p`. `None` is "the order could
@@ -307,7 +321,7 @@ def observed_order(
     log_ratio = math.log(abs(ratio))
     log_r21 = math.log(r21)
 
-    p = abs(log_ratio) / log_r21
+    p = log_ratio / log_r21
     for _ in range(iterations):
         try:
             denominator = r32**p - sign
@@ -315,10 +329,10 @@ def observed_order(
             if denominator == 0.0 or numerator / denominator <= 0.0:
                 return None
             q = math.log(numerator / denominator)
-            updated = abs(log_ratio + q) / log_r21
+            updated = (log_ratio + q) / log_r21
         except (ValueError, OverflowError, ZeroDivisionError):
             return None
-        if not math.isfinite(updated) or updated > 100.0:
+        if not math.isfinite(updated) or abs(updated) > 100.0:
             return None
         if abs(updated - p) < 1e-10:
             return updated
@@ -486,8 +500,12 @@ def assess(
     if order <= 0.0:
         return not_converged(
             f"The observed order of convergence is {order:.3f}, which is not positive: "
-            "refining the mesh is not reducing the error. Check the mesh quality and "
-            "the boundary conditions before refining further.",
+            f"refining the mesh is not reducing the error. The coarse-to-medium step is "
+            f"{e32:.6g} {unit} and the medium-to-fine step is {e21:.6g} {unit}, so the "
+            "change is holding or growing as the mesh refines rather than shrinking. "
+            "Check the mesh quality and the boundary conditions before refining further; "
+            "no extrapolation is offered, because Richardson extrapolation of a "
+            "diverging sequence produces a number with no meaning at all.",
             observed_order=order,
         )
 

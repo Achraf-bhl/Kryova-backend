@@ -1,6 +1,16 @@
 """What a benchmark *is* here, and the rules that stop one being invented.
 
-Master plan 7.1. A benchmark is a published problem with a published answer. The
+Master plan 7.1, **the machinery only**. This module defines what a benchmark
+is, what a target may claim, and how a run is classified. It contains **no
+benchmark instances**: there is no NAFEMS catalogue in this codebase yet, and
+7.4's published validation register does not exist either. Both are named
+throughout the plan and neither has been written, so nothing here should be read
+as evidence that any analysis has been validated against a published source. The
+words "catalogue" and "register" below describe the consumer this module is
+shaped for, not a module you can import. Writing that catalogue is 7.1's
+remaining work, and the rule it must obey is the first one in this list.
+
+A benchmark is a published problem with a published answer. The
 value of running one comes entirely from the answer having been arrived at by
 somebody else, so the single most damaging thing this module could permit is a
 target that looks published and is not. Every rule below exists to make that
@@ -9,7 +19,7 @@ impossible rather than merely discouraged:
 * **A target must say where it came from.** `TargetBasis.PUBLISHED` requires a
   non-empty `source`, and `DERIVED` requires the formula and the function that
   computes it. A number with no provenance is refused at construction, so it
-  cannot reach a test, let alone the register.
+  cannot reach a test, let alone a published register.
 * **"I am not sure" is a first-class state.** `TargetBasis.UNKNOWN` carries a
   reason and *forbids* a value. This is what a case with a target the author
   could not verify looks like: fully encoded, runnable where possible, measured,
@@ -17,8 +27,8 @@ impossible rather than merely discouraged:
   and an `UNKNOWN` target is how the codebase says so out loud.
 * **A benchmark that cannot run says why, in words that name the missing
   capability.** `blocked_reason` is not an apology; it is the phase's most
-  useful output. Half the NAFEMS suite is blocked here on one missing selector
-  and one missing element family, and the register prints exactly that.
+  useful output — a catalogue that reports "blocked: needs shell elements" is
+  telling you what to build next, where a silent skip tells you nothing.
 
 **Outcomes are six, and only one of them is a pass.** `MEASURED` — ran fine,
 nothing to compare against — is never a pass, for the same reason
@@ -32,7 +42,7 @@ ASME V&V 20 separates *verification* — are the equations being solved correctl
 which is what `app.verify.convergence` measures — from *validation* — are they
 the right equations, which is what comparing against a published benchmark
 measures. An `Outcome` is a validation verdict; the convergence verdict rides
-alongside it and the register reports both. Collapsing them would let a case
+alongside it and a catalogue must report both. Collapsing them would let a case
 that happened to land on the target from a grid nobody checked read as fully
 evidenced.
 """
@@ -95,6 +105,16 @@ class Target:
 
         if self.value is None:
             raise ValueError(f"A {self.basis} target must carry a value.")
+        if self.value == 0.0:
+            raise ValueError(
+                "A target of exactly zero cannot carry a relative tolerance, because "
+                "`tolerance` is a fraction *of the target* and every fraction of zero "
+                "is zero. A benchmark whose published answer is zero — a symmetry "
+                "plane that must not move, a rigid-body mode — is an absolute "
+                "comparison against a floor, not a percentage band, and encoding it "
+                "here would compare an absolute deviation against a fractional band "
+                "and call any small number validated."
+            )
         if self.tolerance is None or not 0.0 < self.tolerance < 1.0:
             raise ValueError(
                 f"A {self.basis} target needs a tolerance in (0, 1) — the fraction of "
@@ -157,21 +177,22 @@ class Benchmark:
 
     id: str
     title: str
-    #: One of the analyses in the register: linear-static, modal, buckling,
-    #: thermal-stress. Free text, but the register groups on it.
+    #: One of the analyses a catalogue groups by: linear-static, modal,
+    #: buckling, thermal-stress. Free text; `BenchmarkOutcome` carries it through
+    #: so a report can group on it.
     analysis: str
     description: str
     target: Target
     run: Callable[[], BenchmarkRun] | None = None
     blocked_reason: str = ""
     #: True when a run takes long enough that it should not sit in the default
-    #: test path. `run_catalogue` filters on it.
+    #: test path. `run_suite` filters on it.
     slow: bool = False
     references: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id.strip():
-            raise ValueError("A benchmark needs an id; the register keys on it.")
+            raise ValueError("A benchmark needs an id; a report keys on it.")
         if self.run is None and not self.blocked_reason.strip():
             raise ValueError(
                 f"Benchmark {self.id!r} has no `run` and no `blocked_reason`. A case "
@@ -233,7 +254,7 @@ class BenchmarkOutcome:
     @property
     def passed(self) -> bool:
         """True only for `VALIDATED`. Written as a property so no caller has to
-        remember which of the five outcomes count — and so `MEASURED` cannot be
+        remember which of the six outcomes count — and so `MEASURED` cannot be
         mistaken for one that does."""
         return self.outcome is Outcome.VALIDATED
 
@@ -263,7 +284,7 @@ def run_benchmark(benchmark: Benchmark) -> BenchmarkOutcome:
     Never raises because a suite of benchmarks is a *report*, and one case
     blowing up must not remove the evidence for the other twenty. The exception
     is recorded as `ERRORED`, which is not a pass, so nothing is hidden by the
-    catch — an errored case is as loud in the register as a deviated one.
+    catch — an errored case is as loud in a report as a deviated one.
     """
     if benchmark.run is None:
         return BenchmarkOutcome(
@@ -331,7 +352,10 @@ def run_benchmark(benchmark: Benchmark) -> BenchmarkOutcome:
     assert benchmark.target.value is not None  # guaranteed by Target.__post_init__
     assert benchmark.target.tolerance is not None
     reference = benchmark.target.value
-    deviation = (run.value - reference) / reference if reference != 0.0 else run.value
+    # `Target.__post_init__` refuses a zero-valued target, so this division is
+    # safe by construction rather than by a fallback that would silently compare
+    # an absolute deviation against a fractional band.
+    deviation = (run.value - reference) / reference
     inside = abs(deviation) <= benchmark.target.tolerance
 
     return BenchmarkOutcome(
@@ -357,7 +381,7 @@ class Suite:
     """A named collection of benchmarks, with the id uniqueness they need.
 
     Duplicate ids raise at construction, the same rule `app.catia_kb` applies to
-    its entries and for the same reason: the register keys on the id, so a
+    its entries and for the same reason: a report keys on the id, so a
     duplicate would silently overwrite a case's result with another case's.
     """
 
@@ -370,7 +394,7 @@ class Suite:
             if benchmark.id in seen:
                 raise ValueError(
                     f"Duplicate benchmark id {benchmark.id!r} in suite {self.name!r}. "
-                    "The register keys on the id and would report one case's result "
+                    "A report keys on the id and would report one case's result "
                     "under the other's name."
                 )
             seen.add(benchmark.id)

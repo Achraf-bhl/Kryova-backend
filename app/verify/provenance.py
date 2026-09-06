@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import math
 import platform
 import sys
 from dataclasses import dataclass
@@ -188,6 +189,56 @@ class RunProvenance:
     #: Free-form, for anything the caller must record and nothing else models —
     #: the benchmark id, the mission rung, the job row id.
     notes: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a record that cannot say what it is or what produced it.
+
+        7.3 is the binding, and a record with an empty `analysis` or an empty
+        `geometry_source` is not a weak binding, it is none: nobody reading it
+        later can tell which run it describes. The mesh, the case and the solver
+        cannot be empty — they are typed — so these four strings are the whole of
+        what a caller can leave blank, and leaving one blank must cost the record
+        rather than be discovered by a reader a year later.
+
+        The value is checked against the convergence study for the same reason.
+        `stated_value` is the only number a study permits out, so a record
+        carrying a converged study *and a different number* is asserting one
+        thing in `value` and another in `convergence`, and the whole point of the
+        record is that those cannot come apart.
+        """
+        missing = [
+            field_name
+            for field_name, text in (
+                ("analysis", self.analysis),
+                ("quantity", self.quantity),
+                ("unit", self.unit),
+                ("geometry_source", self.geometry_source),
+            )
+            if not text.strip()
+        ]
+        if missing:
+            raise ValueError(
+                f"A provenance record must say what produced it; {', '.join(missing)} "
+                "is blank. A result that cannot name its analysis, its quantity, its "
+                "unit and where its geometry came from is not evidence — it is a "
+                "number with a hash beside it. Use a phrase like 'primitive box mesh "
+                "built in memory' or a media blob's sha256 for geometry_source."
+            )
+
+        study = self.convergence
+        if study is None or self.value is None:
+            return
+        stated = study.stated_value
+        if stated is None:
+            return
+        if not math.isclose(self.value, stated, rel_tol=1e-12, abs_tol=0.0):
+            raise ValueError(
+                f"The recorded value {self.value!r} is not the value its own "
+                f"convergence study permits ({stated!r}). A record whose number and "
+                "whose evidence disagree is worse than one with no evidence: it reads "
+                "as fully substantiated. Record the study's stated value, or record "
+                "the study that actually produced this number."
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """The record, with an `app.kernel.provenance` sidecar over its paths.

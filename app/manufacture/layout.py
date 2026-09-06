@@ -39,7 +39,7 @@ with two numbers that can disagree after an edit.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
 from app.manufacture.drawing import (
@@ -96,6 +96,35 @@ _CIRCLE_SEARCH_ORDER: Final[tuple[str, ...]] = ("top", "front", "right")
 #: Cycled by index so two leaders in the same view never lie on top of each other,
 #: and fixed rather than computed so the same part always produces the same sheet.
 _LEADER_ANGLES: Final[tuple[float, ...]] = (45.0, 135.0, 225.0, 315.0)
+
+#: Where each canonical orthographic view sits on the projection grid, as
+#: `(row, col)`, stated in the **third angle** sense: a higher row is higher on
+#: the sheet and a higher column is further right. `_place` mirrors both axes for
+#: first angle, and that mirror is the entire difference between the conventions.
+#:
+#: The front view is the middle cell rather than a corner because `left` and
+#: `bottom` exist and have to go somewhere. This table used to give `left` the
+#: same cell as `right` and `back` the same cell as the pictorial view, which
+#: drew two views at one origin — and put the view *from the left* on the
+#: right-hand side of a third-angle sheet, which is precisely the mirrored-part
+#: failure this module's docstring warns about, with nothing in the line work to
+#: betray it.
+_VIEW_CELLS: Final[dict[str, tuple[int, int]]] = {
+    "bottom": (0, 1),
+    "left": (1, 0),
+    "front": (1, 1),
+    "right": (1, 2),
+    "back": (1, 3),
+    "top": (2, 1),
+}
+
+#: The pictorial view's cell: diagonally off the front view, so it never shares a
+#: row or a column with an orthographic view and cannot be read as one.
+_ISO_CELL: Final[tuple[int, int]] = (2, 2)
+
+#: The column sections and details start in — under the front view rather than
+#: under whatever happens to be leftmost, so the sheet reads down the middle.
+_EXTRA_COL: Final = 1
 
 
 @dataclass(frozen=True)
@@ -243,31 +272,42 @@ def lay_out(
 def _build_cells(shape: Any, request: LayoutRequest) -> tuple[_Cell, ...]:
     """Project everything the request asks for, and assign it a grid cell.
 
-    Row 0 holds the front view and, beside it, the right view. Row 1 holds the
-    view from above and the pictorial. Sections and details fill the rows below,
-    two to a row. Which *direction* rows and columns grow is the projection
-    convention's business, applied in `_place` — the grid itself is the same
-    either way, which is what keeps the convention a single sign rather than two
-    layout algorithms that can disagree.
+    Cells are addressed by `_VIEW_CELLS`, in the third-angle sense: front in the
+    middle, top above it, bottom below, right to its right, left to its left.
+    Sections and details fill the rows *below* the block, two to a row, so they
+    never take a cell an orthographic view could want. Which *direction* rows and
+    columns grow is the projection convention's business, applied in `_place` —
+    the grid itself is the same either way, which is what keeps the convention a
+    single sign rather than two layout algorithms that can disagree.
+
+    The grid is compacted at the end, so a sheet that asks for no left view does
+    not carry an empty column where one would have gone.
     """
     from app.render.project import project
     from app.render.views import view_named
 
     cells: list[_Cell] = []
-    positions = {"front": (0, 0), "right": (0, 1), "top": (1, 0), "left": (0, 1), "back": (1, 1)}
 
     for name in request.views:
-        camera = view_named(name)
+        key = name.strip().lower()
+        if key not in _VIEW_CELLS:
+            known = ", ".join(sorted(_VIEW_CELLS))
+            raise DrawingError(
+                f"{name!r} is not an orthographic view and cannot go on the projection "
+                f"grid. The orthographic views are: {known}. A pictorial view is asked "
+                "for with include_iso."
+            )
+        camera = view_named(key)
         projection = project(shape, camera)
         if projection.is_empty:
             continue
-        row, col = positions.get(name, (2, 0))
+        row, col = _VIEW_CELLS[key]
         cells.append(
             _Cell(
                 row=row,
                 col=col,
-                name=name,
-                label=name.upper(),
+                name=key,
+                label=key.upper(),
                 kind=ViewKind.ORTHOGRAPHIC,
                 visible=projection.visible,
                 hidden=projection.hidden,
@@ -282,8 +322,8 @@ def _build_cells(shape: Any, request: LayoutRequest) -> tuple[_Cell, ...]:
         if not projection.is_empty:
             cells.append(
                 _Cell(
-                    row=1,
-                    col=1,
+                    row=_ISO_CELL[0],
+                    col=_ISO_CELL[1],
                     name="iso",
                     label="ISOMETRIC",
                     kind=ViewKind.PICTORIAL,
@@ -299,9 +339,27 @@ def _build_cells(shape: Any, request: LayoutRequest) -> tuple[_Cell, ...]:
                 )
             )
 
-    cells.extend(_section_cells(shape, request, start_row=2))
+    cells.extend(_section_cells(shape, request, start_row=-1))
     cells.extend(_detail_cells(request, cells))
-    return tuple(cells)
+    return _compact(cells)
+
+
+def _compact(cells: list[_Cell]) -> tuple[_Cell, ...]:
+    """Renumber rows and columns to consecutive indices, order preserved.
+
+    `_VIEW_CELLS` addresses a fixed six-cell grid and sections sit on negative
+    rows below it, so most sheets use a handful of scattered indices. `_place`
+    walks the index space, and an index nothing occupies still costs a
+    `VIEW_GAP_MM` — a band of blank paper where the left view would have been.
+    Compaction removes those without moving anything relative to anything else,
+    so the alignment promise between the front view and its neighbours survives
+    it: a row is still a row and the order is still the order.
+    """
+    rows = {row: index for index, row in enumerate(sorted({cell.row for cell in cells}))}
+    columns = {col: index for index, col in enumerate(sorted({cell.col for cell in cells}))}
+    return tuple(
+        replace(cell, row=rows[cell.row], col=columns[cell.col]) for cell in cells
+    )
 
 
 def _section_cells(shape: Any, request: LayoutRequest, *, start_row: int) -> list[_Cell]:
@@ -333,8 +391,8 @@ def _section_cells(shape: Any, request: LayoutRequest, *, start_row: int) -> lis
         )
         cells.append(
             _Cell(
-                row=start_row + index // 2,
-                col=index % 2,
+                row=start_row - index // 2,
+                col=_EXTRA_COL + index % 2,
                 name=f"section_{letter.lower()}",
                 label=f"SECTION {letter}-{letter}",
                 kind=ViewKind.SECTION,
@@ -356,7 +414,7 @@ def _detail_cells(request: LayoutRequest, existing: list[_Cell]) -> list[_Cell]:
     the parent shows and cannot disagree with it about the geometry.
     """
     by_name = {cell.name: cell for cell in existing}
-    row = max((cell.row for cell in existing), default=0) + 1
+    row = min((cell.row for cell in existing), default=0) - 1
     cells: list[_Cell] = []
     for index, detail in enumerate(request.details):
         parent = by_name.get(detail.parent)
@@ -381,8 +439,8 @@ def _detail_cells(request: LayoutRequest, existing: list[_Cell]) -> list[_Cell]:
         letter = detail.label or _detail_letter(index)
         cells.append(
             _Cell(
-                row=row + index // 2,
-                col=index % 2,
+                row=row - index // 2,
+                col=_EXTRA_COL + index % 2,
                 name=f"detail_{letter.lower()}",
                 label=f"DETAIL {letter} ({scale_text(detail.magnification)})",
                 kind=ViewKind.DETAIL,
@@ -586,6 +644,31 @@ class _Placement:
     ambiguous: list[str] = field(default_factory=list)
     centre_lines: dict[str, list[Polyline]] = field(default_factory=dict)
 
+    def table(self, dimension: TracedDimension, reason: str) -> None:
+        """Record a stated dimension that did not reach a view — once.
+
+        Once, because the same dimension is offered to every extent that could
+        carry it: a 12 mm thickness is tried against the front view's height and
+        the top view's depth, and on a cube every stated length is offered to
+        three extents at once. Appending per offer made the sheet report "9
+        stated by the design but not placed" over a design stating three — a
+        drawing whose honesty block was itself wrong about how much was missing,
+        which is the one thing this block exists not to be.
+
+        The first reason wins. It is the one from the view that came closest to
+        carrying the dimension, and a second sentence saying the same thing about
+        another view adds nothing a reader can act on.
+        """
+        for existing in self.tabled:
+            if existing.dimension == dimension:
+                return
+        self.tabled.append(Unplaced(dimension, reason))
+
+    def note_ambiguity(self, message: str) -> None:
+        """Record a collision, once. Two views can report the identical clash."""
+        if message not in self.ambiguous:
+            self.ambiguous.append(message)
+
 
 def _dimension(
     shape: Any,
@@ -619,20 +702,16 @@ def _dimension(
 
     for length in lengths:
         if length not in consumed:
-            state.tabled.append(
-                Unplaced(
-                    length,
-                    "no overall extent of any view is this length, so there is no pair "
-                    "of edges on the sheet to dimension between",
-                )
+            state.table(
+                length,
+                "no overall extent of any view is this length, so there is no pair "
+                "of edges on the sheet to dimension between",
             )
     for angle in angles:
-        state.tabled.append(
-            Unplaced(
-                angle,
-                "this build places no angular dimensions; the value is stated here "
-                "instead of being drawn",
-            )
+        state.table(
+            angle,
+            "this build places no angular dimensions; the value is stated here "
+            "instead of being drawn",
         )
 
     # The views are rebuilt rather than mutated: `DrawnView` is frozen, and
@@ -791,17 +870,15 @@ def _add_linear(
         )
         return {traced}
     if len(matches) > 1:
-        state.ambiguous.append(
+        state.note_ambiguity(
             f"{value:g} mm on the {cell.name} view matches "
             + ", ".join(f"{one.feature}.{one.argument}" for one in matches)
         )
         for one in matches:
-            state.tabled.append(
-                Unplaced(
-                    one,
-                    "more than one stated dimension has this value, so attributing the "
-                    "overall size to one of them would be a guess",
-                )
+            state.table(
+                one,
+                "more than one stated dimension has this value, so attributing the "
+                "overall size to one of them would be a guess",
             )
     state.placed.append(
         Dimension(
@@ -852,24 +929,22 @@ def _place_rounds(
             )
 
     for traced, reason in misses.items():
-        state.tabled.append(Unplaced(traced, reason))
+        state.table(traced, reason)
 
     index = 0
     for key in sorted(wanted, key=lambda one: (one[0], -one[1])):
         claimants = wanted[key]
         group = found[key]
         if len(claimants) > 1:
-            state.ambiguous.append(
+            state.note_ambiguity(
                 f"R{group.radius_mm:g} on the {key[0]} view is wanted by "
                 + ", ".join(f"{one.feature}.{one.argument}" for one in claimants)
             )
             for one in claimants:
-                state.tabled.append(
-                    Unplaced(
-                        one,
-                        "two stated dimensions resolve to the same round feature, so "
-                        "the leader would point at one of them arbitrarily",
-                    )
+                state.table(
+                    one,
+                    "two stated dimensions resolve to the same round feature, so "
+                    "the leader would point at one of them arbitrarily",
                 )
             continue
         traced = claimants[0]
@@ -884,7 +959,7 @@ def _place_rounds(
                 count=group.count,
                 centre=group.anchor,
                 radius_mm=group.radius_mm,
-                offset_mm=_LEADER_ANGLES[index % len(_LEADER_ANGLES)],
+                leader_deg=_LEADER_ANGLES[index % len(_LEADER_ANGLES)],
                 parameter=", ".join(traced.parameters) or None,
                 feature=traced.feature,
                 note=traced.note,

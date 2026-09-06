@@ -13,7 +13,7 @@ sanitiser cannot give you, because a sanitiser is a function you have to
 *remember to call*: **extracted text is not a `str`, so the forgetting does not
 compile.**
 
-Three properties, each pinned by its own test in
+Four properties, each pinned by its own test in
 `tests/test_documents_injection.py`:
 
 1. **`UntrustedText` refuses to become a string.** `str(x)`, `f"{x}"`, `repr(x)`
@@ -25,14 +25,29 @@ Three properties, each pinned by its own test in
    harmless description that is obvious in the output. The dangerous version is
    not a subtle bug you have to notice; it is a stack trace.
 
-2. **Exactly one function returns payload characters for a model**, and it is
+2. **Exactly one function builds payload characters for a model**, and it is
    `quote_for_user_turn`. It always sanitises, always fences with the delimiter
    the frozen system prompts declare inert, and always stamps a provenance
    header. There is no variant that skips any of those, and no keyword that
    turns one off. The other accessor, `raw_for_analysis`, is named to be
    greppable and is asserted by test to be called nowhere outside this package.
 
-3. **The system prompt has no parameter to pass text through.** `app.ai.prompts`
+3. **The fenced block is never obtainable as a bare string.**
+   `quote_for_user_turn` returns a `UserTurnBlock`, not a `str`, and the block's
+   only way out is `render_into_user_message(user_message)`, which *requires the
+   user's own message* and puts it first. So there is no expression anywhere
+   that yields the quoted extracts alone -- the thing you would splice into a
+   system prompt does not exist as a value. This was the gap that made this
+   module's original claim untrue: it returned a `str`, and
+   `system_prompt() + quoted` compiled, ran, and type-checked clean.
+
+   `render_into_user_message` additionally refuses, with `BoundaryViolation`, a
+   `user_message` that contains one of the four frozen system prompts. That is
+   an exact comparison against our own constants, not a content filter, and it
+   turns the one remaining spelling of the mistake -- passing the system prompt
+   *in* -- into a stack trace rather than an injection.
+
+4. **The system prompt has no parameter to pass text through.** `app.ai.prompts`
    exposes four frozen module constants and `app.ai.agent.system_prompt()` takes
    zero arguments -- it selects among the four on two booleans. There is
    literally nowhere for extracted text to enter a system prompt, and the test
@@ -60,9 +75,12 @@ own fields are stripped of the characters that separate them.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
+from app.ai import prompts
 from app.ai.sanitise import fence_tool_result, sanitise_untrusted
+from app.documents.errors import BoundaryViolation
 from app.documents.provenance import SourceRef
 
 #: Opens the one-line citation that precedes each quoted extract. Any occurrence
@@ -195,16 +213,110 @@ class UntrustedText:
         return self._text
 
 
+class UserTurnBlock:
+    """Quoted attachment content, addressed to the user turn and nowhere else.
+
+    The return type of `quote_for_user_turn`, and the reason this module's
+    third property is true. It used to return a `str`, which made the sentence
+    "it must never be concatenated into a system prompt" a *comment*:
+    `system_prompt() + quote_for_user_turn(items)` compiled, ran, type-checked
+    clean, and was a prompt injection. There is now no expression that yields
+    the fenced extracts on their own, so that line cannot be written.
+
+    Like `UntrustedText` it refuses to become a string -- `str()`, `repr()`,
+    `f"{}"` and `+` all give a description or a `TypeError`. The one way out is
+    `render_into_user_message`, which demands the user's own message, puts it
+    first, and so can only ever produce a *user turn*.
+    """
+
+    __slots__ = ("_block", "_count")
+
+    _block: str
+    _count: int
+
+    def __init__(self, block: str, count: int) -> None:
+        object.__setattr__(self, "_block", block)
+        object.__setattr__(self, "_count", count)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("UserTurnBlock is immutable")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("UserTurnBlock is immutable")
+
+    def __str__(self) -> str:
+        return self.describe()
+
+    def __repr__(self) -> str:
+        return self.describe()
+
+    def __format__(self, spec: str) -> str:
+        return self.describe()
+
+    def __len__(self) -> int:
+        return len(self._block)
+
+    def __bool__(self) -> bool:
+        return bool(self._block)
+
+    # `__add__`/`__radd__`/`__iter__` are absent on purpose, so `prompt + block`
+    # and `"".join([block])` raise rather than producing a spliceable string.
+
+    def describe(self) -> str:
+        """What this holds, with none of what it says. Safe to log."""
+        return (
+            f"<quoted attachment block: {self._count} attachment(s), "
+            f"{len(self._block)} chars>"
+        )
+
+    def render_into_user_message(self, user_message: str) -> str:
+        """The user's message with the quoted extracts appended beneath it.
+
+        The only accessor that returns payload characters, and it cannot be used
+        to build anything but a user turn: it requires a user message and emits
+        it *first*, so the block is never a prefix and never stands alone.
+
+        Refuses a `user_message` containing one of the four frozen system
+        prompts. That is an exact comparison against our own constants -- not a
+        content filter, which would be an arms race against paraphrase -- and it
+        exists because passing the system prompt in here is the one remaining
+        spelling of the mistake the type otherwise prevents.
+        """
+        for frozen in _FROZEN_SYSTEM_PROMPTS:
+            if frozen in user_message:
+                raise BoundaryViolation(
+                    "render_into_user_message was handed a system prompt. Quoted "
+                    "attachment content belongs in the user turn; the system "
+                    "prompt is frozen and takes no content. Pass the user's own "
+                    "message instead."
+                )
+        if not self._block:
+            return user_message
+        if not user_message:
+            return self._block
+        return user_message + "\n\n" + self._block
+
+
+#: The four constants `app.ai.agent.system_prompt()` chooses between. Referenced
+#: here only so `render_into_user_message` can recognise one being passed in.
+_FROZEN_SYSTEM_PROMPTS: tuple[str, ...] = (
+    prompts.AGENT_SYSTEM,
+    prompts.AGENT_SYSTEM_DOCS,
+    prompts.AGENT_SYSTEM_CATIA,
+    prompts.AGENT_SYSTEM_CATIA_DOCS,
+)
+
+
 def quote_for_user_turn(
     items: Sequence[UntrustedText],
     *,
     max_chars_each: int = MAX_ATTACHMENT_CHARS,
     max_chars_total: int = MAX_TURN_CHARS,
-) -> str:
+) -> UserTurnBlock:
     """Render extracted content as quoted material for the **user** turn.
 
-    The only function in this package that returns payload characters shaped for
-    a model, and there is no argument that makes it skip a step:
+    The only function in this package that shapes payload characters for a
+    model, and there is no argument that makes it skip a step:
 
     * the payload is sanitised by `app.ai.sanitise.sanitise_untrusted`, which
       strips control and bidirectional characters and defangs every structural
@@ -213,17 +325,12 @@ def quote_for_user_turn(
     * the whole block is fenced by `app.ai.sanitise.fence_tool_result` in the
       delimiter the frozen system prompts declare inert.
 
-    Returns `""` for no items, so a caller can append it unconditionally without
-    emitting an empty fence -- an empty fenced block teaches the model that the
-    markers sometimes mean nothing.
-
-    The result belongs in the **user** message. It must never be concatenated
-    into a system prompt; `app.ai.agent.system_prompt()` takes no arguments, so
-    there is nowhere to put it, and the test that pins that signature is what
-    keeps it that way.
+    Returns an empty `UserTurnBlock` for no items, so a caller can render
+    unconditionally without emitting an empty fence -- an empty fenced block
+    teaches the model that the markers sometimes mean nothing.
     """
     if not items:
-        return ""
+        return UserTurnBlock("", 0)
 
     body: list[str] = [_TURN_PREAMBLE]
     spent = 0
@@ -241,7 +348,10 @@ def quote_for_user_turn(
         spent += len(text)
         body.append(f"{header}\n{text}")
 
-    return fence_tool_result("\n\n".join(body), max_chars=max_chars_total + 4_000)
+    return UserTurnBlock(
+        fence_tool_result("\n\n".join(body), max_chars=max_chars_total + 4_000),
+        len(items),
+    )
 
 
 def _header(source: SourceRef) -> str:
@@ -271,6 +381,15 @@ def _field(value: str) -> str:
     return " ".join(cleaned.split()) or "(unnamed)"
 
 
+#: Matches the header marker however it is cased. Case-insensitive because the
+#: defence is against a *reader* -- a model reading `[ATTACHMENT: spec.pdf |`
+#: sees a citation exactly as it sees `[attachment:`, so an exact-case
+#: replacement would defang only the spelling an attacker has no reason to use.
+#: This is still delimiter neutralisation and not content filtering: it matches
+#: our own marker, which nothing legitimate in a payload contains.
+_HEADER_OPEN_RE = re.compile(re.escape(HEADER_OPEN), re.IGNORECASE)
+
+
 def _defang_header(text: str) -> str:
     """Break any forged provenance header inside a payload.
 
@@ -280,4 +399,4 @@ def _defang_header(text: str) -> str:
     appear in the transcript as a second, more authoritative citation for the
     text that follows it.
     """
-    return text.replace(HEADER_OPEN, "(attachment:")
+    return _HEADER_OPEN_RE.sub("(attachment:", text)

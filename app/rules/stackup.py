@@ -60,6 +60,16 @@ intervals, and the statistical model splits it into a mean at
 correct way to give it a variance. Quietly reading it as ±0.05 would move the
 predicted mean of the whole chain.
 
+**And the deviations belong to the dimension, not to its sign.** `plus_mm` and
+`minus_mm` are read off the drawing — `32 +0.05/−0.02` is `plus_mm=0.05` whether
+that 32 opens the gap or closes it — so a subtractive contributor entered as
+`nominal_mm=−32` swaps them on the way into the chain, because negating the
+dimension negates its deviations too. `Contributor.upper_deviation_mm` is the one
+place that lives. Applying them to the signed nominal instead, which this module
+did until 2026-09-06, mirrors every asymmetry on a subtractive dimension and
+**understates the worst case on the tight side**; symmetric tolerances hide it,
+which is how it shipped.
+
 **Off-centre processes shift the mean, and the shift does not RSS.** When
 `cpk < cp`, the process is running off the middle of its band by
 `half × (1 − cpk/cp)`. That offset is a bias, not a random variation, and in
@@ -175,8 +185,9 @@ class Risk(StrEnum):
     #: Too few contributors for the central-limit argument.
     FEW_CONTRIBUTORS = "few_contributors"
 
-    #: A declared capability below `MINIMUM_CAPABILITY`: the process is wider
-    #: than the tolerance it is being held to.
+    #: A declared capability below `MINIMUM_CAPABILITY` — in `cp`, so the process
+    #: is wider than the tolerance it is being held to, or in `cpk`, so it is
+    #: narrow enough and running off centre far enough to make scrap anyway.
     LOW_CAPABILITY = "low_capability"
 
 
@@ -204,9 +215,11 @@ _RISK_WORDS: Final[dict[Risk, str]] = {
         "of squares; what is missing is a reason to believe the tails."
     ),
     Risk.LOW_CAPABILITY: (
-        "{names} report cp below {minimum}, meaning the process spread is wider than the "
-        "tolerance it is held to. A statistical stack built on that understates the gap. "
-        "Widen the tolerance, improve the process, or design to worst case."
+        "{names} report cp or cpk below {minimum}. Below that the process puts parts "
+        "outside the tolerance the stack is built on — cp below it because the spread "
+        "is wider than the band, cpk below it because the mean has drifted far enough "
+        "for the tail to escape — so the statistical stack understates the gap. Widen "
+        "the tolerance, centre or improve the process, or design to worst case."
     ),
 }
 
@@ -347,17 +360,50 @@ class Contributor:
         return self.sensitivity * (self.plus_mm + self.minus_mm)
 
     @property
+    def _direction(self) -> float:
+        """+1 when this dimension opens the gap, −1 when it closes it.
+
+        Zero counts as +1: a contributor with a zero nominal is a form error or a
+        clearance about nothing, and neither direction is more right than the other.
+        """
+        return -1.0 if self.nominal_mm < 0 else 1.0
+
+    @property
+    def upper_deviation_mm(self) -> float:
+        """How far *the gap* can open on this dimension's account, as a magnitude.
+
+        **The one place the sign rule lives**, and it is not the obvious one.
+        `plus_mm`/`minus_mm` are deviations of the dimension **as drawn** — the
+        docstring's `40 +0.05/−0.02` — and a subtractive dimension enters the chain
+        negated, so its deviations swap: a shaft written `32 +0.05/−0.02` and entered
+        as `nominal_mm=−32` contributes `[−32.05, −31.98]`, not `[−32.02, −31.95]`.
+
+        Reading them straight off the signed nominal, which this module did until
+        2026-09-06, mirrors the asymmetry and **understates the worst case on the tight
+        side** — a bore `40 +0.05/−0.02` over that shaft closed on `7.96 … 8.10` where
+        the drawing allows `7.93 … 8.07`. Symmetric tolerances hide it completely,
+        which is why it survived review.
+        """
+        return self.plus_mm if self._direction > 0 else self.minus_mm
+
+    @property
+    def lower_deviation_mm(self) -> float:
+        """How far the gap can close on this dimension's account, as a magnitude."""
+        return self.minus_mm if self._direction > 0 else self.plus_mm
+
+    @property
     def mean_mm(self) -> float:
         """Where this contribution sits on average, allowing for asymmetry."""
-        return self.sensitivity * (self.nominal_mm + (self.plus_mm - self.minus_mm) / 2.0)
+        skew = (self.upper_deviation_mm - self.lower_deviation_mm) / 2.0
+        return self.sensitivity * (self.nominal_mm + skew)
 
     @property
     def minimum_mm(self) -> float:
-        return self.sensitivity * (self.nominal_mm - self.minus_mm)
+        return self.sensitivity * (self.nominal_mm - self.lower_deviation_mm)
 
     @property
     def maximum_mm(self) -> float:
-        return self.sensitivity * (self.nominal_mm + self.plus_mm)
+        return self.sensitivity * (self.nominal_mm + self.upper_deviation_mm)
 
     def sigma_mm(self, capability: Capability) -> float:
         """One standard deviation of this contribution, under a capability.
@@ -448,6 +494,11 @@ class StackResult:
     #: Who signed for the acknowledged assumptions.
     acknowledged_by: str = ""
 
+    #: Observations about *this* result that are not assumptions anybody can
+    #: acknowledge away — chiefly a statistical band that came out no narrower than
+    #: the worst case, which inverts the only reason to have asked for one.
+    notes: tuple[str, ...] = ()
+
     shares: tuple[Share, ...] = ()
 
     @property
@@ -491,6 +542,8 @@ class StackResult:
                 f"  largest contributor: {self.dominant.name} "
                 f"({self.dominant.fraction * 100:.0f}% of the variation)"
             )
+        for note in self.notes:
+            lines.append(f"  ! {note}")
         for caveat in self.caveats:
             lines.append(f"  ! {caveat}")
         if self.caveats and self.acknowledged_by:
@@ -526,6 +579,8 @@ class StackResult:
             out["sigma_multiple"] = self.sigma_multiple
         if self.refusals:
             out["refusals"] = list(self.refusals)
+        if self.notes:
+            out["notes"] = list(self.notes)
         if self.caveats:
             out["caveats"] = list(self.caveats)
             out["acknowledged_by"] = self.acknowledged_by
@@ -647,10 +702,17 @@ def _assess(
             names=", ".join(non_normal)
         )
 
+    # cpk as well as cp, and the difference is the whole point of having both: a
+    # process with cp = 1.4 and cpk = 0.7 is *tight enough* and running so far off
+    # centre that roughly 2% of it is outside the band. Testing cp alone let that
+    # through with no risk raised at all, and it is precisely the case an RSS number
+    # flatters — the drift term widens the band a little where the real fallout is
+    # one-sided and much worse.
     weak = [
         item.name
         for item in contributors
-        if item.capability is not None and item.capability.cp < MINIMUM_CAPABILITY
+        if item.capability is not None
+        and min(item.capability.cp, item.capability.cpk) < MINIMUM_CAPABILITY
     ]
     if weak:
         found[Risk.LOW_CAPABILITY] = _RISK_WORDS[Risk.LOW_CAPABILITY].format(
@@ -779,6 +841,26 @@ def _statistical(
     sigma_total = math.sqrt(variance)
     half_width = sigma_multiple * sigma_total + drift
     mean = sum(item.mean_mm for item in chain)
+
+    # A statistical band that is not narrower than the worst case has no reason to
+    # exist: the only argument for accepting a population prediction over a bound is
+    # that it buys tolerance, and here it buys none. It happens legitimately — a
+    # uniform contributor has sigma = t/sqrt(3), so its +/-3 sigma is 1.73 times its
+    # own tolerance band; so does a six-sigma multiple on a three-sigma premise — and
+    # in every one of those cases the number is *wider than a bound*, which is the
+    # one shape of statistical result a reader will not be expecting. It is stated,
+    # not refused, because the arithmetic is right and the reading is the problem.
+    worst_case_half = sum(item.half_width_mm for item in chain)
+    notes: tuple[str, ...] = ()
+    if worst_case_half > 0 and half_width >= worst_case_half:
+        notes = (
+            f"this statistical band (+/- {half_width:.4g} mm) is no narrower than the "
+            f"worst case (+/- {worst_case_half:.4g} mm), so it buys nothing and is not a "
+            "bound either. Check the declared distributions and sigma_multiple: "
+            f"{sigma_multiple:g} sigma of a shape whose sigma is a large fraction of its "
+            "tolerance band reaches outside that band by construction.",
+        )
+
     return StackResult(
         method=Method.STATISTICAL,
         contributors=chain,
@@ -792,6 +874,7 @@ def _statistical(
         sigma_multiple=sigma_multiple,
         caveats=tuple(caveats[risk] for risk in Risk if risk in caveats),
         acknowledged_by=acknowledged_by,
+        notes=notes,
         shares=_shares(chain, squared=True),
     )
 

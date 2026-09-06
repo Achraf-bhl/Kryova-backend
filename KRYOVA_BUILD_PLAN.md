@@ -111,6 +111,36 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E6 → **the solver federation is reachable from the product.**
+  `app/solve/calculix/` had been able to solve a real model since earlier that
+  day and **nothing could ask it to**: `simulation/runner.py` constructed
+  `LinearStaticSolver()` directly and the route wrote that class's name onto the
+  job row as a constant, so the row named a solver nobody had consulted. That is
+  the same failure this file records against the OCCT kernel on 2026-09-05 — an
+  era of work green on capability and wired to nothing — and it is worth naming
+  as a pattern rather than fixing twice in silence. `app/solve/registry.py` +
+  `SOLVER_BACKEND`, never chosen automatically (a result computed by a solver
+  nobody selected cannot be relied on), with the CalculiX import lazy and
+  asserted lazy. The runner now records the solver that **ran** and its version:
+  `linear-static 0.2.0+<sha>` or `calculix 2.23`, read from `ccx -v` — which
+  exits **201**, its generic "did not run a job" code, so the text is read and
+  the return code ignored. Both routes measured against closed form through the
+  setting: σ = F/A to 5.7e-16. Five mutations of the guards, all caught.
+  Migration `90957dafff41`; `alembic check` clean.
+
+- **2026-09-06 (early hours)** — **six test-writing agents were killed by a
+  session rate limit part-way through**, and each had already found a defect
+  worth recording before it died: E10's optimiser reports an active constraint
+  at the optimum as `NO_FEASIBLE_POINT`; E9's clearance check short-circuits in
+  a way its own docstring does not admit; E13's `vocabulary.py` was written
+  against a rule-engine module that does not exist. Their partial edits are on
+  disk and two of them left the tree failing type-check — `app/documents/readers.py`
+  reused a loop variable at two different types, and `app/manufacture/layout.py`
+  passed a `leader_deg` argument to a `Dimension` that had no such field, the
+  agent having been cut off between the call site and the definition. Both fixed
+  here; the three defects above are **not** fixed and are the next session's
+  first work, along with the tests those agents were writing.
+
 - **2026-09-06** — **Gate G1 run five times. It did not pass, and produced four
   fixes.** Rung 3 — measure and correct to 2.4 kg — failed five ways, and every
   one left a plausible number on a wrong part, which is why none of them was

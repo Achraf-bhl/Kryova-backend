@@ -22,8 +22,8 @@ from app.mesh.types import MeshError, TetMesh
 from app.models import JobStatus, MediaKind, SimulationJob
 from app.simulation.limits import check_mesh_request
 from app.solve.base import Solver
-from app.solve.linear_static import LinearStaticSolver
 from app.solve.postprocess import nodal_average
+from app.solve.registry import build_solver, solver_version
 from app.solve.types import LoadCase, SolverError
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,12 @@ def run_simulation(
     solver: Solver | None = None,
 ) -> None:
     """Execute one simulation job to completion, recording the outcome."""
-    solver = solver or LinearStaticSolver()
+    # Through the registry rather than by construction, so `SOLVER_BACKEND` can
+    # reach CalculiX at all. An injected solver still wins: the tests pass one,
+    # and so does anything that has already made the choice itself.
+    solver = solver or build_solver(
+        settings.solver_backend, executable=settings.calculix_path or None
+    )
 
     with session_scope() as db:
         media = MediaService(db, store)
@@ -64,6 +69,16 @@ def run_simulation(
             logger.exception("Simulation job %s crashed", job_id)
             _fail(db, job, f"Unexpected solver failure: {exc}")
             return
+
+        # Recorded from the solver that *ran*, not from the name the route wrote
+        # when the job was queued. Decision 3 binds a result to what produced it,
+        # and a row naming a solver nobody consulted is provenance in name only.
+        # The version is `None` when it could not be read, and stored as None:
+        # an unmeasured version must not be guessed at.
+        job.solver = solver.name
+        version = solver_version(solver.name, settings.calculix_path or None)
+        if version:
+            job.solver_version = version
 
         fields = _store_fields(media, job, mesh, output)
         job.fields_media_id = fields.id

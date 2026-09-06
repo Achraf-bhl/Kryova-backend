@@ -59,6 +59,40 @@ FAILED_BUILD_OBJECTIVE: Final = 1e12
 #: for a finite-difference gradient taken across it.
 FAILED_BUILD_PENALTY: Final = 0.1
 
+#: Floor on how far *inside* a constraint the driver is asked to steer, relative
+#: to the bound's own magnitude. **This is not slack in the check** — it is slack
+#: in the target, and the two are different things.
+#:
+#: The optimum of a constrained problem sits *on* its active constraint; that is
+#: what "active" means. An optimiser aiming at the boundary lands on whichever
+#: side its own arithmetic puts it, and it only ever promises to satisfy a
+#: constraint *to its tolerance*. Both halves of that were measured here before
+#: this existed. On a two-variable analytic problem whose exact answer is
+#: x = y = 1 subject to x + y >= 2, SLSQP stopped at x + y = 2 − 3.3e-15. On the
+#: OCCT plate whose exact answer is 100 × 100 subject to
+#: surface_area_mm2 <= 24000, it stopped 4.1e-4 mm² over — one part in 6e7 of the
+#: bound, and exactly the size SLSQP's own tolerance permits. `check_assertions`
+#: read both as FAILED and the run reported NO_FEASIBLE_POINT, telling the user
+#: that no design in the space satisfies a requirement the design in front of
+#: them satisfies to seven digits. Nearly every real constrained run would have
+#: said that, because nearly every real constrained optimum is on a constraint.
+#:
+#: So the driver is asked for a design that satisfies the constraint with a
+#: little room, and the design it returns is then checked against the constraint
+#: **exactly as written**. Only `driver_constraints` backs off; `margin()`,
+#: `Evaluation.feasible`, `infeasibility` and every recorded `AssertionResult`
+#: are untouched, so nothing in the record is softened and a design that
+#: genuinely misses is still reported as missing. It is the rule this module
+#: already applies to the objective — the number the driver sees is not the
+#: number that is recorded.
+#:
+#: The room asked for is the larger of this floor and the run's own convergence
+#: tolerance, because the tolerance is the caller's statement of how exactly they
+#: want the problem solved and is therefore also the size of the overshoot they
+#: are agreeing to. At the default 1e-6 on a bound of 24000 that is 0.024 mm²,
+#: which moves the answer by one part in a million and no further.
+FEASIBILITY_BACKOFF: Final = 1e-9
+
 
 class Model(Protocol):
     """What an optimisation is run against: something that rebuilds and measures.
@@ -435,7 +469,11 @@ class Evaluator:
         out: list[float] = []
         for result in evaluation.constraints:
             room = margin(result)
-            out.append(-1.0 if room is None else room)
+            out.append(
+                -1.0
+                if room is None
+                else room - _backoff(result, self._problem.tolerance)
+            )
         out.append(1.0 if evaluation.built else -1.0)
         return out
 
@@ -449,6 +487,20 @@ class Evaluator:
             return FAILED_BUILD_OBJECTIVE
         worst = max(seen)
         return worst + FAILED_BUILD_PENALTY * max(abs(worst), 1.0)
+
+
+def _backoff(result: AssertionResult, tolerance: float) -> float:
+    """How far inside this constraint the driver is asked to steer.
+
+    Scaled off the bound, because a constraint is a mass in kilograms or a
+    volume in cubic millimetres and one absolute step cannot serve both — the
+    same argument `app/solve/` makes about eigenvalue tolerances. A constraint
+    that already carries a `tolerance` gets that room as well, since `margin()`
+    adds it; this is on top.
+    """
+    expected = result.expected
+    scale = abs(expected) if expected is not None and math.isfinite(expected) else 0.0
+    return max(FEASIBILITY_BACKOFF, tolerance) * max(scale, 1.0)
 
 
 def _backend_of(model: Model) -> str:
@@ -496,6 +548,7 @@ def as_vector(problem: OptimisationProblem, values: Mapping[str, float]) -> Sequ
 __all__ = [
     "FAILED_BUILD_OBJECTIVE",
     "FAILED_BUILD_PENALTY",
+    "FEASIBILITY_BACKOFF",
     "Evaluation",
     "EvaluationLog",
     "Evaluator",

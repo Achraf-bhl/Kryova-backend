@@ -18,7 +18,6 @@ from app.media import MediaNotFound
 from app.models import GeometryVersion, JobStatus, Project, SimulationJob
 from app.schemas import SimulationCreate, SimulationPage, SimulationRead, SurfaceField
 from app.simulation.runner import run_simulation
-from app.solve.linear_static import LinearStaticSolver
 
 router = APIRouter(prefix="/projects/{project_id}/simulations", tags=["simulations"])
 
@@ -91,7 +90,9 @@ def create_simulation(
         project_id=project.id,
         geometry_version_id=geometry.id,
         status=JobStatus.QUEUED,
-        solver=LinearStaticSolver.name,
+        # What was *asked for*. The runner overwrites it with the solver that
+        # actually ran, which is the one a result can be attributed to.
+        solver=settings.solver_backend,
         load_case=payload.load_case.model_dump(),
         element_size_mm=payload.element_size_mm,
         element_order=payload.element_order,

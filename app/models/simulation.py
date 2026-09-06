@@ -45,7 +45,14 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
     status: Mapped[JobStatus] = mapped_column(
         Enum(JobStatus, native_enum=False, length=16), default=JobStatus.QUEUED, index=True
     )
+    #: The solver that ran. Written by the *runner* from `solver.name` once the
+    #: solve is over, not by the route when the job was queued — a row naming a
+    #: solver nobody consulted is provenance in name only.
     solver: Mapped[str] = mapped_column(String(64))
+    #: Its version, when it can be read. `None` is an honest answer and is stored
+    #: as one: Decision 3 binds a result to what produced it, and a stress figure
+    #: whose provenance says only "calculix" cannot be reproduced in two years.
+    solver_version: Mapped[str | None] = mapped_column(String(64), default=None)
 
     load_case: Mapped[dict[str, Any]] = mapped_column(JSONB)
     element_size_mm: Mapped[float | None] = mapped_column(Float, default=None)

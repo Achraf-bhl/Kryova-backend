@@ -550,6 +550,12 @@ def assembly_preload(
     figure) and the friction coefficient are both choices, not measurements, and
     a real joint calculation also needs its stiffness and load introduction.
     """
+    if bolt.kind is not PartKind.BOLT:
+        raise ValueError(
+            f"{bolt.designation} is a {bolt.kind}, not a bolt, so it has no assembly "
+            f"preload. Preload is the tension left in the *bolt* of a joint; pass the "
+            f"bolt, and see app.parts.catalogue.nut_for for the nut that runs on it."
+        )
     if not 0.0 < thread_friction <= 0.5:
         raise ValueError(
             f"A thread friction coefficient of {thread_friction} is outside anything "
@@ -579,7 +585,8 @@ def assembly_preload(
         note=(
             f"VDI 2230 closed form at thread friction {thread_friction:g} and "
             f"{utilisation:g} of yield. Both are assembly choices, not measurements: "
-            f"halving the friction raises this by roughly a fifth."
+            f"halving the friction raises this by about a tenth (M8 8.8, 0.14 to 0.07, "
+            f"18.12 kN to 19.75 kN — computed here, pinned in tests/test_parts.py)."
         ),
     )
 
@@ -597,11 +604,12 @@ def tightening_torque(
     mean bearing diameter under the head, taken as the mean of the head's bearing
     diameter and the clearance hole.
 
-    **Most of this torque never becomes tension.** At mu = 0.14 roughly half goes
-    into friction under the head and a third into thread friction; about a sixth
-    stretches the bolt. That is why the result is `ESTIMATED` however precisely
-    it is computed, and why a critical joint is tightened by angle or by
-    measuring length rather than by torque.
+    **Most of this torque never becomes tension.** For M8 8.8 at mu = 0.14 the
+    three terms come out 48% friction under the head, 39% thread friction and
+    13% the thread helix — so seven eighths of the torque is spent overcoming
+    friction (computed here, pinned in `tests/test_parts.py`). That is why the
+    result is `ESTIMATED` however precisely it is computed, and why a critical
+    joint is tightened by angle or by measuring length rather than by torque.
 
     `head_friction` defaults to `thread_friction`, which is the usual assumption
     when only one coefficient is quoted.

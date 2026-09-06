@@ -229,6 +229,21 @@ class Settings(BaseSettings):
     # different kernel without saying so.
     geometry_backend: str = "catia"
 
+    # Which solver runs a structural job. `internal` is the in-house
+    # linear-static solver; `calculix` federates it across a subprocess boundary
+    # (Decision 4). Default `internal` so an existing deployment is unchanged,
+    # and -- exactly as with `geometry_backend` above -- **never chosen
+    # automatically**: a deployment that silently fell back would hand the user a
+    # result computed by something they did not select, and Decision 3 binds a
+    # result to what produced it. A named solver that cannot run is an error, not
+    # a substitution.
+    solver_backend: str = "internal"
+    # Where `ccx` is, when it is not on PATH. Empty means "look on PATH" --
+    # `app/solve/calculix/run.py` refuses to fall back to PATH when this names a
+    # path that does not exist, so a wrong setting is reported rather than
+    # silently working with a solver the operator did not choose.
+    calculix_path: str = ""
+
     # CATIA desktop bridge. The daemon dials out to this service over a
     # WebSocket; see docs/CATIA_BRIDGE_PROTOCOL.md for the wire format.
     # Off switches the tools out of the agent's vocabulary entirely rather than

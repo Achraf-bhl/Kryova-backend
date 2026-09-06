@@ -85,13 +85,27 @@ class ClearanceSweep:
     #: Why the whole sweep produced nothing, when it produced nothing.
     unavailable_reason: str = ""
 
+    #: How many poses the measurer was actually asked about. Equal to `samples` for a
+    #: complete sweep and **smaller when `stop_on_collision` short-circuited**, which is
+    #: the whole reason it is a field rather than being assumed. It shipped assumed:
+    #: `measured_poses` was `samples - len(failures)`, so a sweep that stopped at pose 9
+    #: of 21 published `measured_pose_count: 21` -- twelve poses nobody looked at,
+    #: counted as measured, in the payload an assertion reads.
+    attempted: int = 0
+
+    #: Whether the sweep stopped at the first collision instead of finishing. When true
+    #: `interference_mm3` is the **first** overlap found, not the worst, and
+    #: `minimum_mm` covers only the poses before it.
+    stopped_early: bool = False
+
     @property
     def collides(self) -> bool:
         return self.interference_mm3 > 0.0
 
     @property
     def measured_poses(self) -> int:
-        return self.samples - len(self.failures)
+        """Poses that were asked about *and* returned a distance."""
+        return self.attempted - len(self.failures)
 
     def to_payload(self) -> dict[str, Any]:
         """The sweep as a measurement payload `app.design.assertions` can read.
@@ -107,6 +121,14 @@ class ClearanceSweep:
             "measured_pose_count": self.measured_poses,
         }
         path = interrogation.MINIMUM_CLEARANCE_MM
+        payload["attempted_pose_count"] = self.attempted
+        payload["stopped_early"] = self.stopped_early
+        early = (
+            " The sweep stopped at the first collision, so poses after it were never "
+            "looked at."
+            if self.stopped_early
+            else ""
+        )
 
         if self.minimum_mm is None:
             provenance.attach(
@@ -129,9 +151,10 @@ class ClearanceSweep:
                 payload,
                 path,
                 provenance.approximated(
-                    f"minimum over {self.measured_poses} sampled poses of a "
-                    f"{self.samples}-sample motion range; an upper bound on the true "
-                    "minimum, because the parts may come closer between two samples"
+                    f"minimum over {self.measured_poses} measured poses of the "
+                    f"{self.attempted} asked about, in a {self.samples}-sample motion "
+                    "range; an upper bound on the true minimum, because the parts may "
+                    "come closer between two samples." + early
                 ),
             )
 
@@ -141,8 +164,14 @@ class ClearanceSweep:
             payload,
             interrogation.INTERFERENCE_VOLUME_MM3,
             provenance.measured(
-                "largest boolean-common volume over the sampled poses; a clash that was "
-                "seen was seen, though a clash between two samples can still be missed"
+                (
+                    "first boolean-common volume found; the sweep stopped there, so "
+                    "this is not the worst overlap in the travel"
+                    if self.stopped_early
+                    else "largest boolean-common volume over the sampled poses"
+                )
+                + "; a clash that was seen was seen, though a clash between two samples "
+                "can still be missed"
             ),
         )
         return payload
@@ -154,8 +183,9 @@ class ClearanceSweep:
                 f"{self.unavailable_reason or 'no pose could be measured'}"
             )
         if self.collides:
+            which = "first" if self.stopped_early else "worst"
             return (
-                f"{self.body_a} vs {self.body_b}: COLLIDE, worst overlap "
+                f"{self.body_a} vs {self.body_b}: COLLIDE, {which} overlap "
                 f"{self.interference_mm3:.4g} mm3 at sample {self.interference_index}."
             )
         return (
@@ -178,7 +208,10 @@ def sweep(
     `stop_on_collision` short-circuits at the first overlap. Off by default because the
     *worst* overlap is what tells a correction loop how far to move something, and the
     first one only tells it that something is wrong; on when a caller is asking the
-    cheap yes/no question over a long sweep.
+    cheap yes/no question over a long sweep. When it fires, the result says so
+    (`stopped_early`) and `attempted` records how far the sweep actually got -- an
+    unlooked-at pose is never counted as a measured one, and the payload's provenance
+    says the interference volume is the first found rather than the largest.
 
     The measurer is called once per pose and **is allowed to fail**: a pose it could not
     answer is counted in `failures` and the sweep continues, because the answer over the
@@ -200,8 +233,11 @@ def sweep(
     worst_overlap = 0.0
     worst_index: int | None = None
     failures: list[str] = []
+    attempted = 0
+    stopped_early = False
 
     for index in range(len(path.times_s)):
+        attempted += 1
         try:
             report = measure(
                 body_a, motion_a.frames[index], body_b, motion_b.frames[index]
@@ -228,13 +264,14 @@ def sweep(
                 best, best_index = value, index
 
         if stop_on_collision and overlap > 0.0:
+            stopped_early = index < len(path.times_s) - 1
             break
 
     times = path.times_s
     unavailable = ""
     if best is None:
         unavailable = (
-            f"none of the {len(times)} sampled poses returned a distance"
+            f"none of the {attempted} sampled poses returned a distance"
             + (f": {failures[0]}" if failures else "")
         )
 
@@ -249,6 +286,8 @@ def sweep(
         interference_index=worst_index,
         failures=tuple(failures),
         unavailable_reason=unavailable,
+        attempted=attempted,
+        stopped_early=stopped_early,
     )
 
 

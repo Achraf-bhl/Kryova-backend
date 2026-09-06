@@ -237,6 +237,13 @@ class Dimension:
     centre: tuple[float, float] | None = None
     radius_mm: float | None = None
     offset_mm: float = DIMENSION_OFFSET_MM
+    #: Which way the leader leaves the feature, in degrees anticlockwise from the
+    #: sheet's horizontal. `None` lets the renderer choose. `layout.py` sets it
+    #: explicitly when several round features share a view, because leaders that
+    #: all set off in the same direction cross each other and land on top of one
+    #: another — a drawing whose dimensions are illegible is as unusable as one
+    #: whose dimensions are missing.
+    leader_deg: float | None = None
     parameter: str | None = None
     feature: str | None = None
     note: str = ""

@@ -419,6 +419,31 @@ vocabulary, and the clash check.
 and reports a real number (0 mm³ interference, or the actual figure). **Fails** if "no
 interference" is asserted without a check having run. **Screenshot:** `S2.png`
 
+**Runs 1-3 (2026-09-06): FAIL, and the third one names the reason precisely.**
+S2 is **not buildable on a CATIA seat today**, and that is architecture rather
+than a bug:
+
+* a conversation owns exactly one document, deliberately -- `app/catia/dispatch.py`
+  explains at length why `catia_close_document` keeps the binding instead of
+  clearing it, because clearing it would leave the CATPart on the workstation
+  with nothing pointing at it and every checkpoint orphaned;
+* `catia_assembly_component`, which takes a finished part out of the
+  conversation so the next can start, is `server_only` -- the open kernel's
+  route, with no COM method behind it and none intended, because on a seat a
+  component is a file;
+* `catia_component_add(kind="existing", document=...)` wants that file, and
+  every Kryova part *is* one (`new_part` saves immediately and returns
+  `remote_path`) -- but nothing releases the conversation's binding so the
+  second part can be started.
+
+So the missing piece is the product structure of **Phase 14**, not a tool. What
+came out of the three runs is fixed and guarded: the refusal now says which
+route exists on which backend, tells a seat plainly to build the second part in
+a new conversation, and a general test asserts that no refusal anywhere names a
+tool the backend does not have (`b6635ea`). A turn also stops after three
+blocked repeats instead of spending its remaining rounds on them (`04a3679`) --
+run 1 spent seven of twenty calling `catia_new_part` at a refusal.
+
 ### S3 — Analysis, not geometry
 
 - [ ] **S3**

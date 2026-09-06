@@ -111,6 +111,26 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E12 → **bought-in parts that say what they do not know.** A
+  bolt whose mass is known but whose proof load is not cannot be checked, and
+  that is the whole difference between a parts library an engineer can sign off
+  and one that gets somebody hurt — the second kind is easier to build, reads
+  identically, and fails only when a joint opens. The data is verified against
+  **ISO 898-1 arithmetic done in the test**, not against the record: an M8's
+  tensile stress area is 36.6 mm², an 8.8's proof stress is 580 MPa, so its proof
+  load is their product, and 8.8 means 800 MPa ultimate with 80% of it at yield.
+  A proof load that does not satisfy that is either the wrong property class or
+  the wrong stress area, and both produce a believable number. The design goes
+  one step past "absent" and that step is what makes it usable: **every absent
+  quantity carries why.** Tightening torque is missing from every bolt not
+  because nobody typed it in but because it is a property of the *joint* — thread
+  and head friction vary by a factor of three between a dry zinc-plated bolt and
+  a lubricated one — so it is computed from VDI 2230 with a coefficient the
+  caller must defend, and a dry bolt correctly needs more torque for the same
+  preload. Mutations: `require()` returning `None` instead of refusing fails 4;
+  dropping the reason fails 1; dropping the list of what *is* held fails 1;
+  ignoring the friction argument fails 1.
+
 - **2026-09-06** — E17 → **the projection convention is real, not decorative,
   and now proven so.** First and third angle put the views on *opposite sides*
   of the front view, and a drawing read in the wrong one is manufactured

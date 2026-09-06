@@ -5,9 +5,14 @@ system can say a part *carries its load*, not only what shape it is. Its
 verification is rung 3 of the ladder carried forward — measure and correct to a
 mass target — plus a load-bearing prompt.
 
-**Verdict: G1 does NOT pass. Rung 3 fails.** One defect in the product was found
-and fixed; two limitations of the local model are recorded and are not ours. The
-load-bearing half was not reached and is not claimed.
+**Verdict: G1 does NOT pass. Rung 3 fails, five times, for five different
+reasons.** Four defects in the product were found and fixed; the model's own
+limits are recorded separately and are not ours. The load-bearing half was not
+reached and is not claimed.
+
+Every one of the five attempts produced a fix. That is the ladder working: rung 3
+is hard enough to keep finding real defects, and each is the kind that leaves a
+plausible number on a wrong part.
 
 ---
 
@@ -139,6 +144,87 @@ a rebuild instead. That is a prompt and tool-description problem, unfixed, and i
 is the third session in a row it has appeared.
 
 ---
+
+## Attempt 3 — after the first two fixes. **FAILED, differently**
+
+Same prompt, holes on a 200 mm bolt circle. 15 calls, 327 s. The agent padded the
+outline at 10, then 11, then 11.5 mm — three stacked pads — created a sketch
+called `Hole Positions`, drew all four circles into it, and **never pocketed it**.
+It then reported *"11.5 mm, 2.459 kg, within 20 grams of 2.4 kg."* 2.459 is
+**59 grams** out; the model's arithmetic was simply wrong.
+
+Measured: one solid, 11.5 mm, volume exactly `(200x150 - pi*30^2) * 11.5` — a
+plate with a bore and **no holes at all**. Fourteen of fifteen calls returned
+`ok`.
+
+Two more product defects, both fixed (`41a742e`):
+
+- **A sketch drawn and abandoned was silent.** A sketch is not geometry, so an
+  unused one is silent *by construction* — there is no failed operation for
+  anything to notice. But nobody draws four circles for no reason. `measure()`
+  now reports `unused_sketches`; reported, not refused, because a sketch may
+  legitimately be drawn before it is used.
+- **The same sketch built three times was accepted.** Refused now, and narrowly:
+  only when the second call differs from the first in *nothing but a dimension*.
+
+## Attempt 4 — the fixes work. **STILL FAILED, and closer**
+
+21 calls, 474 s. The sequence that matters:
+
+    [ERR] catia_pad {"sketch": "Main_profile", "length_mm": 10.11}     <- new guard fired
+    [ERR] catia_set_parameter {"feature": ..., "parameter": ...}        <- wrong argument names
+    [ERR] catia_set_parameter {"name": "Pad.1/length_mm", "value": ...} <- no unit
+    [ok ] catia_set_parameter {"name": "Pad.1/length_mm", ..., "unit": "mm"}
+    [ok ] catia_set_parameter {... "value": "10.24" ...}
+    [ok ] catia_set_parameter {... "value": "11.24" ...}
+
+**The agent used `catia_set_parameter` for the first time in four sessions**, and
+it did so because the refusal told it to. The correction loop ran: 10.11 → 10.24
+→ 11.24 mm, converging on 2.399 kg — 0.8 g from target, and this time the
+arithmetic in its answer was right. All holes were cut. One solid. Three
+features, not six.
+
+It still failed, on geometry. Asked for holes on a *200 mm bolt circle* in a
+200x150 plate — which my prompt should not have asked for, since a 100 mm radius
+lands on the edge of a plate spanning x ±100 — two circles cut half-moon notches
+in the edges and **two missed the part entirely and cut nothing**. `g1-pass-top.png`
+shows it. The volume decodes exactly:
+
+    200*150*11.24 - pi*30^2*11.24 - 2*(half a 12 mm circle, 5 mm deep) = 304854.16
+
+Third product defect, fixed (`01bfccc`): **a cut that removes nothing succeeded
+silently.** `BRepAlgoAPI_Cut` returns the target unchanged when tool and target
+do not overlap, and `IsDone()` is true. Now refused, with the reason — a boolean
+cut with no overlap is a success that changes nothing — and the likely cause.
+Its honest limit is pinned as its own test: a *partial* miss still passes, and
+catching that needs a per-profile check that is not pretended here.
+
+Fourth fix (`2556228`): the advice now carries the required `unit` as well as
+the name, because the agent burned two calls discovering it.
+
+## Attempt 5 — Qwen3.5-9B, the model that fits the card. **WORSE**
+
+Pulled on the strength of five independent 2026 benchmarks naming it the best
+8 GB-tier model and the most stable at tool calling. Measured here:
+
+| | qwen3-coder:30b | qwen3.5:9b |
+|---|---|---|
+| GPU residency | 28% | **76%** |
+| VRAM | 6566 MiB | 6872 MiB |
+| Rung 3, same prompt | 474 s, 21 calls, converged on mass | **512 s, 25 calls, gave up** |
+
+Three times the GPU residency and it was *slower and worse*: it placed the four
+holes at four different wrong coordinates, re-padded the **bore** sketch turning
+the hole into a boss, failed to change the thickness at all, and closed with
+*"I did not manage to produce an answer."*
+
+**`qwen3-coder:30b` stays**, running 72% on the CPU. That is a measured result
+and it contradicts the benchmarks for this workload — general tool-calling
+ability at 9B does not survive a 40-tool payload with interdependent geometric
+state. Worth re-testing when the payload shrinks.
+
+Both new guards fired correctly during this run too, which is the clearest
+evidence they are not tuned to one model's mistakes.
 
 ## What was not verified, and why
 

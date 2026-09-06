@@ -111,6 +111,28 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E15 → **the observability half, and a metering bug that was
+  losing every job.** `QueueMeter._finished` existed as *both* a counter
+  attribute and a method, so `self._meter._finished(...)` called an integer; the
+  `TypeError` died unread inside a `Future`, and **no job was ever counted as
+  finished**. That is also why the ticket is deliberately not wrapped in a
+  blanket `except`: a swallowed metering bug is a metering bug that ships.
+  The design decisions worth keeping: the disabled path costs **~0.09 µs** per
+  span, so instrumentation can be left in rather than compiled out; collection is
+  a process-global rather than a `ContextVar`, because `ThreadPoolExecutor` does
+  not carry a context across `submit` and a context-scoped recorder would miss
+  every job-thread span — which is most of the interesting ones; the queue
+  *counters* are always live even when span recording is off, because "is the
+  queue backed up" is asked **after** it is backed up and a gauge starting at
+  zero answers the wrong question; and `Distribution.of([])` **raises** rather
+  than returning a row of zeros, since a `min_seconds` of 0.0 computed from
+  nothing reads as "instant". The gmsh module lock is now timed *apart* from the
+  session it guards, so contention is visible for the first time. 11 mutations,
+  all caught. Not done, and named rather than implied: `solve.calculix.run`,
+  `linear_static`, `kernel.rebuild` and `kernel.measure` are catalogued
+  `wired=False` with the one-line change each needs, and the report prints them
+  as `UNMEASURED — no hook is installed`.
+
 - **2026-09-06** — E7 → **the provenance chain has tests, and writing them found
   two of my own that were vacuous.** Decision 3 says every result is bound to the
   geometry, mesh, material, load case and solver version that produced it, and

@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
+from app.observe import span
+
 _DIGEST_LENGTH = 64  # hex characters of a SHA-256
 
 
@@ -79,24 +81,32 @@ class LocalMediaStore:
         land in a temp file first and are moved into place afterwards. A failure
         part-way leaves no half-written blob.
         """
-        digest = hashlib.sha256()
-        size = 0
-        staging = self.root / "_incoming"
-        staging.mkdir(parents=True, exist_ok=True)
+        with span("media.write") as timing:
+            digest = hashlib.sha256()
+            size = 0
+            staging = self.root / "_incoming"
+            staging.mkdir(parents=True, exist_ok=True)
 
-        fd, tmp_name = tempfile.mkstemp(dir=staging, suffix=".part")
-        tmp_path = Path(tmp_name)
-        try:
-            with os.fdopen(fd, "wb") as tmp:
-                while chunk := source.read(self.chunk_size):
-                    size += len(chunk)
-                    if max_bytes is not None and size > max_bytes:
-                        raise MediaTooLarge(f"stream exceeds the {max_bytes} byte limit")
-                    digest.update(chunk)
-                    tmp.write(chunk)
-            return self._commit(tmp_path, digest.hexdigest(), size)
-        finally:
-            tmp_path.unlink(missing_ok=True)
+            fd, tmp_name = tempfile.mkstemp(dir=staging, suffix=".part")
+            tmp_path = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "wb") as tmp:
+                    while chunk := source.read(self.chunk_size):
+                        size += len(chunk)
+                        if max_bytes is not None and size > max_bytes:
+                            raise MediaTooLarge(f"stream exceeds the {max_bytes} byte limit")
+                        digest.update(chunk)
+                        tmp.write(chunk)
+                info = self._commit(tmp_path, digest.hexdigest(), size)
+                timing.set("deduplicated", info.deduplicated)
+                return info
+            finally:
+                # Set in the `finally` so a stream refused at the size ceiling
+                # still records how far it got. A rejected 3 GB upload that read
+                # 2 GB before the limit fired did the IO; a span that says it
+                # moved nothing would hide it.
+                timing.set("bytes", size)
+                tmp_path.unlink(missing_ok=True)
 
     def write_file(self, path: Path, max_bytes: int | None = None) -> BlobInfo:
         with Path(path).open("rb") as fh:
@@ -132,10 +142,21 @@ class LocalMediaStore:
         return path.open("rb")
 
     def iter_chunks(self, digest: str, chunk_size: int | None = None) -> Iterator[bytes]:
-        """Read a blob in chunks -- the only safe way to serve a large file."""
+        """Read a blob in chunks -- the only safe way to serve a large file.
+
+        The `media.read` span is open for as long as the *consumer* holds this
+        generator, which is the honest measurement for a streamed response: the
+        cost of serving a blob is the time the client took to take it. A reader
+        that walks away mid-file closes the generator, `GeneratorExit` unwinds
+        the span, and it is recorded as a failed read carrying the bytes that
+        did move -- which is what a disconnected download looks like and is
+        worth being able to see.
+        """
         size = chunk_size or self.chunk_size
-        with self.open(digest) as fh:
+        with span("media.read") as timing, self.open(digest) as fh:
             while chunk := fh.read(size):
+                timing.add("bytes", len(chunk))
+                timing.add("chunks", 1)
                 yield chunk
 
     def local_path(self, digest: str) -> Path:
@@ -155,10 +176,16 @@ class LocalMediaStore:
 
     def verify(self, digest: str) -> bool:
         """Re-hash a blob and check it still matches its name."""
-        actual = hashlib.sha256()
-        for chunk in self.iter_chunks(digest):
-            actual.update(chunk)
-        return actual.hexdigest() == self._validate(digest)
+        with span("media.verify") as timing:
+            actual = hashlib.sha256()
+            read = 0
+            for chunk in self.iter_chunks(digest):
+                actual.update(chunk)
+                read += len(chunk)
+            intact = actual.hexdigest() == self._validate(digest)
+            timing.set("bytes", read)
+            timing.set("intact", intact)
+            return intact
 
     def delete(self, digest: str) -> None:
         """Remove a blob. Callers must be sure nothing else references it --

@@ -3065,17 +3065,69 @@ def _selection_count(selection: Any, fallback: int) -> int:
     return fallback
 
 
+def _by_name(group: Any, name: str) -> Any:  # pragma: no cover - Windows only
+    """One member of a CATIA collection, by name, by looking at each.
+
+    Not `group.Item(name)`. Measured on V5-R33, 2026-09-06: `Item` with a
+    string raises `La methode Item a echoue` on `Sketches` and on `Bodies`
+    even when a member of that exact name is sitting in the collection. It
+    takes an index reliably and a name only sometimes, and which is which is
+    not documented anywhere we can rely on -- so the name lookup is done here,
+    over an index walk, which always works.
+    """
+    try:
+        count = int(group.Count)
+    except Exception:  # noqa: BLE001 - not a collection on this document
+        return None
+    for index in range(1, count + 1):
+        try:
+            member = group.Item(index)
+            if str(member.Name) == name:
+                return member
+        except Exception:  # noqa: BLE001 - one unreadable member is not fatal
+            continue
+    return None
+
+
 def _find_named(part: Any, name: str) -> Any:  # pragma: no cover - Windows only
-    """A feature, sketch or body by the name shown in the specification tree."""
-    for collection in ("Bodies", "Sketches", "HybridBodies"):
+    """A feature, sketch or body by the name shown in the specification tree.
+
+    **A sketch lives under the body, not under the part**, and this used to
+    look only at `part.Sketches` -- which does not exist -- before falling back
+    to `FindObjectByName`, which returned nothing for it either. Measured on
+    ladder prompt H4, 2026-09-06: `catia_list_features` reported `Sketch.1`,
+    the agent passed that exact name to `catia_select`, and got "Not in this
+    part: Sketch.1". A name this system prints and then denies is the worst
+    kind of refusal, because there is no way for the caller to be more right.
+
+    Order is deliberate: the part's own collections first (a body or a
+    geometrical set is named at part level), then the main body's sketches and
+    solid features, then `FindObjectByName` for everything else -- a
+    construction element, a parameter, an axis system.
+    """
+    for collection in ("Bodies", "HybridBodies"):
         try:
             group = getattr(part, collection)
         except Exception:  # noqa: BLE001 - not every document has every collection
             continue
-        try:
-            return group.Item(name)
-        except Exception:  # noqa: BLE001 - Item raises rather than returning None
-            pass
+        found = _by_name(group, name)
+        if found is not None:
+            return found
+
+    try:
+        body = part.MainBody
+    except Exception:  # noqa: BLE001 - a document with no solid body
+        body = None
+    if body is not None:
+        for collection in ("Sketches", "Shapes"):
+            try:
+                group = getattr(body, collection)
+            except Exception:  # noqa: BLE001
+                continue
+            found = _by_name(group, name)
+            if found is not None:
+                return found
+
     try:
         return part.FindObjectByName(name)
     except Exception:  # noqa: BLE001 - the name is simply not in this part

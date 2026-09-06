@@ -111,6 +111,20 @@ and what 5.3's sensitivity can then be run over.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
 
+- **2026-09-06** — E9 → **clearance through a motion range has tests, and the
+  defect they were written for.** The agent building `app/dynamics/` found,
+  before a rate limit killed it, that `measured_poses` was
+  `samples - len(failures)` — so a sweep that short-circuited at pose 9 of 21
+  published `measured_pose_count: 21`. Twelve poses nobody looked at, counted as
+  measured, in the payload an assertion reads. It had fixed it (`attempted` and
+  `stopped_early` are fields now, and the provenance says the interference volume
+  is the *first* found rather than the largest) and had not tested it. Restoring
+  the original expression fails a test. Also pinned, and the more important half:
+  **a collision only in the middle of the travel is caught** — an endpoint check
+  is the natural thing to write and is exactly the check that misses, since an
+  arm clears at both extremes and fouls at forty degrees. Mutating the sweep to
+  look at only the first and last pose fails nine of eleven.
+
 - **2026-09-06** — E10/E7/E12 → **the first of the missing tests, and the defect
   they were written for.** The agent building `app/optimise/` found, before a
   rate limit killed it, that **an optimum sitting on an active constraint was

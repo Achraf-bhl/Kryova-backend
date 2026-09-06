@@ -73,11 +73,22 @@ def build_bracket(session) -> None:
 
 
 def test_daemon_table_covers_exactly_the_server_vocabulary():
+    from catia_bridge.generated_tools import SERVER_ONLY
+
     from app.catia.tool_specs import CATIA_TOOL_SPECS
 
     server = {spec.name for spec in CATIA_TOOL_SPECS}
-    # `catia_status` is answered by the server and never reaches a device.
-    assert set(TOOLS) | {"catia_status"} == server
+    # Server-only tools never reach a device, so the daemon must NOT know them.
+    # `catia_status` is answered by the server; the assembly hand-off tools have
+    # no COM method behind them, because on a seat a component is a *file* while
+    # the open kernel has a live document that has to be *taken*. Derived from
+    # the generated `SERVER_ONLY` rather than listed here, so adding one does not
+    # silently widen what the daemon is expected to carry.
+    assert set(TOOLS) | set(SERVER_ONLY) == server
+    assert not (set(TOOLS) & set(SERVER_ONLY)), (
+        "a server-only tool reached the daemon table; the workstation would be "
+        "offered something no COM method implements"
+    )
     assert set(TOOLS) == set(TOOL_METHODS)
 
 

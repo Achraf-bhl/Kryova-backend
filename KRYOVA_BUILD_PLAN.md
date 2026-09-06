@@ -107,6 +107,39 @@ and what 5.3's sensitivity can then be run over.
 
 ## Done
 
+- **P3 — the admin console and an audit log that cannot be edited (2026-09-06).** The append-only
+  property is **structural in four layers, and the report says which one is worth what**: a
+  `BEFORE UPDATE OR DELETE` row trigger (the one that counts — it applies to the ORM, to raw SQL,
+  to psql and to the next migration), a statement-level `TRUNCATE` trigger (because `TRUNCATE`
+  fires no row triggers and would otherwise empty the table past the first rule),
+  `REVOKE UPDATE, DELETE, TRUNCATE ... FROM PUBLIC`, and a `before_flush` ORM guard that turns the
+  mistake into a Python error at the line that caused it. Written for **both** dialects and
+  installed by `create_all` as well as by migration `2f3f8aadb319`, because a guarantee that is
+  absent on the dialect the suite runs on is a guarantee nobody has seen work. Verified on the
+  live Neon database: UPDATE, DELETE and TRUNCATE each return
+  `RestrictViolation: audit_events is append-only`. What is **not** claimed: the table's owner can
+  `ALTER TABLE ... DISABLE TRIGGER`, and the application connects as that owner today — which is
+  why every entry also carries the previous entry's SHA-256. The tests drop the trigger, prove the
+  same UPDATE then succeeds (so the refusal is attributable to the trigger and not to a typo), and
+  prove the chain reports it: an edited row breaks at its own sequence with `entry_hash` mismatch,
+  a deleted row breaks at the *next* sequence with a gap — different accusations, kept apart.
+  `audit_events` carries **no foreign keys**, deliberately: `ON DELETE CASCADE` would let deleting
+  an account erase what was done to it, and `ON DELETE SET NULL` is an UPDATE the trigger refuses.
+  Impersonation is a **row, not a token claim**, which is what makes "stop impersonating" a
+  revocation rather than a note: mode is read from `impersonation_sessions` on every request, so
+  escalation takes effect without a new token and ending takes effect at once. Read-only is
+  refused in `get_current_user`, *before* the route function is entered, so a route that never
+  heard of impersonation cannot be the one that lets a write through — and the refusal is written
+  to the log on its own transaction before the 403 is raised. Both identities on every row, no
+  `user_id` column to collapse them into, and `impersonation.write_refused` is its own action
+  rather than an outcome. Staff standing is a separate table and grants **nothing** inside a
+  tenant: `/organisations/{id}/audit` never reads a staff grant, so a platform administrator who
+  is not a member gets the same 404 a stranger does. Guards verified by breaking them: the grant
+  revoked and the same request stops working; the session escalated and the same POST starts
+  working; the trigger dropped and the same UPDATE goes through. 65 tests.
+
+- **E18 / M2 — the welded frame, the ladder's first product rung (2026-09-06).** `app/design/missions.py` grew an `AssemblyDesign`: a `ProductStructure`, a `DesignSpec` per leaf component, the interface contracts at the boundaries, and frame-level parameters an assertion can read. M2 is a welded portal in RHS 60×40×4 — **two components, three occurrences**, the post designed once, built once, weighed twice. The section is declared **on the interface** and `bind_into` merges it into both members (14.3), so a member on a different section is a compile error at the joint naming both parties, not a clash three weeks later. Measured, all of it: mass 12.743104 kg against the closed form, centre of mass at (400, 0, 488.18), envelope 800×40×760, both joints measured (0 mm apart, 0 mm³ interference), the two posts rejected by their bounding boxes — 3 pairs, 0 unchecked. 18 mission assertions and 6 interface claims, **none `UNMEASURED`**. Six wrong frames built in the tests, each watched to fail the guard it should: a post 10 mm short opens the joint, a header 10 mm low interpenetrates by 5,824 mm³, a solid bar weighs 41.6 kg, a section rolled a quarter turn puts 60 mm out of plane. Two findings worth the session: **`clearance_mm=0` makes the fit-up claim `UNMEASURED` rather than false** — the broad phase soundly throws away the 10 mm pair — so M2 inspects to 25 mm to get the diagnosis, not the verdict; and a **`widest_gap_mm`** is needed beside `minimum_clearance_mm`, because a header bearing on one post and floating above the other has a minimum clearance of zero. **M2 passes carrying `unproven`**: no load case (E6), no weld classification (E8.3), no weldment or cut list (E17.4), so the ladder is not `complete` and “M2 passes” cannot be read as “the welds are sized”. Four gaps in `app/assembly/` recorded rather than worked around: no combined payload (mass and clash `to_payload()` collide on `occurrence_count`/`complete`), no per-pair lookup or `ClashFinding.to_payload()`, no product envelope (`_world_boxes` is private), and no boundary payload for a contract. `tests/test_mission_m2.py` (48), `tests/test_design_missions.py` (32, coverage figure moved 1/9 → 2/9). **Unproven until a gate:** no chat run has been asked to build this frame — M2 through the harness is not M2 through the product.
+
 - **P2 — organisations, roles and RLS tenancy (2026-09-06).** Projects are owned by an organisation, not a person; `owner_id` stays as provenance and stops being a permission. Migration `1b07f4f27e89` **backfills**: a personal organisation per user, its creator as `owner`, `projects.organisation_id` added nullable, filled, and only then made NOT NULL — 24 users, 24 organisations, 82 projects placed, 0 orphans on the live database, with the migration raising rather than continuing if any row were left behind. A `before_flush` hook extends the guarantee forward, so `app/ai/tools.py` building a `Project` directly gets a tenant without knowing organisations exist. Roles are one ordered ladder and every check is `at_least`, in `api/deps.py` alone. Invitations hash their token like the password reset does, are single-use, and are bound to the address they were sent to. Every cross-tenant miss is a 404 byte-identical to a miss. RLS is enabled **and FORCEd** on six tables, fed only by `set_config(..., is_local => true)` republished on each transaction the request opens — proved by breaking it to `false`, which leaves the tenant on the connection after COMMIT and fails the test. **The one thing that is not true yet:** Neon's `neondb_owner` holds `BYPASSRLS`, which outranks FORCE and made the first run of the isolation suite pass vacuously; it cannot alter itself to drop it. The suite now runs as a `NOBYPASSRLS` probe role so the policies are genuinely tested, and `test_the_application_role_must_not_bypass_row_level_security` is `xfail` with the fix in its reason. Thirteen guards verified by breaking what they guard.
 
 - **E16.1 — the tool the prompt promised and the offer withheld (2026-09-06).** Tool *selection* rebuilt in `app/ai/tool_retrieval.py` and measured against the real 110-tool OCCT registry rather than a synthetic one: the shipped selector was withholding five to nine tools the frozen system prompts *name* on every realistic message, `catia_set_parameter` on all five measured — the tool rung 3 is entirely about and the one the agent failed to find for three sessions running. Prompt-named tools are now a floor, scanned out of the prompt text so it cannot fall behind an edit. Four more rules, each explaining itself: `catia_kb.recognise` supplies the domain layer (*bore* → Hole, in French too), intent families cover tasks whose words are disjoint from the tool that serves them, a registry-derived common-word filter and a name-beats-prose rule kill the noise those widenings would otherwise let in. Offers 17–39 of 110 per turn; every inclusion carries the rule and evidence that produced it, logged per turn. **Unproven until a gate: no chat run has been driven against the narrowed offer.** `app/ai/planning.py` lands 16.2's seam and one first step — the requirements of a request, held where the context window cannot trim them — tested and deliberately unwired.
@@ -114,6 +147,20 @@ and what 5.3's sensitivity can then be run over.
 - **P9.1 — CI that is honest about the database (2026-09-06).** Backend CI split into `lint` / `offline` / `database`: the offline half (3,327 tests) gates every push and reports the 430 it deliberately skipped, the database half runs against a PostgreSQL 17 service container with `alembic upgrade head` + `alembic check`, and `scripts/pytest_split.py --database-only` refuses to start without a real PostgreSQL so conftest's SQLite fallback can never again be reported as the database suite. Fixed two things that were red on main: `mypy app tests` aborted on a duplicate module name and had been checking nothing, and `.env.example` was missing `AI_TOOL_LIMIT` / `AI_DAILY_TOKEN_BUDGET`. Frontend CI already existed (the plan was wrong about that) and was upgraded: SHA-pinned actions, `.nvmrc`, and a three-dependency guard. Decided against a tagged MSI release — the installer bakes build-machine paths, so it would ship broken.
 
 Newest first. Each line names the board row it moved and the commit that moved it.
+
+- **2026-09-06** — two snapshot tests corrected rather than re-pinned, after
+  adding the assembly tools broke both. `test_only_two_queue_implementations_exist`
+  asserted over `JobQueue.__subclasses__()`, which is every subclass alive in the
+  process — so a stub defined in another test file joined it and the assertion
+  **passed alone and failed in a full run**, which is the worst way for a test to
+  be wrong. It now restricts to subclasses defined in `app.jobs`: what the seam
+  promises is that *this package* ships two, and a test's own stub is evidence
+  the seam works rather than a violation of it. And the daemon-vocabulary test
+  listed its exception (`catia_status`) inline; it derives the set from the
+  generated `SERVER_ONLY` now, so adding a server-only tool cannot silently widen
+  what the workstation is expected to carry — plus the converse assertion, that
+  no server-only tool has *reached* the daemon table, which is the direction that
+  would offer the workstation something no COM method implements.
 
 - **2026-09-06** — E15 → **the four catalogued holes are wired, and Decision 1
   finally has a number.** `app/observe/` shipped with `solve.calculix.run`,

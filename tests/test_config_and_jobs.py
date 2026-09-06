@@ -53,8 +53,23 @@ class TestJobQueueBackend:
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module("app.jobs.celery_app")
 
-    def test_only_two_queue_implementations_exist(self) -> None:
-        assert set(JobQueue.__subclasses__()) == {InlineJobQueue, ThreadPoolJobQueue}
+    def test_only_two_queue_implementations_ship(self) -> None:
+        """Restricted to the ones defined in `app.jobs`, deliberately.
+
+        `JobQueue.__subclasses__()` is every subclass alive in the process, so a
+        stub defined inside some other test file joins it — and this assertion
+        then passes alone and fails in a full run, which is the worst way for a
+        test to be wrong. What the seam actually promises is that *this package*
+        ships two implementations; a test's own stub is evidence the seam works,
+        not a violation of it.
+        """
+        shipped = {
+            cls
+            for cls in JobQueue.__subclasses__()
+            if cls.__module__.startswith("app.jobs")
+        }
+
+        assert shipped == {InlineJobQueue, ThreadPoolJobQueue}
 
 
 class TestJobQueueSelection:

@@ -92,7 +92,7 @@ Dev server:   uvicorn app.main:app --reload      # with --reload also set INLINE
 Offline test: pytest tests/test_solver.py tests/test_mesh.py tests/test_geometry.py \
               tests/test_kernel.py tests/test_interrogation.py tests/test_design_*.py \
               tests/test_render.py tests/test_vision.py          # no DB, no network
-Full test:    pytest                              # needs a live Neon connection, ~4 min
+Full test:    pytest                              # needs a live Postgres; ~seconds locally
 Drift check:  alembic check                       # fails if models diverged from migrations
 New revision: alembic revision --autogenerate -m "..."
 ```
@@ -679,9 +679,11 @@ What makes it work rather than a merge conflict:
   linear, so two agents generating revisions at once produce branching heads that
   someone has to merge by hand. One agent (or the parent) holds migration rights
   at a time; everyone else reports the model change they need.
-- **Nobody runs the full suite.** It needs a live Neon connection and takes
-  minutes; six agents running it at once is six times that for no extra
-  information. Each agent runs *its own test files*, plus `ruff` and `mypy`.
+- **Nobody runs the full suite.** Six agents running it at once is six times
+  the work for no extra information, and they would contend for the one
+  `kryova_test` schema, which is created and dropped per run — two concurrent
+  runs drop each other's tables. Each agent runs *its own test files*, plus
+  `ruff` and `mypy`.
 - **Every brief carries the same non-negotiables**: read `CLAUDE.md` first; no
   duplicated code or files; tests written with the work; every new guard verified
   by breaking the thing it guards; and *report what you could not do*, because an
@@ -814,12 +816,18 @@ pass/fail**, and expect the local model to be the limit long before the geometry
 - Physics tests (`test_solver.py`, `test_mesh.py`, `test_geometry.py`) never request a database
   fixture, so they open no connection and run offline in under a second. Keep it that way —
   that tight loop is the reason meshing/FEA work is bearable.
-- Everything else runs against **the same Neon database in a `kryova_test` schema**, created
-  and dropped per run. Testing on SQLite while shipping on Postgres is the drift that hides
-  JSONB, enum and cascade bugs. The cost is real: ~250 ms per round trip, ~4 minutes for the
-  DB suite. The fixtures minimise round trips — one connection per session, isolation by
-  transaction rollback, no app lifespan per test. If it gets painful, the fix is a local
-  Postgres, not a return to SQLite.
+- Everything else runs against **whatever `DATABASE_URL` points at, in a `kryova_test`
+  schema**, created and dropped per run. Testing on SQLite while shipping on Postgres is the
+  drift that hides JSONB, enum and cascade bugs, and that rule has not moved.
+  **What moved is where Postgres lives: since 2026-09-07 this machine runs a local
+  PostgreSQL 18.6 and Neon is the fallback in `.env`** — the paragraph here used to end "if it
+  gets painful, the fix is a local Postgres, not a return to SQLite", and that is what was
+  done. The cost was real and is now not: **0.135 ms per round trip against Neon's ~250 ms**,
+  so the DB suite is seconds rather than ~4 minutes. 18.6 is the version Neon runs, so parity
+  holds. Setup, the `sslmode=disable` that a stock local server requires, and how to switch
+  back are in [docs/LOCAL_POSTGRES.md](docs/LOCAL_POSTGRES.md). The fixtures still minimise
+  round trips — one connection per session, isolation by transaction rollback, no app lifespan
+  per test.
 - The test schema is selected with `schema_translate_map`, never `SET search_path` (see above).
 - `client` fixture overrides the job queue to `InlineJobQueue` so jobs run on the request
   thread inside the test's open transaction — a worker thread would use its own connection and
@@ -843,11 +851,17 @@ pass/fail**, and expect the local model to be the limit long before the geometry
 standing rule above says an end-to-end test goes through the Ollama chatbot and never through
 the dispatcher; this is how that is actually done, so no session has to rediscover it.
 
-- **Account.** `claude.admin@kryova.dev` / `KryovaGui!2026`, created through the ordinary
-  `POST /api/v1/auth/register`, then given a `StaffGrant` of `platform_admin` **out of band** —
-  there is deliberately no API that mints staff (`app/models/audit.py`), so a script through
-  `SessionLocal` is the sanctioned route and `scripts/` is where one belongs if it is needed
-  again. A fresh account has no memberships; the personal organisation is created on demand by
+- **Account.** `admin@admin.com` / `admin` (2026-09-08), created by
+  **`scripts/create_admin.py`** — which is where the script that used to be "needed again"
+  now lives. There is deliberately no API that mints staff (`app/models/audit.py`), so a
+  script through `SessionLocal` is the sanctioned route for the `StaffGrant` of
+  `platform_admin`. It also *has* to create the account: `UserCreate` requires eight
+  characters and `admin` is five, while the login route takes an `OAuth2PasswordRequestForm`
+  and imposes no length — so this password can be used to sign in but not registered. The
+  script is idempotent (re-running resets a forgotten password) and refuses a non-local
+  `DATABASE_URL` without `--i-know`, because its output is an account with unrestricted
+  platform standing. The predecessor was `claude.admin@kryova.dev` / `KryovaGui!2026`, which
+  lives on in the Neon database only. A fresh account has no memberships; the personal organisation is created on demand by
   the `before_flush` hook when the first project is made.
 - **Browser.** Edge is launched **once**, by hand, with `--remote-debugging-port=9222` and its
   own persistent `--user-data-dir`; the driver then attaches with `playwright-core`'s

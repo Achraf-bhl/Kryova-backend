@@ -357,14 +357,25 @@ class TestANameAlreadyOwnedIsRefused:
             run(wired, "catia_product_create", {"name": "Assembly"})
 
     def test_a_part_may_not_take_an_assemblys_name_either(self, wired) -> None:
-        """One namespace: `catia_open_document name=` could not tell them apart."""
+        """One namespace: `catia_open_document name=` could not tell them apart.
+
+        The *wording* of this particular refusal moved on 2026-09-08 -- a
+        collision across kinds now leads with "use a different name" rather than
+        with "continue the existing one", because continuing an assembly cannot
+        produce the part that was asked for (see
+        `TestTheRefusalLeadsWithTheRecoveryThatCanWork`). What this test is for
+        is unchanged and is asserted below: the call is refused, and it is
+        refused *here* rather than reaching the daemon.
+        """
         self._two_parts(wired)
         wired["connection"].replies["catia_product_create"] = _reply_for(
             "Assembly", ".CATProduct"
         ) | {"part_number": "Assembly", "components": 0}
         run(wired, "catia_product_create", {"name": "Assembly"})
-        with pytest.raises(dispatch.CatiaError, match="already owns an assembly"):
+        wired["connection"].calls.clear()
+        with pytest.raises(dispatch.CatiaError, match="'Assembly' is already taken by an assembly"):
             run(wired, "catia_new_part", {"name": "Assembly"})
+        assert not [c for c in wired["connection"].calls if c["tool"] == "catia_new_part"]
 
     def test_a_new_name_goes_through(self, wired, db_session) -> None:
         self._two_parts(wired)
@@ -420,3 +431,63 @@ class TestTheStateBlocksAnnotationIsTolerated:
         active = [d for d in _documents(db_session, wired["conversation"].id) if d.is_active]
         assert [d.doc_name for d in active] == ["Bracket (left)"]
 
+
+
+class TestTheRefusalLeadsWithTheRecoveryThatCanWork:
+    """A name collision across *kinds* is refused with "use a different name",
+    not with "continue the existing one".
+
+    **Measured on ladder prompt PRO4, 2026-09-08.** The agent had built a part
+    named 'Punch press assembly', then called `catia_product_create` with the
+    same name because that is what it wanted the assembly to be called. The
+    refusal told it to continue with `catia_open_document`, it did, and it got
+    the *part* back -- which can never become the product it asked for. It spent
+    the following rounds reopening documents and measuring 0.0 kg, and the turn
+    ended with four parts and no assembly.
+
+    The name is one namespace across parts and products on purpose (see
+    `test_a_part_may_not_take_an_assemblys_name_either`) and that is not what
+    changed. What changed is which of the two remedies is offered first: an
+    agent follows the advice it is given, so advice that cannot produce what it
+    asked for costs the rounds it takes to discover that.
+    """
+
+    def _a_part(self, wired, name: str = "Punch press assembly") -> None:
+        wired["connection"].replies["catia_new_part"] = _reply_for(name)
+        run(wired, "catia_new_part", {"name": name})
+        wired["connection"].calls.clear()
+
+    def test_a_product_wanting_a_parts_name_is_told_to_rename(self, wired) -> None:
+        self._a_part(wired)
+        with pytest.raises(dispatch.CatiaError) as raised:
+            run(wired, "catia_product_create", {"name": "Punch press assembly"})
+        message = str(raised.value)
+        assert "already taken by a part" in message
+        assert "Use a different name" in message
+        # The reopen is still named -- an agent that genuinely wanted the part
+        # must be able to find it -- but as the thing that is *not* the answer.
+        assert "which is not what you asked for" in message
+        assert not [c for c in wired["connection"].calls if c["tool"] == "catia_product_create"]
+
+    def test_a_part_wanting_an_assemblys_name_is_told_to_rename(self, wired) -> None:
+        wired["connection"].replies["catia_product_create"] = _reply_for(
+            "Press", ".CATProduct"
+        ) | {"part_number": "Press", "components": 0}
+        run(wired, "catia_product_create", {"name": "Press"})
+        wired["connection"].calls.clear()
+        with pytest.raises(dispatch.CatiaError) as raised:
+            run(wired, "catia_new_part", {"name": "Press"})
+        message = str(raised.value)
+        assert "already taken by an assembly" in message
+        assert "Use a different name" in message
+
+    def test_the_same_kind_still_leads_with_continue_it(self, wired) -> None:
+        """The case this must not break: a second `catia_new_part` for a part
+        this conversation already has *is* continuable, and continuing it is
+        the whole point of the S2 fix this class sits beside."""
+        self._a_part(wired, "Bushing")
+        with pytest.raises(dispatch.CatiaError) as raised:
+            run(wired, "catia_new_part", {"name": "Bushing"})
+        message = str(raised.value)
+        assert "To continue it, call catia_open_document name='Bushing'" in message
+        assert "everything built in it so far is kept" in message

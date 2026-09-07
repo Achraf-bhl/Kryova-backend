@@ -1387,11 +1387,37 @@ def _enrich(
         taken = _owned_document_named(db, owner, wanted) if wanted else None
         if taken is not None:
             kind = "an assembly" if taken.doc_type == "product" else "a part"
+            # Which recovery leads depends on whether the caller wanted the
+            # kind of document that is in the way, and getting that order wrong
+            # sends the agent somewhere it cannot use.
+            #
+            # Measured on ladder prompt PRO4, 2026-09-08: the agent had built a
+            # *part* named 'Punch press assembly', then called
+            # `catia_product_create` with the same name wanting the assembly.
+            # It was told to continue with `catia_open_document`, did so, and
+            # got the part back -- which can never become the product it asked
+            # for. It spent the next rounds reopening documents and measuring
+            # 0.0 kg, and the turn ended with no assembly.
+            #
+            # So: continuing is only the first advice when continuing can give
+            # the caller what it asked for. When the kinds differ, the name is
+            # simply taken, and the only move is a different one.
+            wanted_product = spec.name == "catia_product_create"
+            same_kind = wanted_product == (taken.doc_type == "product")
+            if same_kind:
+                raise CatiaError(
+                    f"This conversation already owns {kind} called {taken.doc_name!r}. To "
+                    f"continue it, call catia_open_document name={taken.doc_name!r} -- "
+                    "everything built in it so far is kept. To start a different one, "
+                    "use a different name."
+                )
+            asked_for = "an assembly" if wanted_product else "a part"
             raise CatiaError(
-                f"This conversation already owns {kind} called {taken.doc_name!r}. To "
-                f"continue it, call catia_open_document name={taken.doc_name!r} -- "
-                "everything built in it so far is kept. To start a different one, "
-                "use a different name."
+                f"The name {taken.doc_name!r} is already taken by {kind} in this "
+                f"conversation, so it cannot also name {asked_for}. Use a different "
+                f"name for the new one. (catia_open_document name={taken.doc_name!r} "
+                f"reopens the existing {kind.split()[-1]}, which is not what you asked "
+                "for here.)"
             )
 
     if spec.name == "catia_open_document":

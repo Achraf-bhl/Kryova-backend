@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -894,3 +895,203 @@ class TestUpdateOnAProduct:
         assert result["mass_kg"] is None
         assert result["mass_is_provisional"] is True
         assert "material" in result["mass_warning"]
+
+
+class _StubSketch:
+    def __init__(self, name: str) -> None:
+        self.Name = name
+
+
+class _StubSketches:
+    """`Body.Sketches`, which is 1-indexed like every CATIA collection."""
+
+    def __init__(self, names: list[str]) -> None:
+        self._sketches = [_StubSketch(name) for name in names]
+
+    @property
+    def Count(self) -> int:
+        return len(self._sketches)
+
+    def Item(self, index: int) -> _StubSketch:
+        return self._sketches[index - 1]
+
+
+class _StubBody:
+    def __init__(self, names: list[str]) -> None:
+        self.Sketches = _StubSketches(names)
+
+
+def _com_with_sketches(tmp_path: Path, names: list[str]) -> CatiaCom:
+    com = _com(tmp_path)
+    body = _StubBody(names)
+    com._body = lambda: body  # type: ignore[method-assign]
+    # `_find_sketch` ends any open sketch edition first. There is no edition on
+    # a stub, and that is not what this test is about.
+    com._end_sketch_edition = lambda: None  # type: ignore[method-assign]
+    return com
+
+
+class TestASketchThatIsNotThereNamesTheOnesThatAre:
+    """`_find_sketch`'s refusal lists the sketches the part actually holds.
+
+    Every solid feature -- pad, pocket, groove, shaft -- resolves its profile
+    through `_find_sketch`, so this is the message an agent meets at the moment
+    it is building the part rather than drawing in it.
+
+    **It used to say only "Use the name a sketch tool returned", and that is
+    unrecoverable exactly when it fires.** A model that reached here has
+    invented a name, which means it has lost the real one; being told to use
+    the name it was given is being told to consult what it no longer has.
+    Measured on ladder prompt PRO4, 2026-09-08: `catia_pad(sketch='Frame
+    base')` on a part whose sketch was called something else, refused, and the
+    punch press frame was abandoned there rather than retried.
+
+    `SketcherMixin._draw_target` has listed the names for the drawing tools all
+    along. This was the same situation one layer down and the less informative
+    of the two -- the wrong way round, because drawing into the wrong sketch is
+    recoverable and giving up on the solid ends the part.
+    """
+
+    def test_it_names_every_sketch_in_the_part(self, tmp_path: Path) -> None:
+        com = _com_with_sketches(tmp_path, ["Frame outline", "Ram profile"])
+
+        with pytest.raises(CatiaOperationError) as caught:
+            com._find_sketch("Frame base")
+
+        message = str(caught.value)
+        assert "'Frame base'" in message
+        # The half that was missing: what the agent may actually use instead.
+        assert "Frame outline" in message
+        assert "Ram profile" in message
+
+    def test_it_still_resolves_a_name_that_is_there(self, tmp_path: Path) -> None:
+        """The listing must not cost the ordinary path -- a sketch that exists
+        is still returned, and the loop that collects the names must not
+        consume it first."""
+        com = _com_with_sketches(tmp_path, ["Frame outline", "Ram profile"])
+
+        assert com._find_sketch("Ram profile").Name == "Ram profile"
+        # The first entry too: a loop that appends before comparing would find
+        # the second and miss the first.
+        assert com._find_sketch("Frame outline").Name == "Frame outline"
+
+    def test_a_part_with_no_sketches_says_so_rather_than_listing_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        """"It has: " followed by an empty list reads as a truncated message and
+        tells the agent to pick from nothing. The empty part is a different
+        situation with a different remedy -- create one -- and says that."""
+        com = _com_with_sketches(tmp_path, [])
+
+        with pytest.raises(CatiaOperationError) as caught:
+            com._find_sketch("Frame base")
+
+        message = str(caught.value)
+        assert "no sketches at all" in message
+        assert "catia_sketch_create" in message
+        assert "It has: ." not in message
+
+
+class _Dimension:
+    """`Constraint.Dimension`, which on a real seat can refuse to be read."""
+
+    def __init__(self) -> None:
+        self.Value = 0.0
+
+    def Rename(self, _name: str) -> None:
+        return None
+
+
+class _Constraint:
+    def __init__(self, *, dimension_fails: bool) -> None:
+        self.Name = "Contrainte.1"
+        self.Mode = 0
+        self._dimension_fails = dimension_fails
+        self.deleted = False
+
+    @property
+    def Dimension(self) -> _Dimension:
+        if self._dimension_fails:
+            # What V5-R33 actually raised, verbatim from the bridge log:
+            # (0, 'CATIAConstraint', 'La methode Dimension a echoue', None, 0, E_INVALIDARG)
+            raise Exception(
+                "(-2147352567, 'Une exception s'est produite.', "
+                "(0, 'CATIAConstraint', 'La methode Dimension a echoue', None, 0, -2147024809), None)"
+            )
+        return _Dimension()
+
+
+class TestADimensionCatiaWillNotAcceptIsRefusedAndCleanedUp:
+    """`catia_sketch_dimension` turns a refused dimension into a refusal, and
+    takes the half-made constraint with it.
+
+    **Measured on ladder prompt PRO1, 2026-09-08, three consecutive runs on a
+    French V5-R33.** `AddDimensionConstraint` returned a constraint object and
+    reading `.Dimension` off it raised `E_INVALIDARG` --
+    `(0, 'CATIAConstraint', 'La methode Dimension a echoue', ...)`. Two things
+    were wrong with what happened next:
+
+    * The agent was handed that COM string as the result. It is not actionable
+      in any language, and it re-issued the call six times across the runs.
+    * The constraint stayed in the sketch. `AddDimensionConstraint` had already
+      added it, so the sketch was left holding a constraint with no dimension --
+      and the pad built from that sketch then failed three times in a row. That
+      is precisely the wreckage `_discard_failed_feature` was written for after
+      the same thing happened with fillets.
+    """
+
+    @staticmethod
+    def _com_with_constraint(tmp_path: Path, *, dimension_fails: bool) -> tuple[Any, _Constraint]:
+        from catia_bridge.com import sketcher
+
+        com = _com(tmp_path)
+        constraint = _Constraint(dimension_fails=dimension_fails)
+        com._open_sketch = lambda _name="": (object(), object())  # type: ignore[method-assign]
+        com._sketch_reference = lambda _target, name: name  # type: ignore[method-assign]
+        discarded: list[Any] = []
+        com._discard_failed_feature = discarded.append  # type: ignore[method-assign]
+        com._discarded = discarded  # type: ignore[attr-defined]
+        sketcher._add_constraint = lambda *_args, **_kwargs: constraint  # type: ignore[assignment]
+        return com, constraint
+
+    def test_it_refuses_in_words_rather_than_raising_a_com_error(self, tmp_path: Path) -> None:
+        com, _ = self._com_with_constraint(tmp_path, dimension_fails=True)
+
+        with pytest.raises(CatiaOperationError) as caught:
+            com.sketch_dimension(kind="distance", elements=["Droite.1", "Droite.2"], value=100.0)
+
+        message = str(caught.value)
+        # Names what was asked for, so the agent knows which call this was.
+        assert "distance" in message and "100" in message
+        assert "Droite.1" in message and "Droite.2" in message
+        # Says what to do instead, in the register the pad refusal uses.
+        assert "over-constrain" in message
+        assert "catia_sketch_polyline" in message
+        # Keeps the underlying report -- the refusal explains, it does not hide.
+        assert "CATIAConstraint" in message
+
+    def test_the_half_made_constraint_is_removed(self, tmp_path: Path) -> None:
+        """A constraint with no dimension left in the sketch is what made the
+        following three pads fail, so saying "the sketch is still usable" has to
+        be true when it is said."""
+        com, constraint = self._com_with_constraint(tmp_path, dimension_fails=True)
+
+        with pytest.raises(CatiaOperationError) as caught:
+            com.sketch_dimension(kind="distance", elements=["Droite.1", "Droite.2"], value=100.0)
+
+        assert com._discarded == [constraint]
+        assert "has been removed" in str(caught.value)
+
+    def test_a_dimension_that_works_is_untouched(self, tmp_path: Path) -> None:
+        """The refusal must not cost the ordinary path: a dimension CATIA
+        accepts still returns, and nothing is discarded."""
+        com, _ = self._com_with_constraint(tmp_path, dimension_fails=False)
+
+        result = com.sketch_dimension(
+            kind="distance", elements=["Droite.1", "Droite.2"], value=100.0
+        )
+
+        assert result["kind"] == "distance"
+        assert result["value"] == 100.0
+        assert result["driving"] is True
+        assert com._discarded == []

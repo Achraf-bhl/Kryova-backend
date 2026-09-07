@@ -856,10 +856,43 @@ class SketcherMixin:
         # An angle is set in radians and a length in millimetres; the parameter
         # carries its own unit, so writing the number without regard to which
         # is a silent factor-of-57 error on angles.
-        if kind == "angle":
-            constraint.Dimension.Value = math.radians(float(value))
-        else:
-            constraint.Dimension.Value = float(value)
+        #
+        # **`.Dimension` is where this fails on a real seat, and it fails as a
+        # bare COM error.** Measured on ladder prompt PRO1, 2026-09-08, three
+        # runs, French V5-R33: `AddDimensionConstraint` returned a constraint
+        # object and reading `.Dimension` off it raised
+        # `(0, 'CATIAConstraint', 'La methode Dimension a echoue', ..., E_INVALIDARG)`.
+        # The agent was handed that string, could do nothing with it, and
+        # re-issued the call six times across the three runs.
+        #
+        # Two things were wrong and both are fixed here. The message is now
+        # something an agent can act on, in the register the pad and pocket
+        # refusals already use. And the half-made constraint is taken with it:
+        # `AddDimensionConstraint` has already put it in the sketch, and a
+        # constraint with no dimension is exactly the wreckage
+        # `_discard_failed_feature` exists for -- on this run the sketch it was
+        # left in went on to fail its pad three times.
+        try:
+            if kind == "angle":
+                constraint.Dimension.Value = math.radians(float(value))
+            else:
+                constraint.Dimension.Value = float(value)
+        except Exception as exc:  # noqa: BLE001 - turned into a refusal below
+            self._discard_failed_feature(constraint)
+            named = " and ".join(repr(name) for name in elements)
+            raise CatiaOperationError(
+                f"CATIA would not put a {kind} dimension of {value:g} on {named}. "
+                "That usually means the sketch cannot take it: the elements are "
+                "already fixed relative to each other, the dimension would "
+                "over-constrain the profile, or the two elements cannot have that "
+                "kind of dimension between them (a distance needs two elements that "
+                "are actually apart; an angle needs two lines that are not parallel). "
+                "The constraint has been removed, so the sketch is still usable. "
+                "Draw the profile at the size you want with catia_sketch_polyline or "
+                "catia_sketch_rectangle -- the coordinates you pass are millimetres "
+                "and are the dimension -- and constrain only what you must. "
+                f"CATIA reported: {exc}"
+            ) from exc
         constraint.Mode = 1 if reference else 0  # catCstModeDrivingDimension = 0
 
         if parameter_name:

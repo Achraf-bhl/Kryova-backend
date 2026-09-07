@@ -572,6 +572,20 @@ agent can decompose a machine into parts and keep them consistent.
 them in the right relationship, and the closing paragraph is honest about what was not analysed.
 **Screenshot:** `PRO1.png`
 
+**Run of 2026-09-08: fail, four times, and each failure moved somewhere new — which is
+what makes it the most productive prompt on the ladder so far.** Run 1 ended at step 31
+of 60 on `MAX_BLOCKED_REPEATS`. Run 2 created **five part documents and put a solid in
+none of them**, and said so itself: *"We have 5 empty part documents created but no
+geometry built yet."* Run 3, with the new `MAX_EMPTY_DOCUMENTS` guard in, created **one**
+document instead of five and stayed in it — and hit a different wall,
+`catia_sketch_dimension` failing on every attempt with a raw COM error. Run 4, with that
+refused properly and cleaned up, **built its first solid** and then ran out of the model's
+32,768-token context window with four parts still to make.
+
+**The ceiling is now the context window, not the geometry** — which is the thing this
+ladder exists to find out. See `verification-2026-09-08/REPORT.md` for all five defects
+and their fixes. `verification-2026-09-08/PRO1-cframe.png`
+
 ### PRO2 — Sheet-metal box-and-pan brake, conversational
 
 - [ ] **PRO2**
@@ -648,8 +662,19 @@ Three things this measured, all now fixed, none of them keyed to this prompt:
   guards end a stuck turn in seconds regardless of the cap (7efdd1c).
 
 It also produced the empty-sketch pile-up that ended the geared-shaft run an hour later
-and was fixed in 8fc2bd8. **Not re-run since any of those landed — PRO4 stays unticked
-and is the first thing to re-run at the next gate.**
+and was fixed in 8fc2bd8.
+
+**Re-run 2026-09-08 with those three fixes in: `~` partial, and the half that had never
+worked now works.** The shear calculation happened, a lever ratio followed from it, and
+the answer said "I have not checked it" about frame stiffness — which is what the prompt
+asks for. The verification nudge held the turn open at step 29 for two unmeasured
+requirements. What is still wrong is the geometry (two flat plates, no fulcrum, no die
+holder, no stripper) and the assumed shear strength: 200 MPa where ~350 MPa is right, so
+11.3 kN instead of ≈20 kN. Two further defects came out of it and were fixed —
+`catia_pad`'s "no such sketch" refusal not naming the sketches that exist, and a
+part/product name collision leading with a recovery that cannot produce what was asked
+for. **Neither has been driven since. PRO4 stays unticked and is again the first thing
+to re-run.** `verification-2026-09-08/`
 
 ### PRO5 — Bench vice, incremental across turns
 
@@ -705,3 +730,8 @@ only evidence the product improved.
 | 2026-09-06 | H1 | partial | plate + fillets + bore correct; bolt circle never placed | qwen3.5:9b | `H1-catia.png` |
 | 2026-09-06 | H2 | `~` partial | geometry exact to 7 s.f.; write-up failed differently each run | qwen3.5:9b | `H2.png`, `H2-catia.png` |
 | 2026-09-06 | E1-E6 | *(before the day's fixes)* | 1 pass, 2 partial, 3 fail — no geometry built at all | qwen3.5:9b | — |
+| 2026-09-08 | PRO4 | `~` partial | force + lever ratio + an honest "I have not checked it"; geometry is two flat plates | qwen3.5:9b | `verification-2026-09-08/PRO4-screen.png` |
+| 2026-09-08 | PRO1 | `!` fail (run 1) | step 31/60, `MAX_BLOCKED_REPEATS`; banner misreported it as out of rounds | qwen3.5:9b | — |
+| 2026-09-08 | PRO1 | `!` fail (run 2) | 5 empty parts, 0 solids — the agent said so itself | qwen3.5:9b | — |
+| 2026-09-08 | PRO1 | `!` fail (run 3) | 1 part (guard worked); `catia_sketch_dimension` failed every attempt | qwen3.5:9b | — |
+| 2026-09-08 | PRO1 | `!` fail (run 4) | **first solid built**, then out of the model's 32k context with 4 parts to go | qwen3.5:9b | `verification-2026-09-08/PRO1-cframe.png` |

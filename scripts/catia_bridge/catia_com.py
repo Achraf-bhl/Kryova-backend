@@ -1291,15 +1291,39 @@ class CatiaCom(
         the sketch the agent was drawing stops being edited -- the way clicking
         Pad leaves the Sketcher. See `SketcherMixin._end_sketch_edition` for
         the three ladder runs that paid for the refusal this replaces.
+
+        **The refusal names the sketches that do exist**, which it did not until
+        2026-09-08. It used to say only "Use the name a sketch tool returned",
+        and that is unrecoverable at exactly the moment it fires: a model that
+        has invented a name has, by construction, lost the real one, so telling
+        it to use the name it was given is telling it to consult something it no
+        longer has. Measured on ladder prompt PRO4 -- `catia_pad(sketch='Frame
+        base')` against a part whose sketch was called something else, refused,
+        and the frame of the punch press was abandoned there.
+
+        `SketcherMixin._draw_target` has listed the names for the *drawing*
+        tools all along. This is the same situation one layer down and it was
+        the less informative of the two, which is the wrong way round: drawing
+        into the wrong sketch is recoverable, and giving up on the solid is what
+        ends the part.
         """
         self._end_sketch_edition()
         sketches = self._body().Sketches
+        available = []
         for index in range(1, int(sketches.Count) + 1):
             sketch = sketches.Item(index)
             if str(sketch.Name) == name:
                 return sketch
+            available.append(str(sketch.Name))
+        if not available:
+            raise CatiaOperationError(
+                f"No sketch named {name!r} in this part, which has no sketches at all. "
+                "Create one with catia_sketch_create, draw the profile into it, then "
+                "build from the name that tool returned."
+            )
         raise CatiaOperationError(
-            f"No sketch named {name!r} in this part. Use the name a sketch tool returned."
+            f"No sketch named {name!r} in this part. It has: {', '.join(available)}. "
+            "Use one of those names, or create the profile with catia_sketch_create."
         )
 
     # -- features ------------------------------------------------------------

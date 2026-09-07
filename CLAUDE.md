@@ -648,6 +648,22 @@ Read these before touching the relevant file — they are live defects, not styl
   42–66 MB each) and cannot be indexed without OCR. The build reports them as
   `scanned, no text layer` and carries on; this is expected, not a regression. The other 21
   index in ~7s to ~4,900 passages.
+- **`catia_sketch_dimension` fails on this seat far more often than it works** (measured
+  2026-09-08, three consecutive PRO1 runs on French V5-R33). `AddDimensionConstraint`
+  returns a constraint and *reading* `.Dimension` off it raises `E_INVALIDARG` —
+  `(0, 'CATIAConstraint', 'La méthode Dimension a échoué', ...)`. It is now refused in words
+  and the half-made constraint is discarded, so a failed dimension no longer poisons the
+  sketch it was added to — but **the underlying call still fails**, and the working route to
+  a dimensioned profile is to *draw it at the size you want*: the coordinates passed to
+  `catia_sketch_polyline` and `catia_sketch_rectangle` are millimetres and are the dimension.
+  Do not build a feature on the assumption that a constraint will take.
+- **A CATPart that a CATProduct has open does not close.** `Document.Close()` returns cleanly
+  and the document stays in `Documents`, so `while Count > 0: close Item(1)` spins forever
+  reporting success every time round — it wedged the seat on 2026-09-08 and cost a restart.
+  Close products first and test whether the *count fell*, not whether the call succeeded.
+  Same shape as the read loop `MAX_READS_WITHOUT_PROGRESS` exists for.
+  `ABQMaterialPropertiesCatalog.CATfct` never closes at all; it is CATIA's own material
+  catalogue, not a leftover.
 
 ## Build with parallel agents — this is the default, not an optimisation
 

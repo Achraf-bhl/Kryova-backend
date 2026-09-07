@@ -146,10 +146,43 @@ class TestEmptiness:
 
 
 class TestItRunsBeforeAnythingIsCreated:
-    def test_the_check_is_the_first_thing_sketch_create_does(self) -> None:
-        """Refusing after the sketch exists would leave the fourth empty
-        sketch in the tree and complain about three."""
+    def test_the_reuse_happens_before_anything_is_created(self) -> None:
+        """Rewritten 2026-09-07, when the refusal became a reuse.
+
+        The claim is unchanged and still worth pinning: whatever this does about
+        the pile-up, it has to happen *before* `Sketches.Add`, or a fourth empty
+        sketch lands in the tree and then gets complained about. What changed is
+        the answer -- an empty sketch on the wanted plane is handed over rather
+        than the call refused, because most of those empties are debris the
+        profile tools create themselves and refusing cost a whole run.
+        """
         import inspect
 
         body = inspect.getsource(SketcherMixin.sketch_create)
-        assert body.index("_refuse_to_pile_up_empty_sketches") < body.index("Sketches.Add")
+        assert body.index("_reuse_an_empty_sketch") < body.index("Sketches.Add")
+
+    def test_the_reuse_returns_before_a_new_sketch_is_added(self) -> None:
+        """It must actually return, not merely run first."""
+        import inspect
+
+        body = inspect.getsource(SketcherMixin.sketch_create)
+        head = body[: body.index("Sketches.Add")]
+        assert "return reused" in head
+
+    def test_only_a_sketch_on_the_same_support_is_reused(self) -> None:
+        """Handing over a sketch on another plane would silently draw the
+        profile somewhere else -- far worse than an extra name in the tree."""
+        import inspect
+
+        body = inspect.getsource(SketcherMixin._reuse_an_empty_sketch)
+        assert "AbsoluteAxis.Parent.Name" in body
+        assert "continue" in body
+
+    def test_a_part_with_fewer_than_two_empties_creates_a_fresh_one(self) -> None:
+        """The ordinary path is untouched: one empty sketch between
+        `sketch_create` and the first line is normal and reuses nothing."""
+        import inspect
+
+        body = inspect.getsource(SketcherMixin._reuse_an_empty_sketch)
+        assert "if self._empty_sketch_count() < 2:" in body
+        assert "return None" in body

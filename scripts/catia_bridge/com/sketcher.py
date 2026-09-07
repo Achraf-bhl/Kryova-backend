@@ -207,10 +207,14 @@ class SketcherMixin:
     def sketch_create(  # pragma: no cover - Windows only
         self: ComContext, *, support: str, name: str = "", origin: list[float] | None = None
     ) -> dict[str, Any]:
-        self._refuse_to_pile_up_empty_sketches()
         closed = self._end_sketch_edition()
         if name:
             self._refuse_a_duplicate_name(name)
+        reused = self._reuse_an_empty_sketch(support, name)
+        if reused is not None:
+            if closed is not None:
+                reused["closed_previous"] = closed
+            return reused
         sketch = self._body().Sketches.Add(resolve_support(self, support))
         if name:
             try:
@@ -241,8 +245,78 @@ class SketcherMixin:
             )
         return result
 
+    def _reuse_an_empty_sketch(  # pragma: no cover - Windows only
+        self: ComContext, support: str, name: str
+    ) -> dict[str, Any] | None:
+        """Hand back an existing empty sketch rather than refusing the call.
+
+        This used to raise, and the reasoning was sound for the failure it was
+        written against: an agent that creates sketch after sketch without
+        drawing in any of them is looping, and the tree fills with names that
+        every later `catia_list_features` has to report. Ladder prompts H4 and
+        PRO1 both measured it.
+
+        What it could not know is that most of those empties are **debris this
+        bridge creates itself**. `sketch_revolve_profile`, `sketch_gear_profile`
+        and `sketch_groove_profile` build their own sketch from a plane; an
+        agent that reasonably calls `catia_sketch_create(name='Gear section')`
+        first and then asks for the profile gets the profile in a *new* sketch
+        and its named one left empty. Two revolutions is two orphans, and the
+        third `sketch_create` was refused -- so the guard was punishing the
+        caller for a mess the tools made.
+
+        Measured on the geared-shaft prompt, 2026-09-07: shaft and gear blank
+        built, `Shaft profile` and `Gear section profile` left holding one
+        geometric element each (the absolute axis, i.e. nothing), and every
+        subsequent `sketch_create` refused. The teeth were never cut.
+
+        Refusing costs the whole run. Reusing costs nothing: the caller wanted a
+        sketch on `support`, an empty one on that support is indistinguishable
+        from a fresh one, and it gets the name that was asked for. The tree does
+        not grow, which was the guard's actual aim.
+
+        Only a sketch on the *same support* is reused -- one on another plane is
+        a different sketch and handing it over would silently draw the profile
+        somewhere else, which is far worse than an extra name in the tree.
+        """
+        if self._empty_sketch_count() < 2:
+            return None
+        wanted = resolve_support(self, support)
+        for sketch in self._sketches_in_part():
+            if not _is_empty(sketch):
+                continue
+            try:
+                if str(sketch.AbsoluteAxis.Parent.Name) != str(wanted.Name):
+                    continue
+            except Exception:  # noqa: BLE001 - support unreadable, do not guess
+                continue
+            if name:
+                try:
+                    sketch.Name = name
+                except Exception:  # noqa: BLE001 - cosmetic
+                    pass
+            self._sketch_edition = (sketch, sketch.OpenEdition())
+            return {
+                "sketch": str(sketch.Name),
+                "support": support,
+                "open": True,
+                "reused": True,
+                "note": (
+                    "An empty sketch already on this plane was reused rather than a "
+                    "new one created, so the tree does not fill with names. Draw into "
+                    "it as you would a new one."
+                ),
+            }
+        return None
+
     def _refuse_to_pile_up_empty_sketches(self: ComContext) -> None:  # pragma: no cover
         """Refuse a new sketch while empty ones are already stacking up.
+
+        **No longer called from `sketch_create`** -- see
+        `_reuse_an_empty_sketch`, which does the same job by handing one over.
+        Kept because the reasoning below is the record of why the empties
+        matter, and because a caller with no reusable sketch on the wanted plane
+        still gets the `note` on the way out.
 
         Reported and not acted on until 2026-09-06, and the report was not
         enough. Measured twice on the seat:

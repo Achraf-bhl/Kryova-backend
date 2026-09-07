@@ -384,12 +384,25 @@ def point3(description: str) -> dict[str, Any]:
             "minimum": limits.MIN_COORD_MM,
             "maximum": limits.MAX_COORD_MM,
         },
-        "description": f"{description} [x, y, z] in millimetres, in the part's own frame.",
+        "description": description,
     }
 
 
 def point2(description: str) -> dict[str, Any]:
-    """A (u, v) position in a sketch's own 2D frame, in millimetres."""
+    """A (u, v) position in a sketch's own 2D frame, in millimetres.
+
+    **The frame convention is stated once, in the system prompt, and not here.**
+    See `vocabulary.element_reference` for the measurement this follows: the
+    tool schemas are ~60% of the model's prompt and are re-sent on every step of
+    every turn, so a sentence true of every 2D point is charged once per
+    argument per step. This one -- "[u, v] in millimetres, in the sketch's own
+    2D frame, u is the sketch's horizontal axis, v its vertical" -- appeared 35
+    times, which is the single largest repeat in the registry.
+
+    The shape survives the move without it. `minItems`/`maxItems` of 2 already
+    say a pair is wanted, `MIN_COORD_MM`/`MAX_COORD_MM` already say millimetres
+    in the only units this codebase has, and the prompt names the axes.
+    """
     return {
         "type": "array",
         "minItems": 2,
@@ -399,24 +412,33 @@ def point2(description: str) -> dict[str, Any]:
             "minimum": limits.MIN_COORD_MM,
             "maximum": limits.MAX_COORD_MM,
         },
-        "description": (
-            f"{description} [u, v] in millimetres, in the sketch's own 2D frame — "
-            "u is the sketch's horizontal axis, v its vertical."
-        ),
+        "description": description,
     }
 
 
 def direction3(description: str) -> dict[str, Any]:
-    """A direction vector. Need not be normalised; zero-length is refused."""
+    """A direction vector. Need not be normalised; zero-length is refused.
+
+    Both halves of what used to be said here -- that the length is ignored, and
+    that an all-zero vector is refused -- are in the system prompt now, for the
+    reason in `point2`.
+
+    Moving the second half is what found that **it had never been true**. The
+    description had said "All three components zero is refused" since this
+    helper was written and nothing anywhere refused it: not this schema, not
+    `app/catia/validation.py`, not the daemon's copy, not `dispatch`. A zero
+    vector went to CATIA as an axis pointing nowhere. `nonZero` below is that
+    sentence made real, in both validators, so the claim in the prompt is one
+    the code keeps.
+    """
     return {
         "type": "array",
         "minItems": 3,
         "maxItems": 3,
         "items": {"type": "number", "minimum": -1e6, "maximum": 1e6},
-        "description": (
-            f"{description} [x, y, z]; length is ignored, only the direction is used. "
-            "All three components zero is refused."
-        ),
+        # Not a JSON Schema keyword -- see `app/catia/validation.py`.
+        "nonZero": True,
+        "description": description,
     }
 
 

@@ -51,19 +51,17 @@ def _sketch_target() -> tuple:
     Naming a sketch is exact; omitting it means "the one you just created",
     which is how a model writes a five-primitive profile without repeating the
     name five times. The daemon tracks the last opened sketch per document.
+
+    **What both arguments mean is stated once, in the system prompt's Sketching
+    paragraph, and not here** -- see `vocabulary.element_reference` for the
+    measurement. These two ride along with every drawing tool, so the default
+    ("Defaults to the most recent sketch") was repeated 26 times and the
+    definition of a construction element 22 times: a rule about how the sketcher
+    works, restated once per tool that happens to use it.
     """
     return (
-        optional(
-            "sketch",
-            vocab.element_reference("The sketch to draw in. Defaults to the most recent sketch."),
-        ),
-        optional(
-            "construction",
-            flag(
-                "Draw as a construction element — geometry that guides other geometry "
-                "but is not part of the profile and is never padded. Default false."
-            ),
-        ),
+        optional("sketch", vocab.element_reference("The sketch to draw in.")),
+        optional("construction", flag("Draw as a construction element. Default false.")),
     )
 
 

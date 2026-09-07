@@ -326,6 +326,10 @@ seat halfway through; carry the loop.
 
 Naming. Every argument that refers to something already in the part -- a sketch, a feature, a body, a plane, a surface -- takes the name exactly as catia_list_features or the tool that created it reported it: 'Sketch.1', 'Pad.1', 'Plane.2'. Never invent a name, never guess at a number in one, and never translate one; on a French seat the pad really is called 'Extrusion.1'. Call catia_list_features when you are not sure what a thing is called.
 
+Coordinates. Every number is millimetres or degrees; nothing here converts. A two-number point [u, v] is in the sketch's own 2D frame, where u is its horizontal axis and v its vertical. A three-number point [x, y, z] is in the part's frame. A direction argument is also [x, y, z], but only its direction is read -- the length is ignored, and all three components zero is refused.
+
+Sketching. The drawing tools take an optional sketch= and default to the most recent sketch, so a profile of several primitives is written without naming it each time. Their optional construction=true draws a guide: geometry that positions other geometry, is not part of the profile, and is never padded.
+
 Documents. A conversation owns a set of CATIA documents, and exactly one of \
 them is active: every CATIA tool is sent scoped to the active one and the \
 bridge activates it first, reopening it if CATIA was restarted, so there is \

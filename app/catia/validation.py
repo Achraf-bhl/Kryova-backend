@@ -15,6 +15,16 @@ those), properties, required, additionalProperties, enum, minimum, maximum,
 exclusiveMinimum, minLength, maxLength, items, minItems, maxItems.
 Anything else in a schema is ignored, so do not reach for a keyword this does
 not implement and assume it is being enforced.
+
+One keyword here is **not** JSON Schema: `nonZero` on an array, which refuses a
+direction vector whose components are all zero. It was added on 2026-09-07 for
+an unhappy reason -- `spec.direction3`'s description had been telling the model
+"All three components zero is refused" since it was written, and nothing
+anywhere refused it. That is the docstring-claims-a-capability failure CLAUDE.md
+records having already happened twice, and this file is the right place to end
+it: a zero direction reaches CATIA as an axis that points nowhere, and the
+product's rule is that a bad argument comes back as a named refusal rather than
+as a wrongly built part.
 """
 
 from typing import Any
@@ -185,3 +195,22 @@ def _validate_array(value: list[Any], schema: dict[str, Any], where: str) -> Non
     if isinstance(items, dict):
         for index, item in enumerate(value):
             validate(item, items, f"{where}[{index}]")
+    if schema.get("nonZero") and _is_all_zero(value):
+        raise SchemaError(
+            f"{where} is a direction and every component is zero, which points nowhere. "
+            "Give the axis you mean -- [0, 0, 1] for +Z, [1, 0, 0] for +X -- or a negative "
+            "component to reverse it. The length is not used, only the direction."
+        )
+
+
+def _is_all_zero(value: list[Any]) -> bool:
+    """Every component is a real number equal to zero.
+
+    Empty is **not** all-zero: `minItems` owns "you sent nothing", and reporting
+    an empty list as a direction pointing nowhere would answer a question the
+    caller did not ask. A non-numeric entry is not this rule's business either
+    -- `items` has already refused it, with a message naming the index.
+    """
+    return bool(value) and all(
+        isinstance(n, (int, float)) and not isinstance(n, bool) and n == 0 for n in value
+    )

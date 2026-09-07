@@ -603,6 +603,41 @@ def test_the_daemon_copy_of_the_validator_says_exactly_the_same_thing():
     assert daemon_describe(empty) == server_describe(empty)
 
 
+def test_the_daemon_copy_refuses_a_zero_direction_the_same_way():
+    """`nonZero` is not a JSON Schema keyword, so it is the likeliest of the lot
+    to be added to one copy and forgotten in the other -- and a keyword the
+    daemon ignores is a guard that is not there on the machine holding the CAD
+    licence, which is the only machine where a wrong axis becomes a wrong part.
+
+    Both messages are compared, not just both refusals: the model reads the
+    text, and a seat that refuses with different words teaches it a different
+    signature from the server's.
+    """
+    import sys
+    from pathlib import Path as _Path
+
+    scripts = str(_Path(__file__).resolve().parents[1] / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from catia_bridge.validation import SchemaError as DaemonSchemaError
+    from catia_bridge.validation import validate as daemon_validate
+
+    from app.catia.validation import validate as server_validate
+
+    schema = {"type": "array", "minItems": 3, "maxItems": 3, "nonZero": True}
+
+    with pytest.raises(SchemaError) as server_said:
+        server_validate([0, 0, 0], schema, "axis")
+    with pytest.raises(DaemonSchemaError) as daemon_said:
+        daemon_validate([0, 0, 0], schema, "axis")
+    assert str(server_said.value) == str(daemon_said.value)
+
+    # And both let a real direction through, so the agreement is not "refuse
+    # everything" -- which would compare equal and be useless.
+    server_validate([0, 0, 1], schema, "axis")
+    daemon_validate([0, 0, 1], schema, "axis")
+
+
 def test_validator_does_not_accept_a_boolean_as_a_number():
     # `bool` subclasses `int`, so the naive check passes `true` as a length.
     with pytest.raises(SchemaError):

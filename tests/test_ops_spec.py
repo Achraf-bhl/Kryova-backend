@@ -51,6 +51,7 @@ from app.catia.ops.spec import (
     thickness,
     tilt,
 )
+from app.catia.validation import SchemaError, validate
 
 
 def an_operation(**overrides: object) -> Operation:
@@ -229,13 +230,51 @@ class TestParameterConstructors:
         assert schema["minItems"] == schema["maxItems"] == 3
         assert schema["items"]["maximum"] == limits.MAX_COORD_MM
 
-    def test_a_sketch_point_is_two_numbers_in_the_sketch_frame(self) -> None:
+    def test_a_sketch_point_is_two_numbers(self) -> None:
+        """The shape, which is all this helper still carries.
+
+        The frame convention it used to append -- "in the sketch's own 2D frame,
+        u horizontal, v vertical" -- moved to the frozen system prompt on
+        2026-09-07, where it is stated once instead of 35 times.
+        `tests/test_naming_rule.py` pins both halves of that move: gone from
+        here, present there.
+        """
         schema = point2("Where.")
         assert schema["minItems"] == schema["maxItems"] == 2
-        assert "sketch's" in schema["description"]
+        assert schema["description"] == "Where."
 
-    def test_a_direction_needs_no_normalising_but_refuses_zero(self) -> None:
-        assert "length is ignored" in direction3("Which way.")["description"]
+    def test_a_direction_actually_refuses_zero_rather_than_saying_it_does(self) -> None:
+        """The sentence was there for months; the refusal was not.
+
+        `direction3`'s description read "All three components zero is refused"
+        and nothing refused it -- not the schema, not either validator, not
+        dispatch. Moving the sentence into the system prompt is what surfaced
+        it, and this asserts against the validator rather than against prose,
+        so the claim cannot come apart from the behaviour again.
+        """
+        schema = direction3("Which way.")
+        validate([0, 0, 1], schema, "axis")  # a real direction is untouched
+        validate([0, 0, -0.5], schema, "axis")  # reversed, and not normalised
+        with pytest.raises(SchemaError) as refused:
+            validate([0, 0, 0], schema, "axis")
+        assert "points nowhere" in str(refused.value)
+        assert "[0, 0, 1]" in str(refused.value), "the refusal must show a usable answer"
+
+    def test_a_zero_that_is_written_as_a_float_is_still_zero(self) -> None:
+        """-0.0 and 0.0 are zero. A near-miss is a direction and is allowed."""
+        schema = direction3("Which way.")
+        with pytest.raises(SchemaError):
+            validate([0.0, -0.0, 0], schema, "axis")
+        validate([0, 0, 1e-9], schema, "axis")
+
+    def test_an_ordinary_point_is_not_caught_by_the_direction_rule(self) -> None:
+        """The part origin is [0, 0, 0] and is a perfectly good place to be.
+
+        `nonZero` is on `direction3` only. If it ever leaks onto `point3` the
+        model loses the ability to say "at the origin", which is worse than the
+        bug this rule fixes.
+        """
+        validate([0, 0, 0], point3("Where."), "at")
 
     def test_a_point_list_is_bounded_by_the_point_ceiling(self) -> None:
         assert point_list("A polyline.")["maxItems"] == limits.MAX_POINTS

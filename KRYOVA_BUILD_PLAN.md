@@ -34,8 +34,12 @@ happened.
 > `OcctRunner` in-process: the agent builds geometry with no seat and no licence, and a
 > 60×40×20 pad measures 48000 mm³ through the real dispatch path, and
 > `GET /kernel/conversations/{id}/render` + `/measure` let anyone *see* and measure the
-> part a conversation is building. Still to do: **(3)** the frontend surface (E4.4 and
-> part of P5) — and callers for vision / machine_checks / sensitivity.
+> part a conversation is building. **Step 3 is now half done (2026-09-07):** the chat
+> draws the picture a tool returns, so on the CATIA path the product shows its own work.
+> Still to do: the frontend caller for `/kernel/conversations/{id}/render`, without which
+> a part built on the *open* kernel is still invisible in the product — the endpoint has
+> existed since 2026-09-05 with nothing calling it — and callers for vision /
+> machine_checks / sensitivity.
 
 
 **E5 — Assertions and self-correction.** Foundation 2026-09-04; **5.1, 5.3 and 5.4 all
@@ -106,6 +110,24 @@ and what 5.3's sensitivity can then be run over.
 ---
 
 ## Done
+- **2026-09-07 — E4.4, the CATIA half; the integration gap's step 3 is half closed.** The
+  transcript draws the picture a tool result points at instead of `JSON.stringify`-ing a media
+  id and a byte count, so the standing rule that every CATIA result is *looked at* is finally
+  something the product supports rather than something done beside it. In `Kryova-frontend`
+  (`src/lib/tool-media.ts`, `src/components/tool-image.tsx`, `api.mediaBlob`); 293 tests,
+  `tsc --noEmit` and `eslint` green on the Windows machine. **Deliberately not marked DONE:**
+  `GET /kernel/conversations/{id}/render` still has no frontend caller, so a part built on the
+  OCCT backend is still invisible in the product.
+
+- **2026-09-07 — the tool-schema budget went red and was paid down rather than raised.**
+  `test_naming_rule.py`'s 215,000-character ceiling, set on 2026-09-06, caught the registry
+  back at 215,365 after E14 and E16 added assembly and knowledge vocabulary. Four more
+  conventions moved to the frozen system prefix — the sketch 2D frame (x35), what a
+  construction element is (x22), how a direction vector is read (x23), and the sketch default
+  (x26) — for 215,365 → 206,337, about 2,250 tokens off every model call. It compounds with
+  `DEFAULT_MAX_STEPS` 20 → 60 from the same stretch, which makes every repeated sentence three
+  times as expensive as when the first measurement was taken. New ceiling 208,000.
+
 - **2026-09-06 — E14, the seat half.** A conversation owns several CATIA documents, one active; a second `catia_new_part` on a seat adds rather than replaces, products are bound, `catia_open_document name=` switches, and an owned part's name resolves to its saved path when added to an assembly. Migration `c7e2a9d4f1b3`. Driven by ladder prompt S2 on the real seat. Tested with pytest (24 new, 413 green across the binding suites); end to end on the seat next.
 
 - **Ladder prompt H3 passed, and the five defects that were in its way (2026-09-06).** The

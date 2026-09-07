@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from sqlalchemy import Connection, Engine, create_engine, event, exc, text
+from sqlalchemy import Connection, Engine, create_engine, event, exc, make_url, text
 from sqlalchemy.orm import DeclarativeBase, Session, SessionTransaction, sessionmaker
 
 from app.core.config import settings
@@ -18,6 +18,36 @@ from app.core.config import settings
 
 class Base(DeclarativeBase):
     pass
+
+
+def sslmode_for(url: str) -> str:
+    """The `sslmode` to connect with, taken from the URL and defaulting to require.
+
+    This used to be a hardcoded ``connect_args={"sslmode": "require"}``, which
+    was correct for the only server that existed then and refuses every local
+    one: a stock Postgres build has ``ssl = off`` and answers the SSL handshake
+    with a rejection, so psycopg raises "server does not support SSL, but SSL
+    was required" before a single statement runs.
+
+    Deriving it from the URL keeps Neon exactly as it was -- its connection
+    string already carries ``?sslmode=require``, so the hardcoded argument was
+    only ever restating what the URL said -- while letting a local development
+    server ask for ``sslmode=disable`` in the one place a connection is already
+    described. The default stays ``require``, so a URL that says nothing is
+    still refused an unencrypted connection to a remote host; going plaintext
+    has to be written down.
+    """
+    value = make_url(url).query.get("sslmode", "require")
+    if isinstance(value, tuple):
+        # A repeated key (`?sslmode=require&sslmode=disable`) parses to a tuple
+        # rather than a string. libpq reads the last occurrence, so match it
+        # instead of raising -- the alternative is a type error at import time
+        # on a URL Postgres itself would have accepted. The tuple is never
+        # empty: `make_url` drops a key with no value (`?sslmode=` parses to no
+        # key at all), which is why that case arrives here as the default above
+        # rather than as a zero-length tuple.
+        return value[-1]
+    return value
 
 
 #: How long a pooled connection may have been sitting idle before it is pinged
@@ -29,7 +59,7 @@ IDLE_SINCE_KEY = "kryova_idle_since"
 
 engine = create_engine(
     settings.database_url,
-    connect_args={"sslmode": "require"},
+    connect_args={"sslmode": sslmode_for(settings.database_url)},
     # Neon drops idle connections and the pooled endpoint hands the dead socket
     # back out; recycling before it does turns a user-visible error into a
     # reconnect. `pool_pre_ping=False` here does NOT mean the ping is gone --

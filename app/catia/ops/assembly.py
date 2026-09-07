@@ -297,7 +297,9 @@ OPERATIONS: tuple[Operation, ...] = (
                     "To make two turned parts coaxial, coincide two pairs of origin "
                     "planes: Shaft/YZ with Bushing/YZ, then Shaft/ZX with Bushing/ZX. "
                     "Never invent a path like 'Shaft@axis'; only names that exist "
-                    "resolve."
+                    "resolve. If all you want is to put a component somewhere, do not "
+                    "go looking for geometry to reference at all -- catia_component_move "
+                    "takes a translation and needs no reference."
                 ),
             ),
             optional("value", distance("Offset distance, for an offset constraint.")),

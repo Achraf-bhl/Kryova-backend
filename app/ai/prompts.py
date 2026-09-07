@@ -844,3 +844,18 @@ def visual_check_user_message(request: str, views: tuple[str, ...]) -> str:
         f"The images are attached in this order: {named}. "
         "Refer to them by those names."
     )
+
+#: Prefix on a message the *loop* injects mid-turn -- a correction, a hold for
+#: unmeasured requirements, a note that six rounds have read and changed
+#: nothing. These are written with `MessageRole.USER` because that is the only
+#: role a provider will accept an instruction in, and they are emphatically not
+#: the engineer's question.
+#:
+#: `context.window` anchors on the last user message so that a tool-heavy turn
+#: cannot push the question out of the window. Without this marker, an injected
+#: note *becomes* that anchor and the real question is dropped -- which is the
+#: exact failure the anchor exists to prevent, caused by the mechanism meant to
+#: help. Measured by `test_a_tool_heavy_turn_never_loses_the_question_it_is_
+#: answering` on 2026-09-07, which is why that test is worth its keep.
+CONTROL_NOTE = "[kryova] "
+

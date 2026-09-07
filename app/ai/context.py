@@ -35,6 +35,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.ai import prompts
 from app.ai.prompts import (
     SUMMARISE_SYSTEM,
     SUMMARY_CLOSE,
@@ -84,6 +85,20 @@ def _keep_recent() -> int:
     return max(2, settings.ai_summarise_after_messages // 2)
 
 
+
+def _is_the_question(message: ConversationMessage) -> bool:
+    """Whether this user message is the engineer's, rather than the loop's own.
+
+    The loop injects instructions as user messages -- it is the only role a
+    provider accepts one in -- and they carry `prompts.CONTROL_NOTE`. Anchoring
+    on one of those would drop the real question from the window, which is the
+    failure this whole function exists to prevent.
+    """
+    return message.role is MessageRole.USER and not str(message.content or "").startswith(
+        prompts.CONTROL_NOTE
+    )
+
+
 def window(conversation: Conversation) -> list[ConversationMessage]:
     """The messages to replay verbatim this turn.
 
@@ -113,7 +128,7 @@ def window(conversation: Conversation) -> list[ConversationMessage]:
         (
             index
             for index in range(len(eligible) - 1, -1, -1)
-            if eligible[index].role is MessageRole.USER
+            if _is_the_question(eligible[index])
         ),
         None,
     )
@@ -136,7 +151,7 @@ def window(conversation: Conversation) -> list[ConversationMessage]:
     if anchor < start:
         return eligible[anchor:]
 
-    while start < len(eligible) and eligible[start].role is not MessageRole.USER:
+    while start < len(eligible) and not _is_the_question(eligible[start]):
         start += 1
     return eligible[start:]
 

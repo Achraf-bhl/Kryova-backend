@@ -18,7 +18,15 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.ai.agent import DEFAULT_MAX_STEPS, MAX_VERIFICATION_NUDGES, run_agent
+from app.ai.agent import (
+    DEFAULT_MAX_STEPS,
+    MAX_READS_WITHOUT_PROGRESS,
+    MAX_VERIFICATION_NUDGES,
+    AgentStep,
+    _made_progress,
+    _reading_in_circles,
+    run_agent,
+)
 from app.ai.provider import AssistantTurn, ToolCall
 from app.models import Conversation, Project, User
 from tests import test_agent as _agent
@@ -191,3 +199,75 @@ class TestTheRoundCapClosesHonestlyToo:
         )
         assert reply.truncated is True
         assert "Not verified in this turn" in reply.text
+
+
+class TestReadingInCirclesIsALoop:
+    """Rounds that read and change nothing are a loop, whatever their arguments.
+
+    Measured on the punch-press prompt, 2026-09-07, on the seat. The agent built
+    the C-frame, ram, punch and die block, created the product and added all
+    four components -- and then spent fifteen rounds alternating
+    `catia_open_document` with `catia_list_faces`, a different document each
+    time. No two calls were identical, so `MAX_IDENTICAL_READS` never fired, and
+    the turn ended with an assembly holding four parts and zero constraints.
+
+    It was hunting for a face to constrain against in a vocabulary where only
+    origin planes resolve by name. The question that catches it is not "have I
+    seen this call before" but "has anything changed since I started reading".
+    """
+
+    def test_six_barren_rounds_are_called_out(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        reads = [
+            AssistantTurn(
+                text="", tool_calls=[ToolCall(id=str(n), name="list_projects", arguments={"n": n})]
+            )
+            for n in range(MAX_READS_WITHOUT_PROGRESS + 2)
+        ]
+        provider = ScriptedProvider(reads)
+        run_agent(
+            db=db_session,
+            provider=provider,
+            conversation=conversation,
+            toolbox=_toolbox(db_session, user, project),
+            user_message="Assemble the press",
+        )
+        transcript = "\n".join(
+            str(m.get("content", "")) for m in provider.seen_transcripts[-1]
+        )
+        assert "read something and changed nothing" in transcript
+
+    def test_it_names_the_reference_free_alternative(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """Told only to stop, a model tries the neighbouring read -- the same
+        loop one tool over. The way out has to be in the message."""
+        assert "catia_component_move" in _reading_in_circles(6, [])
+
+    def test_it_names_what_was_already_built(self) -> None:
+        text = _reading_in_circles(6, ["C-Frame", "Ram"])
+        assert "C-Frame" in text and "Ram" in text
+
+    def test_a_successful_mutation_counts_as_progress(self) -> None:
+        """The guard must not fire on an agent doing the work."""
+        made = [AgentStep(tool="catia_pad", arguments={}, ok=True, result={})]
+        assert _made_progress(made, lambda name: True) is True
+
+    def test_a_read_does_not_count_however_well_it_went(self) -> None:
+        looked = [AgentStep(tool="catia_list_faces", arguments={}, ok=True, result={})]
+        assert _made_progress(looked, lambda name: False) is False
+
+    def test_a_refused_mutation_does_not_count(self) -> None:
+        """The half that is easy to miss: a pad that was refused changed
+        nothing, so a turn of refused pads is as barren as a turn of reads and
+        must reach the guard just the same."""
+        refused = [AgentStep(tool="catia_pad", arguments={}, ok=False, result={})]
+        assert _made_progress(refused, lambda name: True) is False
+
+    def test_one_success_among_several_calls_is_enough(self) -> None:
+        mixed = [
+            AgentStep(tool="catia_list_faces", arguments={}, ok=True, result={}),
+            AgentStep(tool="catia_pad", arguments={}, ok=True, result={}),
+        ]
+        assert _made_progress(mixed, lambda name: name == "catia_pad") is True

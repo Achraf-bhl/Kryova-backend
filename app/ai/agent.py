@@ -62,12 +62,30 @@ from app.retrieval import knowledge_service
 
 logger = logging.getLogger(__name__)
 
-#: Ceiling on tool round-trips in a single user turn. A CATIA modelling session
-#: legitimately needs a dozen -- sketch, pad, pocket, fillet, measure, capture,
-#: export -- so the old budget of 8 cut off real work, not just confused models.
-#: Still bounded: a model that has spent this many steps without answering is
-#: stuck, and more steps will not unstick it.
-DEFAULT_MAX_STEPS = 20
+#: Ceiling on tool round-trips in a single user turn.
+#:
+#: Raised 8 -> 20 -> 60. The reasoning behind the first two numbers was that a
+#: step costs something, and here it does not: the provider is a local Ollama
+#: model on the engineer's own machine, so the only price of another round is
+#: wall-clock. Against that, the thing Kryova exists to build is a *machine*,
+#: and a machine is not a dozen calls. Measured on the seat 2026-09-07, a
+#: four-part punch press -- C-frame, ram, punch, die block, then a product,
+#: three component adds and the constraints -- passed step 34 with the assembly
+#: only starting. At 20 it could not have been reached from one prompt at all,
+#: and the run before it ended on the cap with nothing built.
+#:
+#: A cap is a poor way to stop a stuck agent anyway, and it is no longer the way
+#: it is done: `MAX_IDENTICAL_READS` refuses a read repeated verbatim,
+#: `_refused_before` refuses a write already refused, and `MAX_BLOCKED_REPEATS`
+#: ends the turn after a few of either. Those fire on *behaviour* and end a
+#: looping turn in seconds regardless of what is left in the budget. So the cap
+#: now only bites on an agent that is genuinely working, which is the one case
+#: it should never have been deciding.
+#:
+#: Sixty steps is roughly twenty minutes of wall-clock at this model's ~20 s per
+#: round. `AI_MAX_STEPS` (or the `ai_max_steps` setting) moves it without a code
+#: change -- see `max_steps`.
+DEFAULT_MAX_STEPS = 60
 
 #: How many times *in a row* the model may be told to re-issue a tool call it
 #: wrote as prose, or to answer at all after returning nothing. Two is enough to
@@ -447,6 +465,13 @@ def stream_agent(
     #: How many times this turn was held open for unmeasured requirements.
     #: See MAX_VERIFICATION_NUDGES.
     nudges = 0
+    #: Consecutive rounds in which nothing was built. See
+    #: MAX_READS_WITHOUT_PROGRESS -- a loop with varying arguments is still
+    #: a loop, and this is the only counter that can see one.
+    barren = 0
+    #: Every feature or document this turn actually created, for the moment
+    #: the model has to be reminded it is not starting from nothing.
+    built: list[str] = []
 
     for step in range(budget):
         yield {"type": "thinking", "step": step + 1, "max_steps": budget}
@@ -481,7 +506,7 @@ def stream_agent(
                     db,
                     conversation,
                     MessageRole.USER,
-                    content=(
+                    content=prompts.CONTROL_NOTE + (
                         correction_for(written)
                         if written
                         else prompts.AGENT_EMPTY_TURN_AFTER_WORK
@@ -524,7 +549,10 @@ def stream_agent(
             if shortfall and nudges < MAX_VERIFICATION_NUDGES and step + 1 < budget:
                 nudges += 1
                 _append(db, conversation, MessageRole.ASSISTANT, content=turn.text or None)
-                _append(db, conversation, MessageRole.USER, content=shortfall)
+                _append(
+                    db, conversation, MessageRole.USER,
+                    content=prompts.CONTROL_NOTE + shortfall,
+                )
                 db.commit()
                 logger.info(
                     "holding the turn open: %d requirement(s) unverified at step %d/%d",
@@ -630,6 +658,10 @@ def stream_agent(
             step_timings.append((call.name, float(elapsed_ms)))
 
             steps.append(AgentStep(tool=call.name, arguments=call.arguments, ok=ok, result=result))
+            if ok and toolbox.is_mutating(call.name):
+                made = result.get("feature") or result.get("doc_name") if isinstance(result, dict) else None
+                if made and str(made) not in built:
+                    built.append(str(made))
             _append(
                 db,
                 conversation,
@@ -650,6 +682,21 @@ def stream_agent(
                 "summary": summarise_step(call.name, result, ok),
                 "duration_ms": elapsed_ms,
             }
+
+        # A round that built nothing is not necessarily wrong; six in a row are
+        # a loop, whatever their arguments were.
+        if _made_progress(steps[-len(turn.tool_calls) :], toolbox.is_mutating):
+            barren = 0
+        else:
+            barren += 1
+            if barren >= MAX_READS_WITHOUT_PROGRESS:
+                _append(
+                    db,
+                    conversation,
+                    MessageRole.USER,
+                    content=prompts.CONTROL_NOTE + _reading_in_circles(barren, built),
+                )
+                barren = 0
 
         db.commit()
         if blocked >= MAX_BLOCKED_REPEATS:
@@ -697,7 +744,11 @@ def stream_agent(
         closing = provider.chat(
             system=system + prompts.AGENT_OUT_OF_STEPS,
             messages=build_messages(db, owner, conversation)
-            + ([{"role": "user", "content": shortfall}] if shortfall else []),
+            + (
+                [{"role": "user", "content": prompts.CONTROL_NOTE + shortfall}]
+                if shortfall
+                else []
+            ),
             tools=[],
             max_tokens=max_tokens,
         )
@@ -802,6 +853,58 @@ def _requirement_plan(conversation: Conversation, steps: list[AgentStep]) -> Any
         if record.ok:
             measured.extend(measurements_in(record.result, record.tool))
     return assess(objectives, measured)
+
+
+#: How many consecutive rounds may read without anything being built before the
+#: model is told so.
+#:
+#: `MAX_IDENTICAL_READS` catches a call repeated byte for byte, and it cannot
+#: catch the shape measured on the punch-press prompt, 2026-09-07: fifteen
+#: rounds alternating `catia_open_document` with `catia_list_faces`, a different
+#: document each time, so no two calls were identical and nothing tripped. The
+#: agent was hunting for a face to constrain against, in a vocabulary where only
+#: origin planes resolve by name, and the turn died with four parts built, an
+#: assembly holding all four, and not one constraint.
+#:
+#: So the question is not "have I seen this call before" but "has anything
+#: changed since I started reading". Six is chosen to sit above legitimate
+#: reading -- listing a part, measuring it, reading the tree and the faces
+#: before deciding is four or five -- and below the point where a turn is spent.
+MAX_READS_WITHOUT_PROGRESS = 6
+
+
+
+def _made_progress(records: list["AgentStep"], is_mutating: Any) -> bool:
+    """Whether this round changed anything, as opposed to only looking.
+
+    Both halves are needed and each has been the reason a guard misfired. A
+    call that *would* mutate but was refused changed nothing -- the part is
+    exactly as it was, so a turn full of refused pads is as barren as a turn
+    full of reads. And a call that succeeded but only reads changed nothing
+    either, which is the case this exists for.
+    """
+    return any(record.ok and is_mutating(record.tool) for record in records)
+
+
+def _reading_in_circles(rounds: int, built: list[str]) -> str:
+    """What to say to a model that has read for `rounds` without building.
+
+    Names what it already has, because the failure is not ignorance of the part
+    -- it has read the part repeatedly -- it is not knowing that reading is not
+    the move. Written as an instruction with an alternative in it: told only to
+    stop, a model tries the neighbouring read, which is the same loop one tool
+    over.
+    """
+    return (
+        f"The last {rounds} calls all read something and changed nothing. Reading "
+        "again cannot help: nothing has altered between them, and it will not now. "
+        + (f"You have already built: {', '.join(built)}. " if built else "")
+        + "Decide with what you have. If you were looking for geometry to "
+        "reference and could not find it, use the tool that needs no reference -- "
+        "a component can be placed at a coordinate with catia_component_move, and "
+        "an assembly constraint takes a component's origin planes by name. If you "
+        "genuinely cannot proceed, say what is blocking you and stop."
+    )
 
 
 def _read_fingerprint(name: str, arguments: Any) -> str:

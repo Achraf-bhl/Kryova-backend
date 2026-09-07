@@ -625,6 +625,32 @@ anything, or only draws.
 at ~350 MPa shear), a lever ratio follows from it, and geometry is built. An unbacked "the frame
 is stiff enough" is a **fail**. **Screenshot:** `PRO4.png`
 
+**Run of 2026-09-07: FAIL, and the most informative failure on this ladder so far —
+the geometry was right and the machine was still not a machine.** From the one prompt
+the agent built a C-frame *with its throat cut*, a ram, a punch, and a die block with a
+6.4 mm bore, created the product, and added all four as components. Then it spent
+**fifteen rounds alternating `catia_open_document` with `catia_list_faces`**, a different
+document each time, and the turn ended with a four-part assembly holding **zero
+constraints**. `docs/verification-2026-09-06/PRESS-catia.png` is the product tree with all
+four components in it; `PRESS-screen.png` is the C-frame part.
+
+Three things this measured, all now fixed, none of them keyed to this prompt:
+
+- **`MAX_IDENTICAL_READS` never fired**, because no two calls were identical. A loop with
+  different arguments every time is still a loop. `MAX_READS_WITHOUT_PROGRESS` asks the
+  question that catches it — not "have I seen this call" but "has anything changed since I
+  started reading" (7efdd1c).
+- **It was hunting for a face to constrain against**, in a vocabulary where only a
+  component's origin planes resolve by name. `catia_constrain` now says so where the agent
+  is standing when it needs to know, and names `catia_component_move` as the way to place a
+  component with no geometric reference at all (7efdd1c).
+- **`DEFAULT_MAX_STEPS` 20 → 60.** A machine is not a dozen calls, and the behavioural
+  guards end a stuck turn in seconds regardless of the cap (7efdd1c).
+
+It also produced the empty-sketch pile-up that ended the geared-shaft run an hour later
+and was fixed in 8fc2bd8. **Not re-run since any of those landed — PRO4 stays unticked
+and is the first thing to re-run at the next gate.**
+
 ### PRO5 — Bench vice, incremental across turns
 
 - [ ] **PRO5**

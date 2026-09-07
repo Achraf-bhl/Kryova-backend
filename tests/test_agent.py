@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.jobs import InlineJobQueue
 from app.models import (
     Conversation,
+    ConversationMessage,
     GeometryVersion,
     JobStatus,
     Media,
@@ -1606,6 +1607,66 @@ class TestATurnStopsRepeatingItself:
         assert len(reply.steps) <= MAX_BLOCKED_REPEATS + 2
         assert len(reply.steps) < 12
 
+    def test_the_done_event_says_which_of_the_two_endings_this_was(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """A turn ended here is not a turn that ran out of budget, and the
+        stream has to say which, because the two have opposite remedies.
+
+        **Measured on ladder prompt PRO1, 2026-09-08.** The turn was ended at
+        step 31 of 60 for re-issuing a refused read, and the user was shown "the
+        agent ran out of tool rounds -- ask for one thing at a time". Half the
+        budget was unspent and asking for less would not have stopped the
+        repeat, so the one piece of advice on screen pointed at the only thing
+        that was not wrong.
+        """
+        from app.ai.agent import stream_agent
+
+        provider = ScriptedProvider(self._hammering(12))
+        done = [
+            event
+            for event in stream_agent(
+                db=db_session,
+                provider=provider,
+                toolbox=_toolbox(db_session, user, project),
+                conversation=conversation,
+                user_message="delete it",
+                allow_mutations=True,
+            )
+            if event["type"] == "done"
+        ]
+
+        assert len(done) == 1
+        assert done[0]["truncated"] is True
+        assert done[0]["stop_reason"] == "repeated_calls"
+        # Well short of the budget -- which is the whole point, and what makes
+        # "ran out of tool rounds" the wrong sentence for this ending.
+        assert done[0]["steps"] < 12
+
+    def test_a_finished_turn_says_so_rather_than_leaving_the_field_out(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """The field is on both `done` events, so nothing downstream has to
+        distinguish "finished" from "an older backend that never sent it"."""
+        from app.ai.agent import stream_agent
+
+        provider = ScriptedProvider([AssistantTurn(text="Nothing to do.")])
+        done = [
+            event
+            for event in stream_agent(
+                db=db_session,
+                provider=provider,
+                toolbox=_toolbox(db_session, user, project),
+                conversation=conversation,
+                user_message="hello",
+                allow_mutations=True,
+            )
+            if event["type"] == "done"
+        ]
+
+        assert done[0]["truncated"] is False
+        assert done[0]["stop_reason"] == "finished"
+
     def test_the_user_still_gets_an_answer(
         self, db_session: Session, user: User, project: Project, conversation: Conversation
     ) -> None:
@@ -1724,3 +1785,178 @@ class TestTheSecondPartRefusalIsBackendAccurate:
         # that writes it is guarded on `backends.is_local()`.
         unreachable = named - known - {"catia_assembly_component"}
         assert not unreachable, sorted(unreachable)
+
+
+class TestOpeningDocumentsIsNotBuildingParts:
+    """A turn that opens document after document and puts a solid in none of
+    them is told so, once.
+
+    **Measured on ladder prompt PRO1, 2026-09-08.** The agent was asked to
+    "produce the frame, the ram, the rack, the pinion and the table as parts",
+    and answered the shape of that request rather than its substance: thirty-one
+    steps, five `catia_new_part` calls, six sketches, and not one pad. Its own
+    closing words were "We have 5 empty part documents created but no geometry
+    built yet" -- it could see the problem, at the point where the turn was over
+    and the budget spent.
+
+    Neither existing guard can see this, and that is the point of a third one.
+    `MAX_IDENTICAL_READS` needs a call repeated byte for byte, and these have a
+    different name every time. `MAX_READS_WITHOUT_PROGRESS` asks whether
+    anything mutated -- and `catia_new_part` *is* a successful mutation, so
+    every one of the five reset the barren counter. Creating a document is the
+    one mutation that changes nothing about the part: it makes the container,
+    not the content.
+    """
+
+    def _opening(self, count: int) -> list[AssistantTurn]:
+        return [
+            AssistantTurn(
+                tool_calls=[
+                    ToolCall(id=str(i), name="catia_new_part", arguments={"name": f"Part{i}"})
+                ]
+            )
+            for i in range(count)
+        ] + [AssistantTurn(text="Those are the parts.")]
+
+    @staticmethod
+    def _answering(monkeypatch: pytest.MonkeyPatch, results: dict[str, dict[str, Any]]) -> None:
+        """Make the named tools succeed with the payload the seat would send.
+
+        The distinction under test lives in those payloads: every solid comes
+        back through `_feature_result`, which carries `feature`, and opening a
+        document carries `doc_name` and no solid.
+        """
+
+        def call(self: ToolBox, name: str, arguments: dict[str, Any], **_: Any) -> dict[str, Any]:
+            if name not in results:
+                raise ToolError(f"unexpected tool {name}")
+            return results[name]
+
+        monkeypatch.setattr(ToolBox, "call", call)
+
+    def _notes(self, db_session: Session, conversation: Conversation) -> list[str]:
+        db_session.flush()
+        return [
+            str(m.content)
+            for m in db_session.scalars(
+                select(ConversationMessage)
+                .where(ConversationMessage.conversation_id == conversation.id)
+                .order_by(ConversationMessage.sequence)
+            )
+            if m.role == MessageRole.USER and "built no solid" in str(m.content)
+        ]
+
+    def test_a_turn_that_opens_documents_and_builds_nothing_is_told(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._answering(monkeypatch, {"catia_new_part": {"doc_name": "Part", "ok": True}})
+        run_agent(
+            db=db_session,
+            provider=ScriptedProvider(self._opening(5)),
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="produce the frame, the ram and the table as parts",
+            allow_mutations=True,
+        )
+
+        notes = self._notes(db_session, conversation)
+        assert len(notes) == 1, notes
+        # The remedy has to name the order the tools go in. "Build something"
+        # produces another sketch; naming the pad produces a solid.
+        assert "catia_pad" in notes[0]
+        assert "Finish one document before opening another" in notes[0]
+
+    def test_it_is_said_once_and_not_every_round(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Same reasoning as MAX_VERIFICATION_NUDGES: a model that ignores this
+        once will ignore it twice, and the rounds are better spent building."""
+        self._answering(monkeypatch, {"catia_new_part": {"doc_name": "Part", "ok": True}})
+        run_agent(
+            db=db_session,
+            provider=ScriptedProvider(self._opening(9)),
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="make all the parts",
+            allow_mutations=True,
+        )
+
+        assert len(self._notes(db_session, conversation)) == 1
+
+    def test_two_documents_are_not_nagged(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Opening a part and then a product to hold it is an ordinary opening
+        move, and a guard that refused it would refuse every assembly."""
+        self._answering(monkeypatch, {"catia_new_part": {"doc_name": "Part", "ok": True}})
+        run_agent(
+            db=db_session,
+            provider=ScriptedProvider(self._opening(2)),
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="start a part",
+            allow_mutations=True,
+        )
+
+        assert self._notes(db_session, conversation) == []
+
+    def test_a_turn_that_actually_builds_is_never_nudged(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The regression that would matter most: a false positive here nags a
+        model that is doing exactly the right thing, on every real build."""
+        self._answering(
+            monkeypatch,
+            {
+                "catia_new_part": {"doc_name": "Part", "ok": True},
+                "catia_pad": {"feature": "Extrusion.1", "mass_kg": 0.3},
+            },
+        )
+        turns = []
+        for i in range(5):
+            turns.append(
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(id=f"n{i}", name="catia_new_part", arguments={"name": f"P{i}"})
+                    ]
+                )
+            )
+            turns.append(
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(id=f"p{i}", name="catia_pad", arguments={"sketch": "S", "length_mm": 10})
+                    ]
+                )
+            )
+        turns.append(AssistantTurn(text="Five parts, each with a solid."))
+
+        run_agent(
+            db=db_session,
+            provider=ScriptedProvider(turns),
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="make five parts",
+            allow_mutations=True,
+        )
+
+        assert self._notes(db_session, conversation) == []

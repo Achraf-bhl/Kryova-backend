@@ -472,6 +472,25 @@ def stream_agent(
     #: Every feature or document this turn actually created, for the moment
     #: the model has to be reminded it is not starting from nothing.
     built: list[str] = []
+    #: Documents opened and solids produced this turn. See
+    #: MAX_EMPTY_DOCUMENTS -- these are counted apart because creating a
+    #: document is the one mutation that changes nothing about the part.
+    documents_created = 0
+    solids_built = 0
+    #: Whether the empty-document nudge has already been given this turn.
+    warned_about_empty_documents = False
+    #: Why the loop stopped, for the user-facing line at the end of a turn that
+    #: did not finish. Two exits reach the same closing code -- falling out of
+    #: the step budget, and breaking on repeated blocked calls -- and until
+    #: 2026-09-08 both were reported as "ran out of tool rounds".
+    #:
+    #: Measured on ladder prompt PRO1: the turn ended at step 31 of 60 because
+    #: the agent kept re-issuing a read the tool layer had already refused, and
+    #: the user was told it had run out of rounds and should "ask for one thing
+    #: at a time". Neither half was true -- half the budget was unspent, and
+    #: asking for less would not have stopped the repeat. Advice that does not
+    #: match the cause sends the user to change the one thing that was fine.
+    stop_reason = "step_budget"
 
     for step in range(budget):
         yield {"type": "thinking", "step": step + 1, "max_steps": budget}
@@ -585,6 +604,7 @@ def stream_agent(
                 "conversation_id": conversation.id,
                 "project_id": toolbox.project_id,
                 "truncated": False,
+                "stop_reason": "finished",
                 "steps": len(steps),
                 "prompt_tokens": usage.prompt_tokens,
                 "completion_tokens": usage.completion_tokens,
@@ -658,6 +678,17 @@ def stream_agent(
             step_timings.append((call.name, float(elapsed_ms)))
 
             steps.append(AgentStep(tool=call.name, arguments=call.arguments, ok=ok, result=result))
+            if ok and isinstance(result, dict):
+                # Which of the two happened is the whole of the empty-document
+                # guard below. Every solid-producing operation comes back
+                # through `_feature_result`, which carries `feature`; opening a
+                # document carries `doc_name` and no solid. Counting them
+                # together is what let five empty parts look like five pieces
+                # of progress.
+                if result.get("feature"):
+                    solids_built += 1
+                elif call.name in _DOCUMENT_TOOLS:
+                    documents_created += 1
             if ok and toolbox.is_mutating(call.name):
                 made = result.get("feature") or result.get("doc_name") if isinstance(result, dict) else None
                 if made and str(made) not in built:
@@ -698,6 +729,28 @@ def stream_agent(
                 )
                 barren = 0
 
+        # Opening documents is not the same failure as reading in circles and
+        # is invisible to the counter above, because each `catia_new_part`
+        # succeeds and resets it. See MAX_EMPTY_DOCUMENTS.
+        if (
+            not warned_about_empty_documents
+            and solids_built == 0
+            and documents_created > MAX_EMPTY_DOCUMENTS
+        ):
+            warned_about_empty_documents = True
+            logger.info(
+                "nudging: %d document(s) opened, no solid built, at step %d/%d",
+                documents_created,
+                step + 1,
+                budget,
+            )
+            _append(
+                db,
+                conversation,
+                MessageRole.USER,
+                content=prompts.CONTROL_NOTE + _nothing_built_yet(documents_created),
+            )
+
         db.commit()
         if blocked >= MAX_BLOCKED_REPEATS:
             # Out of patience rather than out of budget. Ending here leaves the
@@ -709,6 +762,7 @@ def stream_agent(
                 step + 1,
                 budget,
             )
+            stop_reason = "repeated_calls"
             break
 
         # INFO, not DEBUG. This is the one line that says where a turn's time
@@ -755,8 +809,16 @@ def stream_agent(
         text = closing.text
         usage += closing.usage
     except LLMError:
+        # The fallback follows the same rule as the banner: say which of the two
+        # happened, because the remedies are opposite. Out of rounds means the
+        # request was too big for one turn; repeating a refused call means it
+        # was stuck, and asking for less would not have helped.
         text = (
-            "I used all my tool calls for this turn without reaching an answer. "
+            "I stopped because I kept repeating a call that had already been "
+            "refused, and re-sending it could not change the answer. Tell me "
+            "what to do differently and I will carry on from what is built."
+            if stop_reason == "repeated_calls"
+            else "I used all my tool calls for this turn without reaching an answer. "
             "Try narrowing the question."
         )
     if shortfall:
@@ -770,6 +832,7 @@ def stream_agent(
         "conversation_id": conversation.id,
         "project_id": toolbox.project_id,
         "truncated": True,
+        "stop_reason": stop_reason,
         "steps": len(steps),
         "prompt_tokens": usage.prompt_tokens,
         "completion_tokens": usage.completion_tokens,
@@ -871,6 +934,60 @@ def _requirement_plan(conversation: Conversation, steps: list[AgentStep]) -> Any
 #: reading -- listing a part, measuring it, reading the tree and the faces
 #: before deciding is four or five -- and below the point where a turn is spent.
 MAX_READS_WITHOUT_PROGRESS = 6
+
+
+#: The tools that open a new CATIA document and build nothing in it.
+_DOCUMENT_TOOLS = frozenset({"catia_new_part", "catia_product_create"})
+
+
+#: How many documents a turn may open before it has put a single solid in any
+#: of them.
+#:
+#: **Measured on ladder prompt PRO1, 2026-09-08, and the agent diagnosed itself
+#: in its own closing words: "We have 5 empty part documents created but no
+#: geometry built yet."** Thirty-one steps, five parts, six sketches, and not
+#: one pad. It kept answering "produce the frame, the ram, the rack, the pinion
+#: and the table as parts" by producing the *documents* those parts would live
+#: in, which is the shape of the request rather than the substance of it.
+#:
+#: Neither existing guard can see this. `MAX_IDENTICAL_READS` needs a repeated
+#: call and these have different names each time; `MAX_READS_WITHOUT_PROGRESS`
+#: asks whether anything mutated, and `catia_new_part` *is* a successful
+#: mutation, so it reset the barren counter on every one of the five. Creating
+#: a document is the single mutation that changes nothing about the part -- it
+#: is the container, not the content -- and it is exactly the one that was
+#: being mistaken for progress.
+#:
+#: Two, not one: opening a part and then a product to hold it is an ordinary
+#: opening move, and refusing that would refuse every assembly. Three empty
+#: documents is not a plan.
+#:
+#: A nudge rather than a refusal, and once rather than every time. The model is
+#: not doing anything forbidden -- it is doing something useless in an order
+#: that will not converge -- and the same reasoning as MAX_VERIFICATION_NUDGES
+#: applies: a model that ignores this once will ignore it twice, and the rounds
+#: are better spent letting it build.
+MAX_EMPTY_DOCUMENTS = 2
+
+
+def _nothing_built_yet(documents: int) -> str:
+    """What to say to a turn that has opened documents and filled none.
+
+    Names the remedy in the order the tools have to be called, because the
+    failure is not that the model does not know what a pad is -- it is that it
+    is working breadth-first across a parts list and never reaching the bottom
+    of one. Telling it to "build something" produces another sketch; telling it
+    to finish *one* part produces a solid.
+    """
+    return (
+        f"You have opened {documents} CATIA documents this turn and built no solid "
+        "in any of them. A part with no solid is an empty file -- it is not the "
+        "part, and the requirement it stands for is still unmet.\n\n"
+        "Finish one document before opening another: create the sketch, draw the "
+        "closed profile, then call catia_pad on the name the sketch tool returned. "
+        "Measure it, and only then move to the next part. Opening more documents "
+        "cannot make the ones you have any less empty."
+    )
 
 
 

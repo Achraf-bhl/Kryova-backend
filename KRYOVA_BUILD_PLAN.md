@@ -110,6 +110,42 @@ and what 5.3's sensitivity can then be run over.
 ---
 
 ## Done
+- **2026-09-08 — Level 4 driven on the seat; five defects found and fixed; the local Postgres
+  switch.** The database moved from Neon's pooled eu-west-2 endpoint to a local PostgreSQL
+  **18.6** (the same major.minor Neon runs, so dev/prod parity holds and the never-SQLite rule
+  is untouched): **0.135 ms per round trip against ~250 ms**. `docs/LOCAL_POSTGRES.md`, and
+  `scripts/create_admin.py` for the account the API cannot create — `UserCreate` demands eight
+  characters and the login form imposes none, so a short development password can be *used* but
+  not registered.
+
+  PRO4 and PRO1 were then driven through the real GUI against a real V5-R33. **PRO4 is `~`
+  partial and the half that never worked now works** — the shear calculation, a lever ratio
+  from it, and an explicit "I have not checked it" on stiffness. **PRO1 failed four times and
+  each failure moved somewhere new**, which is what earned five fixes:
+
+  1. `catia_pad`'s "no such sketch" refusal now names the sketches that exist. Saying only
+     "use the name a sketch tool returned" is unrecoverable exactly when it fires, because an
+     agent that invented a name has lost the real one.
+  2. A part/product name collision now leads with "use a different name" when the *kinds*
+     differ. Continuing a part cannot produce the assembly that was asked for, and the agent
+     spent rounds discovering that.
+  3. A turn ended for repeating itself is no longer reported as out of budget. Two exits
+     reached identical closing code; the `done` event now carries `stop_reason` and the banner
+     says the matching sentence. Confirmed live on the next run.
+  4. **`MAX_EMPTY_DOCUMENTS`** — five empty parts in one turn tripped neither existing guard,
+     because `catia_new_part` *is* a successful mutation and reset the barren counter every
+     time. Opening a document is the one mutation that changes nothing about the part.
+     Measured effect: one document instead of five.
+  5. `catia_sketch_dimension` failed on **every** attempt on this seat — `.Dimension` raises
+     `E_INVALIDARG` — and returned the raw French COM error while leaving the half-made
+     constraint in the sketch, which then failed the pad three times. Now refused in words and
+     cleaned up.
+
+  Each verified by breaking what it guards. Backend `ruff`/`mypy` clean, `test_agent.py` 79,
+  `test_multi_document.py` 40; frontend `tsc`/`eslint` clean, 296 tests.
+  **The ceiling is now the context window, not the geometry**: PRO1's fourth run built its
+  first solid and exhausted the model's 32k window with four parts still to make.
+  `docs/verification-2026-09-08/REPORT.md`.
 - **2026-09-07 — E4.4, the CATIA half; the integration gap's step 3 is half closed.** The
   transcript draws the picture a tool result points at instead of `JSON.stringify`-ing a media
   id and a byte count, so the standing rule that every CATIA result is *looked at* is finally

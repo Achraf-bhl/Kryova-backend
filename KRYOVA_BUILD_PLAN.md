@@ -110,6 +110,30 @@ and what 5.3's sensitivity can then be run over.
 ---
 
 ## Done
+- **2026-09-08 — gate G1 re-run: rung 3 discharged, the oracle unblocked, the gate still not
+  passed.** Report: `docs/verification-2026-09-08-G1/`. Rung 3 (S1) is done with: on the open
+  kernel the agent reached 2.4 kg by construction rather than by the loop, so a second turn drove
+  `catia_set_parameter` directly — it refused `'Width'` *naming the real parameters*, the agent
+  listed them, set width then height to 45.1 mm, and measured **3.20153 kg** against a 3.2 kg
+  target, with the journal replay keeping `Pad.1` named `Pad.1`. E5 task 5 / `b9b1cb9` is verified
+  end to end. E4.4's "The part so far" panel, its section cuts, and both status-chip tooltips are
+  verified on the real machine (and correctly render nothing on `GEOMETRY_BACKEND=catia`).
+  **The oracle check found a blocker and it is fixed here**: CalculiX reads numeric fields with a
+  Fortran `f20.0` and truncates anything wider, while `deck._number` emitted `repr` — 22–23
+  characters for a full-precision double — so `ccx` refused every deck built from real imported
+  geometry with `*ERROR reading *NODE` and an empty card image. The offline suite could never
+  catch it: every mesh in `test_solver_calculix.py` comes from `box_mesh`, whose coordinates are
+  `5.0` and `200.0`; only a CATIA→STEP→OCCT transfer produces `-7.993605777301127e-15`. Narrowed
+  to 13 significant digits only where `repr` does not fit, so `5.0` stays `5.0`. Four tests,
+  verified by breaking them. `ccx` and `linear_static` now agree on the gate's own case —
+  displacement 0.538697 vs 0.538697.
+  **G1 does not pass**: the load-bearing prompt (S3) is `!`. `draft_load_case` picks faces from
+  six absolute direction words (`left`→x,min …), so on a beam lying along Z it clamped and loaded
+  two faces 20 mm apart on a 200 mm part and reported a factor of safety of 1303 unremarked — the
+  agent caught it itself, which is the one good thing in that prompt. Open: a part-relative face
+  vocabulary, a sense check on drafted load cases, and a convergence check (no stress in this run
+  came from more than one 411-element tet4 mesh). Also corrected the ladder's own S3 criterion,
+  which asked for δ ≈ 4 mm — that is aluminium; mild steel gives 1.56 mm.
 - **2026-09-08 — CI is green for the first time in the history this repo records.** Every run
   since at least 2026-09-02 had failed, and reading them turned up three failures that *only*
   happen in CI, which is why a green local suite never found them. (a) **The `database` job had

@@ -61,3 +61,6 @@ test _api_latancy.py
 # an API; they belong in the session scratchpad, and one that reaches a commit
 # is noise nobody later can tell from a real module.
 _probe*.py
+
+# Claude Code personal overrides
+.claude/settings.local.json

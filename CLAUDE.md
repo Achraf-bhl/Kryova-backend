@@ -401,10 +401,14 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
 3. **The application role must be `NOBYPASSRLS` or the RLS policies are inert.** A superuser, and
    equally Neon's `neondb_owner`, outranks both `ENABLE` and `FORCE ROW LEVEL SECURITY`. On the
    local Linux server the role is not a superuser, so the policies genuinely enforce and
-   `test_the_application_role_must_not_bypass_row_level_security` XPASSes. **They are still inert
-   on Neon and in CI**, whose `postgres:17` container makes `POSTGRES_USER` a superuser. The
-   `xfail(strict=False)` marker records exactly that and must not be deleted to make a local run
-   look tidy.
+   `test_the_application_role_must_not_bypass_row_level_security` XPASSes. **CI enforces too as of
+   2026-09-08**: the `postgres:17` container bootstraps as `postgres` and `ci.yml` creates the
+   application role `NOBYPASSRLS`, with a step that fails the job if the role it connected as can
+   bypass. Measured both ways against a real container — as `POSTGRES_USER: kryova` the role reads
+   `rolsuper/rolbypassrls true true` and the test xfails; with the bootstrap it reads `false false`
+   and XPASSes. **Neon is the one place left inert**, because `neondb_owner` holds `BYPASSRLS` and
+   cannot drop it, so the `xfail(strict=False)` marker stays and must not be deleted to make a
+   local or CI run look tidy.
 4. **`sslmode=disable` in the local URL is required, not a shortcut.** A stock local Postgres has
    `ssl = off` and refuses the handshake. `app/core/database.py::sslmode_for` reads the mode out
    of the URL rather than hardcoding it.
@@ -571,7 +575,6 @@ Three things that are easy to get wrong and are pinned by tests:
 3. **The modal mass matrix is integrated analytically** in barycentric coordinates, not with the
    stiffness assembly's four-point Gauss rule — that rule is exact only to degree 2 and tet10's
    `N^T N` is quartic, so reusing it would be wrong by a few percent: plausible-looking, and wrong.
-
 A bar in tension still returns a finite positive buckling factor (~68,000×), because a 3D bar has
 small compressive pockets at the load introduction. That is correct; the meaningful statement is
 the ratio to the compressive case.
@@ -747,8 +750,10 @@ entry before acting on it, and delete it the moment it stops being true.**
    machines.
 2. **Four of the 25 PDFs are scans with no text layer** and cannot be indexed without OCR. The
    build reports them as `scanned, no text layer` and carries on; expected, not a regression.
-3. **RLS is inert on Neon and in CI** — see *Database* item 3. The policies are deployed and
-   correct and the connecting role outranks them.
+3. **RLS is inert on Neon** — see *Database* item 3. The policies are deployed and correct and
+   `neondb_owner` outranks them. **CI was the other half of this entry until 2026-09-08** and is
+   now fixed; a claim that CI cannot enforce RLS is out of date, and the assertions in
+   `TestContinuousIntegration` are what keep it that way.
 4. **`pip install pychrono` installs an unrelated package and succeeds.** The engine probe checks
    the module really is Chrono. There is no dynamics engine and the docstrings say so.
 5. **The in-memory rate-limiter backend is per-process.** `RedisBackend` exists in

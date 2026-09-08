@@ -110,6 +110,24 @@ and what 5.3's sensitivity can then be run over.
 ---
 
 ## Done
+- **2026-09-08 — RLS enforces in CI, and the twelve red tests on `main` are green.** The
+  `postgres:17` service container makes `POSTGRES_USER` a **superuser**, which outranks both
+  `ENABLE` and `FORCE ROW LEVEL SECURITY` — so for a year the eleven tenant tables had their
+  policies deployed, correct, and completely inert in CI, and `test_tenancy_rls.py` passed
+  vacuously against a database enforcing nothing. `ci.yml` now bootstraps as `postgres` and creates
+  the application role `LOGIN … CREATEDB CREATEROLE NOBYPASSRLS`, owning both databases so `FORCE`
+  does real work, plus a step that fails the job if the connecting role can ever bypass again.
+  **Both configurations were run against a real `postgres:17` rather than reasoned about**: old =
+  `rolsuper/rolbypassrls true true` and the RLS test xfails; new = `false false` and it XPASSes,
+  with the whole database job green (`alembic upgrade head`, `alembic check`, 688 passed, 7m14s).
+  The `xfail(strict=False)` marker stays — Neon's `neondb_owner` cannot drop `BYPASSRLS`, so
+  production is the one place left. Guarded by three new assertions in
+  `TestContinuousIntegration`, one of which was initially satisfied by the step's own `echo` line
+  and had to be tightened onto the SQL — prose is not a gate.
+  The twelve failures are in `4121c77`: one real defect, one tripwire firing correctly, one stale
+  index, nine rotted checks. **Still open:** CI did not catch any of them for a fortnight, which
+  is worth an hour with `gh run list` before this pipeline is trusted as a gate.
+
 - **2026-09-08 — E4 closed: the open kernel's parts are finally visible in the product, and two
   defects in its existing presence there.** The CATIA half of E4.4 shipped on 2026-09-07 (it is
   in `origin/main`, five commits ahead of what this machine had checked out — worth knowing,

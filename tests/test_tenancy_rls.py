@@ -410,15 +410,19 @@ class TestThePoliciesAreActuallyOn:
     @pytest.mark.xfail(
         reason=(
             "Whether this passes is a property of the deployment, not of the code, so "
-            "it is recorded rather than asserted. It XPASSes on a local PostgreSQL "
-            "whose application role is NOBYPASSRLS (2026-09-08) -- the policies really "
-            "enforce there. It still xfails in the two places that matter: Neon's "
-            "neondb_owner holds BYPASSRLS and cannot drop it, and CI's postgres service "
-            "container makes POSTGRES_USER a superuser, which outranks ENABLE and FORCE "
-            "alike. So RLS is deployed and correct everywhere and inert on both of "
-            "those. Do not delete this marker to make a run tidy: strict=False means an "
-            "XPASS is the good news and an xfail is the standing one. It goes when the "
-            "application connects as a NOBYPASSRLS role in CI and in production."
+            "it is recorded rather than asserted. It XPASSes on the local PostgreSQL "
+            "(2026-09-08) and, since the same day, in CI -- `.github/workflows/ci.yml` "
+            "now bootstraps the container as `postgres` and creates the application "
+            "role NOBYPASSRLS, so the policies genuinely enforce for the suite and a "
+            "separate step fails the job if that ever stops being true. Before that "
+            "change the service container made POSTGRES_USER a superuser, which "
+            "outranks ENABLE and FORCE alike, and every RLS assertion here passed "
+            "vacuously. **One place is left and it is the one that matters most**: "
+            "Neon's neondb_owner holds BYPASSRLS and cannot drop it, so RLS is "
+            "deployed, correct, and inert in production until the application "
+            "connects as the `kryova_app` role `core/database.py` documents. Do not "
+            "delete this marker to make a run tidy -- strict=False means an XPASS is "
+            "the good news and an xfail is the standing one."
         ),
         strict=False,
     )

@@ -151,13 +151,27 @@ jobs:
     # a pooler, which matters: `migrations/env.py` issues `SET search_path`,
     # which is safe here and is the one thing CLAUDE.md forbids against the
     # pooled Neon host.
+    #
+    # `POSTGRES_USER` is `postgres` and not `kryova`, and that is the whole of
+    # the row-level-security fix. The container makes POSTGRES_USER a
+    # **superuser**, and a superuser outranks both `ENABLE` and `FORCE ROW LEVEL
+    # SECURITY` -- so while the suite connected as `kryova` the eleven tenant
+    # tables had their policies deployed, correct, and completely inert, and the
+    # isolation tests passed vacuously against a database enforcing nothing.
+    # They were proving application scoping and not the net underneath it, which
+    # is the half that catches the query somebody forgets to scope.
+    #
+    # So `postgres` bootstraps, and the application role is created below with
+    # the same shape the local development server uses (docs/LOCAL_POSTGRES.md):
+    # owning its databases, able to make roles and databases, and unable to
+    # bypass a policy.
     services:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: kryova
-          POSTGRES_PASSWORD: kryova
-          POSTGRES_DB: kryova_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
         ports:
           - 5432:5432
         options: >-
@@ -191,10 +205,43 @@ jobs:
 
       - run: pip install -r requirements-dev.txt
 
-      - name: Create the test database
+      # CREATEROLE because `tests/test_tenancy_rls.py` makes a NOLOGIN probe
+      # role to check the policies from the outside; CREATEDB because the local
+      # recipe has it and the two should not drift. **NOBYPASSRLS is the point.**
+      # The role owns both databases, so `FORCE ROW LEVEL SECURITY` -- which is
+      # what makes a policy apply to the table's owner as well -- is doing real
+      # work rather than being a line in a migration.
+      - name: Create the application role and its databases
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE kryova LOGIN PASSWORD 'kryova' CREATEDB CREATEROLE NOBYPASSRLS;
+          CREATE DATABASE kryova_ci      OWNER kryova ENCODING 'UTF8';
+          CREATE DATABASE kryova_ci_test OWNER kryova ENCODING 'UTF8';
+          SQL
+
+      # The guard, and it fails the job rather than reporting. Everything above
+      # is one `POSTGRES_USER:` away from silently reverting to a superuser, and
+      # the failure mode is not a red build -- it is a *green* one, over a suite
+      # whose RLS assertions have quietly stopped meaning anything. That already
+      # happened here for a year. `rolsuper` is checked as well as
+      # `rolbypassrls` because a superuser bypasses policies without the
+      # attribute being set.
+      - name: The suite connects as a role that cannot bypass RLS
         env:
           PGPASSWORD: kryova
-        run: createdb -h localhost -U kryova kryova_ci_test
+        run: |
+          attrs=$(psql -h localhost -U kryova -d kryova_ci -tAX -c \
+            "SELECT rolsuper::text || ' ' || rolbypassrls::text \
+             FROM pg_roles WHERE rolname = current_user")
+          echo "kryova: rolsuper rolbypassrls = $attrs"
+          test "$attrs" = "false false" || {
+            echo "::error::The suite would connect as a role that outranks row-level"
+            echo "::error::security, so every RLS assertion in tests/test_tenancy_rls.py"
+            echo "::error::would pass without the policies doing anything."
+            exit 1
+          }
 
       # Applying the migrations is half the value: `alembic check` compares the
       # models against the *database*, so it can only speak once the migrations

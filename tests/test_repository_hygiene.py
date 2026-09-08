@@ -152,6 +152,52 @@ class TestContinuousIntegration:
         for url in test_urls:
             assert url.startswith("postgresql"), f"TEST_DATABASE_URL is not PostgreSQL: {url}"
 
+    def test_the_suite_does_not_connect_as_a_superuser(self, commands: str) -> None:
+        """RLS in CI, guarded where it is easiest to lose.
+
+        The `postgres:17` service container makes `POSTGRES_USER` a **superuser**,
+        and a superuser outranks both `ENABLE` and `FORCE ROW LEVEL SECURITY`.
+        While the suite connected as that user the eleven tenant tables had their
+        policies deployed, correct, and completely inert: `tests/test_tenancy_rls.py`
+        passed vacuously against a database enforcing nothing, for a year.
+
+        So the container must bootstrap as `postgres` and the application role
+        must be created `NOBYPASSRLS`. Both are asserted, because either one
+        alone is a revert away from silence — and the failure this guards is not
+        a red build, it is a **green** one over assertions that have stopped
+        meaning anything.
+
+        Measured rather than reasoned: both configurations were run against a
+        real `postgres:17` on 2026-09-08. As `POSTGRES_USER: kryova` the role is
+        `rolsuper=true rolbypassrls=true` and the RLS test xfails; with this
+        bootstrap it is `false false` and the test XPASSes.
+        """
+        assert "POSTGRES_USER: postgres" in commands, (
+            "the service container must not create the application role, because "
+            "it creates it as a superuser"
+        )
+        assert "NOBYPASSRLS" in commands, (
+            "the application role CI connects as must be unable to bypass row-level "
+            "security, or every RLS assertion in the suite passes vacuously"
+        )
+        # And the job must still *check* it at run time, not merely intend it in
+        # the SQL above: a role can be altered, and an image can change.
+        #
+        # Asserted against the **query**, not against the word appearing
+        # anywhere. `rolbypassrls` also occurs in the step's own `echo`, and a
+        # bare substring check was satisfied by that alone — replacing the whole
+        # SELECT with `SELECT 'false false'` left this green, which is the same
+        # prose-is-not-a-gate failure the `name:` exclusion above exists for.
+        assert "FROM pg_roles WHERE rolname = current_user" in commands, (
+            "nothing in the job verifies the role it actually connected as"
+        )
+        reading = [line for line in commands.splitlines() if "SELECT rolsuper" in line]
+        assert reading, "the check does not read rolsuper off the live connection"
+        assert any("rolbypassrls" in line for line in reading), (
+            "the check reads rolsuper but not rolbypassrls; a role can hold "
+            "BYPASSRLS without being a superuser"
+        )
+
 
 class TestMigrationChain:
     VERSIONS = BASE_DIR / "migrations" / "versions"

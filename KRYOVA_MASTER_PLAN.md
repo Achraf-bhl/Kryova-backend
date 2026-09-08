@@ -1613,11 +1613,22 @@ through an application bug?
    > run **passed vacuously against a database enforcing nothing**. Switching this machine to a
    > local PostgreSQL whose application role is `NOBYPASSRLS` flipped
    > `test_the_application_role_must_not_bypass_row_level_security` from xfail to **XPASS** — the
-   > policies really enforce here. **Two places where it is still inert, and both are open work:**
-   > Neon in production, and CI, whose `postgres:17` service container makes `POSTGRES_USER` a
-   > superuser. The `xfail(strict=False)` marker records exactly this and must not be deleted to
-   > make a run tidy. Tested by: `tests/test_tenancy_rls.py` (16 tests). Code:
-   > `app/core/database.py` `tenant_scope()`.
+   > policies really enforce here. **CI enforces too as of 2026-09-08** — `ci.yml` bootstraps the
+   > service container as `postgres` and creates the application role
+   > `LOGIN ... CREATEDB CREATEROLE NOBYPASSRLS`, owning both databases so `FORCE ROW LEVEL
+   > SECURITY` does real work. Verified by reproducing both configurations in Docker against
+   > `postgres:17`: under the old one the role is `rolsuper=true rolbypassrls=true` and the test
+   > **xfails**; under the new one it is `false false` and the test **XPASSes**, with the whole
+   > database job green (`alembic upgrade head`, `alembic check`, 688 passed). A dedicated CI step
+   > fails the job if the connecting role can ever bypass again — the failure mode being guarded
+   > is not a red build but a *green* one over assertions that have quietly stopped meaning
+   > anything, which is what happened for a year.
+   > **One place is still inert and it is the one that matters most: Neon in production.**
+   > `neondb_owner` cannot drop `BYPASSRLS`, so this needs the application to connect as the
+   > `kryova_app` role `core/database.py` already documents. The `xfail(strict=False)` marker
+   > records exactly that and must not be deleted to make a run tidy.
+   > Tested by: `tests/test_tenancy_rls.py` (16 tests). Code: `app/core/database.py`
+   > `tenant_scope()`, `.github/workflows/ci.yml`.
 
 4. **404-not-403, systematised.** The existing rule (`get_owned_project`) generalised to org-scoped
    resources: a resource outside your tenant does not exist. RLS makes the lie consistent.
@@ -1634,8 +1645,9 @@ through an application bug?
 
 **Phase proof:** the cross-tenant test suite — two orgs, adversarial queries at every endpoint,
 zero leakage, all misses reading as 404. Run in CI forever.
-> PARTIAL — the suite exists and passes. It proves application scoping in CI; it does **not** yet
-> prove RLS in CI, because CI's role is a superuser (see task 3).
+> PARTIAL (2026-09-08) — the suite exists, passes, and now proves **both** halves in CI: the
+> application scoping and the RLS net under it, since the suite connects as a `NOBYPASSRLS` role
+> (task 3). What keeps this `PARTIAL` rather than done is tasks 5 and 6, which are not started.
 
 **Gate GP1 opens after P1 + P2.**
 
@@ -1959,16 +1971,27 @@ scene in the Tauri app.
    > longer wear the name of the database suite. Tested by:
    > `tests/test_repository_hygiene.py::TestContinuousIntegration` — verified by breaking all five
    > guards. Code: `.github/workflows/ci.yml`, `scripts/pytest_split.py`.
-   > **OPEN, found 2026-09-08: CI's `postgres:17` service container makes `POSTGRES_USER` a
-   > superuser, so RLS is inert in CI.** The tenancy suite proves application scoping there and not
-   > the safety net under it. Fix: connect the suite as a `NOBYPASSRLS` role.
-   > **OPEN, found 2026-09-08: 12 tests fail on `main` and CI does not appear to be catching it.**
-   > `test_written_tool_calls.py` (5), `test_catia_com_contract.py` (4 — script library, document
-   > path collision, two pocket refusals), `test_tool_retrieval.py` (1),
-   > `test_retrieval_corpus.py` (1, index staleness). They are DB-independent — verified by
-   > stashing the session's test changes and reproducing all of them on the SQLite fallback — and
-   > came in with the agent verification-footer work. A suite that is red on `main` is a suite
-   > people learn to skim, which is the same failure mode as the stale landmines in CLAUDE.md.
+   > **CLOSED 2026-09-08 — RLS now enforces in CI.** The job bootstraps the container as
+   > `postgres` and creates the application role `NOBYPASSRLS`, owning both databases, plus a step
+   > that fails the job if the connecting role can bypass. Both configurations were reproduced in
+   > Docker to prove the change is real and not cosmetic: old = `rolsuper/rolbypassrls true true`
+   > and the RLS test xfails, new = `false false` and it XPASSes, whole database job green.
+   > See P2 task 3.
+   > **CLOSED 2026-09-08 — the 12 failures on `main` are fixed** (commit `4121c77`). One was a
+   > real defect in `app/ai/agent.py`: the verification nudge discarded the "nothing has actually
+   > been done" message the exhausted correction loop had just written, so a model that ran
+   > nothing closed with "Done." and a footnote. One was a tripwire firing correctly
+   > (`KryovaFaceMap` added to the frozen VBA library — reviewed and accepted). One was a stale
+   > BM25 index. The other nine were tests that had rotted: a fixture whose user message carried a
+   > measurable requirement, a stub one call short of the code it fakes, a volume oracle coupled
+   > to how many times the code reads a volume, a negative probe naming a tool the system prompt
+   > has since started teaching, and a `caplog` assertion over every logger rather than the one
+   > under test. **None of the nine was wrong about what it claimed** — each was wrong about how
+   > it checked it, which is why they all failed on a change to something else.
+   > **STILL OPEN: CI did not catch any of them.** Twelve tests were red on `main` for a
+   > fortnight. `ci.yml` runs on push to `main` and on pull requests, so either the runs were
+   > failing unread or they were not running — worth an hour with `gh run list` before trusting
+   > this pipeline as a gate. A gate nobody reads is the same as no gate.
 
 3. **Backend images that carry the fleet**: containers with OCCT + gmsh + CalculiX + (later) Chrono
    pinned — the determinism substrate (E1 task 7) and the deploy artefact are the same thing. GPL

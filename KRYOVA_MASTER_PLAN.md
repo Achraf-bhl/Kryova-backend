@@ -660,8 +660,16 @@ model.
    > Tested by: `tests/test_interrogation.py`. Code: `app/kernel/occt/interrogate/` (8 modules).
 
 3. **Clearance, interference and minimum-distance queries between bodies.**
-   > PARTIAL (2026-09-05) — implemented and tested, **not yet wired to `catia_measure_between`**;
-   > that needs E2 task 2's element references. Tested by: `tests/test_interrogation.py`.
+   > PARTIAL (status corrected 2026-09-08). It **is** wired now — E2 task 2 shipped the element
+   > references it was waiting on, and `occt/operations/inspection.py:151` calls
+   > `measure_clearance` from `catia_measure_between`. The previous status ("not yet wired; that
+   > needs E2 task 2") was stale and would have sent someone to build what exists.
+   > **What is actually left is a test through the tool.** `measure_clearance` is covered
+   > (`tests/test_interrogation.py`, contact and overlap cases); `catia_measure_between` itself is
+   > covered nowhere, so the wiring — the element resolution, the argument shape, the reported
+   > provenance — is unpinned. That is the smallest remaining task in Era II and it closes the
+   > phase. Code: `app/kernel/occt/operations/inspection.py`, `occt/elements.py`,
+   > `occt/interrogate/proximity.py`.
 
 4. **The measurement payload contract.** A stable, versioned vocabulary of numbers that
    `assertions.py` reads by path (`mass_kg`, `bounding_box_mm.size[2]`, …), backend-neutral,

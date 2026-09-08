@@ -546,7 +546,21 @@ two parts, or keep a clearance through a motion range. This is where `correct.py
 
 ### S1 — Closed correction loop, stated as a target
 
-- [ ] **S1**
+- [ ] **S1** — `~` **partial** 2026-09-08 (gate G1, second run, `GEOMETRY_BACKEND=occt`). The
+  answer is right and the loop did not run. Six operations, ~100 s: the agent went **straight
+  to 39.05 mm on the first rectangle** — measured mass 2.4001965 kg, 0.008% from target, box
+  39.05 × 39.05 × 200 — having solved w = √(2.4/(7870×0.2)) analytically. No
+  `catia_set_parameter`, no `catia_measure`, no iteration, so `correct.py` never ran and the
+  "measured rather than computed on paper" condition is not met. One clean refusal on the way
+  (`catia_sketch_rectangle` called with an invented `name`, refused with every accepted
+  argument listed), which is a pass of what that tests.
+  **A second turn was added to exercise the loop directly, and it passes**: told to bring the
+  same block to 3.2 kg by changing the part, `catia_set_parameter` refused `'Width'` *naming
+  the real parameters*, the agent called `catia_list_parameters`, set `Base profile\width_mm`
+  then `Base profile\height_mm` to 45.1 (2.772 kg → **3.20153 kg**, 0.05% from target), and
+  the journal replay kept `Pad.1` named `Pad.1`. E5 task 5 / `b9b1cb9` is verified end to end.
+  Needs a re-run with a prompt whose target cannot be reached in closed form.
+  `docs/verification-2026-09-08-G1/S1-01-part-so-far.png`, `S1-03-set-parameter.png`
 
 **Style:** a target the agent cannot hit by construction and must converge on. This is the
 prompt that makes the loop in `correct.py` actually run.
@@ -636,7 +650,25 @@ Not yet re-run on the seat. The next run is the measurement of all three.
 
 ### S3 — Analysis, not geometry
 
-- [ ] **S3**
+- [ ] **S3** — `!` **failed on a Kryova defect** 2026-09-08 (gate G1, second run,
+  `GEOMETRY_BACKEND=catia`). The whole path ran — part → sketch → pad (`Extrusion.1`) →
+  material → **STEP export** → load case → queued run → result, ten steps, all green — and the
+  answer was nonsense: **factor of safety 1303.41**, peak von Mises 0.284 MPa.
+  The drafted load case clamped `face x/min` and loaded `face x/max` with force `[0,0,-200]`.
+  The meshed geometry is X ∈ [−10,10], Y ∈ [−5,5], **Z ∈ [0,200]** — so Kryova clamped one
+  *long side face* and pushed the opposite one **along the beam's own length**, 20 mm apart on
+  a 200 mm part, and nothing flagged it. The face comes from the six absolute words in
+  `app/ai/load_case_sketch.py` (`left`→x,min, `right`→x,max …); there is no term meaning "the
+  far end", though `draft_load_case`'s description promises one. **The agent caught it itself
+  and said so unprompted**, which is Decision 3 working.
+  Re-run with the axis supplied by hand: δ 0.539 mm, σ 92.3 MPa, FoS 4.01 — the right size and
+  **not converged** (411-element tet4 locks in bending; closed form is δ 1.561 mm, σ 120 MPa).
+  The agent then declared a "RED FLAG" off its *own* arithmetic slip (I = 166.7 instead of
+  1666.7 mm⁴) and blamed the clamped face. No convergence study was run or offered.
+  **The pass criterion above is wrong and should be fixed before this is re-run:** for *mild
+  steel*, δ = PL³/3EI = 1.6×10⁹/(3×205,000×1666.7) = **1.56 mm**, not ≈4 mm. δ ≈ 4 mm needs
+  E ≈ 69 GPa — the figure was computed with aluminium's modulus.
+  `docs/verification-2026-09-08-G1/S3-01-catia-window.png`, `S3-02-capture-view.png`
 
 **Style:** an FEA request in an engineer's words. Tests the mesh → solve → result path and the
 verification discipline: an unconverged number is worse than no number.

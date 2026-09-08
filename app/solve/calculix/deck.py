@@ -47,7 +47,11 @@ will look like the model exploded.
 
 **A coordinate written at low precision is a different part.** Everything numeric
 goes out at `repr`-grade precision (17 significant digits), because a deck that
-rounds node coordinates to six figures has silently re-meshed the model.
+rounds node coordinates to six figures has silently re-meshed the model — with
+one bound on it that CalculiX imposes and `_number` enforces: a numeric field
+wider than twenty characters is truncated by ccx's reader and the deck is
+refused. The handful of values that cannot fit are narrowed to 13 significant
+digits, which is still far finer than any mesh this writes.
 
 **A temperature change that is not written is solved as isothermal, in silence.**
 This is 6.4's half of the file and it was the live defect until 2026-09-08:
@@ -145,13 +149,47 @@ REFERENCE_TEMPERATURE: Final = 0.0
 _FORCE_EPS: Final = 0.0
 
 
+#: CalculiX reads every numeric field with a Fortran `f20.0`, so a token wider
+#: than this is truncated mid-number and the line fails to parse. It does not
+#: complain about the width: `calinput` reports `*ERROR reading *NODE` with an
+#: empty card image, which names neither the node nor the column.
+_CCX_FIELD_WIDTH: Final = 20
+
+
 def _number(value: float) -> str:
-    """A float that reads back as itself.
+    """A float that reads back as itself, in a field CalculiX can read.
 
     `repr` on a Python float is the shortest string that round-trips, which is
-    exactly the requirement: shorter loses geometry, longer is noise.
+    the right default: shorter loses geometry, longer is noise. But a
+    full-precision double runs to 22 or 23 characters
+    (`-7.819982591610898e-15`), and CalculiX truncates every numeric field at
+    `_CCX_FIELD_WIDTH`, so `repr` alone writes decks it then refuses.
+
+    **Only a real import produces such values, which is why the offline suite
+    never saw this.** The meshes in the tests come from exact primitives whose
+    coordinates are `5.0` and `200.0`; a STEP file that has been through CATIA
+    and OCCT carries the accumulated noise of the transfer — `5.0` arrives as
+    `-4.999999999999996` and a nominal zero as `-7.993605777301127e-15` — and
+    those are the tokens that overflow. Measured at gate G1 (2026-09-08): the
+    ccx-vs-`linear_static` oracle could not run at all on the cantilever the
+    product had just built, and reported UNMEASURED.
+
+    Falling back through decreasing precision rather than formatting everything
+    the same way, because the deck is read by people when a solve goes wrong:
+    `5.0` should stay `5.0` and not become `5.000000000000e+00`. Only the
+    values that cannot fit are rewritten, and 12 decimal places of mantissa is
+    still far more than millimetre geometry can carry.
     """
-    return repr(float(value))
+    text = repr(float(value))
+    if len(text) <= _CCX_FIELD_WIDTH:
+        return text
+    for places in range(12, 5, -1):
+        candidate = f"{float(value):.{places}e}"
+        if len(candidate) <= _CCX_FIELD_WIDTH:
+            return candidate
+    # Unreachable for any finite double: `%.6e` of the widest is 13 characters
+    # with sign and a three-digit exponent. Kept so the function is total.
+    return f"{float(value):.6e}"
 
 
 def element_type(mesh: TetMesh) -> str:

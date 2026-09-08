@@ -633,3 +633,78 @@ class TestATemperatureChangeReachesTheDeck:
         deck = write_deck(_mesh(quadratic=True), self._thermal_case(45.0))
 
         assert _section(deck, "*TEMPERATURE") == [f"{ALL_NODES}, 45.0"]
+
+
+class TestEveryNumericFieldFitsCalculixsReader:
+    """CalculiX reads numeric fields with a Fortran `f20.0`.
+
+    A token wider than twenty characters is truncated mid-number and the line
+    fails to parse, and `calinput` says so with an empty card image that names
+    neither the node nor the column — so the deck is refused before anything is
+    solved and nothing in the message points here.
+
+    Nothing above caught this because every mesh in this file comes from
+    `box_mesh`, whose coordinates are `5.0` and `200.0`. The values that
+    overflow only appear on geometry that has been through a real transfer:
+    measured at gate G1 (2026-09-08) on a CATIA-built cantilever exported to
+    STEP, where a nominal zero arrived as `-7.993605777301127e-15` and the
+    ccx-vs-`linear_static` oracle could not run at all.
+    """
+
+    def test_a_full_precision_double_is_narrowed_to_fit(self) -> None:
+        """The exact token that broke G1. `repr` gives 22 characters."""
+        from app.solve.calculix.deck import _CCX_FIELD_WIDTH, _number
+
+        assert len(repr(-7.819982591610898e-15)) > _CCX_FIELD_WIDTH
+        assert len(_number(-7.819982591610898e-15)) <= _CCX_FIELD_WIDTH
+
+    def test_an_ordinary_coordinate_is_left_alone(self) -> None:
+        """Only what cannot fit is rewritten: a deck is read by people when a
+        solve goes wrong, and `5.0` must not become `5.000000000000e+00`."""
+        from app.solve.calculix.deck import _number
+
+        assert _number(5.0) == "5.0"
+        assert _number(200.0) == "200.0"
+        assert _number(-4.999999999999996) == "-4.999999999999996"
+
+    def test_narrowing_keeps_the_value(self) -> None:
+        """Twelve decimal places of mantissa is far more than millimetre
+        geometry carries, so the narrowing must not move the number."""
+        from app.solve.calculix.deck import _number
+
+        for value in (-7.819982591610898e-15, -8.881784197001252e-16, 1.2345678901234567e-8):
+            assert float(_number(value)) == pytest.approx(value, rel=1e-11)
+
+    def test_no_field_in_a_real_deck_overflows(self) -> None:
+        """The guard where it actually matters: the whole deck, token by token.
+
+        Written against a mesh whose coordinates have been perturbed the way a
+        STEP import perturbs them, because `box_mesh` alone cannot fail this.
+        """
+        from app.solve.calculix.deck import _CCX_FIELD_WIDTH
+
+        mesh = _mesh()
+        # Transfer noise, at the scale a STEP import really produces. Far below
+        # the selectors' 0.01 tolerance, so every fixture still holds the same
+        # nodes -- perturbing hard enough to move a node off the clamped face
+        # would test the constraint checker instead of the deck writer.
+        mesh.nodes = np.array(mesh.nodes, dtype=float) + 7.819982591610898e-15
+
+        deck = write_deck(mesh, _case())
+
+        checked = 0
+        for line in deck.splitlines():
+            if line.startswith("*") or "," not in line:
+                continue
+            tokens = [t.strip() for t in line.split(",")]
+            try:
+                [float(t) for t in tokens if t]
+            except ValueError:
+                continue  # the *HEADING free text, which ccx does not parse
+            for token in tokens:
+                assert len(token) <= _CCX_FIELD_WIDTH, line
+            checked += 1
+
+        # Guards the guard: a deck that stopped emitting data lines would pass
+        # the loop above without checking anything.
+        assert checked > 100

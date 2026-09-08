@@ -361,6 +361,24 @@ The gates:
    > `*NODE FILE` *and* `*EL FILE`, that the results then land at the submitted node numbers, and
    > that the `*BEAM SECTION` data-line order (dimensions, then direction cosines) is the one ccx
    > reads. A wrong answer to any of the three is a deck ccx accepts.
+   > **Neither (a) nor (b) is settled by the re-run below**, which ran the oracle on an
+   > isothermal case only and submitted no shell or beam deck. They are `A2` and `A3` in THE
+   > QUEUE (`docs/WINDOWS_VERIFICATION.md`) and the gate still carries them.
+   > **RE-RUN 2026-09-08, STILL DID NOT PASS** — see `docs/verification-2026-09-08-G1/`.
+   > Rung 3 is **discharged**: `catia_set_parameter` and the correction loop are verified end to
+   > end (39.05 → 45.1 mm, 3.20153 kg against a 3.2 kg target, `Pad.1` still `Pad.1` after
+   > replay), and E4.4's part panel and both status-chip tooltips are verified on the real
+   > machine. The **oracle check passes** — but only after fixing a blocker it found: CalculiX
+   > truncates numeric fields at 20 characters and `deck._number` emitted `repr`, which is 22–23
+   > for a full-precision double, so `ccx` refused every deck built from real imported geometry
+   > and the oracle had never once run on a real part. Fixed and pinned this session.
+   > **What G1 now waits on is the load-bearing prompt.** `draft_load_case` chose faces from six
+   > absolute direction words on a beam whose long axis is Z, clamping and loading two faces
+   > 20 mm apart on a 200 mm part and reporting a factor of safety of 1303 with no complaint.
+   > Three open items in the report: a part-relative face vocabulary, a sense check on a drafted
+   > load case, and a convergence check (E7 task 1) — every stress in this run came from one
+   > coarse tet4 mesh. Note also that G1 has now twice been run against an **unfinished E6**
+   > (task 3 NOT STARTED, task 4 PARTIAL).
 2. **G2** — opens after **E11 + E12**. The input stops being a shape description and becomes a
    written requirement, with real materials and bought-in parts. Driven: rung 4 — two parts and a
    constraint, specified as a requirement rather than as dimensions.
@@ -1066,9 +1084,22 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 **Gate G1 opens after this phase.**
 > RUN 2026-09-06, DID NOT PASS — rung 3 failed. Rung 3 is carried forward and G1 runs again.
 > See `docs/verification-2026-09-06/`.
-> **DUE since 2026-09-08**, and it is now the only thing that can verify this phase: tasks 3 and
-> 4 were both written from the manual on a machine with no `ccx`. The two items the gate gained
-> are listed with G1 in *Stop gates*.
+> **The gate is still the only thing that can verify this phase**: tasks 3 and 4 were both
+> written from the manual on a machine with no `ccx`, and the re-run below settled neither —
+> it ran the oracle isothermally and submitted no shell or beam deck. Those two items are
+> listed with G1 in *Stop gates* and as `A2`/`A3` in THE QUEUE.
+> **RE-RUN 2026-09-08, STILL DID NOT PASS** — `docs/verification-2026-09-08-G1/`. Rung 3 is
+> discharged (`catia_set_parameter` verified end to end) and the `ccx`-vs-`linear_static`
+> oracle passes, after this run found and fixed the reason it could never have: CalculiX
+> truncates numeric fields at 20 characters, `deck._number` wrote `repr` at up to 23, and the
+> offline suite could not see it because every mesh in it comes from an exact primitive whose
+> coordinates are `5.0` and `200.0`. **Task 1's "verified against CalculiX 2.23" was true only
+> of exact primitives** — the first real STEP import refused to solve at all.
+> G1 now blocks on the load-bearing prompt: `draft_load_case`'s six absolute direction words
+> cannot name the end of a beam that does not lie along X, and nothing sense-checks the result.
+> **This phase is also still open** — task 3 is NOT STARTED and task 4 PARTIAL, so both G1 runs
+> have tested a precondition that had not finished. C3D10 (task 3) would likely improve the
+> 411-element tet4 numbers this gate had to judge.
 
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
 

@@ -20,6 +20,7 @@ token, the units, the version string, and the file collision.
 from __future__ import annotations
 
 import sys
+from itertools import chain, repeat
 from pathlib import Path
 from typing import Any
 
@@ -382,10 +383,25 @@ class TestFrozenScriptLibrary:
         # be looking at it. KryovaPointsOnCurve was reviewed in: it measures an
         # edge's start/middle/end so fillet and chamfer can pick edges by
         # meaning, and takes only (part, reference).
+        #
+        # KryovaFaceMap was reviewed in on 2026-09-08, arriving with `ff7ff46`.
+        # **The tripwire did its job** -- it failed on `main` for a fortnight
+        # because a script had been added and this list had not been read, which
+        # is the review this test exists to force. Accepted: it is the exact twin
+        # of KryovaEdgeMap, already here, with the same three parameters
+        # (part, query, scopeShape) and the same read-only body -- a
+        # `Selection.Search` followed by `Area`/`GetCOG`/`GetPlane` through
+        # SPAWorkbench. It exists for a measured reason rather than a stylistic
+        # one: pywin32 passes an out-array **by value**, so `GetCOG` and
+        # `GetPlane` return without error having written nothing, and every face of
+        # every part came back centre [0,0,0] normal [0,0,0] on V5-R33. Inside
+        # CATIA the same three calls fill their arrays. It writes nothing, takes
+        # no path, and interpolates nothing (see the test below).
         assert set(vba._ALLOWED.values()) == {
             "KryovaCentreOfGravity",
             "KryovaPointsOnCurve",
             "KryovaEdgeMap",
+            "KryovaFaceMap",
         }
 
     def test_no_script_interpolates_anything(self) -> None:
@@ -451,6 +467,14 @@ class TestDocumentPathCollision:
 
         com._app.Documents = _Documents()
         com._app.document.Part = type("P", (), {"Update": lambda self: None})()
+        # `new_part` now reports the features of the document it made, which
+        # walks `Part.MainBody` and `Part.Bodies` -- neither of which this stub
+        # has, and neither of which this test is about. Stubbed rather than
+        # modelled, the way `_find_sketch` and `_solid_volume` are stubbed
+        # elsewhere in this file: the subject here is the *path*, and a fake
+        # deep enough to satisfy an unrelated call is a fake that starts failing
+        # for unrelated reasons.
+        com._feature_list = lambda **_: []  # type: ignore[method-assign]
 
         # The stub's SaveAs asserts if it is handed a path that exists.
         result = com.new_part(name="Bracket")
@@ -683,7 +707,15 @@ class TestAPocketThatCutsNothingIsRefused:
         com._part = lambda: _PartWithFactory()  # type: ignore[method-assign]
         com._find_sketch = lambda _name: object()  # type: ignore[method-assign]
         com._feature_result = lambda name: {"feature": name}  # type: ignore[method-assign]
-        readings = iter(volumes)
+        # The distinct readings the test is describing, then steady state.
+        # `volumes` used to be a bare `iter`, which coupled every test here to
+        # the exact *number* of times `pocket` reads the volume — an
+        # implementation detail none of them is about. It broke when `pocket`
+        # grew a fourth read to build its `_cut_report` ("this removed 200 mm3"),
+        # and the failure was a `StopIteration` out of a lambda, which names
+        # neither the cause nor the file. Repeating the last value is also the
+        # physical truth: nothing cuts the part again after the last operation.
+        readings = chain(volumes, repeat(volumes[-1]))
         com._solid_volume = lambda: next(readings)  # type: ignore[method-assign]
         return com, state
 

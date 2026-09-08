@@ -169,11 +169,60 @@ class TestItFindsWhatWasAskedFor:
         assert "catia_pattern_circular" in chosen
 
     def test_an_unrelated_request_does_not_pull_in_surfacing(self) -> None:
-        """If everything matched everything, the limit would be doing all the work."""
-        chosen = select_tool_names(REGISTRY, "add a drawing dimension", limit=15)
+        """If everything matched everything, the limit would be doing all the work.
 
-        assert "catia_surface_loft" not in chosen
-        assert "catia_assembly_clash" not in chosen
+        The negative probes are **derived**, not listed. This test named
+        `catia_assembly_clash` until 2026-09-08 and then failed on `main` — not
+        because retrieval regressed but because the frozen system prompt grew to
+        mention that tool, and a prompt-taught tool is an unconditional part of
+        the floor. That is deliberate and load-bearing: `select`'s own docstring
+        says a limit that could evict a tool the prompt names would teach the
+        model to hallucinate the call. So a hand-listed absence here is a claim
+        about the prompt's wording, which nothing in this file controls, and it
+        rots the day someone writes a good sentence in `prompts.py`.
+
+        What is actually being claimed is narrower and does not rot: a tool that
+        no rule reaches — not core, not prompt-taught, not asked for, sharing no
+        word with the request — is not offered.
+        """
+        from app.ai.tool_retrieval import select
+
+        selection = select(REGISTRY, "add a drawing dimension", limit=15)
+        chosen = selection.names()
+
+        # Nothing reaches the offer through the *scored* path without scoring.
+        # This is the literal reading of "if everything matched everything": the
+        # floor rules are allowed to be unconditional, the scorer is not.
+        padded = [c.name for c in selection.choices if c.rule == "match" and c.score <= 0.0]
+        assert not padded, f"offered by the scorer with no score: {padded}"
+
+        # The surfacing family, which this test is named for. None of them is on
+        # the floor and none shares a word with a drafting request.
+        for name in ("catia_surface_loft", "catia_surface_sweep", "catia_surface_fill"):
+            assert name not in chosen
+
+    def test_a_drafting_request_still_pulls_in_the_draft_angle_tool(self) -> None:
+        """A known conflation, recorded rather than hidden.
+
+        `catia_draft` is Part Design's *draft angle for mould release*. It is
+        offered for "add a drawing dimension" because the domain rule asks the
+        CATIA KB what the message implies, the KB answers with the **Drafting**
+        workbench, and the token that entry contributes is `draft` — which is
+        also the whole of `catia_draft`'s name. Two unrelated meanings of one
+        word, in a rule whose entire job is to bridge vocabulary.
+
+        It costs one extra tool in the offer and hides nothing, which is why it
+        is written down here instead of being tuned out in passing: the
+        weighting in this module is measured, and changing it belongs with a
+        re-run of the retrieval-quality sweep rather than with a red suite.
+        """
+        from app.ai.tool_retrieval import select
+
+        selection = select(REGISTRY, "add a drawing dimension", limit=15)
+        draft = next(c for c in selection.choices if c.name == "catia_draft")
+
+        assert draft.rule == "domain"
+        assert "Drafting" in draft.detail
 
     def test_score_is_normalised_by_the_query_not_the_tool(self) -> None:
         """A long description must not outrank a precise short one by bulk."""

@@ -565,7 +565,22 @@ def stream_agent(
             # about -- was there interference -- was never checked at all.
             plan = _requirement_plan(conversation, steps)
             shortfall = shortfall_note(plan)
-            if shortfall and nudges < MAX_VERIFICATION_NUDGES and step + 1 < budget:
+            # Reaching here with `written` or `blank` still set means the
+            # correction budget is spent, and the two branches above have just
+            # replaced `turn.text` with the only honest account of the turn --
+            # "nothing has actually been done", or "I did not manage to produce
+            # an answer". **Holding the turn open would throw that away.** The
+            # loop would `continue`, the next turn would close normally, and the
+            # user would be shown that turn's text with a verification footnote
+            # instead: "Done." over a model that ran nothing and said it had.
+            # That is precisely the silent failure `tests/test_written_tool_calls.py`
+            # exists to prevent, reintroduced from a different direction -- and
+            # the nudge cannot help anyway, since it asks the model to go and
+            # measure something and this model has just failed MAX_CORRECTIONS
+            # times to emit a tool call at all. The footnote below still lands:
+            # it adds what went unverified without contradicting the message.
+            exhausted = bool(written or blank)
+            if shortfall and not exhausted and nudges < MAX_VERIFICATION_NUDGES and step + 1 < budget:
                 nudges += 1
                 _append(db, conversation, MessageRole.ASSISTANT, content=turn.text or None)
                 _append(

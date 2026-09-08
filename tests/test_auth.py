@@ -1,3 +1,5 @@
+from typing import Any
+
 from tests.typing import AuthenticatedTestClient
 
 CREDENTIALS = {"email": "new@kryova.dev", "password": "a-long-enough-password"}
@@ -127,7 +129,25 @@ class TestClientAddressForRateLimiting:
 
 class TestPasswordResetTokenIsNotLogged:
     """There is no mail transport, so the token has nowhere to go. Logging it
-    at INFO put a working password-equivalent in every production log line."""
+    at INFO put a working password-equivalent in every production log line.
+
+    **Every assertion below is scoped to `app.api.routes.auth`.** `caplog`
+    captures at the root, so its `records` hold whatever any logger emitted
+    during the request — and `caplog.at_level(..., logger=...)` sets a *level*
+    on one logger, it does not filter the capture. That difference broke
+    `test_development_logs_the_token_at_debug_only` on `main`: it asserted
+    `caplog.records == []` and started failing the day `app.main` began logging
+    every request at INFO ("POST /auth/password-reset-request -> 204 in 4 ms"),
+    which says nothing about this route's logging and contains no token.
+
+    It also made the production test weaker than it read. `"reset" in emitted`
+    was satisfiable by `app.main`'s request line alone — the path is literally
+    `/auth/password-reset-request` — so that test would have passed with this
+    route logging nothing whatever. Scoping it means it now checks the thing it
+    claims to.
+    """
+
+    LOGGER = "app.api.routes.auth"
 
     @staticmethod
     def _request_reset(client: AuthenticatedTestClient) -> None:
@@ -137,6 +157,11 @@ class TestPasswordResetTokenIsNotLogged:
         )
         assert response.status_code == 204
 
+    @classmethod
+    def _ours(cls, caplog: Any) -> list[Any]:
+        """Only what this route logged, not what the request pipeline did."""
+        return [record for record in caplog.records if record.name == cls.LOGGER]
+
     def test_production_logs_the_request_but_never_the_token(
         self, client: AuthenticatedTestClient, monkeypatch, caplog
     ) -> None:
@@ -145,12 +170,15 @@ class TestPasswordResetTokenIsNotLogged:
         from app.api.routes import auth
 
         monkeypatch.setattr(auth.settings, "environment", "production")
-        with caplog.at_level(logging.DEBUG, logger="app.api.routes.auth"):
+        with caplog.at_level(logging.DEBUG, logger=self.LOGGER):
             self._request_reset(client)
 
-        emitted = " ".join(record.getMessage() for record in caplog.records)
+        ours = self._ours(caplog)
+        assert ours, "the route logged nothing at all in production"
+        emitted = " ".join(record.getMessage() for record in ours)
         assert "reset" in emitted.lower()
         assert CREDENTIALS["email"] not in emitted
+        # A token is 43 urlsafe characters; nothing this route says is that long.
         assert not any(len(word) > 30 for word in emitted.split())
 
     def test_development_logs_the_token_at_debug_only(
@@ -161,11 +189,11 @@ class TestPasswordResetTokenIsNotLogged:
         from app.api.routes import auth
 
         monkeypatch.setattr(auth.settings, "environment", "development")
-        with caplog.at_level(logging.INFO, logger="app.api.routes.auth"):
+        with caplog.at_level(logging.INFO, logger=self.LOGGER):
             self._request_reset(client)
-        assert caplog.records == []
+        assert self._ours(caplog) == []
 
         caplog.clear()
-        with caplog.at_level(logging.DEBUG, logger="app.api.routes.auth"):
+        with caplog.at_level(logging.DEBUG, logger=self.LOGGER):
             self._request_reset(client)
-        assert any("token" in r.getMessage() for r in caplog.records)
+        assert any("token" in r.getMessage() for r in self._ours(caplog))

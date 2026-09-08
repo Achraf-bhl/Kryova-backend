@@ -170,7 +170,15 @@ class TestTheLoopCorrectsInsteadOfAnswering:
             provider=provider,
             conversation=conversation,
             toolbox=_toolbox(db_session, user, project),
-            user_message="Pad the sketch to 10 mm.",
+            # Deliberately carries no measurable requirement. It used to read
+            # "Pad the sketch to 10 mm.", which `extract_objectives` reads as an
+            # objective — so the verification layer held every turn in this class
+            # open for a nudge, consumed the scripted turn the test had lined up
+            # for the correction, and every exact-text assertion here started
+            # measuring the verification footer instead of the correction loop.
+            # Both behaviours are right; testing them through each other is not.
+            # `TestTheTurnClosesHonestly` below covers the interaction on purpose.
+            user_message="List my projects.",
             user=user,
             allow_mutations=True,
         )
@@ -356,7 +364,12 @@ class TestAnEmptyJsonHuskIsNotAnAnswerEither:
             provider=ScriptedProvider(turns),
             conversation=conversation,
             toolbox=_toolbox(db_session, user, project),
-            user_message="Design an M8 50 mm hex bolt.",
+            # No measurable requirement, for the reason given in
+            # `TestTheLoopCorrectsInsteadOfAnswering._run`. The live incident
+            # this class records was about the *reply* being `{}`; what was asked
+            # for is incidental to it, and "Design an M8 50 mm hex bolt" put a
+            # verification nudge between the husk and the retry.
+            user_message="List my projects.",
             user=user,
             allow_mutations=True,
         )
@@ -418,3 +431,129 @@ class TestContentlessDetection:
         the rule is a small closed set of whole-body husks, not "does this parse".
         """
         assert not is_contentless(text)
+
+
+class TestTheTurnClosesHonestly:
+    """Where the correction loop and the verification nudge meet.
+
+    Both features are right on their own and they contradict each other at
+    exactly one point: a turn whose correction budget is spent has already had
+    its text replaced with the only honest account of what happened, and the
+    verification nudge would `continue` past it — discarding that account and
+    closing on a *later* turn's text with a footnote instead.
+
+    Measured before the fix, on the script `[written call] * (MAX_CORRECTIONS+1)`
+    with the user asking to pad a sketch to 10 mm: the reply was
+
+        Done.
+        ---
+        **Not verified in this turn.**
+        - Pad the sketch to 10 mm — nothing measured this
+
+    over a model that had run nothing at all and said it had built the part.
+    "Done." with a measurement caveat is not the same claim as "nothing has
+    actually been done", and the difference is the whole of this file.
+    """
+
+    def _run(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        turns: list[AssistantTurn],
+        message: str,
+    ) -> Any:
+        return run_agent(
+            db=db_session,
+            provider=ScriptedProvider(turns),
+            conversation=conversation,
+            toolbox=_toolbox(db_session, user, project),
+            user_message=message,
+            user=user,
+            allow_mutations=True,
+        )
+
+    def test_a_written_call_still_says_nothing_ran_when_a_requirement_is_open(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """The regression, pinned on the message that produced it."""
+        faked = AssistantTurn(
+            text='Project created.\n{"name": "create_project", "arguments": {"name": "X"}}',
+            usage=TokenUsage(1, 1),
+        )
+        reply = self._run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [faked] * (MAX_CORRECTIONS + 1),
+            "Pad the sketch to 10 mm.",
+        )
+        assert "nothing has actually been done" in reply.text.lower()
+
+    def test_a_silent_model_still_says_so_when_a_requirement_is_open(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """The same discard, reached through the blank branch rather than the
+        written-call one. Two branches write `turn.text`; the nudge threw away
+        whichever of them had just run."""
+        reply = self._run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [AssistantTurn(text="{}", usage=TokenUsage(1, 1))] * (MAX_CORRECTIONS + 1),
+            "Design an M8 50 mm hex bolt.",
+        )
+        assert "{}" not in reply.text
+        assert "did not manage to produce an answer" in reply.text
+
+    def test_what_went_unverified_is_still_stated_beside_it(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """The fix suppresses the *nudge*, not the footnote.
+
+        Both facts are true of that turn and the user needs both: nothing ran,
+        and the thing they asked for was never measured. Dropping the second
+        along with the hold-open would trade one silence for another.
+        """
+        faked = AssistantTurn(
+            text='Project created.\n{"name": "create_project", "arguments": {"name": "X"}}',
+            usage=TokenUsage(1, 1),
+        )
+        reply = self._run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [faked] * (MAX_CORRECTIONS + 1),
+            "Pad the sketch to 10 mm.",
+        )
+        assert "Not verified in this turn" in reply.text
+        assert "Pad the sketch to 10 mm" in reply.text
+
+    def test_a_model_that_is_answering_normally_is_still_held_open_once(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """The other side of the same line, so nobody repairs the above by
+        deleting the nudge.
+
+        A turn that produced real text and simply did not measure what was asked
+        for *is* worth another round — that model can still be sent to measure,
+        and this is the check that was missing when a turn closed on six
+        requirements with three built.
+        """
+        answered = AssistantTurn(text="Padded to 10 mm.", usage=TokenUsage(1, 1))
+        measured = AssistantTurn(text="Measured: 10 mm.", usage=TokenUsage(1, 1))
+        reply = self._run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [answered, measured],
+            "Pad the sketch to 10 mm.",
+        )
+        # It did not close on the first turn's text: it was sent back once.
+        assert not reply.text.startswith("Padded to 10 mm.")
+        assert "Measured: 10 mm." in reply.text

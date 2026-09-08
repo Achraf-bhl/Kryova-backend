@@ -756,11 +756,22 @@ entry before acting on it, and delete it the moment it stops being true.**
    three `import-not-found` errors because of it**, which breaks the "if mypy prints anything, it
    is yours" rule this file depends on. Either declare it (with a `[[tool.mypy.overrides]]` entry)
    or make the fallback explicit; do not learn to skim past those three lines.
-7. **The suite has pre-existing failures on `main` as of 2026-09-08** — `test_written_tool_calls.py`
-   (5), `test_tool_retrieval.py` (1), `test_catia_com_contract.py` (1) and
-   `test_retrieval_corpus.py` (1, index staleness). They are DB-independent and came in with the
-   agent verification-footer work; they are not caused by the local-Postgres switch. Do not read
-   a red suite as your own regression without checking these first.
+7. ~~**The suite has pre-existing failures on `main` as of 2026-09-08**~~ — **fixed 2026-09-08.**
+   All twelve are green and the suite is 6,451 passing / 0 failing. Kept as a record of what they
+   turned out to be, because the split is the useful part: **one was a real defect** (the
+   verification nudge discarded the "nothing has actually been done" message that the exhausted
+   correction loop had just written, so a model that ran nothing closed the turn with "Done." and
+   a footnote — the exact silent failure `test_written_tool_calls.py` exists to prevent, arriving
+   from the other side); **one was a tripwire working correctly** (`KryovaFaceMap` was added to
+   the frozen VBA library and the test fails on purpose until a human reviews it — reviewed and
+   accepted); **one was a stale artefact** (the BM25 index predated the chunker changes; rebuilt,
+   P@1 back to 94.7%); and **the other nine were tests that had rotted**, each in a different way:
+   a fixture whose user message accidentally carried a measurable requirement, a stub one call
+   short of the code it fakes, a volume oracle coupled to how many times the code reads a volume,
+   a negative probe naming a tool the system prompt has since started teaching, and a `caplog`
+   assertion over every logger in the process rather than the one under test. **None of the nine
+   was wrong about what it claimed** — every one was wrong about how it checked it, which is why
+   they all failed on a change to something else.
 
 **Removed on 2026-09-08 because they were no longer true** — recorded so nobody reinstates them
 from memory: `SECRET_KEY="changeme"` boots (it is refused at startup, `config.py:450`); the rate

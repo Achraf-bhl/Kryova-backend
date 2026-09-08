@@ -357,7 +357,15 @@ app.add_middleware(
         "X-Requested-With",
         REQUEST_ID_HEADER,
     ],
-    expose_headers=[REQUEST_ID_HEADER],
+    # A header a browser cannot read is a header that does not exist. The two
+    # render headers were being set by `api/routes/kernel.py` for nobody: the
+    # frontend is a different origin, so without naming them here the fetch that
+    # asks for a picture cannot tell an empty frame from a drawn one, and the
+    # only alternative left to it is guessing from the compressed byte count.
+    # `ETag` is exposed for the same reason — it is the render's own digest, and
+    # a client that can read it can tell "the part has not moved" from "the part
+    # is unchanged in this view" without another request.
+    expose_headers=[REQUEST_ID_HEADER, "ETag", "X-Kryova-View", "X-Kryova-Blank"],
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)

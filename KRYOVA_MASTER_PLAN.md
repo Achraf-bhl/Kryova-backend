@@ -714,6 +714,8 @@ agrees between OCCT and CATIA to declared tolerance.
 
 ##### Phase E4 — Visual verification: the model looks at the model #####
 
+> ✅ PHASE COMPLETE (2026-09-08) — all four tasks done and tested.
+
 **~4 engineer-months.**
 
 1. **Deterministic offscreen rendering** from canonical views (six orthographic, two isometric,
@@ -793,6 +795,40 @@ agrees between OCCT and CATIA to declared tolerance.
 
 4. **Renders flow into the conversation** — the user sees what the agent sees (P5 owns the
    surface).
+   > DONE (2026-09-08) — both halves. Tested by: `Kryova-frontend`
+   > `src/lib/kernel-render.test.ts` (14), `src/components/kernel-part-view.test.tsx` (12),
+   > `src/hooks/use-catia-status.test.ts`; backend `tests/test_kernel_routes.py`. Code:
+   > `Kryova-frontend`: `src/lib/kernel-render.ts`, `src/components/kernel-part-view.tsx`,
+   > `api.kernelRender`, `types/catia.isLocalKernel`; backend `app/main.py` CORS.
+   > **The OCCT half is not a copy of the CATIA one, and the difference is the design.** On a
+   > seat the picture arrives *inside a tool result* and belongs to the step that produced it.
+   > `GET /kernel/conversations/{id}/render` has no history — it draws the document as it stands
+   > — so the same placement would have been a lie: a picture sitting beside turn 3 would
+   > silently redraw itself into turn 9's part on the next build, and a transcript that rewrites
+   > its own evidence is worse than one with no pictures in it. It is therefore pinned to the
+   > live state, above the composer, exactly where the CATIA chip sits and for the same reason.
+   > What to show is decided from `GET /catia/status`, which the chat already polls per
+   > conversation, rather than by firing the render and reading its refusal: the endpoint's three
+   > 409s (wrong backend, evicted, nothing built) are English written for a person, and the
+   > status call carries the same three facts as data. Nothing is drawn on a CATIA deployment and
+   > nothing is drawn before a part exists; an **evicted** part is said in words, because that is
+   > a real loss the user has to know about and it is not the same fact as "nothing built yet".
+   > **Two defects found on the way, both in the open kernel's existing presence in the product.**
+   > (a) `X-Kryova-Blank` and `X-Kryova-View` were set by the render route and absent from the
+   > CORS `expose_headers`, so no browser could read them — headers set for nobody. Without them
+   > the only way to tell an empty frame from a drawn part is guessing from the compressed byte
+   > count, which is a heuristic where the server has already measured the answer. `ETag` was
+   > unexposed too, and it is the whole basis of the 304 the endpoint's docstring promises.
+   > (b) `CatiaStatusOnline` was the only `connected: true` shape the frontend modelled, and the
+   > open kernel is another one with **none** of the device fields — so `describe()` read
+   > `device_name` off it and put the literal string *"undefined is connected, running CATIA"*
+   > into the status chip's tooltip and its screen-reader text on every `GEOMETRY_BACKEND=occt`
+   > deployment: a sentence naming a machine that does not exist, on the one backend where no
+   > machine is involved. Fixed by teaching the union about the third shape, which made `tsc`
+   > refuse the same mistake in `catia-bridge-panel.tsx` as well — that one was rendering an
+   > empty version pill. 22 guards, each verified by breaking the thing it guards.
+
+   <!-- superseded 2026-09-08 -->
    > PARTIAL (2026-09-07) — a picture reaches the conversation on the CATIA path. The transcript
    > renders the picture a tool returned instead of `JSON.stringify`-ing a media id and a byte
    > count. That closes the gap the standing rule had been sitting over — the whole product is

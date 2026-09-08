@@ -146,6 +146,28 @@ class TestRendering:
         bad = auth_client.get(url, params={"section": "w"})
         assert bad.status_code == 400
 
+    def test_the_render_headers_are_readable_by_the_browser_that_asks(self) -> None:
+        """A header a cross-origin client cannot read is a header that does not exist.
+
+        `X-Kryova-Blank` is the renderer saying it drew an empty frame, which is a
+        valid PNG indistinguishable from a successful render of a part that falls
+        outside the view. The frontend is a different origin, so without these
+        names in `expose_headers` the only thing left to the one caller that wants
+        the answer is guessing from the compressed byte count — which is what it
+        was doing until this list grew. `ETag` for the same reason: it is the
+        render's own digest and the whole basis of the 304.
+        """
+        from fastapi.middleware.cors import CORSMiddleware
+
+        from app.main import app
+
+        cors = next(
+            one for one in app.user_middleware if one.cls is CORSMiddleware
+        )
+        exposed = set(cors.kwargs["expose_headers"])
+
+        assert {"ETag", "X-Kryova-View", "X-Kryova-Blank"} <= exposed
+
 
 class TestMeasuring:
     def test_the_plate_measures_to_the_closed_form_volume(

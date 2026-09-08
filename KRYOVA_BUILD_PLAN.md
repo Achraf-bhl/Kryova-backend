@@ -110,6 +110,25 @@ and what 5.3's sensitivity can then be run over.
 ---
 
 ## Done
+- **2026-09-08 — E4 closed: the open kernel's parts are finally visible in the product, and two
+  defects in its existing presence there.** The CATIA half of E4.4 shipped on 2026-09-07 (it is
+  in `origin/main`, five commits ahead of what this machine had checked out — worth knowing,
+  because the local tree looked like the work had never happened). The OCCT half is not a copy
+  of it: `GET /kernel/conversations/{id}/render` has no history, so a picture placed in the
+  transcript would redraw itself into a later part on the next build. It is pinned to the live
+  state above the composer instead, and what to show is decided from `GET /catia/status` — which
+  the chat already polls — rather than from the render endpoint's three English 409s. An evicted
+  part is said in words; a CATIA deployment and a conversation with nothing built show nothing at
+  all. Found on the way: **`X-Kryova-Blank`, `X-Kryova-View` and `ETag` were set by the route and
+  missing from CORS `expose_headers`**, so no browser could read them and the only way to tell an
+  empty frame from a drawn part was guessing from the byte count; and **`describe()` put the
+  literal string "undefined is connected, running CATIA" in the status chip** on every open-kernel
+  deployment, because `CatiaStatusOnline` was the only `connected: true` shape the frontend
+  modelled and the open kernel has none of the device fields. Teaching the union about the third
+  shape made `tsc` refuse the same mistake in `catia-bridge-panel.tsx` too. 22 guards, all
+  verified by breaking what they guard. Frontend 297 → 323 tests; E4 takes the phase-complete
+  marker.
+
 - **2026-09-08 — E3 closed: the measurement layer's *interface* pinned, and a status line that
   had been wrong twice in opposite directions.** E3.3 read "not yet wired" long after the wiring
   landed, was corrected the same morning to "covered nowhere", and that was wrong too —

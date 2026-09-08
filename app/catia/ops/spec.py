@@ -229,6 +229,29 @@ def length(description: str, *, maximum: float = limits.MAX_LENGTH_MM) -> dict[s
     }
 
 
+def bore(description: str) -> dict[str, Any]:
+    """A diameter where zero legitimately means "no bore at all".
+
+    Distinct from `length` only in admitting 0. A revolve profile is solid when
+    the bore is omitted *and* when it is given as zero -- both reach
+    `inner_diameter_mm or 0.0` and draw the same four lines against the axis --
+    so `length`'s `exclusiveMinimum` refused a spelling that was already
+    supported. Measured on the M5 bolt run, 2026-09-08: the model answered the
+    summary's "omit it for a solid rod" with `inner_diameter_mm: 0` and got
+    "must be greater than 0", a refusal that names no way forward.
+
+    Keep this narrow. Zero means something here because a bore can be absent;
+    it does not for a length, a thickness or an angle, where 0 is a degenerate
+    feature and refusing it is right.
+    """
+    return {
+        "type": "number",
+        "minimum": 0,
+        "maximum": limits.MAX_LENGTH_MM,
+        "description": f"{description} Millimetres.",
+    }
+
+
 def feature_length(description: str) -> dict[str, Any]:
     """A local dimension — radius, fillet, chamfer — on a tighter bound."""
     return length(description, maximum=limits.MAX_FEATURE_MM)

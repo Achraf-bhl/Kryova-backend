@@ -1465,6 +1465,7 @@ class CatiaCom(
                 pocket,
                 f"The pocket from {sketch} cut away from the solid, and reversing it "
                 "failed as well.",
+                profile=sketch,
             )
 
         if before and self._solid_volume() >= before:
@@ -1725,7 +1726,7 @@ class CatiaCom(
                 "child of the feature built from it, so removing the failed "
                 "feature removed the drawing as well. Draw it again -- "
                 "catia_sketch_polyline takes the whole outline in one call -- "
-                "and fix what was wrong with it before padding."
+                "and fix what was wrong with it before building from it again."
             )
             raise CatiaOperationError(
                 f"{advice} CATIA reported: {exc}. The failed feature has been "
@@ -1979,6 +1980,7 @@ class CatiaCom(
             "catia_sketch_revolve_profile, which places the profile and the axis "
             "correctly in one call -- that is the part that goes wrong by hand -- "
             "or redraw it offset from the origin, or build the shape with pads.",
+            profile=sketch,
         )
         return self._feature_result(str(shaft.Name))
 
@@ -2003,6 +2005,7 @@ class CatiaCom(
             groove,
             f"CATIA could not cut the groove from {sketch}. The profile must overlap "
             "solid material and stay on one side of the sketch's vertical axis.",
+            profile=sketch,
         )
         if self._solid_volume() >= before:
             raise CatiaOperationError(

@@ -27,6 +27,7 @@ from app.catia.ops.spec import (
     Tier,
     Workbench,
     angle,
+    bore,
     count,
     feature_length,
     flag,
@@ -692,7 +693,10 @@ PROFILE_OPERATIONS: tuple[Operation, ...] = (
             ),
             required("outer_diameter_mm", length("Outside diameter of the finished part.")),
             required("length_mm", length("Length along the revolution axis.")),
-            optional("inner_diameter_mm", length("Bore diameter, for a tube. Omit for a solid rod.")),
+            optional(
+                "inner_diameter_mm",
+                bore("Bore diameter, for a tube. Omit it, or give 0, for a solid rod."),
+            ),
         ),
     ),
     Operation(

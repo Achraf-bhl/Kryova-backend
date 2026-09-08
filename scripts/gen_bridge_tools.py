@@ -55,8 +55,9 @@ matching the server, and the next regeneration silently discards the edit.
 
 Schema shapes here use only the keywords `validation.validate` implements —
 type, properties, required, additionalProperties, enum, minimum, maximum,
-exclusiveMinimum, minLength, maxLength, items, minItems, maxItems. A keyword
-outside that set is not enforced, so the generator refuses to emit one.
+exclusiveMinimum, minLength, maxLength, items, minItems, maxItems, and the one
+non-JSON-Schema keyword `nonZero`. A keyword outside that set is not enforced,
+so the generator refuses to emit one.
 """
 
 from typing import Any
@@ -76,6 +77,14 @@ _SUPPORTED_KEYWORDS = frozenset(
         "type", "properties", "required", "additionalProperties", "enum",
         "minimum", "maximum", "exclusiveMinimum", "minLength", "maxLength",
         "items", "minItems", "maxItems",
+        # Not JSON Schema. `direction3` carries it and BOTH validators
+        # implement it (`app/catia/validation.py`, `catia_bridge/validation.py`),
+        # so it is enforced and belongs here. It was added to the validators and
+        # not to this list, which is the half of the instruction below that is
+        # easy to miss -- and the generator then refused to run at all, freezing
+        # the daemon's table and leaving
+        # `tests/test_bridge_table_is_generated.py` red until 2026-09-08.
+        "nonZero",
         # Prose for the model. Carried through because the daemon's refusal
         # messages read better with it, and ignored by the validator.
         "description",

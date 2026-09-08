@@ -134,10 +134,45 @@ class TestASuccessfulUpdate:
 
 
 class TestTheOperationsThatConsumeAProfilePassItIn:
-    @pytest.mark.parametrize("operation", ["pad", "pocket"])
+    @pytest.mark.parametrize("operation", ["pad", "pocket", "shaft", "groove"])
     def test_the_profile_reaches_the_refusal(self, operation: str) -> None:
-        """A report the call site does not pass is a report nobody sees."""
+        """A report the call site does not pass is a report nobody sees.
+
+        `shaft` and `groove` were missing from this list until 2026-09-08, and
+        the list being the guard is why nobody noticed: both revolve a sketch
+        and CATIA absorbs it exactly as a pad does. Measured on the M5 bolt
+        run -- a groove was refused with "the profile must overlap solid
+        material", the agent went to redraw that profile, and the sketch had
+        been discarded with the failed feature. It had one round left.
+        """
         import inspect
 
         source = inspect.getsource(getattr(CatiaCom, operation))
         assert "profile=sketch" in source
+
+    def test_every_operation_that_names_a_sketch_is_listed_here(self) -> None:
+        """The list above is hand-written, so it is the thing that goes stale.
+
+        A new operation taking `sketch:` and calling `_update_or_discard` is
+        the exact shape of the defect this file records; catching it needs the
+        list checked against the class rather than trusted.
+        """
+        import inspect
+
+        covered = {"pad", "pocket", "shaft", "groove"}
+        consumes_a_profile = set()
+        for name, member in vars(CatiaCom).items():
+            if not inspect.isfunction(member):
+                continue
+            try:
+                signature = inspect.signature(member)
+            except (TypeError, ValueError):  # pragma: no cover - builtins
+                continue
+            if "sketch" not in signature.parameters:
+                continue
+            if "_update_or_discard(" in inspect.getsource(member):
+                consumes_a_profile.add(name)
+        assert consumes_a_profile <= covered, (
+            f"{sorted(consumes_a_profile - covered)} build from a named sketch and "
+            "discard it on failure, but are not checked for profile=sketch"
+        )

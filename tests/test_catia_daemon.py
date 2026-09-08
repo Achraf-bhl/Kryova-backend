@@ -321,6 +321,42 @@ def test_a_revolve_profile_sweeps_a_rod_of_the_stated_diameter(session):
     assert data["volume_mm3"] == pytest.approx(expected, rel=1e-6)
 
 
+def test_an_explicit_zero_bore_is_a_solid_rod(session):
+    """`inner_diameter_mm: 0` and omitting it are the same rod, so both are taken.
+
+    Measured on the M5 bolt run, 2026-09-08. The tool's own summary says "omit
+    it for a solid rod", the model said the same thing the other way round --
+    a bore of zero -- and the schema refused it with "must be greater than 0",
+    which does not mention omitting anything. The two spellings reach identical
+    geometry (`inner_diameter_mm or 0.0`), so refusing one of them buys nothing
+    and costs a round at the point where the agent is already reaching for a
+    revolve because a shaft has just failed.
+    """
+    assert call(session, "catia_new_part", {"name": "Zero bore"})["ok"]
+    profile = call(
+        session,
+        "catia_sketch_revolve_profile",
+        {"plane": "ZX", "outer_diameter_mm": 15, "inner_diameter_mm": 0, "length_mm": 60},
+    )
+    assert profile["ok"] is True, profile.get("error")
+
+    data = call(session, "catia_shaft", {"sketch": profile["data"]["sketch"]})["data"]
+    expected = math.pi * 7.5**2 * 60
+    assert data["volume_mm3"] == pytest.approx(expected, rel=1e-6)
+
+
+def test_a_negative_bore_is_still_refused(session):
+    """Zero is meaningful; below zero is not, and must not be let through with it."""
+    assert call(session, "catia_new_part", {"name": "Negative bore"})["ok"]
+    result = call(
+        session,
+        "catia_sketch_revolve_profile",
+        {"plane": "ZX", "outer_diameter_mm": 15, "inner_diameter_mm": -2, "length_mm": 60},
+    )
+    assert result["ok"] is False
+    assert "inner_diameter_mm" in result["error"]
+
+
 def test_a_revolve_profile_with_a_bore_sweeps_a_tube(session):
     assert call(session, "catia_new_part", {"name": "Tube"})["ok"]
     profile = call(

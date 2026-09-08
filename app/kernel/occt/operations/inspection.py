@@ -479,8 +479,11 @@ def analysis_part(
     return payload.as_dict()
 
 
-#: What `analysis_part` implements, checked against the registry's own enum by the tests
-#: so a kind added to the vocabulary cannot be silently left unimplemented here.
+#: What `analysis_part` implements, checked against the registry's own enum by
+#: `tests/test_measurement_elements.py::test_every_analysis_kind_the_registry_offers_is_implemented`
+#: so a kind added to the vocabulary cannot be silently left unimplemented here. That
+#: check is named rather than merely asserted to exist because this comment claimed it
+#: for three days before anybody wrote it.
 _SUPPORTED_KINDS: Final[frozenset[str]] = frozenset(
     {"thickness", "draft", "curvature", "validity"}
 )

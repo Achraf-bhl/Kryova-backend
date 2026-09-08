@@ -110,6 +110,24 @@ and what 5.3's sensitivity can then be run over.
 ---
 
 ## Done
+- **2026-09-08 — E3 closed: the measurement layer's *interface* pinned, and a status line that
+  had been wrong twice in opposite directions.** E3.3 read "not yet wired" long after the wiring
+  landed, was corrected the same morning to "covered nowhere", and that was wrong too —
+  `tests/test_measurement_elements.py` had carried a `TestMeasureBetween` class since `eb4d89a`
+  on 2026-09-05. Both errors came from reasoning about the code instead of opening the tests.
+  The genuine gap was narrower and is closed: 11 guards over `catia_measure_between` as an
+  interface rather than the geometry under it — `kind` picks the headline and does not gate the
+  computation, every word the registry advertises is one the backend takes, the kind word survives
+  the case and spacing a model gives it, the payload echoes what each reference resolved to,
+  swapping the operands swaps the closest pair, a plane refuses an overlap volume from either side
+  of the pair, a refusal names the tool that refused, and all four numbers report `MEASURED` with
+  the method named. All 11 verified by breaking the guarded thing and watching the named test fail.
+  It also caught a **false comment**: `_SUPPORTED_KINDS` claimed to be cross-checked against the
+  registry's enum by a test that did not exist, so an analysis kind added to
+  `catia_analysis_part` would have been refused at runtime as undocumented. 33 → 44 tests; E3 now
+  carries the phase-complete marker, with the cross-backend agreement half of its proof left
+  explicitly to a seat, the same shape as E1 task 7.
+
 - **2026-09-08 — the plan restructured, the Linux box moved to local Postgres, and RLS shown to
   enforce for the first time.**
 

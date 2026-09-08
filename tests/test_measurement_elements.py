@@ -331,6 +331,163 @@ class TestMeasureBetween:
         assert "closest_points_mm" not in measured
 
 
+class TestTheWiringOfMeasureBetween:
+    """The tool as an *interface*, rather than the geometry underneath it.
+
+    `measure_clearance` and `plane_separation` were covered from the day they were
+    written; what was not covered is everything `measure_between` does around them —
+    which `kind` words it accepts, which shape it echoes the question back in, which
+    operand ends up first, and what basis it claims for the numbers. Every one of those
+    is a way for a correct measurement to be reported wrongly.
+    """
+
+    def test_closest_points_selects_the_headline_and_does_not_gate_the_work(self, part):
+        """`kind` picks which number is the answer; it must not decide which numbers get
+        computed. One extremum search yields distance, overlap and the points, so asking
+        for the points and getting no distance would be a second computation pretending
+        to be a filter."""
+        _, run = part
+        headline = run(
+            "catia_measure_between", elements=["overhead", "slab"], kind="closest_points"
+        )
+        default = run("catia_measure_between", elements=["overhead", "slab"])
+
+        assert headline["measurement"] == "closest_points"
+        assert default["measurement"] == "minimum_distance"
+        assert headline["closest_points_mm"] == default["closest_points_mm"]
+        assert headline["minimum_clearance_mm"] == default["minimum_clearance_mm"]
+
+    def test_every_kind_the_registry_advertises_is_one_this_backend_takes(self, part):
+        """The registry is what the agent reads. A word offered there and missing from
+        `_BETWEEN_KINDS` is refused with "not a measurement this backend takes" — a
+        refusal for a documented option, which reads to the agent as a broken part
+        rather than a broken vocabulary."""
+        from app.catia.ops import OPERATIONS
+        from app.kernel.occt.operations.inspection import _BETWEEN_KINDS
+
+        operation = next(
+            one for one in OPERATIONS if one.name == "catia_measure_between"
+        )
+        advertised = set(operation.json_schema()["properties"]["kind"]["enum"])
+
+        assert advertised <= _BETWEEN_KINDS
+        _, run = part
+        for kind in sorted(advertised):
+            measured = run(
+                "catia_measure_between", elements=["slab#top", "slab#bottom"], kind=kind
+            )
+            assert measured["measurement"] == kind
+
+    def test_the_kind_word_survives_case_and_surrounding_space(self, part):
+        """It arrives from a language model, not from a form."""
+        _, run = part
+        measured = run(
+            "catia_measure_between", elements=["overhead", "slab"], kind="  Minimum_Distance "
+        )
+        assert measured["measurement"] == "minimum_distance"
+        assert measured["minimum_clearance_mm"] == pytest.approx(40.0, rel=1e-9)
+
+    def test_the_payload_says_which_two_things_it_resolved(self, part):
+        """A reference is a *name*, and `slab#top` is one face while `slab` is a solid.
+        Echoing what each resolved to is what makes an unexpected number traceable
+        instead of mysterious — the same reason `catia_measure_item` reports its
+        `measured_kind`."""
+        _, run = part
+        measured = run("catia_measure_between", elements=["slab#top", "boss"])
+
+        first, second = measured["elements"]
+        assert first["reference"] == "slab#top"
+        assert first["kind"] == "faces"
+        assert first["entity_count"] == 1
+        assert second["reference"] == "boss"
+        assert second["kind"] == "body"
+
+    def test_swapping_the_operands_swaps_the_closest_points(self, part):
+        """The distance is symmetric and the pair is not: the first point lies on the
+        first element. A caller annotating a drawing needs to know which is which, and
+        a report that returned them in the kernel's own order would be right half the
+        time and unfalsifiable the rest."""
+        _, run = part
+        forward = run("catia_measure_between", elements=["overhead", "slab"])
+        reversed_ = run("catia_measure_between", elements=["slab", "overhead"])
+
+        assert forward["minimum_clearance_mm"] == pytest.approx(
+            reversed_["minimum_clearance_mm"], rel=1e-12
+        )
+        assert forward["closest_points_mm"] == list(
+            reversed(reversed_["closest_points_mm"])
+        )
+        assert forward["closest_points_mm"][0] == [0.0, 0.0, 60.0]
+
+    def test_a_plane_refuses_the_overlap_whichever_side_of_the_pair_it_is_on(self, part):
+        """`slab_top` against `slab` was already covered; `slab` against `slab_top` goes
+        through the same test read the other way round. Narrowing it to the first operand
+        would report `interference_volume_mm3: 0.0` and `interferes: False` for this
+        pair — which reads as "they do not clash", the exact claim the unavailable
+        reason exists to avoid making."""
+        from app.kernel.interrogation import INTERFERENCE_VOLUME_MM3
+
+        _, run = part
+        measured = run("catia_measure_between", elements=["slab", "slab_top"])
+
+        assert INTERFERENCE_VOLUME_MM3 not in measured
+        assert "interferes" not in measured
+        assert (
+            provenance.basis_of(measured, INTERFERENCE_VOLUME_MM3)
+            is provenance.Basis.UNAVAILABLE
+        )
+
+    def test_a_refusal_names_the_tool_that_refused(self, part):
+        """The agent sees the message and nothing else. "was given an empty element
+        reference" with no tool in it names no call to go and fix."""
+        _, run = part
+        with pytest.raises(GeometryError) as caught:
+            run("catia_measure_between", elements=["slab", ""])
+
+        assert "catia_measure_between" in str(caught.value)
+
+
+class TestWhatTheseNumbersClaimToBe:
+    """Provenance on the pair measurements, read back through the tool.
+
+    Clearance *sounds* like something that would be approximated and here it is not, so
+    the claim is worth pinning: a distance that quietly downgraded to `APPROXIMATED`
+    would still be the right number and would stop an assertion trusting it, and one
+    that wrongly claimed `MEASURED` would let a sampled answer decide a fit.
+    """
+
+    def test_the_clearance_pair_is_measured_and_says_by_what(self, part):
+        _, run = part
+        measured = run("catia_measure_between", elements=["overhead", "slab"])
+
+        for path in ("minimum_clearance_mm", "interference_volume_mm3"):
+            assert provenance.basis_of(measured, path) is provenance.Basis.MEASURED
+        assert "BRepExtrema" in provenance.method_for(measured, "minimum_clearance_mm")
+        assert "boolean" in provenance.method_for(measured, "interference_volume_mm3")
+
+    def test_an_angle_is_measured_from_exact_directions(self, part):
+        _, run = part
+        measured = run(
+            "catia_measure_between", elements=["slab#top", "slab#bottom"], kind="angle"
+        )
+
+        assert provenance.basis_of(measured, "angle_deg") is provenance.Basis.MEASURED
+        assert "directions" in provenance.method_for(measured, "angle_deg")
+
+    def test_the_analytic_plane_pair_is_measured_too(self, part):
+        """A different code path — `plane_separation`, not `measure_clearance` — and the
+        one where a missing basis is easiest to ship, because the number is arithmetic
+        rather than a kernel call."""
+        _, run = part
+        run("catia_plane_offset", name="higher", reference="slab_top", distance_mm=15.0)
+        measured = run("catia_measure_between", elements=["slab_top", "higher"])
+
+        assert (
+            provenance.basis_of(measured, "minimum_clearance_mm")
+            is provenance.Basis.MEASURED
+        )
+
+
 class TestAngle:
     def test_parallel_faces_are_zero_degrees_apart(self, part):
         """The slab's top and bottom normals are antiparallel. Reporting 180° would be
@@ -450,3 +607,24 @@ def test_both_operations_are_wired_into_the_backend():
     assert "catia_measure_between" in HANDLERS
     assert "catia_measure_item" in HANDLERS
     assert unknown_handler_names() == ()
+
+
+def test_every_analysis_kind_the_registry_offers_is_implemented():
+    """`_SUPPORTED_KINDS` in the same module said of itself that it was "checked against
+    the registry's own enum by the tests so a kind added to the vocabulary cannot be
+    silently left unimplemented here". No such test existed. The comment was written
+    before the check and outlived its absence — which is worse than no comment, because
+    the next person to widen the enum reads it and believes they are covered.
+
+    It lives beside the `catia_measure_between` one because it is the same claim about
+    the same module: a word the registry advertises and this backend does not take is
+    refused as "not an analysis this backend runs", and an agent reading that refusal
+    concludes the part is wrong rather than the vocabulary.
+    """
+    from app.catia.ops import OPERATIONS
+    from app.kernel.occt.operations.inspection import _SUPPORTED_KINDS
+
+    operation = next(one for one in OPERATIONS if one.name == "catia_analysis_part")
+    advertised = set(operation.json_schema()["properties"]["kind"]["enum"])
+
+    assert advertised <= _SUPPORTED_KINDS

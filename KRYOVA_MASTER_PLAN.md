@@ -645,6 +645,10 @@ model.
 
 ##### Phase E3 — Geometric interrogation and the measurement layer #####
 
+> ✅ PHASE COMPLETE (2026-09-08) — every task below is done and tested, with one residual
+> named in the phase proof that needs hardware this machine does not have, the same shape
+> as E1 task 7's.
+
 **~3 engineer-months.**
 
 1. **Bulk measures.** Mass, volume, centre of mass, full inertia tensor, bounding boxes (AABB and
@@ -660,16 +664,34 @@ model.
    > Tested by: `tests/test_interrogation.py`. Code: `app/kernel/occt/interrogate/` (8 modules).
 
 3. **Clearance, interference and minimum-distance queries between bodies.**
-   > PARTIAL (status corrected 2026-09-08). It **is** wired now — E2 task 2 shipped the element
-   > references it was waiting on, and `occt/operations/inspection.py:151` calls
-   > `measure_clearance` from `catia_measure_between`. The previous status ("not yet wired; that
-   > needs E2 task 2") was stale and would have sent someone to build what exists.
-   > **What is actually left is a test through the tool.** `measure_clearance` is covered
-   > (`tests/test_interrogation.py`, contact and overlap cases); `catia_measure_between` itself is
-   > covered nowhere, so the wiring — the element resolution, the argument shape, the reported
-   > provenance — is unpinned. That is the smallest remaining task in Era II and it closes the
-   > phase. Code: `app/kernel/occt/operations/inspection.py`, `occt/elements.py`,
+   > DONE (2026-09-08). Tested by: `tests/test_measurement_elements.py` (44 tests, offline).
+   > Code: `app/kernel/occt/operations/inspection.py`, `occt/elements.py`,
    > `occt/interrogate/proximity.py`.
+   > **This status has now been wrong twice in opposite directions, which is worth recording
+   > because both errors were made by reasoning about the code instead of opening the tests.**
+   > It first read "not yet wired; that needs E2 task 2" long after E2 task 2 had shipped the
+   > element references. The correction on 2026-09-08 fixed that and introduced a second false
+   > claim — that `catia_measure_between` was "covered nowhere" — when `tests/test_measurement_elements.py`
+   > had carried a whole `TestMeasureBetween` class since 2026-09-05 (commit `eb4d89a`), including
+   > the contact, overlap, plane-pair and angle cases. **A status line asserting the absence of a
+   > test must be checked by looking for the test.**
+   > What was genuinely unpinned was narrower and is now closed: eleven guards over the tool's
+   > *interface* rather than the geometry under it — that `kind` picks the headline and does not
+   > gate the computation (`closest_points` returned the distance only by accident of ordering),
+   > that every word the registry advertises is one the backend takes, that the kind word survives
+   > the case and spacing a model gives it, that the payload echoes what each reference resolved
+   > to, that swapping the operands swaps the closest pair (the distance is symmetric and the pair
+   > is not), that a plane refuses an overlap volume from *either* side of the pair rather than
+   > only the first, that a refusal names the tool that refused, and that all four numbers report
+   > `MEASURED` with the method named — clearance sounds like something that would be sampled and
+   > here it is not, so the claim is load-bearing. Each one was verified by breaking the thing it
+   > guards and watching the named test fail; all eleven did.
+   > **It also found a false comment in the same module.** `_SUPPORTED_KINDS` said of itself that
+   > it was "checked against the registry's own enum by the tests so a kind added to the vocabulary
+   > cannot be silently left unimplemented here". No such test existed, so an analysis kind added
+   > to `catia_analysis_part`'s enum would have been refused at runtime as "not an analysis this
+   > backend runs" — a refusal for a documented option, which an agent reads as a broken part
+   > rather than a broken vocabulary. The check now exists and the comment names it.
 
 4. **The measurement payload contract.** A stable, versioned vocabulary of numbers that
    `assertions.py` reads by path (`mass_kg`, `bounding_box_mm.size[2]`, …), backend-neutral,
@@ -685,8 +707,10 @@ model.
 
 **Phase proof:** every assertion in the ladder through M4 is measurable, and each measurement
 agrees between OCCT and CATIA to declared tolerance.
-> PARTIAL — the OCCT half is green and reachable via `catia_analysis_part`. The cross-backend
-> agreement half needs a Windows seat, same as E1 task 7.
+> PARTIAL (2026-09-08) — the OCCT half is green and reachable via `catia_analysis_part`,
+> `catia_measure`, `catia_measure_item` and `catia_measure_between`. The cross-backend agreement
+> half needs a Windows seat, same as E1 task 7, and is claimed at no gate before then.
+> Tested by: `tests/test_interrogation.py`, `tests/test_measurement_elements.py`.
 
 ##### Phase E4 — Visual verification: the model looks at the model #####
 

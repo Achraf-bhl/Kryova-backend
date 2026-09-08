@@ -110,6 +110,28 @@ and what 5.3's sensitivity can then be run over.
 ---
 
 ## Done
+- **2026-09-08 — CI is green for the first time in the history this repo records.** Every run
+  since at least 2026-09-02 had failed, and reading them turned up three failures that *only*
+  happen in CI, which is why a green local suite never found them. (a) **The `database` job had
+  never actually run** — 684 errors, all `ModuleNotFoundError: psycopg2`, so the half of the suite
+  the whole three-job split exists to protect was erroring at fixture setup on every push. It
+  passes now (9m46s). (b) **`gen_bridge_tools.py --check` reported a false "stale" on every run**:
+  `_ruff()` searched only `venv/bin`, CI pip-installs into the runner's Python and has no venv, so
+  the generator silently emitted *unformatted* source and compared it against the formatted
+  checked-in file. It now also looks beside `sys.executable` — the same rule stated properly, "the
+  ruff of the environment this generator is running in" — and `--check` **refuses** rather than
+  comparing unformatted output. Verified by hiding ruff from both paths: old = exit 1 with a false
+  "stale", new = exit 2 with the reason. (c) **`search_documentation` is registered only when the
+  BM25 index exists**, and `data/bm25/index/` is derived and untracked, so two vocabulary tests
+  passed locally and failed in CI forever — reporting a shipped capability as dead weight. They
+  now read a `registrable` set (live registrations ∪ `Tool(name=…)` literals by AST) instead of
+  asking a `ToolBox` built on this machine. And **mypy is fully clean** — the three `ezdxf`
+  `import-not-found` lines CLAUDE.md told people to skim past were failing the mypy gate on every
+  run; declared optional-and-untyped in `pyproject.toml`, so `mypy app/` now says *Success: no
+  issues found in 343 source files* with no exceptions. (The `.mypy_cache` hid the fix at first,
+  which is worth knowing.) DXF export still cannot run — that half is a product decision nobody
+  has taken, and the override does not pretend otherwise.
+
 - **2026-09-08 — RLS enforces in CI, and the twelve red tests on `main` are green.** The
   `postgres:17` service container makes `POSTGRES_USER` a **superuser**, which outranks both
   `ENABLE` and `FORCE ROW LEVEL SECURITY` — so for a year the eleven tenant tables had their

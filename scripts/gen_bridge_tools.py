@@ -163,7 +163,7 @@ def render() -> str:
 
 
 def _ruff() -> str | None:
-    """The project's own ruff, on either venv layout.
+    """The project's own ruff, wherever this interpreter's environment puts it.
 
     A venv puts console scripts in `venv/bin` on POSIX and `venv\\Scripts` on
     Windows, with an `.exe` suffix there and none here. This looked only in the
@@ -174,12 +174,27 @@ def _ruff() -> str | None:
     ~7,000 lines in `repr()` style: exactly the diff noise the formatting step
     exists to prevent, and then stale on Linux instead.
 
+    **The directory beside `sys.executable` is searched too, and that is not a
+    widening of the rule but the same rule stated properly.** The rule is "the
+    ruff of the environment this generator is running in", and a venv is only
+    one way to have one: CI pip-installs `requirements-dev.txt` into the
+    runner's Python and has no `venv/` at all, so the venv-only search found
+    nothing there, `_formatted` returned raw source, and `--check` called the
+    checked-in file stale on every CI run. That is the identical defect this
+    docstring already records for Windows, reached from a third direction, and
+    it is why `--check` now refuses rather than comparing unformatted output.
+
     `shutil.which` is what applies PATHEXT, so `ruff.exe` is found without the
-    suffix being spelled out here. Only the venv is searched: a ruff from
-    somewhere else could be a different version, and a generated file whose
-    formatting depends on which machine ran it is the same bug again.
+    suffix being spelled out here. A ruff from anywhere *else* on PATH is still
+    not used: it could be a different version, and a generated file whose
+    formatting depends on which machine ran it is the original bug again.
     """
-    for directory in (REPO_ROOT / "venv" / "bin", REPO_ROOT / "venv" / "Scripts"):
+    candidates = (
+        REPO_ROOT / "venv" / "bin",
+        REPO_ROOT / "venv" / "Scripts",
+        Path(sys.executable).parent,
+    )
+    for directory in candidates:
         found = shutil.which("ruff", path=str(directory))
         if found:
             return found
@@ -219,6 +234,22 @@ def main() -> int:
         help="Exit non-zero if the checked-in file differs from what would be generated.",
     )
     args = parser.parse_args()
+
+    # `--check` compares formatted output against a formatted file, so without a
+    # formatter it is not a weaker check -- it is a **wrong** one, and it fails
+    # in the direction that reads as a real defect. That is exactly what it did
+    # on every CI run: no venv, no ruff, raw source compared against the
+    # correctly formatted checked-in file, reported as "generated_tools.py is
+    # stale". Refuse instead, and say which of the two things is missing.
+    if args.check and _ruff() is None:
+        print(
+            "Cannot check: ruff was not found beside this interpreter or in venv/.\n"
+            "Without it the generated source is unformatted, and comparing that "
+            "against the formatted file reports a stale table that is not stale.\n"
+            "Install the dev requirements into the environment running this script.",
+            file=sys.stderr,
+        )
+        return 2
 
     generated = _formatted(render())
 

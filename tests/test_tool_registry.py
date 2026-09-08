@@ -36,14 +36,62 @@ TERMINATORS = (ast.Return, ast.Raise, ast.Continue, ast.Break)
 
 @pytest.fixture(scope="module")
 def registered() -> set[str]:
-    """Every tool name a `ToolBox` actually answers to.
+    """Every tool name a `ToolBox` actually answers to, on this machine.
 
     `db` and `user` are never read while the vocabulary is being built -- the
     handlers close over `self` and only dereference them when called -- so this
     needs no database and no fixture that opens one.
+
+    **Not the same set as `registrable()`**, and the difference is deliberate
+    rather than incidental -- see that fixture.
     """
     box = ToolBox(db=cast(Any, None), user=cast(Any, None))
     return set(box.labels())
+
+
+@pytest.fixture(scope="module")
+def registrable(registered: set[str]) -> set[str]:
+    """Every tool name this codebase can register, on some machine.
+
+    `search_documentation` is offered **only when the BM25 index exists**, which
+    is a deliberate rule and not an accident of packaging: `app/ai/tools.py`
+    returns no knowledge tools when the index is unavailable, because a tool
+    that is offered and answers nothing is worse than an absent one -- the model
+    calls it, reads an empty result, and tells the user their documentation is
+    empty. The frozen system prompts are gated on the same condition for the
+    same reason.
+
+    So "does this label name a real tool?" cannot be answered by asking a
+    `ToolBox` built here. `data/bm25/index/` is derived and untracked, so it
+    exists on a development machine and never in CI -- which made
+    `test_every_label_names_a_real_tool` and its summary sibling **pass locally
+    and fail in CI, permanently**, reporting a shipped capability as dead
+    weight. The label is not dead: it is what stops `search_documentation`
+    rendering as raw snake_case in the step list on every machine that *does*
+    have the index.
+
+    So this is what `registered` holds **plus** every `Tool(name="...")` literal
+    the source constructs, read by AST -- the same technique `_invoked_names`
+    already uses in this file, and one that does not vary by what happens to be
+    built on disk. The union rather than the scan alone, because the ~200 CATIA
+    tools are generated from `CATIA_TOOL_SPECS` and appear as no literal
+    anywhere: a scan by itself reports `catia_status` as unregistrable, which is
+    the same false negative in a new place.
+    """
+    tools_source = (APP / "ai" / "tools.py").read_text(encoding="utf-8")
+    literals: set[str] = set()
+    for node in ast.walk(ast.parse(tools_source)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Name) and func.id == "Tool"):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
+                if isinstance(keyword.value.value, str):
+                    literals.add(keyword.value.value)
+    assert literals, "no Tool(name=...) literals found; the scan is looking at the wrong shape"
+    return registered | literals
 
 
 def _source_files() -> list[Path]:
@@ -161,16 +209,35 @@ class TestAgentVocabularyMatchesTheToolbox:
                         names.add(comparator.value)
         return names
 
-    def test_every_label_names_a_real_tool(self, registered: set[str]) -> None:
-        stale = sorted(set(agent.TOOL_LABELS) - registered)
+    def test_every_label_names_a_real_tool(self, registrable: set[str]) -> None:
+        stale = sorted(set(agent.TOOL_LABELS) - registrable)
         assert not stale, (
             f"TOOL_LABELS entries for tools that do not exist: {stale}. "
             "They label a capability the agent cannot offer."
         )
 
-    def test_every_summary_branch_names_a_real_tool(self, registered: set[str]) -> None:
-        stale = sorted(self._summarised_names() - registered)
+    def test_every_summary_branch_names_a_real_tool(self, registrable: set[str]) -> None:
+        stale = sorted(self._summarised_names() - registrable)
         assert not stale, f"summarise_step has branches for tools that do not exist: {stale}."
+
+    def test_a_conditionally_offered_tool_is_still_labelled(
+        self, registrable: set[str]
+    ) -> None:
+        """The reason the two tests above read `registrable` and not `registered`.
+
+        `search_documentation` exists only where the BM25 index has been built,
+        and `data/bm25/index/` is derived and untracked — so it is present on a
+        development machine and absent in CI. Asking a live `ToolBox` therefore
+        gives a different answer in the two places, and the label that keeps the
+        step list readable where the tool *does* exist was being reported as a
+        capability the agent cannot offer.
+
+        Pinned rather than left implicit, because the natural "fix" for a red CI
+        is to delete the label — which would silently degrade every machine that
+        has the manuals indexed to a raw `search_documentation` in the UI.
+        """
+        assert "search_documentation" in registrable
+        assert "search_documentation" in agent.TOOL_LABELS
 
     def test_no_registered_tool_renders_as_raw_snake_case(self, registered: set[str]) -> None:
         # `tool_label` falls back to replacing underscores with spaces, which is

@@ -149,6 +149,10 @@ rebuilt the environment for nothing.
 
 **Both ruff and mypy are clean, and there is no list of errors to expect.** A tolerated error is
 one nobody reads, so the next real one hides behind it — if either prints anything, it is yours.
+`mypy app/` says *Success: no issues found in 343 source files*, with no exceptions, as of
+2026-09-08. **Clear `.mypy_cache/` before believing a stale answer**: adding an override to
+`pyproject.toml` did not take effect until the cache was removed, which looked exactly like the
+override not working.
 
 **Setup and update are one script**, `scripts/setup.sh` (bash) and `scripts/setup.ps1`
 (PowerShell — **the product ships on Windows**, so that one is the path that matters). Every step
@@ -751,11 +755,13 @@ entry before acting on it, and delete it the moment it stops being true.**
    `api/rate_limit.py`; with `InMemoryBackend` selected, multiple workers each enforce their own
    budget. Check which backend is configured before reasoning about a limit.
 6. **`ezdxf` is imported by `manufacture/dxf.py` and `documents/readers.py` and is declared in no
-   requirements file** (found 2026-09-08). Both guard the import and degrade, so DXF export and
-   DXF attachment reading simply never work rather than erroring loudly — and **`mypy app/` prints
-   three `import-not-found` errors because of it**, which breaks the "if mypy prints anything, it
-   is yours" rule this file depends on. Either declare it (with a `[[tool.mypy.overrides]]` entry)
-   or make the fallback explicit; do not learn to skim past those three lines.
+   requirements file** (found 2026-09-08). Both guard the import and degrade, so **DXF export and
+   DXF attachment reading can never run** — that half is still true and is a product decision
+   nobody has taken. The mypy half is fixed: the three `import-not-found` errors were **failing
+   the mypy gate in CI on every run**, and `pyproject.toml` now declares the module optional and
+   untyped, so `mypy app/` reports *Success: no issues found* and the "if mypy prints anything, it
+   is yours" rule is literally true again. Declaring it says the import is optional; it does not
+   decide whether DXF should be a supported feature.
 7. ~~**The suite has pre-existing failures on `main` as of 2026-09-08**~~ — **fixed 2026-09-08.**
    All twelve are green and the suite is 6,451 passing / 0 failing. Kept as a record of what they
    turned out to be, because the split is the useful part: **one was a real defect** (the

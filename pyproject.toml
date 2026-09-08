@@ -36,6 +36,23 @@ module = [
   # and falls through when it is missing.
   "pdfminer",
   "pdfminer.*",
+  # `ezdxf` backs DXF export (app/manufacture/dxf.py) and DXF attachment
+  # reading (app/documents/readers.py). Both guard the import and degrade, so
+  # the feature is simply unavailable rather than broken when it is missing --
+  # which is why it has never been in a requirements file.
+  #
+  # It is declared here because the three `import-not-found` lines it produced
+  # were **failing the mypy gate in CI on every run**, and were documented in
+  # CLAUDE.md as errors to skim past. A tolerated error is one nobody reads, so
+  # the next real one hides behind it; that is the whole reason this project's
+  # rule is "if mypy prints anything, it is yours".
+  #
+  # This says the import is optional and untyped. It does **not** decide whether
+  # DXF should be a supported feature: today neither path can ever run, and
+  # making them run means adding a real dependency, which is a decision for the
+  # plan and not for a lint config.
+  "ezdxf",
+  "ezdxf.*",
   # pyLife (E8, fatigue) and OpenMDAO (E10, optimisation) are the federated
   # libraries Decision 2 requires rather than hand-written solvers. Neither
   # ships a py.typed marker, and pandas comes in through pyLife's own API. They

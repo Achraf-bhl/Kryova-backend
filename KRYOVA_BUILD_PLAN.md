@@ -110,6 +110,80 @@ and what 5.3's sensitivity can then be run over.
 ---
 
 ## Done
+- **2026-09-08 — the plan restructured, the Linux box moved to local Postgres, and RLS shown to
+  enforce for the first time.**
+
+  **`KRYOVA_MASTER_PLAN.md` restructured** (2,076 lines, no tables at all): 29 phases as
+  `##### Phase E1 #####` … `##### Phase P10 #####`, each a numbered task list where every task
+  carries one of five status lines, `PARTIAL`/`DONE` naming the test file that proves it. The
+  status board table is gone — its content is distributed onto the tasks it was describing, which
+  is where a reader was going to look anyway. 159 task statuses: 55 done, 39 partial, 62 not
+  started, 3 blocked; `E1` and `E2` carry the phase-complete marker. The file now says in its own
+  header that a task may be added, split or rewritten when the work teaches something the plan did
+  not know, which is what had been happening informally.
+
+  **The Linux development machine moved to local PostgreSQL 16** (the Windows box went to 18.6 on
+  2026-09-07): `kryova` and `kryova_test` databases, `.env.local` overriding `.env`, `~0.14 ms` per
+  round trip against Neon's `~250 ms`. The DB suite went from ~4 minutes to under one.
+
+  **The role was created without `SUPERUSER`, and that answered a question this project had been
+  getting wrong for a year.** A superuser — and equally Neon's `neondb_owner`, which holds
+  `BYPASSRLS` and cannot drop it — **outranks both `ENABLE` and `FORCE ROW LEVEL SECURITY`**, so
+  the P2 policies were deployed, correct, and inert, and the first isolation run passed vacuously
+  against a database enforcing nothing. With `NOBYPASSRLS`,
+  `test_the_application_role_must_not_bypass_row_level_security` flips from xfail to **XPASS**: 11
+  tenant tables enabled and forced, and the policies genuinely enforce. Its marker was rewritten
+  rather than deleted, because RLS is **still inert in the two places that matter** — Neon, and CI,
+  whose `postgres:17` container makes `POSTGRES_USER` a superuser. That CI gap is now a named open
+  item under P9.
+
+  Three defects the switch surfaced, all of which had been invisible while the suite ran on SQLite:
+
+  1. **`TEST_DATABASE_URL` in `.env.local` looked like configuration and did nothing.**
+     `app.core.config` reads `(".env", ".env.local")` and pytest does not, so the run fell back to
+     in-memory SQLite and the RLS, JSONB and cascade tests skipped themselves — the exact shape of
+     "one green tick standing for a Postgres suite that never touched Postgres" this repo had
+     already been burned by once. `conftest.py` now loads it into `os.environ` at import, leaving
+     the resolver a pure function of the environment so `monkeypatch.delenv` still means what it
+     says, and a real environment variable still wins so CI is untouched.
+  2. **The test engine was on the psycopg2 spelling.** A bare `postgresql://` URL routes to
+     psycopg2, which is not installed, so a URL correct in every other respect died with
+     `No module named 'psycopg2'` — and a URL pasted from `DATABASE_URL`, which `Settings`
+     normalises, would not work here. Normalised at engine construction, not in the resolver, so
+     the resolver still returns what was configured.
+  3. **`test_projects.py`'s query-count assertions only held on SQLite.** They matched
+     `" from users"`, and on PostgreSQL every reference is compiled schema-qualified, so the real
+     statement reads `from kryova_test.users`. The captured SQL is now schema-stripped, with the
+     reason written down: these tests are about how many round trips a request makes, not which
+     schema it was translated into.
+
+  **`CLAUDE.md` rewritten (937 → ~690 lines, no tables), and the audit of it was the finding.**
+  **Five of its nine "known landmines" were false** — fixed weeks earlier and never removed:
+  `SECRET_KEY="changeme"` boots (it is refused at startup), the rate limiter trusts
+  `X-Forwarded-For` unconditionally (it honours `trust_proxy_headers` and counts from the right),
+  no list endpoint paginates (all four do, capped at 100), SQLite is not really refused
+  (`_require_postgres` raises), and `/health` is not a readiness probe (it probes the database and
+  the media store and returns 503). A stale landmine is worse than an empty section: it sends the
+  next session to re-fix something that works, and teaches it to skim the real ones. They are
+  recorded as removed so nobody reinstates them from memory. Added: the layout of **both** repos
+  with what each folder is for, the folder/subfolder rule, the naming conventions on both sides,
+  `rg` over `grep`, the Bash-cwd trap between the two checkouts, the master-plan upkeep rules, the
+  Linux-writes/Windows-proves split stated as the process rule it is, and pointers to this file
+  and the prompt ladder. One new real landmine: **`ezdxf` is imported by two modules and declared
+  in no requirements file**, which is why `mypy app/` prints three errors and why DXF export and
+  DXF attachment reading silently never work.
+
+  **`docs/GUI_PROMPT_LADDER.md` grown from 24 prompts to 50**, and two levels added above the
+  existing four. Level 1–4 gained E7–E10, H7–H10, S7–S10 and PRO7–PRO9, each aimed at something
+  the codebase has already been burned by — the scoped-fillet trap that removes 386 mm³ where the
+  scoped version removes 172 and reports success, the pattern count that must come from
+  arithmetic, resume-after-restart reading the operation log rather than the transcript. **Level 5
+  (Programme, PG1–PG6)** asks for a machine *and its evidence*, and is scored on the evidence: a
+  correct assembly whose summary holds one unverified number fails there and passes at Level 4.
+  **Level 6 (Frontier, FR1–FR5)** is deliberately past the ceiling — the deliverable is which wall
+  was hit, and only "a defect in Kryova" is a `!`. Every Level 5 and 6 prompt names the phase it is
+  blocked on, so a bad afternoon converts into a task in the master plan.
+
 - **2026-09-08 — Level 4 driven on the seat; five defects found and fixed; the local Postgres
   switch.** The database moved from Neon's pooled eu-west-2 endpoint to a local PostgreSQL
   **18.6** (the same major.minor Neon runs, so dev/prod parity holds and the never-SQLite rule

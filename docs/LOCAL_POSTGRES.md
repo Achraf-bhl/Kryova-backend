@@ -1,7 +1,12 @@
 # Running Kryova against a local PostgreSQL
 
-**Switched on this workstation 2026-09-07.** Neon stays in `.env` as a one-line
-fallback; the local server is an override in `.env.local`.
+**Switched on the Windows workstation 2026-09-07 and on the Linux development
+machine 2026-09-08.** Neon stays in `.env` as a one-line fallback; the local
+server is an override in `.env.local` on both.
+
+Two recipes below: the Windows one (the product ships there, and it is where the
+CATIA seat is) and the Linux one (where the code is written). They differ only in
+how the server is installed — everything from `.env.local` onwards is identical.
 
 ## Why
 
@@ -38,7 +43,7 @@ the official binaries, run as an ordinary user process.
 a synced Postgres data directory is a corrupted one. `%USERPROFILE%\pgdata` is
 outside the synced tree — `%USERPROFILE%\OneDrive\...` is not.
 
-## Setting it up again from scratch
+## Setting it up again from scratch — Windows
 
 ```powershell
 # 1. Unpack (the zip is the "binaries" download, not the installer)
@@ -73,11 +78,69 @@ mode out of the URL rather than hardcoding `require`, which is the change
 already carries `?sslmode=require`, so the old hardcoded argument was only
 restating what the URL said.
 
-`SUPERUSER` on the `kryova` role is deliberate on a development machine: the
-P2 tenancy migration installs Row-Level Security policies and the audit log's
-append-only triggers, and both want an owner that can create them. It is not a
-pattern to copy into a deployment, where the application role should be the
-one RLS is enforced *against*.
+## Setting it up again from scratch — Linux
+
+The distribution package is fine here; there is no reason to unpack binaries by
+hand as on Windows. Ubuntu 24.04 ships PostgreSQL 16.
+
+```bash
+sudo apt install postgresql            # if it is not already there
+pg_isready                             # /var/run/postgresql:5432 - accepting connections
+
+# Peer auth over the unix socket means the shell user needs no password. Create
+# the role WITHOUT superuser -- see the note below, it is the whole point.
+psql -d postgres -c "CREATE ROLE kryova LOGIN PASSWORD 'kryova_dev_local' CREATEDB CREATEROLE NOBYPASSRLS;"
+psql -d postgres -c "CREATE DATABASE kryova      OWNER kryova ENCODING 'UTF8';"
+psql -d postgres -c "CREATE DATABASE kryova_test OWNER kryova ENCODING 'UTF8';"
+
+# .env.local (gitignored, read after .env, so both lines win)
+#   DATABASE_URL=postgresql://kryova:kryova_dev_local@localhost:5432/kryova?sslmode=disable
+#   TEST_DATABASE_URL=postgresql://kryova:kryova_dev_local@localhost:5432/kryova_test?sslmode=disable
+
+venv/bin/python -m alembic upgrade head
+venv/bin/python -m alembic check       # expect "No new upgrade operations detected"
+```
+
+**`TEST_DATABASE_URL` must name a different database, and `conftest.py` refuses
+one that resolves to the same host and database as `DATABASE_URL`** — the
+fixtures create and drop tables. Leaving it unset falls back to in-memory
+SQLite, which is how a green tick once stood for a Postgres suite that had never
+touched Postgres, so `conftest.py` also reads it out of `.env`/`.env.local` into
+the environment: setting it there used to look like configuration and do
+nothing.
+
+**The Linux box is PostgreSQL 16 and Neon is 18**, which is a real difference and
+smaller than the one that matters. The rule this repo keeps is *the same engine
+you ship on, never SQLite* — that is what catches JSONB, enum and cascade drift,
+and 16 catches all of it. Run `alembic check` after any model change, as always.
+
+## The role must not be a superuser — this is the interesting part
+
+`SUPERUSER` was used on the Windows box because the P2 tenancy migration installs
+Row-Level Security policies and the audit log's append-only triggers, and both
+want an owner that can create them. **On Linux the role was created without it,
+and that changed the answer to a question this project had been getting wrong
+for a year.**
+
+A superuser — and equally Neon's `neondb_owner`, which holds `BYPASSRLS` and
+cannot drop it — **outranks both `ENABLE` and `FORCE ROW LEVEL SECURITY`**. So
+the policies were deployed, correct, and completely inert, and the first
+isolation run *passed vacuously against a database enforcing nothing*.
+
+With `NOBYPASSRLS` they actually enforce, and
+`test_the_application_role_must_not_bypass_row_level_security` flips from xfail
+to **XPASS** (verified 2026-09-08: 11 tenant tables `ENABLE`d and `FORCE`d, role
+`rolsuper=f`, `rolbypassrls=f`).
+
+`CREATEROLE` is still needed — `tests/test_tenancy_rls.py` creates a login-less
+probe role to test the policies from outside the owner — and it is not
+`SUPERUSER` and not `BYPASSRLS`, so enforcement holds.
+
+**Two places where RLS is still inert, and both are open work**: Neon in
+production, and CI, whose `postgres:17` service container makes `POSTGRES_USER`
+a superuser. The `xfail(strict=False)` marker on that test records exactly this
+and **must not be deleted to make a local run look tidy** — an XPASS is the good
+news and the xfail is the standing one.
 
 ## The account
 
@@ -101,10 +164,11 @@ reason the script exists rather than a curl command.
 
 ## Two things to watch
 
-- **It does not survive a reboot.** `pg_ctl` starts a plain user process, not a
-  service. Either re-run the start command, or add a logon scheduled task (user
-  context, no admin needed). A backend that starts before it will fail
-  `/health`'s `database` check, which is the intended way to find out.
+- **On Windows it does not survive a reboot.** `pg_ctl` starts a plain user
+  process, not a service. Either re-run the start command, or add a logon
+  scheduled task (user context, no admin needed). A backend that starts before it
+  will fail `/health`'s `database` check, which is the intended way to find out.
+  On Linux the distribution package installs a systemd unit and does survive.
 - **The tests follow the switch automatically.** `tests/conftest.py` takes its
   URL from `DATABASE_URL` and creates and drops the `kryova_test` schema per
   run, selected with `schema_translate_map` and never `SET search_path`. So

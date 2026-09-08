@@ -8,531 +8,312 @@ chassis — to a standard a licensed engineer can review, sign, and have manufac
 
 Not a chatbot that models a bracket. Not a gear generator. **A machine.**
 
-The controlling document is **[KRYOVA_MASTER_PLAN.md](KRYOVA_MASTER_PLAN.md)** (v2) — an
-Engineering Track (18 phases, 7 eras) **plus a Product Track (P1–P10: identity/sessions, orgs and
-tenancy, admin+audit, file attachments, agent UX, viewer at scale, desktop, billing, delivery,
-trust)**, the technology choices and why, and the honest effort. Read it before designing
-anything substantial; it will usually say where the work belongs and what it must not break.
-[KRYOVA_BUILD_PLAN.md](KRYOVA_BUILD_PLAN.md) is the short-term working queue (one phase at a
-time, green before the next). [KRYOVA_CAPABILITY_ROADMAP.md](KRYOVA_CAPABILITY_ROADMAP.md) is the
-capability audit it grew out of.
+FastAPI service for an AI-native CAD + FEA platform: upload geometry → mesh → FEA → viewer-ready
+results, with an agent that authors geometry through CATIA or an open kernel. The frontend is a
+**separate repo** (`../Kryova-frontend`, own CLAUDE.md).
 
-Eight decisions from the master plan that change how code here should be written. Contradicting
-one is a design change, not a detail:
+## The three documents that run this project
 
-1. **OCCT is the internal engine; CATIA is the delivery target** (amended 2026-09-05 — it
-   used to say "CATIA is one backend among several", which read as though Kryova might be
-   sold without CATIA. It will not be: every customer holds a licence). The agent *designs
-   and iterates* in OCCT, because a design loop needs tens of rebuilds a minute and a seat
-   gives one every few seconds; the result **lands** in CATIA, where the customer works.
-   Geometry must still be buildable headless, free and in CI — without that there is no
-   geometry test that runs without a seat, and no sensitivity or optimisation at all. But:
-   **no customer-facing OCCT surface**, and **operations are added to the OCCT backend only
-   when a test, a sweep or an optimisation needs one**, never for coverage. Deployment is
-   hybrid (Kryova's server + the engineer's machine); OCCT installs silently as an ordinary
-   dependency — a Python wheel with no executable, so it cannot surface as a separate app.
-   Never write anything that assumes CATIA is the only way to make geometry.
-2. **Physics is federated, never re-implemented.** Keep `solve/loads.py`, `solve/selection.py`
-   and `solve/materials.py` — the load-case and geometric-selector vocabulary is the real asset.
-   Swap the kernel underneath (CalculiX and friends). Do not hand-write another solver.
+Read them in this order when you start a session. They answer different questions and none of
+them substitutes for another.
+
+1. **[KRYOVA_MASTER_PLAN.md](KRYOVA_MASTER_PLAN.md)** — *where the project is going and where it
+   currently stands.* Eight decisions, then 29 phases (`E1`–`E18` engineering, `P1`–`P10`
+   product), each a numbered task list where **every task carries a status line**. This is the
+   answer to "where were we?" and it is the file you keep current.
+2. **[KRYOVA_BUILD_PLAN.md](KRYOVA_BUILD_PLAN.md)** — *the short-term working queue and the
+   history.* One batch at a time, green before the next; its *Done* section is the running log.
+   The master plan is current state, the build plan is what happened.
+3. **[docs/GUI_PROMPT_LADDER.md](docs/GUI_PROMPT_LADDER.md)** — *how the product is actually
+   tested.* 50 prompts across six levels, driven through the real web GUI. When you test the
+   whole thing end to end, **you run prompts from this file** — do not invent your own and do not
+   test with a tool call.
+
+Supporting: [KRYOVA_CAPABILITY_ROADMAP.md](KRYOVA_CAPABILITY_ROADMAP.md) (the audit the plan grew
+out of), [KRYOVA_PRD.md](KRYOVA_PRD.md), [KRYOVA_STATE_OF_THE_PROJECT.md](KRYOVA_STATE_OF_THE_PROJECT.md).
+
+### Keeping the master plan current — this is not optional bookkeeping
+
+**A session that finishes work and leaves the plan unchanged has thrown away the only thing that
+lets the next session start.** Rules:
+
+1. **Update the task's status line in the same commit as the work.** Never as a follow-up.
+2. Status vocabulary, exactly five: `NOT STARTED` · `IN PROGRESS (date)` ·
+   `PARTIAL (date) — what shipped` · `DONE (date) — what shipped` · `BLOCKED — what blocks it`.
+   `PARTIAL` and `DONE` end with `Tested by: <files>`.
+3. **`DONE` requires a test that proves it.** Name the file. A claim with nothing to open is an
+   intention, not a status.
+4. When every task in a phase is done, add `> ✅ PHASE COMPLETE (date) — all tasks done and
+   tested.` under the phase heading. One open task means no marker, however much has shipped.
+5. **Never delete a status; supersede it.** Then append one line to the build plan's *Done*.
+6. **You may change the plan itself.** Add a task, split a phase, add a whole phase, or rewrite
+   one that turned out to be wrong — when the work teaches you something the plan did not know.
+   That is how the four defects recorded in its header got found. Say in the commit message what
+   changed and why. What you must not do is quietly leave a task describing something nobody is
+   going to build, or mark something done that is not.
+7. **Keep this CLAUDE.md current too.** When you learn something that would have saved you an
+   hour — a trap, a command, a rule that is not inferable from one file — add it here, and delete
+   anything you find that is no longer true. Two claims in this file were false for weeks (a venv
+   that did exist, a SQLite refusal that was never implemented), and each one cost a session.
+
+## Where the work runs — Linux writes it, Windows proves it
+
+**This matters more than any other process rule here, and getting it wrong wastes a whole
+session.**
+
+**On Linux (this machine — writing code):**
+
+1. Write the tests with the work and commit them together. **Do not skip a test because it will
+   be run elsewhere** — the seat runs what exists, so a phase with no tests written is a phase
+   that never gets verified.
+2. Run `pytest` — the suite is local and fast now (see *Database*). Run `ruff` and `mypy`.
+3. Verify every new guard **by breaking the thing it guards** and watching a named test fail.
+   Where a guard cannot be shown to fail, label it unpinned rather than shipping it as verified.
+4. **There is no CATIA and no GUI run here.** Do not claim an end-to-end result from Linux.
+   An integration claim between gates is unproven and is written as unproven.
+
+**On Windows (the machine with CATIA and the bridge — proving the product):**
+
+1. This is where the **whole application** is exercised: the real `/api/v1/ai/chat` endpoint
+   through the web GUI, the CATIA seat through the bridge, the desktop shell.
+2. **Test with the prompt ladder** (`docs/GUI_PROMPT_LADDER.md`), not with improvised prompts.
+   Levels 1–4 measure the product; 5 and 6 measure the distance to it.
+3. Two pictures per prompt where CATIA is involved: `catia_capture_view` (the part as CATIA draws
+   it, through the product's own tool) **and** a screenshot of the application window (the spec
+   tree, any dialog, any greyed command). A run with no picture has not been verified, it has
+   been believed.
+4. Record the **rung reached**, not just pass/fail, in the ladder's run log, and write a dated
+   report in `docs/verification-<date>/`.
+5. **An end-to-end test goes through the chatbot, never through the dispatcher.** Calling
+   `dispatch` directly tests the tools; it does not test the product, and every defect that has
+   mattered here lived between the model and the tools.
+
+### Driving the GUI on that machine — a session has hands on the real product
+
+1. **Account.** `admin@admin.com` / `admin`, created by **`scripts/create_admin.py`**. There is
+   deliberately no API that mints staff, so a script through `SessionLocal` is the sanctioned
+   route for a `platform_admin` `StaffGrant`. It also *has* to create the account: `UserCreate`
+   requires eight characters and `admin` is five, while the login route takes an
+   `OAuth2PasswordRequestForm` and imposes no length — so this password can sign in but cannot be
+   registered. The script is idempotent (re-running resets a forgotten password) and refuses a
+   non-local `DATABASE_URL` without `--i-know`.
+2. **Browser.** Edge is launched **once**, by hand, with `--remote-debugging-port=9222` and its
+   own persistent `--user-data-dir`; the driver attaches with `playwright-core`'s
+   `chromium.connectOverCDP` and runs one batch of actions per invocation. The persistent profile
+   is what keeps the login cookie and the open conversation alive between tool calls.
+   **Never call `browser.close()` on a CDP-attached browser** — it shuts Edge down and signs the
+   session out; exiting the process is the whole of the detach.
+3. **Scope every DOM read to `main`.** A document-wide text or element scan returns Next.js's RSC
+   `self.__next_f.push` payload and floods the context with megabytes of build output.
+4. **The backend spawns its own CATIA bridge.** `app/catia/local_bridge.py` auto-pairs a device
+   row named "This workstation" and runs `catia_bridge run --wait-for-catia` with the token
+   passed by environment. A hand-paired second daemon cannot start beside it — `bridge.lock` is
+   held, one daemon per machine — so pairing by hand is not just unnecessary, it fails.
+5. **The model is `qwen3.5:9b`**, configured in `.env.local`. Chosen over `qwen3-coder:30b` on the
+   grounds that matter here: the 30b is 22 GB on an 8 GB card, runs 72% on the CPU, and took two
+   and a half minutes to answer with a single word — a CATIA build is tens of turns of that. The
+   9b returns a correct structured `tool_call` in 8–15 s with the full tool payload, and sits 81%
+   on the GPU at `num_ctx=32768` with `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0`.
+   Dropping the window to 16k only reaches 86% — the weights are the bulk, not the KV cache — so
+   the full window is kept. A truncated prompt is refused loudly by `app/ai/providers/ollama.py`
+   and would end a long run.
+6. **Confirm Ollama is actually on the GPU before a gate**: `ollama ps` for the CPU/GPU split,
+   `nvidia-smi` for resident bytes. A gate run on the CPU measures patience, not the product.
+
+**Why it is batched.** Driving a real conversation through the local model against a real seat is
+the only test that has ever found the defects that matter — every one of the seven found on
+2026-09-05 was invisible to the offline suite and left the geometry looking plausible. It is also
+four to seven minutes per prompt on this hardware. So work runs in **stretches** (pytest only,
+Ollama stopped so the card is free) separated by **gates** (the whole product, once, properly).
+The gates are listed in the master plan's Part 2.
+
+## Commands
+
+```
+Install       python -m venv venv && source venv/bin/activate && pip install -r requirements-dev.txt
+Migrate       venv/bin/python -m alembic upgrade head
+Drift check   venv/bin/python -m alembic check          # fails if models diverged from migrations
+New revision  venv/bin/python -m alembic revision --autogenerate -m "..."
+Dev server    venv/bin/uvicorn app.main:app --reload    # with --reload also set INLINE_JOBS=true
+Lint          venv/bin/python -m ruff check app/ tests/
+Types         venv/bin/python -m mypy app/
+Test          venv/bin/python -m pytest                 # whole suite, ~9 min against local Postgres
+Offline only  venv/bin/python -m pytest tests/test_solver.py tests/test_mesh.py \
+                  tests/test_geometry.py tests/test_kernel.py tests/test_interrogation.py \
+                  tests/test_design_*.py tests/test_render.py tests/test_vision.py
+```
+
+**Always `venv/bin/python`, never the system one**, whose numpy/scipy/SQLAlchemy are the wrong
+versions and are not the project's. **The venv exists** — a session that believed otherwise once
+rebuilt the environment for nothing.
+
+**Both ruff and mypy are clean, and there is no list of errors to expect.** A tolerated error is
+one nobody reads, so the next real one hides behind it — if either prints anything, it is yours.
+
+**Setup and update are one script**, `scripts/setup.sh` (bash) and `scripts/setup.ps1`
+(PowerShell — **the product ships on Windows**, so that one is the path that matters). Every step
+is idempotent, so re-running *is* the update. There is deliberately no separate update script.
+
+## Repository layout
+
+### Backend (this repo)
+
+Layered and DI-driven: **route → dep (auth/ownership) → service/runner → module → DB**. Everything
+is injected via `Depends`; nothing imports a session or a store directly.
+
+```
+app/
+  main.py         app factory, CORS, lifespan (fails jobs orphaned by a restart), /health
+  core/           config (pydantic-settings), database (engine/session/tenant_scope), security,
+                  sessions, audit, metering — the cross-cutting layer everything may import
+  models/         SQLAlchemy ORM. One module per domain; a new model must be registered here
+  schemas/        Pydantic request/response models, <Resource>Create/Update/Read
+  api/            deps.py (auth + ownership guards), rate_limit.py, routes/<domain>.py, router.py
+  media/          content-addressed blob store, chunked/resumable uploads, FAISS indexes
+  documents/      attachment parsing and the untrusted-text boundary (Decision 8)
+  geometry/       format detection, dependency-free file inspection
+  mesh/           gmsh tet meshing, quality metrics, exact primitives for tests
+  solve/          Solver + ModalSolver ABCs, in-house FEA, CalculiX federation, materials, loads
+  simulation/     runner.py — the geometry → mesh → solve job pipeline
+  jobs/           JobQueue ABC; ThreadPoolJobQueue today, Celery/RQ later
+  design/         a part as a compilable specification, not a tree to edit
+  kernel/         the open geometry kernel — OCCT, headless, free, in CI
+  catia/          the CATIA backend: 201-operation registry, dispatch, the bridge protocol
+  catia_kb/       ~1,600 curated CATIA entries — shipped in code, not in an index
+  retrieval/      BM25 over the reference manuals the agent consults
+  render/         deterministic hidden-line rendering, section cuts, render diffing
+  ai/             agent, tools, prompts, state, resume, tool retrieval, providers, vision
+  assembly/       product structure, interface contracts, clash, mass roll-up
+  dynamics/       multibody kinematics and reactions
+  fatigue/        rainflow and damage, federated to pyLife
+  optimise/       optimisation drivers, gradients, honesty rules
+  requirements/   the requirements model and coverage
+  rules/          design rules, DFM, GD&T
+  sheetmetal/     bend allowance, unfold, K-factor
+  manufacture/    drawings, dimensions, sheet layout, DXF/STEP export
+  verify/         convergence, the validation register, commitments, the accuracy changelog
+  observe/        spans and the metering listener
+  parts/          bought-in standard parts
+migrations/       Alembic — versions/ is the only migration path
+scripts/          setup, admin provisioning, the CATIA bridge daemon
+docs/             the bridge protocol, the prompt ladder, verification reports, runbooks
+tests/            pytest, mirrors app/
+data/bm25/        the reference manuals and the built index
+```
+
+**The folder pattern is one directory per bounded capability**, flat inside unless the capability
+is genuinely large. A subfolder appears only when a capability has internal parts worth naming
+separately — `kernel/occt/` (the backend) and `kernel/occt/interrogate/` (the scans) exist
+because the alternative is a forty-file directory. `solve/calculix/` is a subfolder because it is
+a federated engine behind a seam. **Do not create a subfolder for two files**, and do not
+introduce a parallel structure alongside an existing one: find the domain slice that owns your
+work and mirror it.
+
+### Frontend (`../Kryova-frontend`, own CLAUDE.md — read it before touching that repo)
+
+Next.js 16 App Router + React 19 + Tailwind v4, wrapped in **Tauri 2** for the desktop. One
+frontend for web and desktop, one API, one auth (Decision 6). **Three runtime dependencies by
+doctrine** (`next`, `react`, `react-dom`) — a new one is a named decision in the master plan, not
+an import, and CI fails if the count changes.
+
+```
+src/
+  proxy.ts        Next middleware — cookie route gate, the auth boundary
+  app/            App Router routes: (auth)/, dashboard/, setup/, layout.tsx, error boundaries
+  components/     feature components flat at the top; subfolders per surface —
+                  ui/ (the primitives: button, input, select, pill, icons, page-shell),
+                  chat/, catia/, simulate/
+  hooks/          use-<thing>.ts — data and UI hooks
+  lib/            api-client, server-api, chunked-upload, conversation-{resume,events,transcript},
+                  agent-stream, load-case, surface-field, poll-schedule, markdown, format
+  types/          api.ts, catia.ts, conversation.ts — shared contracts
+src-tauri/        the desktop shell
+scripts/          setup.mjs / setup.sh / setup.ps1, desktop-build.mjs
+```
+
+**Tests sit beside the code they test** (`foo.ts` and `foo.test.ts`), which is the opposite of the
+backend's mirrored `tests/` tree. Do not move either to match the other.
+
+Commands: `npm run dev` · `build` · `test` (vitest) · `lint` · `type-check` · `desktop:dev` ·
+`desktop:build` · `desktop:msi`.
+
+### Naming
+
+Backend: files `snake_case`, classes `PascalCase`, functions and variables `snake_case`,
+constants `UPPER_SNAKE`. Routes live in `api/routes/<domain>.py` exposing
+`router = APIRouter(prefix=..., tags=[...])` and are wired in `api/router.py` — **an unwired
+router is invisible everywhere, including `/docs`**. Schemas are `<Resource>Create` /
+`<Resource>Update` / `<Resource>Read`. Tests mirror the module: `app/solve/modal.py` →
+`tests/test_solver.py` or `tests/test_modal.py`, one file per capability, never one per class.
+
+Frontend: components and files `kebab-case.tsx` (`agent-step-list.tsx`), hooks
+`use-<thing>.ts`, types `PascalCase` inside `kebab-case.ts` files, tests `<name>.test.ts(x)`
+beside the source.
+
+**Test names are sentences.** `test_a_pocket_that_cuts_nothing_is_refused`, not `test_pocket_2`.
+Class names group them into a claim: `TestTheRenderIsTheRightWayUp`. This is the convention the
+whole suite uses and it is why a failure line is readable without opening the file.
+
+## The eight decisions that constrain how code here is written
+
+Contradicting one is a design change, not a detail. Full text in the master plan, Part 0.
+
+1. **OCCT is the internal engine; CATIA is the delivery target.** The agent designs and iterates
+   in OCCT because a design loop needs tens of rebuilds a minute and a seat gives one every few
+   seconds; the result **lands** in CATIA, where the customer works. Every customer holds a CATIA
+   licence — there is no CATIA-free product story. But geometry must be buildable headless, free
+   and in CI, or there is no geometry test without a seat and no sensitivity or optimisation at
+   all. **No customer-facing OCCT surface**, and **an operation is added to the OCCT backend only
+   when a test, a sweep or an optimisation needs one**, never for coverage. Never write anything
+   that assumes CATIA is the only way to make geometry.
+2. **Physics is federated, never re-implemented.** Keep `solve/loads.py`, `solve/selection.py` and
+   `solve/materials.py` — the load-case and geometric-selector vocabulary is the real asset. Swap
+   the kernel underneath. Do not hand-write another solver.
 3. **Verification is the product.** An unmeasured claim is never a pass; an unconverged number is
    worse than no number; every result is bound to the geometry, mesh, material, load case and
-   solver version that produced it. The existing honesty conventions (a mock mass says it is a
-   mock, a missing translation says it is missing) are this rule applied locally — extend them,
-   never erode them.
+   solver version that produced it. The honesty conventions elsewhere in this file are this rule
+   applied locally — extend them, never erode them.
 4. **Free and open, with the licence consequences taken seriously.** GPL solvers (CalculiX,
    code_aster, OpenFOAM, gmsh) are invoked **as separate processes across a file/CLI boundary**.
    Never link one in-process, however convenient.
 5. **Honest scope.** Kryova does the structural, kinematic and packaging content and integrates
    bought-in components. Unattended sign-off on a safety-critical machine is not the goal and
    never becomes it. Do not write copy, docstrings or model prompts implying otherwise.
-6. **One platform.** Web and desktop share one frontend (`../Kryova-frontend`: Next.js + Tauri),
-   one API, one auth. No second admin web app, no separate viewer product. Respect that repo's
-   three-dependency minimalism — a new frontend dependency is a named decision, not an import.
-7. **Security and tenancy are architecture.** Refresh tokens rotate per use in per-device
-   families with reuse detection (a replayed rotated token kills the family). Orgs own projects;
-   Postgres RLS is the safety net under application scoping, fed **only** by `SET LOCAL` inside
-   an explicit transaction — the one sanctioned exception to the "never `SET` on the pooled
-   endpoint" rule, safe because it dies at COMMIT. Cross-tenant is 404, never 403. Admin
-   impersonation carries both identities, defaults read-only, and always lands in the
-   append-only audit log.
-8. **Attachments are data, never instructions.** User files are parsed locally (Docling /
-   MarkItDown class, `ezdxf`, the geometry pipeline) into provenance-tagged content. Extracted
-   text is quoted material — it never enters system prompts, and no tool action may be justified
-   solely by attachment text without the user seeing that justification. Document-borne prompt
-   injection is a tested-against attack class here, not a hypothetical.
-
-**Keep the phase status board current — this is how sessions keep the thread.** The master plan
-carries a **phase status board** (Part 2, one row per phase E1–E18/17.3 and P1–P10). When your
-work completes or materially advances a phase, update its row **in the same commit as the work**:
-status (`not started` / `in progress (since date)` / `partial — what shipped (date)` /
-`DONE (date)`) plus the evidence column naming the code or test where the claim is checkable.
-`DONE` requires the phase's Proof running green — never mark it otherwise. Also append one line
-to [KRYOVA_BUILD_PLAN.md](KRYOVA_BUILD_PLAN.md)'s *Done* section (the board is current-state;
-the build plan is the history). A session that starts on Kryova work should read the board
-first — it is the answer to "where were we?".
-
-FastAPI service for an AI-native CAD + FEA platform: upload geometry → mesh → linear-static
-FEA → viewer-ready results. Frontend is a **separate repo** (`../Kryova-frontend`, own
-CLAUDE.md). Product scope lives in [KRYOVA_PRD.md](KRYOVA_PRD.md); honest current state and
-the gap to a shippable product live in [KRYOVA_STATE_OF_THE_PROJECT.md](KRYOVA_STATE_OF_THE_PROJECT.md).
-
-## Stack
-
-Python 3.14 · FastAPI 0.141 · SQLAlchemy 2.0 (sync) + psycopg 3 · Alembic · Pydantic v2 +
-pydantic-settings · numpy/scipy (FEA) · gmsh 4.15 (meshing) · faiss-cpu (vector indexes,
-storage only — no consumer yet) · bcrypt + python-jose (auth) · Neon Postgres
-
-## Commands
-
-```
-Install:      python -m venv venv && source venv/bin/activate && pip install -r requirements-dev.txt
-Migrate:      alembic upgrade head
-Dev server:   uvicorn app.main:app --reload      # with --reload also set INLINE_JOBS=true
-Offline test: pytest tests/test_solver.py tests/test_mesh.py tests/test_geometry.py \
-              tests/test_kernel.py tests/test_interrogation.py tests/test_design_*.py \
-              tests/test_render.py tests/test_vision.py          # no DB, no network
-Full test:    pytest                              # needs a live Postgres; ~seconds locally
-Drift check:  alembic check                       # fails if models diverged from migrations
-New revision: alembic revision --autogenerate -m "..."
-```
-
-**The venv exists** (`venv/`, numpy 2.5.2 / scipy 1.18.0 / SQLAlchemy 2.0.52) — this section
-used to say it did not, and a session that believed it either refused to report a result or
-rebuilt the environment for nothing. Always `venv/bin/python`, never the system one, whose
-`numpy 1.26 / scipy 1.11 / SQLAlchemy 1.4` are the wrong versions and are not the project's.
-
-**Lint and type-check exist now** (this section used to say they did not):
-`pyproject.toml` configures ruff (`E,F,I`, line length 100) and mypy (`python_version = "3.12"`,
-`mypy_path = "scripts"`), and `.github/` has workflows. Run
-`venv/bin/python -m ruff check app/ tests/` and `venv/bin/python -m mypy app/` before finishing.
-**Both are clean, and there is no longer a list of errors to expect.** This paragraph used to
-name two in `app/catia/local_bridge.py`; those went, seven in `app/solve/` took their place and
-were carried for a while as "pre-existing", and on 2026-09-05 the last of them were fixed rather
-than tolerated. A tolerated error is one nobody reads, so the next real one hides behind it —
-if mypy prints anything, it is yours.
-
-**Setup and update are one script**, `scripts/setup.sh` (bash) and `scripts/setup.ps1`
-(PowerShell — **the product ships on Windows**, so that one is the path that matters). Every
-step is idempotent, so re-running *is* the update: the venv is reused, pip installs only what
-changed, Alembic applies only new migrations, and the reference index rebuilds only when the
-documents actually changed. There is deliberately no separate update script.
-
-## Architecture
-
-Layered and DI-driven: **route → dep (auth/ownership) → service/runner → module → DB**.
-Everything is injected via `Depends`; nothing imports a session or a store directly.
-
-```
-app/
-  main.py         app factory, CORS, lifespan (fails jobs orphaned by a restart), /health
-  core/           config.py (pydantic-settings), database.py (engine/session), security.py (bcrypt + JWT)
-  models/         SQLAlchemy ORM: User, Project, GeometryVersion, SimulationJob, Media
-  schemas/        Pydantic request/response models
-  api/            deps.py (auth + ownership guards), rate_limit.py, routes/<domain>.py, router.py
-  media/          content-addressed local blob store, chunked/resumable uploads, FAISS indexes
-  geometry/       format detection, dependency-free file inspection
-  mesh/           gmsh tet meshing, quality metrics, exact primitives for tests
-  solve/          Solver interface, linear-static tet4 FEA, materials, region selectors
-  simulation/     runner.py — the geometry → mesh → solve job pipeline
-  jobs/           JobQueue interface; ThreadPoolJobQueue today, Celery/RQ later
-  design/         a part as a compilable specification, not a tree to edit (see below)
-  kernel/         the open geometry kernel — OCCT, headless, free, in CI (see below)
-  retrieval/      the reference manuals the agent consults (see below)
-migrations/       Alembic (versions/ is the only migration path)
-tests/            pytest, mirrors app/
-```
-
-### Three seams exist on purpose — respect them
-
-- **`solve.Solver`** (ABC) — mesh in, load case in, fields out. A surrogate/neural solver must
-  drop in without the API, job, or (future) AI layer knowing which ran.
-- **`solve.ModalSolver`** (ABC) — a sibling, not a method on `Solver`: natural frequencies come
-  from a different input (`ModalCase`, no loads, fixtures optional) and return a different
-  output, so folding them into `solve()` would make every caller branch on what it got back.
-  `solve/modal.py` implements it. The mass matrix is integrated **analytically** in barycentric
-  coordinates, not with the stiffness assembly's four-point Gauss rule — that rule is exact only
-  to degree 2 and tet10's `N^T N` is quartic, so reusing it would be wrong by a few percent:
-  plausible-looking, and wrong.
-
-### Analyses available
-
-All three verified against closed-form solutions, not recorded output.
-
-| Analysis | Module | Case | Checked against |
-|---|---|---|---|
-| Linear static | `solve/linear_static.py` | `LoadCase` | σ = F/A, δ = FL/AE |
-| Modal | `solve/modal.py` | `ModalCase` | bar `f=(2n−1)/4L·√(E/ρ)`, cantilever Euler-Bernoulli modes 1–3, six rigid-body modes free-free |
-| Buckling | `solve/buckling.py` | `BucklingCase` | Euler `P=π²EI/(KL)²` |
-| Thermal stress | `solve/thermal.py` (via `LoadCase.delta_t_k`) | `LoadCase` | restrained bar `σ = −EαΔT` |
-
-Three things about these that are easy to get wrong and are pinned by tests:
-
-- **Thermal strain must be subtracted during stress recovery**, not only added as a load.
-  Leaving it out reports the stress of a freely-expanding part — wrong sign and wrong size.
-- **Buckling is posed as `−Kg φ = μ K φ`**, not the natural way round: `Kg` is indefinite and
-  the generalised symmetric eigensolver needs the positive-definite matrix on the right.
-  `λ = 1/μ`.
-- **Eigenvalue tolerances must be relative.** Eigenvalues are ω² — order 1e10 for steel, 1e4
-  for rubber — so any absolute threshold is simultaneously too tight for one and too loose for
-  the other.
-
-A bar in tension still returns a finite positive buckling factor (measured ~68,000×), because a
-3D bar has small compressive pockets at the load introduction. That is correct, not a bug; the
-meaningful statement is the ratio to the compressive case.
-- **`jobs.JobQueue`** (ABC) — one method, `submit`. Moving to Celery must not touch routes.
-- **`media.LocalMediaStore`** — content addressing + chunked IO behind a small surface, so an
-  S3 store is a swap, not a rewrite.
-
-Never reach around a seam. If a route needs to know which solver ran, put it on the job row.
-
-## The design IR (`app/design/`)
-
-A part described as a **specification that is compiled**, rather than a feature tree that is
-edited. This is Layer B of `KRYOVA_CAPABILITY_ROADMAP.md`, and it exists because editing a
-tree conversationally breaks on the topological naming problem: insert a fillet upstream and
-every downstream reference shatters. Regenerating from a spec has no downstream edit to break.
-
-Read `spec.py` first (what a design *is*), then `compile.py` (what happens to one). Then
-`execute` runs a plan, `assertions` says whether the result is acceptable, `diff` says what an
-edit reached, `correct` closes the loop between them. `names` and `params` are usable alone.
-
-Things that will bite you:
-
-- **Only `execute` touches anything outside the package, and it does so through an injected
-  callable.** No session, no socket, no `dispatch` import. That is why all 338 tests over this
-  package run offline in under a second, and it is worth keeping — the same property the
-  physics tests have and for the same reason.
-- **`Plan.digest()` does not answer "does this build the same part?"** despite reading like
-  it. A plan carries each call's `note` — rationale travels with the design on purpose, and
-  `DesignSpec.digest()` covering it is a *tested contract* — so rewriting a comment moves both
-  digests and builds identical geometry. Every geometry question goes through
-  `diff.builds_the_same` (tools and resolved arguments only). Do not "simplify" one into the
-  other; the digests are what a provenance record wants (D11) and are deliberately coarser.
-- **Impact analysis compares compiled plans, never spec text.** By compile time every
-  parameter is a literal in the argument list of the calls using it, so a feature moved iff
-  its resolved calls differ — exact, with no parameter-usage graph to fall out of step.
-- **A reference is not always a read.** `catia_sketch_rectangle(sketch=@profile)` draws
-  *into* the profile; `catia_pad(sketch=@profile)` extrudes what it finds. So a feature's
-  geometry can change while its call is byte-identical, and following `@` references alone
-  silently leaves every solid built on a changed sketch looking current. The two are told
-  apart by `Plan.unaddressable` — a feature that creates a tree element gets an allocated
-  name, and one that does not is unaddressable *because* its effect landed on something else.
-- **A plan carries exactly one late-bound value**, `Created(feature)`, because a fresh pad is
-  called whatever CATIA invented. `bind()` resolves it from what the creating call reported.
-  Predicting `Pad.1` is the positional fragility this package exists to remove. The executor
-  records the *creating* call's name with `setdefault`, not the following rename's.
-- **An assertion that could not be measured is `UNMEASURED`, never a pass.** A suite that
-  skips what it could not read reports green on a part nobody checked.
-- **The correction loop's stopping rules are exact, not heuristic.** A repair compiling to the
-  same buildable plan cannot change the outcome, so it ends the loop and is not counted as an
-  attempt; a plan already tried is a cycle. Both are gifts from the compiler being
-  deterministic. The attempt cap is only the backstop. A repair that *does not compile* is a
-  normal attempt on purpose — the compiler's error names the feature and says what to do,
-  which is the best feedback in the system, so it goes back round as the next brief.
-- **`feature#selector` is parsed and refused, not resolved.** Predicate selection is roadmap
-  A3 and is blocked behind A1 — a predicate is only decidable against geometry that exists.
-
-## The geometry kernel (`app/kernel/`)
-
-Decision 1 made real: geometry built **headless, free and in CI**, so optimisation,
-sensitivity and geometry regression tests are affordable at all. OCCT via
-`cadquery-ocp` (OCP) — `pythonocc-core` is not on PyPI and would have forced conda into
-the deployment. `app/design/` compiles a spec to a `Plan`; `OcctRunner` executes it, and
-a CATIA seat executes the same plan through the same `CallRunner` seam.
-
-Reading order: `occt/binding.py` (the one place OCP is imported), then `occt/document.py`
-(what a part *is* here), then `occt/naming.py` (the three non-obvious rules that make
-names survive regeneration — break one and `Solve()` returns success while resolving to
-nothing).
-
-Above the backends sit four backend-neutral modules, and the split is load-bearing:
-
-- **`measurement.py`** — what a measured part reports, and `Detail` levels, which exist
-  for latency: a plan for a machine is 10⁵–10⁶ operations and computing the full set
-  after each would dominate the run.
-- **`interrogation.py` + `occt/interrogate/`** — what a part can be *made into*: wall
-  thickness, draft, undercuts, curvature, continuity, validity, clearance. These have a
-  premise ("pulled along +Z"), can be inapplicable, and are frequently **sampled**.
-  Nothing here runs speculatively; `measure()` never calls it.
-- **`contract.py`** — the written vocabulary an assertion may read, with unit and
-  meaning. `undocumented_paths()` is asserted empty, which is what makes it a contract.
-- **`provenance.py`** — measured / approximated / unavailable-with-a-reason, as a
-  *sidecar* so `bounding_box_mm.size[2]` still resolves. `assertions.py` reads it per
-  path, so an exact mass is not tainted by a ray-cast thickness beside it.
-
-Things that will bite you:
-
-- **`topology.explore` de-duplicates and `explore_oriented` does not**, deliberately.
-  `TopExp_Explorer` visits a sub-shape once *per owning parent*, so a box explores as 24
-  edges and 48 vertices. Use the first for "every edge of this part", the second only
-  where a face's own boundary orientation is the point (convexity).
-- **A face's outward normal is not its surface normal.** OCCT stores orientation
-  separately, so a REVERSED face's normal points into the material. `face_normal_at` is
-  the one place that correction lives — and it flips curvature's sign too, which is why
-  concave/convex is measured against a table in `interrogate/curvature.py` rather than
-  reasoned about.
-- **A UV grid is not a set of points on a face.** A trimmed face reports its whole
-  surface's parameter range, so most of a naive grid lands in the hole. Everything goes
-  through `interrogate/sampling.py`, which classifies against the real boundary and
-  refines once when a face is too narrow to catch a sample.
-- **Sampled answers must never be reported as measured.** Thickness and undercut are
-  upper bounds from a finite ray set, and they say so. Draft works this out per part —
-  exact on planes, sampled on curves.
-- **`str.capitalize()` is banned in error text.** It lowercases everything after the
-  first character, turning `BRepFeat_MakePrism` into `brepfeat_makeprism`. Sentence
-  casing lives in `errors._as_sentence`.
-- **OCP passes `Handle(Geom_…)&` by value**, so any OCCT function that works by
-  reassigning a handle is *inert* here — it builds the answer and drops it, with no
-  exception and no return value. `GeomLib::ExtendCurveToPoint` and `ExtendSurfByLength`
-  are both like this, which is why `catia_extrapolate` widens a parameter range instead.
-- **`explore` yields base `TopoDS_Shape`.** `BRepAdaptor_Curve`, `BRepTools_WireExplorer`
-  and `MakeWire.Add` are overloaded on the concrete type and refuse it — cast through
-  `symbol("TopoDS").Edge_s` / `Face_s` / `Wire_s`. This has cost time four times now.
-- **Only what `occt/binding.py` registers is reachable through `symbol()`.**
-  `GeomAbs_CurveType`, `TopAbs_Orientation` and `Geom_Plane` are *not* registered; go
-  through `classify.edge_curve_type` and `BRepAdaptor_Surface(...).Plane()`, or add the
-  symbol to the registry deliberately rather than importing OCP at the call site.
-
-## Rendering and the visual check (`app/render/`, `app/ai/vision.py`)
-
-Phase E4. Eight canonical views rendered byte-identically run to run, section cuts, a
-before/after diff, and a vision model asked whether the part matches the request.
-
-- **Hidden-line removal, not OpenGL.** OCP exposes `V3d`/`AIS` and a viewer does come up
-  here — but 4.1 needs two renders of the same geometry to be *byte-identical* so a render
-  hash can join mass and plan-digest as a third identity check, and a GL image is a
-  function of the driver, sampling and display server on a project that develops on Linux
-  and ships on Windows. HLR is arithmetic; the raster under it is integer.
-- **OCCT's `gp_Ax2` Y axis is `direction × X`** — the opposite of the up vector `views.py`
-  declares — so `project._flatten` negates y. Leaving it out renders every part upside
-  down and **nothing can see it**: a consistently mirrored image is still byte-identical to
-  itself, so determinism holds, a diff of two mirrored renders is still correct, and a
-  wireframe looks plausible either way up. It shipped inverted for one day.
-- Determinism is defended at each cheap place to lose it: no anti-aliasing, `floor(v+0.5)`
-  rather than banker's rounding, dash phase per polyline not per segment, curve deflection
-  relative to model size, and a hand-written PNG encoder (an outside one can add a
-  timestamp chunk or change its filter heuristic between versions).
-- **A section's normal points at the material that is removed** — `catia_split`'s own
-  convention. Two conventions for one question is how a part ends up mirrored with every
-  test green. Hatching fills by **even-odd across every wire at once**, so a bore falls out
-  of the parity with nothing having to identify it as a hole.
-- **The visual check is a filter, never a sign-off**, so `VisualReview` deliberately has no
-  `approved`/`passed` property — only `objected`. Every way it can fail to run is
-  `unchecked`, which is never a pass (the rule `assertions.py` applies to an unmeasured
-  assertion). Nothing in it raises.
-- **Ollama does not refuse an image handed to a text-only model** — it drops it and answers
-  anyway, so the check would manufacture agreement, which is worse than no check. `_sees()`
-  gates on `/api/show` `capabilities` or a `projector_info` block (structural signals, no
-  model-name list to rot); `AI_VISION_MODEL` names the model that looks, because locally it
-  is a second pull. `num_ctx` must be sized for the images too — Ollama truncates a prompt
-  from the front in silence.
-
-## Reference manuals (`app/retrieval/`)
-
-The agent can consult the CATIA and FEA documentation held on this machine instead of
-answering about CATIA from memory, via one tool: `search_documentation`.
-
-**It is lexical (BM25), not embeddings, and that was a decision rather than a shortcut.**
-Three things about this deployment force it, all pointing the same way. The provider is
-pluggable and defaults to local Ollama with no key — and **Anthropic publishes no embedding
-model at all**, so a dense index would either drag a second vendor into a deployment that
-deliberately chose one, or force an extra model pull onto an install whose point is that it
-runs offline. The corpus is technical manuals, which is the regime where lexical retrieval is
-strongest: what discriminates between passages here is exact terms (`M6`, `Ø12`, `tet4`,
-`V5R21`, `Multi-sections Solid`) — precisely what embeddings blur. And the manuals are
-bilingual, where accent folding does for free what no embedding quality gives you.
-The honest caveat, worth keeping in mind before anyone "upgrades" this: on open-domain prose
-hybrid lexical+dense beats either alone. `Corpus.search` sits behind a small surface so a
-dense stage can be fused in later without the agent or tool layer knowing.
-
-Layers, each testable alone: `analyze` (bilingual, jargon-preserving tokenizer) → `extract`
-(PDF→pages, fallback chain poppler → pypdf → pdfminer) → `chunking` (pages→passages, headings
-carried) → `bm25` (scorer over flat numpy arrays) → `corpus` (build/load/search) → `service`
-(process-wide handle) → `language` (per-passage detection + preference).
-
-Things that will bite you:
-
-- **`KnowledgeService.search` cannot raise.** Missing index, corrupt index, wrong format
-  version, disk gone — all return `[]`, logged once. Consulting the manuals improves an
-  answer and must never be why there is not one. Keep it that way.
-- **The tool and the prompt are gated on the index actually existing**, not on the setting.
-  `_build_knowledge` withholds the tool and `system_prompt()` picks a variant without the
-  documentation section. A prompt describing a tool the model was not given teaches it to
-  hallucinate a call. There are **four** frozen system prompts for this reason (CATIA × docs).
-- **Never name the mechanism in user-facing text.** The step label is "Checking the
-  documentation"; the prompt tells the model to cite the document and page and *not* to
-  narrate the lookup. `tests/test_retrieval.py` and the prompt-cleanliness check exist because
-  "I searched my knowledge base" is a worse answer than the answer.
-- **Heading detection is the most tuned code in `chunking.py`.** These manuals are almost
-  entirely numbered procedures, so a bare `\d+\.` pattern labels thousands of instruction
-  steps as section titles. Only keyword (`Chapter 4`) or multi-level (`3.2`) numbers count,
-  and the terminal-punctuation test runs *before* the numbered test. Both orderings are
-  load-bearing and both have already been got wrong once.
-  **Refusing to *accept* a line is not the same as *rejecting* it** — that was the third
-  time. Declining a bare `6.` only passed the line to the title-case fallback, which took
-  it, because a wrapped French step (`6. Cliquez sur OK pour`) has no terminal full stop and
-  is title-case by the letter of the rule: `sur`/`pour` are minor words, `Cliquez`/`OK` are
-  capitalised. That labelled 1,143 of 5,003 real passages, tripling `cliquez` in the term
-  stream and putting a step number in the citation the user reads. `_ENUMERATOR_RE`,
-  `_PATH_FRAGMENT_RE` and the minor-word-ending test are the explicit rejections; all three
-  run before the title-case fallback and all three are asserted against the real corpus.
-- **Language is a boost, never a filter** (`LANGUAGE_PREFERENCE_BOOST`). CATIA's menus are
-  translated, so a French user needs the French page — but a workbench documented only in
-  English must still answer them. A clearly better match in the other language still wins.
-  The value (1.35) is measured, not chosen: Photo Studio is English-only here and FreeStyle
-  French-only, so for those the boost is not breaking a tie but demoting the only answer
-  there is. Swept over the corpus eval set, 1.6 lost both (MRR 0.934) and 1.35 finds every
-  case (P@3 100%, MRR 0.974); above ~1.45 it stops breaking ties and starts overriding
-  relevance. Re-sweep before changing it — `tests/test_retrieval_corpus.py` is the harness.
-- **Every considered file is fingerprinted, including skipped ones.** Recording only successes
-  makes `is_stale` permanently true on any corpus containing one unreadable PDF.
-- Builds are atomic (staging directory, swapped in), so rebuilding under a live server is safe.
-
-```
-python -m app.retrieval.build            # build or rebuild
-python -m app.retrieval.build --check    # exits non-zero when a rebuild is needed
-python -m app.retrieval.build --query X  # see what the agent would find
-```
-
-## CATIA V5 reference (`app/catia_kb/`)
-
-The other half of the CATIA answer, and it does a different job from the corpus above. The
-corpus knows what page 147 of the Part Design manual *says*; this knows that Edge Fillet is
-in Part Design's Dress-Up Features toolbar at `Insert > Dress-Up Features > Edge Fillet`,
-that it needs P1, that the French interface calls it `Congé d'arête` and the German one
-`Kantenverrundung`, that it fails when the radius exceeds the narrowest adjacent face *on the
-propagated tangent chain* rather than the edge you clicked, and that Tritangent Fillet is the
-alternative when a whole face should disappear. ~1,600 entries: workbenches, commands, dialog
-fields, file formats, `Tools > Options` settings, error messages, aerospace vocabulary,
-workflows, methodology, the automation object model, and the V5R19 product trigram table.
-
-It ships **in the code, not in an index**, so unlike the manuals it is always present. That is
-why there are still four frozen system prompts and not eight — the domain section is
-unconditional.
-
-Three consumers, in order of how much they earn:
-
-1. **Query expansion** (`recognise.expand_query`, wired into `KnowledgeService.search`). Half
-   the corpus is French; without this, half of it is unreachable from an English question. A
-   query for "draft angle" gets `dépouille` added before it hits BM25.
-2. **`explain_catia_term`** — the lookup tool. Returns *fields*, where `search_documentation`
-   returns prose, so the model states a menu path it was handed rather than one it recalls.
-3. **The per-turn brief** (`state.py`) — a few lines beside the user's message naming what
-   their words refer to. This is what makes a small local model get the workbench right
-   without having to decide to call a tool.
-
-Things that will bite you:
-
-- **Precision is the hard half, not recall.** This vocabulary contains `fit`, `add`, `part`,
-  `box`, `web` and `pip`. Two disjoint tiers in `recognise.py` keep them from firing:
-  `NEVER_BARE` never matches alone (ordinary English that collides with a CATIA name);
-  `AMBIGUOUS_WORDS` needs corroboration from something unmistakable elsewhere in the message.
-  Distinctive words — `pocket`, `fillet`, `joggle`, `sketch` — are in **neither**, because
-  "how do I make a pocket" carries no other signal and must still work. `TestPrecision` is the
-  set of sentences that must produce nothing; add to it before widening any alias.
-- **Product codes need their capitals when they collide** (`PIP`/`pip`, `FIT`, `GAS`, `EST`,
-  `CUT`). Codes with no collision (`GSD`, `ASL`, `CPD`) match either way.
-- **Fuzzy matching only fires once something matched exactly.** Otherwise `document` scores
-  0.94 against `Documents` and every English sentence with a long word produces a hit.
-- **Expansion and the coverage floor are in direct conflict** — this shipped as a bug once.
-  Expansion adds *synonyms*, and a passage matches the English name or the French one, never
-  both, so a floor computed over the expanded query demands breadth no passage can have.
-  `Corpus.search(..., coverage_query=)` measures the floor against the user's original query.
-  Never remove that argument.
-- **A missing translation is reported as missing.** `localised()` returns `None` and the tool
-  payload says so in words. Never fall back to the English name presented as the localised
-  one — an engineer can work with "I don't have the German name, it's here in the menu", and
-  cannot recover from being sent to a menu item that does not exist. Same rule for the
-  informal trigrams (`WSF`, `AMT`), which say they are informal.
-- **The COM automation API is not localised** (`api.localisation`). `AddNewPad` is
-  `AddNewPad` on every language install; only user-typed data (feature names, materials)
-  translates. This is why the CATIA bridge works on any seat, and why a macro that looks up
-  `"Pad.1"` by string is the one that breaks abroad.
-- **`CatiaKnowledge` cannot raise**, same contract as `KnowledgeService`. Every method returns
-  empty/unchanged on failure, logged once.
-- **Ambiguity is named, not resolved.** SMD vs ASL, GSD vs WSF, GPS vs GAS, generative vs
-  interactive Drafting, Geometrical Set vs Body — the `Disambiguation` table forks these and
-  the brief prints the fork. Picking a side is how an airframe engineer loses a day.
-- Duplicate entry keys raise at import; `missing_cross_references()` and `untranslated()` are
-  asserted empty by the tests, which is what catches a rename orphaning a German name.
-
-## Driving CATIA's interface (`catia_run_command` and the dialog tools)
-
-Eight tools reach every command on the seat rather than the thirty Kryova implements
-directly: `catia_list_commands`, `catia_run_command`, `catia_describe_dialog`,
-`catia_fill_dialog`, `catia_dialog_action`, `catia_press_key`, `catia_switch_workbench`,
-`catia_select`. Server specs in `app/catia/tool_specs.py`, resolution in
-`app/catia_kb/ui.py`, daemon in `scripts/catia_bridge/{ui_automation,ui_policy,mock_ui}.py`.
-Full contract in `docs/CATIA_BRIDGE_PROTOCOL.md` ("Driving the interface").
-
-- **It is Win32, never COM.** `GetMenu`, `EnumChildWindows`, `SendMessageTimeoutW`. Two
-  consequences you must not undo: it reads the seat's *actual* labels so it works in a
-  language nobody wrote a table for, and it keeps working while a modal dialog has COM
-  blocked — which is the only time it matters most.
-- **`OUT_OF_BAND_TOOLS` (`backend.py`) skip the COM liveness probe**, and the same tools are
-  in `dispatch._NO_AUTO_CHECKPOINT`. Both for one reason: a checkpoint is a COM save, and a
-  failed checkpoint refuses the call. Gate these on COM and the tools that dismiss a stuck
-  dialog can only run when no dialog is stuck. `catia_run_command` is the deliberate
-  exception — it starts things, COM is alive by definition when it does, and it stays
-  checkpointed.
-- ~~**`StartCommand` fails silently.**~~ **Corrected 2026-09-06 — it does not, and the
-  belief that it did cost two seat sessions.** Hand a real V5-R33 a name it does not know
-  and it raises a **modal information box** (`Entrée clavier: Commande inconnue : <name>`),
-  which holds COM. Heartbeats stop, the device goes offline, and every later tool fails —
-  *including `catia_describe_dialog` and `catia_dialog_action`*, the two whose whole job is
-  to clear a stuck dialog. Measured twice, on ladder prompts E6 (`Close Sketch`) and H1
-  (`Fastener Pattern`): the agent correctly tried `catia_describe_dialog` three times and
-  could not reach it; the seat stayed dead until a human pressed OK.
-  `catia_com._is_unknown_command_box` now recognises that box — by **the command name being
-  echoed in the dialog's own text**, which is language-proof where the wording is not, and
-  only when the box has no input fields and at most one button, so a real command dialog or
-  a save prompt is never dismissed — clears it, and refuses the call in words. The daemon
-  still tries the **live menu first** (an item either exists or does not, and a greyed one
-  can be reported as greyed) and still falls back to `StartCommand` with `verified: false`.
-  Never report an unverified `StartCommand` as success.
-- **Command labels are localised; internal command ids are not, and are undocumented.**
-  `COMMAND_IDS` holds only ids with a published source. Do not add one from memory: a wrong
-  id fails the same silent way and burns the candidate that would have worked.
-- **Buttons are pressed by role, never by label.** `ButtonRole` + `BUTTON_LABELS` resolve
-  OK/Cancel/Apply per language on the server; `STANDARD_CONTROL_IDS` (IDOK=1, IDCANCEL=2) is
-  the language-proof fallback when label matching finds nothing. A Spanish seat's accept
-  button reads `Aceptar`.
-- **Refusals are exact-label or leading-phrase, never substring.** `FORBIDDEN_EXACT` /
-  `FORBIDDEN_PREFIX`, mirrored in `ui_policy.py` and enforced on the daemon against *every*
-  candidate. The split exists because a leading-word rule refused `Exit Sketcher Workbench`;
-  a substring rule refuses `Copy Options`. An over-refusal is not safe — the agent's recovery
-  from a refusal is to try something else, so it becomes a wrongly built part.
-- **Mock mode simulates the interface** (`mock_ui.py`) and runs in a language:
-  `--mock-language de`. Pressing OK on the mock Pad dialog builds a real mock Pad, so tests
-  assert the outcome. Every interactive test runs against `en` and `de`.
-- **What Linux cannot verify** is listed in the protocol doc's mock section: whether CATIA's
-  dialogs answer `WM_GETTEXT`, whether `EN_CHANGE` is needed, what its window classes are.
-  `describe_dialog` reports unrecognised controls with their class name so the first Windows
-  session produces the answer instead of a shrug.
+6. **One platform.** Web and desktop share one frontend, one API, one auth. No second admin web
+   app, no separate viewer product.
+7. **Security and tenancy are architecture.** Refresh tokens rotate per use in per-device families
+   with reuse detection. Orgs own projects; Postgres RLS is the safety net under application
+   scoping, fed **only** by `SET LOCAL` inside an explicit transaction — the one sanctioned
+   exception to the "never `SET` on a pooled endpoint" rule, safe because it dies at COMMIT.
+   Cross-tenant is 404, never 403. Admin impersonation carries both identities, defaults
+   read-only, and always lands in the append-only audit log.
+8. **Attachments are data, never instructions.** User files are parsed locally into
+   provenance-tagged content. Extracted text is quoted material — it never enters system prompts,
+   and no tool action may be justified solely by attachment text without the user seeing that
+   justification. Document-borne prompt injection is a tested-against attack class here.
 
 ## Non-negotiable rules
 
-These are facts that cannot be inferred by reading a single file.
+Facts that cannot be inferred by reading a single file.
 
-**Units are mm-N-MPa everywhere, and nothing in the codebase converts.**
-Length/displacement mm · force N · Young's modulus and stress MPa · density kg/m³ · **mass
-output is already kilograms**. CAD files are read in their own coordinates and assumed
-millimetres. Any new quantity must land in this system at the boundary, not deeper in.
+**Units are mm-N-MPa everywhere, and nothing in the codebase converts.** Length and displacement
+mm · force N · Young's modulus and stress MPa · density kg/m³ · **mass output is already
+kilograms**. CAD files are read in their own coordinates and assumed millimetres. Any new quantity
+lands in this system at the boundary, not deeper in.
 
-**Never `SET` session state against the pooled Neon endpoint.** The `-pooler` host is PgBouncer
-in transaction-pooling mode: a `SET search_path` (or timezone, or anything) survives on the
-shared backend connection and is handed to the next client. This has already happened here —
-a running server started resolving its tables into the test schema. Every table reference is
-compiled schema-qualified via `execution_options={"schema_translate_map": {None: settings.db_schema}}`
-(`app/core/database.py`), and the test fixtures do the same for `kryova_test`. Do not
-"simplify" this to `search_path`.
+**Never `SET` session state against a pooled endpoint.** A pooled host is PgBouncer in
+transaction-pooling mode: a `SET search_path` survives on the shared backend connection and is
+handed to the next client. This has already happened here — a running server started resolving its
+tables into the test schema. Every table reference is compiled schema-qualified via
+`execution_options={"schema_translate_map": {None: settings.db_schema}}` (`app/core/database.py`),
+and the fixtures do the same for the test schema. Do not "simplify" this to `search_path`.
+`SET LOCAL` inside an explicit transaction is the one exception (Decision 7).
 
-**Cross-user access returns 404, not 403** (`get_owned_project`, `_get_job`) so ids cannot be
-enumerated across accounts. Keep it that way on every new resource.
+**Cross-user and cross-tenant access returns 404, not 403** (`get_owned_project`, `_get_job`), so
+ids cannot be enumerated across accounts. Keep it that way on every new resource.
 
-**Background jobs own their own session.** They outlive the request, whose session is closed
-the moment the response is sent — use `SessionScopeDep`/`get_session_scope`, never the request
+**Background jobs own their own session.** They outlive the request, whose session is closed the
+moment the response is sent — use `SessionScopeDep`/`get_session_scope`, never the request
 session. Commit the job row *before* `queue.submit`, because the worker looks it up by id in a
 different session.
 
@@ -542,396 +323,463 @@ installs a SIGINT handler that raises off the main thread, and meshing never run
 thread.
 
 **Gmsh picks its reader from the file extension, and blobs are named by SHA-256 with no
-extension**, so `gmsh_mesher.py` stages them (hard link where the bytes need no change). It
-also rewrites the 80-byte STL comment header when needed: gmsh's STL sniffer skips lines
-starting with NUL, so a valid binary STL with the conventional zeroed header and no `0x0A`
-byte anywhere is rejected with a bare "Error loading". **The stored blob is never modified.**
+extension**, so `gmsh_mesher.py` stages them (hard link where the bytes need no change). It also
+rewrites the 80-byte STL comment header when needed: gmsh's STL sniffer skips lines starting with
+NUL, so a valid binary STL with the conventional zeroed header and no `0x0A` byte anywhere is
+rejected with a bare "Error loading". **The stored blob is never modified.**
 
 **An under-constrained model is caught by the equilibrium residual, not by looking for NaNs.**
 SuperLU returns a finite, meaningless vector for a singular system. Do not replace
 `_residual_is_small` with a finiteness check.
 
-**Loads are distributed by tributary area** (`solve/selection.distribute_force`), so refining
-the mesh does not change the applied load. Region selection is by geometric selector
-(`{"type":"face","axis":"z","side":"min"}` / `{"type":"box",...}`), never by face id — face ids
-are meaningless across a re-export.
+**Loads are distributed by tributary area** (`solve/selection.distribute_force`), so refining the
+mesh does not change the applied load. Region selection is by geometric selector
+(`{"type":"face","axis":"z","side":"min"}`), never by face id — face ids are meaningless across a
+re-export.
 
-**Every heavy byte goes through `app/media/`.** Nothing loads a whole file into memory —
-not writing, not hashing, not serving. Blobs are content-addressed (SHA-256, sharded
-`blobs/ab/cd/…`), so two records can share one blob: deletion goes through `MediaService`,
-which drops the file only once nothing references it. Small metadata rows go to Neon; a
-400 MB STEP file never crosses the network.
+**Every heavy byte goes through `app/media/`.** Nothing loads a whole file into memory — not
+writing, not hashing, not serving. Blobs are content-addressed and shared, so deletion goes
+through `MediaService`, which drops the file only once nothing references it.
 
-**`pip install pychrono` installs the wrong package, and it succeeds.** The PyPI
-name `pychrono` is not Project Chrono — it is an unrelated 10 kB `py3-none-any`
-wheel for "managing delays, scheduling tasks, timing functions", by a different
-author (github.com/striatp/Pychrono). Verified against PyPI's own metadata on
-2026-09-06. Project Chrono ships compiled SWIG bindings through conda and *can
-never* be a pure-Python wheel, so anything that installs cleanly under that name
-is something else. `app/dynamics/engine.py`'s availability probe therefore checks
-that the imported module really is Chrono rather than trusting the import — which
-is the general rule worth taking from this: **for any dependency chosen by name
-in `KRYOVA_MASTER_PLAN.md`'s technology register, a successful import is not
-evidence you got the thing you meant.** Adding it to `requirements.txt` would
-have shipped a stranger's package into every deployment.
+**Migrations live only in `migrations/versions/`.** Run `alembic check` before finishing any model
+change. **Migrations are serialised, always** — Alembic's `down_revision` chain is linear, so two
+revisions generated in parallel produce branching heads somebody has to merge by hand.
 
-**A Python-side column default does not exist until the flush.** `UUIDPrimaryKey`
-gives `id` a `default=new_uuid`, and SQLAlchemy applies it *during* the flush — so
-anything reading `obj.id` before then gets `None`. This bit three separate times
-on 2026-09-06: `personal_slug` built an organisation slug from a user id in a
-`before_flush` hook (every user created inside one flush raised `AttributeError`,
-and only `test_startup.py` caught it, because the tenancy tests flush first and
-act second); `AuditService.record` hashed the id before the flush and wrote a
-different one after, so **every audit entry failed its own verification on
-read-back**; and both were fixed the same way. The fix is to *materialise* the id
-rather than read it — `if obj.id is None: obj.id = new_uuid()` — which is not a
-second source of truth, because it is the same callable the column default would
-have used moments later. Reading it and hoping is what fails.
+**A Python-side column default does not exist until the flush.** `UUIDPrimaryKey` gives `id` a
+`default=new_uuid`, and SQLAlchemy applies it *during* the flush — so anything reading `obj.id`
+before then gets `None`. This bit three separate times on 2026-09-06: `personal_slug` built an
+organisation slug from a user id in a `before_flush` hook, so every user created inside one flush
+raised `AttributeError` (and only `test_startup.py` caught it, because the tenancy tests flush
+first and act second); and `AuditService.record` hashed the id before the flush and wrote a
+different one after, so **every audit entry failed its own verification on read-back**. The fix is
+to *materialise* the id before you read it.
 
-**Migrations** live only in `migrations/versions/`. Run `alembic check` before finishing any
-model change.
+**Two concurrent full-suite runs drop each other's tables.** The `kryova_test` schema is created
+and dropped per run. Run the suite once at a time.
 
 **A conversation acts on the document it owns, not on CATIA's `ActiveDocument`.** Every
 document-scoped call frame carries `document: {doc_name, remote_path}` from the conversation's
-`CatiaDocument` row, and `backend.ensure_document` activates it — reopening it from disk if
-CATIA was restarted — before the operation runs. Without it, an engineer clicking another part
-between two messages silently redirected the work; nothing errored, the wrong file just grew
-features. The unscoped tools are enumerated with their reasons in `dispatch._UNSCOPED_TOOLS`
-(the three that *establish* a binding, plus the interactive family, which runs when a modal
-dialog has COM blocked and cannot afford a COM call). A backend that holds documents must
-override `ensure_document`; `tests/test_document_binding.py` fails if one inherits the no-op.
+`CatiaDocument` row, and `backend.ensure_document` activates it — reopening it from disk if CATIA
+was restarted — before the operation runs. Without it, an engineer clicking another part between
+two messages silently redirected the work; nothing errored, the wrong file just grew features. The
+unscoped tools are enumerated with their reasons in `dispatch._UNSCOPED_TOOLS`. A backend that
+holds documents must override `ensure_document`; `tests/test_document_binding.py` fails if one
+inherits the no-op.
 
-**The transcript is not the record of what was done — `CatiaOperation` is.** The window trims
-the oldest messages and the summary is an LLM paraphrase of what it trimmed, so neither can be
-trusted about work from last week. `app/ai/resume.py` reads the log instead: a few lines in the
-per-turn state block (how much ran, how long ago, and **which attempts failed and were never
-made to work**) plus the `design_history` tool for the full paged account. Loose ends are keyed
-on the tool alone and cleared by any later success of that tool — keying on arguments would
-leave every superseded retry in the list forever. It carries no `catia_` prefix on purpose:
-that prefix means "goes to the workstation", and this answers with CATIA closed
-(`tests/test_tool_registry.py` enforces it).
+**The transcript is not the record of what was done — `CatiaOperation` is.** The window trims the
+oldest messages and the summary is an LLM paraphrase of what it trimmed. `app/ai/resume.py` reads
+the log instead. Loose ends are keyed on the tool alone and cleared by any later success of that
+tool — keying on arguments would leave every superseded retry in the list forever. It carries no
+`catia_` prefix on purpose: that prefix means "goes to the workstation", and this answers with
+CATIA closed (`tests/test_tool_registry.py` enforces it).
 
-## Known landmines in the current code
+**Errors are human-readable and actionable.** "Increase element_size_mm to coarsen it", "Check
+that the fixtures remove all six rigid-body motions" — match that register, never degrade to
+"Invalid input". Expected, explainable failures (`MeshError`, `SolverError`, `ValueError`) are
+recorded on the job row with their message; anything else is logged with a stack trace and
+recorded as "Unexpected solver failure".
 
-Read these before touching the relevant file — they are live defects, not style opinions.
+## Database
 
-- ~~**tet10 support is dead and broken.**~~ **Fixed and verified 2026-09-02.**
-  `assemble_stiffness` dispatches on `mesh.midside`, `assemble_stiffness_tet10` integrates at
-  four Gauss points, `_recover_stress` has a tet10 branch, and `TestQuadraticElements` checks
-  quadratic beats linear against the closed-form cantilever at equal element count. The
-  docstring now describes what the code does.
-- **`SECRET_KEY` defaults to `"changeme"`** (`core/config.py`) and nothing refuses to start on
-  it. Any deployment that forgets the env var signs JWTs with a public constant.
-- **The rate limiter trusts `X-Forwarded-For` unconditionally** (`api/routes/auth.py::_client_ip`).
-  A client that sets a random XFF per request has no rate limit at all. It is also in-process,
-  so it does nothing across workers.
-- **No list endpoint paginates.** `/projects`, `/projects/{id}/geometry`,
-  `/projects/{id}/simulations`, `/media` all return everything.
-- **The README and `.env.example` claim SQLite is refused at startup.** It is not —
-  `Settings._require_postgres` returns SQLite URLs unchanged and `database.py` has a full
-  SQLite branch. Fix the docs or the code, but do not trust either in isolation.
-- ~~**`/health` returns `{"status":"ok"}` unconditionally**~~ — **stale, corrected 2026-09-05.**
-  It returns `{"status", "version", "git_sha", "built_at", "checks": {"database", "media_store"}}`
-  and genuinely checks both, so it *is* usable as a readiness probe. Verified live on the
-  Windows seat.
-- **`data/bm25/` holds ~450 MB of Dassault Systèmes / CATIA training PDFs, and they are tracked
-  again on purpose** (2026-09-01) so the corpus syncs to the Windows test workstation with a
-  plain `git pull`. They are third-party copyrighted material in a repo carrying its own
-  LICENSE, and a later `.gitignore` cannot undo it — removing them needs a history rewrite.
-  Raise this before the repository is published or cloned widely. `data/bm25/index/` is *not*
-  tracked: it is derived, rewritten whole on every build, and would conflict between machines.
-  The manuals sit directly in `data/bm25/`, not in `data/bm25/sources/`; both are scanned
-  (`knowledge_source_dirs` walks `data/bm25/sources` **and** `data/`), so either works and
-  nothing needs moving — but it does mean any `.md`/`.txt` dropped anywhere under `data/` is
-  indexed as reference material.
-- **Four of the 25 PDFs are scans with no text layer** (the large French `Formation-*` files,
-  42–66 MB each) and cannot be indexed without OCR. The build reports them as
-  `scanned, no text layer` and carries on; this is expected, not a regression. The other 21
-  index in ~7s to ~4,900 passages.
-- **`catia_sketch_dimension` fails on this seat far more often than it works** (measured
-  2026-09-08, three consecutive PRO1 runs on French V5-R33). `AddDimensionConstraint`
-  returns a constraint and *reading* `.Dimension` off it raises `E_INVALIDARG` —
-  `(0, 'CATIAConstraint', 'La méthode Dimension a échoué', ...)`. It is now refused in words
-  and the half-made constraint is discarded, so a failed dimension no longer poisons the
-  sketch it was added to — but **the underlying call still fails**, and the working route to
-  a dimensioned profile is to *draw it at the size you want*: the coordinates passed to
-  `catia_sketch_polyline` and `catia_sketch_rectangle` are millimetres and are the dimension.
-  Do not build a feature on the assumption that a constraint will take.
-- **A CATPart that a CATProduct has open does not close.** `Document.Close()` returns cleanly
-  and the document stays in `Documents`, so `while Count > 0: close Item(1)` spins forever
-  reporting success every time round — it wedged the seat on 2026-09-08 and cost a restart.
-  Close products first and test whether the *count fell*, not whether the call succeeded.
-  Same shape as the read loop `MAX_READS_WITHOUT_PROGRESS` exists for.
-  `ABQMaterialPropertiesCatalog.CATfct` never closes at all; it is CATIA's own material
-  catalogue, not a leftover.
+**Local PostgreSQL, not Neon** — switched on Windows 2026-09-07 and on Linux 2026-09-08. Neon's
+URL stays in `.env` as the fallback; the local server is an override in `.env.local`, which is
+gitignored and read *after* `.env` so every line in it wins. Full recipe for both platforms,
+including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md](docs/LOCAL_POSTGRES.md)**.
 
-## Build with parallel agents — this is the default, not an optimisation
-
-**Standing instruction (2026-09-06): spread the work across concurrent subagents
-rather than writing it one file at a time.** A phase here is usually five or six
-pieces that touch disjoint files — a module, its tests, a wiring change, a
-document check, an install — and running them one after another spends the night
-on the ordering rather than on the code. Six agents on one phase is normal.
-Ten is not too many when the lanes are genuinely separate.
-
-What makes it work rather than a merge conflict:
-
-- **Assign by FILE, not by topic.** Every agent's brief names exactly what it
-  owns and lists what it must not touch, by path. "You own `app/verify/**` and
-  `tests/test_verify*.py`" is a lane; "you handle verification" is a collision.
-  Two agents that both decide they need to edit `deck.py` will silently overwrite
-  each other, and the loser's work looks like it was never done.
-- **Say who else is running.** The brief names the other agents' lanes so an
-  agent that finds it needs something from a locked file *reports the seam it
-  needs* instead of reaching into the file. A clean unsatisfied interface is
-  worth far more than a duplicated node writer — integration is cheap, and
-  un-picking two divergent copies of the same function is not.
-- **Nobody commits but the parent.** Agents do not `git add` and do not
-  `git commit`. Six agents committing into one branch interleaves half-finished
-  work with no way to tell which change belongs to which piece. The parent reads
-  the reports, integrates, runs the checks, and commits each piece with its own
-  message.
-- **Migrations are serialised, always.** Alembic's `down_revision` chain is
-  linear, so two agents generating revisions at once produce branching heads that
-  someone has to merge by hand. One agent (or the parent) holds migration rights
-  at a time; everyone else reports the model change they need.
-- **Nobody runs the full suite.** Six agents running it at once is six times
-  the work for no extra information, and they would contend for the one
-  `kryova_test` schema, which is created and dropped per run — two concurrent
-  runs drop each other's tables. Each agent runs *its own test files*, plus
-  `ruff` and `mypy`.
-- **Every brief carries the same non-negotiables**: read `CLAUDE.md` first; no
-  duplicated code or files; tests written with the work; every new guard verified
-  by breaking the thing it guards; and *report what you could not do*, because an
-  agent that quietly narrows its scope is worse than one that fails loudly.
-- **Give them the authority to decide.** An agent that stops to ask has cost more
-  than it saved. The brief should say "you have full authority over the
-  engineering decisions; make them, record why in the docstrings, do not stop to
-  ask" — and then the parent reviews the decision in the report, where it is
-  cheap to overturn.
-
-**Delegate the expensive-but-shallow work first.** Installing a dependency and
-probing it, sweeping a corpus, writing a fixture builder, auditing what CI
-actually checks — these are hours of wall-clock and almost no judgement, which is
-exactly what a parallel agent is for. Keep the integration, the seam design and
-the commit for the parent, because those need the whole picture.
+1. **Two databases**: `kryova` for the application, `kryova_test` for the suite. `conftest.py`
+   **refuses** a `TEST_DATABASE_URL` that resolves to the same host and database as
+   `DATABASE_URL`, because the fixtures create and drop tables.
+2. **Leaving `TEST_DATABASE_URL` unset falls back to in-memory SQLite**, and the RLS, JSONB and
+   cascade tests then skip themselves. That is how a green tick once stood for a Postgres suite
+   that had never touched Postgres, so `conftest.py` also reads the variable out of
+   `.env`/`.env.local` into the environment — setting it there used to look like configuration
+   and do nothing.
+3. **The application role must be `NOBYPASSRLS` or the RLS policies are inert.** A superuser, and
+   equally Neon's `neondb_owner`, outranks both `ENABLE` and `FORCE ROW LEVEL SECURITY`. On the
+   local Linux server the role is not a superuser, so the policies genuinely enforce and
+   `test_the_application_role_must_not_bypass_row_level_security` XPASSes. **They are still inert
+   on Neon and in CI**, whose `postgres:17` container makes `POSTGRES_USER` a superuser. The
+   `xfail(strict=False)` marker records exactly that and must not be deleted to make a local run
+   look tidy.
+4. **`sslmode=disable` in the local URL is required, not a shortcut.** A stock local Postgres has
+   `ssl = off` and refuses the handshake. `app/core/database.py::sslmode_for` reads the mode out
+   of the URL rather than hardcoding it.
+5. `expire_on_commit=False` is load-bearing; endpoints read ORM attributes after `commit()`.
+6. **`~250 ms` per round trip on Neon, `~0.14 ms` locally.** The DB suite was four minutes of
+   almost pure latency and is now well under one.
 
 ## Testing
 
-**Tests are written on Linux and run on Windows (agreed 2026-09-05).** The user has a
-Windows machine with CATIA and the bridge, and that is where the suites are executed —
-against the real application rather than repeatedly here. So on this machine:
+1. **One capability, one test file, mirroring `app/`.** The suite is ~6,400 tests.
+2. **Physics and design tests never request a database fixture**, so they open no connection and
+   run offline in under a second. Keep it that way — that tight loop is why meshing, FEA and
+   design work is bearable. `app/design/`'s 338 tests run offline because `execute` takes its
+   runner as an injected callable; do not import `app.kernel` into that package.
+3. **The solver is verified against closed-form solutions, not recorded output.** A bar in pure
+   tension reproduces σ = F/A and δ = FL/AE to 1e-6, including through a real gmsh mesh. Any new
+   solver work is verified the same way. **Eigenvalue tolerances must be relative** — eigenvalues
+   are ω², order 1e10 for steel and 1e4 for rubber, so any absolute threshold is simultaneously
+   too tight for one and too loose for the other.
+4. **Verify a new guard by breaking the thing it guards** and watching a named test fail. Say so
+   in the commit. A guard nobody has seen fail is a guard nobody knows works.
+5. `client` overrides the job queue to `InlineJobQueue` so jobs run on the request thread inside
+   the test's open transaction — a worker thread would use its own connection and see none of the
+   uncommitted data.
+6. **Retrieval is verified twice.** `test_retrieval.py` proves the machinery on synthetic
+   fixtures. `test_retrieval_corpus.py` measures the *real* index — 38 questions scored
+   precision@1/@3 and MRR, plus corpus and citation health. Every test in the first passed while
+   the shipped index was labelling 23% of its passages with a procedure step, which is the whole
+   argument for having the second. It **skips** when no index is built, so a fresh clone stays
+   green.
+7. **A one-off API-surface check is not a test** — does this OCCT symbol exist, does this method
+   take these arguments — and is worth doing, because shipping code that calls a name that is not
+   there wastes a seat session on an `AttributeError`.
 
-- **Write the tests with the work and commit them with it.** Skipping them because they
-  will not be run here is the one thing this arrangement must not turn into: the seat runs
-  what exists, so a phase with no tests written is a phase that never gets verified.
-- **Which machine you are on decides whether you run them, and "here" is ambiguous —
-  check.** On the **Linux authoring machine**: do not run the suites — not `pytest`, not a
-  single file, not to "check it works" — and report what was written, not what passed. On
-  the **Windows seat** (CATIA installed, `venv\Scripts\python.exe`), running them *is* the
-  job, and a phase reported as done without a green run on the seat has not been verified.
-  This paragraph used to say "do not run the suites here" unconditionally, which read as a
-  refusal on the one machine that can actually execute them.
-- **`ruff` and `mypy` run on both before finishing.** They are lint and type-check, not
-  tests, and they are cheap. `venv/bin/python -m ruff check app/ tests/` and
-  `venv/bin/python -m mypy app/` — on Windows, `venv\Scripts\python.exe`, and note that
-  `PYTHONPATH=.` is needed to run a script against the package there.
-- Verifying a new guard by **breaking the thing it guards** is still required. Reason it
-  through against the source and say so plainly in the commit; where a guard cannot be
-  shown to fail, label it unpinned rather than shipping it as verified.
-- A one-off *API-surface* check — does this OCCT symbol exist, does this method take these
-  arguments — is not a test and is worth doing, because shipping code that calls a name
-  that is not there wastes a seat session on an `AttributeError`.
+## Build with parallel agents — the default, not an optimisation
 
-**Coding runs in stretches; the expensive verification happens at gates (agreed 2026-09-06).**
-The master plan's *Stop gates* section (Part 2) names them and says which phase opens each one.
-The rule for a session is short:
+A phase here is usually five or six pieces touching disjoint files — a module, its tests, a wiring
+change, a document check, an install — and running them one after another spends the night on the
+ordering rather than on the code. Six agents on one phase is normal; ten is not too many when the
+lanes are genuinely separate. What makes it work rather than a merge conflict:
 
-- **Inside a stretch, `pytest` is the whole of the testing, and Ollama is stopped.** No chatbot
-  run, no CATIA seat, no screenshots. Stop the model and the service (`ollama stop qwen3-coder:30b`,
-  then the `ollama`/`ollama app` processes) so the card is free — a 20.6 GB model on an 8 GB card
-  occupies the GPU and returns four to seven minutes later, and a stretch spent waiting on it is a
-  stretch that wrote nothing. `ruff` and `mypy` still run before finishing; guards are still
-  verified by breaking what they guard.
-- **At a gate, the whole product is driven once, properly**: Ollama back up and confirmed on the
-  GPU, the prompt through the real chat endpoint, the CATIA seat through the bridge, both pictures,
-  a dated report in `docs/verification-<date>/`, and the rung reached recorded.
-- **Say which of the two a claim rests on.** "Tested with pytest, end to end pending G1" is an
-  honest commit line. A phase reported `DONE` on unit tests alone, when its Proof names the
-  product, is the failure mode this arrangement exists to prevent — not a shortcut it licenses.
+1. **Assign by FILE, not by topic.** Every brief names exactly what that agent owns and what it
+   must not touch, **by path**. "You own `app/verify/**` and `tests/test_verify*.py`" is a lane;
+   "you handle verification" is a collision. Two agents that both decide they need `deck.py` will
+   silently overwrite each other, and the loser's work looks like it was never done.
+2. **Say who else is running.** The brief names the other lanes, so an agent that needs something
+   from a locked file **reports the seam it needs** instead of reaching in. A clean unsatisfied
+   interface is worth far more than a duplicated writer — integration is cheap, and un-picking two
+   divergent copies of one function is not.
+3. **Nobody commits but the parent.** Agents do not `git add` and do not `git commit`. Six agents
+   committing into one branch interleaves half-finished work with no way to tell which change
+   belongs to which piece. The parent reads the reports, integrates, runs the checks, and commits
+   each piece with its own message.
+4. **Migrations are serialised** and **nobody runs the full suite** — see the rules above for
+   both; concurrent runs drop each other's `kryova_test` schema. Each agent runs *its own* test
+   files, plus `ruff` and `mypy`.
+5. **Give them the authority to decide** within their lane. An agent that must ask before every
+   choice is a slower version of doing it yourself.
+6. **Say which of the two a claim rests on** — the offline suite or a seat run. They prove
+   different things and only one of them proves the path.
 
-**An end-to-end test goes through the Ollama chatbot, never through the dispatcher**
-(standing rule, 2026-09-05). "End to end" means the path a user actually takes —
-chat → agent → tool layer → dispatch → backend → CATIA or the open kernel — and a test
-that starts at `dispatch.call_catia` or at a bare `OcctRunner` is testing a *middle*, not
-an end. It may still be the right test; it may not be *called* an end-to-end one.
+## Tools
 
-This is not a preference, it is the lesson of two measured defects. **D2** — on
-`GEOMETRY_BACKEND=occt` the agent could create a part and then do nothing to it, because
-the local branch returned before writing the `CatiaDocument` row, and every document-scoped
-tool after it was refused *in `app/ai/tools.py`*. `tests/test_geometry_backends.py` could
-not see it: it calls the dispatcher, and the refusal lives one layer up. The master plan's
-"measured end to end, a 60×40×20 pad returns 48000 mm³" had been measured through the
-dispatcher, and the product was broken the whole time. **D9** — a test calls
-`runner("catia_pad", {"name": "slab", ...})`, an argument `dispatch.validate()` rejects, so
-it passes while proving nothing about the path it is quoted for.
+**Use `rg` (ripgrep), not `grep`**, for code search — it respects `.gitignore`, so it will not
+drown you in `venv/`, `node_modules/` or `data/bm25/`. `rg -n "pattern" app/` for a search,
+`rg --files -g "*.py"` to list. It is verified working correctly in this repo (2026-09-08).
+`fd` and `ast-grep` are not installed; use `find` or `rg --files`. `gh` for GitHub, `jq`/`yq` for
+JSON/YAML.
 
-So: every phase whose Proof mentions the product, and every verification session, drives a
-real conversation against the real chat endpoint with a real local model. The model is
-`qwen3-coder:30b` — re-measured 2026-09-05 against the 108-tool payload the OCCT backend
-offers, where `gpt-oss:20b` returns prose and no `tool_calls` at all (the earlier benchmark
-that favoured it used ~26 tools). **Confirm Ollama is on the GPU** (`ollama ps` shows the
-CPU/GPU split; `nvidia-smi` shows resident bytes) — an 8 GB card holds ~30% of a 20.6 GB
-model and the rest runs from RAM, which is slow but working, and *not* being on the GPU at
-all is a different and reportable condition.
+**The Bash tool's working directory persists between calls.** The frontend is a sibling checkout,
+so a `cd ../Kryova-frontend` in one call leaves the next one there — `pwd` before anything that
+depends on which repo you are in. This has already produced a build of the wrong tree under the
+right tag.
 
-A weak local model is part of what is being tested, not an obstacle to it: it guesses
-argument names outside the schema and calls tools before their prerequisites, and every one
-of those must come back as a named refusal from our own validation rather than as a wrongly
-built part.
+**Read only the files you need.** `rg` to locate first; avoid loading large files wholesale.
 
-**Every CATIA test result is screenshotted, and the screenshot is looked at.** A tool result
-that says `ok` is not evidence the geometry is right — `catia_capture_view`'s own summary
-says it: *"a feature that succeeded but produced the wrong shape looks identical to one that
-worked, in every other result."* A run with no picture has not been verified, it has been
-believed. Two pictures, because they fail to show different things:
+## The design IR (`app/design/`)
 
-- **`catia_capture_view`** — the part as CATIA draws it, taken *through the product's own
-  tool*, so the tool is exercised too. This is the one that shows a pad that went the wrong
-  way, a pocket that missed, a fillet that swallowed a face.
-- **A screenshot of the application window** — the spec tree, a modal dialog, a greyed
-  command, an error box, a floating toolbar. `catia_capture_view` renders the *viewport* and
-  cannot show any of that, which is exactly why **D11** — a floating toolbar read as an open
-  modal dialog, refusing every interactive command on a working seat — was invisible until
-  somebody looked at the whole window.
+A part described as a **specification that is compiled**, rather than a feature tree that is
+edited. It exists because editing a tree conversationally breaks on the topological naming
+problem: insert a fillet upstream and every downstream reference shatters. Regenerating from a
+spec has no downstream edit to break.
 
-Save them beside the session's report (`docs/verification-<date>/`) and name them in it. The
-French seat names features `Extrusion.1` and `Poche.1`, so the tree in the picture is also
-how you confirm the localisation path is intact.
+Read `spec.py` first (what a design *is*), then `compile.py`. Then `execute` runs a plan,
+`assertions` says whether the result is acceptable, `diff` says what an edit reached, `correct`
+closes the loop. `names` and `params` are usable alone.
 
-**The chat prompt gets harder every session, and the target is a machine.** Kryova's point
-is a system that designs a stamping press, not one that models a plate — so an end-to-end
-prompt that stays at "make a 60×40×20 plate" stops measuring anything the day it first
-passes. Each session starts one rung above where the last one got to, and records where it
-stopped and why. A rough ladder, deliberately parallel to `app/design/missions.py`:
+1. **Only `execute` touches anything outside the package, and through an injected callable.** No
+   session, no socket, no `dispatch` import. That is why 338 tests run offline in under a second.
+2. **`Plan.digest()` does not answer "does this build the same part?"** despite reading like it. A
+   plan carries each call's `note` — rationale travels with the design on purpose — so rewriting a
+   comment moves the digest and builds identical geometry. Every geometry question goes through
+   `diff.builds_the_same` (tools and resolved arguments only).
+3. **Impact analysis compares compiled plans, never spec text.** By compile time every parameter
+   is a literal in the argument list of the calls using it, so a feature moved iff its resolved
+   calls differ — exact, with no parameter-usage graph to fall out of step.
+4. **A reference is not always a read.** `catia_sketch_rectangle(sketch=@profile)` draws *into*
+   the profile; `catia_pad(sketch=@profile)` extrudes what it finds. So a feature's geometry can
+   change while its call is byte-identical. The two are told apart by `Plan.unaddressable`.
+5. **A plan carries exactly one late-bound value**, `Created(feature)`, because a fresh pad is
+   called whatever CATIA invented. `bind()` resolves it from what the creating call reported.
+   Predicting `Pad.1` is the positional fragility this package exists to remove.
+6. **An assertion that could not be measured is `UNMEASURED`, never a pass.**
+7. **The correction loop's stopping rules are exact, not heuristic.** A repair compiling to the
+   same buildable plan cannot change the outcome, so it ends the loop and is not counted as an
+   attempt; a plan already tried is a cycle. A repair that *does not compile* is a normal attempt
+   on purpose — the compiler's error names the feature and says what to do.
 
-1. one solid from a sketch — the plumbing (this is *passed*, do not re-run it as the test);
-2. a part with several features that must agree: holes on a bolt circle, corner fillets, a
-   pocket to a named depth, all dimensioned from parameters rather than typed twice;
-3. a part the agent must *measure and correct* — "make it 2.4 kg" — so the loop in
-   `correct.py` and the aim in `sensitivity.py` run for real;
-4. two parts and a constraint between them: an assembly, with a clash check;
-5. a mechanism — something with a motion range and a clearance that must hold through it;
-6. a subsystem of a machine off the ladder (M2 upward), against a written requirement.
+## The geometry kernel (`app/kernel/`)
 
-Rung 2 upward is where the interesting failures live, because they need the agent to hold
-intent across many calls — which is the open question Phases 14 and 16 exist to answer, and
-the thing no amount of kernel coverage tests for. **Report the rung reached, not just
-pass/fail**, and expect the local model to be the limit long before the geometry is.
+Decision 1 made real. OCCT via `cadquery-ocp` (OCP) — `pythonocc-core` is not on PyPI and would
+have forced conda into the deployment.
 
-- Physics tests (`test_solver.py`, `test_mesh.py`, `test_geometry.py`) never request a database
-  fixture, so they open no connection and run offline in under a second. Keep it that way —
-  that tight loop is the reason meshing/FEA work is bearable.
-- Everything else runs against **whatever `DATABASE_URL` points at, in a `kryova_test`
-  schema**, created and dropped per run. Testing on SQLite while shipping on Postgres is the
-  drift that hides JSONB, enum and cascade bugs, and that rule has not moved.
-  **What moved is where Postgres lives: since 2026-09-07 this machine runs a local
-  PostgreSQL 18.6 and Neon is the fallback in `.env`** — the paragraph here used to end "if it
-  gets painful, the fix is a local Postgres, not a return to SQLite", and that is what was
-  done. The cost was real and is now not: **0.135 ms per round trip against Neon's ~250 ms**,
-  so the DB suite is seconds rather than ~4 minutes. 18.6 is the version Neon runs, so parity
-  holds. Setup, the `sslmode=disable` that a stock local server requires, and how to switch
-  back are in [docs/LOCAL_POSTGRES.md](docs/LOCAL_POSTGRES.md). The fixtures still minimise
-  round trips — one connection per session, isolation by transaction rollback, no app lifespan
-  per test.
-- The test schema is selected with `schema_translate_map`, never `SET search_path` (see above).
-- `client` fixture overrides the job queue to `InlineJobQueue` so jobs run on the request
-  thread inside the test's open transaction — a worker thread would use its own connection and
-  see none of the uncommitted data.
-- The solver is verified against **closed-form solutions**, not recorded output: a bar in pure
-  tension reproduces σ = F/A and δ = FL/AE to 1e-6, including through a real gmsh mesh.
-  Any new solver work must be verified the same way.
-- Retrieval is verified twice, and the split matters. `test_retrieval.py` proves the machinery
-  on synthetic fixtures (fast, always runs). `test_retrieval_corpus.py` measures the *real*
-  index over `data/bm25` — 38 engineering questions against the manual that ought to answer
-  each, scored precision@1 / precision@3 / MRR, plus corpus and citation health. Every test
-  in it passed on synthetic input while the shipped index was labelling 23% of its passages
-  with a procedure step, which is the whole argument for having it. It **skips** when no
-  index is built (fresh clone, CI) and skips any individual case whose subject matter is not
-  indexed, so curating the manuals cannot turn it red. Thresholds are floors with headroom,
-  not the measured numbers pinned — currently P@1 94.7%, P@3 100%, MRR 0.974.
+Reading order: `occt/binding.py` (the one place OCP is imported), then `occt/document.py`, then
+`occt/naming.py` (the three rules that make names survive regeneration — break one and `Solve()`
+returns success while resolving to nothing).
 
-## Driving the GUI directly — a session can, and for an end-to-end claim it must
+Four backend-neutral modules sit above the backends, and the split is load-bearing:
+`measurement.py` (what a part reports, with `Detail` levels for latency), `interrogation.py` (what
+a part can be *made into* — has a premise, can be inapplicable, is frequently sampled, and never
+runs speculatively), `contract.py` (the documented vocabulary an assertion may read;
+`undocumented_paths()` is asserted empty), `provenance.py` (measured / approximated /
+unavailable-with-a-reason, as a sidecar so paths still resolve).
 
-**A session on this Windows machine has hands on the real product**, not just on the API. The
-standing rule above says an end-to-end test goes through the Ollama chatbot and never through
-the dispatcher; this is how that is actually done, so no session has to rediscover it.
+1. **`topology.explore` de-duplicates and `explore_oriented` does not**, deliberately.
+   `TopExp_Explorer` visits a sub-shape once *per owning parent*, so a box explores as 24 edges.
+2. **A face's outward normal is not its surface normal.** OCCT stores orientation separately, so a
+   REVERSED face's normal points into the material. `face_normal_at` is the one place that
+   correction lives.
+3. **A UV grid is not a set of points on a face.** A trimmed face reports its whole surface's
+   parameter range, so most of a naive grid lands in the hole. Everything goes through
+   `interrogate/sampling.py`.
+4. **Sampled answers must never be reported as measured.** Thickness and undercut are upper bounds
+   from a finite ray set, and they say so.
+5. **`str.capitalize()` is banned in error text** — it lowercases everything after the first
+   character, turning `BRepFeat_MakePrism` into `brepfeat_makeprism`. Use `errors._as_sentence`.
+6. **OCP passes `Handle(Geom_…)&` by value**, so any OCCT function that works by reassigning a
+   handle is *inert* here — it builds the answer and drops it, with no exception and no return
+   value. `GeomLib::ExtendCurveToPoint` and `ExtendSurfByLength` are both like this.
+7. **`explore` yields base `TopoDS_Shape`.** `BRepAdaptor_Curve`, `BRepTools_WireExplorer` and
+   `MakeWire.Add` are overloaded on the concrete type and refuse it — cast through
+   `symbol("TopoDS").Edge_s` / `Face_s` / `Wire_s`. This has cost time four times now.
+8. **Only what `occt/binding.py` registers is reachable through `symbol()`.** Go through
+   `classify.edge_curve_type` and `BRepAdaptor_Surface(...).Plane()`, or add the symbol to the
+   registry deliberately rather than importing OCP at the call site.
 
-- **Account.** `admin@admin.com` / `admin` (2026-09-08), created by
-  **`scripts/create_admin.py`** — which is where the script that used to be "needed again"
-  now lives. There is deliberately no API that mints staff (`app/models/audit.py`), so a
-  script through `SessionLocal` is the sanctioned route for the `StaffGrant` of
-  `platform_admin`. It also *has* to create the account: `UserCreate` requires eight
-  characters and `admin` is five, while the login route takes an `OAuth2PasswordRequestForm`
-  and imposes no length — so this password can be used to sign in but not registered. The
-  script is idempotent (re-running resets a forgotten password) and refuses a non-local
-  `DATABASE_URL` without `--i-know`, because its output is an account with unrestricted
-  platform standing. The predecessor was `claude.admin@kryova.dev` / `KryovaGui!2026`, which
-  lives on in the Neon database only. A fresh account has no memberships; the personal organisation is created on demand by
-  the `before_flush` hook when the first project is made.
-- **Browser.** Edge is launched **once**, by hand, with `--remote-debugging-port=9222` and its
-  own persistent `--user-data-dir`; the driver then attaches with `playwright-core`'s
-  `chromium.connectOverCDP` and runs one batch of actions per invocation. The persistent profile
-  is what keeps the login cookie and the open conversation alive between tool calls.
-  **Never call `browser.close()` on a CDP-attached browser** — it shuts Edge down and signs the
-  session out; exiting the process is the whole of the detach.
-- **Scope every DOM read to `main`.** A document-wide text or element scan returns Next.js's RSC
-  `self.__next_f.push` payload and floods the context with megabytes of build output.
-- **The backend spawns its own CATIA bridge.** `app/catia/local_bridge.py` auto-pairs a device
-  row named "This workstation" for the requesting user and runs `catia_bridge run
-  --wait-for-catia` with the token passed by environment. A hand-paired second daemon cannot
-  start beside it — `bridge.lock` is held, one daemon per machine — so pairing by hand here is
-  not just unnecessary, it fails.
-- **The prompts to drive it with live in [docs/GUI_PROMPT_LADDER.md](docs/GUI_PROMPT_LADDER.md)**:
-  twenty-four, six each at easy / hard / super-hard / professional, every one in a different
-  interaction style, each with the conditions it passes under and a checkbox. That file is the
-  run log as well as the script — tick a box only against a screenshot, and keep the failures.
-  One prompt, one project: open a new project for each and close the previous one, or a pass is
-  really a pass for two prompts at once.
+## Analyses available
 
-**The model that drives it is `qwen3.5:9b`** (2026-09-06), configured in `.env.local`. It was
-chosen over `qwen3-coder:30b` on the grounds that matter here: the 30b is 22 GB on an 8 GB card,
-runs 72% on the CPU, and took two and a half minutes to answer with a single word — a CATIA
-build is tens of turns of that. The 9b was probed the way the technology-register rule demands,
-against `/api/chat` with the full 108-tool payload as well as a small one, and returns a correct
-structured `tool_call` both times in 8–15 s. It sits 81% on the GPU at `num_ctx=32768` with
-`OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0`; dropping the window to 16k only
-reaches 86%, because the weights are the bulk and not the KV cache, so the full window is kept —
-a truncated prompt is refused loudly by `app/ai/providers/ollama.py` and would end a long run.
+All verified against closed-form solutions, not recorded output.
 
-## Conventions
+1. **Linear static** — `solve/linear_static.py`, `LoadCase`, checked against σ = F/A and δ = FL/AE.
+2. **Modal** — `solve/modal.py`, `ModalCase`, checked against the bar `f=(2n−1)/4L·√(E/ρ)`,
+   cantilever Euler-Bernoulli modes 1–3, six rigid-body modes free-free.
+3. **Buckling** — `solve/buckling.py`, `BucklingCase`, checked against Euler `P=π²EI/(KL)²`.
+4. **Thermal stress** — `solve/thermal.py` via `LoadCase.delta_t_k`, checked against the
+   restrained bar `σ = −EαΔT`.
 
-- Files `snake_case` · classes `PascalCase` · functions/vars `snake_case` · constants `UPPER_SNAKE`
-- Routes: `api/routes/<domain>.py` exposing `router = APIRouter(prefix=..., tags=[...])`,
-  wired in `api/router.py` — an unwired router is invisible everywhere, including `/docs`
-- Schemas: `<Resource>Create` / `<Resource>Update` / `<Resource>Read`
-- Errors: raise `HTTPException` with a **human-readable, actionable** `detail`. The existing
-  messages tell the user what to do ("Increase element_size_mm to coarsen it", "Check that the
-  fixtures remove all six rigid-body motions") — match that register, do not degrade to
-  "Invalid input".
-- Expected, explainable failures (`MeshError`, `SolverError`, `ValueError`) are recorded on the
-  job row with their message; anything else is logged with a stack trace and recorded as
-  "Unexpected solver failure".
+Three things that are easy to get wrong and are pinned by tests:
+
+1. **Thermal strain must be subtracted during stress recovery**, not only added as a load. Leaving
+   it out reports the stress of a freely-expanding part — wrong sign and wrong size.
+2. **Buckling is posed as `−Kg φ = μ K φ`**, not the natural way round: `Kg` is indefinite and the
+   generalised symmetric eigensolver needs the positive-definite matrix on the right. `λ = 1/μ`.
+3. **The modal mass matrix is integrated analytically** in barycentric coordinates, not with the
+   stiffness assembly's four-point Gauss rule — that rule is exact only to degree 2 and tet10's
+   `N^T N` is quartic, so reusing it would be wrong by a few percent: plausible-looking, and wrong.
+
+A bar in tension still returns a finite positive buckling factor (~68,000×), because a 3D bar has
+small compressive pockets at the load introduction. That is correct; the meaningful statement is
+the ratio to the compressive case.
+
+## Seams — respect them
+
+1. **`solve.Solver`** (ABC) — mesh in, load case in, fields out. A surrogate or neural solver must
+   drop in without the API, job or AI layer knowing which ran.
+2. **`solve.ModalSolver`** (ABC) — a sibling, not a method on `Solver`: natural frequencies come
+   from a different input and return a different output, so folding them in would make every
+   caller branch on what it got back.
+3. **`jobs.JobQueue`** (ABC) — one method, `submit`. Moving to Celery must not touch routes.
+4. **`media.LocalMediaStore`** — content addressing and chunked IO behind a small surface, so an
+   S3 store is a swap, not a rewrite.
+
+**Never reach around a seam.** If a route needs to know which solver ran, put it on the job row.
+
+## Reference manuals (`app/retrieval/`) and the CATIA KB (`app/catia_kb/`)
+
+The agent consults the CATIA and FEA documentation held on this machine instead of answering from
+memory, via `search_documentation`. **It is lexical (BM25), not embeddings, and that was a decision
+rather than a shortcut**: the discriminating terms are exact (`M6`, `Ø12`, `tet4`, `V5R21`,
+`Multi-sections Solid`) — precisely what embeddings blur — the corpus is bilingual, where accent
+folding does for free what no embedding quality gives, and no embedding model ships with a
+deployment whose point is that it runs offline. `Corpus.search` sits behind a small surface so a
+dense stage can be fused in later.
+
+`app/catia_kb/` does a different job: ~1,600 entries that know Edge Fillet is in Part Design's
+Dress-Up Features toolbar, that the French interface calls it `Congé d'arête`, and when it fails.
+It ships **in the code, not in an index**, so unlike the manuals it is always present.
+
+1. **`KnowledgeService.search` and `CatiaKnowledge` cannot raise.** Missing index, corrupt index,
+   wrong format version, disk gone — all return empty, logged once. Consulting the manuals
+   improves an answer and must never be why there is not one.
+2. **The tool and the prompt are gated on the index actually existing**, not on the setting. A
+   prompt describing a tool the model was not given teaches it to hallucinate a call. There are
+   **four** frozen system prompts for this reason (CATIA × docs).
+3. **Never name the mechanism in user-facing text.** The step label is "Checking the
+   documentation"; "I searched my knowledge base" is a worse answer than the answer.
+4. **Heading detection is the most tuned code in `chunking.py`.** These manuals are almost entirely
+   numbered procedures, so a bare `\d+\.` pattern labels thousands of instruction steps as section
+   titles. **Refusing to *accept* a line is not the same as *rejecting* it** — declining a bare
+   `6.` only passed the line to the title-case fallback, which took it, labelling 1,143 of 5,003
+   real passages. `_ENUMERATOR_RE`, `_PATH_FRAGMENT_RE` and the minor-word-ending test are the
+   explicit rejections; all three run before the title-case fallback.
+5. **Language is a boost, never a filter** (1.35, measured — re-sweep with
+   `tests/test_retrieval_corpus.py` before changing it). CATIA's menus are translated, so a French
+   user needs the French page, but a workbench documented only in English must still answer them.
+6. **Precision is the hard half of the KB, not recall.** This vocabulary contains `fit`, `add`,
+   `part`, `box`, `web` and `pip`. `NEVER_BARE` never matches alone; `AMBIGUOUS_WORDS` needs
+   corroboration. Distinctive words are in neither, because "how do I make a pocket" carries no
+   other signal and must still work. `TestPrecision` is the set of sentences that must produce
+   nothing — add to it before widening any alias. Two supporting rules: **product codes need their
+   capitals when they collide** (`PIP`/`pip`, `FIT`, `GAS`, `EST`, `CUT`; codes with no collision
+   like `GSD` match either way), and **fuzzy matching only fires once something matched exactly**,
+   or `document` scores 0.94 against `Documents` and every English sentence with a long word
+   produces a hit.
+7. **Expansion and the coverage floor are in direct conflict** — this shipped as a bug once.
+   Expansion adds synonyms, and a passage matches the English name or the French one, never both.
+   `Corpus.search(..., coverage_query=)` measures the floor against the user's original query.
+   Never remove that argument.
+8. **A missing translation is reported as missing.** Never fall back to the English name presented
+   as the localised one — an engineer can work with "I don't have the German name, it's here in
+   the menu", and cannot recover from being sent to a menu item that does not exist.
+9. **The COM automation API is not localised.** `AddNewPad` is `AddNewPad` on every language
+   install; only user-typed data translates. This is why the bridge works on any seat, and why a
+   macro that looks up `"Pad.1"` by string is the one that breaks abroad.
+10. **Ambiguity is named, not resolved.** SMD vs ASL, GSD vs WSF, Geometrical Set vs Body — the
+    `Disambiguation` table forks these and the brief prints the fork.
+
+```
+venv/bin/python -m app.retrieval.build            # build or rebuild
+venv/bin/python -m app.retrieval.build --check    # exits non-zero when a rebuild is needed
+venv/bin/python -m app.retrieval.build --query X  # see what the agent would find
+```
+
+## Rendering and the visual check (`app/render/`, `app/ai/vision.py`)
+
+Eight canonical views rendered byte-identically run to run, section cuts, a before/after diff, and
+a vision model asked whether the part matches the request.
+
+1. **Hidden-line removal, not OpenGL.** Two renders of the same geometry must be *byte-identical*
+   so a render hash can join mass and plan-digest as a third identity check, and a GL image is a
+   function of the driver, sampling and display server on a project that develops on Linux and
+   ships on Windows. HLR is arithmetic; the raster under it is integer.
+2. **OCCT's `gp_Ax2` Y axis is `direction × X`** — the opposite of the up vector `views.py`
+   declares — so `project._flatten` negates y. Leaving it out renders every part upside down and
+   **nothing can see it**: a consistently mirrored image is still byte-identical to itself, and a
+   wireframe looks plausible either way up. It shipped inverted for one day.
+3. Determinism is defended at each cheap place to lose it: no anti-aliasing, `floor(v+0.5)` rather
+   than banker's rounding, dash phase per polyline not per segment, curve deflection relative to
+   model size, and a hand-written PNG encoder (an outside one can add a timestamp chunk).
+4. **A section's normal points at the material that is removed** — `catia_split`'s own convention.
+   Two conventions for one question is how a part ends up mirrored with every test green. Hatching
+   fills by **even-odd across every wire at once**, so a bore falls out of the parity with nothing
+   having to identify it as a hole.
+5. **The visual check is a filter, never a sign-off**, so `VisualReview` deliberately has no
+   `approved`/`passed` property — only `objected`. Every way it can fail to run is `unchecked`,
+   which is never a pass. Nothing in it raises.
+6. **Ollama does not refuse an image handed to a text-only model** — it drops it and answers
+   anyway, so the check would manufacture agreement, which is worse than no check. `_sees()` gates
+   on `/api/show` `capabilities` or a `projector_info` block (structural signals, no model-name
+   list to rot); `AI_VISION_MODEL` names the model that looks. `num_ctx` must be sized for the
+   images too — Ollama truncates a prompt from the front in silence.
+
+## Driving CATIA's interface
+
+Eight tools reach every command on the seat rather than the thirty Kryova implements directly.
+Server specs in `app/catia/tool_specs.py`, resolution in `app/catia_kb/ui.py`, daemon in
+`scripts/catia_bridge/`. Full contract in `docs/CATIA_BRIDGE_PROTOCOL.md`.
+
+1. **It is Win32, never COM.** `GetMenu`, `EnumChildWindows`, `SendMessageTimeoutW`. Two
+   consequences you must not undo: it reads the seat's *actual* labels so it works in a language
+   nobody wrote a table for, and it keeps working while a modal dialog has COM blocked — which is
+   when it matters most.
+2. **`OUT_OF_BAND_TOOLS` skip the COM liveness probe**, and the same tools are in
+   `dispatch._NO_AUTO_CHECKPOINT`. A checkpoint is a COM save, and a failed checkpoint refuses the
+   call — gate these on COM and the tools that dismiss a stuck dialog can only run when no dialog
+   is stuck. `catia_run_command` is the deliberate exception.
+3. **`StartCommand` fails silently.** Hand it a name CATIA does not know and it does nothing,
+   raises nothing, returns nothing. So the daemon tries the **live menu first** and falls back to
+   `StartCommand` with `verified: false`. Never report an unverified `StartCommand` as success.
+4. **Command labels are localised; internal command ids are not, and are undocumented.**
+   `COMMAND_IDS` holds only ids with a published source. Do not add one from memory.
+5. **Buttons are pressed by role, never by label.** `ButtonRole` + `BUTTON_LABELS` resolve
+   OK/Cancel/Apply per language; `STANDARD_CONTROL_IDS` (IDOK=1, IDCANCEL=2) is the language-proof
+   fallback. A Spanish seat's accept button reads `Aceptar`.
+6. **Refusals are exact-label or leading-phrase, never substring.** A leading-word rule refused
+   `Exit Sketcher Workbench`; a substring rule refuses `Copy Options`. **An over-refusal is not
+   safe** — the agent's recovery from a refusal is to try something else, so it becomes a wrongly
+   built part.
+7. **Mock mode simulates the interface** (`mock_ui.py`) and runs in a language:
+   `--mock-language de`. Pressing OK on the mock Pad dialog builds a real mock Pad, so tests assert
+   the outcome. Every interactive test runs against `en` and `de`.
+8. **What Linux cannot verify** is listed in the protocol doc: whether CATIA's dialogs answer
+   `WM_GETTEXT`, whether `EN_CHANGE` is needed, what its window classes are. `describe_dialog`
+   reports unrecognised controls with their class name so the first Windows session produces the
+   answer instead of a shrug.
+
+### Two seat behaviours that cost a restart each — measured, not theorised
+
+1. **`catia_sketch_dimension` fails on this seat far more often than it works** (measured
+   2026-09-08, three consecutive PRO1 runs on French V5-R33). `AddDimensionConstraint` returns a
+   constraint and *reading* `.Dimension` off it raises `E_INVALIDARG` —
+   `(0, 'CATIAConstraint', 'La méthode Dimension a échoué', ...)`. It is refused in words now and
+   the half-made constraint is discarded, so a failed dimension no longer poisons the sketch it
+   was added to — but **the underlying call still fails**. The working route to a dimensioned
+   profile is to *draw it at the size you want*: the coordinates passed to
+   `catia_sketch_polyline` and `catia_sketch_rectangle` are millimetres and **are** the dimension.
+   Do not build a feature on the assumption that a constraint will take.
+2. **A CATPart that a CATProduct has open does not close.** `Document.Close()` returns cleanly and
+   the document stays in `Documents`, so `while Count > 0: close Item(1)` spins forever reporting
+   success every time round — it wedged the seat on 2026-09-08 and cost a restart. Close products
+   first, and test whether the **count fell**, not whether the call succeeded. Same shape as the
+   read loop `MAX_READS_WITHOUT_PROGRESS` exists for.
+   `ABQMaterialPropertiesCatalog.CATfct` never closes at all; it is CATIA's own material
+   catalogue, not a leftover.
+
+## Known landmines
+
+Live defects, not style opinions. Read before touching the file.
+
+**This section was audited on 2026-09-08 and five of its nine entries were false** — fixed weeks
+earlier and never removed from here. That is worse than an empty section: a stale landmine sends
+you to re-fix something that works, and it teaches you to skim the ones that are real. **Verify an
+entry before acting on it, and delete it the moment it stops being true.**
+
+1. **`data/bm25/` holds ~450 MB of tracked Dassault Systèmes PDFs, on purpose** (2026-09-01) so the
+   corpus syncs to the Windows workstation with a plain `git pull`. They are third-party
+   copyrighted material in a repo carrying its own LICENSE, and a later `.gitignore` cannot undo
+   it — removing them needs a history rewrite. Raise this before the repository is published or
+   cloned widely. `data/bm25/index/` is *not* tracked: it is derived and would conflict between
+   machines.
+2. **Four of the 25 PDFs are scans with no text layer** and cannot be indexed without OCR. The
+   build reports them as `scanned, no text layer` and carries on; expected, not a regression.
+3. **RLS is inert on Neon and in CI** — see *Database* item 3. The policies are deployed and
+   correct and the connecting role outranks them.
+4. **`pip install pychrono` installs an unrelated package and succeeds.** The engine probe checks
+   the module really is Chrono. There is no dynamics engine and the docstrings say so.
+5. **The in-memory rate-limiter backend is per-process.** `RedisBackend` exists in
+   `api/rate_limit.py`; with `InMemoryBackend` selected, multiple workers each enforce their own
+   budget. Check which backend is configured before reasoning about a limit.
+6. **`ezdxf` is imported by `manufacture/dxf.py` and `documents/readers.py` and is declared in no
+   requirements file** (found 2026-09-08). Both guard the import and degrade, so DXF export and
+   DXF attachment reading simply never work rather than erroring loudly — and **`mypy app/` prints
+   three `import-not-found` errors because of it**, which breaks the "if mypy prints anything, it
+   is yours" rule this file depends on. Either declare it (with a `[[tool.mypy.overrides]]` entry)
+   or make the fallback explicit; do not learn to skim past those three lines.
+7. **The suite has pre-existing failures on `main` as of 2026-09-08** — `test_written_tool_calls.py`
+   (5), `test_tool_retrieval.py` (1), `test_catia_com_contract.py` (1) and
+   `test_retrieval_corpus.py` (1, index staleness). They are DB-independent and came in with the
+   agent verification-footer work; they are not caused by the local-Postgres switch. Do not read
+   a red suite as your own regression without checking these first.
+
+**Removed on 2026-09-08 because they were no longer true** — recorded so nobody reinstates them
+from memory: `SECRET_KEY="changeme"` boots (it is refused at startup, `config.py:450`); the rate
+limiter trusts `X-Forwarded-For` unconditionally (it honours `trust_proxy_headers` and counts from
+the right, `auth.py::_client_ip`); no list endpoint paginates (all four do, `page_size` capped at
+100); SQLite is not actually refused (`_require_postgres` raises for any non-PostgreSQL URL);
+`/health` is not a readiness probe (it probes the database and the media store and returns 503).
 
 ## Do not
 
-- Don't convert units anywhere — the whole codebase is mm-N-MPa
-- Don't use `SET search_path`, or any session-level `SET`, against the pooled endpoint
-- Don't borrow the request session in a background job
-- Don't call gmsh off the module lock, or modify a stored blob in place
-- Don't return unpaginated collections in new endpoints (the existing ones are a known debt,
-  not a pattern to copy)
-- Don't add migrations outside `migrations/versions/`
-- Don't return 403 for another user's resource — 404
-- Don't claim a capability in a docstring or README that the code does not have (this has
-  already happened twice — tet10 and the SQLite refusal)
+1. Don't convert units anywhere — the whole codebase is mm-N-MPa.
+2. Don't use `SET search_path`, or any session-level `SET`, against a pooled endpoint.
+3. Don't borrow the request session in a background job.
+4. Don't call gmsh off the module lock, or modify a stored blob in place.
+5. Don't return unpaginated collections — every list endpoint paginates, `page_size` capped at 100.
+6. Don't add migrations outside `migrations/versions/`.
+7. Don't return 403 for another user's or tenant's resource — 404.
+8. Don't claim a capability in a docstring, README or status line that the code does not have.
+   This has already happened twice, and both times it cost a session to discover.
+9. Don't mark a master-plan task `DONE` without a test that proves it, and don't leave a finished
+   task unmarked.
+10. Don't claim an end-to-end result from Linux. No CATIA here.

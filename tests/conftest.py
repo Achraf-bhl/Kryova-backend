@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from dotenv import dotenv_values
 from fastapi.testclient import TestClient
 from sqlalchemy import Connection, Engine, create_engine, event, make_url, text
 from sqlalchemy.orm import Session
@@ -15,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_media_service, get_session_scope
 from app.api.rate_limit import auth_limiter
-from app.core.config import settings
+from app.core.config import _as_psycopg_url, settings
 from app.core.database import Base, get_db
 from app.jobs import InlineJobQueue, get_job_queue
 from app.main import app
@@ -25,6 +26,35 @@ from tests.typing import AuthenticatedTestClient
 # Shared by every connection in the process, so the schema one connection
 # creates is the schema the next one sees.
 _IN_MEMORY_SQLITE = "sqlite+pysqlite:///:memory:"
+
+
+def _load_test_database_url_from_the_files_settings_reads() -> None:
+    """Put `TEST_DATABASE_URL` into the environment if only a `.env` file has it.
+
+    `app.core.config` reads `(".env", ".env.local")` and pytest does not, so a
+    developer who sets `TEST_DATABASE_URL` beside `DATABASE_URL` in `.env.local`
+    has every reason to think they configured the suite and has silently
+    configured nothing: the run falls back to SQLite and the RLS, JSONB and
+    cascade tests skip themselves. That is the failure this repository has
+    already had once, where one green tick stood for a Postgres suite that had
+    never touched Postgres.
+
+    It writes to `os.environ` rather than being consulted by the resolver, so
+    the resolver stays a pure function of the environment and
+    `monkeypatch.delenv` still means what it says. A real environment variable
+    always wins, so CI -- which exports one -- is untouched.
+    """
+    if os.environ.get("TEST_DATABASE_URL", "").strip():
+        return
+    for name in settings.model_config.get("env_file", ()):
+        if not Path(name).exists():
+            continue
+        value = (dotenv_values(Path(name)).get("TEST_DATABASE_URL") or "").strip()
+        if value:
+            os.environ["TEST_DATABASE_URL"] = value
+
+
+_load_test_database_url_from_the_files_settings_reads()
 
 
 def _resolve_test_database_url() -> str:
@@ -53,7 +83,14 @@ def _resolve_test_database_url() -> str:
 
 def _build_engine(url: str) -> Engine:
     if make_url(url).get_backend_name() != "sqlite":
-        return create_engine(url, pool_pre_ping=True)
+        # Onto psycopg 3, exactly as `Settings` does for the application. A bare
+        # `postgresql://` URL is SQLAlchemy's psycopg2 spelling and psycopg2 is
+        # not installed, so without this a URL that is correct in every other
+        # respect dies at connect time with `No module named 'psycopg2'` -- and
+        # a URL pasted from `DATABASE_URL`, which is normalised, would not work
+        # here. Done at engine construction rather than in the resolver so the
+        # resolver still returns what was configured, unchanged.
+        return create_engine(_as_psycopg_url(url), pool_pre_ping=True)
 
     # One shared connection: an in-memory SQLite database belongs to the
     # connection that opened it, and a fresh one would find no tables.

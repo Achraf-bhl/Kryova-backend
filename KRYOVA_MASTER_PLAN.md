@@ -1,30 +1,10 @@
 # Kryova — the plan to build machines from a conversation
 
-**Version 2, written 2026-09-05. This is the controlling document for what Kryova is trying to
-become.** Version 1 was written earlier the same day; v2 supersedes it wholesale.
+**Version 3 (restructured 2026-09-08). Content is version 2 (written 2026-09-05); the structure
+is new: no tables, no status board, one flat numbered task list per phase, and a status comment
+on every task.** This is the controlling document for what Kryova is trying to become.
 
-**What v2 adds and corrects.** Version 1 planned the *engineering* system and forgot Kryova is a
-*product*: it said nothing about the frontend, users, organisations, admin, auth hardening,
-billing, deployment, or reading the files a user attaches. Version 2 adds a full **Product
-Track** (phases P1–P10) alongside the Engineering Track (phases 1–18), fixes v1's part-numbering
-gap, and records four defects that investigation of the actual code surfaced meanwhile:
-
-1. **Auth is single-device by design accident.** `users.refresh_token_hash` is one column on the
-   user row — a second login invalidates the first device's session silently. Fixed in P1.
-2. ~~**The frontend has no CI at all.**~~ **Wrong as written, corrected 2026-09-06.** The
-   frontend *does* have `.github/workflows/ci.yml`, added 2026-08-29, and it already ran lint,
-   `tsc`, vitest and the build on every push. The real gap was in this repo: the **backend**
-   workflow ran the whole suite with `TEST_DATABASE_URL` unset, which `tests/conftest.py`
-   silently answers with in-memory SQLite — so one green tick stood for a Postgres suite that
-   had never touched Postgres. Both are addressed in P9; see that row.
-3. **`SECRET_KEY` defaults to `"changeme"` and the server starts anyway.** Already listed as a
-   landmine in CLAUDE.md; now owned by P1 with a startup refusal.
-4. **`pythonocc-core`'s coverage of OCCT's OCAF/TNaming layers is not confirmed by its docs.**
-   v1's topological-naming plan leaned on it. Phase 1 now opens with a one-week spike to verify,
-   with the C++-side fallback named. Planning around an unverified binding is exactly the kind of
-   mistake this document exists to prevent.
-
-The goal is unchanged and it is the point of everything below:
+The goal, unchanged, and the point of everything below:
 
 > **A system an engineer can talk to that designs, analyses, validates and documents a complete
 > working machine — a stamping press, a gearbox, a conveyor, a robot arm, a motorcycle chassis —
@@ -35,119 +15,136 @@ that real users, real teams and real money can actually use.
 
 Companion documents:
 
-- [KRYOVA_BUILD_PLAN.md](KRYOVA_BUILD_PLAN.md) — the working queue. One batch at a time, green
-  before the next. Short-term truth; this file is where it is going.
-- [KRYOVA_CAPABILITY_ROADMAP.md](KRYOVA_CAPABILITY_ROADMAP.md) — the 2026-09-03 capability audit
-  this plan grew out of.
-- [KRYOVA_STATE_OF_THE_PROJECT.md](KRYOVA_STATE_OF_THE_PROJECT.md) — honest current state.
+1. [KRYOVA_BUILD_PLAN.md](KRYOVA_BUILD_PLAN.md) — the working queue. One batch at a time, green
+   before the next. Short-term truth; this file is where it is going.
+2. [KRYOVA_CAPABILITY_ROADMAP.md](KRYOVA_CAPABILITY_ROADMAP.md) — the 2026-09-03 capability audit
+   this plan grew out of.
+3. [KRYOVA_STATE_OF_THE_PROJECT.md](KRYOVA_STATE_OF_THE_PROJECT.md) — honest current state.
+
+---
+
+## How to read and maintain this file
+
+1. **Every phase is a numbered task list.** `##### Phase E1 #####` … `##### Phase P10 #####`.
+   Engineering Track phases are `E1`–`E18` (plus `E17.3`); Product Track phases are `P1`–`P10`.
+2. **Every task carries a status line beginning `>`.** Exactly five forms, and nothing else:
+   - `> NOT STARTED`
+   - `> IN PROGRESS (since YYYY-MM-DD)`
+   - `> PARTIAL (YYYY-MM-DD) — <what shipped>. Tested by: <files>.`
+   - `> DONE (YYYY-MM-DD) — <what shipped>. Tested by: <files>.`
+   - `> BLOCKED — <what blocks it>.`
+3. **A task is `DONE` only when a test proves it.** The status line names the test file or the CI
+   job. A claim with nothing to open is not a status, it is an intention.
+4. **When a task finishes, edit its status line in the same commit as the work** — never as a
+   follow-up that can be forgotten.
+5. **When every task in a phase is `DONE`, add the phase-complete line** immediately under the
+   phase heading: `> ✅ PHASE COMPLETE (YYYY-MM-DD) — all tasks done and tested.` A phase with one
+   task still open does not get it, however much has shipped.
+6. **Never delete a status; supersede it.** This file is current state. The build plan's *Done*
+   section is the history — one line lands there for every status change here that isn't
+   `NOT STARTED`.
+7. **A task whose proof names the product waits for its gate** (see *Stop gates*). Inside a
+   stretch the offline suite is the whole of the evidence, and the status says so:
+   `pytest green, end to end pending G<n>` is honest; a bare `DONE` on unit tests is not.
+8. **A session starting Kryova work reads this file first.** It is the answer to "where were we?".
 
 ---
 
 ## Part 0 — The decisions that shape everything below
 
 Most of this plan is consequence. These decisions are the plan. The first five are the
-engineering spine (unchanged from v1); the last three are the product spine v1 was missing.
+engineering spine; the last three are the product spine.
 
 ### Decision 1 — OCCT is the internal engine; CATIA is the delivery target
 
 **The most important decision in the document; it reverses the project's centre of gravity.**
 
-> **Amended 2026-09-05, and the amendment matters.** This decision used to read "CATIA is one
-> backend among several", which invited a reading it was never meant to carry: that Kryova
-> might one day be sold without CATIA. It will not be. **Every customer holds a CATIA licence
-> — that is the market.** OCCT is the engine the agent *designs and iterates in*, because a
-> design loop needs tens of rebuilds a minute and a seat gives you one every few seconds;
-> CATIA is where the result **lands**, because that is where the customer works.
->
-> Three consequences, all binding:
->
-> * **No customer-facing OCCT surface.** No "choose your kernel" in the UI, no CATIA-free
->   product story, no marketing that implies one.
-> * **Operations are added to the OCCT backend only when a test, a sensitivity sweep or an
->   optimisation needs one** — never for coverage's sake. The 108/201 figure is scaffolding
->   depth, not product progress, and reading it as progress is how it got to 108.
-> * **The deployment is hybrid**: part of the backend runs on Kryova's server, part on the
->   engineer's machine alongside CATIA. OCCT installs **silently, as an ordinary dependency of
->   the Kryova install** (`cadquery-ocp`, a Python wheel with no executable, no service and no
->   shortcut — it cannot appear as a separate application, and that is structural rather than
->   arranged). The honest cost is **~805 MB**: 166 MB of OCP plus 639 MB of VTK, which is a
->   *hard* requirement — the compiled extension links VTK directly and will not load without
->   it, so it cannot be trimmed away.
->
-> What has **not** changed is why the engine exists at all, and it is not a preference. Without
-> it there is no CI for geometry, no test that runs without a licensed seat, and no sensitivity
-> or optimisation, because those need many rebuilds and a seat cannot give them.
+Amended 2026-09-05. It used to read "CATIA is one backend among several", which invited a reading
+it was never meant to carry: that Kryova might one day be sold without CATIA. It will not be.
+**Every customer holds a CATIA licence — that is the market.** OCCT is the engine the agent
+*designs and iterates in*, because a design loop needs tens of rebuilds a minute and a seat gives
+one every few seconds; CATIA is where the result **lands**, because that is where the customer
+works.
 
-Today geometry exists only where CATIA exists: a licensed Windows workstation, reached over a
-socket, one seat per user, one COM round trip per operation. Every ambition in the roadmap
-collides with that:
+Three consequences, all binding:
 
-| Ambition | What CATIA-only does to it |
-|---|---|
-| 10⁵–10⁶ operations for a machine | ~1 s per COM round trip ⇒ **28+ hours of pure latency** |
-| Test the geometry in CI | Impossible — CI has no CATIA and never will |
-| Deterministic, reproducible builds | Depends on a seat's version, language, install and options |
-| Many users, many designs at once | One bridge = one user; licences are the ceiling |
-| Optimisation, DOE, parameter sweeps | Each of 500 candidates costs a workstation-hour |
-| An agent that iterates freely | Every experiment is billed against a human's machine |
+1. **No customer-facing OCCT surface.** No "choose your kernel" in the UI, no CATIA-free product
+   story, no marketing that implies one.
+2. **Operations are added to the OCCT backend only when a test, a sensitivity sweep or an
+   optimisation needs one** — never for coverage's sake. The 108/201 figure is scaffolding depth,
+   not product progress, and reading it as progress is how it got to 108.
+3. **The deployment is hybrid**: part of the backend runs on Kryova's server, part on the
+   engineer's machine alongside CATIA. OCCT installs **silently, as an ordinary dependency**
+   (`cadquery-ocp`, a Python wheel with no executable, no service and no shortcut — it cannot
+   appear as a separate application, and that is structural rather than arranged). The honest
+   cost is **~805 MB**: 166 MB of OCP plus 639 MB of VTK, a *hard* requirement — the compiled
+   extension links VTK directly and will not load without it.
+
+What has **not** changed is why the engine exists at all. Without it there is no CI for geometry,
+no test that runs without a licensed seat, and no sensitivity or optimisation, because those need
+many rebuilds and a seat cannot give them.
+
+What CATIA-only does to every ambition:
+
+1. 10⁵–10⁶ operations for a machine — at ~1 s per COM round trip, **28+ hours of pure latency**.
+2. Test the geometry in CI — impossible; CI has no CATIA and never will.
+3. Deterministic, reproducible builds — depend on a seat's version, language, install and options.
+4. Many users, many designs at once — one bridge = one user; licences are the ceiling.
+5. Optimisation, DOE, parameter sweeps — each of 500 candidates costs a workstation-hour.
+6. An agent that iterates freely — every experiment is billed against a human's machine.
 
 `app/design/` already made the necessary move without naming it: a design is a **specification
-compiled to a call plan**, and `compile.py` is a compiler with a pluggable target. Nothing about
-a `Plan` is CATIA-specific except the operation vocabulary it happens to emit.
-
-So: **add a second compilation target — [Open CASCADE Technology](https://dev.opencascade.org/)
-(OCCT), the open-source B-rep kernel behind FreeCAD — and make it the primary one.**
+compiled to a call plan**, and `compile.py` is a compiler with a pluggable target. Nothing about a
+`Plan` is CATIA-specific except the operation vocabulary it happens to emit. So: **add a second
+compilation target — [Open CASCADE Technology](https://dev.opencascade.org/) (OCCT), the
+open-source B-rep kernel behind FreeCAD — and make it the primary one.**
 
 What that buys, none of it obtainable otherwise:
 
-- **Geometry in CI.** Every design in the repository rebuilds and re-asserts on every commit,
-  headless, free, in seconds. Unit testing for geometry stops being a metaphor. No CAD company
-  ships this because their kernel is their product; ours is a dependency.
-- **Throughput.** In-process kernel calls instead of COM round trips — the difference between a
-  batch of 500 design candidates being a coffee break and being a fortnight.
-- **Determinism.** One pinned kernel version, one locale, one tessellation tolerance, in a
-  container we control. Roadmap I5 becomes checkable rather than aspirational.
-- **No licence ceiling.** Optimisation, self-correction loops and the mission ladder become
-  affordable, because the marginal geometry operation costs CPU rather than a seat-hour.
-- **A real answer to topological naming.** OCCT ships `TNaming_Selector` and, since **OCCT 8.0
-  (May 2026), `BRepGraph`** — a graph representation of B-rep topology with bidirectional
-  traversal and history tracking. Combined with the semantic naming already built in
-  `app/design/names.py`, this is the mechanism Layer B needs. *(Caveat owned in Phase 1: the
-  Python binding's coverage of these layers must be verified in week one.)*
+1. **Geometry in CI.** Every design in the repository rebuilds and re-asserts on every commit,
+   headless, free, in seconds. No CAD company ships this because their kernel is their product;
+   ours is a dependency.
+2. **Throughput.** In-process kernel calls instead of COM round trips — 500 candidates as a coffee
+   break rather than a fortnight.
+3. **Determinism.** One pinned kernel version, one locale, one tessellation tolerance, in a
+   container we control.
+4. **No licence ceiling.** Optimisation, self-correction loops and the mission ladder become
+   affordable, because the marginal geometry operation costs CPU rather than a seat-hour.
+5. **A real answer to topological naming.** OCCT ships `TNaming_Selector` and, since OCCT 8.0
+   (May 2026), `BRepGraph` — a graph representation of B-rep topology with bidirectional traversal
+   and history tracking.
 
 CATIA does **not** go away. It becomes what it should always have been: **the delivery and
-interop backend**, plus the backend for customers whose process is CATIA-native. The same `Plan`
-targets both. A design is authored, iterated, simulated and verified against OCCT thousands of
-times, and materialised into a real CATPart once, at the end, when a human wants one.
+interop backend**. The same `Plan` targets both. A design is authored, iterated, simulated and
+verified against OCCT thousands of times, and materialised into a real CATPart once, at the end,
+when a human wants one. This also makes the old `A1` blocker tractable: validating 201 operations
+against a seat stops being a blocker on everything and becomes a **conformance suite** — the same
+plan built on both kernels, geometry compared, unattended.
 
-This also makes `A1` (validate the 201 ops against a real seat) tractable: it stops being a
-blocker on everything and becomes a **conformance suite** — the same plan built on both kernels,
-geometry compared, unattended. A far stronger test than a human clicking through 201 operations.
-
-**Cost:** OCCT is a large, old, idiosyncratic C++ library; `pythonocc-core` (LGPL) is mature but
-the surface is enormous and parts of it are thinly documented. Budget real time for kernel-facing
-work and expect the first six weeks to feel slow. Still cheaper than any alternative.
+**Cost:** OCCT is a large, old, idiosyncratic C++ library; the surface is enormous and parts of it
+are thinly documented. Budget real time for kernel-facing work and expect the first six weeks to
+feel slow. Still cheaper than any alternative.
 
 ### Decision 2 — Physics is federated, never re-implemented
 
 `app/solve/` is ~1,300 lines of hand-written FEA — correct, verified against closed-form
-solutions, and a **component solver**: no contact, no plasticity, no large deformation, no
-shells or beams as authored elements, no dynamics, and a direct solve that will not survive an
-assembly. Writing the missing 90% is a decade of specialist work that has already been done,
-validated and given away:
+solutions, and a **component solver**: no contact, no plasticity, no large deformation, no shells
+or beams as authored elements, no dynamics, and a direct solve that will not survive an assembly.
+Writing the missing 90% is a decade of specialist work that has already been done, validated and
+given away:
 
-- **[CalculiX](http://www.calculix.de/)** (GPL) — the workhorse. Abaqus-compatible `.inp` decks,
-  25 years of validation, nonlinear, contact, plasticity, modal, buckling, thermal, dynamics.
-- **[code_aster](https://code-aster.org/)** (GPL, EDF) — fracture, cyclic plasticity, the things
-  a nuclear utility needs and validates.
-- **[Elmer](https://www.csc.fi/web/elmer)** (LGPL) — multiphysics, FSI.
-- **[OpenFOAM](https://openfoam.org/)** (GPL) — CFD, late and only when genuinely needed.
+1. **[CalculiX](http://www.calculix.de/)** (GPL) — the workhorse. Abaqus-compatible `.inp` decks,
+   25 years of validation, nonlinear, contact, plasticity, modal, buckling, thermal, dynamics.
+2. **[code_aster](https://code-aster.org/)** (GPL, EDF) — fracture, cyclic plasticity, the things
+   a nuclear utility needs and validates.
+3. **[Elmer](https://www.csc.fi/web/elmer)** (LGPL) — multiphysics, FSI.
+4. **[OpenFOAM](https://openfoam.org/)** (GPL) — CFD, late and only when genuinely needed.
 
 **Kept, emphatically:** `solve/loads.py`, `solve/selection.py`, `solve/materials.py`. The
 load-case vocabulary and the *geometric selector* abstraction (a face named by geometry, never by
-id) are the real intellectual property — they are what the agent drives and what makes a load
-case survive a re-mesh. The hand-written solver stays as **fast path and oracle**: any linear
-static case must agree between it and CalculiX, and a disagreement is a bug in the integration.
+id) are the real intellectual property — they are what the agent drives and what makes a load case
+survive a re-mesh. The hand-written solver stays as **fast path and oracle**: any linear static
+case must agree between it and CalculiX, and a disagreement is a bug in the integration.
 
 ### Decision 3 — Verification is the product, not a feature of it
 
@@ -161,24 +158,24 @@ assertion is never a pass); the plan extends it, never erodes it.
 
 ### Decision 4 — Free and open, with the licence consequences taken seriously
 
-Every external dependency in this plan is free — a constraint the user set, and the right call:
-it keeps the system deployable offline, keeps the marginal cost of an experiment at zero, and
-avoids a vendor deciding our roadmap.
+Every external dependency in this plan is free. It keeps the system deployable offline, keeps the
+marginal cost of an experiment at zero, and avoids a vendor deciding our roadmap. The obligation
+it carries:
 
-The obligation it carries: **GPL solvers (CalculiX, code_aster, OpenFOAM, gmsh) are invoked as
-separate processes across a file/CLI boundary** — write an input deck, run the binary, read the
-results. Settled practice, unambiguous, and the right architecture anyway (solvers crash; a crash
-should kill a subprocess, not the API). **LGPL libraries (OCCT, PlaneGCS, OpenCAMLib) stay
-dynamically linked and replaceable.** Neither rule may be "optimised" away.
-
-`data/bm25/` already holds ~450 MB of tracked Dassault Systèmes PDFs — a separate, unresolved
-copyright hazard. Resolve before the repository is published or widely cloned (history rewrite).
+1. **GPL solvers (CalculiX, code_aster, OpenFOAM, gmsh) are invoked as separate processes across a
+   file/CLI boundary** — write an input deck, run the binary, read the results. Settled practice,
+   and the right architecture anyway (solvers crash; a crash should kill a subprocess, not the
+   API).
+2. **LGPL libraries (OCCT, PlaneGCS, OpenCAMLib) stay dynamically linked and replaceable.**
+3. Neither rule may be "optimised" away.
+4. `data/bm25/` holds ~450 MB of tracked Dassault Systèmes PDFs — a separate, unresolved copyright
+   hazard. Resolve before the repository is published or widely cloned (history rewrite).
 
 ### Decision 5 — Honest scope: which machines, and what "designs it" means
 
 Nobody designs a motorcycle from zero. Small manufacturers buy the engine, the suspension, the
-brakes — and design the **chassis, packaging, ergonomics, bodywork and integration**. That is
-what the industry actually does, and it is a very large business. So the target, precisely:
+brakes — and design the **chassis, packaging, ergonomics, bodywork and integration**. That is what
+the industry actually does, and it is a very large business. So the target, precisely:
 
 > **Kryova designs, analyses and documents the structural, kinematic and packaging content of a
 > machine, integrating bought-in functional components, to a standard a licensed engineer can
@@ -187,1088 +184,1781 @@ what the industry actually does, and it is a very large business. So the target,
 The machine classes, in tractability order — the **mission ladder**, each rung a permanent
 regression test:
 
-| # | Machine | What makes it hard | Era it becomes possible |
-|---|---|---|---|
-| M1 | Machined bracket | Nothing. The "hello world". | I |
-| M2 | Welded frame / bench | Weld sizing, fatigue at joints | III |
-| M3 | Sheet-metal enclosure | Unfolding, bend allowance, DFM | IV |
-| M4 | Gearbox | Gear geometry, bearings, tolerance stacks, lubrication | IV |
-| M5 | **Sheet-metal stamping press** | Force path, frame stiffness, die set, drive, guarding | V |
-| M6 | Belt conveyor system | Long assemblies, standard parts, modularity, layout | V |
-| M7 | 6-axis robot arm | Kinematics, dynamic loads, stiffness under motion | VI |
-| M8 | Motorcycle chassis + swingarm | Fatigue under real duty cycles, MBD loads, homologation | VI |
-| M9 | Full vehicle chassis programme | 10³–10⁴ parts, teams, change propagation | VII |
+1. **M1 — machined bracket.** Nothing hard. The "hello world". Possible from Era I.
+2. **M2 — welded frame / bench.** Weld sizing, fatigue at joints. Era III.
+3. **M3 — sheet-metal enclosure.** Unfolding, bend allowance, DFM. Era IV.
+4. **M4 — gearbox.** Gear geometry, bearings, tolerance stacks, lubrication. Era IV.
+5. **M5 — sheet-metal stamping press.** Force path, frame stiffness, die set, drive, guarding.
+   Era V.
+6. **M6 — belt conveyor system.** Long assemblies, standard parts, modularity, layout. Era V.
+7. **M7 — 6-axis robot arm.** Kinematics, dynamic loads, stiffness under motion. Era VI.
+8. **M8 — motorcycle chassis + swingarm.** Fatigue under real duty cycles, MBD loads,
+   homologation. Era VI.
+9. **M9 — full vehicle chassis programme.** 10³–10⁴ parts, teams, change propagation. Era VII.
 
-**Never in scope:** unattended sign-off on a safety-critical machine. The honest product is
-*"does 80% of the engineering in a tenth of the time; a licensed engineer signs."*
+**Never in scope:** unattended sign-off on a safety-critical machine. The honest product is *"does
+80% of the engineering in a tenth of the time; a licensed engineer signs."*
 
-### Decision 6 — One platform: web and desktop share one frontend, one API, one auth *(new in v2)*
+### Decision 6 — One platform: web and desktop share one frontend, one API, one auth
 
-The frontend already exists and already made the right structural choices: Next.js 16 App Router
-+ React 19 + Tailwind v4, **wrapped in Tauri 2 for the desktop**, with a deliberate
-three-dependency runtime (`next`, `react`, `react-dom`), a hand-written WebGL 1 stress viewer,
-and 237 passing tests. The desktop app is not a second product: it is the same frontend with two
-extra powers — the CATIA workstation bridge runs beside it, and signed auto-update ships it.
-Every capability in this plan surfaces through this one frontend; nothing gets a separate admin
-web app or a separate viewer product. The frontend's minimalism doctrine ("before adding a
-dependency, check whether the hand-rolled equivalent should be extended") is respected as policy:
-any new dependency is a named decision in this plan, not a convenience import.
+The frontend already exists and already made the right structural choices: Next.js 16 App Router +
+React 19 + Tailwind v4, **wrapped in Tauri 2 for the desktop**, with a deliberate
+three-dependency runtime (`next`, `react`, `react-dom`), a hand-written WebGL 1 stress viewer, and
+237 passing tests. The desktop app is not a second product: it is the same frontend with two extra
+powers — the CATIA workstation bridge runs beside it, and signed auto-update ships it. Every
+capability in this plan surfaces through this one frontend; nothing gets a separate admin web app
+or a separate viewer product. Any new frontend dependency is a named decision in this plan, not a
+convenience import.
 
-### Decision 7 — Security and tenancy are architecture, not a hardening pass *(new in v2)*
+### Decision 7 — Security and tenancy are architecture, not a hardening pass
 
-The 2026 consensus is unambiguous and this plan adopts it wholesale:
+1. **Sessions**: short-lived access tokens; refresh tokens **rotated on every use**, grouped into
+   **families per device**, with **reuse detection** that kills the whole family — a stolen refresh
+   token becomes a detectable event instead of a 30-day capability. Absolute session expiry.
+   Per-device session list with individual and global revocation.
+2. **Tenancy**: organisations own projects; users belong to organisations with roles. Application
+   code scopes every query, and **PostgreSQL Row-Level Security is the safety net underneath**.
+   Tenant context reaches RLS via **`SET LOCAL` inside an explicit transaction only** —
+   transaction-scoped, discarded at COMMIT/ROLLBACK, and therefore safe under transaction-pooling
+   PgBouncer. This is the *one* disciplined exception to this repo's hard "never `SET` against the
+   pooled endpoint" rule, and the rule exists precisely because a *session-level* `SET` once leaked
+   between clients here. `SET LOCAL` outside a transaction, or any statement-mode pooling,
+   re-opens that hole — both forbidden and tested against.
+3. **Cross-tenant access returns 404, never 403** — already the codebase rule; RLS makes it
+   enforceable rather than conventional.
+4. **Admin power is bounded and recorded**: impersonation carries *both* identities in the token,
+   is read-only by default, and every admin action lands in an append-only audit log.
 
-- **Sessions**: short-lived access tokens; refresh tokens **rotated on every use**, grouped into
-  **families per device**, with **reuse detection** that kills the whole family — a stolen
-  refresh token becomes a detectable event instead of a 30-day capability. Absolute session
-  expiry. Per-device session list with individual and global revocation.
-- **Tenancy**: organisations own projects; users belong to organisations with roles. Application
-  code scopes every query, and **PostgreSQL Row-Level Security is the safety net underneath** —
-  enforced in the database, so an application bug leaks nothing. Tenant context reaches RLS via
-  **`SET LOCAL` inside an explicit transaction only** — transaction-scoped, discarded at
-  COMMIT/ROLLBACK, and therefore safe under transaction-pooling PgBouncer. This is the *one*
-  disciplined exception to this repo's hard "never `SET` against the pooled endpoint" rule, and
-  the rule exists precisely because a *session-level* `SET` once leaked between clients here.
-  `SET LOCAL` outside a transaction, or any statement-mode pooling, re-opens that hole — both are
-  forbidden and tested against.
-- **Cross-tenant access returns 404, never 403** — already the codebase rule; RLS makes it
-  enforceable rather than conventional.
-- **Admin power is bounded and recorded**: impersonation carries *both* identities in the token,
-  is read-only by default, and every admin action lands in an append-only audit log.
-
-### Decision 8 — Everything a user attaches is data to understand and never instructions to obey *(new in v2)*
+### Decision 8 — Everything a user attaches is data to understand and never instructions to obey
 
 Users will attach PDFs, spreadsheets, photos, drawings, STEP files, supplier datasheets. Two
 commitments:
 
 1. **Kryova reads them properly.** A local, free document-understanding pipeline (Docling /
    MarkItDown class, plus `ezdxf` for DXF and the geometry pipeline for CAD formats) turns
-   attachments into structured, provenance-tagged content the agent can actually use — tables
-   stay tables, dimensions stay numbers with units.
+   attachments into structured, provenance-tagged content the agent can actually use — tables stay
+   tables, dimensions stay numbers with units.
 2. **Kryova never obeys them.** Document-borne prompt injection is a documented attack class
    ("ignore your instructions" hidden in white text on page 12 of a datasheet). Extracted content
    enters the model as quoted, provenance-tagged *data*, is never concatenated into the system
-   prompt, and no tool call may be justified solely by text found inside an attachment without
-   the user seeing that justification. This mirrors the CATIA daemon's existing stance (the
-   server is not trusted to describe its own request) one layer up.
+   prompt, and no tool call may be justified solely by text found inside an attachment without the
+   user seeing that justification.
+
+### The four defects v2 recorded, and where they are owned
+
+1. **Auth was single-device by design accident.** `users.refresh_token_hash` was one column on the
+   user row — a second login invalidated the first device's session silently. Owned by P1, fixed.
+2. **CI was dishonest about the database.** The frontend *does* have CI (added 2026-08-29). The
+   real gap was here: the **backend** workflow ran the whole suite with `TEST_DATABASE_URL` unset,
+   which `tests/conftest.py` silently answers with in-memory SQLite — so one green tick stood for a
+   Postgres suite that had never touched Postgres. Owned by P9, fixed.
+3. **`SECRET_KEY` defaults to `"changeme"` and the server starts anyway.** Owned by P1 with a
+   startup refusal.
+4. **`pythonocc-core`'s coverage of OCCT's OCAF/TNaming layers was not confirmed by its docs.**
+   v1's topological-naming plan leaned on it. Phase E1 opened with a spike to verify — which found
+   the binding is not on PyPI at all and switched the project to `cadquery-ocp`.
 
 ---
 
-## Part 1 — Where the code actually is (2026-09-05, measured, both repos)
+## Part 1 — Where the code actually is (measured 2026-09-05, both repos)
 
 ### Backend (`Kryova-backend`)
 
-```
-app/catia/ops/       201 operations, 11 domains, one declarative registry
-app/design/          spec · params · names · compile · execute · diff · assertions · correct
-                     (338 tests, all offline, <1 s)
-app/solve/           linear static tet4/tet10 · modal · buckling · thermal stress · loads · selection
-app/mesh/            gmsh 4.15.2 — industrial grade, keep
-app/retrieval/       BM25 over 21 indexed CATIA/FEA manuals (~4,900 passages)
-app/catia_kb/        ~1,600 curated CATIA entries; query expansion, term lookup, per-turn brief
-app/ai/              agent · tools · prompts · state · resume · providers (pluggable, Ollama default)
-app/media/           content-addressed blob store, chunked IO — the provenance substrate
-app/api/routes/      auth · projects · geometry · simulations · media · materials · ai · catia
-app/models/          User · Project · GeometryVersion · SimulationJob · Media · Conversation · catia
-```
+1. `app/catia/ops/` — 201 operations, 11 domains, one declarative registry.
+2. `app/design/` — spec · params · names · compile · execute · diff · assertions · correct
+   (338 tests, all offline, <1 s).
+3. `app/solve/` — linear static tet4/tet10 · modal · buckling · thermal stress · loads · selection.
+4. `app/mesh/` — gmsh 4.15.2, industrial grade, keep.
+5. `app/retrieval/` — BM25 over 21 indexed CATIA/FEA manuals (~4,900 passages).
+6. `app/catia_kb/` — ~1,600 curated CATIA entries; query expansion, term lookup, per-turn brief.
+7. `app/ai/` — agent · tools · prompts · state · resume · providers (pluggable, Ollama default).
+8. `app/media/` — content-addressed blob store, chunked IO — the provenance substrate.
+9. `app/api/routes/` — auth · projects · geometry · simulations · media · materials · ai · catia.
+10. `app/models/` — User · Project · GeometryVersion · SimulationJob · Media · Conversation · catia.
 
-Full suite: **2,849 passed, 4 skipped, ~223 s.** ruff clean. mypy at a known 7-error baseline.
+Full suite: **2,849 passed, 4 skipped, ~223 s.** ruff clean. mypy clean.
 
 Auth as it stands: JWT HS256 access + refresh with a **type claim that is checked** (a refresh
 token cannot pass as access — good), bcrypt with prehash, cookie sessions, password reset with
-hashed one-time tokens, `is_active`. And the defects now owned by P1: **one
-`refresh_token_hash` per user** (single device), no rotation families or reuse detection, no
-roles of any kind, no admin surface, no audit log, in-process rate limiter that trusts
-`X-Forwarded-For`, `SECRET_KEY="changeme"` accepted at startup.
+hashed one-time tokens, `is_active`.
 
 ### Frontend (`../Kryova-frontend`)
 
-```
-src/proxy.ts             Next 16 middleware — cookie route gate
-src/app/(auth)/          login, register
-src/app/setup/           health-check + onboarding wizard
-src/app/dashboard/       the product surface
-src/components/          agent-chat · agent-step-list · webgl-stress-viewer (hand-written WebGL 1)
-                         geometry-preview · catia-bridge-panel · result-interpretation ·
-                         markdown-message · error-boundary · skeleton · mesh-orb
-src/lib/                 api-client · server-api · chunked-upload · conversation-{resume,events,
-                         transcript} · load-case · surface-field · poll-schedule · markdown · format
-src-tauri/               Tauri 2 desktop shell
-```
+1. `src/proxy.ts` — Next 16 middleware, cookie route gate.
+2. `src/app/(auth)/` — login, register.
+3. `src/app/setup/` — health-check + onboarding wizard.
+4. `src/app/dashboard/` — the product surface.
+5. `src/components/` — agent-chat · agent-step-list · webgl-stress-viewer (hand-written WebGL 1) ·
+   geometry-preview · catia-bridge-panel · result-interpretation · markdown-message ·
+   error-boundary · skeleton · mesh-orb.
+6. `src/lib/` — api-client · server-api · chunked-upload · conversation-{resume,events,transcript} ·
+   load-case · surface-field · poll-schedule · markdown · format.
+7. `src-tauri/` — Tauri 2 desktop shell.
 
-**237 tests, ~7 s, currently clean; lint and `tsc` clean. No CI runs any of it.** Three runtime
-dependencies by explicit doctrine. The WebGL viewer, chunked upload and conversation-resume are
-hand-rolled and tested — genuine assets to extend, not to replace.
+**237 tests, ~7 s, clean; lint and `tsc` clean.** Three runtime dependencies by explicit doctrine.
+The WebGL viewer, chunked upload and conversation-resume are hand-rolled and tested — genuine
+assets to extend, not to replace.
 
 ### What is genuinely strong, both sides
+
 The operation registry (one declaration, everything generated); the design IR; offline test
 discipline; the content-addressed store; the honesty conventions; a frontend that is small, fast,
 typed and tested; a working desktop shell.
 
-### What is absent
-Everything in the two tracks below.
-
 ---
 
-## Part 2 — How to read the plan: two tracks, one ladder
+## Part 2 — Two tracks, one ladder
 
-- **Engineering Track — phases 1–18 in seven eras.** The machine-building capability.
-- **Product Track — phases P1–P10.** The platform around it: identity, tenancy, admin, files,
-  frontend experience, viewer scale, desktop, billing, delivery, trust.
+1. **Engineering Track — phases E1–E18 in seven eras.** The machine-building capability.
+2. **Product Track — phases P1–P10.** The platform around it: identity, tenancy, admin, files,
+   frontend experience, viewer scale, desktop, billing, delivery, trust.
 
 They run **in parallel** and gate each other only where stated. The mission ladder gates both: a
 mission is not "done" when the geometry is right — it is done when a signed-in user of the right
 organisation can run it end to end in the product, see every number's provenance, and export the
 package.
 
-### The phase status board — the single place progress is recorded
+### Stop gates — where coding stops and the product is tested for real
 
-**This board is how a session picks up where the last one stopped.** Whenever work completes or
-materially advances a phase, its row is updated **in the same commit as the work** — never as a
-follow-up that can be forgotten. Rules:
-
-- Status vocabulary, exactly four: `not started` · `in progress (since YYYY-MM-DD)` ·
-  `partial — <what shipped> (YYYY-MM-DD)` · `DONE (YYYY-MM-DD)`.
-- **A `*` before the phase number means the phase is finished in full** — `*E1`, not `E1`. It is
-  the one mark that is scannable down the left edge of the table, so "how far are we?" is
-  answered by counting stars rather than by reading eighteen status cells. A phase gets its star
-  in the same edit that marks it `DONE`, and only then: a phase with any sub-item still open
-  keeps a bare number however much of it has shipped.
-- A phase is marked `DONE` **only when its Proof runs green** — and the row says where that
-  proof lives (a test file, a CI job, a mission id). A phase without a checkable proof cannot be
-  `DONE`; fix the phase definition instead.
-- **A phase whose Proof names the product waits for its gate** (see *Stop gates* below). Inside a
-  stretch the offline suite is the whole of the evidence, and the row says so — `pytest green,
-  end to end pending G<n>` is an honest status and a bare `DONE` on the strength of unit tests
-  is not.
-- Never delete a status; supersede it. The board is current-state, the build plan's *Done*
-  section is the history — one line lands there for every board change that isn't `not started`.
-- The evidence column names *code that exists*, not intentions. Anyone (human or model) must be
-  able to open the named thing and see the claim be true.
-
-| Phase | Title (short) | Status | Evidence / where the proof lives |
-|---|---|---|---|
-| *E1 | OCCT kernel target | **DONE (2026-09-05)** — 1.0/1.1/1.4/1.5/1.6 complete; 1.2 at 22/201 ops, 1.3 parametric (solver deferred, see below) | `app/kernel/` (24 modules), `tests/test_kernel.py`. M1 bracket builds on OCCT. **Residual: the CATIA-seat half of the conformance run needs a Windows seat.** |
-| *E2 | Selection & authoring vocabulary | **2.1/2.2/2.3/2.4 DONE (2026-09-05)**; **2.5 DONE (2026-09-05)**; **2.6 DONE (2026-09-05); the phase Proof is written and green** | `app/kernel/selection.py`, `occt/{resolve,classify,selectors,reference,naming,sketching}.py`, `occt/operations/` (15 modules), `app/kernel/threads.py`, `tests/test_reference_geometry.py` (36 tests) + `tests/test_kernel.py::{TestDrawnCurvesChainIntoContours,TestSweptFeatures,TestThreadsAreAnnotations,TestStiffenersFindTheirOwnBoundaries,TestDraftSplitsAtAPartingElement,TestSurfacesAreSkinNotMaterial,TestASkinBecomesMaterialOnlyWhenAsked,TestCuttingSurfacesAgainstEachOther,TestWireframeCurvesLiveInSpace,TestAnchorsPointsAndLines,TestPlanesDerivedFromGeometry,TestCurvesDerivedFromSurfaces,TestJoiningTwoCurves,TestASpiralIsFittedAndSaysSo,TestTheReflectLineIsGeometryNotADrawing,TestAPolylineRoundsItsOwnCorners,TestSteeredSurfaces,TestPropagationAndSewing,TestExtendingPastAnEnd,TestARunOfBoundary,TestTheProofOfPhaseTwo}`. Every vocabulary word decidable; per-edge parameters; `parallel_to`/`perpendicular_to` make "the vertical walls" one selection; reference geometry complete for everything not needing a named face; **`feature#selector` resolves — `slab#top` returns the annulus under a boss, a face the plain word `top` can never return.** Coverage **108/201**. **Five regressions this phase introduced were caught and fixed on 2026-09-05 by the first `pytest` run since — see the build plan.** **Every geometry operation now records its own faces** — pad/pocket/shaft/groove, primitives, transforms, boolean, shell, fillet, chamfer and draft — and a test fails if one stops. Drawn segments chain into contours, so four `catia_sketch_line` calls make a padable square; ribs and slots verified against Pappus's theorem; a thread is an annotation that provably does not change the mass. **2.5 closes with the two features whose extent is not stated by their own arguments**: a stiffener runs until it meets material (built by subtraction, exact against ½·b·h·t, and a sweep that never meets material is refused by name rather than left hanging in the air), and a draft with a `parting` element tapers *both* sides away from the plane so a two-part mould releases — checked against the frustum closed form on each side, and distinct from the unparted draft of the same faces. A draft's `neutral` element may now be a planar face of the part, a refusal that had been pointing at Phase 2.2 since before 2.2 was built. **2.6 opens with the half that earns the rest**: a surface is skin, not material — it lives in the document's construction store and the part's mass does not move when one is built — and `catia_close_surface` / `catia_thick_surface` are the two named crossings back. Extrude, revolve, offset, fill, loft, join, extract, boundary all land; a frustum is built entirely as skin and closed into the solid the closed form predicts. Two OCCT traps are pinned by tests that fail when the fix is removed: **a thickened surface comes back inside-out**, which `BRepCheck_Analyzer` calls valid and which makes a later fuse silently swallow the thing being fused; and **`MakeFilling` approximates even a flat boundary**, so a patched circular hole measured 314.1595 mm² against πr². **The trimming family lands with it**: split, trim, untrim, disassemble, healing and `catia_surface_analysis`. Which side of a cut survives is *stated* — cells ordered by the signed distance of their centre from the cutting plane, `first` the side its normal points away from — and a cutter with no plane is refused rather than resolved by whichever piece OCCT listed first. Two more traps pinned: **cells are not connected components** (a split shell's halves share the cut edge, so `domains` correctly says one while the caller plainly wants two), and **`untrim` on a plane is not refused by OCCT** — `MakeFace` reports success and returns a face of area 8 × 10¹⁰⁰, which then flows into a mass and a bounding box looking like a measurement. `catia_surface_analysis(kind='connect')` reports *the smallest tolerance that would join the pieces*, which is the argument `catia_healing` takes, so the analysis hands the repair its own parameter. **Wireframe curves land too** (`occt/operations/curves.py`): helix, 3D circle and arc, polyline, interpolating spline, section, intersection, extremum — so a 3D path is expressible at all for the first time, where every curve before had to come from a planar sketch or a surface boundary. Verified against `n·√(pitch² + (2πr)²)` and `r + h·tan(taper)`; the parameterisation trap is that `Geom2d_Line` **normalises** the direction it is given, so sweeping 0 → 2πn builds a helix of the right shape and a 16% wrong length. `catia_measure_item` on a curve now also returns `bounding_box_mm`, which is what distinguishes an edge carrying a real 3D curve from one carrying only a parameter curve — the second measures the right length and is unusable by anything that sweeps along it. **The derived anchors land too**: `catia_point_{on_curve,on_surface,centre}` and `catia_line_{between,direction,normal,tangent}`, which is what makes a point *associative* — defined by the geometry rather than measured once and typed as a coordinate that then goes stale. A point on a curve walks the whole chain by **arc length** in connection order (map order is build order, and `ratio: 0.5` on an L put the midpoint a quarter of the way along); a normal is read at the point rather than at the face centre, which is the same answer on a flat wall and a different fastener axis on a curved one; and a point offset along a surface is projected back onto it, or it is a point in the air that still reads as being on the face. **The associative curves and planes close the gap between the two**: `catia_curve_{project,parallel,offset_3d,combine}` and `catia_plane_{normal_to_curve,tangent_to_surface,mean}` + `catia_planes_between`. `plane_normal_to_curve` is the one that earns the rest — it places a sweep profile square to its path, so the helix built earlier is now something a section can be swept along, and its normal carries the lead angle `atan(p/2πr)` exactly. Three traps pinned by tests that fail when the fix is removed. **A face is a trimmed piece of an unbounded surface**: `GeomAPI_ProjectPointOnSurf` answers for the whole surface, so a point beside a cylinder projected onto the *infinite plane* of its top disc, 20 mm outside the rim, nearer than the wall — and `catia_point_on_surface`, `catia_line_normal` and the new tangent plane then all agreed on a place that is not on the part (fixed in `closest_on_surface`, which now measures against the face's real boundary). **An offset has a side, and OCCT does not take it from the argument the caller gave** — it reads the wire's own winding and never sees the named support, so the side is stated here, measured on the result and mirrored when it went the other way; the same L on a support facing down offsets 60 mm where the one facing up offsets 77.854. **A best-fit plane is an inertia question asked backwards** — the principal axis of *greatest* moment is the covariance's smallest eigenvector, which OCCT computes exactly and which agrees with `numpy.linalg.svd` to the last digit, so the kernel needs no numpy; points on one line are refused because every plane through a line fits it equally well. A projected curve is an OCCT B-spline fit (~1 part in 10⁷) and says so; `curve_combine` with no directions extrudes each view along its own plane, checked against the Steinmetz curve — two ellipses of semi-axes r and r√2. **The joins and the spiral close the wireframe family**: `catia_curve_corner` is an arc tangent to two curves — a quarter circle of `2πr/4` exactly between perpendicular legs — and it leaves both inputs untouched, because a step that edited an earlier one would make the same plan mean something different the second time it ran. `catia_curve_connect` is a Bézier of the lowest degree that can carry the continuity asked for: 1, 3 or 5. **Curvature continuity is where the arithmetic bites** — the source states its second derivative in its own parameter and the join runs on [0, 1], so the factor `(s/|d1|)²` from the affine reparameterisation is load-bearing and dropping it gives a curve out by the square of the chord length: invisible at unit scale, wrong by four orders on a 100 mm join. Across a 60° gap in a 10 mm circle the quintic carries the circle's own 0.1/mm and the cubic leaves a step of 0.0068/mm — identical shaded, and exactly the break a reflection shows. The join **measures what it achieved** and reports tangent error in degrees and curvature step per mm, because a G2 claim that is asserted rather than measured is the kind of number this codebase refuses to print. `catia_curve_spiral` is the one curve here no kernel holds exactly — an Archimedean spiral is not a NURBS — so it is interpolated and reports its own worst radial error, measured against the closed form **between** the interpolation knots: at the knots it reads 1e-14 against the 9.4e-5 mm it is really out by, a factor of 10⁹, so a fit that measured itself at the points it was given would report machine zero and be believed. Arc length checked against `(1/a)∫√(r²+a²)dr`. **`catia_curve_reflect_line` closes the wireframe family**, and it is the silhouette as *geometry* rather than as a drawing — the parting line a mould splits along, the highlight a class-A surface is judged by. Two things separate it from the hidden-line algorithm that computes it, and both are pinned: it keeps the **hidden** part of the line (`ShowAll`, not `Hide` — two fused spheres return one equator with visibility on and both with it off, and a parting line does not stop existing because something is in front of it), and it keeps only what lies on a **curved** face, because HLR reports a box's eight boundary edges as "outline" and a box has no reflect line at all — a polyhedron does its turning at edges that already exist. Verified against a sphere's great circle from three directions and a cylinder's two straight edges. A general angle is refused, before anything is resolved: the iso-angle contour has to be marched face by face and would come back sampled. `catia_curve_polyline` now rounds its own corners too, **each in the plane of its own two segments** rather than in one plane fitted to the whole path, with the trims accumulating along a run — which is what makes a 3D sweep path expressible in one call, and a sharp corner is what makes a sweep fail. **The steered surfaces land too**: `catia_surface_loft` takes a `spine` and a `guide`, and a tangent `catia_surface_fill` meets its supports along them. A spine is not a refinement of a loft but a different algorithm — the sections are swept rather than interpolated — and two 5 mm circles at the ends of a quarter arc give the torus segment Pappus predicts to 1e-9 where the free loft of the same sections comes out 23% smaller; a guide flaring 5→15 over 60 mm gives the cone's `π(r₁+r₂)·slant` to one part in 10⁵. A guide with no spine is refused rather than given an invented one — working a spine out from the sections means inventing the curve the surface follows. The fill is where two OCCT traps live. **Handing `MakeFilling` a boundary edge that carries no parameter curve on the support segfaults** — `Add` accepts it quietly and the process dies inside `Build()` with no exception to catch — so each boundary edge is matched to the support's own edge *by geometry* before the call, and an unmatched one is refused. **And OCCT reports a tangency it did not deliver**: filling a cylinder's rim tangentially asks the patch to leave straight up, which the plate solver cannot reach, so it returns success and a flat disc 82.5° out all the way round, where the same call on a spherical opening lands within 1e-4°. So the fill **measures the tangency it achieved**, reports it as `tangent_error_deg`, and refuses a patch that missed by more than a degree. G2 filling is refused with what OCCT itself says (`BRepFill_Filling` answers "the continuity is not G0 G1 or G2" and builds nothing). A loft section may now be a bare wireframe curve rather than only a sketch, without which the spine and guide arguments were unreachable. **Tangent propagation and sewing land too.** `catia_extract` spreads from a seed face along tangency, which is what makes "the rounded end of this part" a selection rather than an enumeration — and the tangency is measured **at the shared edge**, not between the faces' own normals: a fillet's normal at its parametric centre is 45° from the flat face it runs into, and `classify.edge_is_convex` (which uses the centre normals, correctly, for a different question) calls every fillet a sharp corner here. Verified on a flared post whose base, quarter-round fillet and wall meet smoothly and whose top rim does not: tangent propagation returns base + fillet + wall to 1e-16 against Pappus, point continuity adds the top disc. `catia_sew_surface` trims a solid to a surface — the third crossing from skin into material, and the only one that builds nothing new. Which side survives is `catia_split`'s stated rule; `remove` and `reversed` each flip it and compose, exactly as `catia_plane_offset`'s signed distance and its own `reversed` do. A surface standing clear of the part is refused rather than cutting nothing and reporting success — that is the case CATIA answers by *adding* material, which needs the part's own face to close the region and is a different construction. **`catia_extrapolate` lands, and it is three cases rather than one.** The route OCCT advertises for it does not exist through these bindings: `GeomLib::ExtendCurveToPoint` and `ExtendSurfByLength` both take the geometry as `Handle(Geom_...)&` and reassign it, and OCP passes handles by value, so each builds the extension and drops it — no exception, no return value, bounds and poles and type identical afterwards. That is measured by a test rather than remembered, because it is the reason everything here is exact instead of approximate. What runs instead is **widening the parameter range**, which for a conic or an analytic surface *is* the extension: a quarter of a Ø20 circle extended 5 mm is 5 mm more of that circle, with no join for a continuity claim to be about, and `GCPnts_AbscissaPoint` is what makes it 5 mm rather than 5 radians. A BSpline has no geometry outside its knots, so a curve gets a real piece built from its end conditions — a straight segment for `tangent`, an **arc of the osculating circle** for `curvature`, swept by `length/radius` so it is G2 and the right length by construction rather than by a search — and a freeform *face* is refused with the binding fact above rather than with "not implemented". Which end moves is the one facing what `boundary` names, not the curve's own end, for the reason `catia_curve_connect` already states: that depends on which way somebody drew it. On a face there are four sides rather than two ends, so `boundary` must pick out exactly one — either lying on it or past it — and **past beats on**, which is the whole correctness of that step: a point 20 mm above a 40 mm sheet sits exactly on the line of a side edge extended when its x happens to be 0, and reading that as "the u edge" widened the face sideways and reported success. A length only extends a face evenly where the parameter runs at one speed along the boundary, so a cone extends along its slant (exact against the frustum formula) and is refused around its axis quoting both speeds — 5 mm per unit at one end of that edge and 20 at the other. Seven guards, each verified by breaking it and watching a named test fail. **`catia_boundary` takes a seed and a stop, which is the last capability 2.6 owed.** A boundary comes back whole — the right default and the wrong answer for "the rounded end of this pocket" — so `limit_from` names where a run starts and the walk goes both ways along the wire from the boundary edge nearest it, `point_continuity` taking the whole connected loop and `tangent_continuity` stopping the first time the boundary creases. It is walked in **connection order** rather than collected as a set, because `limit_to` has to be able to cut it and because a sweep along it needs to know which edge follows which. Two things are refused rather than guessed, both for the reason `catia_split` gives about which side of a cut survives: a `limit_to` on a run that **closes into a loop** (two ways round, and nothing in the arguments chooses), and a **branch vertex** where three free edges meet — verified on three blades sharing one root edge, where point continuity from one tip returns that blade's 20 + 20 + 10 and not a millimetre of the other two. The endpoints are matched on a micron grid, not by `IsSame`: `ShapeAnalysis_FreeBounds` rebuilds the boundary, so one corner arrives as two vertices equal to within tolerance and identical to nothing. Six guards, each verified by breaking it. **The phase Proof is written and green** (`TestTheProofOfPhaseTwo`): a 60×40×20 plate whose four vertical corners carry 2, 3, 4 and 5 mm — one call, the edges chosen by predicate and the radii matched to the selection order — compiled from a `DesignSpec` and run through the real `OcctRunner`, then the *same spec* with a through-notch inserted ahead of the fillets, recompiled and rebuilt from nothing. Volume is exact against `blank − Σh·r²(1−π/4) − notch` both times, and the four rounded corners come back with the radii the design gave them. The insertion is not assumed to renumber anything — it is measured: the plate's vertical edges move from positions 0, 1, 4, 7 to 5, 7, 19, 23, and the design still finds them because it refers to nothing positional. **Running it found four places where the layers were each right and disagreed, none of which any existing test could see.** `catia_fillet`'s `radius_mm` was declared a number, so the per-edge list the kernel has taken since 2.3 was unreachable from a spec. `catia_fillet`'s `feature` argument was **declared and silently dropped** — the design suite's own bracket fixture asks for it, so the canonical example of the vocabulary was rounding every vertical edge on the part and reporting success. A compiled design renames every feature to its own name and `Document.feature` looked up only the build name, which made `feature#selector` — the whole of 2.2 — invisible to an authored design while working perfectly under a direct call. And `topology.shape_list` refused any OCCT list longer than two on the belief that OCP exposed no iterator; it does, and a pocket cutting a slot *through* a part turns one face into five, so an ordinary notch was unbuildable. One thing found and deliberately **not** changed: the bare word `vertical` matches a vertical bore's seam, which is a parameterisation artefact rather than an edge of the part — but `boss#vertical` naming a cylinder's seam is how `catia_measure_item` reports a boss height today, so narrowing it is a vocabulary decision rather than a bug fix. The Proof uses the feature-scoped form, which is unaffected and is what 2.2 exists for. `catia_draft` in reflect-line mode is no longer blocked on the silhouette (that exists now) but on OCCT taking a neutral *plane* where the mode wants a curve on the face — a ruled surface has to be built and the face replaced, which is surfacing work rather than a missing argument. **A defect that had been in `Sketch.face` since the file was written, found on 2026-09-06 by driving rung 3** (`71ac1b2`): an inner profile padded as a **boss, not a bore**. The docstring said the right thing — *"Later profiles become holes in the first"* — and the code handed each one to `BRepBuilderAPI_MakeFace.Add`, which requires an inner wire to carry the *opposite* orientation; an unreversed wire is accepted without complaint and integrates as material. A 100×100 sketch with a 40 mm circle padded 10 mm measured 112,566 mm³ against 87,434 for the plate minus its bore, and `IsDone()` was true. Containment is decided by boolean algebra now, in **both** directions — draw order is not containment order, and an agent draws the bore before the outline about as often as after — with a partial overlap refused rather than read as one thing or the other. It also removes a second convention: `app/render/section.py` already fills by even-odd, so the section view of that plate drew the bore correctly while the mass counted it as solid. |
-| E3 | Interrogation & measurement | **OCCT side DONE (2026-09-05)** — 3.1–3.5 complete; CATIA-side measures shipped 2026-09-03 | `app/kernel/{interrogation,contract,provenance}.py`, `app/kernel/occt/interrogate/` (8 modules), `occt/metrology.oriented_bounding_box`, `tests/test_interrogation.py` (39 tests, offline, all against closed-form answers). Reached via `catia_analysis_part`. **Residual: 3.3's clearance is implemented and tested but not yet wired to `catia_measure_between` — that needs 2.2 element references; and the cross-backend agreement half of the Proof needs a Windows seat, same as E1.** |
-| — | **Integration gap (not a phase)** | **steps 1+2 closed (2026-09-05)** — the agent drives the open kernel, and the part it builds can be seen and measured over HTTP; step 3 (frontend surface, E4.4/P5) remains | `app/geometry/backends.py`, `dispatch.call_catia` local branch, `app/api/routes/kernel.py` (`GET /kernel/conversations/{id}/render` + `/measure`), `tests/test_geometry_backends.py`, `tests/test_kernel_routes.py` | **Era I–II is green on capability and connected to nothing.** The agent can only drive CATIA, so 108 kernel operations need a licence to reach; `app/render/`, `app/ai/vision.py`, `machine_checks.py` and `sensitivity.py` have no caller outside tests. Decision 1 says the IR compiles to an open kernel *first* and CATIA is one backend among several — and until 2026-09-05 CATIA was the only one dispatch could reach. **`GEOMETRY_BACKEND=occt` now routes tool calls to `OcctRunner` in-process**, so the agent builds geometry with no seat, no licence and no Windows; measured end to end, a 60×40×20 pad returns 48000 mm³ exactly. The seam is additive — the CATIA path keeps the same validation, approval, logging and messages — and it is placed *after* normalisation and schema validation so both backends take identical arguments, since the vocabulary is the contract. Three honesty rules ride with it: the offered tool list is read from the handler table (108, not 201) so it cannot drift from the code; an unimplemented operation is **named as a backend gap**, never as a geometry failure, because an agent told the second will damage a good part trying to repair it; and the backend is **never chosen automatically**, because a silent fallback hands the user a part built by a different kernel and Decision 3 binds a result to what produced it. Documents are per-worker and per-conversation by necessity (live OCAF state is not serialisable), eight at a time, and an evicted conversation is told on its next call rather than quietly building into an empty part. **Step 2 (2026-09-05): `app/render/` has its first caller.** `GET /kernel/conversations/{id}/render` draws the part a conversation is building (any canonical view, optional mid-axis section, hatched) and `/measure` returns the measurement payload with provenance. The render's own digest is the ETag — deterministic bytes are exactly what an ETag wants, so a polling client gets 304s until the geometry moves. Serves the OCCT backend only and **refuses** for a CATIA-seat part rather than faking a picture of something else; three distinct 409s (wrong backend / evicted / nothing built), because the remedies differ. Writing it found two more defects reading had not: `section_faces` fed `classify` a base `TopoDS_Shape` (the Face_s cast trap, fourth occurrence), and the hatcher's `zip(pixels, pixels[1:], strict=True)` can never satisfy `strict` — **hatching had never executed until this smoke run**; its first-ever output was visually inspected (44,650 hatch pixels on a mid-x section of the 60×40×20 plate, correct 45° pattern, outline drawn over the hatch). **Step 3 opened (2026-09-07) and is half closed.** The frontend now draws the picture a tool result points at, so on the CATIA path the product finally shows what it built (E4 row, 4.4). The OCCT half is untouched: `GET /kernel/conversations/{id}/render` still has no caller, so a part built by the open kernel remains invisible in the product even though the endpoint that would draw it has existed since 2026-09-05. Still open: that caller; and vision/machine_checks/sensitivity, which have no caller at all. |
-| E4 | Visual verification | **4.1 DONE (2026-09-05, incl. section cuts); 4.2 DONE (2026-09-05); 4.3 DONE (2026-09-05)**; **4.4 partial — a picture reaches the conversation on the CATIA path (2026-09-07); the OCCT render endpoint still has no caller** | `app/render/` (`views.py`, `project.py`, `raster.py`, `diff.py`, `__init__.py`); `app/ai/vision.py`, `LLMProvider.look` + the three providers that implement it, `prompts.VISUAL_CHECK_SYSTEM`, `schemas.VisualCheck`, `app/render/section.py`; `tests/test_vision.py` (30 tests) + `tests/test_render.py` (37 tests), both offline | **Rendering is hidden-line removal, not OpenGL, and that is the phase's own requirement rather than a shortcut.** OCP exposes `V3d`/`AIS`/`OpenGl_GraphicDriver` and a viewer comes up on this machine — but 4.1 asks for two renders of the same geometry to be *byte-identical*, and names the leverage: a render hash that becomes part of the geometry's identity, blind where mass and plan-digest are blind (mirrored, inside-out, wrong orientation). A GL image is a function of the driver, the sampling and the display server, and this project develops on Linux and ships on Windows, so the one comparison that matters most is exactly the one GL cannot make. HLR is arithmetic and the raster under it is integer. Eight canonical views — six orthographic plus two isometric — each built from **three** HLR streams per side (sharp, smooth and silhouette: taking only the sharp edges loses every curved outline, so a cylinder seen from the side renders as nothing). Verified: the same shape renders byte-identically twice, a part rebuilt from scratch matches the first, and a part with a pocket differs. Framing is derived from the part rather than chosen, and is a *value* — `render_views` fits one frame over every view's extent so a six-view sheet is at one scale, and `render_pair` puts two parts through one frame, which is what makes 4.3 mean anything. Determinism is defended at each step where it is easy to lose: no anti-aliasing, `floor(v+0.5)` rather than banker's rounding at the pixel boundary, a dash phase carried along the whole polyline rather than restarted per segment (else the pattern depends on how OCCT split a curve), curve flattening at a deflection *relative to the model size* so the same shape gives the same segment count at any scale, and a hand-written PNG encoder — three chunks, filter 0, fixed zlib level — because an outside encoder can add a timestamp chunk or change its filter heuristic between versions and silently break the hash. **4.3 diffs on ink, not shade**: a line that went from hidden to visible has not moved, and flagging it would light up every part whose features merely reordered behind one another. Added and removed are separate colours because "a pocket appeared" and "an edge vanished" are different facts. Two renders framed differently are **refused** rather than diffed — independently framed, a part 2 mm bigger changes every pixel and the diff says nothing. Measured on a plate gaining a Ø14 pocket: 321 pixels arrived, 0 gone, 3.3% of the ink. **4.2 asks a vision model whether the part matches the request, and is built around the phase's own stated limitation rather than in spite of it.** A VLM will confidently approve a subtly wrong part, so `VisualReview` has no `approved` or `passed` property for a caller to gate a release on — the flag that exists is `objected`, and a test asserts the others do not appear. There are three outcomes and **`unchecked` is never a pass**, the same rule `assertions.py` applies to an unmeasured assertion: no vision model, an unreachable provider, a blank render, a model that says 'unsure', and a model that says 'differs' while naming nothing specific all land there with the reason in words. Nothing raises — like `KnowledgeService.search`, a visual check improves an answer and must never be why there is not one. **The dangerous case is Ollama**, which does not refuse an image handed to a text-only model: it drops it and answers anyway, so the shipping default (`qwen2.5-coder`, which has no eyes) would return a confident description of nothing with no error and no flag — a check that manufactures agreement, which is worse than no check. `_sees()` refuses on two *structural* signals with no model-name list to go stale: `/api/show` publishes `capabilities`, and only a multimodal model has a `projector_info` block at all — the projector is the vision encoder. `AI_VISION_MODEL` names the model that looks, because locally it is a second pull. Images are unlabelled on the wire (Ollama attaches them to the message with nowhere for a caption), so **order is the only thing tying an image to what it is a picture of** — the prompt names the order and the code sends them in it. `num_ctx` is sized for the pictures as well as the words, because Ollama truncates a prompt from the front in silence and a window sized from the text alone cuts the images off. The schema puts `describes` before `verdict` so a constrained decoder must state what it sees before it judges — and the prompt forbids reading any dimension off a drawing that has no scale, since a number from the model would be read as a measurement. Three views by default, not eight: images dominate the cost and three perpendicular directions already fix the silhouette. **Section cuts close 4.1**, and the work is the vocabulary rather than the drawing: `mid_section` / `offset_section` / `section_named`, with the plane's normal pointing at the material that is *removed* — the same convention `catia_split` states for which side of a cut survives, because two conventions for one question in one codebase is how a part ends up mirrored with every test green. That convention is also what lets `natural_view` pick the camera without a second argument: you look at a section from where the material was taken off. A plane that misses the part is **refused**, since an uncut part returned from a section call looks exactly like a successful section of a solid one. The cut is a finite box rather than `BRepPrimAPI_MakeHalfSpace` — OCCT's booleans are materially less robust against an infinite solid and fail by returning the shape unchanged, which is that same wrong-picture failure. The cut face is found by **geometry, not boolean history** (history is per-operation and lost the moment the shape is passed on) and is hatched at 45°, because without hatching a cut block and a solid block have the same outline to a person and to 4.2's vision model alike. The hatch fills by the **even-odd rule across every wire at once**, so a bore through the cut face falls out of the parity arithmetic with nothing having to identify it as a hole. It needs *ordered* wires, which HLR cannot give, so `face_outlines` walks with `BRepTools_WireExplorer` and projects through `View.to_view_mm` — asking the wire, not the edge, which way to walk (`CurrentVertex`), because half the edges of an ordinary rectangle are stored backwards and one walked the wrong way puts a diagonal across the polygon. **Writing it found that 4.1 shipped rendering every part upside down.** OCCT's `gp_Ax2` defines its Y axis as `direction × X`, the opposite of the up vector `views.py` declares, so the top of a 40 mm box seen from the front came back at y = −40. **No check could see it**: a consistently mirrored image is still byte-identical to itself so determinism held, a diff of two mirrored renders is still correct so 4.3 held, and a wireframe of a plate is entirely plausible upside down. It is precisely the wrong-orientation error 4.1 says a render hash exists to catch. Fixed in the projection rather than the raster, so view millimetres do not lie, and pinned by `TestTheRenderIsTheRightWayUp`. **4.4, partially, on 2026-09-07** (`Kryova-frontend`: `src/lib/tool-media.ts`, `src/components/tool-image.tsx`, `api.mediaBlob`): the transcript renders the picture a tool returned, instead of `JSON.stringify`-ing a media id and a byte count. That closes the gap the standing rule had been sitting over — the whole product is built on somebody *looking* at what `catia_capture_view` returns, and the product could not show it. The detector claims only that a result *might* carry a picture and settles it by measurement: it fetches the bytes and draws an `<img>` only once the blob's own MIME type says `image/*`, so an unverified guess is not a pass on this side of the wire either. It is deliberately not keyed to `catia_capture_view` by name, and deliberately not keyed on `width_px`/`height_px` — only the *mock* daemon populates those, so that detector would have worked perfectly in tests and shown nothing on the machine with CATIA on it. **Still partial, and the remaining half is the OCCT one**: `GET /kernel/conversations/{id}/render` has no frontend caller, so an agent driving the open kernel still builds a part nobody in the product can see. That is the honest reading of "renders into the conversation" and is why this row is not `DONE`. |
-| E5 | Assertions & self-correction | partial — foundation shipped (2026-09-04); **5.1 DONE (2026-09-05); 5.3 DONE (2026-09-05); 5.4 DONE (2026-09-05)**; 5.2 blocked on Phase 11 (requirements) and is all that remains | `app/design/{assertions,diff,correct}.py`, 109 tests; `app/design/machine_checks.py`, `app/design/sensitivity.py`, `tests/test_design_{machine_checks,sensitivity}.py` (33 + 34 tests, offline); `app/design/missions.py`, `tests/test_design_missions.py` (31 tests) — **M1 green on the real kernel, 8 rungs PENDING and counted** | **5.1's library exists because `assertions.py` cannot express a machine.** That checks a claim about a number already in a payload, which is right for a part and cannot say whether an arm clears its frame through travel, whether six tolerances still fit, or whether the first mode is above the drive frequency — **those claims must be *produced*, not read.** So a machine check is a *measurement source*: it computes a number, files it under a path with provenance, and the existing `Assertion` machinery compares it. No second comparison language, and `UNMEASURED`/`gap`/the report come for free. **The tools are injected, never imported** — the package's load-bearing property is that it runs offline with no kernel and no solver (`execute` takes its runner as a callable for the same reason), so reaching for `app.kernel` here would pull ~166 MB of OCP into every test in the package. A tool that is absent is `unavailable` **with a reason naming what is missing**, which is also what a check needing a solver Kryova has not federated yet should say — and that is what lets 5.1 land complete while part of what it describes waits on Phase 6. Eight checks: mass budget, envelope (three assertions, because "it does not fit" is not actionable and "40 mm too long in Z" is), minimum wall (carrying the ray cast's own `approximate` through, so a wall passing by 0.01 mm on a sampled measurement is never read as passing), clearance through a motion range, first natural frequency, factor of safety, buckling factor, and stack-up. **Clearance through motion is sampled and says so** — a continuous swept-volume check is a different and much harder problem, so the moving part is posed at N points, the answer is marked approximate, the note states that a collision between two adjacent poses is invisible to it, and fewer than three samples is refused because that is not a sweep. **Stack-up offers both methods and defaults to neither being silent**: worst case is what a safety-critical fit is designed to, RSS is what a production run sees when contributors are independent and is often half the size, so the method chosen is named in the claim — picking one quietly means either designing to a case that never occurs or shipping a fit that fails on the tails. It needs no tools at all and is the one check here that can never come back unmeasured. **A cost budget is declared and honestly unavailable**: there is no cost model (Phase 13 owns it), so it reports `UNMEASURED` with the reason rather than being quietly left out of the library 5.1 describes, and becomes real the day a tool answers `cost`. **5.3 makes a repair aimed rather than guessed**, which the plan calls the difference between a validator and a retry counter: `assertions.py` says the part is 3.1 kg over and `correct.py` can try something and see whether the number moved, but neither can say which of eleven parameters to move or how far. `sensitivity.py` finite-differences each free parameter against one measurement and `aim()` turns a failing assertion's `gap` into a parameter and a distance. It is affordable only because of Decision 1 — a probe was minutes of a CATIA workstation and is a headless build here. Four things make the difference between a number and a lie, each pinned by a test. **A build that fails at the perturbed value is not zero sensitivity**: stepping a fillet past what the geometry carries is ordinary, and reporting 0.0 tells the loop to leave alone the one parameter that is at its limit — so it comes back unprobed with the reason, and ranks last rather than first. **A topology change is not a derivative**: a step big enough to make a fillet swallow a face compares two different parts, so face/edge/solid counts (already in the measurement contract) are differenced too and the influence is refused with an actionable message; a payload carrying no counts is reported `topology_unchecked` rather than assumed unchanged. **Only free parameters are probed** — a parameter with an expression is a *consequence*, as `params.py` already says — and a derived one is **excluded with its formula in the reason** rather than dropped, because absent from a ranking reads as "no influence", a different claim. **The ranking is by elasticity, not derivative**: ∂mass/∂radius is kg/mm and ∂mass/∂angle is kg/degree, so "which matters most" is meaningless until the two are dimensionless — and the test that pins it has a tiny slope on a large parameter correctly outrank a large slope on a small one. Central differencing where both sides build, one-sided where only one does, with the scheme recorded per parameter because the two are different orders of accuracy. `aim` refuses rather than dividing by a negligible derivative (a step of absurd size costs the loop an attempt on a build that cannot exist), carries a first-order caveat on every suggestion, and invents no baseline value when it was not given one. **5.4 turns the ladder from a table into a suite that runs.** Decision 5 lists nine machines and calls each rung "a permanent regression test", and until now nothing executed it: "M1 works" was a claim from the day somebody last tried it by hand, and there was no moment at which M1 quietly breaking would have been noticed. `app/design/missions.py` declares all nine rungs, gives M1 a real `DesignSpec`, and checks it against closed forms computed from the same constants the spec is built from — so a changed dimension moves the design and its claims together, where a number typed in by hand would stop describing the part and fail looking like a geometry bug. M1 builds through the real `OcctRunner` in twelve calls (the count Phase 1's Proof describes) and its eight claims hold: volume, mass, surface area, thickness, footprint, one solid, eleven faces, and a centroid at mid-thickness — the last three chosen because **a bore that stopped short keeps the volume plausible** and only an independent quantity catches it. **The eight rungs that cannot be built are `PENDING`, which is never a pass and never a skip** — `assertions.Outcome.UNMEASURED` applied one level up, each naming the phase that owns the gap (M7 waits on E9's multibody, M3 on E17.3's sheet metal). But a pending rung does *not* make the report red, because a suite that is red for the two years it takes to reach M9 is a suite somebody switches off: `ok` answers the regression question and `complete` answers the programme question, and the sentence a human reads is "1/9 rungs pass, 8 not yet buildable", which cannot be mistaken for coverage. **A rung that claims to build and then does not is a failure whatever the reason** — deliberately unlike `conformance.py`, which separates a coverage gap from a real stop because it is asking which of two backends is behind; here the mission *declared* it builds, so an operation that regressed into unimplemented has falsified the claim, and calling that coverage would let a rung rot while the suite stayed green. Each rung gets its own runner from a factory, because a mission that passed on the previous one's leftovers would report the right volume for the wrong reason with nothing in the arithmetic to show it. Five guards verified by breaking them, each producing named failures; deleting the pending rungs from the report flips `complete` to true, which is the exact false green the split exists to prevent. **And writing it corrected a claim this file would otherwise have carried:** the fillet-before-bore order was justified as necessary, on the belief that the bare word `vertical` would catch the bore's seam. Measured — it does not, here; bore-first gives the same volume to 1e-12 and the same eleven faces. What *is* load-bearing is the `feature` scope: with a 20×20×10 boss on the slab, scoped removes 171.68 mm³ and unscoped removes 386.28 mm³, having rounded the boss too and reported success — the same defect the 2026-09-05 verification found in the design suite's own bracket fixture. The order now stands as machining order and says so. **5.3 and 5.1's mass budget were unreachable from the product until 2026-09-06** (`b9b1cb9`), and nothing said so. Both are loops that change a dimension and measure again, and `catia_set_parameter` was **not implemented on the open kernel** — so on `GEOMETRY_BACKEND=occt` the sensitivity probe this plan justifies as "minutes of a CATIA workstation, a headless build here" could be driven from the design IR and not from a conversation. Measured by rung 3 of the ladder: told to adjust a thickness until the mass came right, the agent had no way to, and padded the same sketch four times. A part built in conversation has no parameter set, so its **build log is one** — every mutating call recorded, every numeric argument a dimension, and setting one rewrites the call and replays the part from the top. That is this plan's own "specification that is compiled", applied to a part assembled call by call rather than compiled from a spec, and it inherits the property that matters: a recompiled spec has no downstream edit to shatter, so replay allocates the same names in the same order and `Pad.1` is still `Pad.1`. The replay builds into a *fresh* document and is swapped in only on success, so a value the geometry cannot carry costs a refusal and nothing else. |
-| E6 | Solver federation (CalculiX) | **6.1, 6.5, 6.6 DONE and 6.4's decks written; the registry landed 2026-09-06, so `SOLVER_BACKEND=calculix` now reaches a real solve.** Verified against CalculiX 2.23: σ = 25.000000 MPa vs F/A to 5.7e-16 on both solvers through the setting, versions recorded on the job row (`linear-static 0.2.0+sha`, `calculix 2.23`). Open: 6.3 (shells and beams), thermal in the deck, and gate G1 — which was **run five times and did not pass** | `app/solve/calculix/`, `app/solve/{registry,oracle,constraints}.py`, `tests/test_solver_registry.py` (19), `docs/verification-2026-09-06/` |
-| E7 | V&V: NAFEMS, convergence, provenance | **in progress — convergence, the benchmark honesty rules, the provenance chain and now 7.4's validation register (2026-09-06)**. The register's denominator is **declared, not discovered**: eleven analyses are listed, and one nobody has benchmarked gets a row with a reason rather than being absent. **It reads 0 validated of 11 today** — 7.1 has machinery and no case catalogue — and that is the correct answer. The four solver analyses carry closed-form *verification* published under its own key with the ASME V&V 20 split stated, because a reader meeting them under a friendlier name would read them as validation | `app/verify/`, `tests/test_verify_*.py` |
-| E8 | Fatigue (pyLife) | **partial (2026-09-06) — pyLife installs and imports on Python 3.14**, which was the open question; rainflow and damage federated to it per Decision 2, with the load-history/factor/provenance vocabulary ours. Verified against closed form (exact cycle count, Miner arithmetic) — rainflow and damage accumulation federated to pyLife per Decision 2, with the load-history / factor / provenance vocabulary kept ours. Verified against closed form (exact cycle count, Miner arithmetic), and every factor a qualified engineer must choose is an explicit input with a source field rather than a buried default | `app/fatigue/` |
-| E9 | Multibody (Chrono) | **partial — kinematics, clearance and reactions tested (2026-09-06)**, 104 tests, all against closed form: slider-crank at both dead centres, the Grashof families each cross-checked against the solver, `ω²r`, and the pendulum period pinned through the reaction (driven at the natural frequency the rod carries no tangential force; the residual is `mg·A³/6` to 4 figures). **`pip install pychrono` installs an unrelated package and succeeds** — see CLAUDE.md; the engine probe checks the module really is Chrono. So there is no dynamics engine and the docstrings say so | `app/dynamics/`, `tests/test_dynamics_*.py` (115) |
-| E10 | Thermal, CFD, optimisation | partial — thermal *stress* shipped (2026-09-03); **optimisation's honesty rules and its gradients now have tests (2026-09-06)**. `design/sensitivity.py` finally has a caller outside a test — it had been listed beside `app/render/` and `app/ai/vision.py` as capability wired to nothing. Gradients checked against hand-differentiated functions whose partials *differ*, so a swap is caught, and across variables scaled a thousand apart, so an absolute step masquerading as a relative one is caught. An ungradable point is `available=False` with a reason, never zeros — a zero gradient tells an optimiser it has arrived. `drivers.py`, `models.py`, `problem.py` still untested; conduction/CFD not started | `app/optimise/`, `tests/test_optimise_{honesty,gradients}.py` |
-| E11 | Requirements model | **partial — a requirement set can now be checked against a real part (2026-09-06)**, which is the gap that mattered: 2,860 lines and four test files existed and **nothing in `app/` called them**. Four requirements over a built pad report met / violated-by-5mm / **UNMEASURED for two different reasons**, all four counting against coverage. `scans_needed()` names *which* scan produces a path without measuring anything | `app/requirements/`, `tests/test_requirements_*.py` (5 files) |
-| E12 | Load cases, materials, standard parts | **partial — materials, standard parts and the load library all tested (2026-09-06)**. The library *composes* the existing vocabulary (Decision 2), pinned by reading the load types out of `types.Load`'s own union so a new one automatically joins the set it must stay inside — and one composed case is **actually solved**: 12 MPa of pressure gives σ = 12.0 MPa exactly | `app/solve/{materials,load_library}.py`, `app/parts/`, `tests/test_load_library.py` (43) |
-| E13 | Design rules, GD&T, cost | **partial — stack-up, the rule engine and GD&T all have tests now (2026-09-06)**, 127 in total. A rule naming a quantity outside `kernel/contract.py` is refused **at construction**; the verdicts are literally `design.assertions.Outcome`; and **a rule resting on a *sampled* bound cannot prove a pass** — `minimum_wall_mm >= 2.5` measuring 2.6 is `PASSED` but *not proven*, because an upper bound from a finite ray set can only prove the violation. GD&T deliberately evaluates no tolerance-zone geometry, guarded three ways. **Neither `engine.py` nor `gdt.py` has a consumer anywhere in `app/`** — verified modules, not a product path. Cost out of scope | `app/rules/`, `tests/test_rules_*.py` (127) |
-| E14 | Product structure & contracts | **partial — 14.1–14.4 shipped (2026-09-06)**: **The seat-side half shipped the same evening**: a conversation owns a *set* of CATIA documents with exactly one active (`CatiaDocument.is_active`, a partial unique index, migration `c7e2a9d4f1b3`); on a seat a second `catia_new_part` adds a document and deactivates the current one, nothing is abandoned, `catia_product_create` is bound as a `product`, `catia_open_document name=` switches, and `catia_component_add kind=existing document=<name>` resolves to the path the part was really saved under. Measured need: ladder prompt S2 on the real seat, where one document per conversation left no route to a second part and the agent called `catia_new_part` seven times at the refusal. `tests/test_multi_document.py` (24). The open kernel keeps its one-document contract. the product *graph* (a bolt used 40 times is one component and 40 occurrences, and **occurrence numbers are declared, never positional**, so inserting a leg at the head of a list renumbers nothing — the topological-naming answer one level up), interface contracts as assertions over a boundary that name **which side** a change violated, a conservative broad-phase clash check, and a mass roll-up. A partial result never gets the headline name: an incomplete clash publishes `checked_minimum_clearance_mm`, not `minimum_clearance_mm`, because both directions of that error make the machine look safer. 14.5 (concurrency) untouched; effectivity not implemented and says so | `app/assembly/` (6 modules), `tests/test_assembly_{structure,contracts,clash,mass}.py` (108) |
-| E15 | Throughput, storage, observability | **partial — the observability half (15.5) DONE and fully wired (2026-09-06)**; 15.1–15.4 deferred. `~0.09 µs` per disabled span. All four spans the package landed as catalogued holes are now installed — and the first number out of them is the one Decision 1 rests on: **a parametric rebuild costs 0.49 ms**, so a 200-value sweep is ~0.1 s of rebuilds. That argument has been the basis of the OCCT decision since the plan was written and had never been measured | `app/observe/` (5 modules), `tests/test_observe*.py` (68) |
-| E16 | Tool retrieval, planning, memory | partial — resume-from-log shipped (2026-09-03); **16.1 selection rebuilt and measured offline (2026-09-06)**: 110 OCCT tools narrow to 17–39 per turn, every inclusion carries the rule that put it there, and the shipped selector's own defect is fixed — it was withholding five to nine *prompt-named* tools on every realistic message, `catia_set_parameter` among them on all five, which is the tool rung 3 is about and the one the agent could not find for three sessions. **Unproven until a gate**: no chat run has been driven against the narrowed offer, so the prize (`qwen3.5:9b` failed the 40-tool payload where the 30B model at 72% CPU succeeded — shrink the payload and a model that fits the card becomes usable) is still a hypothesis. 16.2 is a tested seam and one first step, deliberately unwired. **Driven at last on 2026-09-08 and the hypothesis holds — with a new ceiling behind it.** The narrowed offer (55 of 220 tools) was driven through the real GUI for the whole of Level 4; `qwen3.5:9b` emitted correct structured calls at 50–52 tok/s for turns of forty steps, which the un-narrowed payload never did. **What binds now is the transcript, not the offer**: PRO1's fourth run built its first solid and then exhausted the 32,768-token window with four parts still to make, refused loudly by `providers/ollama.py`. A third behavioural guard landed from the same runs — `MAX_EMPTY_DOCUMENTS`, because opening a document is the one mutation that changes nothing about the part, and both existing guards counted it as progress: five empty parts in one turn tripped neither. Measured effect, one document instead of five | `app/ai/tool_retrieval.py`, `app/ai/planning.py`, `app/ai/agent.py`, `tests/test_ai_tool_selection.py`, `tests/test_ai_planning.py`, `tests/test_agent.py::TestOpeningDocumentsIsNotBuildingParts`, `app/ai/resume.py`, `docs/verification-2026-09-06/REPORT.md`, `docs/verification-2026-09-08/REPORT.md` |
-| E17 | Manufacturing output | **in progress — dimensioning, sheet layout, DXF and STEP export now have tests (2026-09-06)**, 154 in total. First and third angle demonstrably place views on opposite sides, so a convention that were stored and ignored is caught: swapping them fails two tests, and a drawing read in the wrong convention is manufactured **mirrored** with nothing looking wrong. A dimension traced to its parameter is distinguishable from one measured off the solid; `locate.py` finds a dimension's own feature in the geometry (radius matching, deduped by axis position, never by face) rather than trusting where the design says it should be, and reports a dimension unplaced rather than drawn somewhere plausible when it cannot. **A same-radius coincidence in the mirror-orientation check** (`TestWhereAKnownFeatureLands`) was found and fixed on 2026-09-06: two circles of equal radius closer together than their diameter always intersect, so a single stray vertex of the *real* bore was passing a naive nearest-point check for a deliberately-wrong mirrored centre 20 mm away. `_roundness` now samples twelve angles around the candidate circle and takes the worst, which a coincidental intersection cannot satisfy. What remains open: STEP/DXF export from a live CATIA seat (exercised so far only through OCCT) | `app/manufacture/` (+ `dxf.py`, `export.py`), `tests/test_manufacture_{drawing,dimensions,export,sheet}.py` (154) |
-| E17.3 | Sheet metal (pulled forward to Era IV) | **partial — the arithmetic and the vocabulary shipped (2026-09-06)**: bend allowance, setback, deduction, unfold and formability, every number checked against arithmetic in the test. **There is no default K-factor anywhere** — a `Bend` requires one and a `KFactor` requires a `Source`; `assumed()` demands a written reason and marks the pattern provisional with an `UNMEASURED` finding. ANSI and DIN differ by a factor 1.211 at r/t=1.5, which moves a 90° bend in 2 mm by 0.24 mm — the distinction is real and is carried. **Not wired to any geometry**: M3 still needs a `SheetMetalPart` → OCCT solid path | `app/sheetmetal/` (6 modules), `tests/test_sheetmetal*.py` (147) |
-| E18 | Machine missions M1–M8 | **partial — M1, M2 and M3 green (2026-09-06); ladder 3/9**, and two of the three pass *carrying* what they do not claim. M2 is the first assembly; M3 is the folded enclosure the sheet-metal work was pulled forward for. **M3's finding is the important one: there is no sheet-metal operation in the OCCT backend at all**, and `SheetMetalPart` cannot compile to a `DesignSpec` — so M3 declares the cover *twice*, as a fold tree and as a hand-drawn section, and the only thing holding the two descriptions together is a volume residual | `app/design/missions.py`, `tests/test_mission_m{2,3}.py` |
-| P1 | Identity, sessions, token rotation | **partial — P1.1, P1.2 and P1.4 DONE (2026-09-06); P1.3's backend DONE, its UI open; P1.5–P1.8 not started.** The recorded defect is fixed: `refresh_token_hash` held one slot per *user*, so a second device silently ended the first and a stolen token and the real one wrote to the same slot — whoever refreshed last won, and nothing noticed a token had been used twice. Now a row per device family, rotation per use, and a replay outside a 10 s race window revokes the whole family | `app/models/session.py`, `app/core/sessions.py`, `tests/test_auth_sessions.py` (39 tests; 8 mutations run against the guards, 8 caught — the two that first escaped are recorded in the build plan) |
-| P2 | Orgs, roles, RLS tenancy | **partial — orgs, roles, invitations and RLS policies shipped (2026-09-06); migration `1b07f4f27e89` backfilled 24 users → 24 orgs, 82 projects placed, 0 orphans, verified against the live database.** **RLS is deployed but INERT for the application**: Neon's `neondb_owner` holds `BYPASSRLS`, which outranks both ENABLE and FORCE, and the first isolation run therefore **passed vacuously against a database enforcing nothing**. It stays inert until `DATABASE_URL` points at a `NOBYPASSRLS` role — an ops action, tracked by an `xfail` that flips to XPASS the day it is done rather than hiding | `app/models/organisation.py`, `app/core/database.py` `tenant_scope()`, `tests/test_tenancy*.py` + `tests/test_organisations.py` (52) |
-| P3 | Admin panel & audit log | **partial — P3.1, P3.2, P3.3 and the read half of P3.4/P3.6 shipped (2026-09-06); P3.5 flags, P3.7 announcements and suspension/GDPR deletion not started.** The audit log is **append-only in the database, not by convention**: a `BEFORE UPDATE OR DELETE` trigger plus a statement-level `TRUNCATE` trigger, installed by migration `2f3f8aadb319` *and* by `create_all`, so the guarantee holds in the test schema too — verified on the live Neon database, where UPDATE, DELETE and TRUNCATE all come back `RestrictViolation: audit_events is append-only`. Every entry carries the previous entry's SHA-256, because the table's owner can drop the trigger and the application currently connects as that owner: the trigger prevents, the chain detects, and the tests drop the trigger to prove both halves. Impersonation is a **row, not a claim** — read-only by default, refused before the route function is entered, escalated only by a platform administrator with a second reason, and revocable at once. Both identities are on every row and there is no single `user_id` column to collapse them into | `app/models/audit.py`, `app/core/audit.py`, `app/api/routes/admin.py`, `app/api/deps.py` `require_staff`, migration `2f3f8aadb319`, `tests/test_audit.py` (25) + `tests/test_admin.py` (40) |
-| P4 | File attachments & understanding | partial — chunked upload + content-addressed store exist; **Decision 8's injection boundary now has its attack tests (2026-09-06)** and they are structural rather than filters: `UntrustedText` does not subclass `str`, so concatenation raises and `f"{x}"` yields a description; `render_into_user_message` is the only accessor that returns payload characters and it **requires the user's own message**, so no call exists that puts attachment content in a system prompt. Forged `[attachment: …]` headers are defanged. the readers are tested too now (2026-09-06) — including that text-bearing DXF entities are no longer silently dropped, which had been reading a drawing full of MULTILEADER notes and TOLERANCE frames as an empty document | `app/media/`, `app/documents/`, `tests/test_documents_injection.py` (32) |
-| P5 | Conversation & agent UX | partial — steps, resume, transcript exist | frontend `agent-step-list`, `conversation-resume` (tested); spec-view/gates open |
-| P6 | Viewer at machine scale | partial — single-part WebGL viewer exists | `webgl-stress-viewer.tsx` (tested); tessellation service/LOD/streaming open |
-| P7 | Desktop & workstation bridge | partial — Tauri shell + bridge panel exist; **the Windows installer builds (2026-09-05)** | `src-tauri/`, `catia-bridge-panel.tsx`. `npm run desktop:msi` produces `Kryova_0.2.0_x64_en-US.msi` (3.8 MB) on this machine, release profile, WiX candle+light, ~41 s Rust compile. **Built is not installed**: nothing has run the installer and confirmed the app starts from it, so P7.1's signed auto-update and P9.4's release pipeline both remain open, and a release still needs a human. |
-| P8 | Billing & metering | **partial — metering, the usage ledger, rollups, per-tenant quotas and the billing API shipped (2026-09-06)**. Metering is *always on*, independent of tracing: `app.observe.collect.add_listener` lets a listener see every span whether or not `collect()` is running, so a bill is never gated on an operator having turned tracing on for the request that happened to be billable. `app.simulation.runner` is the first wired consumer — `usage_scope` posts a job's meshing and solve time to the ledger in a `finally`, so a solve that fails after nine minutes is still billed for the nine minutes, and the metering write goes through its own session (`LedgerSink`) rather than the job's transaction, so a metering fault can never roll back the result it was measuring. **Declared but not yet wired**: AI token usage, CATIA seat time, kernel operations — the meters exist in the schema and report a gap rather than a number until something calls them. No Stripe integration | `app/core/metering.py`, `app/models/billing.py`, `app/api/routes/billing.py`, `app/observe/collect.py` (`add_listener`/`remove_listener`), `app/simulation/runner.py`, `tests/test_billing*.py` + `tests/test_metering.py`, migration `b3d7c1f4a920` |
-| P9 | Delivery: CI/CD, backups | partial — P9.1 done; CI is honest about the database (2026-09-06) | `.github/workflows/ci.yml` in **both** repos, `scripts/pytest_split.py`, `../Kryova-frontend/scripts/check-dependencies.mjs`. Backend CI is three jobs: `lint` (ruff + `mypy app`), `offline` (3,327 tests, no connection, and it prints how many database tests it did *not* run), `database` (PostgreSQL 17 service container + `alembic upgrade head` + `alembic check` + the other 430 tests). `--database-only` refuses to start without a real PostgreSQL, so the SQLite fallback can no longer wear the name of the database suite; `tests/test_repository_hygiene.py::TestContinuousIntegration` pins that and was verified by breaking all five guards. Frontend CI existed already and was upgraded (SHA-pinned actions, `.nvmrc`, three-dependency check). **Not done:** P9.2 images, P9.3 staging, P9.4 releases (see `../Kryova-frontend/.github/workflows/desktop.yml` for why a tagged MSI would ship broken), P9.5 backups, P9.6 supply chain. |
-| P10 | Docs, onboarding, trust surface | **partial — P10.3's trust surface shipped (2026-09-06)**: the validation register, twelve commitments each **MECHANICAL with the files that enforce it or POLICY with none** (a mechanical one naming no file is refused at construction), and a typed accuracy changelog. Public and unauthenticated, defended: a page claiming verification is the product, behind a login, can only be read by people who already bought. Paid for structurally — no `DbSession`, no `CurrentUser`, an allowlist on provenance, and a test that walks each route's dependency graph. P10.1/2/4 not started | `app/api/routes/trust.py`, `app/verify/{register,commitments,changelog}.py`, `tests/test_trust.py` |
-
-### Stop gates — where coding stops and the product is tested for real *(new, 2026-09-06)*
-
-**The expensive verification is batched, and the batches have names.** Driving a real
-conversation through the local model against a real CATIA seat is the only test that has ever
-found the defects that matter here — every one of the seven found on 2026-09-05 was invisible to
-the offline suite and left the geometry looking plausible. It is also, measured on this machine,
-four to seven minutes per prompt: a 20.6 GB model on an 8 GB card runs 70% on the CPU, and while
-it runs the GPU is occupied and nothing else can use it. Doing that after every commit spends the
-night on the model rather than on the product.
+**The expensive verification is batched, and the batches have names.** Driving a real conversation
+through the local model against a real CATIA seat is the only test that has ever found the defects
+that matter here — every one of the seven found on 2026-09-05 was invisible to the offline suite
+and left the geometry looking plausible. It is also four to seven minutes per prompt on this
+machine: a 20.6 GB model on an 8 GB card runs 70% on the CPU, and while it runs the GPU is
+occupied. Doing that after every commit spends the night on the model rather than on the product.
 
 So the work runs in **stretches** separated by **gates**:
 
-- **Inside a stretch — `pytest` only.** Write the tests with the work and commit them together,
-  run `pytest`, `ruff check app/ tests/` and `mypy app/`, and verify each new guard by breaking
-  the thing it guards. **Ollama is stopped** for the whole stretch (`ollama stop <model>`, then
-  the service) so the card is free and nothing is waiting on it. No chatbot run, no CATIA seat,
-  no screenshots — there is nothing to photograph that a unit test cannot state better.
-- **At a gate — the whole product, once, properly.** Ollama back up and **confirmed on the GPU**
-  (`ollama ps` for the CPU/GPU split, `nvidia-smi` for resident bytes); the prompt driven through
-  the real `/api/v1/ai/chat` endpoint, never the dispatcher; the CATIA seat exercised through the
-  bridge; `catia_capture_view` *and* a window screenshot per the standing rule; a dated report in
-  `docs/verification-<date>/` naming both. The rung reached is recorded, not just pass/fail.
+1. **Inside a stretch — `pytest` only.** Write the tests with the work and commit them together,
+   run `pytest`, `ruff check app/ tests/` and `mypy app/`, and verify each new guard by breaking
+   the thing it guards. **Ollama is stopped** for the whole stretch so the card is free. No chatbot
+   run, no CATIA seat, no screenshots.
+2. **At a gate — the whole product, once, properly.** Ollama back up and **confirmed on the GPU**
+   (`ollama ps`, `nvidia-smi`); the prompt driven through the real `/api/v1/ai/chat` endpoint,
+   never the dispatcher; the CATIA seat exercised through the bridge; `catia_capture_view` *and* a
+   window screenshot; a dated report in `docs/verification-<date>/` naming both. The rung reached
+   is recorded, not just pass/fail.
 
 **A gate is placed after a phase that changes what the product can do — never at a round number.**
-The test of a gate is whether the sentence "what can Kryova do now that it could not do before
-this gate?" has an answer an engineer would care about. If it does not, the gate is in the wrong
-place and the stretch continues.
+The test of a gate is whether "what can Kryova do now that it could not do before this gate?" has
+an answer an engineer would care about.
 
-| Gate | Opens after | What becomes true | What is driven at it |
-|---|---|---|---|
-| **G1** *(run 2026-09-06, did not pass — rung 3 failed; see `docs/verification-2026-09-06/`)* | **E6** — solver federation | the system can say a part *carries its load*, not only what shape it is. Until CalculiX answers, every structural claim is either the in-house linear-static component solver or nothing | rung 3 (carried over — measure-and-correct to a mass target), then a load-bearing prompt: build it, load it, tell me if it holds. Oracle check `ccx` vs `linear_static` on the same case |
-| **G2** | **E11 + E12** | the input stops being a shape description and becomes a written requirement, with real materials and bought-in parts | rung 4 — two parts and a constraint, specified as a requirement rather than as dimensions |
-| **G3** | **E14 + E9** | assemblies with interface contracts, and motion — a thing with a range rather than a pose | rung 5 — a mechanism whose clearance must hold through its travel |
-| **G4** | **E17 (with 17.3)** | a package leaves the system that a manufacturer can act on: drawings, STEP, BOM | the package is produced and *read* — a drawing looked at, not a file counted |
-| **G5** | **E18 M2 upward** | a machine, against a written requirement, off the mission ladder | rung 6 |
-| **GP1** | **P1 + P2** | more than one person can use it safely — rotation, families, orgs, RLS | two accounts, two orgs, cross-tenant reads that must 404 |
+The gates:
+
+1. **G1** — opens after **E6** (solver federation). What becomes true: the system can say a part
+   *carries its load*, not only what shape it is. Driven at it: rung 3 (measure-and-correct to a
+   mass target), then a load-bearing prompt — build it, load it, tell me if it holds; oracle check
+   `ccx` vs `linear_static` on the same case.
+   > RUN 2026-09-06, DID NOT PASS — rung 3 failed. See `docs/verification-2026-09-06/`. Rung 3 is
+   > carried forward and G1 runs again.
+2. **G2** — opens after **E11 + E12**. The input stops being a shape description and becomes a
+   written requirement, with real materials and bought-in parts. Driven: rung 4 — two parts and a
+   constraint, specified as a requirement rather than as dimensions.
+   > NOT RUN
+3. **G3** — opens after **E14 + E9**. Assemblies with interface contracts, and motion — a thing
+   with a range rather than a pose. Driven: rung 5 — a mechanism whose clearance must hold through
+   its travel.
+   > NOT RUN
+4. **G4** — opens after **E17 (with E17.3)**. A package leaves the system that a manufacturer can
+   act on: drawings, STEP, BOM. Driven: the package is produced and *read* — a drawing looked at,
+   not a file counted.
+   > NOT RUN
+5. **G5** — opens after **E18 M2 upward**. A machine, against a written requirement, off the
+   mission ladder. Driven: rung 6.
+   > NOT RUN
+6. **GP1** — opens after **P1 + P2**. More than one person can use it safely — rotation, families,
+   orgs, RLS. Driven: two accounts, two orgs, cross-tenant reads that must 404.
+   > NOT RUN
 
 Four rules that keep this from becoming a way of testing less:
 
-- **The bar does not move.** A phase is still `DONE` only when its Proof runs green, and a Proof
-  that names the product still waits for its gate. Batching changes *when* the expensive check
-  runs, never *whether*.
-- **A defect found at a gate re-opens the stretch**, and the gate runs again afterwards. A gate
-  that half-passed is a gate that did not pass; record the rung reached and carry it forward
-  (G1 carries rung 3 for exactly this reason).
-- **The prompt gets harder at every gate.** The ladder in `CLAUDE.md` is the schedule; a gate
-  that re-runs the previous gate's prompt has measured nothing.
-- **Between gates, an integration claim is unproven and is written as unproven.** The offline
-  suite proves the units; it has never once proved the path. Say "tested with pytest" in the
-  commit and leave the end-to-end column empty until a gate fills it.
+1. **The bar does not move.** A task is still `DONE` only when its proof runs green, and a proof
+   that names the product still waits for its gate. Batching changes *when* the expensive check
+   runs, never *whether*.
+2. **A defect found at a gate re-opens the stretch**, and the gate runs again afterwards. A gate
+   that half-passed is a gate that did not pass; record the rung reached and carry it forward.
+3. **The prompt gets harder at every gate.** A gate that re-runs the previous gate's prompt has
+   measured nothing.
+4. **Between gates, an integration claim is unproven and is written as unproven.** The offline
+   suite proves the units; it has never once proved the path.
 
-**The documentation-first rule (standing, all phases).** Every phase opens by reading the primary
-documentation of what it builds on — the OCCT reference for a kernel phase, the CalculiX manual
-(Dhondt) for a solver phase, the Tauri v2 updater docs for P7, the OWASP cheat-sheets for P1 —
-and recording the load-bearing facts in the phase's design note *with citations*. Two rules make
-this stick: **no dependency is adopted on the strength of a blog post** (primary docs or source,
-always), and **any fact the plan leans on that the docs do not confirm becomes a spike, not an
-assumption** — that is exactly how v1's pythonocc/OCAF assumption got caught, and the correction
-is recorded in this file's header. Where licences allow, dependency docs are ingested into the
-existing BM25 index (`app/retrieval/`) so the agent can consult them the same way it consults the
-CATIA manuals — the machinery is already built, tuned and tested; pointing it at our own
-dependencies is nearly free.
+### The documentation-first rule (standing, all phases)
 
+Every phase opens by reading the primary documentation of what it builds on — the OCCT reference
+for a kernel phase, the CalculiX manual (Dhondt) for a solver phase, the Tauri v2 updater docs for
+P7, the OWASP cheat-sheets for P1 — and recording the load-bearing facts in the phase's design
+note *with citations*. Two rules make this stick:
+
+1. **No dependency is adopted on the strength of a blog post** — primary docs or source, always.
+2. **Any fact the plan leans on that the docs do not confirm becomes a spike, not an assumption**
+   — exactly how v1's pythonocc/OCAF assumption got caught.
+
+Where licences allow, dependency docs are ingested into the existing BM25 index (`app/retrieval/`)
+so the agent can consult them the same way it consults the CATIA manuals.
 ---
 
 # ENGINEERING TRACK
 
-# ERA I — THE GEOMETRY ENGINE BECOMES OURS
+## ERA I — THE GEOMETRY ENGINE BECOMES OURS
 
-## Phase 1 — The open kernel: OCCT as the primary compilation target
+##### Phase E1 — The open kernel: OCCT as the primary compilation target #####
+
+> ✅ PHASE COMPLETE (2026-09-05) — every task below is done and tested, with one residual
+> named in task 7 that needs hardware this machine does not have.
 
 **~8 engineer-months. The keystone. Nothing downstream is affordable until it lands.**
 
-### The question it answers
-Can Kryova build geometry without a licensed workstation, deterministically, in CI, at machine
-scale?
+**The question it answers:** can Kryova build geometry without a licensed workstation,
+deterministically, in CI, at machine scale?
 
-### Workstream 1.0 — the binding spike ✅ **PASSED, 2026-09-05**
+1. **The binding spike.** Establish whether OCAF/TNaming is reachable from Python well enough to
+   build persistent naming on, and name the fallback if it is not.
+   > DONE (2026-09-05) — three findings, each of which changed the phase.
+   > (a) **`pythonocc-core` is not on PyPI at all** — conda-only. Adopting it would have forced
+   > conda into every deployment and into CI, against the whole point of Decision 1. The binding
+   > is therefore [`cadquery-ocp`](https://pypi.org/project/cadquery-ocp) (OCP, pybind11,
+   > OCCT 7.9.3): pip-installable, exposing all 320 OCCT modules including the full OCAF stack
+   > (`TNaming`, `TDF`, `TDocStd`, `TFunction`, `TDataStd`). **The C++-service fallback is not
+   > needed**, and neither is pyOCCT.
+   > (b) **Persistent naming survives a real parametric rebuild.** The spike named a fillet face,
+   > regenerated the part at different dimensions, and recovered the *new* corresponding face —
+   > verified by area against the closed-form quarter-cylinder (691.150 mm² at r=8, h=55), not
+   > against a recorded number.
+   > (c) **Three non-obvious rules govern it**, two of which fail by making
+   > `TNaming_Selector.Solve()` return **success while resolving to nothing**: one OCAF label
+   > records one evolution kind; a regeneration must rewrite the *same* labels; edges must be
+   > walked as well as faces, because a fillet's new face is `Generated` by the edge, not by any
+   > face. All three documented in `app/kernel/occt/naming.py` with the failure each produces.
+   > **Cost finding handed to P9.2:** OCP is ~166 MB and pulls ~640 MB of VTK as a hard dependency
+   > this codebase never uses. Stripping it is a container-layer job, not a `--no-deps` install
+   > that would silently break. Tested by: `tests/test_kernel.py`.
 
-The question was whether OCAF/TNaming is reachable from Python well enough to build persistent
-naming on. Three findings, each of which changed the phase:
+2. **The kernel service.** A process wrapping the kernel behind the same `CallRunner` interface
+   `app/design/execute.py` already defines. In-process where safe, subprocess-isolated where the
+   kernel can abort (OCCT does abort on degenerate booleans, and a crash must kill a worker, not
+   the API).
+   > DONE (2026-09-05). Tested by: `tests/test_kernel.py`. Code: `app/kernel/` (24 modules).
 
-1. **`pythonocc-core` is not on PyPI at all** — conda-only. Adopting it would have forced conda
-   into every deployment and into CI, against the whole point of Decision 1. The binding is
-   therefore [`cadquery-ocp`](https://pypi.org/project/cadquery-ocp) (OCP, pybind11, OCCT 7.9.3):
-   pip-installable, and it exposes all 320 OCCT modules including the full OCAF stack
-   (`TNaming`, `TDF`, `TDocStd`, `TFunction`, `TDataStd`). **The C++-service fallback is not
-   needed**, and neither is pyOCCT.
-2. **Persistent naming survives a real parametric rebuild.** The spike named a fillet face,
-   regenerated the part at different dimensions, and recovered the *new* corresponding face —
-   verified by area against the closed-form quarter-cylinder (691.150 mm² at r=8, h=55), not
-   against a recorded number.
-3. **Three non-obvious rules govern it**, each got wrong before it was got right, and two of the
-   three fail by making `TNaming_Selector.Solve()` return **success while resolving to nothing**:
-   (a) one OCAF label records one evolution kind; (b) a regeneration must rewrite the *same*
-   labels; (c) edges must be walked as well as faces, because a fillet's new face is `Generated`
-   by the edge, not by any face. All three are documented in `app/kernel/occt/naming.py` with the
-   failure each one produces.
+3. **The operation mapping.** Each of the 201 registry operations gets an OCCT implementation or
+   an explicit, reasoned refusal. Not mechanical: `catia_pad` is `BRepPrimAPI_MakePrism` plus
+   sketch resolution plus support resolution plus naming bookkeeping. Sequence by mission — M1's
+   vocabulary first, then M2's weldment needs. Per Decision 1 an operation is added only when a
+   test, a sweep or an optimisation needs it, never for coverage.
+   > PARTIAL — 22/201 at the close of E1, **108/201 after E2**. This figure is scaffolding depth,
+   > not product progress, and reading it as progress is how it got to 108. Tested by:
+   > `tests/test_kernel.py`.
 
-**Cost finding for P9.2:** OCP is ~166 MB and pulls ~640 MB of VTK as a hard dependency that this
-codebase never uses — nothing here renders through VTK. Stripping it is a container-layer job, not
-a `--no-deps` install that would silently break.
+4. **The sketch layer.**
+   > PARTIAL (2026-09-05) — parametric half done, solver deferred with cause. The finding that
+   > changed this task: **the registry's sketch vocabulary is dimension-driven, not
+   > constraint-driven.** `catia_sketch_rectangle` takes a width and a height,
+   > `catia_sketch_circle` a diameter, `catia_sketch_polygon` a side count and a diameter — each
+   > *fully determined by its arguments*, with nothing for a solver to solve. So every profile
+   > that actually feeds a pad, pocket, shaft or groove is buildable without PlaneGCS, and those
+   > profiles build now (`app/kernel/occt/sketching.py`). PlaneGCS is still owed for exactly one
+   > operation, **`catia_sketch_constrain`**, which applies arbitrary constraints to free
+   > geometry; it refuses by name with that reason rather than pretending. When it lands the
+   > choice stands: **PlaneGCS** (FreeCAD's, LGPL — DogLeg / Levenberg-Marquardt / BFGS / SQP),
+   > full constraint vocabulary, proven detachable (a WASM port exists). Rejected: SolveSpace's
+   > solver — faster, narrower; a sketcher that cannot express tangency is not a sketcher.
+   > This is a narrowing of scope, not a claim to have finished it.
 
-### Workstreams
-**1.1 — The kernel service.** A process wrapping the kernel behind the same `CallRunner`
-interface `app/design/execute.py` already defines. In-process where safe, subprocess-isolated
-where the kernel can abort (OCCT does abort on degenerate booleans, and a crash must kill a
-worker, not the API).
-**1.2 — The operation mapping.** Each of the 201 registry operations gets an OCCT implementation
-or an explicit, reasoned refusal. The bulk of the work, and not mechanical: `catia_pad` is
-`BRepPrimAPI_MakePrism` plus sketch resolution plus support resolution plus naming bookkeeping.
-Sequence by mission: M1's vocabulary first, then M2's weldment needs.
-**1.3 — The sketch layer.** ✅ **Parametric half done 2026-09-05; solver deferred with cause.**
+5. **Persistent topological naming.** *The hard part.* Every created face gets a stable identity
+   that survives regeneration, keyed by the design IR's semantic names
+   (`swingarm.pivot_bore.inner_face`). Mechanism: `TNaming` plus, where available, OCCT 8.0's
+   `BRepGraph` history. The published insight that bounds the work: **only faces need naming** —
+   `TNaming_Selector` recovers edges and vertices from adjacent faces.
+   > DONE (2026-09-05). Tested by: `tests/test_kernel.py`. Code: `app/kernel/occt/naming.py`.
 
-The finding that changed this workstream: **the registry's sketch vocabulary is
-dimension-driven, not constraint-driven.** `catia_sketch_rectangle` takes a width and a height,
-`catia_sketch_circle` a diameter, `catia_sketch_polygon` a side count and a diameter. Each is
-*fully determined by its arguments* — there is nothing for a solver to solve. So every profile
-that actually feeds a pad, pocket, shaft or groove is buildable without PlaneGCS, and those
-profiles now build (`app/kernel/occt/sketching.py`).
+6. **The conformance harness.** One `Plan`, two backends, geometry compared: volume, mass, centre
+   of gravity, inertia tensor, bounding box, surface area, face/edge counts, within declared
+   tolerance. Divergence is a finding about one backend, and the harness says which.
+   > DONE (2026-09-05) — `compare_backends` is written and exercised against two runners.
+   > Tested by: `tests/test_kernel.py`.
 
-PlaneGCS is still owed, for exactly one operation: **`catia_sketch_constrain`**, which applies
-arbitrary constraints to free geometry. It refuses by name with that reason rather than
-pretending. When it lands, the choice stands: **PlaneGCS** (FreeCAD's, LGPL — DogLeg /
-Levenberg-Marquardt / BFGS / SQP), full constraint vocabulary, proven detachable (a WASM port
-exists). Rejected: SolveSpace's solver — faster, narrower; a sketcher that cannot express
-tangency is not a sketcher.
+7. **Determinism.** Pinned OCCT version, pinned tessellation tolerance, fixed locale,
+   containerised. Same spec + same version ⇒ same geometry, byte for byte, asserted in CI.
+   > DONE (2026-09-05) — the same spec built twice produces the same geometry digest; a changed
+   > dimension changes it. Tested by: `tests/test_kernel.py`.
+   > **RESIDUAL, and it needs hardware this machine does not have:** the CATIA half — the same
+   > plan built on a real V5 seat, compared. Pointing `compare_backends`' right-hand side at
+   > `app.catia.dispatch` on a Windows seat is the remaining step. Until that has run the
+   > *cross-backend* claim is untested and is written as untested.
 
-*This is a narrowing of 1.3's scope, not a claim to have finished it, and the coverage figure
-reports it as such.*
-**1.4 — Persistent topological naming.** *The hard part.* Every created face gets a stable
-identity that survives regeneration, keyed by the design IR's semantic names
-(`swingarm.pivot_bore.inner_face`). Mechanism: `TNaming` + (where available) OCCT 8.0's
-`BRepGraph` history. The published insight that bounds the work: **only faces need naming** —
-`TNaming_Selector` recovers edges and vertices from adjacent faces.
-**1.5 — The conformance harness.** One `Plan`, two backends, geometry compared: volume, mass,
-centre of gravity, inertia tensor, bounding box, surface area, face/edge counts, within declared
-tolerance. This is `A1` done properly and unattended; divergence is a finding about one backend,
-and the harness says which.
-**1.6 — Determinism.** Pinned OCCT version, pinned tessellation tolerance, fixed locale,
-containerised. Same spec + same version ⇒ same geometry, byte for byte, asserted in CI.
+**Phase proof:** M1 — a machined bracket — compiles, builds on OCCT in CI, builds on CATIA on a
+real seat, and the two agree on every interrogated quantity to declared tolerance. Ten times,
+identically, from a cold container.
+> MET ON THE OCCT HALF (2026-09-05). The bracket (sketch → rectangle → pad → circle →
+> through-pocket → corner fillets, 12 calls) compiles from a `DesignSpec` and builds on OCCT,
+> with volumes matching closed-form values exactly and assertions checked against them.
 
-### Creative leverage
-**Geometry CI.** Every design in the repository rebuilt and re-asserted on every push, free, in
-seconds. No CAD vendor ships this because their kernel is the product they sell; ours is a
-dependency. It turns "did that refactor break anything" from a week of manual checking into a red
-build.
+**Risks:** OCCT API vastness and thin documentation; the binding lagging upstream; boolean
+robustness on degenerate input (a weakness of every kernel). Mitigation: per-operation backend
+capability already exists in the registry — the fallback for a failing operation is "CATIA backend
+for that op", not "no geometry".
 
-### Proof — met on the OCCT half, 2026-09-05
-M1 — a machined bracket — compiles, builds on OCCT in CI, builds on CATIA on a real seat, and the
-two agree on every interrogated quantity to declared tolerance. Ten times, identically, from a
-cold container.
+##### Phase E2 — Selection, reference geometry, and the authoring vocabulary real parts need #####
 
-**Where that stands.** The bracket (sketch → rectangle → pad → circle → through-pocket → corner
-fillets, 12 calls) compiles from a `DesignSpec` and builds on OCCT, with volumes matching
-closed-form values exactly and assertions checked against them. Determinism holds: the same spec
-built twice produces the same geometry digest, a changed dimension changes it. The conformance
-harness runs and reports.
-
-**The residual is one thing and it needs hardware this machine does not have:** the CATIA half —
-the same plan built on a real V5 seat, compared. `compare_backends` is written and exercised
-against two runners; pointing its right-hand side at `app.catia.dispatch` on a Windows seat is
-the remaining step. Until that has run, the *cross-backend* claim is untested, and the board says
-so rather than implying otherwise.
-
-### Risks
-OCCT API vastness and thin documentation; `pythonocc` lagging upstream; boolean robustness on
-degenerate input (a weakness of every kernel). Mitigation: per-operation backend capability
-already exists in the registry — the fallback for a failing operation is "CATIA backend for that
-op", not "no geometry".
-
-## Phase 2 — Selection, reference geometry, and the authoring vocabulary real parts need
+> ✅ PHASE COMPLETE (2026-09-05) — all six tasks done, and the phase Proof is written and green.
 
 **~6 engineer-months.**
 
-### The question it answers
-Can the agent *point at* the thing it means, without a face id and without a guess?
+**The question it answers:** can the agent *point at* the thing it means, without a face id and
+without a guess?
 
-### Workstreams
-**2.1 — Predicate selection** (roadmap A3; the item the build-plan queue still owes). Replace
-named-enum picking with geometric predicates: *all edges longer than 10 mm*, *all faces whose
-normal is within 5° of +Z*, *all cylindrical faces of Ø6 H7*, *the tangent-continuous edge chain
-from this one*. Only decidable against geometry that exists — which is why it was blocked before
-Phase 1 and is nearly free after it.
-**2.2 — `feature#selector` resolves.** `SemanticName` already reserves the spelling and refuses
-it with a message pointing here.
-**2.3 — Per-entity parameters.** Per-edge fillet radius, not one radius per group — the single
-most limiting schema constraint in the current vocabulary.
-**2.4 — Reference geometry completed.** Offset planes, plane-on-face, plane-through-3-points,
-plane-normal-to-curve, user axis systems, datum points/lines — the OCCT half.
-**2.5 — Part Design completion.** Multi-body, booleans between bodies, geometrical sets,
-rib/slot/stiffener, draft with parting line, variable/tritangent fillets, thread, user patterns,
-shell with face selection, thickness.
-**2.6 — Surfaces / GSD.** Multi-section with guides, adaptive sweep, blend with continuity, fill,
-join/heal with tolerance, trim/split, law-driven surfaces, curvature analysis. Deferrable within
-the era until the ladder needs bodywork.
+1. **Predicate selection.** Replace named-enum picking with geometric predicates: *all edges
+   longer than 10 mm*, *all faces whose normal is within 5° of +Z*, *all cylindrical faces of
+   Ø6 H7*, *the tangent-continuous edge chain from this one*. Only decidable against geometry that
+   exists — which is why it was blocked before E1 and is nearly free after it.
+   > DONE (2026-09-05) — every vocabulary word decidable; `parallel_to`/`perpendicular_to` make
+   > "the vertical walls" one selection. Tested by: `tests/test_kernel.py`. Code:
+   > `app/kernel/selection.py`, `occt/{resolve,classify,selectors}.py`.
 
-### Creative leverage
-**A selection predicate is an assertion in disguise.** *All faces normal to +Z with area >
-400 mm²* both picks faces and *claims* something. One vocabulary, two uses — and the assertion
-engine already evaluates it.
+2. **`feature#selector` resolves.** `SemanticName` already reserved the spelling and refused it
+   with a message pointing here.
+   > DONE (2026-09-05) — `slab#top` returns the annulus under a boss, a face the plain word `top`
+   > can never return. Tested by: `tests/test_kernel.py`.
 
-### Proof
-A part authored with every fillet radius different, each chosen by predicate; the design
-regenerates correctly after an upstream feature insertion changes every face id in the model.
+3. **Per-entity parameters.** Per-edge fillet radius, not one radius per group — the single most
+   limiting schema constraint in the old vocabulary.
+   > DONE (2026-09-05). Tested by: `tests/test_kernel.py`.
 
-# ERA II — PERCEPTION: THE SYSTEM KNOWS WHAT IT BUILT
+4. **Reference geometry completed.** Offset planes, plane-on-face, plane-through-3-points,
+   plane-normal-to-curve, user axis systems, datum points/lines — the OCCT half.
+   > DONE (2026-09-05) — complete for everything not needing a named face. Tested by:
+   > `tests/test_reference_geometry.py` (36 tests).
 
-## Phase 3 — Geometric interrogation and the measurement layer
+5. **Part Design completion.** Multi-body, booleans between bodies, geometrical sets,
+   rib/slot/stiffener, draft with parting line, variable/tritangent fillets, thread, user
+   patterns, shell with face selection, thickness.
+   > DONE (2026-09-05). Every geometry operation now records its own faces — pad/pocket/shaft/
+   > groove, primitives, transforms, boolean, shell, fillet, chamfer and draft — and a test fails
+   > if one stops. Drawn segments chain into contours, so four `catia_sketch_line` calls make a
+   > padable square. Ribs and slots verified against Pappus's theorem; a thread is an annotation
+   > that provably does not change the mass. Closes with the two features whose extent is not
+   > stated by their own arguments: a **stiffener** runs until it meets material (built by
+   > subtraction, exact against ½·b·h·t; a sweep that never meets material is refused by name
+   > rather than left hanging in the air), and a **draft with a `parting` element** tapers *both*
+   > sides away from the plane so a two-part mould releases — checked against the frustum closed
+   > form on each side. Tested by: `tests/test_kernel.py`.
+
+6. **Surfaces / GSD.** Multi-section with guides, adaptive sweep, blend with continuity, fill,
+   join/heal with tolerance, trim/split, law-driven surfaces, curvature analysis.
+   > DONE (2026-09-05). Opens with the half that earns the rest: **a surface is skin, not
+   > material** — it lives in the document's construction store and the part's mass does not move
+   > when one is built — and `catia_close_surface` / `catia_thick_surface` are the two named
+   > crossings back. Extrude, revolve, offset, fill, loft, join, extract, boundary all land.
+   > Traps pinned by tests that fail when the fix is removed:
+   > (a) **a thickened surface comes back inside-out**, which `BRepCheck_Analyzer` calls valid and
+   > which makes a later fuse silently swallow the thing being fused;
+   > (b) **`MakeFilling` approximates even a flat boundary**, so a patched circular hole measured
+   > 314.1595 mm² against πr²;
+   > (c) **cells are not connected components** — a split shell's halves share the cut edge, so
+   > `domains` correctly says one while the caller plainly wants two;
+   > (d) **`untrim` on a plane is not refused by OCCT** — `MakeFace` reports success and returns a
+   > face of area 8 × 10¹⁰⁰, which then flows into a mass and a bounding box looking like a
+   > measurement;
+   > (e) **`Handle(Geom_…)&` is passed by value by OCP**, so `GeomLib::ExtendCurveToPoint` and
+   > `ExtendSurfByLength` build the answer and drop it — no exception, no return value. That is
+   > why `catia_extrapolate` widens a parameter range instead, and it is measured by a test rather
+   > than remembered;
+   > (f) **handing `MakeFilling` a boundary edge carrying no parameter curve segfaults** — `Add`
+   > accepts it quietly and the process dies inside `Build()`, so each boundary edge is matched to
+   > the support's own edge by geometry first;
+   > (g) **OCCT reports a tangency it did not deliver** — filling a cylinder's rim tangentially
+   > returns success and a flat disc 82.5° out, so the fill measures `tangent_error_deg` and
+   > refuses a patch that missed by more than a degree;
+   > (h) **`Geom2d_Line` normalises the direction it is given**, so sweeping 0 → 2πn builds a
+   > helix of the right shape and a 16% wrong length;
+   > (i) **a face is a trimmed piece of an unbounded surface** — `GeomAPI_ProjectPointOnSurf`
+   > answers for the whole surface, so a point beside a cylinder projected onto the *infinite*
+   > plane of its top disc, 20 mm outside the rim; fixed in `closest_on_surface`;
+   > (j) **an offset has a side and OCCT does not take it from the caller's argument** — it reads
+   > the wire's own winding, so the side is stated here, measured on the result and mirrored when
+   > it went the other way.
+   > Which side of a cut survives is *stated* — cells ordered by the signed distance of their
+   > centre from the cutting plane — and a cutter with no plane is refused rather than resolved by
+   > whichever piece OCCT listed first. `catia_surface_analysis(kind='connect')` reports the
+   > smallest tolerance that would join the pieces, which is the argument `catia_healing` takes,
+   > so the analysis hands the repair its own parameter. Wireframe curves land too (helix, 3D
+   > circle and arc, polyline, interpolating spline, section, intersection, extremum), verified
+   > against `n·√(pitch² + (2πr)²)`. Derived anchors land (`catia_point_{on_curve,on_surface,
+   > centre}`, `catia_line_{between,direction,normal,tangent}`), which is what makes a point
+   > *associative* rather than a coordinate that goes stale. Associative curves and planes close
+   > the gap (`catia_curve_{project,parallel,offset_3d,combine}`, `catia_plane_{normal_to_curve,
+   > tangent_to_surface,mean}`, `catia_planes_between`). `catia_curve_connect` measures the
+   > continuity it achieved and reports tangent error in degrees and curvature step per mm,
+   > because a G2 claim that is asserted rather than measured is the kind of number this codebase
+   > refuses to print. `catia_curve_spiral` reports its own worst radial error measured *between*
+   > the interpolation knots — at the knots it reads 1e-14 against the 9.4e-5 mm it is really out
+   > by, a factor of 10⁹. `catia_curve_reflect_line` keeps the **hidden** part of the line and
+   > keeps only what lies on a **curved** face, because a polyhedron does its turning at edges
+   > that already exist. Tested by: `tests/test_kernel.py` (21 named test classes),
+   > `tests/test_reference_geometry.py`. Code: `occt/operations/` (15 modules),
+   > `app/kernel/threads.py`.
+
+**Phase proof:** a part authored with every fillet radius different, each chosen by predicate; the
+design regenerates correctly after an upstream feature insertion changes every face id in the
+model.
+> GREEN (2026-09-05) — `TestTheProofOfPhaseTwo`. A 60×40×20 plate whose four vertical corners
+> carry 2, 3, 4 and 5 mm — one call, edges chosen by predicate and radii matched to the selection
+> order — compiled from a `DesignSpec` and run through the real `OcctRunner`; then the *same spec*
+> with a through-notch inserted ahead of the fillets, recompiled and rebuilt from nothing. Volume
+> exact against `blank − Σh·r²(1−π/4) − notch` both times. The insertion is not assumed to
+> renumber nothing — it is measured: the plate's vertical edges move from positions 0, 1, 4, 7 to
+> 5, 7, 19, 23, and the design still finds them because it refers to nothing positional.
+>
+> **Running the proof found four places where the layers were each right and disagreed, none of
+> which any existing test could see:**
+> (a) `catia_fillet`'s `radius_mm` was declared a number, so the per-edge list the kernel has
+> taken since task 3 was unreachable from a spec;
+> (b) `catia_fillet`'s `feature` argument was **declared and silently dropped** — the design
+> suite's own bracket fixture asks for it, so the canonical example of the vocabulary was rounding
+> every vertical edge on the part and reporting success;
+> (c) a compiled design renames every feature to its own name and `Document.feature` looked up
+> only the build name, which made `feature#selector` — the whole of task 2 — invisible to an
+> authored design while working perfectly under a direct call;
+> (d) `topology.shape_list` refused any OCCT list longer than two on the belief that OCP exposed
+> no iterator; it does, and a pocket cutting a slot *through* a part turns one face into five, so
+> an ordinary notch was unbuildable.
+>
+> **A defect that had been in `Sketch.face` since the file was written, found 2026-09-06 by
+> driving rung 3** (`71ac1b2`): an inner profile padded as a **boss, not a bore**. The docstring
+> said the right thing — *"Later profiles become holes in the first"* — and the code handed each
+> one to `BRepBuilderAPI_MakeFace.Add`, which requires an inner wire to carry the *opposite*
+> orientation; an unreversed wire is accepted without complaint and integrates as material. A
+> 100×100 sketch with a 40 mm circle padded 10 mm measured 112,566 mm³ against 87,434, and
+> `IsDone()` was true. Containment is decided by boolean algebra now, in **both** directions —
+> draw order is not containment order — with a partial overlap refused rather than read as one
+> thing or the other.
+>
+> **Known and deliberately not changed:** the bare word `vertical` matches a vertical bore's seam,
+> which is a parameterisation artefact rather than an edge of the part — but `boss#vertical`
+> naming a cylinder's seam is how `catia_measure_item` reports a boss height today, so narrowing
+> it is a vocabulary decision rather than a bug fix.
+> **Still open:** `catia_draft` in reflect-line mode, blocked not on the silhouette (that exists
+> now) but on OCCT taking a neutral *plane* where the mode wants a curve on the face — a ruled
+> surface has to be built and the face replaced, which is surfacing work rather than a missing
+> argument.
+
+## ERA II — PERCEPTION: THE SYSTEM KNOWS WHAT IT BUILT
+
+##### Phase E3 — Geometric interrogation and the measurement layer #####
 
 **~3 engineer-months.**
 
-**3.1** Mass, volume, centre of mass, full inertia tensor, bounding boxes (AABB and oriented),
-surface area, per-face/per-edge measures — native OCCT, in-process, free.
-**3.2** Wall-thickness scan, draft analysis, curvature/continuity checks, undercut detection.
-**3.3** Clearance, interference and minimum-distance queries between bodies.
-**3.4** The **measurement payload contract** — a stable, versioned vocabulary of numbers that
-`assertions.py` reads by path (`mass_kg`, `bounding_box_mm.size[2]`, …), backend-neutral,
-documented.
-**3.5** Honest provenance on every number: measured vs approximated vs unavailable — the mock's
-existing discipline, made universal.
+1. **Bulk measures.** Mass, volume, centre of mass, full inertia tensor, bounding boxes (AABB and
+   oriented), surface area, per-face and per-edge measures — native OCCT, in-process, free.
+   > DONE (2026-09-05). Tested by: `tests/test_interrogation.py` (39 tests, offline, all against
+   > closed-form answers). Code: `app/kernel/interrogation.py`,
+   > `occt/metrology.oriented_bounding_box`.
 
-**Proof:** every assertion in the ladder through M4 is measurable, and each measurement agrees
-between OCCT and CATIA to declared tolerance.
+2. **Manufacturability scans.** Wall-thickness scan, draft analysis, curvature/continuity checks,
+   undercut detection.
+   > DONE (2026-09-05) — these have a premise ("pulled along +Z"), can be inapplicable, and are
+   > frequently **sampled**; nothing here runs speculatively and `measure()` never calls it.
+   > Tested by: `tests/test_interrogation.py`. Code: `app/kernel/occt/interrogate/` (8 modules).
 
-## Phase 4 — Visual verification: the model looks at the model
+3. **Clearance, interference and minimum-distance queries between bodies.**
+   > PARTIAL (2026-09-05) — implemented and tested, **not yet wired to `catia_measure_between`**;
+   > that needs E2 task 2's element references. Tested by: `tests/test_interrogation.py`.
+
+4. **The measurement payload contract.** A stable, versioned vocabulary of numbers that
+   `assertions.py` reads by path (`mass_kg`, `bounding_box_mm.size[2]`, …), backend-neutral,
+   documented.
+   > DONE (2026-09-05) — `undocumented_paths()` is asserted empty, which is what makes it a
+   > contract rather than a list. Tested by: `tests/test_interrogation.py`. Code:
+   > `app/kernel/contract.py`.
+
+5. **Honest provenance on every number** — measured vs approximated vs unavailable-with-a-reason.
+   > DONE (2026-09-05) — carried as a *sidecar* so `bounding_box_mm.size[2]` still resolves, and
+   > read per path by `assertions.py`, so an exact mass is not tainted by a ray-cast thickness
+   > beside it. Tested by: `tests/test_interrogation.py`. Code: `app/kernel/provenance.py`.
+
+**Phase proof:** every assertion in the ladder through M4 is measurable, and each measurement
+agrees between OCCT and CATIA to declared tolerance.
+> PARTIAL — the OCCT half is green and reachable via `catia_analysis_part`. The cross-backend
+> agreement half needs a Windows seat, same as E1 task 7.
+
+##### Phase E4 — Visual verification: the model looks at the model #####
 
 **~4 engineer-months.**
 
-**4.1** Deterministic offscreen rendering from canonical views (six orthographic, two isometric,
-section cuts) via OCCT's own visualisation, headless — fixed camera, lighting, resolution, so two
-renders of the same geometry are byte-identical.
-**4.2** A vision-model check: render, ask a VLM whether the result matches the request. The
-provider layer is already pluggable; the local-Ollama default means no key required.
-**4.3** **Render diffing** — before/after pixel diff, so review surfaces *what visibly changed*.
-Cheap, and startlingly effective at catching what numeric checks miss.
-**4.4** Renders flow into the conversation — the user sees what the agent sees (Product Track P5
-owns the surface).
+1. **Deterministic offscreen rendering** from canonical views (six orthographic, two isometric,
+   plus section cuts) — fixed camera, lighting and resolution, so two renders of the same geometry
+   are byte-identical.
+   > DONE (2026-09-05, including section cuts). **Hidden-line removal, not OpenGL, and that is the
+   > task's own requirement rather than a shortcut.** OCP exposes `V3d`/`AIS`/`OpenGl_GraphicDriver`
+   > and a viewer does come up here — but this task asks for two renders to be *byte-identical*,
+   > and a GL image is a function of the driver, the sampling and the display server, on a project
+   > that develops on Linux and ships on Windows. HLR is arithmetic and the raster under it is
+   > integer. Eight canonical views, each built from **three** HLR streams per side (sharp, smooth
+   > and silhouette — taking only the sharp edges loses every curved outline, so a cylinder seen
+   > from the side renders as nothing). Framing is derived from the part rather than chosen, and is
+   > a *value*: `render_views` fits one frame over every view's extent so a six-view sheet is at
+   > one scale, and `render_pair` puts two parts through one frame. Determinism is defended at each
+   > step where it is easy to lose: no anti-aliasing, `floor(v+0.5)` rather than banker's rounding,
+   > a dash phase carried along the whole polyline rather than restarted per segment, curve
+   > flattening at a deflection *relative to model size*, and a hand-written PNG encoder — three
+   > chunks, filter 0, fixed zlib level — because an outside encoder can add a timestamp chunk or
+   > change its filter heuristic between versions and silently break the hash.
+   > **Section cuts close this task, and the work is the vocabulary rather than the drawing:**
+   > `mid_section` / `offset_section` / `section_named`, with the plane's normal pointing at the
+   > material that is *removed* — `catia_split`'s own convention, because two conventions for one
+   > question in one codebase is how a part ends up mirrored with every test green. That convention
+   > is also what lets `natural_view` pick the camera without a second argument. A plane that
+   > misses the part is **refused**, since an uncut part returned from a section call looks exactly
+   > like a successful section of a solid one. The cut is a finite box rather than
+   > `BRepPrimAPI_MakeHalfSpace` — OCCT's booleans are materially less robust against an infinite
+   > solid and fail by returning the shape unchanged. The cut face is found by **geometry, not
+   > boolean history** (history is per-operation and lost the moment the shape is passed on) and is
+   > hatched at 45°, filling by the **even-odd rule across every wire at once**, so a bore falls
+   > out of the parity arithmetic with nothing having to identify it as a hole.
+   > **Writing the sections found that this task shipped rendering every part upside down.**
+   > OCCT's `gp_Ax2` defines its Y axis as `direction × X`, the opposite of the up vector
+   > `views.py` declares, so the top of a 40 mm box seen from the front came back at y = −40.
+   > **No check could see it**: a consistently mirrored image is still byte-identical to itself so
+   > determinism held, a diff of two mirrored renders is still correct so task 3 held, and a
+   > wireframe of a plate is entirely plausible upside down. It is precisely the wrong-orientation
+   > error a render hash exists to catch. Fixed in the projection rather than the raster, so view
+   > millimetres do not lie, and pinned by `TestTheRenderIsTheRightWayUp`.
+   > Tested by: `tests/test_render.py` (37 tests, offline). Code: `app/render/`.
 
-**Creative leverage:** deterministic rendering makes a render hash part of the geometry's
-identity — a third check, blind where mass and plan-digest are blind (mirrored, inside-out, wrong
+2. **A vision-model check** — render, ask a VLM whether the result matches the request.
+   > DONE (2026-09-05), and built around the task's own stated limitation rather than in spite of
+   > it. A VLM will confidently approve a subtly wrong part, so `VisualReview` has **no `approved`
+   > or `passed` property** for a caller to gate a release on — the flag that exists is
+   > `objected`, and a test asserts the others do not appear. There are three outcomes and
+   > **`unchecked` is never a pass**, the same rule `assertions.py` applies to an unmeasured
+   > assertion: no vision model, an unreachable provider, a blank render, a model that says
+   > 'unsure', and a model that says 'differs' while naming nothing specific all land there with
+   > the reason in words. Nothing raises — a visual check improves an answer and must never be why
+   > there is not one.
+   > **The dangerous case is Ollama**, which does not refuse an image handed to a text-only model:
+   > it drops it and answers anyway, so the shipping default (`qwen2.5-coder`, which has no eyes)
+   > would return a confident description of nothing with no error and no flag — a check that
+   > manufactures agreement, which is worse than no check. `_sees()` refuses on two *structural*
+   > signals with no model-name list to go stale: `/api/show` publishes `capabilities`, and only a
+   > multimodal model has a `projector_info` block at all. `AI_VISION_MODEL` names the model that
+   > looks, because locally it is a second pull. Images are unlabelled on the wire, so **order is
+   > the only thing tying an image to what it is a picture of** — the prompt names the order and
+   > the code sends them in it. `num_ctx` is sized for the pictures as well as the words, because
+   > Ollama truncates a prompt from the front in silence. The schema puts `describes` before
+   > `verdict` so a constrained decoder must state what it sees before it judges, and the prompt
+   > forbids reading any dimension off a drawing that has no scale. Three views by default, not
+   > eight: images dominate the cost and three perpendicular directions already fix the silhouette.
+   > Tested by: `tests/test_vision.py` (30 tests, offline). Code: `app/ai/vision.py`,
+   > `LLMProvider.look`, `prompts.VISUAL_CHECK_SYSTEM`, `schemas.VisualCheck`.
+
+3. **Render diffing** — before/after pixel diff, so review surfaces *what visibly changed*.
+   > DONE (2026-09-05). **Diffs on ink, not shade**: a line that went from hidden to visible has
+   > not moved, and flagging it would light up every part whose features merely reordered behind
+   > one another. Added and removed are separate colours because "a pocket appeared" and "an edge
+   > vanished" are different facts. Two renders framed differently are **refused** rather than
+   > diffed — independently framed, a part 2 mm bigger changes every pixel and the diff says
+   > nothing. Measured on a plate gaining a Ø14 pocket: 321 pixels arrived, 0 gone, 3.3% of the
+   > ink. Tested by: `tests/test_render.py`. Code: `app/render/diff.py`.
+
+4. **Renders flow into the conversation** — the user sees what the agent sees (P5 owns the
+   surface).
+   > PARTIAL (2026-09-07) — a picture reaches the conversation on the CATIA path. The transcript
+   > renders the picture a tool returned instead of `JSON.stringify`-ing a media id and a byte
+   > count. That closes the gap the standing rule had been sitting over — the whole product is
+   > built on somebody *looking* at what `catia_capture_view` returns, and the product could not
+   > show it. The detector claims only that a result *might* carry a picture and settles it by
+   > measurement: it fetches the bytes and draws an `<img>` only once the blob's own MIME type
+   > says `image/*`. It is deliberately not keyed to `catia_capture_view` by name and deliberately
+   > not keyed on `width_px`/`height_px` — only the *mock* daemon populates those, so that
+   > detector would have worked perfectly in tests and shown nothing on the machine with CATIA on
+   > it. **The remaining half is the OCCT one**: `GET /kernel/conversations/{id}/render` has no
+   > frontend caller, so an agent driving the open kernel still builds a part nobody in the
+   > product can see. Code: `Kryova-frontend`: `src/lib/tool-media.ts`,
+   > `src/components/tool-image.tsx`, `api.mediaBlob`.
+
+**Creative leverage:** deterministic rendering makes a render hash part of the geometry's identity
+— a third check, blind where mass and plan-digest are blind (mirrored, inside-out, wrong
 orientation).
 
 **Honest limitation:** a VLM will confidently approve a subtly wrong part. This catches gross
 errors — which are the common ones. A filter, never a sign-off.
 
-## Phase 5 — Assertions, regression, and the self-correcting loop *(foundation shipped 2026-09-04)*
+##### Phase E5 — Assertions, regression, and the self-correcting loop #####
 
 **~4 engineer-months remaining.**
 
-Landed: `assertions.py` (pass / fail / **unmeasured** — and unmeasured is never a pass),
-`diff.py` (what changed, how far it reaches, `builds_the_same`), `correct.py` (bounded loop with
-exact stopping rules — no-progress and cycle detection are *exact* because the compiler is
-deterministic). Remaining:
+Landed as the foundation (2026-09-04): `assertions.py` (pass / fail / **unmeasured** — and
+unmeasured is never a pass), `diff.py` (what changed, how far it reaches, `builds_the_same`),
+`correct.py` (bounded loop with exact stopping rules — no-progress and cycle detection are *exact*
+because the compiler is deterministic).
 
-**5.1** An assertion library for machines, not parts: interference-free through a motion range,
-stack-up within tolerance, first natural frequency above threshold, minimum wall, mass and cost
-budgets, factor of safety against a named load case.
-**5.2** Assertions bound to *requirements* — "meets REQ-014", not "mass_kg <= 4.2" (needs
-Phase 11).
-**5.3** Diagnosis quality: **sensitivity** — which parameter moves this measurement most,
-computed by finite difference over the free geometry, so a repair is aimed rather than guessed.
-The literature's bluntest finding stands: a validator that cannot say *why* is a retry counter.
-**5.4** The mission ladder as a permanent regression suite.
+1. **An assertion library for machines, not parts**: interference-free through a motion range,
+   stack-up within tolerance, first natural frequency above threshold, minimum wall, mass and cost
+   budgets, factor of safety against a named load case.
+   > DONE (2026-09-05). **It exists because `assertions.py` cannot express a machine.** That
+   > checks a claim about a number already in a payload, which is right for a part and cannot say
+   > whether an arm clears its frame through travel, whether six tolerances still fit, or whether
+   > the first mode is above the drive frequency — **those claims must be *produced*, not read.**
+   > So a machine check is a *measurement source*: it computes a number, files it under a path
+   > with provenance, and the existing `Assertion` machinery compares it. No second comparison
+   > language, and `UNMEASURED`/`gap`/the report come for free. **The tools are injected, never
+   > imported** — the package's load-bearing property is that it runs offline with no kernel and
+   > no solver, so reaching for `app.kernel` here would pull ~166 MB of OCP into every test in the
+   > package. A tool that is absent is `unavailable` **with a reason naming what is missing**.
+   > Eight checks: mass budget, envelope (three assertions, because "it does not fit" is not
+   > actionable and "40 mm too long in Z" is), minimum wall (carrying the ray cast's own
+   > `approximate` through, so a wall passing by 0.01 mm on a sampled measurement is never read as
+   > passing), clearance through a motion range, first natural frequency, factor of safety,
+   > buckling factor, and stack-up. **Clearance through motion is sampled and says so** — a
+   > continuous swept-volume check is a different and much harder problem, so the moving part is
+   > posed at N points, the answer is marked approximate, the note states that a collision between
+   > two adjacent poses is invisible to it, and fewer than three samples is refused because that
+   > is not a sweep. **Stack-up offers both methods and defaults to neither being silent**: worst
+   > case is what a safety-critical fit is designed to, RSS is what a production run sees when
+   > contributors are independent and is often half the size, so the method chosen is named in the
+   > claim. **A cost budget is declared and honestly unavailable** — there is no cost model (E13
+   > owns it), so it reports `UNMEASURED` with the reason rather than being quietly left out of
+   > the library, and becomes real the day a tool answers `cost`.
+   > Tested by: `tests/test_design_machine_checks.py` (33 tests, offline). Code:
+   > `app/design/machine_checks.py`.
+
+2. **Assertions bound to *requirements*** — "meets REQ-014", not "mass_kg <= 4.2".
+   > BLOCKED — needs E11 (the requirements model). This is all that remains of the phase.
+
+3. **Diagnosis quality: sensitivity.** Which parameter moves this measurement most, computed by
+   finite difference over the free geometry, so a repair is aimed rather than guessed. The
+   literature's bluntest finding stands: a validator that cannot say *why* is a retry counter.
+   > DONE (2026-09-05). `assertions.py` says the part is 3.1 kg over and `correct.py` can try
+   > something and see whether the number moved, but neither can say which of eleven parameters to
+   > move or how far. `sensitivity.py` finite-differences each free parameter against one
+   > measurement and `aim()` turns a failing assertion's `gap` into a parameter and a distance. It
+   > is affordable only because of Decision 1 — a probe was minutes of a CATIA workstation and is
+   > a headless build here. Four things make the difference between a number and a lie, each
+   > pinned by a test:
+   > (a) **a build that fails at the perturbed value is not zero sensitivity** — stepping a fillet
+   > past what the geometry carries is ordinary, and reporting 0.0 tells the loop to leave alone
+   > the one parameter that is at its limit, so it comes back unprobed with the reason and ranks
+   > last rather than first;
+   > (b) **a topology change is not a derivative** — a step big enough to make a fillet swallow a
+   > face compares two different parts, so face/edge/solid counts are differenced too and the
+   > influence is refused with an actionable message; a payload carrying no counts is reported
+   > `topology_unchecked` rather than assumed unchanged;
+   > (c) **only free parameters are probed** — a parameter with an expression is a *consequence*,
+   > and a derived one is **excluded with its formula in the reason** rather than dropped, because
+   > absent from a ranking reads as "no influence", a different claim;
+   > (d) **the ranking is by elasticity, not derivative** — ∂mass/∂radius is kg/mm and
+   > ∂mass/∂angle is kg/degree, so "which matters most" is meaningless until the two are
+   > dimensionless; the test that pins it has a tiny slope on a large parameter correctly outrank
+   > a large slope on a small one.
+   > Central differencing where both sides build, one-sided where only one does, with the scheme
+   > recorded per parameter because the two are different orders of accuracy. `aim` refuses rather
+   > than dividing by a negligible derivative, carries a first-order caveat on every suggestion,
+   > and invents no baseline value when it was not given one.
+   > Tested by: `tests/test_design_sensitivity.py` (34 tests, offline). Code:
+   > `app/design/sensitivity.py`.
+
+4. **The mission ladder as a permanent regression suite.**
+   > DONE (2026-09-05). Decision 5 lists nine machines and calls each rung "a permanent regression
+   > test", and until now nothing executed it: "M1 works" was a claim from the day somebody last
+   > tried it by hand. `app/design/missions.py` declares all nine rungs, gives M1 a real
+   > `DesignSpec`, and checks it against closed forms computed **from the same constants the spec
+   > is built from** — so a changed dimension moves the design and its claims together, where a
+   > number typed in by hand would stop describing the part and fail looking like a geometry bug.
+   > M1 builds through the real `OcctRunner` in twelve calls and its eight claims hold: volume,
+   > mass, surface area, thickness, footprint, one solid, eleven faces, and a centroid at
+   > mid-thickness — the last three chosen because **a bore that stopped short keeps the volume
+   > plausible** and only an independent quantity catches it. **The eight rungs that cannot be
+   > built are `PENDING`, which is never a pass and never a skip** — `Outcome.UNMEASURED` applied
+   > one level up, each naming the phase that owns the gap. But a pending rung does *not* make the
+   > report red, because a suite that is red for the two years it takes to reach M9 is a suite
+   > somebody switches off: `ok` answers the regression question and `complete` answers the
+   > programme question, and the sentence a human reads is "1/9 rungs pass, 8 not yet buildable".
+   > **A rung that claims to build and then does not is a failure whatever the reason** —
+   > deliberately unlike `conformance.py`, which separates a coverage gap from a real stop because
+   > it is asking which of two backends is behind; here the mission *declared* it builds, so an
+   > operation that regressed into unimplemented has falsified the claim. Each rung gets its own
+   > runner from a factory, because a mission that passed on the previous one's leftovers would
+   > report the right volume for the wrong reason.
+   > **Writing it corrected a claim this file would otherwise have carried:** the fillet-before-bore
+   > order was justified as necessary, on the belief that the bare word `vertical` would catch the
+   > bore's seam. Measured — it does not; bore-first gives the same volume to 1e-12 and the same
+   > eleven faces. What *is* load-bearing is the `feature` scope: with a 20×20×10 boss on the slab,
+   > scoped removes 171.68 mm³ and unscoped removes 386.28 mm³, having rounded the boss too and
+   > reported success. The order now stands as machining order and says so.
+   > Tested by: `tests/test_design_missions.py` (31 tests) — M1 green on the real kernel, 8 rungs
+   > PENDING and counted. Five guards verified by breaking them; deleting the pending rungs from
+   > the report flips `complete` to true, which is the exact false green the split exists to
+   > prevent. Code: `app/design/missions.py`.
+
+5. **`catia_set_parameter` on the open kernel** — without it tasks 1 and 3 are unreachable from a
+   conversation, because both are loops that change a dimension and measure again.
+   > DONE (2026-09-06, `b9b1cb9`) — and nothing had said so before. On `GEOMETRY_BACKEND=occt` the
+   > sensitivity probe this plan justifies as "minutes of a CATIA workstation, a headless build
+   > here" could be driven from the design IR and not from a conversation. Measured by rung 3 of
+   > the ladder: told to adjust a thickness until the mass came right, the agent had no way to,
+   > and padded the same sketch four times. **A part built in conversation has no parameter set,
+   > so its build log is one** — every mutating call recorded, every numeric argument a dimension,
+   > and setting one rewrites the call and replays the part from the top. That is this plan's own
+   > "specification that is compiled", applied to a part assembled call by call rather than
+   > compiled from a spec, and it inherits the property that matters: a recompiled spec has no
+   > downstream edit to shatter, so replay allocates the same names in the same order and `Pad.1`
+   > is still `Pad.1`. The replay builds into a *fresh* document and is swapped in only on
+   > success, so a value the geometry cannot carry costs a refusal and nothing else.
 
 **Creative leverage:** sensitivity is nearly free once geometry is free — a few hundred kernel
 calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 compounding.
+## ERA III — PHYSICS THAT DECIDES
 
-# ERA III — PHYSICS THAT DECIDES
-
-## Phase 6 — The solver federation
+##### Phase E6 — The solver federation #####
 
 **~7 engineer-months.**
 
-**6.1** A `Solver` implementation backed by **CalculiX** across a subprocess boundary: write
-`.inp`, run `ccx`, parse `.frd`/`.dat`. The `Solver` ABC does not change.
-**6.2** Loads and BCs from the *existing* `loads.py`/`selection.py` vocabulary mapped onto
-CalculiX node/element sets — tributary-area distribution preserved, geometric selectors
-preserved. This surface must not be rewritten; it is what the agent drives.
-**6.3** Element strategy, informed by the CalculiX manual rather than habit: **C3D10 is the
-documented recommended solid** (stable, robust); shells and beams are *expanded* internally
-(S8R → 20-node brick, B31 → C3D8I), which changes thickness-direction stress recovery and is a
-known source of surprise — record it in the integration notes and test against it. A frame
-meshed as solids is a mesh nobody can afford; beams and shells are not optional.
-**6.4** Analysis types unlocked by 6.1: nonlinear static, large deformation, plasticity, contact,
-bolt pretension, modal, buckling, transient dynamics, coupled thermal-stress.
-**6.5** The hand-written solver as fast path and oracle (Decision 2).
-**6.6** Solver-failure taxonomy: non-convergence, singular stiffness, distorted elements, contact
-chatter — each mapped to a diagnosis the agent can act on, in the codebase's existing register
-("say what to do next").
+1. **A `Solver` implementation backed by CalculiX across a subprocess boundary** — write `.inp`,
+   run `ccx`, parse `.frd`/`.dat`. The `Solver` ABC does not change.
+   > DONE (2026-09-06) — the registry landed, so `SOLVER_BACKEND=calculix` now reaches a real
+   > solve. Verified against CalculiX 2.23: σ = 25.000000 MPa vs F/A to 5.7e-16 on both solvers
+   > through the setting, versions recorded on the job row (`linear-static 0.2.0+sha`,
+   > `calculix 2.23`). Tested by: `tests/test_solver_registry.py` (19 tests). Code:
+   > `app/solve/calculix/`, `app/solve/registry.py`. Report: `docs/verification-2026-09-06/`.
 
-## Phase 7 — Verification and validation *(needs an ME)*
+2. **Loads and BCs from the *existing* `loads.py`/`selection.py` vocabulary** mapped onto CalculiX
+   node/element sets — tributary-area distribution preserved, geometric selectors preserved. This
+   surface must not be rewritten; it is what the agent drives.
+   > DONE (2026-09-06). Tested by: `tests/test_solver_registry.py`. Code:
+   > `app/solve/constraints.py`.
+
+3. **Element strategy, informed by the CalculiX manual rather than habit.** **C3D10 is the
+   documented recommended solid** (stable, robust); shells and beams are *expanded* internally
+   (S8R → 20-node brick, B31 → C3D8I), which changes thickness-direction stress recovery and is a
+   known source of surprise — record it in the integration notes and test against it. A frame
+   meshed as solids is a mesh nobody can afford; beams and shells are not optional.
+   > NOT STARTED — shells and beams are the open half of this phase.
+
+4. **Analysis types unlocked by task 1**: nonlinear static, large deformation, plasticity, contact,
+   bolt pretension, modal, buckling, transient dynamics, coupled thermal-stress.
+   > PARTIAL (2026-09-06) — the decks are written; thermal in the deck is still open.
+
+5. **The hand-written solver as fast path and oracle** (Decision 2). Any linear static case must
+   agree between it and CalculiX, and a disagreement is a bug in the integration.
+   > DONE (2026-09-06). Tested by: `tests/test_solver_registry.py`. Code: `app/solve/oracle.py`.
+
+6. **Solver-failure taxonomy**: non-convergence, singular stiffness, distorted elements, contact
+   chatter — each mapped to a diagnosis the agent can act on, in the codebase's existing register
+   ("say what to do next").
+   > DONE (2026-09-06). Tested by: `tests/test_solver_registry.py`.
+
+**Gate G1 opens after this phase.**
+> RUN 2026-09-06, DID NOT PASS — rung 3 failed. Rung 3 is carried forward and G1 runs again.
+> See `docs/verification-2026-09-06/`.
+
+##### Phase E7 — Verification and validation *(needs an ME)* #####
 
 **~4 engineer-months.**
 
-**7.1** The **NAFEMS** standard benchmarks (linear elastic, free vibration, thermal) as an
-automated suite. Reference values are reproduced in publicly readable vendor verification
-manuals (Abaqus, Ansys, DIANA) — a free, legitimate route to the targets.
-**7.2** Mesh convergence automation: refine until the answer stops moving, Richardson
-extrapolation, reported **Grid Convergence Index**. After this phase an unconverged number
-*cannot* be stated — the report machinery refuses.
-**7.3** Simulation provenance: every result permanently bound to geometry version, mesh settings,
-material, load case, solver name+version, convergence evidence. `app/media/`'s content addressing
-is the substrate.
-**7.4** A published validation register: which analysis types are validated, against what, to
-what accuracy. In the product, not buried (P10 owns the surface).
+1. **The NAFEMS standard benchmarks** (linear elastic, free vibration, thermal) as an automated
+   suite. Reference values are reproduced in publicly readable vendor verification manuals
+   (Abaqus, Ansys, DIANA) — a free, legitimate route to the targets.
+   > PARTIAL — the machinery exists; **there is no case catalogue yet**, which is why the register
+   > in task 4 reads 0 validated of 11. Code: `app/verify/`.
+
+2. **Mesh convergence automation**: refine until the answer stops moving, Richardson
+   extrapolation, reported **Grid Convergence Index**. After this an unconverged number *cannot*
+   be stated — the report machinery refuses.
+   > DONE. Tested by: `tests/test_verify_*.py`. Code: `app/verify/`.
+
+3. **Simulation provenance**: every result permanently bound to geometry version, mesh settings,
+   material, load case, solver name+version, convergence evidence. `app/media/`'s content
+   addressing is the substrate.
+   > DONE. Tested by: `tests/test_verify_*.py`.
+
+4. **A published validation register**: which analysis types are validated, against what, to what
+   accuracy. In the product, not buried (P10 owns the surface).
+   > DONE (2026-09-06). The register's denominator is **declared, not discovered**: eleven
+   > analyses are listed, and one nobody has benchmarked gets a row with a reason rather than being
+   > absent. **It reads 0 validated of 11 today** — and that is the correct answer. The four
+   > solver analyses carry closed-form *verification* published under its own key with the ASME
+   > V&V 20 split stated, because a reader meeting them under a friendlier name would read them as
+   > validation. Tested by: `tests/test_verify_*.py`. Code: `app/verify/register.py`.
 
 **Creative leverage:** the provenance ledger is what makes output *signable*. An engineer signing
 accepts liability; what they need is a complete, tamper-evident chain from requirement to number.
 
-## Phase 8 — Fatigue and durability *(needs an ME)*
+##### Phase E8 — Fatigue and durability *(needs an ME)* #####
 
 **~5 engineer-months.**
 
-**Structures fail from fatigue, not from a single static load.** If exactly one physics
-capability is added, it is this one.
-
-**[pyLife](https://github.com/boschresearch/pylife)** (Bosch Research, Apache-2.0) covers
-rainflow counting, load collectives, S-N handling, damage summation, equivalent stress —
-maintained, documented, permissive. **[FFPACK](https://pypi.org/project/ffpack)** and
+**Structures fail from fatigue, not from a single static load.** If exactly one physics capability
+is added, it is this one. **[pyLife](https://github.com/boschresearch/pylife)** (Bosch Research,
+Apache-2.0) covers rainflow counting, load collectives, S-N handling, damage summation, equivalent
+stress. **[FFPACK](https://pypi.org/project/ffpack)** and
 **[fatpack](https://github.com/Gunnstein/fatpack)** supply Goodman/Soderberg corrections and
-trilinear curves.
+trilinear curves. **The library is 20% of this phase. The methodology is 80%, and it needs a real
+analyst.**
 
-**8.1** pyLife against the federation's stress output. **8.2** Mean-stress correction, surface
-finish, size and reliability factors. **8.3** **Weld classification** — BS 7608 / Eurocode 3
-detail categories; where a welded frame lives or dies; judgement, not arithmetic — *needs an ME*.
-**8.4** Duty-cycle definition and damage over a real usage spectrum. **8.5** Notch handling,
-hot-spot stress extrapolation.
+1. **pyLife against the federation's stress output.**
+   > PARTIAL (2026-09-06) — **pyLife installs and imports on Python 3.14**, which was the open
+   > question. Rainflow and damage federated to it per Decision 2, with the load-history/factor/
+   > provenance vocabulary ours. Verified against closed form (exact cycle count, Miner
+   > arithmetic). Tested by: `tests/` under `app/fatigue/`. Code: `app/fatigue/`.
 
-**The library is 20% of this phase. The methodology is 80%, and it needs a real analyst.**
+2. **Mean-stress correction, surface finish, size and reliability factors.**
+   > PARTIAL (2026-09-06) — every factor a qualified engineer must choose is an explicit input
+   > with a source field rather than a buried default.
 
-## Phase 9 — Multibody dynamics: where load cases actually come from
+3. **Weld classification** — BS 7608 / Eurocode 3 detail categories; where a welded frame lives or
+   dies; judgement, not arithmetic.
+   > NOT STARTED — needs an ME.
+
+4. **Duty-cycle definition and damage over a real usage spectrum.**
+   > NOT STARTED.
+
+5. **Notch handling, hot-spot stress extrapolation.**
+   > NOT STARTED.
+
+##### Phase E9 — Multibody dynamics: where load cases actually come from #####
 
 **~6 engineer-months, needs an ME.**
 
 Today load cases are hand-entered guesses. In reality they are *outputs* of the machine moving.
 
-**9.1** **[Project Chrono](https://projectchrono.org/)** (BSD-3, UW-Madison) — multibody + FEA +
-FSI, Python API, template-based `Chrono::Vehicle` with ready suspension templates. Rejected:
-MBDyn (GPL; stronger on rotor/aeroelastic — kept in reserve for exactly that).
-**9.2** Mechanism definition derived from assembly constraints — the kinematic model comes from
-the CAD, never modelled twice.
-**9.3** Motion-range simulation: swept volume, interference through motion, travel and lock
-checks.
-**9.4** **Joint-load extraction feeding FEA** — manoeuvre → MBD → reactions at every joint → FEA
-load case → stress → fatigue damage. The loop that closes the system; nothing else in this plan
-produces a defensible load case.
-**9.5** CATIA DMU Kinematics as an alternative backend where a seat exists.
+1. **Project Chrono** (BSD-3, UW-Madison) — multibody + FEA + FSI, Python API, template-based
+   `Chrono::Vehicle` with ready suspension templates. Rejected: MBDyn (GPL; stronger on
+   rotor/aeroelastic — kept in reserve for exactly that).
+   > BLOCKED — **`pip install pychrono` installs an unrelated package and succeeds.** The engine
+   > probe checks the module really is Chrono. So there is no dynamics engine and the docstrings
+   > say so.
 
-## Phase 10 — Thermal, flow, and optimisation
+2. **Mechanism definition derived from assembly constraints** — the kinematic model comes from the
+   CAD, never modelled twice.
+   > PARTIAL (2026-09-06) — kinematics tested against closed form: slider-crank at both dead
+   > centres, the Grashof families each cross-checked against the solver. Tested by:
+   > `tests/test_dynamics_*.py` (115 tests). Code: `app/dynamics/`.
+
+3. **Motion-range simulation**: swept volume, interference through motion, travel and lock checks.
+   > PARTIAL (2026-09-06) — clearance tested. Tested by: `tests/test_dynamics_*.py`.
+
+4. **Joint-load extraction feeding FEA** — manoeuvre → MBD → reactions at every joint → FEA load
+   case → stress → fatigue damage. The loop that closes the system; nothing else in this plan
+   produces a defensible load case.
+   > PARTIAL (2026-09-06) — reactions tested against closed form: `ω²r`, and the pendulum period
+   > pinned through the reaction (driven at the natural frequency the rod carries no tangential
+   > force; the residual is `mg·A³/6` to 4 figures). Tested by: `tests/test_dynamics_*.py`.
+
+5. **CATIA DMU Kinematics as an alternative backend where a seat exists.**
+   > NOT STARTED.
+
+##### Phase E10 — Thermal, flow, and optimisation #####
 
 **~9 engineer-months.**
 
-**10.1** Steady/transient conduction, convection BCs, thermal-stress coupling (thermal *stress*
-already shipped via `LoadCase.delta_t_k`; conduction is genuinely missing).
-**10.2** CFD via **OpenFOAM**, deliberately late — *the meshing is the hard part* — scoped first
-to cooling flow and ducting.
-**10.3** Optimisation: **[OpenMDAO](https://openmdao.org/)** (NASA Glenn, Apache-2.0) as the MDO
-framework; SIMP and level-set topology optimisation; DOE; response surfaces; multi-objective
-trade-offs (mass vs stiffness vs cost). The capability that makes an AI designer *better* than a
-human rather than merely faster.
-**10.4** **The surrogate flywheel.** Every FEA run is a labelled datapoint (geometry + loads →
-response). After a few thousand, a surrogate answers "roughly how stiff" in milliseconds, and the
-optimiser explores thousands of candidates before spending a real solve. Training data is a free
-by-product of use; the `Solver` ABC means the surrogate drops in as just another solver — which
-is what that seam was built for.
+1. **Steady/transient conduction, convection BCs, thermal-stress coupling.**
+   > PARTIAL (2026-09-03) — thermal *stress* shipped via `LoadCase.delta_t_k`; **conduction is
+   > genuinely missing**.
 
-# ERA IV — ENGINEERING KNOWLEDGE
+2. **CFD via OpenFOAM**, deliberately late — *the meshing is the hard part* — scoped first to
+   cooling flow and ducting.
+   > NOT STARTED.
 
-## Phase 11 — The requirements model *(needs an ME)*
+3. **Optimisation: [OpenMDAO](https://openmdao.org/)** (NASA Glenn, Apache-2.0) as the MDO
+   framework; SIMP and level-set topology optimisation; DOE; response surfaces; multi-objective
+   trade-offs (mass vs stiffness vs cost). The capability that makes an AI designer *better* than
+   a human rather than merely faster.
+   > PARTIAL (2026-09-06) — the honesty rules and the gradients now have tests, and
+   > `design/sensitivity.py` finally has a caller outside a test (it had been listed beside
+   > `app/render/` and `app/ai/vision.py` as capability wired to nothing). Gradients checked
+   > against hand-differentiated functions whose partials *differ*, so a swap is caught, and
+   > across variables scaled a thousand apart, so an absolute step masquerading as a relative one
+   > is caught. **An ungradable point is `available=False` with a reason, never zeros** — a zero
+   > gradient tells an optimiser it has arrived. `drivers.py`, `models.py`, `problem.py` still
+   > untested. Tested by: `tests/test_optimise_honesty.py`, `tests/test_optimise_gradients.py`.
+   > Code: `app/optimise/`.
+
+4. **The surrogate flywheel.** Every FEA run is a labelled datapoint (geometry + loads →
+   response). After a few thousand, a surrogate answers "roughly how stiff" in milliseconds, and
+   the optimiser explores thousands of candidates before spending a real solve. Training data is a
+   free by-product of use; the `Solver` ABC means the surrogate drops in as just another solver —
+   which is what that seam was built for.
+   > NOT STARTED.
+
+## ERA IV — ENGINEERING KNOWLEDGE
+
+##### Phase E11 — The requirements model *(needs an ME)* #####
 
 **~4 engineer-months.**
 
 A machine is defined by a specification before geometry. Without this, "design me a press" has no
 answerable meaning.
 
-**11.1** Requirements with flow-down and validation flow-up: target mass, duty cycle, envelope,
-regulatory regime, cost ceiling, service life. Aligned to **SysML v2** — 2026 is its tooling
-maturity year; **[SysON](https://mbse-syson.org/)** and **[Capella](https://mbse-capella.org/)**
-(both Eclipse, both free) are credible implementations with a published interop path.
-**11.2** Requirement → assertion binding. **A requirement nothing checks is a wish.**
-**11.3** Traceability: every design decision to a requirement or a standard (roadmap H5) — what a
-signing engineer demands first.
-**11.4** Coverage reporting: verified / by-what-evidence / unverified.
+1. **Requirements with flow-down and validation flow-up**: target mass, duty cycle, envelope,
+   regulatory regime, cost ceiling, service life. Aligned to **SysML v2** —
+   **[SysON](https://mbse-syson.org/)** and **[Capella](https://mbse-capella.org/)** (both
+   Eclipse, both free) are credible implementations with a published interop path.
+   > PARTIAL (2026-09-06). Tested by: `tests/test_requirements_*.py` (5 files). Code:
+   > `app/requirements/`.
 
-## Phase 12 — Load cases, materials, and standard parts
+2. **Requirement → assertion binding. A requirement nothing checks is a wish.**
+   > PARTIAL (2026-09-06) — **a requirement set can now be checked against a real part**, which is
+   > the gap that mattered: 2,860 lines and four test files existed and **nothing in `app/` called
+   > them**. Four requirements over a built pad report met / violated-by-5mm / **UNMEASURED for
+   > two different reasons**, all four counting against coverage.
+
+3. **Traceability**: every design decision to a requirement or a standard — what a signing
+   engineer demands first.
+   > NOT STARTED.
+
+4. **Coverage reporting**: verified / by-what-evidence / unverified.
+   > PARTIAL (2026-09-06) — `scans_needed()` names *which* scan produces a path without measuring
+   > anything.
+
+**This phase unblocks E5 task 2.**
+
+##### Phase E12 — Load cases, materials, and standard parts #####
 
 **~8 engineer-months, mostly needs an ME.**
 
-**12.1 Load-case library** — standardised, per-domain, *executable*: pothole strike, panic
-braking, curb drop, proof/ultimate factors, press tonnage cycles. Today invented per
-conversation, so no two runs are comparable.
-**12.2 Materials.** The honest research finding: **the open materials databases are the wrong
-kind of open** — Materials Project, AFLOW, OQMD, OPTIMADE are DFT/atomistic; superb, and useless
-for an engineering S-N curve. Free engineering sources (MakeItFrom, MatDat, ASM's free tier) are
-partial and licence-varied. Deliverable: the **schema, provenance model and ingestion path** —
-every property carries source and confidence; buying Granta/MatWeb later becomes data-loading,
-not re-architecture.
-**12.3 Standard parts.** **70%+ of any real machine is bought.**
-**[BOLTS](https://boltsparts.github.io/)** (open library of technical specifications — parametric
-ISO/DIN parts with dimension metadata) as the base; supplier CAD (TraceParts, McMaster) via
-*import*, respecting their terms, never redistribution.
-**12.4** A parts *selection* engine: given load, speed, life — choose the bearing; never model
-what should be bought.
+1. **Load-case library** — standardised, per-domain, *executable*: pothole strike, panic braking,
+   curb drop, proof/ultimate factors, press tonnage cycles. Today invented per conversation, so no
+   two runs are comparable.
+   > PARTIAL (2026-09-06) — the library *composes* the existing vocabulary (Decision 2), pinned by
+   > reading the load types out of `types.Load`'s own union so a new one automatically joins the
+   > set it must stay inside. One composed case is **actually solved**: 12 MPa of pressure gives
+   > σ = 12.0 MPa exactly. Tested by: `tests/test_load_library.py` (43 tests). Code:
+   > `app/solve/load_library.py`.
 
-## Phase 13 — Design rules, DFM, tolerance and cost *(needs an ME)*
+2. **Materials.** The honest research finding: **the open materials databases are the wrong kind of
+   open** — Materials Project, AFLOW, OQMD, OPTIMADE are DFT/atomistic; superb, and useless for an
+   engineering S-N curve. Free engineering sources (MakeItFrom, MatDat, ASM's free tier) are
+   partial and licence-varied. Deliverable: the **schema, provenance model and ingestion path** —
+   every property carries source and confidence; buying Granta/MatWeb later becomes data-loading,
+   not re-architecture.
+   > PARTIAL (2026-09-06) — tested. Code: `app/solve/materials.py`.
+
+3. **Standard parts. 70%+ of any real machine is bought.**
+   **[BOLTS](https://boltsparts.github.io/)** (open library of parametric ISO/DIN parts with
+   dimension metadata) as the base; supplier CAD (TraceParts, McMaster) via *import*, respecting
+   their terms, never redistribution.
+   > PARTIAL (2026-09-06) — tested. Code: `app/parts/`.
+
+4. **A parts *selection* engine**: given load, speed, life — choose the bearing; never model what
+   should be bought.
+   > NOT STARTED.
+
+**Gate G2 opens after E11 + E12.**
+
+##### Phase E13 — Design rules, DFM, tolerance and cost *(needs an ME)* #####
 
 **~9 engineer-months.**
 
-**13.1 Design rules as assertions** — minimum wall by process, draft angles, bolt torque and
-preload, thread engagement, weld sizing, machining access — attached automatically from feature
-type + declared process, running in the Phase-5 engine. **DFM becomes a red build.**
-**13.2 Tolerance and GD&T** — stack-up (worst case and RSS), fit selection, datum schemes, FTA.
-*A drawing without tolerances is not a drawing.*
-**13.3 Cost model** — material + process + tooling + assembly time, as an assertion. An agent
-that ignores cost confidently designs the unbuildable.
-**13.4** Process-specific rule sets: cast, machined, printed, sheet, moulded, welded.
+1. **Design rules as assertions** — minimum wall by process, draft angles, bolt torque and preload,
+   thread engagement, weld sizing, machining access — attached automatically from feature type +
+   declared process, running in the E5 engine. **DFM becomes a red build.**
+   > PARTIAL (2026-09-06). A rule naming a quantity outside `kernel/contract.py` is refused **at
+   > construction**; the verdicts are literally `design.assertions.Outcome`; and **a rule resting
+   > on a *sampled* bound cannot prove a pass** — `minimum_wall_mm >= 2.5` measuring 2.6 is
+   > `PASSED` but *not proven*, because an upper bound from a finite ray set can only prove the
+   > violation. **`engine.py` has no consumer anywhere in `app/`** — a verified module, not a
+   > product path. Tested by: `tests/test_rules_*.py` (127 tests across this phase). Code:
+   > `app/rules/`.
 
-# ERA V — SCALE
+2. **Tolerance and GD&T** — stack-up (worst case and RSS), fit selection, datum schemes, FTA.
+   *A drawing without tolerances is not a drawing.*
+   > PARTIAL (2026-09-06) — stack-up and GD&T tested. GD&T deliberately evaluates no tolerance-zone
+   > geometry, guarded three ways. **`gdt.py` has no consumer anywhere in `app/`.** Tested by:
+   > `tests/test_rules_*.py`.
 
-## Phase 14 — Product structure, decomposition and interface contracts
+3. **Cost model** — material + process + tooling + assembly time, as an assertion. An agent that
+   ignores cost confidently designs the unbuildable.
+   > NOT STARTED — out of scope for now. E5 task 1's cost budget reports `UNMEASURED` until this
+   > lands.
+
+4. **Process-specific rule sets**: cast, machined, printed, sheet, moulded, welded.
+   > NOT STARTED.
+
+## ERA V — SCALE
+
+##### Phase E14 — Product structure, decomposition and interface contracts #####
 
 **~9 engineer-months. Architecturally the most important era-V phase.**
 
-**14.1** Product structure and BOM as **first-class data** — assembly tree, effectivity,
-revisions, where-used. A conversation transcript is not a data structure.
-**14.2 Hierarchical decomposition with interface contracts.** One component at a time, against a
-contract: mounting points, envelope, mass budget, interface loads, clearances. How human teams
-partition work, and **the only way the context problem is solvable — no model size fixes it.**
-**14.3 The creative core: an interface contract is itself a compilable spec fragment.** Both
-sides compile against it; the swingarm's spec imports the pivot contract, so does the frame's. A
-violation is a **compile error at the interface naming both parties** — not a clash found in
-assembly three weeks later. Reuses the entire Phase 1–5 machinery.
-**14.4 Change propagation.** `diff.py` already answers this within one part (`changed_calls`,
-`downstream`, `invalidates`); this lifts it to the product graph.
-**14.5** Concurrency and locking: multiple agents/users on one product without corruption.
+1. **Product structure and BOM as first-class data** — assembly tree, effectivity, revisions,
+   where-used. A conversation transcript is not a data structure.
+   > DONE (2026-09-06) — the product *graph*: a bolt used 40 times is one component and 40
+   > occurrences, and **occurrence numbers are declared, never positional**, so inserting a leg at
+   > the head of a list renumbers nothing — the topological-naming answer one level up.
+   > **Effectivity is not implemented and says so.** Tested by: `tests/test_assembly_structure.py`.
+   > Code: `app/assembly/` (6 modules).
 
-## Phase 15 — Throughput, storage and the compute fabric
+2. **Hierarchical decomposition with interface contracts.** One component at a time, against a
+   contract: mounting points, envelope, mass budget, interface loads, clearances. How human teams
+   partition work, and **the only way the context problem is solvable — no model size fixes it.**
+   > DONE (2026-09-06) — interface contracts as assertions over a boundary that name **which
+   > side** a change violated. Tested by: `tests/test_assembly_contracts.py`.
+
+3. **The creative core: an interface contract is itself a compilable spec fragment.** Both sides
+   compile against it; the swingarm's spec imports the pivot contract, so does the frame's. A
+   violation is a **compile error at the interface naming both parties** — not a clash found in
+   assembly three weeks later. Reuses the entire E1–E5 machinery.
+   > DONE (2026-09-06) — plus a conservative broad-phase clash check and a mass roll-up. **A
+   > partial result never gets the headline name**: an incomplete clash publishes
+   > `checked_minimum_clearance_mm`, not `minimum_clearance_mm`, because both directions of that
+   > error make the machine look safer. Tested by: `tests/test_assembly_clash.py`,
+   > `tests/test_assembly_mass.py`.
+
+4. **Change propagation.** `diff.py` already answers this within one part (`changed_calls`,
+   `downstream`, `invalidates`); this lifts it to the product graph.
+   > DONE (2026-09-06). Tested by: `tests/test_assembly_structure.py` (108 tests across tasks 1–4).
+
+5. **Concurrency and locking**: multiple agents/users on one product without corruption.
+   > NOT STARTED.
+
+6. **The seat-side half: a conversation owns a *set* of CATIA documents with exactly one active.**
+   > DONE (2026-09-06) — `CatiaDocument.is_active`, a partial unique index, migration
+   > `c7e2a9d4f1b3`. On a seat a second `catia_new_part` adds a document and deactivates the
+   > current one, nothing is abandoned, `catia_product_create` is bound as a `product`,
+   > `catia_open_document name=` switches, and `catia_component_add kind=existing document=<name>`
+   > resolves to the path the part was really saved under. **Measured need:** ladder prompt S2 on
+   > the real seat, where one document per conversation left no route to a second part and the
+   > agent called `catia_new_part` seven times at the refusal. The open kernel keeps its
+   > one-document contract. Tested by: `tests/test_multi_document.py` (24 tests).
+
+**Gate G3 opens after E14 + E9.**
+
+##### Phase E15 — Throughput, storage and the compute fabric #####
 
 **~6 engineer-months.**
 
-**15.1** Batch compilation — a `Plan` as one kernel session (OCCT); a CATScript executed once
-(CATIA), never 10⁵ COM calls.
-**15.2** Simulation compute: queue, autoscale, result caching keyed on the provenance digest.
-**FEA is not a request-path workload** and never becomes one.
-**15.3** Geometry storage/versioning: content-addressed CAD with **semantic diffs under a
-tolerance policy** (research consensus: line diffs on CAD are meaningless; reviewers should see
-only consequential change). Extends `app/media/`.
-**15.4** CATIA session pool, crash recovery, affinity — a smaller problem now it is off the
-critical path.
-**15.5** Observability: per-operation success rates, agent trajectory traces, solver timings,
-failure taxonomy. Nothing measures op reliability today, which makes capability claims
-unfalsifiable.
+1. **Batch compilation** — a `Plan` as one kernel session (OCCT); a CATScript executed once
+   (CATIA), never 10⁵ COM calls.
+   > NOT STARTED.
 
-# ERA VI — THE AGENT
+2. **Simulation compute**: queue, autoscale, result caching keyed on the provenance digest.
+   **FEA is not a request-path workload** and never becomes one.
+   > NOT STARTED.
 
-## Phase 16 — Tool retrieval, planning and long-horizon memory
+3. **Geometry storage/versioning**: content-addressed CAD with **semantic diffs under a tolerance
+   policy** (line diffs on CAD are meaningless; reviewers should see only consequential change).
+   Extends `app/media/`.
+   > NOT STARTED.
+
+4. **CATIA session pool, crash recovery, affinity** — a smaller problem now it is off the critical
+   path.
+   > NOT STARTED.
+
+5. **Observability**: per-operation success rates, agent trajectory traces, solver timings, failure
+   taxonomy. Nothing measured op reliability before this, which made capability claims
+   unfalsifiable.
+   > DONE and fully wired (2026-09-06) — `~0.09 µs` per disabled span. All four spans the package
+   > landed as catalogued holes are installed, and **the first number out of them is the one
+   > Decision 1 rests on: a parametric rebuild costs 0.49 ms**, so a 200-value sweep is ~0.1 s of
+   > rebuilds. That argument has been the basis of the OCCT decision since the plan was written
+   > and had never been measured. Tested by: `tests/test_observe*.py` (68 tests). Code:
+   > `app/observe/` (5 modules).
+
+## ERA VI — THE AGENT
+
+##### Phase E16 — Tool retrieval, planning and long-horizon memory #####
 
 **~10 engineer-months. Research-adjacent; the least predictable phase.**
 
-**16.1 Tool retrieval at scale — a measured wall, not a worry.** 201 operations heading past 900.
-Published 2026 numbers: accuracy falls from **87.4% at 500 tools to 65% at 2,000**; definitions
-alone can consume 50k+ tokens before the user's request is read; retrieval errors account for
-about **half of agent failures** at scale; retrieve-then-rerank measured at ~76% where naive
-selection scored far lower. Approach: semantic retrieval over the registry (already a single
-declarative source — unusually clean), rerank, and per-workbench sub-agents so no context sees
-900 tools. The BM25 machinery is reusable directly, and lexical retrieval is *strong* in this
-regime — operation names are exact terms.
-*Built lexically, not semantically (2026-09-06), for the reasons `app/retrieval/` chose lexical:
-the discriminating terms here are exact (`fillet`, `helix`, `dépouille`, `M6`), the registry is
-already in memory so there is no index to keep in step, and no embedding model ships with this
-deployment. `app/catia_kb/recognise.py` supplies the domain layer — it already knows *bore* means
-Hole in five interface languages — and the scored matches are backed by two tables the scoring
-cannot express: a floor of everything the frozen system prompts name (withholding one of those is
-what teaches a model to hallucinate a call) and intent families for tasks whose vocabulary is
-disjoint from the tool that serves them ("adjust the thickness until it weighs 2.4 kg" shares no
-word with `catia_set_parameter`). Per-workbench sub-agents remain open.*
-**16.2 Planning.** "Design a swingarm" → an ordered, dependency-aware task graph with
-checkpoints. *Seam only so far (2026-09-06): `app/ai/planning.py` turns a request into the list of
-requirements it states, with the numbers and tolerances attached and a three-state record where
-"nobody checked" is never "fine". No sequencing, no dependency graph, no replanning, and
-deliberately **not wired** — half-wiring it would add a schema to the payload 16.1 is shrinking, or
-describe machinery to the model that is not there. It answers the failure of 2026-09-06 attempt 3:
-six stated requirements, three built, and a closing report of success, because nothing in the
-system was holding the list.*
-**16.3 Long-horizon memory.** The 2026 literature converges on hierarchical working memory —
-subgoals as chunks with summarised observations (HiAgent-class results: ~2× success on
-long-horizon tasks). Kryova already has the right instinct: `resume.py` reads the operation log,
-not the transcript, because a trimmed window and an LLM paraphrase cannot be trusted about last
-week. That principle generalises to the whole design record.
-**16.4 Failure recovery.** Diagnose → repair → bounded retry → escalate with a *specific*
-question (Phase 5's machinery is the foundation).
-**16.5 Human checkpoints.** Structured approval gates — a reviewable diff with a sign-off record,
-not a chat message (P5 owns the surface).
-**16.6 Cost/time estimation before starting** — "this is four hours of compute and $X" (P8 owns
-the meter).
+1. **Tool retrieval at scale — a measured wall, not a worry.** 201 operations heading past 900.
+   Published 2026 numbers: accuracy falls from **87.4% at 500 tools to 65% at 2,000**; definitions
+   alone can consume 50k+ tokens before the user's request is read; retrieval errors account for
+   about **half of agent failures** at scale; retrieve-then-rerank measured at ~76% where naive
+   selection scored far lower.
+   > DONE offline, PROVEN at a gate (2026-09-08). Built **lexically, not semantically**
+   > (2026-09-06), for the reasons `app/retrieval/` chose lexical: the discriminating terms here
+   > are exact (`fillet`, `helix`, `dépouille`, `M6`), the registry is already in memory so there
+   > is no index to keep in step, and no embedding model ships with this deployment.
+   > `app/catia_kb/recognise.py` supplies the domain layer — it already knows *bore* means Hole in
+   > five interface languages — and the scored matches are backed by two tables the scoring cannot
+   > express: **a floor of everything the frozen system prompts name** (withholding one of those
+   > is what teaches a model to hallucinate a call) and **intent families** for tasks whose
+   > vocabulary is disjoint from the tool that serves them ("adjust the thickness until it weighs
+   > 2.4 kg" shares no word with `catia_set_parameter`).
+   > Measured offline: 110 OCCT tools narrow to 17–39 per turn, every inclusion carrying the rule
+   > that put it there. **The shipped selector's own defect was fixed by this work** — it was
+   > withholding five to nine *prompt-named* tools on every realistic message,
+   > `catia_set_parameter` among them on all five, which is the tool rung 3 is about and the one
+   > the agent could not find for three sessions.
+   > **Driven at last on 2026-09-08 and the hypothesis holds — with a new ceiling behind it.** The
+   > narrowed offer (55 of 220 tools) was driven through the real GUI for the whole of Level 4;
+   > `qwen3.5:9b` emitted correct structured calls at 50–52 tok/s for turns of forty steps, which
+   > the un-narrowed payload never did. **What binds now is the transcript, not the offer**: PRO1's
+   > fourth run built its first solid and then exhausted the 32,768-token window with four parts
+   > still to make, refused loudly by `providers/ollama.py`.
+   > **Per-workbench sub-agents remain open.** Tested by: `tests/test_ai_tool_selection.py`. Code:
+   > `app/ai/tool_retrieval.py`. Reports: `docs/verification-2026-09-06/REPORT.md`,
+   > `docs/verification-2026-09-08/REPORT.md`.
+
+2. **Planning.** "Design a swingarm" → an ordered, dependency-aware task graph with checkpoints.
+   > PARTIAL (2026-09-06) — a tested seam and one first step, **deliberately unwired**.
+   > `app/ai/planning.py` turns a request into the list of requirements it states, with the numbers
+   > and tolerances attached and a three-state record where "nobody checked" is never "fine". No
+   > sequencing, no dependency graph, no replanning. Half-wiring it would add a schema to the
+   > payload task 1 is shrinking, or describe machinery to the model that is not there. It answers
+   > the failure of 2026-09-06 attempt 3: six stated requirements, three built, and a closing
+   > report of success, because nothing in the system was holding the list. Tested by:
+   > `tests/test_ai_planning.py`. Code: `app/ai/planning.py`.
+
+3. **Long-horizon memory.** The 2026 literature converges on hierarchical working memory —
+   subgoals as chunks with summarised observations (HiAgent-class results: ~2× success on
+   long-horizon tasks). Kryova already has the right instinct: `resume.py` reads the operation log,
+   not the transcript, because a trimmed window and an LLM paraphrase cannot be trusted about last
+   week. That principle generalises to the whole design record.
+   > PARTIAL (2026-09-03) — resume-from-log shipped. Code: `app/ai/resume.py`.
+
+4. **Failure recovery.** Diagnose → repair → bounded retry → escalate with a *specific* question
+   (E5's machinery is the foundation).
+   > PARTIAL (2026-09-08) — a third behavioural guard landed from the Level-4 runs:
+   > **`MAX_EMPTY_DOCUMENTS`**, because opening a document is the one mutation that changes nothing
+   > about the part, and both existing guards counted it as progress — five empty parts in one turn
+   > tripped neither. Measured effect: one document instead of five. Tested by:
+   > `tests/test_agent.py::TestOpeningDocumentsIsNotBuildingParts`.
+
+5. **Human checkpoints.** Structured approval gates — a reviewable diff with a sign-off record, not
+   a chat message (P5 owns the surface).
+   > NOT STARTED.
+
+6. **Cost/time estimation before starting** — "this is four hours of compute and $X" (P8 owns the
+   meter).
+   > NOT STARTED.
 
 **Creative leverage:** the design record replaces the transcript. Rationale already travels in
 `FeatureSpec.note`; extend to decisions, rejected alternatives and reasons, and *"why is this rib
 here"* has an answer in six months — from the artefact.
 
-# ERA VII — OUTPUT, AND THE MACHINES
+## ERA VII — OUTPUT, AND THE MACHINES
 
-## Phase 17 — Manufacturing output
+##### Phase E17 — Manufacturing output #####
 
 **~9 engineer-months.**
 
-**17.1** Drawings with GD&T: auto views, sections, details, dimension generation, FTA, BOM
-tables, title blocks. *Without this nothing leaves the building.*
-**17.2** Export: STEP AP242 (the one that carries PMI), IGES, JT, 3MF/STL, DXF flat patterns —
-mostly native OCCT.
-**17.3** **Sheet metal**: wall, bend, flange, unfold, bend allowance `BA=(π/180)·θ·(r+K·t)`,
-K-factor with the ANSI/DIN distinction and radius-to-thickness-dependent material sheets —
-**[FreeCAD SheetMetal](https://github.com/shaise/FreeCAD_SheetMetal)** (LGPL) is the working
-reference implementation. A press needs this; so does every enclosure.
-**Sequencing exception:** 17.3 is **pulled forward and scheduled with Era IV** — the ladder
-promises M3 (enclosure) in Era IV and M5 (press) in Era V, and both need sheet-metal authoring
-long before the rest of this phase's drawings-and-CAM work. It sits in this phase because it
-*belongs* with manufacturing output; it runs early because the missions need it. The status
-board tracks it as its own row for exactly this reason.
-**17.4** Weldments and tubing: beads, symbols, cut lists, tube routing. **A motorcycle frame is a
-tubular weldment.**
-**17.5** CAM: **[OpenCAMLib](https://github.com/aewallin/opencamlib)** (LGPL) — drop-cutter and
-waterline primitives — plus machining features, stock, fixturing notes.
-**17.6** Inspection planning: CMM points and measurement plans derived from the GD&T scheme.
-**17.7** Technical documentation: assembly instructions, exploded views, service manuals, parts
-catalogues.
+1. **Drawings with GD&T**: auto views, sections, details, dimension generation, FTA, BOM tables,
+   title blocks. *Without this nothing leaves the building.*
+   > PARTIAL (2026-09-06) — dimensioning and sheet layout tested. **First and third angle
+   > demonstrably place views on opposite sides**, so a convention that was stored and ignored is
+   > caught: swapping them fails two tests, and a drawing read in the wrong convention is
+   > manufactured **mirrored** with nothing looking wrong. A dimension traced to its parameter is
+   > distinguishable from one measured off the solid; `locate.py` finds a dimension's own feature
+   > in the geometry (radius matching, deduped by axis position, never by face) rather than
+   > trusting where the design says it should be, and reports a dimension **unplaced** rather than
+   > drawn somewhere plausible when it cannot.
+   > **A same-radius coincidence in the mirror-orientation check was found and fixed 2026-09-06**
+   > (`TestWhereAKnownFeatureLands`): two circles of equal radius closer together than their
+   > diameter always intersect, so a single stray vertex of the *real* bore was passing a naive
+   > nearest-point check for a deliberately-wrong mirrored centre 20 mm away. `_roundness` now
+   > samples twelve angles around the candidate circle and takes the worst, which a coincidental
+   > intersection cannot satisfy.
+   > Tested by: `tests/test_manufacture_drawing.py`, `tests/test_manufacture_dimensions.py`,
+   > `tests/test_manufacture_sheet.py` (154 tests across tasks 1–2). Code: `app/manufacture/`.
 
-## Phase 18 — The machine missions
+2. **Export**: STEP AP242 (the one that carries PMI), IGES, JT, 3MF/STL, DXF flat patterns —
+   mostly native OCCT.
+   > PARTIAL (2026-09-06) — DXF and STEP export tested through OCCT. **Open: STEP/DXF export from
+   > a live CATIA seat.** Tested by: `tests/test_manufacture_export.py`. Code:
+   > `app/manufacture/dxf.py`, `app/manufacture/export.py`.
+
+3. **Weldments and tubing**: beads, symbols, cut lists, tube routing. **A motorcycle frame is a
+   tubular weldment.**
+   > NOT STARTED.
+
+4. **CAM**: **[OpenCAMLib](https://github.com/aewallin/opencamlib)** (LGPL) — drop-cutter and
+   waterline primitives — plus machining features, stock, fixturing notes.
+   > NOT STARTED.
+
+5. **Inspection planning**: CMM points and measurement plans derived from the GD&T scheme.
+   > NOT STARTED.
+
+6. **Technical documentation**: assembly instructions, exploded views, service manuals, parts
+   catalogues.
+   > NOT STARTED.
+
+**Gate G4 opens after E17 (with E17.3).**
+
+##### Phase E17.3 — Sheet metal (pulled forward to run with Era IV) #####
+
+**Sequencing exception, and it is deliberate.** This belongs to E17 because it *is* manufacturing
+output, and it runs early because the missions need it: the ladder promises M3 (enclosure) in
+Era IV and M5 (press) in Era V, and both need sheet-metal authoring long before the rest of E17's
+drawings-and-CAM work. It is tracked as its own phase for exactly that reason.
+**[FreeCAD SheetMetal](https://github.com/shaise/FreeCAD_SheetMetal)** (LGPL) is the working
+reference implementation.
+
+1. **The arithmetic**: bend allowance `BA=(π/180)·θ·(r+K·t)`, setback, deduction, unfold,
+   formability.
+   > DONE (2026-09-06) — every number checked against arithmetic in the test. Tested by:
+   > `tests/test_sheetmetal*.py` (147 tests). Code: `app/sheetmetal/` (6 modules).
+
+2. **K-factor with the ANSI/DIN distinction** and radius-to-thickness-dependent material sheets.
+   > DONE (2026-09-06). **There is no default K-factor anywhere** — a `Bend` requires one and a
+   > `KFactor` requires a `Source`; `assumed()` demands a written reason and marks the pattern
+   > provisional with an `UNMEASURED` finding. ANSI and DIN differ by a factor 1.211 at r/t=1.5,
+   > which moves a 90° bend in 2 mm by 0.24 mm — the distinction is real and is carried.
+
+3. **Wall, bend, flange as authoring operations wired to geometry.**
+   > NOT STARTED — **this is not wired to any geometry at all.** M3 still needs a `SheetMetalPart`
+   > → OCCT solid path, and **there is no sheet-metal operation in the OCCT backend**.
+
+##### Phase E18 — The machine missions #####
 
 **~12 engineer-months across the ladder.**
 
-Not new capability — **proof of it**, and the discovery of the twenty things nobody predicted.
-Each mission runs end-to-end **in the product** (Part 2's rule), is reviewed by a real engineer,
-and stays green forever: spec, geometry, mesh, analyses with convergence evidence, fatigue
-assessment, drawings with tolerances, BOM with bought parts, cost estimate, requirements
-coverage — every number traceable.
+Not new capability — **proof of it**, and the discovery of the twenty things nobody predicted. Each
+mission runs end-to-end **in the product**, is reviewed by a real engineer, and stays green
+forever: spec, geometry, mesh, analyses with convergence evidence, fatigue assessment, drawings
+with tolerances, BOM with bought parts, cost estimate, requirements coverage — every number
+traceable.
 
-M1 bracket → M2 welded frame → M3 enclosure → M4 gearbox → **M5 stamping press** → M6 conveyor →
-M7 robot arm → M8 motorcycle chassis + swingarm.
+**M5 is the honest mid-point milestone**: structure, mechanism, sheet metal, bought parts, fatigue
+and guarding at once. If M5 does not work, the phases before it were decoration.
 
-**M5 is the honest mid-point milestone**: structure, mechanism, sheet metal, bought parts,
-fatigue and guarding at once. If M5 does not work, the phases before it were decoration.
+1. **M1 — machined bracket.**
+   > DONE (2026-09-05). Green on the real kernel. Tested by: `tests/test_design_missions.py`.
 
+2. **M2 — welded frame / bench.** The first assembly.
+   > DONE (2026-09-06) — and it passes *carrying* what it does not claim. Tested by:
+   > `tests/test_mission_m2.py`.
+
+3. **M3 — sheet-metal enclosure.** The folded enclosure E17.3 was pulled forward for.
+   > DONE (2026-09-06), **and its finding is the important one: there is no sheet-metal operation
+   > in the OCCT backend at all**, and `SheetMetalPart` cannot compile to a `DesignSpec` — so M3
+   > declares the cover *twice*, as a fold tree and as a hand-drawn section, and the only thing
+   > holding the two descriptions together is a volume residual. Tested by:
+   > `tests/test_mission_m3.py`.
+
+4. **M4 — gearbox.**
+   > NOT STARTED — PENDING in the ladder report, naming the phase that owns the gap.
+
+5. **M5 — sheet-metal stamping press.**
+   > NOT STARTED — PENDING.
+
+6. **M6 — belt conveyor system.**
+   > NOT STARTED — PENDING.
+
+7. **M7 — 6-axis robot arm.**
+   > NOT STARTED — PENDING, waiting on E9's multibody.
+
+8. **M8 — motorcycle chassis + swingarm.**
+   > NOT STARTED — PENDING.
+
+**Ladder standing at 3/9.**
+**Gate G5 opens after M2 upward.**
 ---
 
 # PRODUCT TRACK
 
-*The platform that makes the engineering usable, sellable and safe. P-phases run in parallel
-with the engineering track; each names what it gates and what gates it.*
+*The platform that makes the engineering usable, sellable and safe. P-phases run in parallel with
+the engineering track; each names what it gates and what gates it.*
 
-## Phase P1 — Identity, sessions and tokens done right
+##### Phase P1 — Identity, sessions and tokens done right #####
 
 **~3 engineer-months. Starts immediately; blocks any external user.**
 
-### The question it answers
-Can a person trust Kryova with an account, on several devices, against an attacker who steals a
-token?
+**The question it answers:** can a person trust Kryova with an account, on several devices,
+against an attacker who steals a token?
 
-### What exists and what is wrong with it
-The good: typed JWTs whose refresh/access distinction is actually checked, bcrypt with prehash,
-hashed reset tokens, cookie sessions. The wrong: **one refresh-token hash on the user row** — a
-second device's login silently revokes the first; no rotation family, so a stolen refresh token
-is a 30-day capability with no detection; no absolute session lifetime; `SECRET_KEY="changeme"`
-boots; the rate limiter trusts `X-Forwarded-For` and lives in one process.
+**What was good and what was wrong.** Good: typed JWTs whose refresh/access distinction is actually
+checked, bcrypt with prehash, hashed reset tokens, cookie sessions. Wrong: **one refresh-token hash
+on the user row** — a second device's login silently revoked the first; no rotation family, so a
+stolen refresh token was a 30-day capability with no detection; no absolute session lifetime;
+`SECRET_KEY="changeme"` booted; the rate limiter trusted `X-Forwarded-For` and lived in one process.
 
-### Workstreams
-**P1.1 — Sessions become rows.** A `sessions` table: user, device label, family id, current
-refresh-token hash, previous-hash (grace), created, last-used, absolute-expiry, revoked-at, IP,
-user-agent. Login creates a session; each device has its own.
-**P1.2 — Rotation with reuse detection.** Every refresh **rotates** the token; presenting an
-already-rotated token is a **theft signal that revokes the whole family** and forces
-re-authentication. This is the 2026 OWASP-aligned consensus, and rotation without the detection
-half is theatre. Access tokens stay short (≤15 min); absolute session cap (e.g. 30 days) ends
-even a perfectly rotated chain.
-**P1.3 — Session management UX** (frontend): device list with last-seen, "sign out this device",
-"sign out everywhere". Backed by revocation that actually revokes (the session row is the truth,
-not the cookie).
-**P1.4 — Startup refusals.** `SECRET_KEY` unset or `"changeme"` ⇒ the server does not start, with
-a message that says what to do. Same for an empty CORS origin list in production mode.
-**P1.5 — Email verification and password flows** hardened: verification required before first
-project creation (not before first look — friction where it protects, not where it annoys);
-reset flow already hashes one-time tokens, keep; add resend throttling.
-**P1.6 — Rate limiting that survives deployment reality**: keyed on the *authenticated principal*
-where one exists, on the connecting IP otherwise, `X-Forwarded-For` honoured **only** from a
-declared trusted-proxy list, and backed by a shared store so multiple workers enforce one
-budget.
-**P1.7 — Second factor (TOTP)** — standard `pyotp`-class implementation, recovery codes, and the
-decision recorded that WebAuthn/passkeys are the follow-on, not the first ship.
-**P1.8 — Token custody in both clients.** Web: httpOnly cookies as today (never storage). Tauri:
-the same cookie flow through its webview, with the OS keychain via Tauri's secure storage if a
-native token cache is ever needed — never a JSON file.
+1. **Sessions become rows.** A `sessions` table: user, device label, family id, current
+   refresh-token hash, previous-hash (grace), created, last-used, absolute-expiry, revoked-at, IP,
+   user-agent. Login creates a session; each device has its own.
+   > DONE (2026-09-06) — the recorded defect is fixed. `refresh_token_hash` held one slot per
+   > *user*, so a second device silently ended the first, and a stolen token and the real one wrote
+   > to the same slot — whoever refreshed last won, and nothing noticed a token had been used
+   > twice. Now a row per device family. Tested by: `tests/test_auth_sessions.py` (39 tests). Code:
+   > `app/models/session.py`, `app/core/sessions.py`.
 
-### Proof
-A stolen refresh token replayed after rotation kills the family and the attacker's session, the
-user sees it in the device list, and the audit log (P3) records it. A demo of this exact
-sequence is part of the phase's acceptance.
+2. **Rotation with reuse detection.** Every refresh **rotates** the token; presenting an
+   already-rotated token is a **theft signal that revokes the whole family** and forces
+   re-authentication. Rotation without the detection half is theatre. Access tokens stay short
+   (≤15 min); an absolute session cap (e.g. 30 days) ends even a perfectly rotated chain.
+   > DONE (2026-09-06) — rotation per use, and a replay outside a 10 s race window revokes the
+   > whole family. Tested by: `tests/test_auth_sessions.py` — **8 mutations run against the guards,
+   > 8 caught**; the two that first escaped are recorded in the build plan.
 
-## Phase P2 — Organisations, teams, roles and sharing
+3. **Session management UX** (frontend): device list with last-seen, "sign out this device", "sign
+   out everywhere". Backed by revocation that actually revokes — the session row is the truth, not
+   the cookie.
+   > PARTIAL (2026-09-06) — **backend DONE, the UI is open.**
+
+4. **Startup refusals.** `SECRET_KEY` unset or `"changeme"` ⇒ the server does not start, with a
+   message that says what to do. Same for an empty CORS origin list in production mode.
+   > DONE (2026-09-06). Tested by: `tests/test_auth_sessions.py`.
+
+5. **Email verification and password flows hardened**: verification required before first project
+   creation (not before first look — friction where it protects, not where it annoys); the reset
+   flow already hashes one-time tokens, keep; add resend throttling.
+   > NOT STARTED.
+
+6. **Rate limiting that survives deployment reality**: keyed on the *authenticated principal* where
+   one exists, on the connecting IP otherwise, `X-Forwarded-For` honoured **only** from a declared
+   trusted-proxy list, and backed by a shared store so multiple workers enforce one budget.
+   > NOT STARTED — the in-process limiter that trusts `X-Forwarded-For` is still there.
+
+7. **Second factor (TOTP)** — standard `pyotp`-class implementation, recovery codes, and the
+   decision recorded that WebAuthn/passkeys are the follow-on, not the first ship.
+   > NOT STARTED.
+
+8. **Token custody in both clients.** Web: httpOnly cookies as today, never storage. Tauri: the
+   same cookie flow through its webview, with the OS keychain via Tauri's secure storage if a
+   native token cache is ever needed — never a JSON file.
+   > NOT STARTED.
+
+**Phase proof:** a stolen refresh token replayed after rotation kills the family and the attacker's
+session, the user sees it in the device list, and the audit log (P3) records it. A demo of this
+exact sequence is part of the phase's acceptance.
+
+##### Phase P2 — Organisations, teams, roles and sharing #####
 
 **~4 engineer-months. Gates: P3, P8, mission ladder beyond M2 in-product.**
 
-### The question it answers
-Can a *team* — not a lone user — own a machine programme, with the right people able to do the
-right things and nobody able to see across a tenant boundary, even through an application bug?
+**The question it answers:** can a *team* — not a lone user — own a machine programme, with the
+right people able to do the right things and nobody able to see across a tenant boundary, even
+through an application bug?
 
-### Workstreams
-**P2.1 — The model.** `organisations`, `memberships(user, org, role)`, projects owned by
-organisations (personal projects = an implicit personal org, so there is exactly one ownership
-model). Invitations by email with expiring signed tokens; joining flows in the frontend.
-**P2.2 — Roles, two-layered.** *Platform roles*: `owner / admin / member / viewer` govern the
-organisation itself (billing, members, deletion). *Domain roles*: `engineer` (author designs,
-run simulations), `reviewer` (comment, approve gates, cannot edit geometry), `operator` (run
-released missions, cannot alter them). The approval gates in 16.5/P5 read the domain role — a
-review sign-off from someone without `reviewer` is not a sign-off.
-**P2.3 — Postgres RLS as the safety net.** Policies on every tenant-owned table; tenant context
-supplied per request via **`SET LOCAL` inside the request's transaction** and therefore
-discarded at COMMIT — safe under transaction-pooling PgBouncer, and the *only* sanctioned use of
-`SET` in this codebase (Decision 7 states the rule and its reason; the test suite gains an
-explicit cross-tenant isolation test that fails if a query escapes scoping *or* if anyone
-downgrades `SET LOCAL` to `SET`). Application-level scoping remains primary; RLS exists for the
-day the application is wrong.
-**P2.4 — 404-not-403, systematised.** The existing rule (`get_owned_project`) generalised to
-org-scoped resources: a resource outside your tenant does not exist. RLS makes the lie
-consistent.
-**P2.5 — Sharing and hand-off.** Transfer a project between orgs (with provenance intact);
-read-only share links for a released design package, expiring, revocable — the artefact a
-supplier or customer sees, without an account requirement for viewing.
-**P2.6 — Frontend surfaces**: org switcher, member management, role assignment, invitation flows,
-pending-invite states — all in the existing dashboard design language.
+1. **The model.** `organisations`, `memberships(user, org, role)`, projects owned by organisations
+   (personal projects = an implicit personal org, so there is exactly one ownership model).
+   Invitations by email with expiring signed tokens; joining flows in the frontend.
+   > DONE (2026-09-06) — migration `1b07f4f27e89` backfilled 24 users → 24 orgs, 82 projects
+   > placed, **0 orphans**, verified against the live database. Tested by: `tests/test_tenancy.py`,
+   > `tests/test_organisations.py` (52 tests across this phase). Code:
+   > `app/models/organisation.py`.
 
-### Proof
-The cross-tenant test suite: two orgs, adversarial queries at every endpoint, zero leakage, all
-misses reading as 404. Run in CI forever.
+2. **Roles, two-layered.** *Platform roles*: `owner / admin / member / viewer` govern the
+   organisation itself (billing, members, deletion). *Domain roles*: `engineer` (author designs,
+   run simulations), `reviewer` (comment, approve gates, cannot edit geometry), `operator` (run
+   released missions, cannot alter them). The approval gates in E16.5/P5 read the domain role — a
+   review sign-off from someone without `reviewer` is not a sign-off.
+   > DONE (2026-09-06). Tested by: `tests/test_tenancy.py::TestRoles`.
 
-## Phase P3 — The admin panel and operations console
+3. **Postgres RLS as the safety net.** Policies on every tenant-owned table; tenant context
+   supplied per request via **`SET LOCAL` inside the request's transaction** and therefore
+   discarded at COMMIT — safe under transaction-pooling PgBouncer, and the *only* sanctioned use of
+   `SET` in this codebase. Application-level scoping remains primary; RLS exists for the day the
+   application is wrong.
+   > DONE (2026-09-06); **enforcement now verified locally (2026-09-08).** Policies are `ENABLE`d
+   > and `FORCE`d on all 11 tenant tables. It was **deployed but INERT** for a year of Neon:
+   > `neondb_owner` holds `BYPASSRLS`, which outranks both ENABLE and FORCE, so the first isolation
+   > run **passed vacuously against a database enforcing nothing**. Switching this machine to a
+   > local PostgreSQL whose application role is `NOBYPASSRLS` flipped
+   > `test_the_application_role_must_not_bypass_row_level_security` from xfail to **XPASS** — the
+   > policies really enforce here. **Two places where it is still inert, and both are open work:**
+   > Neon in production, and CI, whose `postgres:17` service container makes `POSTGRES_USER` a
+   > superuser. The `xfail(strict=False)` marker records exactly this and must not be deleted to
+   > make a run tidy. Tested by: `tests/test_tenancy_rls.py` (16 tests). Code:
+   > `app/core/database.py` `tenant_scope()`.
+
+4. **404-not-403, systematised.** The existing rule (`get_owned_project`) generalised to org-scoped
+   resources: a resource outside your tenant does not exist. RLS makes the lie consistent.
+   > DONE (2026-09-06). Tested by: `tests/test_tenancy.py`.
+
+5. **Sharing and hand-off.** Transfer a project between orgs (with provenance intact); read-only
+   share links for a released design package, expiring, revocable — the artefact a supplier or
+   customer sees, without an account requirement for viewing.
+   > NOT STARTED.
+
+6. **Frontend surfaces**: org switcher, member management, role assignment, invitation flows,
+   pending-invite states — all in the existing dashboard design language.
+   > NOT STARTED.
+
+**Phase proof:** the cross-tenant test suite — two orgs, adversarial queries at every endpoint,
+zero leakage, all misses reading as 404. Run in CI forever.
+> PARTIAL — the suite exists and passes. It proves application scoping in CI; it does **not** yet
+> prove RLS in CI, because CI's role is a superuser (see task 3).
+
+**Gate GP1 opens after P1 + P2.**
+
+##### Phase P3 — The admin panel and operations console #####
 
 **~4 engineer-months. Needs P1, P2.**
 
-### The question it answers
-Can the people running Kryova support users, control rollout, and investigate incidents — with
-power that is bounded, visible and recorded?
-
-### Workstreams
-**P3.1 — The audit log, first.** Append-only, hash-chained (each entry carries the previous
-entry's hash, so tampering breaks the chain visibly), covering: auth events, admin actions,
-permission changes, impersonation start/end, quota changes, destructive operations, sign-offs.
-Written from day one of P3 because every later workstream must land in it. Admin reads it in the
-panel; org owners read their own org's slice (enterprise buyers ask for exactly this).
-**P3.2 — Staff roles.** `support` (read, impersonate-read-only), `operator` (quotas, flags),
-`platform_admin` (all, including suspension). Staff status is separate from any org membership —
-being staff grants nothing *inside* a tenant without impersonation.
-**P3.3 — Impersonation done right.** A separate token carrying **both identities** (acting
-staff + subject user), **read-only by default**, time-boxed, visually bannered in the frontend,
-every request audit-logged with the staff actor. Write-mode impersonation requires a second
-confirmation and a reason string, and notifies the user by email after the fact.
-**P3.4 — User and org administration**: search, view, suspend/reactivate (suspension revokes all
-session families — P1 machinery), storage/compute quota adjustment, manual verification, GDPR
-deletion with a grace window (soft-delete, then hard purge job through `MediaService` so blob
-refcounting holds).
-**P3.5 — Feature flags**: per-tenant and per-user overrides, kill switches, percentage rollouts.
-Server-evaluated (the flag state rides to the frontend with the session, so the UI and the API
-always agree on what is on).
-**P3.6 — The operations dashboard**: job queues, solver failure rates by taxonomy class, per-op
-success rates (E-15.5's data), storage growth, active sessions — the panel where "is Kryova
-healthy" has one answer.
-**P3.7 — Announcements and maintenance mode**: a banner the backend serves and both clients
-render; read-only mode that refuses mutations with an honest message instead of erroring.
+**The question it answers:** can the people running Kryova support users, control rollout, and
+investigate incidents — with power that is bounded, visible and recorded?
 
 *(Admin UI lives in the existing frontend under an `/admin` route group, gated by staff claims in
 `proxy.ts` server-side — never a client-side-only gate. No second web app: Decision 6.)*
 
-### Proof
-A support engineer resolves a real user issue via read-only impersonation; the user's org owner
-can see that it happened, when, and by whom, in their own audit view.
+1. **The audit log, first.** Append-only, hash-chained (each entry carries the previous entry's
+   hash, so tampering breaks the chain visibly), covering: auth events, admin actions, permission
+   changes, impersonation start/end, quota changes, destructive operations, sign-offs. Written from
+   day one of P3 because every later task must land in it. Admin reads it in the panel; org owners
+   read their own org's slice.
+   > DONE (2026-09-06) — **append-only in the database, not by convention**: a
+   > `BEFORE UPDATE OR DELETE` trigger plus a statement-level `TRUNCATE` trigger, installed by
+   > migration `2f3f8aadb319` *and* by `create_all`, so the guarantee holds in the test schema too.
+   > Verified on the live database, where UPDATE, DELETE and TRUNCATE all come back
+   > `RestrictViolation: audit_events is append-only`. Every entry carries the previous entry's
+   > SHA-256, because the table's owner can drop the trigger and the application currently connects
+   > as that owner: **the trigger prevents, the chain detects**, and the tests drop the trigger to
+   > prove both halves. Tested by: `tests/test_audit.py` (25 tests). Code: `app/models/audit.py`,
+   > `app/core/audit.py`.
 
-## Phase P4 — File attachments: reading what users hand us
+2. **Staff roles.** `support` (read, impersonate-read-only), `operator` (quotas, flags),
+   `platform_admin` (all, including suspension). Staff status is separate from any org membership —
+   being staff grants nothing *inside* a tenant without impersonation.
+   > DONE (2026-09-06). Tested by: `tests/test_admin.py` (40 tests). Code: `app/api/deps.py`
+   > `require_staff`.
+
+3. **Impersonation done right.** A separate token carrying **both identities** (acting staff +
+   subject user), **read-only by default**, time-boxed, visually bannered in the frontend, every
+   request audit-logged with the staff actor. Write-mode impersonation requires a second
+   confirmation and a reason string, and notifies the user by email after the fact.
+   > DONE (2026-09-06) — impersonation is a **row, not a claim**: read-only by default, refused
+   > before the route function is entered, escalated only by a platform administrator with a second
+   > reason, and revocable at once. Both identities are on every row and **there is no single
+   > `user_id` column to collapse them into**. Tested by: `tests/test_admin.py`.
+
+4. **User and org administration**: search, view, suspend/reactivate (suspension revokes all
+   session families — P1 machinery), storage/compute quota adjustment, manual verification, GDPR
+   deletion with a grace window (soft-delete, then hard purge job through `MediaService` so blob
+   refcounting holds).
+   > PARTIAL (2026-09-06) — **the read half shipped**; suspension and GDPR deletion are open.
+   > Tested by: `tests/test_admin.py`. Code: `app/api/routes/admin.py`.
+
+5. **Feature flags**: per-tenant and per-user overrides, kill switches, percentage rollouts.
+   Server-evaluated — the flag state rides to the frontend with the session, so the UI and the API
+   always agree on what is on.
+   > NOT STARTED.
+
+6. **The operations dashboard**: job queues, solver failure rates by taxonomy class, per-op success
+   rates (E15 task 5's data), storage growth, active sessions — the panel where "is Kryova healthy"
+   has one answer.
+   > PARTIAL (2026-09-06) — the read half shipped.
+
+7. **Announcements and maintenance mode**: a banner the backend serves and both clients render;
+   read-only mode that refuses mutations with an honest message instead of erroring.
+   > NOT STARTED.
+
+**Phase proof:** a support engineer resolves a real user issue via read-only impersonation; the
+user's org owner can see that it happened, when, and by whom, in their own audit view.
+
+##### Phase P4 — File attachments: reading what users hand us #####
 
 **~5 engineer-months. Needs P1; feeds the agent immediately; drawing understanding matures with
 Era IV.**
 
-### The question it answers
-A user drops a supplier datasheet PDF, a load-case spreadsheet, a photo of a failed weld, a STEP
-file and a scanned drawing into the conversation. Does Kryova *understand* them — and stay safe
-while doing so?
+**The question it answers:** a user drops a supplier datasheet PDF, a load-case spreadsheet, a
+photo of a failed weld, a STEP file and a scanned drawing into the conversation. Does Kryova
+*understand* them — and stay safe while doing so?
 
-### Workstreams
-**P4.1 — Ingestion.** Attachments ride the existing chunked-upload path into the
-content-addressed store (dedup for free; the same datasheet attached twice costs one blob). Type
-sniffing by content, size/type limits, per-org storage quotas (P3). Every attachment is a
-first-class object: owner, conversation link, extraction status, provenance.
-**P4.2 — The extraction pipeline**, tiered by format, all local and free:
-  - **CAD (STEP/IGES/BREP/STL/DXF)** → the geometry pipeline (Phase 1 kernel; `ezdxf` for DXF
-    entities/dimensions). A STEP attachment can *become* a `GeometryVersion` on request.
-  - **Documents (PDF/DOCX/XLSX/PPTX/HTML/images)** → **[Docling](https://github.com/docling-project/docling)**
-    (IBM Research, MIT) as primary — strongest local table/layout/reading-order understanding,
-    OCR for scans, unified document representation. **[MarkItDown](https://github.com/microsoft/markitdown)**
-    (Microsoft, MIT) as the light fallback for the long tail of formats. Chosen over
-    hosted parsers: local, free, no data leaves the deployment.
-  - **Spreadsheets** keep their structure — a load-case table becomes rows with units, not prose.
-  - **Images/photos** → the vision provider (already pluggable, P5 surfaces it).
-**P4.3 — Engineering-drawing understanding**, staged honestly: text-layer PDFs → Docling now;
-scanned drawings → OCR now; **dimension/GD&T extraction** → a later, research-adjacent
-workstream (the published route: layout detection + a document transformer / fine-tuned VLM —
-Donut/Florence-2-class), explicitly *not* promised early, because a wrongly read tolerance is
-worse than an unread one. Until then, extracted drawing content is labelled "unverified read —
-confirm dimensions before use".
-**P4.4 — Provenance-tagged facts.** Everything extracted enters the conversation as quoted
-material with a source pointer (file, page/sheet/cell). When an extracted number flows into a
-design parameter, the *spec records the source* — `FeatureSpec.note` and the requirement links
-(11.3) already give it somewhere to live. "Where did 42 mm come from?" must answer "cell C7 of
-loads.xlsx, attached 2026-09-05".
-**P4.5 — The injection boundary (Decision 8).** Extracted text is *data*: rendered as quoted
-context, never merged into system instructions; the agent may not take a tool action whose sole
-justification is attachment text without surfacing that justification for the user's approval
-where it matters (approval gates, P5). Test fixtures include hostile documents ("ignore previous
-instructions…") asserted inert — a regression suite, not a hope. This is the documented
-document-to-LLM supply-chain attack class, taken seriously from the first release.
-**P4.6 — Frontend**: drag-drop into the conversation, upload progress (chunked client exists),
-extraction status, an attachment panel per conversation, inline previews (tables, images,
-geometry via P6 viewer), and "insert as parameter / as requirement / as load case" affordances —
-the moment extraction earns its keep.
+1. **Ingestion.** Attachments ride the existing chunked-upload path into the content-addressed
+   store (dedup for free; the same datasheet attached twice costs one blob). Type sniffing by
+   content, size/type limits, per-org storage quotas (P3). Every attachment is a first-class
+   object: owner, conversation link, extraction status, provenance.
+   > PARTIAL — chunked upload and the content-addressed store exist. Code: `app/media/`.
 
-### Proof
-The hostile-document suite passes; a load-case spreadsheet becomes a named, provenance-tagged
-load case applied to a design; a STEP attachment becomes geometry through the same kernel as
-everything else.
+2. **The extraction pipeline**, tiered by format, all local and free:
+   - **CAD (STEP/IGES/BREP/STL/DXF)** → the geometry pipeline (E1's kernel; `ezdxf` for DXF
+     entities/dimensions). A STEP attachment can *become* a `GeometryVersion` on request.
+   - **Documents (PDF/DOCX/XLSX/PPTX/HTML/images)** →
+     **[Docling](https://github.com/docling-project/docling)** (IBM Research, MIT) as primary —
+     strongest local table/layout/reading-order understanding, OCR for scans.
+     **[MarkItDown](https://github.com/microsoft/markitdown)** (Microsoft, MIT) as the light
+     fallback for the long tail. Chosen over hosted parsers: local, free, no data leaves the
+     deployment.
+   - **Spreadsheets** keep their structure — a load-case table becomes rows with units, not prose.
+   - **Images/photos** → the vision provider (already pluggable, P5 surfaces it).
+   > PARTIAL (2026-09-06) — the readers are tested now, **including that text-bearing DXF entities
+   > are no longer silently dropped**, which had been reading a drawing full of MULTILEADER notes
+   > and TOLERANCE frames as an empty document. Code: `app/documents/`.
 
-## Phase P5 — The conversation and agent experience
+3. **Engineering-drawing understanding**, staged honestly: text-layer PDFs → Docling now; scanned
+   drawings → OCR now; **dimension/GD&T extraction** → a later, research-adjacent task (layout
+   detection + a document transformer / fine-tuned VLM — Donut/Florence-2-class), explicitly *not*
+   promised early, because a wrongly read tolerance is worse than an unread one. Until then,
+   extracted drawing content is labelled "unverified read — confirm dimensions before use".
+   > NOT STARTED.
 
-**~5 engineer-months. Continuous; the frontend face of Phases 4, 5, 16.**
+4. **Provenance-tagged facts.** Everything extracted enters the conversation as quoted material
+   with a source pointer (file, page/sheet/cell). When an extracted number flows into a design
+   parameter, the *spec records the source* — `FeatureSpec.note` and the requirement links (E11
+   task 3) already give it somewhere to live. "Where did 42 mm come from?" must answer "cell C7 of
+   loads.xlsx, attached 2026-09-05".
+   > NOT STARTED.
 
-### The question it answers
-Does working with the agent feel like working with a competent colleague — legible,
-interruptible, honest about uncertainty — rather than watching a terminal scroll?
+5. **The injection boundary (Decision 8).** Extracted text is *data*: rendered as quoted context,
+   never merged into system instructions; the agent may not take a tool action whose sole
+   justification is attachment text without surfacing that justification for the user's approval
+   where it matters. Test fixtures include hostile documents ("ignore previous instructions…")
+   asserted inert — a regression suite, not a hope.
+   > DONE (2026-09-06), **and the guards are structural rather than filters**: `UntrustedText` does
+   > not subclass `str`, so concatenation raises and `f"{x}"` yields a description;
+   > `render_into_user_message` is the only accessor that returns payload characters and it
+   > **requires the user's own message**, so no call exists that puts attachment content in a
+   > system prompt. Forged `[attachment: …]` headers are defanged. Tested by:
+   > `tests/test_documents_injection.py` (32 tests).
 
-### Workstreams
-**P5.1 — Streaming done properly**: token streaming and step events over SSE (fits the existing
-poll-schedule/api-client machinery; WebSockets only if bidirectionality is ever actually needed),
-reconnect-and-resume (conversation-resume exists and is tested — extend, don't replace).
-**P5.2 — The step surface**: `agent-step-list` grows into the run view — plan steps, live
-geometry operations, solver progress, per-step timing, failure taxonomy classes surfaced in
-plain language.
-**P5.3 — The design as an artefact, visibly.** The spec (the IR) rendered beside the chat:
-parameters editable with units checked, features with their rationale notes, references
-navigable; **spec diffs rendered like code review** (what changed, what it reaches — `diff.py`
-already computes both). The conversation is the *log*; the spec is the *truth*; the UI must make
-that hierarchy legible.
-**P5.4 — The verification surface**: assertion dashboard (pass / fail / **unmeasured** rendered
-as first-class — unmeasured is amber, never green), requirement coverage, provenance drill-down
-from any number to its evidence chain (7.3), convergence badges on simulation results.
-**P5.5 — Approval gates as UI**: a gate is a page — the diff, the affected assertions, the
-cost/time estimate of what follows, an approve/reject with the actor recorded (P2 domain roles;
-P3 audit). Not a chat message that scrolls away.
-**P5.6 — Interruption and steering**: stop a run cleanly (the bounded loops make this safe),
-edit a parameter mid-mission, resume without loss.
-**P5.7 — Cost/time honesty**: before a long run, the estimate (16.6/P8); during, elapsed vs
-estimate; after, actuals — the trust habit that makes P8's billing uncontroversial.
+6. **Frontend**: drag-drop into the conversation, upload progress (chunked client exists),
+   extraction status, an attachment panel per conversation, inline previews (tables, images,
+   geometry via P6 viewer), and "insert as parameter / as requirement / as load case" affordances —
+   the moment extraction earns its keep.
+   > NOT STARTED.
 
-## Phase P6 — The viewer at machine scale
+**Phase proof:** the hostile-document suite passes; a load-case spreadsheet becomes a named,
+provenance-tagged load case applied to a design; a STEP attachment becomes geometry through the
+same kernel as everything else.
 
-**~6 engineer-months. Grows with E-1 (tessellation source), E-14 (product structure), P4 (CAD
+##### Phase P5 — The conversation and agent experience #####
+
+**~5 engineer-months. Continuous; the frontend face of E4, E5 and E16.**
+
+**The question it answers:** does working with the agent feel like working with a competent
+colleague — legible, interruptible, honest about uncertainty — rather than watching a terminal
+scroll?
+
+1. **Streaming done properly**: token streaming and step events over SSE (fits the existing
+   poll-schedule/api-client machinery; WebSockets only if bidirectionality is ever actually
+   needed), reconnect-and-resume — `conversation-resume` exists and is tested, so extend, don't
+   replace.
+   > PARTIAL — resume exists and is tested. Code: frontend `conversation-resume`.
+
+2. **The step surface**: `agent-step-list` grows into the run view — plan steps, live geometry
+   operations, solver progress, per-step timing, failure taxonomy classes surfaced in plain
+   language.
+   > PARTIAL — steps and transcript exist. Code: frontend `agent-step-list`.
+
+3. **The design as an artefact, visibly.** The spec (the IR) rendered beside the chat: parameters
+   editable with units checked, features with their rationale notes, references navigable; **spec
+   diffs rendered like code review** (what changed, what it reaches — `diff.py` already computes
+   both). The conversation is the *log*; the spec is the *truth*; the UI must make that hierarchy
+   legible.
+   > NOT STARTED.
+
+4. **The verification surface**: assertion dashboard (pass / fail / **unmeasured** rendered as
+   first-class — unmeasured is amber, never green), requirement coverage, provenance drill-down
+   from any number to its evidence chain (E7 task 3), convergence badges on simulation results.
+   > NOT STARTED.
+
+5. **Approval gates as UI**: a gate is a page — the diff, the affected assertions, the cost/time
+   estimate of what follows, an approve/reject with the actor recorded (P2 domain roles; P3 audit).
+   Not a chat message that scrolls away.
+   > NOT STARTED.
+
+6. **Interruption and steering**: stop a run cleanly (the bounded loops make this safe), edit a
+   parameter mid-mission, resume without loss.
+   > NOT STARTED.
+
+7. **Cost/time honesty**: before a long run, the estimate (E16 task 6 / P8); during, elapsed vs
+   estimate; after, actuals — the trust habit that makes P8's billing uncontroversial.
+   > NOT STARTED.
+
+##### Phase P6 — The viewer at machine scale #####
+
+**~6 engineer-months. Grows with E1 (tessellation source), E14 (product structure), P4 (CAD
 attachments).**
 
-### The question it answers
-Can a user *see* a 2,000-part machine in the browser — orbit it smoothly, open its tree, section
-it, measure it, watch stress paint onto it — on an ordinary laptop?
+**The question it answers:** can a user *see* a 2,000-part machine in the browser — orbit it
+smoothly, open its tree, section it, measure it, watch stress paint onto it — on an ordinary
+laptop?
 
-### The stance
-The hand-written WebGL 1 viewer is a strength for what it does today (a part, a stress field) and
-respects the frontend's minimalism doctrine. Machine scale is a different problem class:
-**server-side preparation, client-side streaming.** The kernel we now own (Phase 1) tessellates;
-the client renders what it is sent, at the detail the view deserves.
+**The stance:** the hand-written WebGL 1 viewer is a strength for what it does today (a part, a
+stress field) and respects the frontend's minimalism doctrine. Machine scale is a different problem
+class: **server-side preparation, client-side streaming.** The kernel we now own tessellates; the
+client renders what it is sent, at the detail the view deserves.
 
-### Workstreams
-**P6.1 — The tessellation service** (backend): OCCT shape → glTF with **Draco** (70–95% geometry
-reduction, 14-bit quantisation) or **meshopt** (lossless, GPU-direct decode) — measure both on
-real Kryova parts and pick per-asset; multi-LOD generation at export; instancing extraction
-(BOLTS parts repeat thousands of times — one mesh, N transforms). Cached in the
-content-addressed store keyed on geometry digest + tessellation params, so a part is tessellated
-once ever.
-**P6.2 — The streaming scene** (frontend): assembly loads structure-first (the tree and bounding
-boxes immediately), meshes stream by priority (frustum + screen-space size), LOD switches by
-distance. Target: first meaningful paint of a 2,000-part machine under 2 s on a mid-range
-laptop; interaction never below 30 fps (measured in CI against a reference assembly — a
-performance *assertion*, in the house style).
-**P6.3 — The renderer decision, made explicitly**: extend the hand-rolled WebGL viewer to WebGL 2
-(instancing, better attribute handling) as the default path — it keeps the dependency doctrine
-and the team knows every line. Adopt a library only if 6-months-in measurements show the
-hand-rolled path cannot hold the fps target on M5-class assemblies; that decision point is
-scheduled, criteria written now, so it is a measurement, not a mood. WebGPU is the follow-on
-where available, behind capability detection.
-**P6.4 — Engineering interactions**: section planes, exploded views (from the assembly
-structure, animated), measure (point-point, edge, face-face — against real geometry via a
-backend query, not against the decimated mesh), hide/isolate by subtree, camera bookmarks per
-conversation ("the view we were talking about").
-**P6.5 — Results on geometry**: the existing stress-field rendering generalised — scalar fields
-(stress, displacement, thickness, fatigue damage) on the streamed meshes, shared colour-scale
-legend, probe-a-value. The `surface-field` code is the seed.
-**P6.6 — Tree ↔ 3D ↔ spec, one selection model**: click a part in the tree, it highlights in 3D
-and the spec panel scrolls to its feature; select a face in 3D, the predicate that would name it
-(2.1) is offered. This is where Layers B and C become *tangible*.
+1. **The tessellation service** (backend): OCCT shape → glTF with **Draco** (70–95% geometry
+   reduction, 14-bit quantisation) or **meshopt** (lossless, GPU-direct decode) — measure both on
+   real Kryova parts and pick per-asset; multi-LOD generation at export; instancing extraction
+   (BOLTS parts repeat thousands of times — one mesh, N transforms). Cached in the
+   content-addressed store keyed on geometry digest + tessellation params, so a part is tessellated
+   once ever.
+   > NOT STARTED.
 
-### Proof
-M5's full assembly: structure paint <2 s, orbit at 30+ fps on the reference laptop, stress
-overlay on the frame, a section through the die set, all in the browser; the same scene in the
-Tauri app.
+2. **The streaming scene** (frontend): assembly loads structure-first (the tree and bounding boxes
+   immediately), meshes stream by priority (frustum + screen-space size), LOD switches by distance.
+   Target: first meaningful paint of a 2,000-part machine under 2 s on a mid-range laptop;
+   interaction never below 30 fps, measured in CI against a reference assembly — a performance
+   *assertion*, in the house style.
+   > NOT STARTED.
 
-## Phase P7 — The desktop app and the workstation bridge
+3. **The renderer decision, made explicitly**: extend the hand-rolled WebGL viewer to WebGL 2
+   (instancing, better attribute handling) as the default path — it keeps the dependency doctrine
+   and the team knows every line. Adopt a library only if 6-months-in measurements show the
+   hand-rolled path cannot hold the fps target on M5-class assemblies; that decision point is
+   scheduled and its criteria written now, so it is a measurement, not a mood. WebGPU is the
+   follow-on where available, behind capability detection.
+   > PARTIAL — the single-part WebGL viewer exists and is tested. Code:
+   > `webgl-stress-viewer.tsx`.
+
+4. **Engineering interactions**: section planes, exploded views (from the assembly structure,
+   animated), measure (point-point, edge, face-face — against real geometry via a backend query,
+   not against the decimated mesh), hide/isolate by subtree, camera bookmarks per conversation
+   ("the view we were talking about").
+   > NOT STARTED.
+
+5. **Results on geometry**: the existing stress-field rendering generalised — scalar fields
+   (stress, displacement, thickness, fatigue damage) on the streamed meshes, shared colour-scale
+   legend, probe-a-value. The `surface-field` code is the seed.
+   > NOT STARTED.
+
+6. **Tree ↔ 3D ↔ spec, one selection model**: click a part in the tree, it highlights in 3D and the
+   spec panel scrolls to its feature; select a face in 3D, the predicate that would name it (E2
+   task 1) is offered.
+   > NOT STARTED.
+
+**Phase proof:** M5's full assembly — structure paint <2 s, orbit at 30+ fps on the reference
+laptop, stress overlay on the frame, a section through the die set, all in the browser; the same
+scene in the Tauri app.
+
+##### Phase P7 — The desktop app and the workstation bridge #####
 
 **~3 engineer-months. Extends what exists; the CATIA bridge's natural home.**
 
-**P7.1 — Signed auto-update**: Tauri v2 updater with the offline signing keypair; **private-key
-custody written down** (lost key = no more updates for installed apps, ever — key in a hardware
-token or sealed secret store, never CI plaintext); staged rollout channels (stable/beta);
-`latest.json` + signatures published per release (P9's pipeline builds it).
-**P7.2 — The bridge, integrated**: the CATIA daemon (`scripts/catia_bridge/`) ships with/beside
-the desktop app on workstation installs; the `catia-bridge-panel` grows into a first-class
-status surface (connection, seat language, document binding, pending approvals). The
-tier/approval model already exists — the desktop UI is where destructive-tier approvals belong.
-**P7.3 — Desktop-only powers, used sparingly**: local file open/save into the attachment
-pipeline, OS notifications for long-run completion, deep links (`kryova://run/...`) from CI or
-email into the app.
-**P7.4 — Offline honesty**: what works without the backend (viewing cached designs, reading
-docs) and what does not (everything else), stated in the UI rather than discovered by timeout.
+1. **Signed auto-update**: Tauri v2 updater with the offline signing keypair; **private-key custody
+   written down** (lost key = no more updates for installed apps, ever — key in a hardware token or
+   sealed secret store, never CI plaintext); staged rollout channels (stable/beta); `latest.json` +
+   signatures published per release (P9's pipeline builds it).
+   > NOT STARTED — blocked behind P9 task 4's finding.
 
-## Phase P8 — Billing, quotas and metering
+2. **The bridge, integrated**: the CATIA daemon (`scripts/catia_bridge/`) ships with/beside the
+   desktop app on workstation installs; the `catia-bridge-panel` grows into a first-class status
+   surface (connection, seat language, document binding, pending approvals). The tier/approval model
+   already exists — the desktop UI is where destructive-tier approvals belong.
+   > PARTIAL — the Tauri shell and bridge panel exist. Code: `src-tauri/`,
+   > `catia-bridge-panel.tsx`.
+
+3. **Desktop-only powers, used sparingly**: local file open/save into the attachment pipeline, OS
+   notifications for long-run completion, deep links (`kryova://run/...`) from CI or email into the
+   app.
+   > NOT STARTED.
+
+4. **Offline honesty**: what works without the backend (viewing cached designs, reading docs) and
+   what does not (everything else), stated in the UI rather than discovered by timeout.
+   > NOT STARTED.
+
+5. **The Windows installer.**
+   > PARTIAL (2026-09-05) — `npm run desktop:msi` produces `Kryova_0.2.0_x64_en-US.msi` (3.8 MB) on
+   > this machine, release profile, WiX candle+light, ~41 s Rust compile. **Built is not
+   > installed**: nothing has run the installer and confirmed the app starts from it, so task 1 and
+   > P9 task 4 both remain open and a release still needs a human.
+
+##### Phase P8 — Billing, quotas and metering #####
 
 **~3 engineer-months. Needs P2 (orgs), P3 (flags/quotas); ships before general availability.**
 
-**P8.1 — Meter what costs**: solver-seconds by class (a CalculiX nonlinear minute ≠ a linear
-static second), geometry-operation batches, storage-bytes, seats. Usage accumulates locally and
-posts in aggregates (the high-volume pattern; never one event per action).
-**P8.2 — Plans**: free tier (real but bounded — M1-class work, community support), team, and
-enterprise (SSO later, audit-log export from P3.1, custom quotas). **Stripe** metered billing +
-prepaid credits for compute bursts — the hybrid the compute-heavy SaaS pattern converged on.
-**P8.3 — Enforcement with dignity**: quota exhaustion returns the honest envelope (what ran out,
-what it costs to continue, what remains free), never a bare 429; estimates before expensive runs
-(P5.7) mean nobody is surprised.
-**P8.4 — The bridge between metering and trust**: the same meter that bills is the meter shown in
-cost estimates. One number, two uses; divergence is a bug class of its own.
+1. **Meter what costs**: solver-seconds by class (a CalculiX nonlinear minute ≠ a linear static
+   second), geometry-operation batches, storage-bytes, seats. Usage accumulates locally and posts in
+   aggregates — the high-volume pattern; never one event per action.
+   > PARTIAL (2026-09-06) — metering, the usage ledger, rollups and per-tenant quotas shipped.
+   > **Metering is *always on*, independent of tracing**: `app.observe.collect.add_listener` lets a
+   > listener see every span whether or not `collect()` is running, so a bill is never gated on an
+   > operator having turned tracing on for the request that happened to be billable.
+   > `app.simulation.runner` is the first wired consumer — `usage_scope` posts a job's meshing and
+   > solve time to the ledger in a `finally`, so a solve that fails after nine minutes is still
+   > billed for the nine minutes, and the metering write goes through its own session (`LedgerSink`)
+   > rather than the job's transaction, so a metering fault can never roll back the result it was
+   > measuring. **Declared but not yet wired**: AI token usage, CATIA seat time, kernel operations —
+   > the meters exist in the schema and report a gap rather than a number until something calls
+   > them. Tested by: `tests/test_billing*.py`, `tests/test_metering.py`. Code:
+   > `app/core/metering.py`, `app/models/billing.py`, `app/api/routes/billing.py`, migration
+   > `b3d7c1f4a920`.
 
-## Phase P9 — Delivery: CI/CD, environments, and operational safety
+2. **Plans**: free tier (real but bounded — M1-class work, community support), team, and enterprise
+   (SSO later, audit-log export from P3 task 1, custom quotas). **Stripe** metered billing +
+   prepaid credits for compute bursts — the hybrid the compute-heavy SaaS pattern converged on.
+   > NOT STARTED — **no Stripe integration.**
 
-**~3 engineer-months. Starts immediately — the frontend's zero-CI state is the first fix.**
+3. **Enforcement with dignity**: quota exhaustion returns the honest envelope (what ran out, what it
+   costs to continue, what remains free), never a bare 429; estimates before expensive runs (P5
+   task 7) mean nobody is surprised.
+   > NOT STARTED.
 
-**P9.1 — Frontend CI, week one**: **done 2026-09-06** — and it turned out to be mostly done
-already (the workflow was added 2026-08-29; this plan's claim that `.github/` did not exist was
-simply wrong). Lint, `tsc`, vitest and build run on every push, now with SHA-pinned actions, the
-Node version in `.nvmrc` so CI and `nvm use` agree, and a check that the repo still has exactly
-three runtime dependencies — the one design rule in that repo that nothing else notices being
-broken. Still open: preview deployments per PR.
-**P9.2 — Backend images that carry the fleet**: containers with OCCT + gmsh + CalculiX +
-(later) Chrono pinned — the determinism substrate (1.6) and the deploy artefact are the same
-thing. GPL components live in their own layers/processes per Decision 4.
-**P9.3 — Environments**: staging with seeded demo orgs and the mission suite running nightly
-against it; production migrations gated on `alembic check` and a rollback note per migration.
-**P9.4 — Desktop release pipeline**: tauri build matrix (Windows first — the CATIA audience),
-signing, `latest.json` publication, channel promotion (beta → stable) as a pipeline step.
-**Decided 2026-09-06: a tagged release must not build the MSI yet, and the reason is not
-scheduling.** `src-tauri/src/lib.rs` resolves both checkouts and node through `option_env!`,
-fixed at compile time by `scripts/desktop-build.mjs`, and `tauri.conf.json` sets
-`frontendDist: "http://localhost:3000"` — so the desktop app is a shell that launches a dev
-server from paths baked in at build time. An MSI built on a runner therefore ships pointing at
-`D:\a\...`, and on a customer machine starts nothing and times out. Publishing it would be the
-"green on a suite nobody ran" failure in artefact form. P9.4 begins with bundling the frontend
-statically and packaging the backend (P9.2), not with a release workflow. Meanwhile
-`../Kryova-frontend/.github/workflows/desktop.yml` type-checks the Rust shell on Windows
-(`workflow_dispatch` only, no artefact, gates nothing) so `src-tauri/` cannot rot silently.
-**P9.5 — Backups and restore *drills***: Neon PITR verified by actually restoring; blob-store
-backup with refcount integrity check; a written RTO/RPO and a quarterly drill that proves it.
-**P9.6 — Secrets and supply chain**: no default secrets boot (P1.4), dependency pinning +
-audit in CI, SBOM for the desktop app (enterprise buyers ask), release notes generated from the
-merge log.
+4. **The bridge between metering and trust**: the same meter that bills is the meter shown in cost
+   estimates. One number, two uses; divergence is a bug class of its own.
+   > NOT STARTED.
 
-## Phase P10 — Documentation, onboarding and the trust surface
+##### Phase P9 — Delivery: CI/CD, environments, and operational safety #####
+
+**~3 engineer-months. Starts immediately.**
+
+1. **Frontend CI, week one.**
+   > DONE (2026-09-06) — and it turned out to be mostly done already (the workflow was added
+   > 2026-08-29; this plan's v2 claim that `.github/` did not exist was simply wrong). Lint, `tsc`,
+   > vitest and build run on every push, now with SHA-pinned actions, the Node version in `.nvmrc`
+   > so CI and `nvm use` agree, and a check that the repo still has exactly three runtime
+   > dependencies — the one design rule in that repo that nothing else notices being broken.
+   > **Still open: preview deployments per PR.** Code: `../Kryova-frontend/.github/workflows/ci.yml`,
+   > `scripts/check-dependencies.mjs`.
+
+2. **Backend CI that is honest about the database.**
+   > DONE (2026-09-06). Three jobs: `lint` (ruff + `mypy app`), `offline` (3,327 tests, no
+   > connection, and it prints how many database tests it did *not* run), `database` (PostgreSQL 17
+   > service container + `alembic upgrade head` + `alembic check` + the other 430 tests).
+   > **`--database-only` refuses to start without a real PostgreSQL**, so the SQLite fallback can no
+   > longer wear the name of the database suite. Tested by:
+   > `tests/test_repository_hygiene.py::TestContinuousIntegration` — verified by breaking all five
+   > guards. Code: `.github/workflows/ci.yml`, `scripts/pytest_split.py`.
+   > **OPEN, found 2026-09-08: CI's `postgres:17` service container makes `POSTGRES_USER` a
+   > superuser, so RLS is inert in CI.** The tenancy suite proves application scoping there and not
+   > the safety net under it. Fix: connect the suite as a `NOBYPASSRLS` role.
+   > **OPEN, found 2026-09-08: 12 tests fail on `main` and CI does not appear to be catching it.**
+   > `test_written_tool_calls.py` (5), `test_catia_com_contract.py` (4 — script library, document
+   > path collision, two pocket refusals), `test_tool_retrieval.py` (1),
+   > `test_retrieval_corpus.py` (1, index staleness). They are DB-independent — verified by
+   > stashing the session's test changes and reproducing all of them on the SQLite fallback — and
+   > came in with the agent verification-footer work. A suite that is red on `main` is a suite
+   > people learn to skim, which is the same failure mode as the stale landmines in CLAUDE.md.
+
+3. **Backend images that carry the fleet**: containers with OCCT + gmsh + CalculiX + (later) Chrono
+   pinned — the determinism substrate (E1 task 7) and the deploy artefact are the same thing. GPL
+   components live in their own layers/processes per Decision 4.
+   > NOT STARTED.
+
+4. **Environments**: staging with seeded demo orgs and the mission suite running nightly against
+   it; production migrations gated on `alembic check` and a rollback note per migration.
+   > NOT STARTED.
+
+5. **Desktop release pipeline**: tauri build matrix (Windows first — the CATIA audience), signing,
+   `latest.json` publication, channel promotion (beta → stable) as a pipeline step.
+   > BLOCKED, and the reason is not scheduling (decided 2026-09-06). `src-tauri/src/lib.rs`
+   > resolves both checkouts and node through `option_env!`, fixed at compile time by
+   > `scripts/desktop-build.mjs`, and `tauri.conf.json` sets
+   > `frontendDist: "http://localhost:3000"` — so the desktop app is a shell that launches a dev
+   > server from paths baked in at build time. **An MSI built on a runner therefore ships pointing
+   > at `D:\a\...`, and on a customer machine starts nothing and times out.** Publishing it would be
+   > the "green on a suite nobody ran" failure in artefact form. This task begins with bundling the
+   > frontend statically and packaging the backend (task 3), not with a release workflow. Meanwhile
+   > `../Kryova-frontend/.github/workflows/desktop.yml` type-checks the Rust shell on Windows
+   > (`workflow_dispatch` only, no artefact, gates nothing) so `src-tauri/` cannot rot silently.
+
+6. **Backups and restore *drills***: PITR verified by actually restoring; blob-store backup with
+   refcount integrity check; a written RTO/RPO and a quarterly drill that proves it.
+   > NOT STARTED.
+
+7. **Secrets and supply chain**: no default secrets boot (P1 task 4), dependency pinning + audit in
+   CI, SBOM for the desktop app (enterprise buyers ask), release notes generated from the merge log.
+   > NOT STARTED.
+
+##### Phase P10 — Documentation, onboarding and the trust surface #####
 
 **~2 engineer-months, then continuous.**
 
-**P10.1 — In-product onboarding**: the existing setup wizard grows into first-run success — a
-guided M1 in under ten minutes, on the free tier, no sales call.
-**P10.2 — The docs site**: task-oriented docs, the mission gallery (every ladder mission as a
-worked, forkable example), API reference from the OpenAPI schema that already exists.
-**P10.3 — The trust pages, the differentiator**: the **validation register** (7.4) published —
-which analyses are validated against what, to what accuracy; the **"what Kryova will not
-claim"** page (Decision 5's scope, the sign-off model, the unmeasured-is-never-green rule) as
-public commitments; a changelog that names accuracy-affecting changes loudly.
-**P10.4 — Status and comms**: status page, incident history, the P3.7 announcement machinery's
-public face.
+1. **In-product onboarding**: the existing setup wizard grows into first-run success — a guided M1
+   in under ten minutes, on the free tier, no sales call.
+   > NOT STARTED.
 
+2. **The docs site**: task-oriented docs, the mission gallery (every ladder mission as a worked,
+   forkable example), API reference from the OpenAPI schema that already exists.
+   > NOT STARTED.
+
+3. **The trust pages, the differentiator**: the **validation register** (E7 task 4) published —
+   which analyses are validated against what, to what accuracy; the **"what Kryova will not claim"**
+   page (Decision 5's scope, the sign-off model, the unmeasured-is-never-green rule) as public
+   commitments; a changelog that names accuracy-affecting changes loudly.
+   > DONE (2026-09-06) — the validation register, twelve commitments each **MECHANICAL with the
+   > files that enforce it or POLICY with none** (a mechanical one naming no file is refused at
+   > construction), and a typed accuracy changelog. **Public and unauthenticated, defended**: a page
+   > claiming verification is the product, behind a login, can only be read by people who already
+   > bought. Paid for structurally — no `DbSession`, no `CurrentUser`, an allowlist on provenance,
+   > and a test that walks each route's dependency graph. Tested by: `tests/test_trust.py`. Code:
+   > `app/api/routes/trust.py`, `app/verify/{register,commitments,changelog}.py`.
+
+4. **Status and comms**: status page, incident history, the P3 task 7 announcement machinery's
+   public face.
+   > NOT STARTED.
 ---
 
 ## Part 3 — Technology register
@@ -1276,104 +1966,118 @@ public face.
 Every dependency choice, why, and what was rejected. All free; licences noted because they
 constrain architecture (Decision 4).
 
-| Need | Choice | Licence | Why, and what was rejected |
-|---|---|---|---|
-| CAD kernel | **OCCT** + `pythonocc-core` | LGPL | Only mature open B-rep kernel; OCCT 8.0 `BRepGraph` history. Fallback binding: pyOCCT; naming layer may go C++-side (Phase 1.0 spike). Rejected: CGAL (mesh, not B-rep), Manifold (no NURBS) |
-| 2D constraints | **PlaneGCS** | LGPL | Full vocabulary, proven detachable. Rejected: SolveSpace solver (narrower) |
-| Meshing | **gmsh** *(in use)* | GPL | Industrial grade. Subprocess boundary |
-| FEA workhorse | **CalculiX** | GPL | Abaqus-style decks, 25 yrs validation; C3D10 recommended solid; shell/beam expansion caveat recorded. **Subprocess only** |
-| FEA specialist | **code_aster** | GPL | Fracture, cyclic plasticity. **Subprocess only** |
-| Multiphysics | **Elmer** | LGPL | FSI, coupled fields |
-| CFD | **OpenFOAM** | GPL | The standard; late; meshing is the hard part |
-| Fatigue | **pyLife** (+ FFPACK, fatpack) | Apache-2.0 | Bosch Research; turns D4 from bespoke into integration + methodology |
-| Multibody | **Project Chrono** | BSD-3 | Python API, vehicle templates. MBDyn (GPL) reserved for rotordynamics |
-| Optimisation | **OpenMDAO** | Apache-2.0 | NASA Glenn; SIMP/level-set precedent |
-| CAM | **OpenCAMLib** | LGPL | Drop-cutter/waterline, FreeCAD-proven |
-| Sheet metal | **FreeCAD SheetMetal** as reference | LGPL | Working unfold, ANSI/DIN K-factor |
-| Standard parts | **BOLTS** | open | ISO/DIN parametric parts + metadata |
-| Requirements | **SysML v2** via SysON / Capella | EPL | 2026 tooling maturity; Eclipse, free |
-| Doc understanding | **Docling** primary, **MarkItDown** fallback | MIT / MIT | Local, free; Docling strongest on tables/layout/OCR; MarkItDown widest format tail. Rejected: hosted parsers (data leaves deployment) |
-| DXF | **ezdxf** | MIT | The standard Python DXF library, R12→R2018 |
-| Mesh compression | **Draco** and/or **meshopt** | Apache-2.0 / MIT | Measured per-asset; LOD + instancing on top |
-| Retrieval | **BM25** *(in use)* + rerank | own | Exact-term regime; built and tuned |
-| Payments | **Stripe** metered + credits | commercial svc | The one paid *service*; no free equivalent worth its risk. Rejected: bespoke billing |
-| Materials data | schema + provenance, ingest later | — | **Honest gap**: open DBs are DFT/atomistic; engineering S-N data is not freely available at quality |
+1. **CAD kernel — OCCT via `cadquery-ocp` (OCP).** LGPL. The only mature open B-rep kernel; OCCT
+   8.0 adds `BRepGraph` history. Rejected: `pythonocc-core` (conda-only, not on PyPI — the E1 spike
+   finding), pyOCCT (not needed), CGAL (mesh, not B-rep), Manifold (no NURBS).
+2. **2D constraints — PlaneGCS.** LGPL. Full vocabulary, proven detachable. Rejected: SolveSpace's
+   solver (narrower; a sketcher that cannot express tangency is not a sketcher).
+3. **Meshing — gmsh** *(in use)*. GPL. Industrial grade. Subprocess boundary.
+4. **FEA workhorse — CalculiX.** GPL. Abaqus-style decks, 25 years of validation; C3D10 the
+   recommended solid; the shell/beam expansion caveat recorded. **Subprocess only.**
+5. **FEA specialist — code_aster.** GPL. Fracture, cyclic plasticity. **Subprocess only.**
+6. **Multiphysics — Elmer.** LGPL. FSI, coupled fields.
+7. **CFD — OpenFOAM.** GPL. The standard; late; the meshing is the hard part.
+8. **Fatigue — pyLife** (+ FFPACK, fatpack). Apache-2.0. Bosch Research; turns the fatigue phase
+   from bespoke work into integration plus methodology.
+9. **Multibody — Project Chrono.** BSD-3. Python API, vehicle templates. MBDyn (GPL) reserved for
+   rotordynamics. **Caveat: `pip install pychrono` installs an unrelated package and succeeds** —
+   the engine probe checks the module really is Chrono.
+10. **Optimisation — OpenMDAO.** Apache-2.0. NASA Glenn; SIMP/level-set precedent.
+11. **CAM — OpenCAMLib.** LGPL. Drop-cutter/waterline, FreeCAD-proven.
+12. **Sheet metal — FreeCAD SheetMetal as reference.** LGPL. Working unfold, ANSI/DIN K-factor.
+13. **Standard parts — BOLTS.** Open. ISO/DIN parametric parts plus metadata.
+14. **Requirements — SysML v2 via SysON / Capella.** EPL. Eclipse, free.
+15. **Document understanding — Docling primary, MarkItDown fallback.** MIT / MIT. Local and free;
+    Docling strongest on tables/layout/OCR, MarkItDown widest format tail. Rejected: hosted parsers
+    (data leaves the deployment).
+16. **DXF — ezdxf.** MIT. The standard Python DXF library, R12→R2018.
+17. **Mesh compression — Draco and/or meshopt.** Apache-2.0 / MIT. Measured per-asset; LOD and
+    instancing on top.
+18. **Retrieval — BM25** *(in use)* plus rerank. Own. Exact-term regime; built and tuned.
+19. **Payments — Stripe**, metered plus credits. Commercial service — the one paid *service*; no
+    free equivalent worth its risk. Rejected: bespoke billing.
+20. **Materials data — schema and provenance now, ingest later.** **An honest gap**: the open
+    databases are DFT/atomistic and useless for an engineering S-N curve.
 
-### Licence obligations (restated because they bind)
-GPL ⇒ separate process, file/CLI boundary, always. LGPL ⇒ dynamically linked, replaceable.
-`data/bm25/` tracked Dassault PDFs ⇒ resolve before publishing the repo (history rewrite).
-Dependency docs ingested into our BM25 index ⇒ check each licence permits the copy; where it does
-not, index a pointer, not the text.
+**Licence obligations, restated because they bind:**
+
+1. GPL ⇒ separate process, file/CLI boundary, always.
+2. LGPL ⇒ dynamically linked, replaceable.
+3. `data/bm25/`'s tracked Dassault PDFs ⇒ resolve before publishing the repo (history rewrite).
+4. Dependency docs ingested into our BM25 index ⇒ check each licence permits the copy; where it
+   does not, index a pointer, not the text.
 
 ---
 
 ## Part 4 — Effort, honestly
 
-| Track | Phases | Engineer-months | Character |
-|---|---|---:|---|
-| E-I Geometry engine | 1–2 | 14 | Hard, foundational, unavoidable |
-| E-II Perception | 3–5 | 11 | Best value per effort |
-| E-III Physics | 6–10 | 31 | Mostly integrate; ~15 needs an ME |
-| E-IV Knowledge | 11–13 | 21 | Nearly all needs domain engineers |
-| E-V Scale | 14–15 | 15 | Architecture |
-| E-VI Agent | 16 | 10 | Research-adjacent, least predictable |
-| E-VII Output & missions | 17–18 | 21 | Integration + discovery |
-| **Engineering total** | | **~123** | |
-| P1 Identity & sessions | | 3 | Standard, must be flawless |
-| P2 Orgs & tenancy | | 4 | Standard + RLS discipline |
-| P3 Admin & audit | | 4 | Standard, enterprise-gating |
-| P4 Attachments | | 5 | Integration + one research tail (drawings) |
-| P5 Agent UX | | 5 | Product craft, continuous |
-| P6 Viewer at scale | | 6 | Hard graphics engineering |
-| P7 Desktop | | 3 | Extends what exists |
-| P8 Billing | | 3 | Standard, pre-GA |
-| P9 Delivery | | 3 | Starts week one (frontend CI) |
-| P10 Docs & trust | | 2+ | Continuous |
-| **Product total** | | **~38** | |
-| **Programme total** | | **~161** | ≈ 8–10 engineers × ~1.7 years, ideal conditions |
+**Engineering track — ~123 engineer-months:**
 
-**Ideal conditions do not exist.** With hiring, rework and discovery: **4–7 calendar years** to
-the full ambition — with sellable, honest intermediate products from the first year (M1–M3 class
-work on the product track's platform is already a real tool).
+1. Era I, geometry engine (E1–E2) — 14. Hard, foundational, unavoidable.
+2. Era II, perception (E3–E5) — 11. Best value per effort.
+3. Era III, physics (E6–E10) — 31. Mostly integrate; ~15 needs an ME.
+4. Era IV, knowledge (E11–E13) — 21. Nearly all needs domain engineers.
+5. Era V, scale (E14–E15) — 15. Architecture.
+6. Era VI, agent (E16) — 10. Research-adjacent, least predictable.
+7. Era VII, output and missions (E17–E18) — 21. Integration plus discovery.
 
-The ~36 engineer-months needing a real analyst do not compress, and the plan would be dishonest
-if it pretended a library substitutes for judgement.
+**Product track — ~38 engineer-months:**
 
-### Not software — no amount of code fixes these
-Domain engineers on staff · physical testing (rigs, strain gauges, correlation) · homologation
-(ECE, FMVSS, Machinery Directive, CE) · professional liability (someone licensed signs — a legal
-fact) · supplier relationships and manufacturing capacity · aesthetic judgement (Class-A
-surfacing is craft; taste does not automate).
+1. P1 identity and sessions — 3. Standard, must be flawless.
+2. P2 orgs and tenancy — 4. Standard plus RLS discipline.
+3. P3 admin and audit — 4. Standard, enterprise-gating.
+4. P4 attachments — 5. Integration plus one research tail (drawings).
+5. P5 agent UX — 5. Product craft, continuous.
+6. P6 viewer at scale — 6. Hard graphics engineering.
+7. P7 desktop — 3. Extends what exists.
+8. P8 billing — 3. Standard, pre-GA.
+9. P9 delivery — 3. Starts week one.
+10. P10 docs and trust — 2+. Continuous.
+
+**Programme total ≈ 161 engineer-months** — about 8–10 engineers × ~1.7 years, in ideal conditions.
+
+**Ideal conditions do not exist.** With hiring, rework and discovery: **4–7 calendar years** to the
+full ambition — with sellable, honest intermediate products from the first year (M1–M3 class work
+on the product track's platform is already a real tool). The ~36 engineer-months needing a real
+analyst do not compress, and the plan would be dishonest if it pretended a library substitutes for
+judgement.
+
+**Not software — no amount of code fixes these:**
+
+1. Domain engineers on staff.
+2. Physical testing — rigs, strain gauges, correlation.
+3. Homologation — ECE, FMVSS, Machinery Directive, CE.
+4. Professional liability — someone licensed signs, which is a legal fact.
+5. Supplier relationships and manufacturing capacity.
+6. Aesthetic judgement — Class-A surfacing is craft; taste does not automate.
 
 ---
 
 ## Part 5 — Sequencing, and the interleave
 
-1. **Week one, in parallel**: Phase 1.0 (the binding spike) and P9.1 (frontend CI). One de-risks
-   the keystone; the other stops the only untested-in-CI codebase from rotting.
-2. **Phase 1 before everything engineering.** Every later phase is priced in geometry
-   operations; Phase 1 makes them free.
+1. **Week one, in parallel**: E1's binding spike and P9's frontend CI. One de-risks the keystone;
+   the other stops the only untested-in-CI codebase from rotting.
+2. **E1 before everything engineering.** Every later phase is priced in geometry operations; E1
+   makes them free.
 3. **P1–P2 before any external user** — auth and tenancy are not retrofittable with dignity.
 4. **Era II before Era III**: measure before asserting; assert before simulating decisions.
-5. **P4 early** — attachment understanding multiplies the agent's usefulness immediately, and
-   the injection boundary must exist before the feature is loved.
-6. **Phase 7 before any accuracy claim.** Until then numbers are plausible, not right.
-7. **Phase 14 before anything past M4.** The context problem is solved by contracts, not model
-   size.
-7½. **17.3 (sheet metal) runs with Era IV, not Era VII** — M3 and M5 need it (see the
-   sequencing exception recorded in Phase 17). The rest of Phase 17 stays where it is.
-8. **Era VI and P5 run continuously** — the 900-tool wall and the UX both arrive regardless.
-9. **P8 before GA; P3 before the first supported customer; P10's trust pages with the first
-   public accuracy claim.**
-10. **Missions continuously, in-product, never at the end.** A mission that has not run in the
+5. **P4 early** — attachment understanding multiplies the agent's usefulness immediately, and the
+   injection boundary must exist before the feature is loved.
+6. **E7 before any accuracy claim.** Until then numbers are plausible, not right.
+7. **E14 before anything past M4.** The context problem is solved by contracts, not model size.
+8. **E17.3 (sheet metal) runs with Era IV, not Era VII** — M3 and M5 need it. The rest of E17 stays
+   where it is.
+9. **Era VI and P5 run continuously** — the 900-tool wall and the UX both arrive regardless.
+10. **P8 before GA; P3 before the first supported customer; P10's trust pages with the first public
+    accuracy claim.**
+11. **Missions continuously, in-product, never at the end.** A mission that has not run in the
     product is a phase that has not been tested.
 
 ### The two facts to keep in view
 
-**1. Tool capability is not agent capability.** Whether an LLM can hold coherent design intent
-across 10⁵–10⁶ operations is unproven by anyone. Phases 14 and 16 are the attempt to make it
-true; this document does not claim they are solved.
-
-**2. The honest product is a force multiplier.** *80% of the engineering in a tenth of the time;
-a licensed engineer signs.* Everything here — both tracks — serves making that 80% trustworthy
-enough to be worth the engineer's 20%.
+1. **Tool capability is not agent capability.** Whether an LLM can hold coherent design intent
+   across 10⁵–10⁶ operations is unproven by anyone. E14 and E16 are the attempt to make it true;
+   this document does not claim they are solved.
+2. **The honest product is a force multiplier.** *80% of the engineering in a tenth of the time; a
+   licensed engineer signs.* Everything here — both tracks — serves making that 80% trustworthy
+   enough to be worth the engineer's 20%.

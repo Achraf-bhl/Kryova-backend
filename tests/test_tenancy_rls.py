@@ -409,11 +409,16 @@ class TestThePoliciesAreActuallyOn:
 
     @pytest.mark.xfail(
         reason=(
-            "Neon's neondb_owner holds BYPASSRLS and cannot drop it; the application "
-            "connects as that role, so the policies above are deployed and correct but "
-            "inert in production until DATABASE_URL points at a NOBYPASSRLS role. The "
-            "recipe is in connected_role_bypasses_rls's docstring. When this starts "
-            "XPASSing, delete the marker."
+            "Whether this passes is a property of the deployment, not of the code, so "
+            "it is recorded rather than asserted. It XPASSes on a local PostgreSQL "
+            "whose application role is NOBYPASSRLS (2026-09-08) -- the policies really "
+            "enforce there. It still xfails in the two places that matter: Neon's "
+            "neondb_owner holds BYPASSRLS and cannot drop it, and CI's postgres service "
+            "container makes POSTGRES_USER a superuser, which outranks ENABLE and FORCE "
+            "alike. So RLS is deployed and correct everywhere and inert on both of "
+            "those. Do not delete this marker to make a run tidy: strict=False means an "
+            "XPASS is the good news and an xfail is the standing one. It goes when the "
+            "application connects as a NOBYPASSRLS role in CI and in production."
         ),
         strict=False,
     )

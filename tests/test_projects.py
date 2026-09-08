@@ -3,6 +3,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import Connection, event
 
+from app.core.config import settings
 from tests.typing import AuthenticatedTestClient
 
 
@@ -64,11 +65,22 @@ def test_another_users_project_is_not_visible(
 
 @contextmanager
 def recorded_sql(connection: Connection) -> Iterator[list[str]]:
-    """Every statement the request issues on the test's connection."""
+    """Every statement the request issues on the test's connection.
+
+    The schema qualifier is stripped, because these tests are about *how many*
+    round trips a request makes and which tables they touch -- not about which
+    schema they were translated into. On SQLite the table is `users`; on
+    PostgreSQL, where every reference is compiled schema-qualified via
+    `schema_translate_map`, the same statement reads `kryova_test.users`. Left
+    in, the assertions below silently only hold on SQLite, which is the exact
+    shape of drift the "test on the engine you ship on" rule exists to catch --
+    and is how they were found, by pointing the suite at a real PostgreSQL.
+    """
     captured: list[str] = []
+    qualifier = f"{settings.test_schema}."
 
     def before(conn, cursor, statement, parameters, context, executemany) -> None:  # type: ignore[no-untyped-def]
-        captured.append(" ".join(statement.split()).lower())
+        captured.append(" ".join(statement.split()).lower().replace(qualifier, ""))
 
     event.listen(connection, "before_cursor_execute", before)
     try:

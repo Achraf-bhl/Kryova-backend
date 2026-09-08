@@ -28,8 +28,16 @@ from app.solve.calculix.deck import (
     DENSITY_KG_M3_TO_TONNE_MM3,
     element_type,
     write_deck,
+    write_frame_deck,
+    write_frame_model,
 )
 from app.solve.calculix.diagnose import Diagnosis, diagnose
+from app.solve.calculix.elements import (
+    EXPANSIONS,
+    ElementChoice,
+    Expansion,
+    choose_element,
+)
 from app.solve.calculix.frd import (
     FrdFile,
     displacements,
@@ -52,6 +60,10 @@ __all__ = [
     "CalculiXUnavailable",
     "CcxRun",
     "Diagnosis",
+    "EXPANSIONS",
+    "ElementChoice",
+    "Expansion",
+    "choose_element",
     "C3D10_MIDSIDE_ORDER",
     "DENSITY_KG_M3_TO_TONNE_MM3",
     "FrdFile",
@@ -66,4 +78,6 @@ __all__ = [
     "run_ccx",
     "von_mises_from_tensor",
     "write_deck",
+    "write_frame_deck",
+    "write_frame_model",
 ]

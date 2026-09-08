@@ -34,12 +34,15 @@ happened.
 > `OcctRunner` in-process: the agent builds geometry with no seat and no licence, and a
 > 60×40×20 pad measures 48000 mm³ through the real dispatch path, and
 > `GET /kernel/conversations/{id}/render` + `/measure` let anyone *see* and measure the
-> part a conversation is building. **Step 3 is now half done (2026-09-07):** the chat
-> draws the picture a tool returns, so on the CATIA path the product shows its own work.
-> Still to do: the frontend caller for `/kernel/conversations/{id}/render`, without which
-> a part built on the *open* kernel is still invisible in the product — the endpoint has
-> existed since 2026-09-05 with nothing calling it — and callers for vision /
-> machine_checks / sensitivity.
+> part a conversation is building. **Step 3 closed 2026-09-08.** Its first half landed on
+> 2026-09-07 — the chat draws the picture a tool returns, so on the CATIA path the product
+> shows its own work — and the OCCT half followed: `kernel-part-view.tsx` calls
+> `/kernel/conversations/{id}/render` and pins the drawing to the live state above the
+> composer, so a part built on the open kernel is no longer invisible in the product. The
+> endpoint had existed since 2026-09-05 with nothing calling it.
+> **Still to do from this gap: callers for vision / machine_checks / sensitivity.** Those
+> three still have zero callers outside tests, so the sentence above them — phases green on
+> capability and never connected to anything — remains true of that much of Era II.
 
 
 **E5 — Assertions and self-correction.** Foundation 2026-09-04; **5.1, 5.3 and 5.4 all
@@ -51,10 +54,13 @@ nothing. **All that remains under E5 is 5.2**, requirement-bound assertions, gen
 blocked on Phase 11: "meets REQ-014" needs REQ-014 to exist as an object. E5 therefore
 keeps a bare number rather than a star.
 
-**E4 is done except 4.4** (renders into the conversation), which Product Track P5 owns.
-`app/render/` renders eight canonical views deterministically, cuts sections and diffs two
-of them; `app/ai/vision.py` asks a vision model whether the part matches the request. 4.4 is
-the only part of E4 outstanding and the only one blocked outside E4.
+**E4 closed 2026-09-08** — `*E4`, all four tasks done and tested. `app/render/` renders eight
+canonical views deterministically, cuts sections and diffs two of them; `app/ai/vision.py` asks
+a vision model whether the part matches the request; and 4.4, the last one outstanding and the
+only one whose surface lived outside this repo, now draws both backends' parts in the chat.
+**E3 closed the same day** — `*E3` — with one residual named in its phase proof rather than
+hidden in it: cross-backend measurement agreement needs a Windows seat, the same shape as E1
+task 7, and is claimed at no gate before then.
 
 **E2 closed on 2026-09-05** — `*E2`, Proof green. Its capability list and its Proof are
 both done; what remains under it are refusals with stated reasons, each raised where it
@@ -100,16 +106,71 @@ never could do — the CATIA-seat halves of E1's and E3's conformance runs.
 > on 2026-09-05 show the gate itself cannot be skipped, only batched.
 
 
-**E6 — The solver federation** is now *in progress* rather than next: the deck writer landed 2026-09-05. What is left of it is the largest single thing standing. CalculiX
-across a subprocess boundary (Decision 4: GPL solvers are invoked as separate processes,
-never linked), with the `Solver` ABC unchanged and the existing `loads.py`/`selection.py`
-vocabulary mapped onto CalculiX sets rather than rewritten — that surface is what the agent
-drives. It is also what turns three of 5.1's checks from honestly-unmeasured into measured,
-and what 5.3's sensitivity can then be run over.
+**E6 closed 2026-09-08** — `*E6`, all six tasks done and tested. CalculiX across a subprocess
+boundary (Decision 4: GPL solvers are invoked as separate processes, never linked), with the
+`Solver` ABC unchanged and the existing `loads.py`/`selection.py` vocabulary mapped onto
+CalculiX sets rather than rewritten. The last two tasks closed together: 6.3's element strategy
+(shells and beams, and what ccx does to them) and 6.4's thermal cards. **Three residuals are
+named in the phase marker rather than hidden in it** — nothing here has been round-tripped
+through a real `ccx`, nothing produces a shell or beam mesh yet, and loads on 1-D and 2-D
+regions have no tributary-area rule, which is why `write_frame_deck` takes a force vector and
+says so. E6 was also what turns three of 5.1's checks from honestly-unmeasured into measured,
+and what 5.3's sensitivity can now be run over.
+
+**Gate G1 is what comes next**, carrying rung 3 forward. It is the run that turns the whole of
+this phase from documented into verified: every CalculiX keyword written since 2026-09-05 was
+read from the manual on a machine with no solver on it.
 
 ---
 
 ## Done
+- **2026-09-08 — E6 closed: shells and beams reach the deck, and a temperature change that had
+  been reaching only one of the two solvers.** 6.4 first, because it was a **defect and not a
+  gap**: `LoadCase.delta_t_k` was assembled into a thermal load by `linear_static` and written
+  into a CalculiX deck **nowhere at all**, so the same case returned `sigma = -E alpha dT` from
+  one solver and exactly zero from the other, both with success on the job row and neither with
+  a warning. 6.5's oracle exists to catch exactly that and had never been pointed at a thermal
+  case. The fix is three cards rather than one — `*INITIAL CONDITIONS, TYPE=TEMPERATURE`,
+  `*EXPANSION, ZERO=` and `*TEMPERATURE` — because the physics reads `alpha * (T - ZERO)` and
+  two of those numbers are the two halves of the subtraction; the test that pins it **moves the
+  reference off zero**, since at zero a deck writer that dropped the reference entirely would
+  pass. That test immediately earned itself: `initial_temperature_lines` had the reference as a
+  *default argument*, which Python evaluates once at import, so one card would have gone on
+  reading 0.0 while the other two moved. And a material with no expansion coefficient is now
+  refused by name — ccx accepts that deck, applies the temperature to a material that cannot
+  respond to it, and reports zero thermal stress, which reads as a finding rather than as a gap.
+
+  **6.3 is the element strategy, and the interesting content is what CalculiX does *after* it
+  reads the deck.** It has no shell or beam formulation: it expands them into solids
+  (S3→C3D6, S4→C3D8I, S6→C3D15, S8R→C3D20R, B31→C3D8I, B32→C3D20R) and ties the expansion back
+  with multiple-point constraints. Three consequences, each a plausible wrong number rather than
+  an error, each now guarded. **The results file is written for the expanded model unless it is
+  told otherwise** — more nodes than the mesh submitted, every number a real displacement of a
+  real node, just not the node `frd.displacements(frd, mesh.node_count)` thinks; `OUTPUT=2D` on
+  both output cards is the whole of the fix and there is no length mismatch that would have
+  caught it. **A node of a shell or beam has six degrees of freedom**, so a `clamp` written as
+  three is a *pin* — and a cantilever on a pin is a different structure, not a softer one. The
+  word is now read rather than the letters (`constraints.local_dofs`), with `custom` naming
+  three letters deliberately staying a pin, because `dofs` is a list of letters and letters are
+  translations. **`check_restraints` needed a six-degree-of-freedom form**, and that is not
+  tidiness: the three-DOF form refuses a beam clamped at one node as under-constrained *and*
+  refuses a straight beam as a degenerate mesh, two refusals of correct models, which is as
+  costly as accepting a wrong one. Supporting vocabulary in `app/mesh/structural.py` and
+  `app/solve/sections.py`; the section properties are checked against **numerical integration
+  over the real outline**, not against the formula they were written from, which is what catches
+  the axis swap that makes an RHS 60x40 report a stiffness 1.94x wrong with both numbers real.
+  One test found its own expectation wrong rather than the code — a warped quadrilateral's area,
+  where the obvious decomposition describes a split along the *other* diagonal; rewritten with
+  Heron's formula, which shares no algebra with the cross product under test.
+
+  6,451 → 6,568 tests, `ruff` and `mypy` clean. 14 guards verified by breaking what they guard.
+  **What is not claimed:** no `ccx` on this machine, so not one keyword written since 2026-09-05
+  has been round-tripped through the real solver; no mesher produces a `ShellMesh` or `BeamMesh`,
+  so the strategy is exercised by authored meshes; and loads on 1-D and 2-D regions have no
+  tributary-area rule, so `write_frame_deck` takes a nodal force vector rather than a `LoadCase`
+  and states the reason — an equal split would have run, looked right, and been mesh-dependent
+  in exactly the way 6.2's rule exists to prevent.
+
 - **2026-09-08 — CI is green for the first time in the history this repo records.** Every run
   since at least 2026-09-02 had failed, and reading them turned up three failures that *only*
   happen in CI, which is why a green local suite never found them. (a) **The `database` job had

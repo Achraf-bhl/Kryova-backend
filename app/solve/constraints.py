@@ -115,12 +115,21 @@ from typing import Any, Final
 import numpy as np
 from numpy.typing import NDArray
 
-from app.mesh.types import TetMesh
-from app.solve.selection import select_nodes
+from app.solve.selection import PointCloud, select_nodes
 from app.solve.types import Fixture, SolverError
 
 #: A free rigid body in three dimensions has exactly this many motions.
 RIGID_BODY_MODES: Final = 6
+
+#: Degrees of freedom a node of a solid element carries: three translations, and
+#: no rotation at all. A `*BOUNDARY` naming DOF 4 on a solid is meaningless.
+SOLID_DOFS: Final = 3
+
+#: Degrees of freedom a node of a shell or beam element carries: three
+#: translations and three rotations. Master plan 6.3 — CalculiX expands these
+#: elements into solids internally and ties the expansion back with multiple-
+#: point constraints, so the node the caller wrote does have a rotation to hold.
+STRUCTURAL_DOFS: Final = 6
 
 #: Below this, a normalised, whitened singular value is zero. See the module
 #: docstring for the two bounds it sits between; it is absolute rather than
@@ -289,11 +298,63 @@ def _and(names: Sequence[str]) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
-def held_dofs(mesh: TetMesh, fixtures: Sequence[Fixture]) -> NDArray[np.int64]:
+def local_dofs(fixture: Fixture, *, rotations: bool) -> tuple[int, ...]:
+    """Which of a node's degrees of freedom this fixture holds, 0-based and local.
+
+    0, 1, 2 are the translations along x, y, z; 3, 4, 5 the rotations about them.
+    CalculiX numbers the same six 1 to 6, and `deck.py` adds the one.
+
+    **Master plan 6.3.** On a solid there is nothing to decide: a solid element
+    has no rotational degree of freedom, so a fixture holds exactly the
+    translations it names. On a shell or a beam the same word means more, and
+    getting it wrong is not a small error:
+
+    * **`clamp` holds all six.** A clamp is *built in*. Holding only the three
+      translations leaves a **pin**, and a cantilever on a pin is a mechanism —
+      a beam clamped at one node and loaded at the other is either four times
+      stiffer than the pinned version or, with a single element, not solvable at
+      all. This is the one place the word has to be read rather than the letters.
+    * **`symmetry` holds the out-of-plane translation and the two rotations about
+      the in-plane axes.** That is what a plane of symmetry is: material crossing
+      it must arrive perpendicular. Holding only the translation gives a roller,
+      and a roller lets the section rotate through the plane, which is precisely
+      the thing symmetry forbids.
+    * **`roller` holds one translation and no rotation**, and `slider` holds the
+      two translations across its normal and no rotation. Both are named for
+      supports that genuinely do not resist a moment, so nothing is added.
+    * **`custom` holds the translations it names and nothing else** — even
+      `["x", "y", "z"]`, which is a pin and not a clamp. `dofs` is a list of
+      *letters*, and letters are translations; a caller who wants the rotations
+      held has the word `clamp` to say so. Upgrading it silently would mean two
+      spellings of the same fixture solving differently with nothing to read.
+    """
+    translations = tuple(_AXES.index(axis) for axis in fixture.held)
+    if not rotations:
+        return translations
+
+    if fixture.kind == "clamp":
+        return (0, 1, 2, 3, 4, 5)
+    if fixture.kind == "symmetry":
+        # `Fixture._implied_dofs` has already refused a symmetry fixture with no
+        # normal, so this cannot be None by the time a solver sees one.
+        normal = fixture.normal or "x"
+        in_plane = tuple(3 + _AXES.index(axis) for axis in _AXES if axis != normal)
+        return translations + in_plane
+    return translations
+
+
+def held_dofs(
+    mesh: PointCloud,
+    fixtures: Sequence[Fixture],
+    *,
+    dofs_per_node: int = SOLID_DOFS,
+) -> NDArray[np.int64]:
     """Global degree-of-freedom indices the fixtures hold: sorted, de-duplicated.
 
-    Degrees of freedom are numbered ``3 * node + {0, 1, 2}`` for x, y, z, which is
-    the numbering the whole `solve` package uses.
+    Degrees of freedom are numbered ``dofs_per_node * node + local``, with the
+    local numbering `local_dofs` documents. At the default of three that is
+    ``3 * node + {0, 1, 2}`` for x, y, z — the numbering the whole `solve`
+    package uses, unchanged.
 
     `linear_static._dof_indices` computes the same thing and should call this
     instead, so the mapping is written down once. It could not be changed to in
@@ -305,36 +366,61 @@ def held_dofs(mesh: TetMesh, fixtures: Sequence[Fixture]) -> NDArray[np.int64]:
     """
     if not fixtures:
         return np.zeros(0, dtype=np.int64)
+    rotations = dofs_per_node == STRUCTURAL_DOFS
     blocks = []
     for fixture in fixtures:
         nodes = select_nodes(mesh, fixture.where)
-        offsets = np.array([_AXES.index(axis) for axis in fixture.held], dtype=np.int64)
-        blocks.append((nodes[:, None] * 3 + offsets[None, :]).ravel())
+        offsets = np.array(local_dofs(fixture, rotations=rotations), dtype=np.int64)
+        blocks.append((nodes[:, None] * dofs_per_node + offsets[None, :]).ravel())
     return np.unique(np.concatenate(blocks))
 
 
-def rigid_body_modes(nodes: NDArray[np.float64]) -> NDArray[np.float64]:
-    """The six rigid-body motions over these nodes, as columns of a (3N, 6) array.
+def rigid_body_modes(
+    nodes: NDArray[np.float64], *, dofs_per_node: int = SOLID_DOFS
+) -> NDArray[np.float64]:
+    """The six rigid-body motions over these nodes, as columns of a (D*N, 6) array.
 
     Columns 0-2 are the translations along x, y, z; columns 3-5 the rotations
     about x, y, z **through the centroid**, which is what makes the two groups
     mutually orthogonal (see the module docstring). Not normalised — `check` does
     that, and a caller wanting the raw motions should get the raw motions.
+
+    At `dofs_per_node=6` each node also carries the *rotation* part of each mode:
+    a rigid rotation about x turns every node by the same amount about x, so the
+    rotational block of that column is a constant unit vector while the
+    translational block is still ``omega x r``. Two things follow, and the second
+    is why the six-degree-of-freedom form has to exist at all:
+
+    * the two groups stay mutually orthogonal — the extra term is
+      ``e_a . 0 = 0`` against a translation — so the whitening argument in the
+      module docstring is untouched;
+    * **a rotation mode of a collinear mesh is no longer zero.** A straight beam
+      has every node on one line, so ``omega x r`` about that line vanishes and
+      the three-degree-of-freedom form calls the mesh degenerate. With the
+      rotational block present the column has norm ``sqrt(N)`` whatever the
+      geometry, and a straight beam is checked like anything else — which it has
+      to be, because a straight beam is the commonest member in a frame.
     """
     coords = np.ascontiguousarray(nodes, dtype=np.float64)
     count = len(coords)
     offsets = coords - coords.mean(axis=0)
 
-    modes = np.zeros((3 * count, RIGID_BODY_MODES), dtype=np.float64)
+    modes = np.zeros((dofs_per_node * count, RIGID_BODY_MODES), dtype=np.float64)
     for index, axis in enumerate(np.eye(3)):
-        modes[index::3, index] = 1.0
-        modes[:, 3 + index] = np.cross(axis, offsets).ravel()
+        modes[index :: dofs_per_node, index] = 1.0
+        rotation = np.cross(axis, offsets)
+        for component in range(3):
+            modes[component :: dofs_per_node, 3 + index] = rotation[:, component]
+        if dofs_per_node == STRUCTURAL_DOFS:
+            modes[3 + index :: dofs_per_node, 3 + index] = 1.0
     return modes
 
 
-def _normalised_modes(nodes: NDArray[np.float64]) -> NDArray[np.float64]:
+def _normalised_modes(
+    nodes: NDArray[np.float64], dofs_per_node: int
+) -> NDArray[np.float64]:
     """`rigid_body_modes` with each column scaled to unit L2 norm over the mesh."""
-    modes = rigid_body_modes(nodes)
+    modes = rigid_body_modes(nodes, dofs_per_node=dofs_per_node)
     norms = np.linalg.norm(modes, axis=0)
     if float(norms.min()) <= 0.0:
         raise SolverError(
@@ -345,7 +431,12 @@ def _normalised_modes(nodes: NDArray[np.float64]) -> NDArray[np.float64]:
     return modes / norms[None, :]
 
 
-def check_restraints(mesh: TetMesh, fixtures: Sequence[Fixture]) -> ConstraintReport:
+def check_restraints(
+    mesh: PointCloud,
+    fixtures: Sequence[Fixture],
+    *,
+    dofs_per_node: int = SOLID_DOFS,
+) -> ConstraintReport:
     """Do these fixtures remove all six rigid-body motions? Exact, and cheap.
 
     Cheap: one pass to build a ``(3N, 6)`` array and an SVD of a ``(|C|, 6)``
@@ -356,8 +447,8 @@ def check_restraints(mesh: TetMesh, fixtures: Sequence[Fixture]) -> ConstraintRe
     exception, because the API and the agent both want to *render* it. Use
     `require_restrained` where a `SolverError` is what the caller wants.
     """
-    modes = _normalised_modes(mesh.nodes)
-    constrained = held_dofs(mesh, fixtures)
+    modes = _normalised_modes(mesh.nodes, dofs_per_node)
+    constrained = held_dofs(mesh, fixtures, dofs_per_node=dofs_per_node)
 
     # Whitening: G = R^T R is a correlation matrix (unit diagonal, since the
     # columns are normalised). In the whitened coordinates a unit vector is a
@@ -420,7 +511,12 @@ def check_restraints(mesh: TetMesh, fixtures: Sequence[Fixture]) -> ConstraintRe
     )
 
 
-def require_restrained(mesh: TetMesh, fixtures: Sequence[Fixture]) -> ConstraintReport:
+def require_restrained(
+    mesh: PointCloud,
+    fixtures: Sequence[Fixture],
+    *,
+    dofs_per_node: int = SOLID_DOFS,
+) -> ConstraintReport:
     """`check_restraints`, but raise `SolverError` when the model can still move.
 
     This is the one line a solver adds. Call it *before* writing a deck or
@@ -428,7 +524,7 @@ def require_restrained(mesh: TetMesh, fixtures: Sequence[Fixture]) -> Constraint
     is the only thing standing between a part held nowhere and a plausible-looking
     displacement of 5.4e+11 mm.
     """
-    report = check_restraints(mesh, fixtures)
+    report = check_restraints(mesh, fixtures, dofs_per_node=dofs_per_node)
     if not report.restrained:
         raise SolverError(report.message())
     return report
@@ -438,10 +534,13 @@ __all__ = [
     "MODE_NAMES",
     "RANK_TOLERANCE",
     "RIGID_BODY_MODES",
+    "SOLID_DOFS",
+    "STRUCTURAL_DOFS",
     "ConstraintReport",
     "FreeMotion",
     "check_restraints",
     "held_dofs",
+    "local_dofs",
     "motion_name",
     "require_restrained",
     "rigid_body_modes",

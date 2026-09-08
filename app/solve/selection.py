@@ -1,3 +1,5 @@
+from typing import Protocol
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -15,7 +17,34 @@ from app.solve.types import (
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
 
-def select_nodes(mesh: TetMesh, selector: Selector) -> NDArray[np.int64]:
+class PointCloud(Protocol):
+    """The three things a geometric selector needs from a mesh.
+
+    A selector names a region by *where it is* — the bottom face, a box, the wall
+    of a bore — so it needs coordinates and an extent and nothing else. Stated as
+    a protocol rather than as `TetMesh` because 6.3 adds `ShellMesh` and
+    `BeamMesh`, and a selector that worked only on solids would mean a frame's
+    restraints had to be written as node numbers: the exact thing
+    `KRYOVA_MASTER_PLAN.md` 6.2 says the vocabulary exists to avoid, since a node
+    number dies on the next re-mesh.
+
+    Deliberately narrow. `distribute_force` below stays on `TetMesh`, because
+    tributary area is defined over a solid's boundary triangles and a shell or a
+    beam needs its own distribution — a named gap rather than one papered over
+    with an equal split that would look like it had worked.
+    """
+
+    @property
+    def nodes(self) -> NDArray[np.float64]: ...
+
+    @property
+    def node_count(self) -> int: ...
+
+    @property
+    def bounding_box(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]: ...
+
+
+def select_nodes(mesh: PointCloud, selector: Selector) -> NDArray[np.int64]:
     """Resolve a selector to node indices. Raises if it matches nothing."""
     if isinstance(selector, FaceSelector):
         nodes = _select_face(mesh, selector)
@@ -44,7 +73,7 @@ def select_nodes(mesh: TetMesh, selector: Selector) -> NDArray[np.int64]:
     return nodes
 
 
-def _select_face(mesh: TetMesh, selector: FaceSelector) -> NDArray[np.int64]:
+def _select_face(mesh: PointCloud, selector: FaceSelector) -> NDArray[np.int64]:
     axis = _AXIS_INDEX[selector.axis]
     coords = mesh.nodes[:, axis]
     lo, hi = mesh.bounding_box
@@ -60,7 +89,7 @@ def _select_face(mesh: TetMesh, selector: FaceSelector) -> NDArray[np.int64]:
     return np.flatnonzero(coords >= coords.max() - band)
 
 
-def _select_box(mesh: TetMesh, selector: BoxSelector) -> NDArray[np.int64]:
+def _select_box(mesh: PointCloud, selector: BoxSelector) -> NDArray[np.int64]:
     lo = np.asarray(selector.min, dtype=np.float64)
     hi = np.asarray(selector.max, dtype=np.float64)
     if np.any(hi < lo):
@@ -102,7 +131,7 @@ def radial_offsets(
     return perpendicular, along
 
 
-def _select_cylinder(mesh: TetMesh, selector: CylinderSelector) -> NDArray[np.int64]:
+def _select_cylinder(mesh: PointCloud, selector: CylinderSelector) -> NDArray[np.int64]:
     """Nodes in the wall of a cylinder -- a bore, a boss, a shaft seat.
 
     A band rather than a solid disc: a bolt hole is selected by naming its
@@ -119,7 +148,7 @@ def _select_cylinder(mesh: TetMesh, selector: CylinderSelector) -> NDArray[np.in
     return np.flatnonzero(inside)
 
 
-def _select_sphere(mesh: TetMesh, selector: SphereSelector) -> NDArray[np.int64]:
+def _select_sphere(mesh: PointCloud, selector: SphereSelector) -> NDArray[np.int64]:
     centre = np.asarray(selector.centre, dtype=np.float64)
     inside = np.linalg.norm(mesh.nodes - centre, axis=1) <= selector.radius
     return np.flatnonzero(inside)

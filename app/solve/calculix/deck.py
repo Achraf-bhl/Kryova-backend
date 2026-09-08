@@ -48,6 +48,34 @@ will look like the model exploded.
 **A coordinate written at low precision is a different part.** Everything numeric
 goes out at `repr`-grade precision (17 significant digits), because a deck that
 rounds node coordinates to six figures has silently re-meshed the model.
+
+**A temperature change that is not written is solved as isothermal, in silence.**
+This is 6.4's half of the file and it was the live defect until 2026-09-08:
+`LoadCase.delta_t_k` reached the in-house solver, which assembles a thermal load
+from it, and reached CalculiX not at all. The same case therefore returned
+`sigma = -E alpha dT` from one solver and zero from the other, with no error on
+either side — and 6.5's oracle would have called that a bug in the deck writer,
+correctly, had anything ever run a thermal case through both. Three facts make
+the written form mean what `app/solve/thermal.py` means by it:
+
+- **[M] `*INITIAL CONDITIONS, TYPE=TEMPERATURE`** sets the temperature the part
+  starts at. Written explicitly as 0.0 rather than left to ccx's initialiser,
+  because the number it holds is one half of a subtraction and the other half is
+  four lines further down.
+- **[M] `*EXPANSION`, parameter `ZERO`**: "temperature at which the thermal
+  strains are zero (default: 0)". Also written explicitly, and for the same
+  reason: `ZERO` and the initial condition must agree or `delta_t_k` stops being
+  a *change*, and two numbers that must agree belong where a reader can see both.
+- **[M] `*TEMPERATURE`** inside the `*STATIC` step then names the temperature the
+  part is *at*. With the two above pinned to zero, `alpha * (T - ZERO)` is
+  `alpha * delta_t_k` exactly, which is what `thermal.thermal_strain` computes.
+
+And the trap that makes the refusal necessary: **a material with no expansion
+coefficient writes no `*EXPANSION` card, and a deck with `*TEMPERATURE` and no
+`*EXPANSION` heats the part and reports zero thermal stress.** No error, no
+warning — the temperature is applied to a material that does not respond to it.
+`write_deck` refuses that case by name instead, which is what `thermal_strain`
+already does on the in-house path.
 """
 
 from __future__ import annotations
@@ -58,10 +86,24 @@ from typing import Final
 import numpy as np
 from numpy.typing import NDArray
 
+from app.mesh.structural import BeamMesh, ShellMesh
 from app.mesh.types import TetMesh
-from app.solve.constraints import require_restrained
+from app.solve.calculix.elements import (
+    choose_element,
+    element_rows,
+    output_request_lines,
+    require_orientation,
+    require_section_for,
+    section_lines,
+)
+from app.solve.constraints import (
+    STRUCTURAL_DOFS,
+    local_dofs,
+    require_restrained,
+)
 from app.solve.loads import assemble_loads
-from app.solve.selection import select_nodes
+from app.solve.sections import BeamSection, Section
+from app.solve.selection import PointCloud, select_nodes
 from app.solve.types import Fixture, LoadCase, Material, SolverError
 
 #: Our midside slot order -> CalculiX's. See the module docstring; verified
@@ -83,8 +125,19 @@ C3D10_EDGES: Final[tuple[tuple[int, int], ...]] = (
 #: boundary where the numbers stop being ours.
 DENSITY_KG_M3_TO_TONNE_MM3: Final = 1e-12
 
-#: CalculiX degree-of-freedom numbers for a solid element.
-_DOF: Final = {"x": 1, "y": 2, "z": 3}
+#: The element set every element of a single-section model belongs to.
+ALL_ELEMENTS: Final = "EALL"
+
+#: The node set every node of the model belongs to. Written on `*NODE` and named
+#: again by the temperature cards, which apply to the whole part.
+ALL_NODES: Final = "NALL"
+
+#: The temperature at which the thermal strain is zero, and the temperature the
+#: part starts at. One number rather than two because they are the same fact:
+#: `delta_t_k` is a *change*, so whatever it is measured from must also be what
+#: `*EXPANSION, ZERO=` is measured from. Zero is chosen because it makes the
+#: subtraction the identity and the deck readable.
+REFERENCE_TEMPERATURE: Final = 0.0
 
 #: Below this a nodal force is not worth a deck line. Tributary-area
 #: distribution leaves exact zeros on most nodes, and writing them all out
@@ -137,7 +190,7 @@ def _wrap(numbers: Sequence[int], per_line: int = 8) -> list[str]:
 
 
 def _fixture_sets(
-    mesh: TetMesh, fixtures: Sequence[Fixture]
+    mesh: PointCloud, fixtures: Sequence[Fixture]
 ) -> list[tuple[str, NDArray[np.int64]]]:
     """One node set per fixture, named for its position in the case.
 
@@ -188,50 +241,101 @@ def write_model(
     the deck writer rather than to the physics, which is the one thing that
     comparison exists to rule out.
     """
-    lines: list[str] = [
-        "*HEADING",
-        f"{name} -- written by Kryova. Units: mm, N, MPa, tonne.",
-        "*NODE, NSET=NALL",
-    ]
+    lines = _heading_and_nodes(mesh.nodes, name=name)
 
-    for index, (x, y, z) in enumerate(mesh.nodes):
-        lines.append(f"{index + 1}, {_number(x)}, {_number(y)}, {_number(z)}")
-
-    lines.append(f"*ELEMENT, TYPE={element_type(mesh)}, ELSET=EALL")
-    for element_id, nodes in _element_rows(mesh):
-        chunks = _wrap([element_id, *nodes])
-        lines.append(chunks[0] + ("," if len(chunks) > 1 else ""))
-        for extra in chunks[1:]:
-            lines.append(extra)
+    lines.append(f"*ELEMENT, TYPE={element_type(mesh)}, ELSET={ALL_ELEMENTS}")
+    lines.extend(_element_lines(_element_rows(mesh)))
 
     sets = _fixture_sets(mesh, fixtures)
+    lines.extend(_nset_lines(sets))
+    lines.extend(_material_lines(material))
+    lines.append(
+        f"*SOLID SECTION, ELSET={ALL_ELEMENTS}, MATERIAL={_material_name(material)}"
+    )
+
+    return lines, _boundary_data(sets, fixtures, rotations=False)
+
+
+def _heading_and_nodes(
+    nodes: NDArray[np.float64], *, name: str = "Kryova"
+) -> list[str]:
+    """`*HEADING` and the `*NODE` block. The one node writer in this backend.
+
+    Shared by the solid and the frame model writers rather than copied. A second
+    node writer is how two decks quietly start describing different models, and
+    it would put 6.5's oracle in the position of localising a disagreement to
+    the deck writer instead of to the physics — the one thing that comparison
+    exists to rule out.
+    """
+    lines = [
+        "*HEADING",
+        f"{name} -- written by Kryova. Units: mm, N, MPa, tonne.",
+        f"*NODE, NSET={ALL_NODES}",
+    ]
+    for index, (x, y, z) in enumerate(nodes):
+        lines.append(f"{index + 1}, {_number(x)}, {_number(y)}, {_number(z)}")
+    return lines
+
+
+def _element_lines(rows: Iterable[tuple[int, list[int]]]) -> list[str]:
+    """`*ELEMENT` data rows, wrapped and continued where they must be."""
+    lines: list[str] = []
+    for element_id, nodes in rows:
+        chunks = _wrap([element_id, *nodes])
+        lines.append(chunks[0] + ("," if len(chunks) > 1 else ""))
+        lines.extend(chunks[1:])
+    return lines
+
+
+def _nset_lines(sets: Sequence[tuple[str, NDArray[np.int64]]]) -> list[str]:
+    lines: list[str] = []
     for set_name, held_nodes in sets:
         lines.append(f"*NSET, NSET={set_name}")
         lines.extend(_wrap([int(n) + 1 for n in held_nodes]))
+    return lines
 
-    lines.append(f"*MATERIAL, NAME={_material_name(material)}")
-    lines.append("*ELASTIC, TYPE=ISO")
-    lines.append(
-        f"{_number(material.youngs_modulus_mpa)}, {_number(material.poissons_ratio)}"
-    )
-    lines.append("*DENSITY")
-    lines.append(_number(material.density_kg_m3 * DENSITY_KG_M3_TO_TONNE_MM3))
+
+def _material_lines(material: Material) -> list[str]:
+    lines = [
+        f"*MATERIAL, NAME={_material_name(material)}",
+        "*ELASTIC, TYPE=ISO",
+        f"{_number(material.youngs_modulus_mpa)}, {_number(material.poissons_ratio)}",
+        "*DENSITY",
+        _number(material.density_kg_m3 * DENSITY_KG_M3_TO_TONNE_MM3),
+    ]
     if material.thermal_expansion_per_k is not None:
-        lines.append("*EXPANSION")
+        # ZERO is written even though 0.0 is ccx's own default: it is one half of
+        # the subtraction `*TEMPERATURE` completes, and the other half is the
+        # `*INITIAL CONDITIONS` block. See the module docstring.
+        lines.append(f"*EXPANSION, ZERO={_number(REFERENCE_TEMPERATURE)}")
         lines.append(_number(material.thermal_expansion_per_k))
-    lines.append(f"*SOLID SECTION, ELSET=EALL, MATERIAL={_material_name(material)}")
+    return lines
 
-    boundary: list[str] = []
+
+def _boundary_data(
+    sets: Sequence[tuple[str, NDArray[np.int64]]],
+    fixtures: Sequence[Fixture],
+    *,
+    rotations: bool,
+) -> list[str]:
+    """`*BOUNDARY` data rows for each fixture's node set, without the card.
+
+    Which degrees of freedom a fixture holds is `constraints.local_dofs`'
+    question, not this module's — a clamp holding all six on a beam and three on
+    a solid is a statement about what the word means, and it is read here rather
+    than restated so that the deck and the pre-solve restraint check can never
+    disagree about what was held.
+    """
+    rows: list[str] = []
     for (set_name, _), fixture in zip(sets, fixtures, strict=True):
-        for dof in fixture.held:
-            number = _DOF[dof]
+        for local in local_dofs(fixture, rotations=rotations):
+            number = local + 1
             # start, end, value -- CalculiX takes a range, and a single dof is a
             # range of one. The explicit 0.0 matters: omitting it is legal and
             # means the same thing, but a reader diffing two decks should not
             # have to know that.
-            boundary.append(f"{set_name}, {number}, {number}, 0.0")
-
-    return lines, boundary
+            rows.append(f"{set_name}, {number}, {number}, 0.0")
+    return rows
 
 
 def cload_data_lines(forces: NDArray[np.float64]) -> list[str]:
@@ -250,6 +354,199 @@ def cload_data_lines(forces: NDArray[np.float64]) -> list[str]:
         value = reshaped[node_index, axis]
         lines.append(f"{int(node_index) + 1}, {axis + 1}, {_number(value)}")
     return lines
+
+
+def write_frame_model(
+    mesh: ShellMesh | BeamMesh,
+    material: Material,
+    fixtures: Sequence[Fixture],
+    section: Section,
+    *,
+    name: str = "Kryova",
+) -> tuple[list[str], list[str]]:
+    """`write_model` for a shell or beam mesh — master plan 6.3.
+
+    Same contract, same return: `(model lines, boundary data lines)`, the
+    boundary rows without their card, so a static, a `*FREQUENCY` and a `*BUCKLE`
+    step can each place their own. What differs is only what a shell and a beam
+    *are*: the element comes from `elements.choose_element`, the section card
+    carries the thickness or the profile the mesh does not, and the restraints
+    reach six degrees of freedom per node rather than three.
+
+    Three things are refused before a line is written, each of which CalculiX
+    would either accept quietly or complain about in the wrong terms:
+
+    1. a section of the wrong kind for the mesh (`require_section_for`);
+    2. a beam orientation lying along one of its own members
+       (`require_orientation`) — the local frame is degenerate and the profile
+       has nowhere to point;
+    3. fixtures that leave a rigid-body motion, checked over all six degrees of
+       freedom. That check has to be the six-DOF one: a cantilever clamped at a
+       single node is properly restrained and the three-DOF form calls it free,
+       while a straight beam is collinear and the three-DOF form calls its mesh
+       degenerate. Both would be refusals of a model that is perfectly correct.
+    """
+    require_section_for(mesh, section)
+    choice = choose_element(mesh)
+    if isinstance(mesh, BeamMesh) and isinstance(section, BeamSection):
+        require_orientation(mesh, section)
+
+    lines = _heading_and_nodes(mesh.nodes, name=name)
+    lines.append(f"*ELEMENT, TYPE={choice.calculix_type}, ELSET={ALL_ELEMENTS}")
+    lines.extend(_element_lines(element_rows(mesh)))
+
+    sets = _fixture_sets(mesh, fixtures)
+    lines.extend(_nset_lines(sets))
+    lines.extend(_material_lines(material))
+    lines.extend(
+        section_lines(
+            choice,
+            section,
+            element_set=ALL_ELEMENTS,
+            material_name=_material_name(material),
+        )
+    )
+
+    return lines, _boundary_data(sets, fixtures, rotations=True)
+
+
+def write_frame_deck(
+    mesh: ShellMesh | BeamMesh,
+    material: Material,
+    fixtures: Sequence[Fixture],
+    section: Section,
+    *,
+    forces: NDArray[np.float64],
+    delta_t_k: float | None = None,
+    name: str = "Kryova",
+) -> str:
+    """A complete linear static `.inp` for a shell or beam model.
+
+    **It takes a force vector rather than a `LoadCase`, and that is a stated gap
+    rather than an oversight.** `loads.assemble_loads` distributes a force over
+    its region by tributary area, and tributary area is defined in
+    `selection.distribute_force` over a *solid's boundary triangles* — a shell's
+    faces and a beam's segments each need their own distribution, and the two are
+    not the same rule. Accepting a `LoadCase` here and splitting the force
+    equally between the selected nodes would run, look right, and be
+    mesh-dependent in exactly the way 6.2's tributary-area rule exists to
+    prevent: refine the mesh and the applied load moves. So the caller supplies
+    the `(3 * n_nodes,)` vector it means, `cload_data_lines` writes it, and
+    "loads on 1-D and 2-D regions" stays a piece of work somebody has to do
+    rather than one that looks done.
+
+    Rotational loads are not written either. `*CLOAD` can name degrees of freedom
+    4 to 6 on these elements — a moment applied straight to a node — and there is
+    no vocabulary for one in `types.py` yet. `MomentLoad` is a moment *about an
+    axis through a region*, resolved into tangential nodal forces, which is a
+    different and more general thing; mapping it onto a beam node's rotational
+    DOF is a decision, not a translation.
+    """
+    lines, boundary = write_frame_model(mesh, material, fixtures, section, name=name)
+    require_restrained(mesh, fixtures, dofs_per_node=STRUCTURAL_DOFS)
+    choice = choose_element(mesh)
+
+    expected = 3 * mesh.node_count
+    if forces.size != expected:
+        raise SolverError(
+            f"The force vector has {forces.size} entries and this mesh has "
+            f"{mesh.node_count} nodes, so it needs {expected} — three translational "
+            "components per node, in node order. A vector of the wrong length would "
+            "otherwise be reshaped into loads on the wrong nodes."
+        )
+
+    if delta_t_k is not None:
+        _require_expansion(material, delta_t_k)
+        lines.extend(initial_temperature_lines())
+
+    lines.append("*STEP")
+    lines.append("*STATIC")
+    lines.append("*BOUNDARY")
+    lines.extend(boundary)
+
+    cloads = cload_data_lines(forces)
+    if cloads:
+        lines.append("*CLOAD")
+        lines.extend(cloads)
+
+    if delta_t_k is not None:
+        lines.append("*TEMPERATURE")
+        lines.extend(temperature_data_lines(delta_t_k))
+
+    # `OUTPUT=2D` rather than the plain cards `write_deck` uses. On an expanded
+    # element the default writes the results at the *expanded* nodes, which the
+    # caller has never seen and which outnumber the mesh's own — and every reader
+    # in `frd.py` indexes by the submitted node numbers. See
+    # `elements.py` consequence 2.
+    lines.extend(output_request_lines(choice, node="U", element="S"))
+    lines.append("*END STEP")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def initial_temperature_lines(reference: float | None = None) -> list[str]:
+    """`*INITIAL CONDITIONS, TYPE=TEMPERATURE` over the whole model.
+
+    A *model* card — it belongs before the first `*STEP`, not inside one, which
+    is why it is written here rather than by `steps.py`. Public because a thermal
+    case posed as a modal or buckling run would need the same block, and a second
+    copy of the set name and the reference temperature is a second place for them
+    to drift out of step with `*EXPANSION, ZERO=`.
+
+    `None` rather than `REFERENCE_TEMPERATURE` as the default, and resolved in
+    the body. A default argument is evaluated once when the module is imported,
+    so spelling it the obvious way would freeze this function's idea of the
+    reference at import time while `temperature_data_lines` and `write_model`
+    went on reading the live constant — three cards, two references, and a
+    `delta_t_k` that silently stops being a change. Found by the test that moves
+    the reference, which is why that test moves it rather than trusting zero.
+    """
+    value = REFERENCE_TEMPERATURE if reference is None else float(reference)
+    return [
+        "*INITIAL CONDITIONS, TYPE=TEMPERATURE",
+        f"{ALL_NODES}, {_number(value)}",
+    ]
+
+
+def temperature_data_lines(delta_t_k: float) -> list[str]:
+    """`*TEMPERATURE` data rows for a uniform change, without the card.
+
+    Uniform over the whole part, which is the only thermal problem
+    `app/solve/thermal.py` accepts and says so: a temperature *field* needs a
+    conduction solve with its own boundary conditions, and inventing one here
+    would be answering a question nobody asked. `ALL_NODES` is therefore the
+    right set, and the deck says as much by naming it.
+
+    The value written is `REFERENCE_TEMPERATURE + delta_t_k` rather than
+    `delta_t_k`, which are the same number today and would not be if the
+    reference ever moved. Writing the sum is what makes `delta_t_k` a change.
+    """
+    return [f"{ALL_NODES}, {_number(REFERENCE_TEMPERATURE + float(delta_t_k))}"]
+
+
+def _require_expansion(material: Material, delta_t_k: float) -> None:
+    """Refuse a temperature change on a material that cannot respond to one.
+
+    CalculiX will not refuse it. With no `*EXPANSION` card the temperature is
+    applied to a material whose expansion coefficient is zero, the run succeeds,
+    and the reported thermal stress is zero — which reads as "this part does not
+    mind being heated" rather than as "nobody told the solver how it expands".
+
+    The in-house path refuses the same case in `thermal.thermal_strain`. Said
+    here in its own words rather than by importing that module: `thermal.py`
+    pulls in `linear_static` and therefore scipy, and the deck writer is
+    deliberately free of both. `tests/test_solver_calculix.py` pins the two
+    messages to the same substance so they cannot drift into disagreeing.
+    """
+    if material.thermal_expansion_per_k is not None:
+        return
+    raise SolverError(
+        f"This load case applies a temperature change of {delta_t_k:g} K, but "
+        f"{material.name!r} has no coefficient of thermal expansion, so its thermal "
+        "stress cannot be computed. Set thermal_expansion_per_k on the material "
+        "(per kelvin -- 23.6e-6 for aluminium), or clear delta_t_k to solve the "
+        "isothermal case."
+    )
 
 
 def write_deck(mesh: TetMesh, case: LoadCase, *, name: str = "Kryova") -> str:
@@ -284,6 +581,13 @@ def write_deck(mesh: TetMesh, case: LoadCase, *, name: str = "Kryova") -> str:
     lines, boundary = write_model(mesh, material, case.fixtures, name=name)
     require_restrained(mesh, case.fixtures)
 
+    # Model cards, so before the first *STEP. Refused first: a deck that heats a
+    # material with no expansion coefficient is accepted by ccx and reports no
+    # thermal stress at all. See `_require_expansion`.
+    if case.delta_t_k is not None:
+        _require_expansion(material, case.delta_t_k)
+        lines.extend(initial_temperature_lines())
+
     lines.append("*STEP")
     lines.append("*STATIC")
 
@@ -295,6 +599,10 @@ def write_deck(mesh: TetMesh, case: LoadCase, *, name: str = "Kryova") -> str:
     if cloads:
         lines.append("*CLOAD")
         lines.extend(cloads)
+
+    if case.delta_t_k is not None:
+        lines.append("*TEMPERATURE")
+        lines.extend(temperature_data_lines(case.delta_t_k))
 
     # Ask for exactly what `SolveOutput` needs and nothing else. A .frd carrying
     # every field CalculiX can write is large, slow to parse, and full of
@@ -320,11 +628,18 @@ def _material_name(material: Material) -> str:
 
 
 __all__ = [
+    "ALL_ELEMENTS",
+    "ALL_NODES",
     "C3D10_EDGES",
     "C3D10_MIDSIDE_ORDER",
     "DENSITY_KG_M3_TO_TONNE_MM3",
+    "REFERENCE_TEMPERATURE",
     "cload_data_lines",
     "element_type",
+    "initial_temperature_lines",
+    "temperature_data_lines",
     "write_deck",
+    "write_frame_deck",
+    "write_frame_model",
     "write_model",
 ]

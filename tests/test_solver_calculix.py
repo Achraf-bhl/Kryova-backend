@@ -23,8 +23,8 @@ from app.solve.calculix import (
     element_type,
     write_deck,
 )
+from app.solve.calculix.deck import ALL_NODES, write_model
 from app.solve.calculix.deck import cload_data_lines as _cload_lines
-from app.solve.calculix.deck import write_model
 from app.solve.materials import MATERIALS
 from app.solve.types import FaceSelector, Fixture, ForceLoad, LoadCase, SolverError
 
@@ -494,3 +494,142 @@ class TestAnUnsolvableModelIsRefusedBeforeItIsWritten:
             write_deck(_mesh(), case)
 
         assert "Fixture 2" in str(raised.value)
+
+
+class TestATemperatureChangeReachesTheDeck:
+    """Master plan 6.4. Until 2026-09-08 `LoadCase.delta_t_k` reached the
+    in-house solver and reached CalculiX not at all.
+
+    That is the worst shape a defect can take here: the same load case returned
+    `sigma = -E alpha dT` from one solver and exactly zero from the other, both
+    with `success` on the job row and neither with a warning. 6.5's oracle exists
+    to catch precisely that and had never been pointed at a thermal case.
+
+    Every test below is named after the wrong answer it prevents, and none of the
+    mistakes raises anything on its own.
+    """
+
+    def _thermal_case(self, delta_t_k: float = 80.0, **overrides) -> LoadCase:
+        return _case(delta_t_k=delta_t_k, **overrides)
+
+    def test_an_isothermal_case_writes_no_temperature_card_at_all(self) -> None:
+        """The cost of the feature to everyone who is not using it must be zero
+        — including the reader's, which is why the cards are absent rather than
+        written with a zero in them."""
+        deck = write_deck(_mesh(), _case())
+
+        assert "*TEMPERATURE" not in deck
+        assert "*INITIAL CONDITIONS" not in deck
+
+    def test_a_temperature_change_writes_both_halves_of_the_subtraction(self) -> None:
+        """`*TEMPERATURE` alone is not a temperature *change*. Without the
+        initial condition the deck states one number where the physics needs
+        two, and what the part expands by is then whatever ccx initialised its
+        reference to rather than what the caller asked for."""
+        deck = write_deck(_mesh(), self._thermal_case(80.0))
+
+        assert "*INITIAL CONDITIONS, TYPE=TEMPERATURE" in deck
+        assert "*TEMPERATURE" in deck
+        assert _section(deck, "*INITIAL CONDITIONS") == [f"{ALL_NODES}, 0.0"]
+        assert _section(deck, "*TEMPERATURE") == [f"{ALL_NODES}, 80.0"]
+
+    def test_the_written_temperature_is_the_change_the_case_asked_for(self) -> None:
+        """`delta_t_k` is a change and the deck states an absolute temperature.
+
+        The reference is moved for this test rather than trusted at zero,
+        because at zero the two are the same number and a deck writer that
+        dropped the reference entirely would pass. What is being pinned is the
+        *difference between the two cards*, which is the only thing the physics
+        reads: `alpha * (T - ZERO)`.
+        """
+        monkeypatched = 20.0
+        for delta in (-120.0, -0.5, 0.0, 250.0):
+            import app.solve.calculix.deck as deck_module
+
+            original = deck_module.REFERENCE_TEMPERATURE
+            try:
+                deck_module.REFERENCE_TEMPERATURE = monkeypatched
+                deck = write_deck(_mesh(), self._thermal_case(delta))
+            finally:
+                deck_module.REFERENCE_TEMPERATURE = original
+
+            applied = float(_section(deck, "*TEMPERATURE")[0].split(",")[1])
+            initial = float(_section(deck, "*INITIAL CONDITIONS")[0].split(",")[1])
+            zero = float(
+                next(
+                    line for line in deck.splitlines() if line.startswith("*EXPANSION")
+                ).split("=")[1]
+            )
+
+            assert applied - initial == pytest.approx(delta)
+            assert initial == pytest.approx(zero)
+
+    def test_the_expansion_card_states_the_zero_it_is_measured_from(self) -> None:
+        """`*EXPANSION`'s ZERO and the initial condition are one fact written
+        twice. A deck stating one and defaulting the other reads as though the
+        two could differ, and the day ccx's default moves, they do."""
+        deck = write_deck(_mesh(), self._thermal_case())
+
+        expansion = [line for line in deck.splitlines() if line.startswith("*EXPANSION")]
+        assert expansion == ["*EXPANSION, ZERO=0.0"]
+        assert f"{ALL_NODES}, 0.0" in _section(deck, "*INITIAL CONDITIONS")
+
+    def test_the_temperature_is_applied_inside_the_static_step(self) -> None:
+        """A `*TEMPERATURE` card outside a step is a model definition ccx has
+        nothing to do with; the load has to be *in* the step that solves. And
+        `*INITIAL CONDITIONS` is the opposite — a model card, refused inside a
+        step. Getting either the wrong side of `*STEP` is a parse error at best
+        and an ignored load at worst."""
+        lines = write_deck(_mesh(), self._thermal_case()).splitlines()
+        step = lines.index("*STEP")
+
+        assert lines.index("*INITIAL CONDITIONS, TYPE=TEMPERATURE") < step
+        assert lines.index("*TEMPERATURE") > step
+        assert lines.index("*TEMPERATURE") < lines.index("*END STEP")
+
+    def test_a_material_that_cannot_expand_is_refused_rather_than_heated(self) -> None:
+        """The one that would have shipped a wrong number. With no expansion
+        coefficient no `*EXPANSION` card is written, ccx applies the temperature
+        to a material that does not respond to it, and the run succeeds with zero
+        thermal stress — which reads as a finding rather than as a gap."""
+        cold = MATERIALS["steel-1018"].model_copy(update={"thermal_expansion_per_k": None})
+
+        with pytest.raises(SolverError) as refused:
+            write_deck(_mesh(), self._thermal_case(material=cold))
+
+        message = str(refused.value)
+        assert "thermal_expansion_per_k" in message
+        assert "steel-1018" in message
+
+    def test_the_two_solvers_refuse_the_same_case_for_the_same_reason(self) -> None:
+        """`thermal.thermal_strain` refuses this on the in-house path and this
+        module refuses it on the federated one, in two separately written
+        sentences. They are allowed to differ in wording and not in substance: a
+        user who fixes what one of them names must have fixed the other."""
+        from app.solve.thermal import thermal_strain
+
+        cold = MATERIALS["steel-1018"].model_copy(update={"thermal_expansion_per_k": None})
+
+        with pytest.raises(SolverError) as internal:
+            thermal_strain(cold, 80.0)
+        with pytest.raises(SolverError) as federated:
+            write_deck(_mesh(), self._thermal_case(material=cold))
+
+        for message in (str(internal.value), str(federated.value)):
+            assert "thermal_expansion_per_k" in message
+            assert "23.6e-6" in message
+
+    def test_a_material_that_can_expand_is_not_refused_without_a_temperature(self) -> None:
+        """The refusal is about the pair, not about either half. A material with
+        no expansion coefficient is perfectly solvable isothermally, and most
+        materials in a static run never touch one."""
+        cold = MATERIALS["steel-1018"].model_copy(update={"thermal_expansion_per_k": None})
+
+        assert "*STATIC" in write_deck(_mesh(), _case(material=cold))
+
+    def test_the_thermal_cards_survive_a_quadratic_mesh(self) -> None:
+        """Nothing here depends on element order, and a test that only ever ran
+        on tet4 would not have shown that."""
+        deck = write_deck(_mesh(quadratic=True), self._thermal_case(45.0))
+
+        assert _section(deck, "*TEMPERATURE") == [f"{ALL_NODES}, 45.0"]

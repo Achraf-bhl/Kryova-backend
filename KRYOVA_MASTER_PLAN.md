@@ -351,6 +351,16 @@ The gates:
    `ccx` vs `linear_static` on the same case.
    > RUN 2026-09-06, DID NOT PASS — rung 3 failed. See `docs/verification-2026-09-06/`. Rung 3 is
    > carried forward and G1 runs again.
+   > **DUE — E6 closed 2026-09-08 and the gate has grown two items, because the phase's last two
+   > tasks landed on a machine with no `ccx` on it.** (a) **Run the oracle on a thermal case**,
+   > not only an isothermal one: `delta_t_k` reached CalculiX nowhere at all until 6.4, so a
+   > restrained-bar case at `delta_t_k=80` is the first comparison that could ever have caught
+   > it — expect `sigma = -E alpha dT` from both. (b) **Submit one shell deck and one beam deck
+   > and read the `.frd` back**, which settles the three keyword claims in
+   > `app/solve/calculix/elements.py` that no Linux run can: that `OUTPUT=2D` is accepted on
+   > `*NODE FILE` *and* `*EL FILE`, that the results then land at the submitted node numbers, and
+   > that the `*BEAM SECTION` data-line order (dimensions, then direction cosines) is the one ccx
+   > reads. A wrong answer to any of the three is a deck ccx accepts.
 2. **G2** — opens after **E11 + E12**. The input stops being a shape description and becomes a
    written requirement, with real materials and bought-in parts. Driven: rung 4 — two parts and a
    constraint, specified as a requirement rather than as dimensions.
@@ -978,6 +988,16 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 
 ##### Phase E6 — The solver federation #####
 
+> ✅ PHASE COMPLETE (2026-09-08) — all six tasks done and tested, with three residuals named
+> in the tasks that carry them rather than hidden: **nothing in this phase has been
+> round-tripped through a real `ccx`** (there is none on the Linux machine — every keyword is
+> read from the manual, and the first Windows run is the measurement that turns it from
+> documented into verified); **nothing produces a shell or beam mesh yet**, so the element
+> strategy in task 3 is exercised by authored meshes and not by a mesher; and **loads on 1-D
+> and 2-D regions have no tributary-area rule**, so `write_frame_deck` takes a nodal force
+> vector rather than a `LoadCase` and says why. Each is a stated gap, not a gap the code
+> pretends is closed.
+
 **~7 engineer-months.**
 
 1. **A `Solver` implementation backed by CalculiX across a subprocess boundary** — write `.inp`,
@@ -999,11 +1019,40 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    (S8R → 20-node brick, B31 → C3D8I), which changes thickness-direction stress recovery and is a
    known source of surprise — record it in the integration notes and test against it. A frame
    meshed as solids is a mesh nobody can afford; beams and shells are not optional.
-   > NOT STARTED — shells and beams are the open half of this phase.
+   > DONE (2026-09-08) — the strategy is one module, `app/solve/calculix/elements.py`, and the
+   > expansion is a table rather than a comment: S3→C3D6, S4→C3D8I, S6→C3D15, S8R→C3D20R,
+   > B31→C3D8I, B32→C3D20R, each with the consequence it carries for stress recovery. Three
+   > things follow from the expansion and each is guarded. **`OUTPUT=2D` is written on every
+   > expanded model** — ccx's default stores results at the *expanded* nodes, which outnumber
+   > the submitted mesh's and are all in range, so `frd.displacements(frd, mesh.node_count)`
+   > would read a different model's answer with nothing to complain about. **A `clamp` holds
+   > all six degrees of freedom on a shell or a beam and three on a solid** (`constraints.
+   > local_dofs`) — a clamp written as three is a pin, and a cantilever on a pin is a different
+   > structure; a `custom` fixture naming three letters stays a pin, deliberately and testably.
+   > **`check_restraints` gained a six-degree-of-freedom form**, without which a beam clamped at
+   > one node reads as under-constrained and a straight beam reads as a degenerate mesh — two
+   > refusals of correct models. Supporting vocabulary: `app/mesh/structural.py`
+   > (`ShellMesh`/`BeamMesh`) and `app/solve/sections.py` (thickness, RECT/CIRC/PIPE/BOX
+   > profiles with closed-form area and second moments, and the `n1` orientation an RHS is 2.25×
+   > stiffer or softer for). Deck: `deck.write_frame_model`/`write_frame_deck`. Section
+   > properties are checked against numerical integration over the real outline, not against the
+   > formula they were written from. **Unverified until a seat run:** no `ccx` here, and no
+   > mesher produces one of these meshes yet. Tested by: `tests/test_solver_calculix_elements.py`
+   > (49), `tests/test_solver_sections.py` (26), `tests/test_mesh_structural.py` (35) — 14 guards
+   > verified by breaking what they guard.
 
 4. **Analysis types unlocked by task 1**: nonlinear static, large deformation, plasticity, contact,
    bolt pretension, modal, buckling, transient dynamics, coupled thermal-stress.
-   > PARTIAL (2026-09-06) — the decks are written; thermal in the deck is still open.
+   > DONE (2026-09-08) — thermal closed the open half, and it was a live defect rather than a
+   > missing feature: `LoadCase.delta_t_k` reached the in-house solver and reached CalculiX
+   > **not at all**, so one case returned `sigma = -E alpha dT` from one solver and exactly zero
+   > from the other, both reporting success. `write_deck` now writes `*INITIAL CONDITIONS,
+   > TYPE=TEMPERATURE`, `*EXPANSION, ZERO=` and `*TEMPERATURE` — all three, because the physics
+   > reads a *difference* and two of those numbers are the two halves of it — and **refuses a
+   > temperature change on a material with no expansion coefficient**, which ccx accepts and
+   > answers with zero thermal stress. `write_frame_deck` carries the same cards. Tested by:
+   > `tests/test_solver_calculix.py` (`TestATemperatureChangeReachesTheDeck`, 9) and
+   > `tests/test_solver_calculix_elements.py`; every guard verified by breaking it.
 
 5. **The hand-written solver as fast path and oracle** (Decision 2). Any linear static case must
    agree between it and CalculiX, and a disagreement is a bug in the integration.
@@ -1017,6 +1066,9 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 **Gate G1 opens after this phase.**
 > RUN 2026-09-06, DID NOT PASS — rung 3 failed. Rung 3 is carried forward and G1 runs again.
 > See `docs/verification-2026-09-06/`.
+> **DUE since 2026-09-08**, and it is now the only thing that can verify this phase: tasks 3 and
+> 4 were both written from the manual on a machine with no `ccx`. The two items the gate gained
+> are listed with G1 in *Stop gates*.
 
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
 

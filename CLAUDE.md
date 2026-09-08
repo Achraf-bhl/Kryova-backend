@@ -575,6 +575,38 @@ Three things that are easy to get wrong and are pinned by tests:
 3. **The modal mass matrix is integrated analytically** in barycentric coordinates, not with the
    stiffness assembly's four-point Gauss rule — that rule is exact only to degree 2 and tet10's
    `N^T N` is quartic, so reusing it would be wrong by a few percent: plausible-looking, and wrong.
+
+### CalculiX: there is no `ccx` on this Linux machine, and it shapes what may be claimed
+
+`app/solve/calculix/` is written entirely from the CalculiX manual. Every module in it says so
+about itself (`steps.py`, `frd.py`, `elements.py`) with a `[M]` citation per keyword and a
+`[S]` where the manual stops and ccx's own source answers. **A deck written here is documented,
+not verified**, and the difference is a status line: the first Windows run is the measurement.
+Keep facts as *tables of constants* rather than inline format strings, so that run corrects one
+value instead of a scatter of them.
+
+Three things about shells and beams that produce a plausible wrong number rather than an error
+(master plan 6.3, all pinned by `tests/test_solver_calculix_elements.py`):
+
+1. **ccx has no shell or beam formulation — it expands them into solids** (S4/B31 → C3D8I,
+   S8R/B32 → C3D20R) and ties the expansion back with MPCs. One element through the thickness,
+   whatever the surface mesh density, so a through-thickness stress *distribution* is not
+   something these elements contain.
+2. **The results file is written for the expanded model unless `OUTPUT=2D` is asked for.** The
+   expanded model has more nodes than the mesh submitted and every number in the `.frd` is a
+   real displacement of a real node — just not the node `frd.displacements(frd,
+   mesh.node_count)` believes. Nothing errors; there is not even a length mismatch.
+3. **A shell or beam node has six degrees of freedom, a solid node three.** A `clamp` written as
+   DOFs 1-3 is a **pin**, and a cantilever on a pin is a different structure. `constraints.
+   local_dofs` reads the fixture's *word* for this; a `custom` fixture naming `["x","y","z"]`
+   stays a pin on purpose. `check_restraints` needs `dofs_per_node=STRUCTURAL_DOFS` for these —
+   the three-DOF form refuses a beam clamped at one node *and* refuses a straight beam as a
+   degenerate mesh, two refusals of correct models.
+
+`write_frame_deck` takes a **nodal force vector, not a `LoadCase`**, and that is deliberate:
+tributary-area distribution is defined over a solid's boundary triangles, and loads on 1-D and
+2-D regions have no rule yet. An equal split would run, look right, and be mesh-dependent in
+exactly the way the load vocabulary exists to prevent.
 A bar in tension still returns a finite positive buckling factor (~68,000×), because a 3D bar has
 small compressive pockets at the load introduction. That is correct; the meaningful statement is
 the ratio to the compressive case.

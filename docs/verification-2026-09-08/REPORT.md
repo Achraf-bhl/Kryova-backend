@@ -191,3 +191,157 @@ contracts should now say belongs to their own phases:
    "~200 MPa (typical value)" is an assumed number presented in an answer, and
    the whole verification doctrine says that is the kind of number which must be
    traceable or absent.
+
+---
+
+# Second session, 2026-09-08 — ladder rung 2, an M5×30 hex bolt
+
+## Conditions
+
+Same seat, same French V5-R33. Prompt, in the user's own words:
+
+> design a m5 30 hex bolt, do the threads, you can do them by revolution
+> removal of material. choose the other parameters yourself
+
+Rung 2 of the chat ladder — several features that must agree — with a thread
+form on top, which is rung 2½: the threads are a revolved cut, so the run
+exercises `catia_sketch_revolve_profile`, `catia_shaft` and `catia_groove`
+together for the first time on a real seat.
+
+## Result
+
+**Failed. Rung 2 not reached.** 58 tool calls, five separate parts, and the run
+ended out of tool rounds with a shank and a hex head and no threads. The
+screenshot shows `Part13` — a pad, a hexagonal pad, `Steel`, 0.022373 kg —
+which is a bolt blank, not a bolt.
+
+The agent was not the limiting factor for most of it. Three defects took the
+rounds, and the last one took the part.
+
+## Defects found and fixed
+
+**1. A failed `catia_shaft` or `catia_groove` destroys the sketch and does not
+say so.** The one that ended the run. `_update_or_discard` has taken a
+`profile=` argument since 2026-09-06 precisely so a refusal can report that
+CATIA absorbed the profile into the feature and the discard took the drawing
+with it — and `pad` and `pocket` pass it. `shaft` and `groove`, which revolve a
+sketch and absorb it identically, never did. Measured here exactly as
+predicted: `catia_groove` was refused with *"the profile must overlap solid
+material"*, the agent did the sensible thing and went to redraw that profile,
+and got *"No sketch named 'Threads' in this part"* — with one round left.
+`tests/test_lost_profile.py` had a guard for this and it listed
+`["pad", "pocket"]` only, so the gap was invisible. The list is now checked
+against the class: any method taking `sketch:` and calling `_update_or_discard`
+must pass the profile, so the next operation that consumes a profile cannot be
+added without it. `scripts/catia_bridge/catia_com.py` (3 call sites — `shaft`,
+`groove`, and the pocket-reversal update, which had the same hole),
+`tests/test_lost_profile.py::TestTheOperationsThatConsumeAProfilePassItIn` (5).
+
+**2. `inner_diameter_mm: 0` was refused on a tool whose summary says to omit it
+for a solid rod.** The agent reached for `catia_sketch_revolve_profile` to
+build the shank, said "no bore" the other way round — as a zero — and got
+*"inner_diameter_mm must be greater than 0"*, a refusal naming no way forward.
+Zero and omitted reach identical geometry (`inner_diameter_mm or 0.0` draws the
+same four lines against the axis), so refusing one spelling bought nothing and
+cost a round at the moment the agent was already recovering from a failed
+shaft. `length`'s `exclusiveMinimum` is right everywhere else — 0 is a
+degenerate length, a degenerate thickness, a degenerate angle — so this is a
+new `bore()` constructor rather than a loosening of `length`, deliberately
+narrow: zero means something here only because a bore can be absent.
+`app/catia/ops/spec.py`, `app/catia/ops/sketcher.py`,
+`tests/test_catia_daemon.py` (2, including that a *negative* bore is still
+refused).
+
+**3. The daemon's tool table could not be regenerated, and had been frozen for
+two days.** Found while shipping defect 2: `scripts/gen_bridge_tools.py`
+refused to run at all, so the change could not reach the daemon. `direction3`'s
+`nonZero` had been added to *both* validators and not to the generator's
+`_SUPPORTED_KEYWORDS` — the second half of the generator's own instruction, and
+the easy half to miss. The generator then failed closed on every invocation,
+`tests/test_bridge_table_is_generated.py` was red, and `generated_tools.py`
+drifted from the server.
+
+Two consequences, and the second is the one that matters. The backlog it was
+holding turned out to be benign — no tool added or removed, only the
+description-shortening work. But **`nonZero` itself never reached the daemon's
+schemas**: `direction3`'s docstring says the refusal is real "in both
+validators", and it was true of the server only. Eight direction arguments were
+unenforced on the daemon side the whole time — the daemon implements the
+keyword and was never handed a schema carrying it. A zero vector rejected by
+the server would have gone straight through a call that reached the daemon by
+any other route. Regenerating shipped all eight.
+`scripts/gen_bridge_tools.py`, `scripts/catia_bridge/generated_tools.py`.
+
+## Defects found and fixed that this run did not cause
+
+Both pre-existing, both red on `main`, both left behind by the same commit
+(591db1b, E14) — and both sitting directly on the document-binding rule this
+run exercised five times over.
+
+**4. A test asserted the opposite of the shipped behaviour.**
+`test_new_part_is_refused_once_a_document_is_bound` encoded the old
+one-document-per-conversation rule. E14 deliberately reversed it on a seat,
+because ladder prompt S2 ended with seven `catia_new_part` calls against that
+refusal and an assembly needs several documents. The commit changed the code
+and not the test. Rewritten to the shipped contract, and the branch beside it —
+the open kernel *does* still refuse while a document is live — was covered by
+nothing at all: the refusal's own wording ("still open in memory") appeared
+nowhere in the suite, which is how a test asserting the reverse of its
+neighbour survived. Verified by breaking it. `tests/test_ai_context.py` (3).
+
+**5. The "exactly one migration head" guard had not run since 2026-09-06.** The
+E14 migration declares `revision = "..."` where every other migration declares
+`revision: str = "..."`, and `TestMigrationChain._chain` matches on the
+annotated form. It asserts *"is not a migration"* on the first file that does
+not parse — so the head check never reached the heads. Alembic itself was
+always fine (`alembic heads` reports one head, and did throughout). This
+matters more than a red line: parallel agents branching `down_revision` is a
+named hazard in `CLAUDE.md`, and this is the only thing watching for it.
+`migrations/versions/c7e2a9d4f1b3_*.py` now uses the annotated form.
+
+## Not a defect
+
+**Five parts in one conversation is the shipped behaviour**, not the bug it
+looks like. E14 made a conversation own a set of documents with one active, so
+on a seat `catia_new_part` starts another and deactivates the previous —
+nothing is abandoned, every row keeps its path and its checkpoints. It is still
+what made this run unreadable, and it is worth asking whether a *second* part
+with no assembly in sight should say what it is leaving. That is a product
+question, not a fix, and it is not made here.
+
+## Checks
+
+- `pytest tests/test_lost_profile.py tests/test_catia_daemon.py
+  tests/test_bridge_table_is_generated.py tests/test_ai_context.py
+  tests/test_ops_spec.py tests/test_catia_protocol.py tests/test_catia_api.py
+  tests/test_tool_registry.py tests/test_repository_hygiene.py` — green.
+- `ruff check app/ tests/ scripts/` — clean. `mypy app/` — clean, 343 files.
+- Full suite: 6534 passed, 23 failed, 16 skipped. **All 23 verified identical
+  on unmodified `main`** by stashing and re-running — none are from this work,
+  which fixed two others (`test_bridge_table_is_generated`,
+  `test_ai_context`) and defect 5 above.
+- Defects 1 and 4 verified by breaking what they guard: the guard for 1 fails
+  on exactly `shaft` and `groove` before the fix; disabling the live-document
+  check makes the new test for 4 fail and leaves its sibling green.
+
+## Still red on main, and not from this session
+
+Untouched here, each its own investigation:
+
+- `test_written_tool_calls` (5) — a "Not verified in this turn" banner is now
+  appended to answers; the tests assert the bare string.
+- `test_catia_local_bridge` (8) — daemon supervision.
+- `test_catia_com_contract` (4) — frozen script library, document-path
+  collision, the pocket direction flip.
+- `test_auth` (2) — the request-logging middleware emits records the
+  password-reset test expects absent.
+- `test_repository_hygiene::test_every_settings_field_appears` (1) —
+  `.env.example` is behind `Settings`.
+- `test_tool_retrieval` (1) — tool selection now pulls `catia_assembly_clash`
+  into an unrelated request.
+
+## What to do next
+
+Re-run the M5 bolt prompt. Defect 1 was the run-ender and the thread cut is the
+first thing the agent will come back to; with the refusal now naming the lost
+sketch, the correction loop has what it needs. Report the rung reached.

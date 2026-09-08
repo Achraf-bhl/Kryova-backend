@@ -343,7 +343,7 @@ class TestConversationDocumentBinding:
         assert catia.calls[0]["tool"] == "catia_new_part"
         assert catia.calls[0]["conversation_id"] == conversation.id
 
-    def test_new_part_is_refused_once_a_document_is_bound(
+    def test_a_seat_allows_a_second_part_because_an_assembly_needs_one(
         self,
         db_session: Session,
         user: User,
@@ -351,12 +351,78 @@ class TestConversationDocumentBinding:
         catia: _StubDispatch,
         bound_document: list[str | None],
     ) -> None:
-        """Rebinding would silently abandon everything already modelled."""
+        """This test asserted the opposite until 2026-09-08, and was left behind.
+
+        It read "rebinding would silently abandon everything already modelled"
+        and expected a refusal. E14 (591db1b) deliberately reversed that on a
+        seat: a conversation owns a *set* of documents with one active, because
+        ladder prompt S2 -- a shaft, a bushing and a clash check -- ended with
+        the agent calling `catia_new_part` seven times against the old refusal,
+        a second part having nowhere to go. `dispatch._bind_document`
+        deactivates the previous row rather than replacing it, so nothing is
+        abandoned; every row keeps its path and its checkpoints.
+
+        The commit changed the code and not this test, so the suite has been
+        red on it since. Nothing was wrong with the product -- but a failure
+        nobody can act on is one the next real failure hides behind, and this
+        one sat directly on top of the document-binding rule that the M5 bolt
+        run then exercised five times over.
+        """
         bound_document[0] = "Bracket.CATPart"
+        box = ToolBox(db=db_session, user=user, conversation=conversation)
+        box.call("catia_new_part", {"name": "Other"}, allow_mutations=True)
+        assert catia.calls[0]["tool"] == "catia_new_part"
+
+    def test_the_open_kernel_refuses_a_second_part_while_one_is_live(
+        self,
+        db_session: Session,
+        user: User,
+        conversation: Conversation,
+        catia: _StubDispatch,
+        bound_document: list[str | None],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The seat's rule does not transfer: OCCT holds one document per session.
+
+        Untested until 2026-09-08 -- the refusal's own wording ("still open in
+        memory") appeared nowhere in the suite -- which is how the branch above
+        it came to be checked by a test asserting the reverse of the code.
+        """
+        from app.ai import tools as tools_module
+
+        monkeypatch.setattr(tools_module.backends, "is_local", lambda: True)
+        monkeypatch.setattr(
+            tools_module.backends, "peek_session", lambda _id: types.SimpleNamespace(document=object())
+        )
+        bound_document[0] = "Bracket"
         box = ToolBox(db=db_session, user=user, conversation=conversation)
         with pytest.raises(ToolError, match="already owns"):
             box.call("catia_new_part", {"name": "Other"}, allow_mutations=True)
         assert catia.calls == []
+
+    def test_the_open_kernel_allows_a_rebuild_when_the_document_is_gone(
+        self,
+        db_session: Session,
+        user: User,
+        conversation: Conversation,
+        catia: _StubDispatch,
+        bound_document: list[str | None],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A row naming an evicted document must not deadlock the conversation.
+
+        The binding is in Postgres and survives a restart; the OCCT document is
+        live state in this process and does not. Refusing on the row alone left
+        the conversation with no way out at all.
+        """
+        from app.ai import tools as tools_module
+
+        monkeypatch.setattr(tools_module.backends, "is_local", lambda: True)
+        monkeypatch.setattr(tools_module.backends, "peek_session", lambda _id: None)
+        bound_document[0] = "Bracket"
+        box = ToolBox(db=db_session, user=user, conversation=conversation)
+        box.call("catia_new_part", {"name": "Other"}, allow_mutations=True)
+        assert catia.calls[0]["tool"] == "catia_new_part"
 
     def test_a_resumed_conversation_can_reopen_its_document(
         self,

@@ -500,3 +500,322 @@ class TestPreMeshLimits:
         job = run(auth_client, project_with_geometry, element_size_mm=1.0)
         assert job["status"] == "failed"
         assert "over the 100 limit" in job["error"]
+
+
+# ---------------------------------------------------------------------------
+# Plane stress and plane strain through the job path — E7 task 5's second half.
+# ---------------------------------------------------------------------------
+
+
+def _plane_step_bytes(width: float = 40.0, length: float = 200.0) -> bytes:
+    """A flat rectangle in the z = 0 plane, as a STEP face.
+
+    Built rather than fixtured because a plane analysis needs a *face*, and
+    every other geometry in this file is a solid. `generate_tri_mesh` refuses a
+    solid by name, which is a different test below.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+
+    from app.kernel.occt.binding import require, symbol
+    from app.manufacture.export import write_step
+
+    require()
+    face = symbol("BRepBuilderAPI_MakeFace")(
+        symbol("gp_Pln")(
+            symbol("gp_Pnt")(0.0, 0.0, 0.0), symbol("gp_Dir")(0.0, 0.0, 1.0)
+        ),
+        0.0,
+        length,
+        0.0,
+        width,
+    ).Face()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _Path(tmp) / "sheet.step"
+        write_step(face, path)
+        return path.read_bytes()
+
+
+@pytest.fixture
+def project_with_sheet(auth_client: AuthenticatedTestClient, project_id: str) -> str:
+    response = auth_client.post(
+        f"/api/v1/projects/{project_id}/geometry",
+        files={"file": ("sheet.step", _plane_step_bytes(), "application/octet-stream")},
+    )
+    assert response.status_code == 201, response.text
+    return project_id
+
+
+class TestAPlaneAnalysisCanBeAskedFor:
+    """E7 task 5 was PARTIAL for one reason: `PlaneSolver` existed and was
+    reachable from no route, job or registry, so a plane analysis could not be
+    *requested*. Capability built and never connected is this project's oldest
+    failure mode and it is the whole content of these tests.
+    """
+
+    def _sheet_case(self, force: float = 4000.0) -> dict:
+        return {
+            "name": "Sheet in tension",
+            "material": load_case()["material"],
+            # Symmetry rollers rather than a clamp, for the reason the solid
+            # test above uses them: a clamped end concentrates stress and the
+            # peak is then not F/A anywhere. Held in x on one edge and in y on
+            # another is fully constrained in a plane model — there is no z
+            # degree of freedom to hold, and naming one is refused.
+            "fixtures": [
+                {"where": {"type": "face", "axis": "x", "side": "min"}, "dofs": ["x"]},
+                {"where": {"type": "face", "axis": "y", "side": "min"}, "dofs": ["y"]},
+            ],
+            "loads": [
+                {
+                    "where": {"type": "face", "axis": "x", "side": "max"},
+                    "force_n": [force, 0.0, 0.0],
+                }
+            ],
+        }
+
+    def test_a_plane_stress_run_reproduces_the_hand_calculation(
+        self, auth_client: AuthenticatedTestClient, project_with_sheet: str
+    ) -> None:
+        """sigma = F / (width * thickness). The point of wiring it is that the
+        answer is right through the *route*, not only in a unit test of the
+        solver."""
+        job = run(
+            auth_client,
+            project_with_sheet,
+            load_case=self._sheet_case(),
+            analysis="plane-stress",
+            thickness_mm=5.0,
+            element_size_mm=10.0,
+        )
+
+        assert job["status"] == "succeeded", job["error"]
+        expected = 4000.0 / (40.0 * 5.0)  # 20 MPa
+        assert job["result"]["max_von_mises_mpa"] == pytest.approx(expected, rel=0.02)
+
+    def test_the_row_records_which_idealisation_ran(
+        self, auth_client: AuthenticatedTestClient, project_with_sheet: str
+    ) -> None:
+        """Plane stress and plane strain give different answers on the same mesh
+        and the same load, so a row that does not say which one ran cannot be
+        reproduced or argued with."""
+        job = run(
+            auth_client,
+            project_with_sheet,
+            load_case=self._sheet_case(),
+            analysis="plane-strain",
+            thickness_mm=5.0,
+        )
+
+        assert job["analysis"] == "plane-strain"
+        assert job["thickness_mm"] == pytest.approx(5.0)
+
+    def test_the_row_names_the_solver_that_actually_ran(
+        self, auth_client: AuthenticatedTestClient, project_with_sheet: str
+    ) -> None:
+        """`SOLVER_BACKEND` chooses between the solid solvers and neither of them
+        runs a plane model. Recording the backend's name here would be provenance
+        naming a solver that never saw the job."""
+        job = run(
+            auth_client,
+            project_with_sheet,
+            load_case=self._sheet_case(),
+            analysis="plane-stress",
+            thickness_mm=5.0,
+        )
+
+        assert job["solver"] == "plane"
+
+    def test_the_two_idealisations_do_not_give_the_same_answer(
+        self, auth_client: AuthenticatedTestClient, project_with_sheet: str
+    ) -> None:
+        """If they did, the choice would be decoration. Plane strain holds the
+        material through the thickness and is stiffer."""
+        stress = run(
+            auth_client,
+            project_with_sheet,
+            load_case=self._sheet_case(),
+            analysis="plane-stress",
+            thickness_mm=5.0,
+        )
+        strain = run(
+            auth_client,
+            project_with_sheet,
+            load_case=self._sheet_case(),
+            analysis="plane-strain",
+            thickness_mm=5.0,
+        )
+
+        assert stress["result"]["max_displacement_mm"] > strain["result"]["max_displacement_mm"]
+
+    def test_a_solid_run_still_says_solid(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The server default, and the meaning every row written before this
+        column existed already had."""
+        job = run(auth_client, project_with_geometry)
+
+        assert job["analysis"] == "solid"
+        assert job["thickness_mm"] is None
+
+    def test_a_row_written_without_the_column_still_means_solid(
+        self, db_session, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The migration's backwards compatibility, pinned.
+
+        Every simulation in the table predates this column. The *server* default
+        is what gives those rows their meaning, and the Python-side default
+        cannot stand in for it: the route always passes `analysis` explicitly,
+        so the Python default is never reached and breaking it changes nothing.
+        Inserted with raw SQL, omitting the column, exactly as an old row was.
+        """
+        from sqlalchemy import select, text, update
+
+        from app.models import SimulationJob
+
+        table = SimulationJob.__table__
+        job = run(auth_client, project_with_geometry)
+        # Through the ORM table, never a raw string: every table reference in
+        # this codebase is compiled schema-qualified through
+        # `schema_translate_map`, and a hand-written "UPDATE simulation_jobs"
+        # resolves against no schema at all.
+        db_session.execute(
+            update(table).where(table.c.id == job["id"]).values(analysis=text("DEFAULT"))
+        )
+        db_session.flush()
+
+        row = db_session.execute(
+            select(table.c.analysis, table.c.thickness_mm).where(table.c.id == job["id"])
+        ).one()
+
+        assert row[0] == "solid"
+        assert row[1] is None
+
+    def test_a_plane_run_without_a_thickness_is_refused_at_the_boundary(
+        self, auth_client: AuthenticatedTestClient, project_with_sheet: str
+    ) -> None:
+        """Every stress in a plane run scales with the thickness, so a thickness
+        nobody chose is a whole answer nobody chose."""
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_sheet}/simulations",
+            json={"load_case": self._sheet_case(), "analysis": "plane-stress"},
+        )
+
+        assert response.status_code == 422
+        assert "thickness_mm" in response.text
+
+    def test_a_solid_run_given_a_thickness_is_refused_rather_than_ignored(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """Silently dropping it would leave the engineer believing it was used."""
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={"load_case": load_case(), "analysis": "solid", "thickness_mm": 5.0},
+        )
+
+        assert response.status_code == 422
+
+    def test_a_plane_run_on_a_solid_is_refused_by_name(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """A plane model is an idealisation of a cross-section, not a thin body.
+        Meshing a solid's boundary hands back a closed shell whose faces are not
+        in one plane, and the refusal says so and says it will not project them
+        — because projecting changes the geometry rather than repositioning it.
+        """
+        job = run(
+            auth_client,
+            project_with_geometry,
+            analysis="plane-stress",
+            thickness_mm=5.0,
+        )
+
+        assert job["status"] == "failed"
+        error = (job["error"] or "").lower()
+        assert "z = 0" in error
+        assert "project" in error, "the refusal must say it will not silently project"
+
+
+class TestAConvergedAnswerCanBeAskedFor:
+    """G1's third open item, from the request side.
+
+    E7 task 2 built the convergence machinery and validated it on three NAFEMS
+    benchmarks, and **nothing in the request path ever called it** — so every
+    stress this product had reported came from one mesh. Measured at gate G1
+    (`docs/verification-2026-09-08-G1/`): a factor of safety of 1303 off a
+    single 411-element tet4 mesh, stated without a second solve to compare
+    against. The report's words: "until then no stress from this product is
+    converged and it should say so in words."
+
+    It now says so either way. A single run reports `single-grid`; a study
+    reports what the study found, including when the study found nothing.
+    """
+
+    def test_a_single_run_still_says_it_solved_one_mesh(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = run(auth_client, project_with_geometry)
+
+        claim = job["result"]["mesh_convergence"]
+        assert claim["basis"] == "single-grid"
+        assert claim["converged"] is False
+        assert job["grids"] == 1
+
+    def test_a_study_solves_every_grid_and_assesses_them(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = run(auth_client, project_with_geometry, grids=3, element_size_mm=12.0)
+
+        assert job["status"] == "succeeded", job["error"]
+        claim = job["result"]["mesh_convergence"]
+        assert claim["basis"] == "grid-convergence-index"
+        assert claim["grids"] == 3
+
+    def test_the_study_travels_with_the_run_for_a_reader_to_check(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """A verdict with no working shown is a verdict nobody can audit. Every
+        grid's size, count and value rides in the mesh stats."""
+        job = run(auth_client, project_with_geometry, grids=3, element_size_mm=12.0)
+
+        study = job["mesh_stats"]["study"]
+        assert len(study["levels"]) == 3
+        assert {level["value"] for level in study["levels"]}
+
+    def test_the_result_shown_is_the_finest_grid_not_the_coarsest(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The study's verdict travels beside the best answer computed, never
+        instead of it. A caller who paid for three grids and got a picture of
+        the coarsest would rightly disbelieve all of it."""
+        job = run(auth_client, project_with_geometry, grids=3, element_size_mm=12.0)
+
+        study = job["mesh_stats"]["study"]
+        finest = min(study["levels"], key=lambda level: level["element_size_mm"])
+        assert job["result"]["element_count"] == finest["element_count"]
+
+    def test_a_study_refines_from_the_size_given_rather_than_below_it(self) -> None:
+        """Directly, because the property is about arithmetic and paying for
+        three meshes to assert it would be silly. The requested size is the
+        *coarsest* grid: refining below a size the caller chose is the direction
+        that runs out of memory."""
+        from app.simulation.runner import _study_sizes
+
+        sizes = _study_sizes(10.0, 3)
+
+        assert max(sizes) > 10.0
+        assert min(sizes) == pytest.approx(10.0)
+        assert sizes == sorted(sizes, reverse=True)
+
+    def test_two_grids_are_refused_because_they_cannot_form_a_study(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """Two grids give a difference and no way to tell a converging answer
+        from a coincidence. Refused by name rather than promoted to three."""
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={"load_case": load_case(), "grids": 2},
+        )
+
+        assert response.status_code == 422
+        assert "three" in response.text

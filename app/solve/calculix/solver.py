@@ -108,6 +108,7 @@ class CalculiXSolver(Solver):
             ),
             displacements=node_displacements,
             von_mises=mises,
+            nodal_stress=nodal_tensor,
         )
 
 

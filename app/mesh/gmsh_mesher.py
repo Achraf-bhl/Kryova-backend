@@ -1,4 +1,5 @@
-"""Gmsh-backed tetrahedral meshing of uploaded CAD files.
+"""Gmsh-backed meshing of uploaded CAD files: tetrahedra from a solid body,
+triangles from a face authored in the z = 0 plane.
 
 Gmsh is a process-global singleton and is not thread-safe, so every call here
 goes through `gmsh_session`, which holds the module lock for the whole model's
@@ -17,12 +18,23 @@ import numpy as np
 
 from app.geometry.inspect import is_binary_stl
 from app.mesh.gmsh_session import gmsh_session, staged_with_extension
+from app.mesh.planar import (
+    _PLANARITY_TOLERANCE_MM,
+    TRI6_EDGES,
+    TriMesh,
+    planar_quality,
+)
 from app.mesh.types import TET10_EDGES, MeshError, TetMesh, quality
 
 _TET4_ELEMENT_TYPE = 4
 _TET10_ELEMENT_TYPE = 11
 _NODES_PER_ELEMENT = {_TET4_ELEMENT_TYPE: 4, _TET10_ELEMENT_TYPE: 10}
 _ELEMENT_TYPE_FOR_ORDER = {1: _TET4_ELEMENT_TYPE, 2: _TET10_ELEMENT_TYPE}
+
+_TRI3_ELEMENT_TYPE = 2
+_TRI6_ELEMENT_TYPE = 9
+_NODES_PER_TRIANGLE = {_TRI3_ELEMENT_TYPE: 3, _TRI6_ELEMENT_TYPE: 6}
+_TRI_ELEMENT_TYPE_FOR_ORDER = {1: _TRI3_ELEMENT_TYPE, 2: _TRI6_ELEMENT_TYPE}
 
 # Default target: this many elements along the bounding-box diagonal. Enough to
 # resolve a simple part in seconds; refinement is a user-facing knob.
@@ -71,6 +83,46 @@ def generate_tet_mesh(
         mesh = _extract(gmsh, element_order)
 
     stats = quality(mesh)
+    stats["mesher"] = "gmsh"
+    return mesh, stats
+
+
+def generate_tri_mesh(
+    path: Path,
+    file_format: str,
+    element_size_mm: float | None = None,
+    element_order: int = 1,
+) -> tuple[TriMesh, dict[str, Any]]:
+    """Mesh a planar CAD file into triangles, for a plane stress or plane strain model.
+
+    Returns the mesh and its quality summary. `element_size_mm` overrides the
+    automatic target size; `element_order` is 1 for tri3 or 2 for tri6.
+
+    The face must be authored in the z = 0 plane. A plane model is an
+    idealisation of a cross-section rather than a shell, so a face that arrives
+    anywhere else is refused by name and never projected -- see
+    `_assert_lies_in_the_z_zero_plane`.
+    """
+    if element_order not in _TRI_ELEMENT_TYPE_FOR_ORDER:
+        raise MeshError(f"element_order must be 1 or 2, got {element_order}")
+
+    with _named_for_gmsh(path, file_format) as readable, gmsh_session() as gmsh:
+        _load_surface(gmsh, readable, file_format)
+        _set_element_size(gmsh, element_size_mm)
+        try:
+            gmsh.model.mesh.generate(2)
+            if element_order == 2:
+                # Straight edges, for the same reason as the tet path: gmsh
+                # otherwise pulls midside nodes onto the CAD curve, and every
+                # geometric quantity here (area, the boundary edges a traction
+                # is distributed over) is computed from the three corners.
+                gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)
+                gmsh.model.mesh.setOrder(2)
+        except Exception as exc:  # gmsh raises bare Exception subclasses
+            raise MeshError(f"Meshing failed: {exc}") from exc
+        mesh = _extract_tri(gmsh, element_order)
+
+    stats = planar_quality(mesh)
     stats["mesher"] = "gmsh"
     return mesh, stats
 
@@ -160,6 +212,55 @@ def _build_volume_from_triangles(gmsh) -> None:
         ) from exc
 
 
+def _load_surface(gmsh, path: Path, file_format: str) -> None:
+    """The 2-D counterpart of `_load`: what is needed is a face, not a volume."""
+    try:
+        gmsh.merge(str(path))
+    except Exception as exc:
+        raise MeshError(f"Gmsh could not read the file: {exc}") from exc
+
+    if file_format == "stl":
+        _build_surfaces_from_triangles(gmsh)
+    elif gmsh.model.getEntities(3):
+        # Meshing the boundary of a solid would succeed and hand back a closed
+        # shell -- a surface in three dimensions, which is not a plane model and
+        # would be refused a step later for being off z = 0. Say so here, where
+        # the reason is still legible.
+        raise MeshError(
+            "The file contains a solid body. A plane stress or plane strain model is "
+            "meshed from a single face lying in z = 0; export the cross-section as a "
+            "face, or run a solid analysis instead."
+        )
+
+    if not gmsh.model.getEntities(2):
+        raise MeshError(
+            "The file contains no surface to mesh. A plane model needs a face; a file "
+            "holding only points and curves has nothing to fill with triangles."
+        )
+
+
+def _build_surfaces_from_triangles(gmsh) -> None:
+    """Recover surface topology from a raw STL triangle soup.
+
+    The first half of `_build_volume_from_triangles` and no more: a plane model
+    has no volume to close, so there is no surface loop to build.
+    """
+    try:
+        gmsh.model.mesh.classifySurfaces(
+            np.radians(_STL_FEATURE_ANGLE_DEG),
+            True,
+            True,
+            np.radians(_STL_CURVE_ANGLE_DEG),
+        )
+        gmsh.model.mesh.createGeometry()
+        gmsh.model.geo.synchronize()
+    except Exception as exc:
+        raise MeshError(
+            f"No surface could be recovered from the STL ({exc}). A plane model is "
+            "meshed from a face; check that the file is not empty or self-intersecting."
+        ) from exc
+
+
 def _set_element_size(gmsh, element_size_mm: float | None) -> None:
     if element_size_mm is not None:
         if element_size_mm <= 0:
@@ -238,5 +339,113 @@ def _assert_midside_ordering(mesh: TetMesh) -> None:
     if not np.allclose(actual, expected, atol=1e-6 * scale):
         raise MeshError(
             "Gmsh returned tet10 nodes in an unexpected order; the quadratic "
+            "element formulation cannot be trusted against this mesh."
+        )
+
+
+def _extract_tri(gmsh, element_order: int) -> TriMesh:
+    """The 2-D counterpart of `_extract`, element for element."""
+    node_tags, coordinates, _ = gmsh.model.mesh.getNodes()
+    if len(node_tags) == 0:
+        raise MeshError("Meshing produced no nodes")
+    nodes = np.asarray(coordinates, dtype=np.float64).reshape(-1, 3)
+
+    # Gmsh tags are 1-based and may have gaps; remap them to dense indices.
+    tags = np.asarray(node_tags, dtype=np.int64)
+    lookup = np.full(int(tags.max()) + 1, -1, dtype=np.int64)
+    lookup[tags] = np.arange(len(tags), dtype=np.int64)
+
+    wanted = _TRI_ELEMENT_TYPE_FOR_ORDER[element_order]
+    element_types, _, element_nodes = gmsh.model.mesh.getElements(2)
+    for element_type, connectivity in zip(element_types, element_nodes, strict=True):
+        if element_type != wanted:
+            continue
+        elements = lookup[
+            np.asarray(connectivity, dtype=np.int64).reshape(-1, _NODES_PER_TRIANGLE[wanted])
+        ]
+        if (elements < 0).any():
+            raise MeshError("Meshing produced an element referencing an unknown node")
+        mesh = _drop_unused_tri_nodes(nodes, elements)
+        if element_order == 2:
+            _assert_tri_midside_ordering(mesh)
+        return mesh
+
+    raise MeshError("Meshing produced no triangles; the geometry may not contain a face")
+
+
+def _drop_unused_tri_nodes(nodes: np.ndarray, elements: np.ndarray) -> TriMesh:
+    """The 2-D counterpart of `_drop_unused_nodes`, with the planarity check.
+
+    The check has to happen here rather than after the mesh is built, because
+    `TriMesh.__post_init__` refuses the same array first and its message is
+    about the data structure -- the caller needs to hear about the file.
+    """
+    used, inverse = np.unique(elements, return_inverse=True)
+    kept = nodes[used]
+    _assert_lies_in_the_z_zero_plane(kept)
+    renumbered = inverse.reshape(elements.shape).astype(np.int64)
+    return TriMesh(
+        nodes=kept,
+        tris=renumbered[:, :3],
+        midside=renumbered[:, 3:] if elements.shape[1] == 6 else None,
+    )
+
+
+def _assert_lies_in_the_z_zero_plane(nodes: np.ndarray) -> None:
+    """Refuse a mesh that came back anywhere but z = 0, naming where it is.
+
+    `app.mesh.planar` carries the third coordinate only so the geometric
+    selectors keep working; the plane model itself is a cross-section, not a
+    shell. Gmsh returns a face where the file put it, so an offset or rotated
+    face must be refused rather than projected: projecting an offset face would
+    silently move the geometry, and projecting a face in x = 0 would collapse it
+    to a line. The threshold is `planar`'s own, so this fires before
+    `TriMesh.__post_init__` does and never after it.
+    """
+    out_of_plane = float(np.abs(nodes[:, 2]).max(initial=0.0))
+    if out_of_plane <= _PLANARITY_TOLERANCE_MM:
+        return
+    raise MeshError(
+        f"A plane model must be authored in the z = 0 plane; this face was meshed in "
+        f"{_describe_plane(nodes)}, up to {out_of_plane:g} mm off it. Move the face onto "
+        "z = 0 in the CAD file and export it again. Meshing will not project it for you, "
+        "because projecting changes the geometry rather than repositioning it."
+    )
+
+
+def _describe_plane(nodes: np.ndarray) -> str:
+    """Where a non-conforming mesh actually is, in words, for the error above."""
+    lo = nodes.min(axis=0)
+    hi = nodes.max(axis=0)
+    extent = hi - lo
+    span = float(extent.max(initial=0.0)) or 1.0
+    flat = np.flatnonzero(extent <= 1e-6 * span)
+    if len(flat) == 1:
+        axis = "xyz"[int(flat[0])]
+        return f"the plane {axis} = {0.5 * float(lo[flat[0]] + hi[flat[0]]):g} mm"
+    return (
+        f"a plane that is not parallel to z = 0 (its z runs from {float(lo[2]):g} to "
+        f"{float(hi[2]):g} mm)"
+    )
+
+
+def _assert_tri_midside_ordering(mesh: TriMesh) -> None:
+    """Confirm gmsh's midside node order still matches `TRI6_EDGES`.
+
+    The same failure mode as `_assert_midside_ordering` and the same argument:
+    the plane shape functions are written against that table, and a silent
+    disagreement returns a plausible, wrong stiffness matrix rather than an
+    error. `Mesh.SecondOrderLinear` puts each midside node exactly halfway along
+    its edge, so the check is a coordinate comparison.
+    """
+    assert mesh.midside is not None
+    corners = mesh.nodes[mesh.tris]
+    expected = np.stack([0.5 * (corners[:, a] + corners[:, b]) for a, b in TRI6_EDGES], axis=1)
+    actual = mesh.nodes[mesh.midside]
+    lo, hi = mesh.bounding_box
+    scale = float(np.linalg.norm(hi - lo)) or 1.0
+    if not np.allclose(actual, expected, atol=1e-6 * scale):
+        raise MeshError(
+            "Gmsh returned tri6 nodes in an unexpected order; the quadratic plane "
             "element formulation cannot be trusted against this mesh."
         )

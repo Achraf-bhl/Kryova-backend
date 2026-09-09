@@ -36,12 +36,18 @@ from app.verify.register import (
     AnalysisRow,
     Register,
     Standing,
+    _blocked_outcomes,
     assert_publishable,
     published_register,
     scrub,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+#: The analyses the shipped register reports as validated right now. Named
+#: rather than counted, so a new benchmark has to be declared here instead of
+#: nudging a number nobody reads.
+VALIDATED_TODAY = {"modal", "linear-static"}
 
 
 def _target(*, value: float = 100.0, tolerance: float = 0.02) -> Target:
@@ -88,23 +94,73 @@ class TestAnUnvalidatedAnalysisAppears:
     """The register's central claim: what is *not* validated is as visible as
     what is. Everything else in this file is a defence of that one."""
 
-    def test_every_declared_analysis_has_a_row_with_no_benchmarks_at_all(self) -> None:
+    def test_every_declared_analysis_gets_a_row_whether_or_not_a_case_touches_it(
+        self,
+    ) -> None:
+        """Updated 2026-09-08, when 7.1's catalogue landed.
+
+        Until then every row read `NO_BENCHMARK`, because there were none. The
+        NAFEMS cases are now published here, so three rows carry a case instead —
+        and the claim being defended is unchanged and is at last actually being
+        exercised: an analysis nobody has benchmarked is as visible as one
+        somebody has.
+        """
         register = published_register()
+        by_id = {row.analysis.id: row for row in register.rows}
 
         assert len(register.rows) == len(ANALYSES)
-        assert {row.analysis.id for row in register.rows} == {a.id for a in ANALYSES}
-        assert all(row.standing is Standing.UNVALIDATED for row in register.rows)
-        assert all(row.because == NO_BENCHMARK for row in register.rows)
+        assert set(by_id) == {a.id for a in ANALYSES}
 
-    def test_the_shipped_register_says_nothing_is_validated(self) -> None:
+        touched = {"linear-static", "thermal-stress", "modal"}
+        assert all(by_id[name].because != NO_BENCHMARK for name in touched)
+        assert all(
+            row.because == NO_BENCHMARK and row.standing is Standing.UNVALIDATED
+            for row in register.rows
+            if row.analysis.id not in touched
+        )
+
+    def test_the_shipped_register_says_which_two_analyses_are_validated(self) -> None:
         """The honest state of this codebase today, asserted rather than
-        described, so the day it changes somebody has to come here and say so."""
+        described, so the day it changes somebody has to come here and say so.
+
+        It changed twice on 2026-09-08 and somebody did, both times. Modal is
+        validated against NAFEMS FV52 and linear static against LE10; the other
+        nine are not, and `complete` stays false — which is the number this
+        register exists to publish. Asserted as the *set of names* rather than as
+        a count, so a third case still has to be declared here rather than
+        quietly moving a number.
+        """
+        register = published_register()
+        validated = {
+            row.analysis.id for row in register.rows if row.standing is Standing.VALIDATED
+        }
+
+        assert validated == VALIDATED_TODAY
+        assert register.complete is False
+        assert len(register.unvalidated) == len(ANALYSES) - len(VALIDATED_TODAY)
+
+    def test_a_case_this_product_cannot_run_is_published_with_the_reason(self) -> None:
+        """A benchmark that executes must not be reachable from a public route.
+
+        `assert_publishable` refuses one and `PUBLISHED_SUITE` filters on
+        `runnable`, so the executed cases arrive from a recorded run instead —
+        the blocked ones plus the recordings, which is what a reader of the page
+        actually gets.
+
+        The blocked count is read off the catalogue rather than written here as
+        a literal. It has changed twice as cases were unblocked, and each time a
+        hand-edited number made a genuine improvement look like a regression;
+        what this test is actually for is that every blocked case *reaches the
+        page*, not that there are precisely N of them.
+        """
+        from app.verify.nafems import CASES
+
+        expected_blocked = sum(1 for case in CASES if case.blocker is not None)
         register = published_register()
 
-        assert register.summary.validated == 0
-        assert register.summary.benchmarks == 0
-        assert register.complete is False
-        assert len(register.unvalidated) == len(ANALYSES)
+        assert register.summary.benchmarks == len(CASES)
+        assert register.summary.blocked == expected_blocked
+        assert register.summary.measured_only == 0
 
     def test_the_headline_carries_the_denominator(self) -> None:
         """'3 analyses validated' is true of a product with three and of a
@@ -112,8 +168,8 @@ class TestAnUnvalidatedAnalysisAppears:
         register = published_register()
         headline = register.headline()
 
-        assert f"0 of {len(ANALYSES)}" in headline
-        assert f"{len(ANALYSES)} are not" in headline
+        assert f"{len(VALIDATED_TODAY)} of {len(ANALYSES)}" in headline
+        assert f"{len(ANALYSES) - len(VALIDATED_TODAY)} are not" in headline
 
     def test_one_benchmarked_analysis_does_not_hide_the_rest(self) -> None:
         register = Register.build([_outcome(Outcome.VALIDATED, deviation=0.001)])
@@ -149,7 +205,9 @@ class TestAnUnvalidatedAnalysisAppears:
         passed, so the unvalidated rows are published twice on purpose."""
         payload = published_register().to_dict()
 
-        assert {row["id"] for row in payload["not_validated"]} == {a.id for a in ANALYSES}
+        assert {row["id"] for row in payload["not_validated"]} == {
+            a.id for a in ANALYSES if a.id not in VALIDATED_TODAY
+        }
         assert all(row["because"] for row in payload["not_validated"])
 
     def test_a_row_that_is_not_validated_must_give_a_reason(self) -> None:
@@ -390,8 +448,7 @@ class TestThePublishedSuiteCannotRunAnything:
         )
 
         assert_publishable(blocked)
-        register = published_register()
-        assert register.summary.validated == 0
+        assert Register.build(_blocked_outcomes()).summary.validated == 0
 
 
 # ---------------------------------------------------------------------------
@@ -439,13 +496,17 @@ class TestTheDeclaredAnalyses:
         reader seeing a list of closed-form checks under a key called
         `closed_form_checks` would reasonably read them as the validation."""
         payload = published_register().to_dict()
-        linear = next(
-            r for r in payload["analyses"] if r["analysis"]["id"] == "linear-static"
-        )
+        rows = {row["analysis"]["id"]: row for row in payload["analyses"]}
 
-        assert "verification_closed_form_checks" in linear["analysis"]
-        assert linear["analysis"]["verification_closed_form_checks"]
-        assert linear["validated"] is False
+        assert rows["linear-static"]["analysis"]["verification_closed_form_checks"]
+
+        # The split is only visible on an analysis that has closed-form checks
+        # and is *not* validated. Until 2026-09-08 linear static was the example;
+        # LE10 validated it, so the example moved to buckling, which is checked
+        # against the Euler column and has no published benchmark behind it.
+        buckling = rows["buckling"]
+        assert buckling["analysis"]["verification_closed_form_checks"]
+        assert buckling["validated"] is False
         assert any("Verification and validation are different" in n for n in payload["notes"])
 
 
@@ -477,6 +538,31 @@ class TestScrub:
     )
     def test_it_leaves_ordinary_result_text_alone(self, text: str) -> None:
         assert scrub(text) == text
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Read at https://abaqus-docs.mit.edu/2017/English/x.htm on 2026-09-08.",
+            "see http://www.nafems.org/benchmarks for the publication",
+            "ftp://example.invalid/tnsb.pdf",
+        ],
+    )
+    def test_a_citation_url_survives_because_it_is_not_a_path(self, text: str) -> None:
+        """The guard destroying what it protects, caught 2026-09-08.
+
+        `scrub` replaces the *whole* string, and the drive-letter branch used to
+        match the `s:/` inside `https://` — so on a page whose entire value is
+        checkable references, every reason that cited its document would have
+        published "[withheld: looked like a filesystem path]" instead.
+        """
+        assert scrub(text) == text
+
+    def test_a_windows_path_is_still_withheld_when_a_url_sits_beside_it(self) -> None:
+        """The narrowing must not be a hole: one character before the colon is
+        the whole of the distinction, and a real drive letter has none."""
+        text = r"see https://example.invalid, opened C:\Users\achraf\part.stp"
+
+        assert "[withheld" in scrub(text)
 
 
 # ---------------------------------------------------------------------------
@@ -560,3 +646,54 @@ class TestTheAccuracyChangelog:
 
         fresh = Register.build(generated_at="2099-01-01T00:00:00+00:00")
         assert fresh.superseded_by(CHANGES) == ()
+
+
+class TestTheNotesDoNotContradictTheNumbers:
+    """The page's prose is published alongside its counts, and nothing was
+    checking that the two agreed.
+
+    They stopped agreeing the day a third case validated: a note still read
+    "Nothing in this register is validated today" while the summary beside it
+    said two analyses were. That is worse on a trust page than either statement
+    alone — a reader cannot tell which half is stale, so neither is usable, and
+    the whole value of the page is that a reader does not have to decide that.
+
+    The notes are static text and the summary is computed, so the only way they
+    can be kept honest is a test that reads both.
+    """
+
+    def test_no_note_claims_nothing_is_validated_when_something_is(self) -> None:
+        register = published_register()
+        prose = " ".join(register.notes).lower()
+
+        if register.summary.validated > 0:
+            for claim in ("nothing in this register is validated", "none is validated"):
+                assert claim not in prose, (
+                    f"a note says {claim!r} while the summary reports "
+                    f"{register.summary.validated} validated analyses"
+                )
+
+    def test_the_notes_say_the_page_never_runs_a_benchmark(self) -> None:
+        """`assert_publishable` enforces it in code; a reader of the page needs
+        to be told, because a validated row otherwise reads as something this
+        route computed on request."""
+        prose = " ".join(published_register().notes).lower()
+
+        assert "never runs a benchmark" in prose
+
+    def test_the_notes_explain_that_a_validated_row_can_expire(self) -> None:
+        """The fingerprint is what separates this page from a cached green tick,
+        and it is invisible unless the page says so."""
+        prose = " ".join(published_register().notes).lower()
+
+        assert "fingerprint" in prose
+        assert "discarded" in prose
+
+    def test_the_verification_and_validation_split_is_still_stated_first(self) -> None:
+        """ASME V&V 20's distinction is the one thing a reader must have before
+        reading anything else on the page: the closed-form checks in the same
+        payload are verification, and reading them as validation is the exact
+        conflation this register exists to prevent."""
+        first = published_register().notes[0].lower()
+
+        assert "verification and validation are different questions" in first

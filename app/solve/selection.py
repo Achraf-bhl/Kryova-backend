@@ -8,6 +8,7 @@ from app.solve.types import (
     BodySelector,
     BoxSelector,
     CylinderSelector,
+    EllipticalWallSelector,
     FaceSelector,
     Selector,
     SolverError,
@@ -57,6 +58,12 @@ def select_nodes(mesh: PointCloud, selector: Selector) -> NDArray[np.int64]:
         description = (
             f"cylinder r={selector.radius} about {selector.axis_point} "
             f"along {selector.axis_direction}"
+        )
+    elif isinstance(selector, EllipticalWallSelector):
+        nodes = _select_elliptical_wall(mesh, selector)
+        description = (
+            f"elliptical wall {selector.semi_axis_a} x {selector.semi_axis_b} "
+            f"about {selector.axis_point} swept along {selector.axis}"
         )
     elif isinstance(selector, SphereSelector):
         nodes = _select_sphere(mesh, selector)
@@ -144,6 +151,36 @@ def _select_cylinder(mesh: PointCloud, selector: CylinderSelector) -> NDArray[np
     radius = np.linalg.norm(perpendicular, axis=1)
     inside = np.abs(radius - selector.radius) <= selector.radius_tolerance
     if selector.length is not None:
+        inside &= (along >= 0.0) & (along <= selector.length)
+    return np.flatnonzero(inside)
+
+
+def _select_elliptical_wall(
+    mesh: PointCloud, selector: EllipticalWallSelector
+) -> NDArray[np.int64]:
+    """Nodes on the wall of an elliptical bore, boss or plate edge.
+
+    The test is on the **normalised** radius `sqrt((u/a)^2 + (v/b)^2)`, which is
+    exactly 1 on the wall whatever the aspect ratio. A distance band cannot do
+    this job: on a 3250 x 2750 edge a band wide enough to catch the flatter end
+    reaches well into the material at the sharper one, so the restraint quietly
+    stiffens the part it was meant to support.
+
+    Note this is a band on a *dimensionless* quantity, so `tolerance` does not
+    scale with the part. That is deliberate — a mesh resolves a curved wall to
+    within a fraction of its own size, and the fraction is what matters.
+    """
+    axis = _AXIS_INDEX[selector.axis]
+    in_plane = [index for index in (0, 1, 2) if index != axis]
+    centre = np.asarray(selector.axis_point, dtype=np.float64)
+
+    u = (mesh.nodes[:, in_plane[0]] - centre[in_plane[0]]) / selector.semi_axis_a
+    v = (mesh.nodes[:, in_plane[1]] - centre[in_plane[1]]) / selector.semi_axis_b
+    normalised = np.sqrt(u * u + v * v)
+    inside = np.abs(normalised - 1.0) <= selector.tolerance
+
+    if selector.length is not None:
+        along = mesh.nodes[:, axis] - centre[axis]
         inside &= (along >= 0.0) & (along <= selector.length)
     return np.flatnonzero(inside)
 

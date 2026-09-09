@@ -170,3 +170,129 @@ class TestRadialOffsets:
         one, _ = radial_offsets(nodes, (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
         many, _ = radial_offsets(nodes, (0.0, 0.0, 0.0), (0.0, 0.0, 100.0))
         assert np.allclose(one, many)
+
+
+class TestTheEllipticalWall:
+    """The selector NAFEMS LE10 could not be posed without.
+
+    A curved outer edge is not any region the other five can name: a box takes
+    the material inside it, a face selector takes a flat plane the wall is not,
+    and a cylinder is the wrong shape. LE10 restrains that edge in x and y and
+    restrains `uz` on one ring of it — two different regions of the same wall —
+    so `length` is load-bearing rather than a convenience.
+    """
+
+    @pytest.fixture
+    def wall_mesh(self):
+        """Nodes placed by hand on and off a 30 x 10 ellipse, extruded in z.
+
+        Built rather than meshed so every expected answer is arithmetic: two
+        nodes exactly on the wall at each height, one well inside, one outside.
+        """
+        from app.mesh.types import TetMesh
+
+        points = []
+        for z in (0.0, 5.0, 10.0):
+            points.extend(
+                [
+                    [30.0, 0.0, z],  # on the wall, at the flat end
+                    [0.0, 10.0, z],  # on the wall, at the sharp end
+                    [15.0, 0.0, z],  # halfway in
+                    [45.0, 0.0, z],  # outside
+                ]
+            )
+        nodes = np.array(points, dtype=np.float64)
+        # One tet, only so the object is a mesh; selection reads nodes alone.
+        return TetMesh(nodes=nodes, tets=np.array([[0, 1, 2, 4]], dtype=np.int64))
+
+    def _wall(self, **overrides):
+        from app.solve.types import EllipticalWallSelector
+
+        return EllipticalWallSelector(
+            **{
+                "axis": "z",
+                "axis_point": (0.0, 0.0, 0.0),
+                "semi_axis_a": 30.0,
+                "semi_axis_b": 10.0,
+                **overrides,
+            }
+        )
+
+    def test_it_takes_the_wall_at_both_ends_of_the_ellipse(self, wall_mesh) -> None:
+        """The point of testing both: a band on *distance* would reach 30 mm
+        into the material at the flat end while missing the sharp one. The test
+        is on the normalised radius, which is 1 all the way round."""
+        selected = set(int(index) for index in select_nodes(wall_mesh, self._wall()))
+
+        on_the_wall = {
+            index
+            for index, node in enumerate(wall_mesh.nodes)
+            if abs((node[0] / 30.0) ** 2 + (node[1] / 10.0) ** 2 - 1.0) < 1e-9
+        }
+        assert selected == on_the_wall
+        assert len(selected) == 6
+
+    def test_it_leaves_the_material_inside_and_outside_alone(self, wall_mesh) -> None:
+        selected = select_nodes(wall_mesh, self._wall())
+        radii = np.sqrt(
+            (wall_mesh.nodes[selected, 0] / 30.0) ** 2
+            + (wall_mesh.nodes[selected, 1] / 10.0) ** 2
+        )
+        assert np.allclose(radii, 1.0, atol=0.02)
+
+    def test_length_clips_it_to_one_ring(self, wall_mesh) -> None:
+        """LE10's line EE' is the midplane ring of the outer wall, and it is the
+        only thing holding the plate up in z."""
+        selected = select_nodes(
+            wall_mesh, self._wall(axis_point=(0.0, 0.0, 4.0), length=2.0)
+        )
+        assert sorted(wall_mesh.nodes[selected, 2]) == [5.0, 5.0]
+
+    def test_it_reads_the_ellipse_in_the_plane_normal_to_its_axis(self) -> None:
+        """`axis` is the sweep direction, and the two semi-axes are measured
+        along the remaining coordinate axes in x, y, z order. Swapping them is
+        the mistake this pins."""
+        from app.mesh.types import TetMesh
+
+        nodes = np.array([[7.0, 30.0, 0.0], [7.0, 0.0, 10.0]], dtype=np.float64)
+        mesh = TetMesh(
+            nodes=np.vstack([nodes, [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]]),
+            tets=np.array([[0, 1, 2, 3]], dtype=np.int64),
+        )
+        selected = select_nodes(
+            mesh,
+            self._wall(axis="x", axis_point=(0.0, 0.0, 0.0), semi_axis_a=30.0, semi_axis_b=10.0),
+        )
+        assert sorted(int(i) for i in selected) == [0, 1]
+
+    def test_a_wall_that_is_not_there_is_refused_rather_than_returning_nothing(
+        self, wall_mesh
+    ) -> None:
+        with pytest.raises(SolverError, match="elliptical wall"):
+            select_nodes(wall_mesh, self._wall(semi_axis_a=500.0, semi_axis_b=400.0))
+
+    def test_the_tolerance_is_on_the_normalised_radius_not_on_a_distance(self) -> None:
+        """One number has to mean the same thing at both ends of the ellipse.
+
+        These two nodes sit at the same *proportional* depth — 80% of the way
+        out — and at very different distances from the wall: 6 mm at the flat
+        end, 2 mm at the sharp one. A band on distance would take one and not
+        the other, quietly stiffening the part along half its edge. A band on
+        the normalised radius takes both or neither, and this asserts both
+        directions so a tolerance that happened to be generous cannot pass it.
+        """
+        from app.mesh.types import TetMesh
+
+        mesh = TetMesh(
+            nodes=np.array(
+                [[24.0, 0.0, 0.0], [0.0, 8.0, 0.0], [30.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+                dtype=np.float64,
+            ),
+            tets=np.array([[0, 1, 2, 3]], dtype=np.int64),
+        )
+
+        both = set(int(i) for i in select_nodes(mesh, self._wall(tolerance=0.25)))
+        assert {0, 1} <= both
+
+        neither = set(int(i) for i in select_nodes(mesh, self._wall(tolerance=0.15)))
+        assert neither.isdisjoint({0, 1})

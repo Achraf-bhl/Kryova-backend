@@ -56,20 +56,25 @@ against it.
 refuses that suite at import if it contains a runnable case. A validation
 benchmark is a mesh convergence study — minutes of CPU, several solves — and
 running one inside an HTTP request thread on a public, unauthenticated route is
-a denial-of-service tool with a nice name. When 7.1's catalogue lands, the
-outcomes must arrive from a recorded CI artefact and be passed to
-`Register.build`, which is why that function takes outcomes as an argument
-rather than a suite.
+a denial-of-service tool with a nice name. So `PUBLISHED_SUITE` is the *blocked*
+half of `app.verify.nafems`, and a case that executes reaches this register only
+as a recorded outcome passed to `Register.build` — which is why that function
+takes outcomes as an argument rather than a suite.
 
 ## What it says today
 
-Nothing is validated. There is no NAFEMS catalogue in this codebase — 7.1 has
-its machinery and no cases — so `PUBLISHED_SUITE` is empty and every declared
-analysis is `UNVALIDATED`. The closed-form checks listed against several of them
-are real and are pinned by tests, but they are **verification** (are we solving
-the equations right) and not **validation** (are they the right equations), the
-ASME V&V 20 split `benchmarks.py` refuses to collapse. They are carried in a
-field of their own, named as verification, and they do not move a standing.
+Nothing is validated, and that is still the correct answer with a catalogue in
+place. `app.verify.nafems` holds five standard NAFEMS cases; four are blocked
+and appear here with their published targets and their named blockers, and the
+fifth — FV52 — runs and validates, but nothing has yet recorded that run into
+this page. So the four rows a reader sees are the honest published state: the
+numbers we must eventually reproduce, and why we cannot yet.
+
+The closed-form checks listed against several analyses are real and are pinned
+by tests, but they are **verification** (are we solving the equations right) and
+not **validation** (are they the right equations), the ASME V&V 20 split
+`benchmarks.py` refuses to collapse. They are carried in a field of their own,
+named as verification, and they do not move a standing.
 """
 
 from __future__ import annotations
@@ -81,7 +86,9 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Final
 
+from app.verify import recorded
 from app.verify.benchmarks import BenchmarkOutcome, Outcome, Suite, Target
+from app.verify.nafems import NAFEMS_SUITE
 
 
 class Standing(StrEnum):
@@ -342,9 +349,17 @@ _PUBLIC_PROVENANCE: Final[dict[str, tuple[str, ...]]] = {
 #: carries an exception's own message, and `FileNotFoundError` puts an absolute
 #: path in one — on the Windows seat that path starts `C:\Users\<the customer>`.
 #: The register is published, so a path in it is a leak whoever wrote it.
+#:
+#: **A drive letter is exactly one character, and the lookbehind is what says
+#: so.** Without it the branch also matches the `s:/` inside `https://`, and
+#: `scrub` replaces the *whole* string — so a benchmark whose reason cites the
+#: document it came from would publish "[withheld: looked like a filesystem
+#: path]" instead of the citation. On a page whose entire value is checkable
+#: references, that is the guard destroying what it protects. Found 2026-09-08
+#: when `app.verify.nafems` landed, carrying a URL in every source.
 _PATH_RE: Final = re.compile(
     r"""(
-        [A-Za-z]:[\\/]                 # C:\ or C:/
+        (?<![A-Za-z])[A-Za-z]:[\\/]    # C:\ or C:/ — but not the s:/ of https://
         | \\\\[^\s\\]+\\               # \\server\share
         | (?:^|(?<=[\s"'(]))/(?:home|Users|root|mnt|var|tmp|opt|srv)/
     )""",
@@ -766,11 +781,25 @@ def _summarise(rows: tuple[AnalysisRow, ...]) -> Summary:
 # The published register
 # --------------------------------------------------------------------------
 
-#: The cases the published register reports on. **Empty**, because 7.1's NAFEMS
-#: catalogue has not been written: `app/verify/benchmarks.py` is machinery and
-#: no instances, and the honest register of a codebase with no benchmarks is one
-#: that says nothing is validated.
-PUBLISHED_SUITE: Final = Suite(name="kryova-published-validation", benchmarks=())
+#: The cases the published register reports on: **the blocked half of 7.1's
+#: NAFEMS catalogue**, and nothing else.
+#:
+#: The filter is what makes this safe rather than a rule somebody must remember.
+#: `assert_publishable` refuses a runnable case, and this module runs that
+#: assertion at import — so selecting the catalogue wholesale would turn the day
+#: somebody makes LE10 runnable into the day the application stops booting.
+#: Filtering on `runnable` cannot fail that way, and it is the same statement:
+#: a benchmark that executes reaches this register from a recorded run, never
+#: from a request.
+#:
+#: Publishing the blocked ones is the point rather than a consolation. Each
+#: carries the number we must eventually produce and the named reason we cannot
+#: yet, which is exactly what 7.4 asks a register to say about what is *not*
+#: validated.
+PUBLISHED_SUITE: Final = Suite(
+    name="kryova-published-validation",
+    benchmarks=tuple(b for b in NAFEMS_SUITE.benchmarks if not b.runnable),
+)
 
 #: Notes printed with the register. Not decoration: without the first line a
 #: reader sees eleven `UNVALIDATED` rows and no explanation of the closed-form
@@ -782,9 +811,14 @@ PUBLISHED_NOTES: Final[tuple[str, ...]] = (
     "correctly, checked against an identity with a known answer. None of that is "
     "*validation*, which asks whether they are the right equations and is "
     "answered only by a published benchmark with a published result.",
-    "Nothing in this register is validated today. The benchmark machinery exists "
-    "(app/verify/benchmarks.py) and the catalogue of cases does not, so every "
-    "analysis is reported unvalidated rather than omitted.",
+    "This page never runs a benchmark. A validation case is several solves and "
+    "this route is unauthenticated, so a validated row is a *recording* — the "
+    "outcome of a run made elsewhere, carried in with a fingerprint of every "
+    "source file that decides an answer. If that fingerprint stops matching the "
+    "code, the recording is discarded and the page reverts to publishing only "
+    "the blocked half, with the reason, rather than a result nobody re-checked. "
+    "A blocked case still shows the published target it must eventually "
+    "reproduce and the named reason it cannot be run yet.",
     "An analysis appears here whether or not anybody has benchmarked it. The list "
     "is declared in app/verify/register.py and is not assembled from whatever "
     "happened to run.",
@@ -812,13 +846,9 @@ def assert_publishable(suite: Suite) -> None:
 assert_publishable(PUBLISHED_SUITE)
 
 
-def published_register(*, generated_at: str | None = None) -> Register:
-    """The register as the trust page publishes it.
-
-    Cheap by construction — `assert_publishable` guarantees there is nothing to
-    run — so no cache is needed and a stale one cannot be served.
-    """
-    outcomes = tuple(
+def _blocked_outcomes() -> tuple[BenchmarkOutcome, ...]:
+    """The cases this product cannot run, as outcomes. Costs nothing to state."""
+    return tuple(
         BenchmarkOutcome(
             benchmark_id=benchmark.id,
             title=benchmark.title,
@@ -829,9 +859,30 @@ def published_register(*, generated_at: str | None = None) -> Register:
         )
         for benchmark in PUBLISHED_SUITE.benchmarks
     )
-    return Register.build(
-        outcomes, generated_at=generated_at, notes=PUBLISHED_NOTES
-    )
+
+
+def published_register(*, generated_at: str | None = None) -> Register:
+    """The register as the trust page publishes it.
+
+    Cheap by construction — `assert_publishable` guarantees there is nothing to
+    run here, and the results of the cases that *can* run are read from a
+    recorded artefact rather than produced on the request.
+
+    **A recorded run that no longer describes this code publishes nothing**, and
+    says so. `recorded.load` compares a fingerprint of the solvers, the mesher
+    and the verification modules against the working tree, so the register falls
+    back to the blocked-only view the moment a solver changes — which is the
+    honest state until somebody records the run again. Reading it per request
+    rather than at import is deliberate: a register cached at startup would keep
+    publishing a result the file on disk had already retired.
+    """
+    outcomes, discarded = recorded.load()
+    notes = PUBLISHED_NOTES
+    if discarded:
+        outcomes = _blocked_outcomes()
+        notes = (*PUBLISHED_NOTES, discarded)
+
+    return Register.build(outcomes, generated_at=generated_at, notes=notes)
 
 
 __all__ = [

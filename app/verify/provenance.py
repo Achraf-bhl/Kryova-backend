@@ -50,6 +50,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from app.kernel.provenance import Record, attach, measured, unavailable
+from app.mesh.planar import TriMesh, planar_quality
 from app.mesh.types import TetMesh, quality
 from app.verify.convergence import ConvergenceStudy
 
@@ -66,7 +67,15 @@ def _sha256(*chunks: bytes) -> str:
     return _DIGEST_PREFIX + digest.hexdigest()
 
 
-def mesh_digest(mesh: TetMesh) -> str:
+#: Every mesh a result can be bound to. A union rather than a Protocol because
+#: the two are genuinely different shapes — a solid has tets and a volume, a
+#: plane model has triangles and an area — and the code below has to say which
+#: it is holding rather than paper over the difference with a shared attribute
+#: name that would put mm^2 under a key called `volume_mm3`.
+AnyMesh = TetMesh | TriMesh
+
+
+def mesh_digest(mesh: AnyMesh) -> str:
     """A content digest of the discretised geometry a result was computed on.
 
     Node coordinates and connectivity only — not the quality summary, which is
@@ -76,9 +85,10 @@ def mesh_digest(mesh: TetMesh) -> str:
     point: a result and the mesh it was computed on travel together or the
     result is worthless.
     """
+    elements = mesh.tris if isinstance(mesh, TriMesh) else mesh.tets
     return _sha256(
         np.ascontiguousarray(mesh.nodes, dtype=np.float64).tobytes(),
-        np.ascontiguousarray(mesh.tets, dtype=np.int64).tobytes(),
+        np.ascontiguousarray(elements, dtype=np.int64).tobytes(),
         b"" if mesh.midside is None else np.ascontiguousarray(mesh.midside).tobytes(),
     )
 
@@ -181,7 +191,7 @@ class RunProvenance:
     unit: str
     value: float | None
     geometry_source: str
-    mesh: TetMesh
+    mesh: AnyMesh
     case: BaseModel
     solver: SolverIdentity
     element_size_mm: float | None = None
@@ -248,7 +258,26 @@ class RunProvenance:
         `measurable_paths`-style walkers skip the sidecar for free because its
         entries are dicts of strings rather than numbers.
         """
-        stats = quality(self.mesh)
+        # A plane model measures an area and a solid measures a volume, and the
+        # payload says which rather than putting one under the other's key: a
+        # field that holds mm^3 on one record and mm^2 on another is the
+        # unit-blurring this whole package exists to prevent. Both carry
+        # `element_count`, `min_quality` and `sliver_count`, which is what a
+        # reader comparing two runs actually needs.
+        # Written as a branch rather than three conditional expressions so the
+        # type narrows: `quality` takes a solid and `planar_quality` takes a
+        # plane mesh, and a boolean flag leaves both calls holding the union.
+        stats: dict[str, Any]
+        if isinstance(self.mesh, TriMesh):
+            planar = True
+            stats = dict(planar_quality(self.mesh))
+            measure_key = "area_mm2"
+            element_count = self.mesh.element_count
+        else:
+            planar = False
+            stats = dict(quality(self.mesh))
+            measure_key = "volume_mm3"
+            element_count = self.mesh.tet_count
         material = getattr(self.case, "material", None)
 
         payload: dict[str, Any] = {
@@ -263,8 +292,8 @@ class RunProvenance:
                 "element_type": self.mesh.element_type,
                 "element_order": self.mesh.element_order,
                 "node_count": self.mesh.node_count,
-                "element_count": self.mesh.tet_count,
-                "volume_mm3": stats["volume_mm3"],
+                "element_count": element_count,
+                measure_key: stats[measure_key],
                 "min_quality": stats["min_quality"],
                 "sliver_count": stats["sliver_count"],
             },
@@ -283,7 +312,15 @@ class RunProvenance:
             payload["notes"] = dict(self.notes)
 
         attach(payload, "geometry.digest", measured("sha256 over node coordinates and connectivity"))
-        attach(payload, "mesh.volume_mm3", measured("sum of signed tetrahedron volumes"))
+        attach(
+            payload,
+            f"mesh.{measure_key}",
+            measured(
+                "sum of signed triangle areas"
+                if planar
+                else "sum of signed tetrahedron volumes"
+            ),
+        )
         attach(payload, "load_case.digest", measured("sha256 over the case's canonical JSON"))
         attach(payload, "solver.code_digest", measured("sha256 of the solver module's source"))
         attach(payload, "solver.version", self.solver.version_record())
@@ -344,12 +381,16 @@ class RunProvenance:
             )
             return
         payload["value"] = self.value
+        elements = (
+            self.mesh.element_count
+            if isinstance(self.mesh, TriMesh)
+            else self.mesh.tet_count
+        )
         attach(
             payload,
             "value",
             measured(
-                f"{self.solver.name} on {self.mesh.tet_count} {self.mesh.element_type} "
-                "elements"
+                f"{self.solver.name} on {elements} {self.mesh.element_type} elements"
                 if study is None
                 else f"{self.solver.name}, converged over {len(study.levels)} grids"
             ),

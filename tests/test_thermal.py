@@ -230,3 +230,156 @@ class TestNoRegression:
         assert both.displacements == pytest.approx(
             mechanical.displacements + thermal.displacements, abs=1e-9
         )
+
+
+class TestAPrescribedTemperatureField:
+    """A temperature that varies over the part, given rather than computed.
+
+    E7 task 6 names two different things and this is the first: a field the
+    engineer or the benchmark *states* as a formula of position. NAFEMS LE11 is
+    exactly that — its temperature is `sqrt(x^2 + y^2) + z`, prescribed — and it
+    is why `delta_t_k` alone left that benchmark blocked. The second thing, a
+    field *solved* from boundary conditions, is a conduction analysis and lives
+    elsewhere.
+
+    The field is a solver argument and deliberately not a field on `LoadCase`:
+    a case is stored as JSONB on the job row and meant to be read by a person,
+    and one number per node is data the size of the mesh that would also stop
+    matching the mesh the moment either changed.
+    """
+
+    def _mesh(self):
+        # The same bar the rest of this file uses: `axial_fixtures()` pins
+        # rigid-body motion at named corner coordinates, so a different size
+        # silently restrains nothing.
+        return box_mesh((120.0, 20.0, 20.0), (12, 2, 2))
+
+    def _case(self, **overrides) -> LoadCase:
+        return LoadCase(
+            material=STEEL,
+            fixtures=axial_fixtures(),
+            loads=[NEGLIGIBLE],
+            **overrides,
+        )
+
+    def test_a_uniform_field_is_the_uniform_case_to_machine_precision(self) -> None:
+        """The two paths must be one calculation. If a field of 80 K gave even
+        slightly different numbers from `delta_t_k=80`, the field path would be
+        a second implementation of thermal stress and one of them would rot.
+        """
+        mesh = self._mesh()
+        solver = LinearStaticSolver()
+
+        field = solver.solve(
+            mesh, self._case(), temperatures=np.full(mesh.node_count, 80.0)
+        )
+        scalar = solver.solve(mesh, self._case(delta_t_k=80.0))
+
+        assert field.nodal_stress == pytest.approx(scalar.nodal_stress, rel=1e-12)
+
+    def test_a_bar_held_at_both_ends_carries_the_mean_of_a_graded_field(self) -> None:
+        """Closed form, and a sharper one than it first looks.
+
+        With both ends held in x and nothing else resisting, equilibrium says
+        `d(sigma_xx)/dx = 0` — so a linear temperature gradient does **not**
+        give a graded stress. It gives a *constant* one, equal to
+        `-E alpha` times the **mean** temperature. A per-element implementation
+        that quietly used one element's temperature everywhere, or that averaged
+        the wrong way, would fail this by a factor of two.
+        """
+        mesh = self._mesh()
+        temperatures = mesh.nodes[:, 0]  # dT = x, from 0 to 120 K
+
+        out = LinearStaticSolver().solve(mesh, self._case(), temperatures=temperatures)
+
+        expected = -STEEL.youngs_modulus_mpa * STEEL.thermal_expansion_per_k * 60.0
+        interior = np.abs(mesh.nodes[:, 0] - 60.0) < 30.0
+        assert out.nodal_stress[interior, 0] == pytest.approx(expected, rel=0.05)
+
+    def test_the_field_is_refused_when_it_does_not_fit_the_mesh(self) -> None:
+        """A field one node short would shift every temperature by one node and
+        produce a plausible, wrong answer. Bound to its mesh or refused."""
+        mesh = self._mesh()
+
+        with pytest.raises(SolverError) as refused:
+            LinearStaticSolver().solve(
+                mesh, self._case(), temperatures=np.zeros(mesh.node_count - 1)
+            )
+
+        message = str(refused.value)
+        assert str(mesh.node_count) in message
+        assert "re-evaluate" in message
+
+    def test_a_field_and_a_uniform_change_together_are_refused(self) -> None:
+        """Adding them would double-count the expansion silently. One or the
+        other, and the message says to fold the offset into the field."""
+        mesh = self._mesh()
+
+        with pytest.raises(SolverError) as refused:
+            LinearStaticSolver().solve(
+                mesh, self._case(delta_t_k=50.0), temperatures=np.full(mesh.node_count, 10.0)
+            )
+
+        assert "double-count" in str(refused.value)
+
+    def test_no_field_and_no_delta_t_leaves_the_run_isothermal(self) -> None:
+        """The cost to everyone not using this must be zero, including the
+        arithmetic: no thermal load, no correction, no change of answer."""
+        mesh = self._mesh()
+
+        out = LinearStaticSolver().solve(mesh, self._case(), temperatures=None)
+
+        assert out.nodal_stress == pytest.approx(0.0, abs=1e-6)
+
+    def test_a_field_works_on_quadratic_elements_too(self) -> None:
+        """Nothing here depends on element order, and a check that only ever ran
+        on tet4 would not have shown that."""
+        mesh = promote_to_tet10(self._mesh())
+
+        out = LinearStaticSolver().solve(
+            mesh, self._case(), temperatures=np.full(mesh.node_count, 80.0)
+        )
+
+        expected = -STEEL.youngs_modulus_mpa * STEEL.thermal_expansion_per_k * 80.0
+        interior = np.abs(mesh.nodes[:, 0] - 60.0) < 30.0
+        assert out.nodal_stress[interior, 0] == pytest.approx(expected, rel=0.02)
+
+    def test_a_transverse_gradient_gives_a_stress_that_varies_with_it(self) -> None:
+        """The test that can tell a field from its own average.
+
+        Written because the obvious one cannot. A bar held at both ends under an
+        *axial* gradient carries constant stress equal to `-E alpha` times the
+        mean temperature — so an implementation that quietly replaced the field
+        by its mean would pass it, and did: that break ran green until this test
+        existed.
+
+        A gradient *across* the bar separates them. Equilibrium still makes
+        `sigma_xx` independent of x, but nothing makes it independent of y, so
+        each fibre carries `-E alpha T(y)` and the stress varies across the
+        section by about `E alpha` times the temperature range. Averaged first,
+        it would be flat.
+        """
+        # Four divisions across the section, not two: an element takes its
+        # corners' mean temperature, so with two the effective gradient is
+        # halved and the measured spread is 72% of the continuum value. At four
+        # it is 90%, and stays there to sixteen — the residual gap is the free
+        # lateral surfaces, not the field.
+        mesh = box_mesh((120.0, 20.0, 20.0), (12, 4, 2))
+        temperatures = mesh.nodes[:, 1]  # dT = y, 0 to 20 K across the section
+
+        out = LinearStaticSolver().solve(mesh, self._case(), temperatures=temperatures)
+
+        low = out.nodal_stress[mesh.nodes[:, 1] < 5.0, 0].mean()
+        high = out.nodal_stress[mesh.nodes[:, 1] > 15.0, 0].mean()
+        spread = abs(high - low)
+        continuum = STEEL.youngs_modulus_mpa * STEEL.thermal_expansion_per_k * 20.0
+
+        # The bound is on the claim, not on the measurement: the stress follows
+        # the field. Averaging the field first gives a spread of essentially
+        # zero, so three quarters separates the two by a mile without pinning a
+        # discretisation figure that a mesh change would move.
+        assert spread > 0.75 * continuum, (
+            f"the stress must follow the field across the section, not its average; "
+            f"spread {spread:.1f} MPa against a continuum {continuum:.1f} MPa"
+        )
+        assert spread < 1.1 * continuum

@@ -165,6 +165,42 @@ class TestInterpretService:
         assert "aluminium-6061-t6" in user
         assert "Coarse mesh near the fillet" in user
 
+    def test_the_mesh_convergence_claim_reaches_the_model(self) -> None:
+        """Gate G1's third item, at the last place it can still be lost.
+
+        The claim can be correct on the result row and never reach the person
+        who is told what the run means. G1 reported a factor of safety of 1303
+        off one mesh; the number was explained as a result rather than as a
+        result *from one mesh*, and the explanation is what the engineer reads.
+        """
+        provider = StubProvider(response=_interpretation())
+        service.interpret_result(
+            provider,
+            result={
+                **SUCCEEDED_RESULT,
+                "mesh_convergence": {"converged": False, "basis": "single-grid", "grids": 1},
+            },
+            load_case=LOAD_CASE,
+        )
+
+        assert "mesh_convergence" in provider.calls[0]["user"]
+        assert "single-grid" in provider.calls[0]["user"]
+
+    def test_a_result_row_written_before_the_field_existed_still_says_one_mesh(
+        self,
+    ) -> None:
+        """Every simulation already in the database predates the field. A
+        missing key must read as 'one mesh, unchecked' — which is what those
+        runs were — and never as an absent caveat, because absence is exactly
+        what the model would take for 'nothing to mention'.
+        """
+        provider = StubProvider(response=_interpretation())
+        assert "mesh_convergence" not in SUCCEEDED_RESULT
+
+        service.interpret_result(provider, result=SUCCEEDED_RESULT, load_case=LOAD_CASE)
+
+        assert "single-grid" in provider.calls[0]["user"]
+
 
 class TestPrompts:
     """The prompts encode rules the product depends on."""
@@ -173,6 +209,20 @@ class TestPrompts:
         from app.ai.prompts import INTERPRET_SYSTEM
 
         assert "Never compute" in INTERPRET_SYSTEM
+
+    def test_interpret_prompt_requires_an_unconverged_number_to_be_called_one(
+        self,
+    ) -> None:
+        """Sending the claim is half of it; the other half is the model being
+        told it may not bury it. G1's failure was not a missing field, it was a
+        number presented as settled — so the instruction is that it goes in the
+        summary beside the headline, not in a caveat at the end.
+        """
+        from app.ai.prompts import INTERPRET_SYSTEM
+
+        assert "mesh_convergence" in INTERPRET_SYSTEM
+        assert "single-grid" in INTERPRET_SYSTEM
+        assert "not a clearance to build" in INTERPRET_SYSTEM
         assert "Never convert units" in INTERPRET_SYSTEM
 
     def test_prompts_carry_the_real_material_library(self) -> None:

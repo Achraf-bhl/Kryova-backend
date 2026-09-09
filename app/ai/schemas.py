@@ -164,10 +164,30 @@ class LoadCaseDraft(BaseModel):
 # The load-case sketch: what a small local model is asked to fill in.
 # ---------------------------------------------------------------------------
 
-#: The six faces of a part's bounding box, by the words an engineer uses. +Z is
-#: up, +X is to the right, +Y is away from the viewer; `load_case_sketch.py`
+#: The words a support or a load may name a face by. `load_case_sketch.py`
 #: turns each into the `FaceSelector` the solver reads.
-FaceName = Literal["top", "bottom", "left", "right", "front", "back"]
+#:
+#: **Six are absolute and two are part-relative, and the split is the point.**
+#: The absolute six are the viewer's frame: +Z is up, +X is to the right, +Y is
+#: away from the viewer. They are right whenever the description is in those
+#: terms ("the top face", "the base").
+#:
+#: `far end` and `near end` are the two faces normal to the part's **longest**
+#: axis, and they exist because the absolute six cannot express the commonest
+#: request there is. Measured at gate G1 on 2026-09-08: asked to fix one end of
+#: a beam and load the free end, the drafting model answered `left` and `right`
+#: — always ±X — on a beam whose long axis was Z. It was given the bounding box
+#: and still chose X, because turning a box into an axis is a reasoning step,
+#: and the fix is to remove the step rather than to ask for it more firmly. The
+#: result was a clamp and a load 20 mm apart on a 200 mm part, reported as a
+#: factor of safety of 1303.
+#:
+#: They need the bounding box to resolve, and `realise` refuses them by name
+#: when it has none — never silently falling back to an axis, because a wrong
+#: axis is exactly the failure they were added to prevent.
+FaceName = Literal[
+    "top", "bottom", "left", "right", "front", "back", "far end", "near end"
+]
 
 #: Every material the solver's library holds, by slug. Built from the library
 #: rather than typed, so adding a material to `solve/materials.py` adds it to

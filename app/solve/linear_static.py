@@ -32,7 +32,7 @@ from app import observe
 from app.mesh.types import TET10_EDGES, TetMesh
 from app.solve.base import SolveOutput, Solver
 from app.solve.loads import assemble_loads
-from app.solve.postprocess import summarise_static
+from app.solve.postprocess import nodal_average, summarise_static
 from app.solve.selection import select_nodes
 from app.solve.types import LoadCase, Material, SolverError
 
@@ -60,6 +60,32 @@ _TET_GAUSS_POINTS = (
 _TET_GAUSS_WEIGHT = 1.0 / 24.0
 
 _CENTROID = (0.25, 0.25, 0.25)
+
+#: Where each of a tet10's ten nodes sits in natural coordinates, in the local
+#: order the connectivity uses: the four corners, then the midsides in
+#: `TET10_EDGES` order. Derived from that table rather than typed out, so a mesh
+#: whose midside ordering changed could not leave this silently describing the
+#: old one — the stress would then be evaluated at the wrong point of the right
+#: element, which is a plausible wrong number and not an error.
+_TET10_CORNERS_NATURAL: tuple[tuple[float, float, float], ...] = (
+    (0.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0),
+    (0.0, 0.0, 1.0),
+)
+def _midside_natural(a: int, b: int) -> tuple[float, float, float]:
+    first, second = _TET10_CORNERS_NATURAL[a], _TET10_CORNERS_NATURAL[b]
+    return (
+        0.5 * (first[0] + second[0]),
+        0.5 * (first[1] + second[1]),
+        0.5 * (first[2] + second[2]),
+    )
+
+
+_TET10_NATURAL_NODES: tuple[tuple[float, float, float], ...] = (
+    *_TET10_CORNERS_NATURAL,
+    *(_midside_natural(a, b) for a, b in TET10_EDGES),
+)
 
 _MIN_JACOBIAN = 1e-12
 
@@ -259,10 +285,54 @@ def von_mises(stress: NDArray[np.float64]) -> NDArray[np.float64]:
     )
 
 
+def _temperature_change(
+    mesh: TetMesh, case: LoadCase, temperatures: NDArray[np.float64] | None
+) -> float | NDArray[np.float64] | None:
+    """The temperature change this solve applies, per element or uniformly.
+
+    **A prescribed field is a solver argument rather than a field on
+    `LoadCase`, and that is deliberate.** A case is stored as JSONB on the job
+    row and is meant to be read by a person; one number per node is data the
+    size of the mesh, and putting it there would make every saved load case
+    unreadable and every row enormous — to say nothing of a field that no longer
+    matches the mesh it was written for. It is passed alongside the mesh it
+    belongs to, or not at all.
+
+    Nodal values are averaged onto their element's corners, which is the
+    approximation the assembly already makes: `thermal_load` integrates a
+    constant strain per element in the uniform case too.
+
+    Refused rather than truncated when the length is wrong, because a field one
+    node short would silently shift every temperature by one node and produce a
+    plausible, wrong answer.
+    """
+    if temperatures is None:
+        return case.delta_t_k if case.delta_t_k else None
+    field = np.asarray(temperatures, dtype=np.float64).reshape(-1)
+    if len(field) != mesh.node_count:
+        raise SolverError(
+            f"The temperature field has {len(field)} values and the mesh has "
+            f"{mesh.node_count} nodes. A field is bound to the mesh it was evaluated "
+            "on; re-evaluate it on this one rather than padding or truncating it."
+        )
+    if case.delta_t_k:
+        raise SolverError(
+            "This case carries a uniform delta_t_k and a temperature field was also "
+            "supplied. Adding them would silently double-count the expansion — give "
+            "one or the other, and fold any uniform offset into the field."
+        )
+    return field[mesh.tets[:, :4]].mean(axis=1)
+
+
 class LinearStaticSolver(Solver):
     name = "linear-static"
 
-    def solve(self, mesh: TetMesh, case: LoadCase) -> SolveOutput:
+    def solve(
+        self,
+        mesh: TetMesh,
+        case: LoadCase,
+        temperatures: NDArray[np.float64] | None = None,
+    ) -> SolveOutput:
         started = time.perf_counter()
         warnings: list[str] = []
 
@@ -279,10 +349,11 @@ class LinearStaticSolver(Solver):
         # Restrained thermal expansion is a load like any other, so it is added
         # here rather than solved separately: a part that is both heated and
         # pushed has one displacement field, not two to superpose by hand.
-        if case.delta_t_k:
+        delta_t = _temperature_change(mesh, case, temperatures)
+        if delta_t is not None:
             from app.solve.thermal import thermal_load
 
-            forces += thermal_load(mesh, case.material, case.delta_t_k)
+            forces += thermal_load(mesh, case.material, delta_t)
 
         fixed = np.unique(
             np.concatenate(
@@ -326,9 +397,10 @@ class LinearStaticSolver(Solver):
             raise _under_constrained("the solution does not satisfy equilibrium")
         displacements[free] = solution
 
-        mises = self._recover_stress(
-            mesh, case.material, displacements, delta_t_k=case.delta_t_k
+        element_stress = self._recover_stress(
+            mesh, case.material, displacements, delta_t_k=delta_t
         )
+        mises = von_mises(element_stress)
         # Shared with every other Solver rather than computed here: two
         # solvers that summarised their own results would be free to mean
         # different things by "factor of safety", and 6.5 compares them.
@@ -336,7 +408,18 @@ class LinearStaticSolver(Solver):
             mesh, case, displacements, mises, warnings, time.perf_counter() - started
         )
         return SolveOutput(
-            result=result, displacements=displacements.reshape(-1, 3), von_mises=mises
+            result=result,
+            displacements=displacements.reshape(-1, 3),
+            von_mises=mises,
+            # Averaged onto the nodes rather than reported per element. The
+            # headline peak in `result` stays the raw element value — smoothing
+            # a concentration out of the number an engineer sizes to would be a
+            # different and much worse decision — but a stress *at a named
+            # point* is a nodal question, and CalculiX answers it at nodes too,
+            # so the oracle compares like with like.
+            nodal_stress=self._recover_nodal_stress(
+                mesh, case.material, displacements, delta_t_k=delta_t
+            ),
         )
 
     @staticmethod
@@ -393,29 +476,33 @@ class LinearStaticSolver(Solver):
             )
         return solution
 
-    def _recover_stress(
+    def _stress_at(
         self,
         mesh: TetMesh,
         material: Material,
         displacements: NDArray[np.float64],
-        delta_t_k: float | None = None,
+        natural: tuple[float, float, float],
+        delta_t_k: float | NDArray[np.float64] | None,
     ) -> NDArray[np.float64]:
+        """The stress tensor of every element at one natural coordinate.
+
+        (n_elements, 6), SXX SYY SZZ SXY SYZ SZX — the tensor rather than von
+        Mises, because the caller needs both and the invariant throws away the
+        six numbers a signed component reader needs.
+        """
         if mesh.midside is None:
+            # Tet4 strain is constant over the element, so the natural point is
+            # irrelevant and one evaluation is exact.
             grads, _ = _shape_gradients(mesh)
-            # Tet4 strain is constant over the element, so one evaluation is exact.
         else:
-            # Tet10 strain is linear, so it has to be sampled somewhere. The
-            # centroid is the element's superconvergent point: sampling at a
-            # face or a corner instead reads the extrapolated tail of the
-            # element's own approximation and overstates the peak.
             grads, _ = _mapped_gradients(
-                mesh.nodes[mesh.connectivity], _tet10_shape_gradients(*_CENTROID)
+                mesh.nodes[mesh.connectivity], _tet10_shape_gradients(*natural)
             )
         b = _strain_displacement(grads)
         element_u = displacements[_element_dofs(mesh.connectivity)]
         strain = np.einsum("eij,ej->ei", b, element_u)
         stress = strain @ constitutive_matrix(material).T
-        if delta_t_k:
+        if delta_t_k is not None:
             # Only the *mechanical* part of the strain carries stress. Skipping
             # this subtraction reports the stress of a part that was free to
             # expand, which for a restrained bar is the wrong sign as well as
@@ -423,4 +510,59 @@ class LinearStaticSolver(Solver):
             from app.solve.thermal import thermal_stress_correction
 
             stress = stress - thermal_stress_correction(material, delta_t_k)
-        return von_mises(stress)
+        return stress
+
+    def _recover_stress(
+        self,
+        mesh: TetMesh,
+        material: Material,
+        displacements: NDArray[np.float64],
+        delta_t_k: float | NDArray[np.float64] | None = None,
+    ) -> NDArray[np.float64]:
+        """The stress reported *per element*, sampled at the centroid.
+
+        The centroid is the element's superconvergent point: sampling at a face
+        or a corner instead reads the extrapolated tail of the element's own
+        approximation and overstates the peak, and this is the number the
+        headline peak stress and the factor of safety are computed from.
+        """
+        return self._stress_at(mesh, material, displacements, _CENTROID, delta_t_k)
+
+    def _recover_nodal_stress(
+        self,
+        mesh: TetMesh,
+        material: Material,
+        displacements: NDArray[np.float64],
+        delta_t_k: float | NDArray[np.float64] | None = None,
+    ) -> NDArray[np.float64]:
+        """The stress reported *per node*, (n_nodes, 6).
+
+        **Evaluated at each node's own natural coordinate and then averaged, not
+        by averaging centroid values.** The two sound alike and differ by the
+        thing a plate benchmark measures: a tet10's strain is linear, so on a
+        plate in bending the centroid value is the stress halfway between the
+        surface and the neutral axis. Spreading it to the nodes reports about
+        75% of the surface stress on a mesh four elements thick — and because the
+        error shrinks with refinement, it reads as a converging answer rather
+        than as a systematic offset. Evaluating at the node recovers the linear
+        variation the element already carries.
+
+        For tet4 the strain is constant, so this necessarily reduces to
+        averaging the element values: a constant-strain element has no
+        through-element variation to recover, which is the same reason it cannot
+        represent bending in the first place.
+        """
+        connectivity = mesh.connectivity
+        if mesh.midside is None:
+            return nodal_average(
+                mesh, self._stress_at(mesh, material, displacements, _CENTROID, delta_t_k)
+            )
+
+        totals = np.zeros((mesh.node_count, 6), dtype=np.float64)
+        counts = np.zeros(mesh.node_count, dtype=np.int64)
+        for local, natural in enumerate(_TET10_NATURAL_NODES):
+            stress = self._stress_at(mesh, material, displacements, natural, delta_t_k)
+            np.add.at(totals, connectivity[:, local], stress)
+            np.add.at(counts, connectivity[:, local], 1)
+        divisor = counts[:, None]
+        return np.divide(totals, divisor, out=np.zeros_like(totals), where=divisor > 0)

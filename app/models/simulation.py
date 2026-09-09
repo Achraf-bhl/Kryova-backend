@@ -60,6 +60,28 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
     # produced is not kept, and a result is only reproducible alongside the
     # element order that computed it.
     element_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    #: Which idealisation was solved: `solid`, `plane-stress` or `plane-strain`.
+    #: Stored for the same reason `element_order` is — the mesh is not kept, and
+    #: plane stress and plane strain give *different answers on the same mesh and
+    #: the same load*, so a result whose row does not say which one ran cannot be
+    #: reproduced or even argued with. `solid` is the server default, so every
+    #: row written before this column existed keeps the meaning it had.
+    analysis: Mapped[str] = mapped_column(
+        String(16), default="solid", server_default="solid"
+    )
+    #: How many successively finer grids to solve. 1 is one mesh and the
+    #: default, which is what every run before this column did. 3 or more turns
+    #: the run into a **convergence study**: the same case solved on each grid
+    #: and the peak stress assessed with a Grid Convergence Index, so the result
+    #: can say how far the answer would move on a finer mesh instead of saying
+    #: nothing. Stored because the meshes are not kept and a number is only
+    #: reproducible alongside the evidence that was gathered for it.
+    grids: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    #: Out-of-plane thickness in mm for a plane analysis; None for a solid, where
+    #: the geometry carries its own thickness. Required by the plane solver and
+    #: refused at the route rather than defaulted, because a thickness nobody
+    #: chose scales every stress in the run.
+    thickness_mm: Mapped[float | None] = mapped_column(Float, default=None)
 
     mesh_stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)

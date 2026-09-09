@@ -47,6 +47,44 @@ Companion documents:
    stretch the offline suite is the whole of the evidence, and the status says so:
    `pytest green, end to end pending G<n>` is honest; a bare `DONE` on unit tests is not.
 8. **A session starting Kryova work reads this file first.** It is the answer to "where were we?".
+9. **The progress block below is generated from those status lines, and is the only number in this
+   file nobody may type.** `venv/bin/python -m scripts.plan_progress --write` regenerates it;
+   `--check` says whether it has gone stale. A percentage written by hand is wrong from the next
+   status change onward and says nothing when it is — the same defect as the validation register's
+   hand-written blocked-case count, which made unblocking a case look like a regression twice.
+   Regenerate it in the commit that moves a status, the way the status itself moves with the work.
+
+---
+
+## Progress — counted from the status lines, never typed
+
+<!-- progress:begin -->
+**Measured 2026-09-09** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+line under every task in this file and the engineer-month figures in Part 4. Do not edit the
+block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
+
+| Track | Phases complete | Tasks | Effort |
+|---|---|---|---|
+| Engineering — E1–E18 | 5/19 | 59/101 = 58% | 66/123 eng-months = 53% |
+| Product — P1–P10 | 0/10 | 20/61 = 33% | 11/38 eng-months = 30% |
+| **Programme** | 5/29 | 79/162 = 49% | 77/161 eng-months = 48% |
+
+Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
+a convention rather than a measurement, so read the per-phase rows, not the headline.
+
+| | Phases |
+|---|---|
+| ✅ complete | E1, E2, E3, E4, E6 |
+| in flight | E5 80%, E7 79%, E14 83%, E15 20%, E16 42%, E17.3 67%, E18 38%, P1 44%, P2 64%, P3 57%, P4 33%, P9 29%, P10 25% |
+| nothing finished yet | E8, E9, E10, E11, E12, E13, E17, P5, P6, P7, P8 |
+
+**What this is not.** It is progress against the plan, not against a shipped product. Almost
+every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
+turn that into an end-to-end claim, and none of them has run yet. Two figures inside the plan
+are also deliberately not progress: E1.3's operation count is scaffolding depth (it says so),
+and roughly 36 of the remaining engineer-months are the work Part 4 marks as needing a real
+mechanical engineer, which does not compress.
+<!-- progress:end -->
 
 ---
 
@@ -379,6 +417,19 @@ The gates:
    > load case, and a convergence check (E7 task 1) — every stress in this run came from one
    > coarse tet4 mesh. Note also that G1 has now twice been run against an **unfinished E6**
    > (task 3 NOT STARTED, task 4 PARTIAL).
+   > **Two of that report's three open items are closed on Linux, 2026-09-09.** (1) The face
+   > vocabulary gained `far end` and `near end`, resolved against the part's own bounding box, so
+   > the end of a beam can be named whatever direction it lies in — the model no longer has to
+   > turn a box into an axis, which is the reasoning step it got wrong. (2) A drafted case is now
+   > checked against the geometry it was drafted for, and the gate's own answer comes back
+   > carrying *"the left face is held and the right face is loaded, and they are only 20 mm apart
+   > across the part's x direction — the part is 200 mm long in z"*. Both are warnings in
+   > `unresolved`, not refusals: a short span is a legitimate load case, and this codebase's rule
+   > about over-refusal is that the agent's recovery from one is to try something else. **What
+   > was missing was not permission to run; it was anybody saying the number looked wrong.**
+   > (3) The convergence check is still open and is E7's — the machinery now exists and is
+   > validated, but nothing in the request path runs a study, so every stress this product
+   > reports still comes from one mesh.
 2. **G2** — opens after **E11 + E12**. The input stops being a shape description and becomes a
    written requirement, with real materials and bought-in parts. Driven: rung 4 — two parts and a
    constraint, specified as a requirement rather than as dimensions.
@@ -1100,6 +1151,9 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 > **This phase is also still open** — task 3 is NOT STARTED and task 4 PARTIAL, so both G1 runs
 > have tested a precondition that had not finished. C3D10 (task 3) would likely improve the
 > 411-element tet4 numbers this gate had to judge.
+> **Two of the three items G1 named are fixed (2026-09-09)** — the part-relative face vocabulary
+> and the sense check on a drafted load case; see the G1 entry in *Stop gates*. The third, a
+> convergence check in the request path, is E7's.
 
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
 
@@ -1108,8 +1162,98 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 1. **The NAFEMS standard benchmarks** (linear elastic, free vibration, thermal) as an automated
    suite. Reference values are reproduced in publicly readable vendor verification manuals
    (Abaqus, Ansys, DIANA) — a free, legitimate route to the targets.
-   > PARTIAL — the machinery exists; **there is no case catalogue yet**, which is why the register
-   > in task 4 reads 0 validated of 11. Code: `app/verify/`.
+   > PARTIAL (2026-09-09) — **four of five cases run; three validate and the fourth honestly
+   > does not.** LE1 joined FV52 and LE10 once E7 task 5 built the element family it needs.
+   > **LE11 now runs too, and reports `UNCONVERGED`** — which is the finding rather than a
+   > failure to reach one. Every grid lands within 2% of the published −105 MPa, and the
+   > convergence study still refuses to state a value: point A is a corner where the inner sphere
+   > meets the base plane, so the quantity is a point stress in a steep gradient, and over a
+   > seven-size sweep the answer scattered between −105.3 and −107.1 MPa with no three
+   > consecutive levels monotone. A number picked out of that scatter would be worse than no
+   > number. What the case reports is a **capability finding**: a tetrahedral mesh cannot state
+   > this corner stress to better than its own noise, and the published solutions that can use
+   > curved-hex or p-version elements. A case that runs and refuses is worth more than one that
+   > sits blocked — it is measured.
+   > **Only LE3 is blocked now**, on a shell solver, which needs `ccx`, which needs the Windows
+   > machine; `Blocker` is down to one member because a blocker no case backs fails a test, and
+   > both `NO_PLANE_STRESS_ELEMENT` and `GEOMETRY_NOT_BUILT` were deleted the day their case
+   > started running.
+   > `app/verify/nafems.py` holds five standard cases, and the route this task names is the one
+   > used: every target is reproduced from a publicly readable vendor verification manual, cited
+   > with the section, the NAFEMS publication it credits, the URL and the date it was read.
+   > **FV52 — the simply supported "solid" square plate — runs and validates**: three
+   > geometrically similar tet10 grids, Grid Convergence Index 1.05%, observed order 2.05, and
+   > 43.624 Hz against the published 44.092 Hz, 1.06% inside a ±5% band fixed before the case was
+   > first run. Its three rigid-body modes come back as NAFEMS's own reference row records them,
+   > which is what makes mode 4 the fundamental and is asserted separately — a plate accidentally
+   > clamped flat also produces a plausible frequency.
+   > **LE10 — the thick elliptical plate under pressure — runs and validates too**, and it is the
+   > harder of the two because it is a *stress* case on a curved solid: **−5.36376 MPa against the
+   > published −5.38 MPa, 0.302%** inside a ±2% band that was fixed while the case was still
+   > catalogued as blocked and was not touched afterwards. GCI 2.227%, observed order 2.31, three
+   > levels at h = 245/165/115 mm, 44 s.
+   > **Getting there cost three defects that all read as "the solver is a bit off"**, and they are
+   > the reason this case is worth having. **(a)** Nodal stress was being built by averaging
+   > element-centroid values, a ~25% under-read on a plate in bending that *shrinks* with
+   > refinement — so it looks like a converging answer rather than an offset. tet10 stress is now
+   > evaluated at each node's own natural coordinate (`_TET10_NATURAL_NODES`, derived from
+   > `TET10_EDGES` rather than typed out); the centroid remains the superconvergent point and still
+   > feeds the headline peak. **(b)** The mid-plane support had no geometry to land on: a one-piece
+   > extrusion has no edge at mid-thickness, so the `uz` ring selected 2, 38 and 5 nodes on the
+   > three meshes and the answer scattered between −3.2 and −6.1 MPa. The plate is now two
+   > half-thickness solids fused, which leaves gmsh a real edge to put a node ring on. **(c)** A
+   > coarse mesh of a curved solid is a *smaller part*, not a coarser mesh — at h = 300 the meshed
+   > volume was 7% short of the exact 3.269e9 mm³ — so `run_le10` computes the volume from the
+   > semi-axes and refuses a level more than 0.5% short, which `run_study` records as a level
+   > failure rather than averaging into the trend.
+   > Two seam changes were needed and are taken deliberately: `SolveOutput` gained an optional
+   > `nodal_stress` tensor (optional so a surrogate still satisfies the `Solver` ABC), and the
+   > region vocabulary gained `EllipticalWallSelector`, which selects on **normalised radius**
+   > `|√((u/a)²+(v/b)²) − 1| ≤ tol` — a distance tolerance on an ellipse is a different band at
+   > every point of the wall.
+   > **One case is blocked, and the blocker is the useful output**: LE3 needs a shell
+   > solver (E6's named residual — the deck writes one, nothing solves one). It still carries its
+   > published target, because knowing the number we must eventually produce is most of the value
+   > of a benchmark. `Blocker` is an enum so "two cases wait on one thing" is countable, and a
+   > blocker no case backs fails a test — which is how `NO_PLANE_STRESS_ELEMENT` came to be
+   > deleted the moment LE1 ran, rather than lingering as a claim about the product that nothing
+   > backed.
+   > **Two rules earned their keep the day they were written.** A value recalled rather than read
+   > was wrong — a second vendor manual quotes 45.897 Hz for the same mode, our own answer
+   > converges through 44.10, and the disagreement is recorded on the case rather than resolved by
+   > preference. And the register's path scrubber matched the `s:/` inside `https://` and replaced
+   > the whole string, so on a page whose entire value is checkable references every citation
+   > would have published "[withheld: looked like a filesystem path]"; a drive letter is one
+   > character and the lookbehind now says so.
+   > **All three results reach the published register**, which is what makes any of this visible
+   > outside the test suite — the register had read 0 of 11 since it was written and now reads
+   > **2 of 11 analyses** (modal and linear-static) from **3 of 5 cases**; LE1 and LE10 are both
+   > linear-static, so a third validated case is not a third validated analysis, and the register
+   > counts what it says it counts. It still never runs a benchmark: results arrive as a
+   > recorded artefact
+   > (`data/verify/validation-outcomes.json`, written by `python -m app.verify.recorded`), because
+   > a validation case is several solves and that page is served unauthenticated. **A recording is
+   > a claim about the code that produced it**, so `recorded.py` fingerprints every source file
+   > that decides an answer — `app/solve/`, `app/mesh/` and the four verification modules — and a
+   > mismatch takes the page straight back to "nothing is validated" with the reason published,
+   > rather than serving a green tick nobody has re-checked. The publisher's own modules are
+   > deliberately outside the fingerprint: an artefact that goes stale when somebody rewords a
+   > note is one people regenerate without reading, and then the guard is gone while still
+   > appearing to be there. `--check` is instant and belongs in CI; the same comparison is a test,
+   > so editing the modal solver without re-recording fails the suite (verified by doing it).
+   > **Still open, and each has an owner rather than a shrug**: LE11 needs a per-node temperature
+   > field, which is task 6 of this phase, so it is not a silent gap. LE3 needs a shell solver,
+   > which is E6's residual and cannot be settled on Linux (no `ccx`), so it is in THE QUEUE as
+   > **A6**. The NAFEMS *thermal* family is absent rather than blocked for the same reason as
+   > LE11: no analysis here solves **for** a temperature field, `delta_t_k` applies one; task 6
+   > owns it.
+   > Tested by: `tests/test_verify_nafems.py` (67), `tests/test_verify_recorded.py` (14),
+   > `tests/test_verify_register.py`, `tests/test_solver.py::TestTheNodalStressTensor`,
+   > `tests/test_solve_selection.py::TestTheEllipticalWall`,
+   > `tests/test_verify_convergence.py::TestTheStressComponentQuantity` — twenty-two guards
+   > verified by breaking what they guard, and five more on LE1 (E7 task 5).
+   > Code: `app/verify/nafems.py`, `app/verify/recorded.py`, `app/solve/linear_static.py`,
+   > `app/solve/types.py`, `app/solve/selection.py`, `app/verify/quantities.py`.
 
 2. **Mesh convergence automation**: refine until the answer stops moving, Richardson
    extrapolation, reported **Grid Convergence Index**. After this an unconverged number *cannot*
@@ -1125,10 +1269,179 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    accuracy. In the product, not buried (P10 owns the surface).
    > DONE (2026-09-06). The register's denominator is **declared, not discovered**: eleven
    > analyses are listed, and one nobody has benchmarked gets a row with a reason rather than being
-   > absent. **It reads 0 validated of 11 today** — and that is the correct answer. The four
+   > absent. It read **0 validated of 11** from the day it was written until 2026-09-08, which
+   > was the correct answer for a codebase with no benchmark cases; with task 1's catalogue in
+   > place it reads **2 of 11** — modal against NAFEMS FV52 and linear-static against LE10, each
+   > with its deviation and its source published beside it — and the other nine are as visible as
+   > they ever were. It still runs
+   > nothing: the three blocked cases come from the catalogue and the validated two from a recorded
+   > artefact whose fingerprint must still match the code. The runnable cases stay out of
+   > `PUBLISHED_SUITE` by construction — it filters on `runnable`, so the day somebody makes LE10
+   > executable the application still boots; selecting the catalogue wholesale would have turned
+   > that day into an import-time refusal on a public route. The four
    > solver analyses carry closed-form *verification* published under its own key with the ASME
    > V&V 20 split stated, because a reader meeting them under a friendlier name would read them as
    > validation. Tested by: `tests/test_verify_*.py`. Code: `app/verify/register.py`.
+
+5. **Plane-stress and plane-strain elements**, so a 2-D benchmark can be posed as the 2-D problem
+   it is. This is the whole of what LE1 (the elliptic membrane) waits on, and it is the cheapest
+   remaining route to a third validated analysis — the case is fully encoded, cited and carrying
+   its target already; nothing but the element family is missing.
+   > DONE (2026-09-09) — **the element family exists, is verified against closed form, LE1
+   > validates through it, and a plane analysis can now be asked for through the API.**
+   > Added earlier the same day because "LE1 is blocked" was recorded
+   > on the case with no task anywhere that would ever unblock it, and a blocker nobody owns is a
+   > silent gap. Both halves of that blocker fell.
+   >
+   > **The geometry half was a sourcing problem, and the fix generalises.** Three vendor manuals
+   > quote LE1's target and none prints its ellipses — the Abaqus page says the curves are "given
+   > above" beside a figure that is not in the text. The semi-axes are in FeenoX's committed
+   > `examples/nafems-le1.geo`, and they are the same four the independently-sourced LE10 entry
+   > already carried: **LE1 and LE10 are one plan geometry**, a 100 mm membrane and a 600 mm
+   > plate, now written once as `ANNULUS_*` so the two cases cannot disagree about a shape they
+   > share. When a reproducing manual omits geometry, read a free solver's test inputs.
+   >
+   > **The element half is four pieces.** `app/mesh/planar.py` — `TriMesh` (tri3/tri6), with
+   > nodes carried as (n, 3) at z = 0 so the entire existing region vocabulary works on a plane
+   > model unchanged, and a refusal rather than a projection if the mesh drifts off the plane.
+   > `app/mesh/gmsh_mesher.generate_tri_mesh` — 2-D meshing, refusing a solid by name rather than
+   > meshing its boundary into a closed shell that then fails an unreadable planarity check.
+   > `app/solve/plane.py` — `PlaneState`, `PlaneCase`, and `PlanarSolver` as a **sibling** of
+   > `Solver` for `ModalSolver`'s reason, with `SolveOutput` deliberately shared so the
+   > verification, provenance and viewer paths need no fork. And dimension-awareness in
+   > `app/verify/` — `h = (A/N)^(1/2)`, because the cube root on an area reports an observed
+   > order inflated by exactly 3/2; measured on LE1's own recorded levels, the wrong root does
+   > not merely inflate the order to 7.03, it pushes it past `MAXIMUM_CREDIBLE_ORDER` and
+   > **refuses the case outright**.
+   >
+   > **LE1 validates: 92.40783 MPa against the published 92.7, −0.315%**, inside the ±2% band
+   > fixed while the case was still catalogued as blocked. GCI 0.05%, three monotone grids, and
+   > **4.1 seconds against LE10's 44** — the same curved boundary and the same class of answer on
+   > a tenth of the degrees of freedom, which is the engineering argument for the family stated
+   > as a measurement rather than a claim. The trust page reads **3 of 5 cases validated**;
+   > analyses stay 2 of 11, because LE1 and LE10 are both linear-static.
+   > **One caution is published rather than smoothed away**: the observed order is 4.69 against a
+   > formal order of 2, so these grids are not strictly asymptotic and the GCI understates the
+   > error — Richardson extrapolates them to ~92.46 where the reference is 92.7, five times the
+   > 0.05% GCI. The study is handed the formal order so it says so itself.
+   > Closed-form verification of the solver is separate from the benchmark and stronger than it:
+   > σ = F/A and δ = FL/AE to 1e-9 on both orders, G recovered from pure shear, both idealisations
+   > distinguished by SZZ and by the out-of-plane strain, restrained thermal stress in both, a
+   > tri6 quadratic patch test, and Lame's thick-walled cylinder at **−0.360%** converging
+   > 1.049% → 0.360% → 0.107%.
+   > **The wiring landed 2026-09-09 and this task is now DONE.** It was `PARTIAL` for one day
+   > because `PlaneSolver` was reachable from no route, job or registry — capability built and
+   > never connected, this project's oldest failure mode, named rather than left to be found.
+   > A simulation job now carries `analysis` (`solid` / `plane-stress` / `plane-strain`) and
+   > `thickness_mm` (migration `490d3f517ca6`), the runner branches to a triangular mesh and the
+   > plane solver, and the API takes both. **A 40 × 200 sheet pulled at 4 kN comes back at
+   > 20.0 MPa through the real route**, which is `F/(w·t)` exactly.
+   > Four decisions are recorded in the code rather than assumed. `analysis` is NOT NULL with a
+   > server default of `solid`, so every row written before the column keeps the meaning it had —
+   > and that is pinned by a test that clears the column and reads it back, because the *Python*
+   > default is unreachable (the route always sets it) and cannot stand in for the server one.
+   > `thickness_mm` is **refused** rather than defaulted on a plane run, since every stress in
+   > one scales with it, and refused rather than ignored on a solid, since silently dropping it
+   > leaves the engineer believing it was used. The job row records the solver that *actually*
+   > ran, not the registry's backend — `SOLVER_BACKEND` chooses between the two solid solvers and
+   > neither of them runs a plane model. And a plane run on a solid is refused by the mesher in
+   > words, because meshing a solid's boundary succeeds and hands back a closed shell.
+   > Tested by: `tests/test_simulations.py::TestAPlaneAnalysisCanBeAskedFor` (9), six guards
+   > verified by breaking what they guard.
+   > Tested by: `tests/test_solver_plane.py` (63), `tests/test_mesh_planar.py` (43),
+   > `tests/test_verify_convergence.py` (+26), `tests/test_verify_nafems.py` (+21) — seventeen
+   > guards verified by breaking what they guard, and one recorded as unpinned by a weak break
+   > until the break was made to bite.
+
+6. **Solve *for* a temperature field** — steady conduction with convection boundaries, so the
+   thermal analyses are analyses rather than an applied `delta_t_k`. LE11 waits on this (plus its
+   cylinder/taper/sphere geometry), and so does the entire NAFEMS *thermal* family, which task 1
+   names and cannot encode. E10 task 1 records the same gap from the physics side; this task is
+   the verification consequence and the two must move together.
+   > IN PROGRESS (2026-09-09). **LE11's geometry is fully sourced** — the half of this task that
+   > was not physics — and the record is `docs/nafems-le11-geometry.md`, written so the encoding
+   > lane needs to redo none of it. The LE1 technique worked again and then went one better:
+   > FeenoX does commit `examples/nafems-le11.geo`, but **ESRD's StressCheck benchmarks guide
+   > reprints the original NAFEMS dimensioned figure as an image**, which text extraction misses
+   > and a 500 dpi render reads. That figure is the primary source and the solver inputs
+   > cross-check it; nine of ten dimensions agree exactly across three independent documents.
+   > **The tenth disagrees and was settled by arithmetic rather than preference**, which is the
+   > part worth keeping: the figure prints the spherical band as 0.700 m and FeenoX builds it as
+   > 1.0·cos45° = 0.707107. Taking 0.700 literally puts the junction at radius 0.994983 on a
+   > sphere the same figure says has radius 1.0 — five millimetres off a surface it is supposed
+   > to lie on — so 0.700 is the rounded annotation. Labelled INFERRED with the arithmetic shown.
+   > FeenoX's −105.04 MPa corroborates but is explicitly *not* claimed as proof, because ESRD's
+   > own runs from the printed figure land at −105.2 to −105.5 and the target cannot discriminate
+   > between the two readings.
+   > **One trap is flagged in capitals for whoever encodes it**: LE11's temperature field is
+   > defined in **metres** and this codebase is mm-N-MPa with nothing converting, so the formula
+   > must become `(sqrt(x²+y²)+z)/1000` in mm. Used unchanged it gives temperatures — and
+   > stresses — 1000× too large, with no error anywhere.
+   > **The physics landed the same day, and it is two things rather than one.** That distinction
+   > was buried in this task and is worth stating: a temperature field can be **prescribed** — a
+   > formula of position, which is what LE11 gives — or **solved** from boundary conditions.
+   > LE11 was blocked on the first while this task named the second, so it needed far less than
+   > the phase claimed.
+   > **Prescribed** (`app/solve/thermal.py`, `app/solve/linear_static.py`): `thermal_strain`,
+   > `thermal_load` and `thermal_stress_correction` take one number or one value per element —
+   > identical arithmetic, since thermal strain is a local quantity and always was — and
+   > `LinearStaticSolver.solve` takes an optional `temperatures=`. It is a solver argument and
+   > **not** a field on `LoadCase`: a case is JSONB on the job row meant to be read by a person,
+   > and one value per node is data the size of the mesh that stops matching it the moment either
+   > changes. Verified against closed form twice, because the obvious check cannot do the job — a
+   > bar held at both ends under an axial gradient carries *constant* stress at `-Eα` times the
+   > **mean**, so replacing the field by its own average passes it, and that break ran green until
+   > a transverse gradient was added (measured spread 90% of `EαΔT`; averaged, essentially zero).
+   > **Solved** (`app/solve/conduction.py`): steady-state conduction on tet4 and tet10 —
+   > Dirichlet, convection (Robin) and heat-flux boundaries over the existing `Selector`
+   > vocabulary, plus a uniform volumetric source. Closed forms, not recorded output: the linear
+   > bar profile to **6.6e-12 K** on both orders, the logarithmic tube wall at observed order
+   > 1.79/1.64 (tet4) and 2.00 (tet10 — **the polygonal wall is the limit, not the element**,
+   > which is documented because the obvious reading of those two numbers is that the quadratic
+   > element is broken), the convecting-bar Biot tip temperature to 6.8e-12 K, and `q''x/k` to
+   > 2.7e-11 K. A floating model — no fixed temperature and no *contributing* film — is refused by
+   > name twice, structurally and by heat balance, because a declared film that selected no facets
+   > is not an assembled one. **20 of 21 injected defects are caught by a named test and the 21st
+   > is labelled unpinned in the source** rather than presented as verified.
+   > Conductivity is on the case rather than on `Material`, deliberately: putting it there means
+   > every entry in `materials.py` gains a transcribed value with a citation or an honest `None`,
+   > which is its own pass. Watts enter the unit system here and convert exactly once, the way
+   > density does in the CalculiX deck writer.
+   > Tested by: `tests/test_conduction.py` (58), `tests/test_thermal.py` (21).
+   > **Wired the same day.** `ConductionSolver` is now a **fourth ABC** beside `Solver`,
+   > `ModalSolver` and `PlanarSolver` — `TetMesh` + `ThermalCase` in, `ThermalField` out — and it
+   > keeps its **own** output type rather than sharing `SolveOutput`. That is the decision worth
+   > recording: `PlanarSolver` shares it because a plane result genuinely *is* those four fields,
+   > whereas a temperature field would have to ride in a `displacements` array under a name that
+   > lies. The concrete class became `SteadyConductionSolver`, matching
+   > `ModalSolver`/`ModalEigenSolver`, so the class name and the recorded `name` agree.
+   > The registry gained a **parallel table** rather than an entry in `_FACTORIES`, and the
+   > reasoning is the seam again: `_FACTORIES` is typed to `Solver` because that is what the
+   > runner holds, so admitting a different ABC would make it return a union and push the branch
+   > the four ABCs exist to prevent up into the factory. Asking for `calculix` is refused **by
+   > name**, saying `*HEAT TRANSFER` exists in ccx and is not federated behind the seam yet,
+   > rather than quietly handing back the in-house solver. `solver_version` is deliberately not
+   > duplicated: a version is a fact about the backend, not about the analysis.
+   > `observe.span("solve.conduction")` is declared and wired, and it reports
+   > `degrees_of_freedom` even though it equals `nodes` here — one temperature per node against
+   > three displacements is exactly what makes a conduction duration comparable with a static one.
+   > Tested by: `tests/test_conduction.py` (69), `tests/test_solver_registry.py` (30),
+   > `tests/test_observe_report.py`; seven guards verified by breaking what they guard.
+   > **Still open**: no job type routes to it, so the seam is reachable by configuration and not
+   > yet by a request; and there is no `CONDUCTION_BACKEND` setting, so it is selected by a name
+   > the caller supplies.
+
+**Where this phase stands, 2026-09-09, and why it carries no `✅ PHASE COMPLETE` marker.**
+Tasks 2, 3, 4 and 5 are done. Task 6's two halves are both in hand — a prescribed temperature
+field reaches the solver, and LE11's geometry is sourced to the citation standard. Task 1 is
+`PARTIAL` and **cannot be closed on this machine**: LE3 is a shell benchmark, a shell deck needs
+`ccx`, and there is no `ccx` on Linux. It is `A6` in `docs/WINDOWS_VERIFICATION.md`, sitting
+after the four CalculiX items it depends on.
+
+That is the whole of what stands between E7 and its marker, and the rule is deliberately
+unbending: one open task means no marker, however much has shipped. Recording it here rather
+than taking the marker on four-fifths of a phase is the same discipline the register applies to
+a number — the honest report is the one that says which part is missing.
 
 **Creative leverage:** the provenance ledger is what makes output *signable*. An engineer signing
 accepts liability; what they need is a complete, tamper-evident chain from requirement to number.
@@ -1202,8 +1515,19 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 **~9 engineer-months.**
 
 1. **Steady/transient conduction, convection BCs, thermal-stress coupling.**
-   > PARTIAL (2026-09-03) — thermal *stress* shipped via `LoadCase.delta_t_k`; **conduction is
-   > genuinely missing**.
+   > PARTIAL (2026-09-09) — **steady conduction is no longer missing**; the 2026-09-03 status
+   > saying so was true for six days and is superseded. `app/solve/conduction.py` solves
+   > `div(k grad T) = -q` on tet4 and tet10 with Dirichlet, convection (Robin) and heat-flux
+   > boundaries over the existing `Selector` vocabulary, verified against closed forms rather
+   > than recorded output — it was built under E7 task 6, which needed it for the NAFEMS thermal
+   > family, and the full result is recorded there rather than repeated here.
+   > Thermal *stress* also went from a single uniform `delta_t_k` to a temperature that varies
+   > with position, which is the coupling half of this task: a prescribed field reaches
+   > `LinearStaticSolver.solve` and a computed one has its own load and correction path.
+   > **Still missing, and now the whole of it**: *transient* conduction. Everything above is
+   > steady state — there is no time integration, no heat capacity and no initial condition, so
+   > "how long until it reaches that temperature" is a question this cannot answer. That is the
+   > next unit of work on this task and it is a genuine gap rather than a wiring one.
 
 2. **CFD via OpenFOAM**, deliberately late — *the meshing is the hard part* — scoped first to
    cooling flow and ducting.

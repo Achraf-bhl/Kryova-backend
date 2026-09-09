@@ -81,6 +81,47 @@ class CylinderSelector(BaseModel):
     length: float | None = Field(default=None, gt=0)
 
 
+class EllipticalWallSelector(BaseModel):
+    """The wall of an elliptical bore, boss or plate edge.
+
+    `CylinderSelector` names a circular wall and cannot name this one; picking an
+    elliptical outer edge with a box takes the material inside it as well, and
+    with a face selector it takes a flat plane the wall is not. An elliptical
+    plate edge, an oval access hole and a racetrack boss are all ordinary machine
+    features, and a restraint on one of them cannot be expressed without this.
+
+    **Axis-aligned in a principal plane, deliberately.** `axis` is the direction
+    the ellipse is swept along; `semi_axis_a` and `semi_axis_b` are the two
+    semi-axes measured along the *other two* coordinate axes in x, y, z order.
+    A general oriented ellipse would need a rotation in its own plane as well as
+    an axis direction, and no caller has one — adding the two remaining degrees
+    of freedom on the chance somebody wants them is how a vocabulary becomes
+    unusable. A tilted ellipse is refused by absence rather than approximated.
+
+    `tolerance` is a band on the *normalised* radius `sqrt((u/a)^2 + (v/b)^2)`,
+    which is 1 exactly on the wall — so one number covers a wall whose two
+    semi-axes differ by a factor of three, where a distance band would be far
+    too wide at one end and too tight at the other.
+    """
+
+    type: Literal["elliptical_wall"] = "elliptical_wall"
+    #: The sweep direction. The ellipse lies in the other two axes.
+    axis: Literal["x", "y", "z"]
+    #: A point on the sweep axis; only its two in-plane components decide the
+    #: ellipse's centre, and the component along `axis` is where `length` starts.
+    axis_point: tuple[float, float, float]
+    #: Semi-axis along the first of the two remaining coordinate axes.
+    semi_axis_a: float = Field(gt=0)
+    #: Semi-axis along the second of the two remaining coordinate axes.
+    semi_axis_b: float = Field(gt=0)
+    #: Half-width of the accepted band on the normalised radius, dimensionless.
+    tolerance: float = Field(default=0.02, gt=0, lt=1.0)
+    #: Extent along `axis` from `axis_point`, in mm. None selects the full sweep,
+    #: which is what a whole wall is; a value picks a ring of it — the midplane
+    #: line of a plate edge, say, which is a restraint in its own right.
+    length: float | None = Field(default=None, gt=0)
+
+
 class SphereSelector(BaseModel):
     """Every node within a sphere. Useful for a point-ish load or support."""
 
@@ -101,7 +142,12 @@ class BodySelector(BaseModel):
 
 
 Selector = Annotated[
-    FaceSelector | BoxSelector | CylinderSelector | SphereSelector | BodySelector,
+    FaceSelector
+    | BoxSelector
+    | CylinderSelector
+    | EllipticalWallSelector
+    | SphereSelector
+    | BodySelector,
     Field(discriminator="type"),
 ]
 
@@ -412,6 +458,55 @@ class BucklingResult(BaseModel):
         return self.model_dump() | {"critical_load_factor": self.critical_load_factor}
 
 
+class MeshConvergence(BaseModel):
+    """What a reported number's mesh dependence is known to be.
+
+    **Always present, and `single-grid` is the honest default rather than an
+    omission.** A result with no convergence field reads as a result nobody
+    needed to check; that is how gate G1 reported a peak stress from one
+    411-element tet4 mesh with nothing beside it saying so
+    (`docs/verification-2026-09-08-G1/`, open item 3). An empty `warnings` list
+    cannot carry this, because empty means both "nothing was wrong" and "nobody
+    looked", and Decision 3 turns on being able to tell those apart.
+
+    `converged` is **never** true on a single grid, whatever the mesh looks
+    like: one solve contains no evidence about its own discretisation error, and
+    a fine mesh is not evidence, it is a hope. `app/verify/convergence.py` is
+    what can set it — three grids, a Grid Convergence Index and an observed
+    order — and `from_study` is the only route to a true.
+    """
+
+    converged: bool = False
+    basis: Literal["single-grid", "grid-convergence-index"] = "single-grid"
+    grids: int = 1
+    gci_percent: float | None = None
+    observed_order: float | None = None
+    detail: str = (
+        "Solved on one mesh. Nothing here measures how much the answer would move "
+        "on a finer one, so treat the numbers as indicative: refine and re-run to "
+        "find out, or run a convergence study."
+    )
+
+    @classmethod
+    def from_study(cls, study: Any) -> "MeshConvergence":
+        """The claim a finished `ConvergenceStudy` supports.
+
+        Imported by duck type rather than by name to keep `app.solve` clear of
+        `app.verify`, which imports the solver: `verify` sits above `solve` and
+        the arrow must not point both ways.
+        """
+        converged = str(getattr(study, "verdict", "")) == "converged"
+        gci = getattr(study, "gci_fine", None)
+        return cls(
+            converged=converged,
+            basis="grid-convergence-index",
+            grids=len(getattr(study, "levels", ()) or ()),
+            gci_percent=None if gci is None else float(gci) * 100.0,
+            observed_order=getattr(study, "observed_order", None),
+            detail=str(getattr(study, "reason", "") or ""),
+        )
+
+
 class StaticResult(BaseModel):
     """Summary of a linear static run. Full fields stay out of the DB."""
 
@@ -427,6 +522,9 @@ class StaticResult(BaseModel):
     element_count: int
     solve_seconds: float
     warnings: list[str] = Field(default_factory=list)
+    #: Defaulted so every existing construction site keeps working and none of
+    #: them can produce a result that says nothing about its own mesh.
+    mesh_convergence: MeshConvergence = Field(default_factory=MeshConvergence)
 
     def summary(self) -> dict[str, Any]:
         return self.model_dump()

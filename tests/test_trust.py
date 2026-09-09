@@ -134,7 +134,10 @@ _TENANT_WORDS = re.compile(
     re.IGNORECASE,
 )
 
-_PATHISH = re.compile(r"[A-Za-z]:[\\/]|\\\\[^\s\\]+\\|/home/|/Users/|/var/lib/")
+# A drive letter is one character: the lookbehind stops this matching the `s:/`
+# inside `https://`. The validation register publishes a citation URL per
+# benchmark source, and without it every one of those read as a leaked path.
+_PATHISH = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]|\\\\[^\s\\]+\\|/home/|/Users/|/var/lib/")
 
 
 class TestThePayloadCarriesNothingTenantSpecific:
@@ -227,16 +230,18 @@ class TestTheRegisterPage:
     def test_it_publishes_the_unvalidated_analyses(self, anonymous: TestClient) -> None:
         payload = anonymous.get("/trust/validation-register").json()
 
-        assert {row["id"] for row in payload["not_validated"]} == {a.id for a in ANALYSES}
+        assert {row["id"] for row in payload["not_validated"]} == {
+            a.id for a in ANALYSES if a.id not in {"modal", "linear-static"}
+        }
         assert payload["complete"] is False
-        assert payload["summary"]["analyses_validated"] == 0
+        assert payload["summary"]["analyses_validated"] == 2
 
     def test_the_index_repeats_the_headline(self, anonymous: TestClient) -> None:
         """A reader who follows one link and no further still leaves knowing how
         much is not validated."""
         index = anonymous.get("/trust").json()
 
-        assert f"0 of {len(ANALYSES)}" in index["validation_headline"]
+        assert f"2 of {len(ANALYSES)}" in index["validation_headline"]
         assert index["everything_validated"] is False
 
     def test_it_serves_the_accuracy_changes_that_supersede_it(

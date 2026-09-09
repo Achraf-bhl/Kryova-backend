@@ -706,6 +706,7 @@ class CalculiXBucklingSolver(_CalculiXEigenSolver):
             ),
             displacements=node_displacements,
             von_mises=mises,
+            nodal_stress=nodal_tensor,
         )
 
 

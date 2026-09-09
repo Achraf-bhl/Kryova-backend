@@ -255,7 +255,18 @@ class TestTheCatalogueContract:
         ever asked to produce it.
 
         The four `solve.*` and `kernel.*` entries were installed on 2026-09-06,
-        after the package landed with them catalogued as holes.
+        after the package landed with them catalogued as holes. `solve.plane`
+        joined them on 2026-09-08 with the plane-stress element family, and it
+        arrived the way the pair of tests intends: the solver emitted the span,
+        `test_every_span_name_in_the_app_is_declared` turned red because nothing
+        declared it, and adding it here is a person saying the report should
+        carry it rather than a hook appearing unannounced.
+
+        `solve.conduction` joined on 2026-09-09 the same way, and it is here for
+        the same reason the other `solve.*` entries are: the conduction solver
+        assembles a matrix over every element and factorises it, so it is a
+        heavy step, and a heavy step nobody timed is one nobody can explain.
+        Its call site is `SteadyConductionSolver.solve`.
         """
         assert catalogue.wired_names() == {
             "mesh.gmsh.wait",
@@ -267,6 +278,8 @@ class TestTheCatalogueContract:
             "jobs.run",
             "solve.calculix.run",
             "solve.linear_static",
+            "solve.plane",
+            "solve.conduction",
             "kernel.rebuild",
             "kernel.measure",
         }

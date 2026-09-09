@@ -740,3 +740,434 @@ class TestARealSolve:
         assert study.stated_value == pytest.approx(
             self.FORCE_N / (self.WIDTH * self.DEPTH), rel=1e-9
         )
+
+
+class TestTheStressComponentQuantity:
+    """`stress_component_at` — one signed component, at a node.
+
+    Added with NAFEMS LE10, whose target is a direct stress at a named point.
+    Two properties make it a different thing from `von_mises_near` rather than a
+    variation on it: it is **signed**, so it can tell the two faces of a plate in
+    bending apart, and it is **nodal**, so it reports a stress *at* a surface
+    rather than half an element inside it.
+    """
+
+    def test_it_reads_the_named_component_at_the_nearest_node(self) -> None:
+        from app.verify.quantities import stress_component_at
+
+        mesh = box_mesh((10.0, 10.0, 10.0), divisions=(1, 1, 1))
+        tensor = np.zeros((mesh.node_count, 6), dtype=np.float64)
+        tensor[:, 1] = 42.0  # SYY
+
+        class _Output:
+            nodal_stress = tensor
+
+        quantity = stress_component_at((0.0, 0.0, 0.0), "yy")
+        assert quantity.read(mesh, _Output()) == pytest.approx(42.0)
+        assert quantity.unit == "MPa"
+
+    def test_it_keeps_the_sign(self) -> None:
+        """A published target of -5.38 MPa is a claim about which face of a
+        plate is being read; a magnitude passes a part bent the wrong way."""
+        from app.verify.quantities import stress_component_at
+
+        mesh = box_mesh((10.0, 10.0, 10.0), divisions=(1, 1, 1))
+        tensor = np.zeros((mesh.node_count, 6), dtype=np.float64)
+        tensor[:, 1] = -5.38
+
+        class _Output:
+            nodal_stress = tensor
+
+        assert stress_component_at((0.0, 0.0, 0.0), "yy").read(
+            mesh, _Output()
+        ) == pytest.approx(-5.38)
+
+    def test_a_solver_that_reported_no_tensor_is_refused_by_name(self) -> None:
+        """`SolveOutput.nodal_stress` is optional so the seam still admits a
+        surrogate that predicts displacement and von Mises. A caller that needs
+        six components must be told that, not handed a `TypeError` from None."""
+        from app.verify.quantities import stress_component_at
+
+        mesh = box_mesh((10.0, 10.0, 10.0), divisions=(1, 1, 1))
+
+        class _Output:
+            nodal_stress = None
+
+        with pytest.raises(ValueError, match="no stress tensor"):
+            stress_component_at((0.0, 0.0, 0.0), "yy").read(mesh, _Output())
+
+    def test_an_unknown_component_is_refused_when_the_quantity_is_built(self) -> None:
+        """At construction, not at read time: a catalogue builds its quantities
+        at import and a typo must not wait for the study to run."""
+        from app.verify.quantities import stress_component_at
+
+        with pytest.raises(ValueError, match="component must be one of"):
+            stress_component_at((0.0, 0.0, 0.0), "yx")
+
+
+# --------------------------------------------------------------------------
+# Dimension: the root must match the model, and getting it wrong is silent
+# --------------------------------------------------------------------------
+
+
+#: A fixed notional area for synthetic plane levels, numerically equal to
+#: `_VOLUME_MM3` on purpose. That is what lets the two studies below be built
+#: from the *same* element counts and the *same* values, so the only thing that
+#: differs between them is the root taken — which is the whole claim.
+_AREA_MM2 = 1000.0
+
+
+def plane_level(element_count: float, value: float) -> GridLevel:
+    """A synthetic 2-D grid level over `_AREA_MM2` of plane."""
+    return GridLevel(
+        element_size_mm=1.0,
+        node_count=10,
+        element_count=element_count,  # type: ignore[arg-type]
+        element_type="tri3",
+        dimension=2,
+        area_mm2=_AREA_MM2,
+        value=value,
+    )
+
+
+class TestTheRootMustMatchTheDimension:
+    """The defect this whole feature exists to prevent, pinned from both sides.
+
+    `h = (V/N)^(1/3)` is the cube root of a volume per element. The same
+    statement for a plane model is `h = (A/N)^(1/2)`. Cube-rooting an area gives
+    every refinement ratio as `r^(2/3)` of the true one, and since the observed
+    order is `ln|e32/e21| / ln r`, dividing by two-thirds of the correct
+    logarithm inflates it by exactly 3/2 — a second-order plane element reporting
+    order 3.0, which no reviewer could catch from the report.
+    """
+
+    def test_the_same_values_give_orders_in_the_ratio_three_halves_in_2d_and_3d(
+        self,
+    ) -> None:
+        """One sequence of numbers, two dimensions, two different observed orders.
+
+        The element counts, the measures and the three values are identical; the
+        only difference is that one study is told it is a plane and the other
+        that it is a solid. **The 2-D number is the correct one for a plane
+        model** — for a plane mesh the measure really is an area, and the
+        3-D reading of the same data is precisely the bug: 1.5x too high.
+        """
+        counts = [_VOLUME_MM3 / h**3 for h in (1.0, 2.0, 4.0)]
+        values = [lvl.value for lvl in power_law_levels(7.5, 2.0, 0.01)]
+
+        solid = assess("q", "mm", [level(h, v) for h, v in zip((1.0, 2.0, 4.0), values)])
+        plane = assess("q", "mm", [plane_level(n, v) for n, v in zip(counts, values)])
+
+        assert solid.observed_order is not None
+        assert plane.observed_order is not None
+        assert solid.observed_order == pytest.approx(2.0, rel=1e-9)
+        assert plane.observed_order == pytest.approx(2.0 / 1.5, rel=1e-9)
+        assert solid.observed_order == pytest.approx(1.5 * plane.observed_order, rel=1e-9)
+
+    def test_the_refinement_ratios_themselves_differ_by_the_same_two_thirds(self) -> None:
+        """The order ratio is not a coincidence of the estimator: it comes from
+        the ratios, and `h_3d = h_2d^(2/3)` for the same element counts."""
+        counts = [_VOLUME_MM3 / h**3 for h in (1.0, 2.0, 4.0)]
+        values = [1.01, 1.04, 1.16]
+
+        solid = assess("q", "mm", [level(h, v) for h, v in zip((1.0, 2.0, 4.0), values)])
+        plane = assess("q", "mm", [plane_level(n, v) for n, v in zip(counts, values)])
+
+        assert solid.refinement_ratios == pytest.approx((2.0, 2.0))
+        assert plane.refinement_ratios == pytest.approx((2.0**1.5, 2.0**1.5))
+
+    def test_a_plane_levels_representative_size_is_the_square_root_of_area_per_element(
+        self,
+    ) -> None:
+        """400 mm^2 over 100 triangles is 4 mm^2 each, so h = 2 mm. By hand,
+        because a formula checked against itself checks nothing."""
+        lvl = GridLevel(
+            element_size_mm=99.0,
+            node_count=61,
+            element_count=100,
+            element_type="tri3",
+            dimension=2,
+            area_mm2=400.0,
+            value=1.0,
+        )
+        assert lvl.representative_size_mm == pytest.approx(2.0, rel=1e-12)
+        assert lvl.representative_size_mm != pytest.approx(400.0 / 100.0 ** (1.0 / 3.0))
+
+    def test_a_solid_levels_representative_size_is_unchanged(self) -> None:
+        """1000 mm^3 over 125 tets is 8 mm^3 each, so h = 2 mm — exactly what
+        this class computed before it knew what a dimension was."""
+        lvl = GridLevel(
+            element_size_mm=99.0,
+            node_count=216,
+            element_count=125,
+            element_type="tet4",
+            volume_mm3=1000.0,
+            value=1.0,
+        )
+        assert lvl.dimension == 3, "3 is the default, so every existing caller is a solid"
+        assert lvl.representative_size_mm == pytest.approx(2.0, rel=1e-12)
+
+    def test_the_existing_three_dimensional_order_is_exactly_what_it_always_was(self) -> None:
+        """A regression fence around the default: the synthetic power-law study
+        that the rest of this file is built on must still return its own order."""
+        for order in (1.0, 1.5, 2.0, 3.0):
+            study = assess("q", "mm", power_law_levels(7.5, order, 0.01))
+            assert study.observed_order == pytest.approx(order, rel=1e-9)
+            assert study.levels[0].representative_size_mm == pytest.approx(1.0)
+            assert study.levels[0].dimension == 3
+
+
+class TestTheMeasureCarriesItsUnit:
+    """One field holding mm^3 on one level and mm^2 on another is the blur this
+    codebase refuses everywhere else, and it is worse here because the two are
+    numerically comparable: 1000 mm^3 and 1000 mm^2 would sort, subtract and
+    average without a murmur."""
+
+    def test_a_solid_level_has_a_volume_and_no_area(self) -> None:
+        lvl = level(1.0, 1.0)
+        assert lvl.volume_mm3 == pytest.approx(_VOLUME_MM3)
+        assert lvl.area_mm2 is None
+        assert lvl.measure_unit == "mm^3"
+        assert lvl.measure("mm^3") == pytest.approx(_VOLUME_MM3)
+
+    def test_a_plane_level_has_an_area_and_no_volume(self) -> None:
+        lvl = plane_level(250.0, 1.0)
+        assert lvl.area_mm2 == pytest.approx(_AREA_MM2)
+        assert lvl.volume_mm3 is None
+        assert lvl.measure_unit == "mm^2"
+        assert lvl.measure("mm^2") == pytest.approx(_AREA_MM2)
+
+    def test_asking_a_plane_level_for_a_volume_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="2-D grid level, measured in mm\\^2"):
+            plane_level(250.0, 1.0).measure("mm^3")
+
+    def test_asking_a_solid_level_for_an_area_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="3-D grid level, measured in mm\\^3"):
+            level(1.0, 1.0).measure("mm^2")
+
+    def test_a_plane_level_offered_a_volume_is_refused_at_construction(self) -> None:
+        """Not coerced and not ignored: a plane model with a meshed volume is a
+        modelling mistake, and the out-of-plane extent is the solver's
+        idealisation rather than something the mesh knows."""
+        with pytest.raises(ValueError, match="carries area_mm2, not volume_mm3"):
+            GridLevel(
+                element_size_mm=1.0,
+                node_count=10,
+                element_count=100,
+                element_type="tri3",
+                dimension=2,
+                area_mm2=400.0,
+                volume_mm3=1000.0,
+                value=1.0,
+            )
+
+    def test_a_solid_level_offered_an_area_is_refused_at_construction(self) -> None:
+        with pytest.raises(ValueError, match="carries volume_mm3, not area_mm2"):
+            GridLevel(
+                element_size_mm=1.0,
+                node_count=10,
+                element_count=100,
+                element_type="tet4",
+                volume_mm3=1000.0,
+                area_mm2=400.0,
+                value=1.0,
+            )
+
+    @pytest.mark.parametrize(
+        ("dimension", "match"),
+        [(3, "pass volume_mm3"), (2, "pass area_mm2")],
+    )
+    def test_a_level_with_no_measure_at_all_is_refused(self, dimension: int, match: str) -> None:
+        with pytest.raises(ValueError, match=match):
+            GridLevel(
+                element_size_mm=1.0,
+                node_count=10,
+                element_count=100,
+                element_type="tet4",
+                dimension=dimension,
+                value=1.0,
+            )
+
+    @pytest.mark.parametrize("dimension", [0, 1, 4, -3])
+    def test_an_unsupported_dimension_is_refused(self, dimension: int) -> None:
+        with pytest.raises(ValueError, match="2-D .* or 3-D"):
+            GridLevel(
+                element_size_mm=1.0,
+                node_count=10,
+                element_count=100,
+                element_type="tet4",
+                dimension=dimension,
+                volume_mm3=1000.0,
+                value=1.0,
+            )
+
+    def test_a_plane_level_that_did_not_build_says_so_in_its_own_unit(self) -> None:
+        """The existing 'did not build' refusal, reached through the 2-D root."""
+        empty = GridLevel(
+            element_size_mm=1.0,
+            node_count=0,
+            element_count=0,
+            element_type="tri3",
+            dimension=2,
+            area_mm2=0.0,
+            value=1.0,
+        )
+        with pytest.raises(ValueError, match="no mm\\^2 has no representative size"):
+            _ = empty.representative_size_mm
+
+    def test_the_record_names_the_dimension_and_only_the_measure_it_has(self) -> None:
+        solid = level(1.0, 1.0).to_dict()
+        assert solid["dimension"] == 3
+        assert solid["volume_mm3"] == pytest.approx(_VOLUME_MM3)
+        assert "area_mm2" not in solid, "a solid level has no area to publish"
+
+        plane = plane_level(250.0, 1.0).to_dict()
+        assert plane["dimension"] == 2
+        assert plane["area_mm2"] == pytest.approx(_AREA_MM2)
+        assert "volume_mm3" not in plane, (
+            "a plane level must not emit a volume key at all — a null one reads as "
+            "'unknown volume' rather than 'there is no volume'"
+        )
+
+
+# --------------------------------------------------------------------------
+# run_study reads the dimension off the mesh it was handed
+# --------------------------------------------------------------------------
+
+
+class _FakePlaneMesh:
+    """The structural shape `app.mesh.planar.TriMesh` presents to a study.
+
+    A fake rather than the real class so this test stays offline and stays a
+    test of `run_study`'s dispatch rather than of the mesher — and so it fails
+    if `run_study` ever starts requiring something `TriMesh` does not have.
+    """
+
+    element_type = "tri3"
+
+    def __init__(self, element_count: int, area: float) -> None:
+        self._n = element_count
+        self._area = area
+
+    @property
+    def node_count(self) -> int:
+        return self._n * 2
+
+    @property
+    def element_count(self) -> int:
+        return self._n
+
+    @property
+    def area(self) -> float:
+        return self._area
+
+
+class TestRunStudyIsDimensionAware:
+    def test_a_sampler_returning_a_solid_mesh_produces_three_dimensional_levels(self) -> None:
+        def sample(size: float) -> tuple[TetMesh, float]:
+            n = int(round(10.0 / size))
+            return box_mesh((10.0, 10.0, 10.0), divisions=(n, n, n)), 1.0 + size / 100.0
+
+        study = run_study("q", "mm", [4.0, 2.0, 1.0], sample)
+        assert [lvl.dimension for lvl in study.levels] == [3, 3, 3]
+        for lvl in study.levels:
+            assert lvl.volume_mm3 == pytest.approx(1000.0)
+            assert lvl.area_mm2 is None
+            assert lvl.element_type == "tet4"
+
+    def test_a_sampler_returning_a_plane_mesh_produces_two_dimensional_levels(self) -> None:
+        """And the representative size is the square root, measured from the
+        mesh the sampler actually built."""
+        meshes = {4.0: 25, 2.0: 100, 1.0: 400}
+
+        def sample(size: float) -> tuple[_FakePlaneMesh, float]:
+            return _FakePlaneMesh(meshes[size], 400.0), 1.0 + size / 100.0
+
+        study = run_study("q", "mm", [4.0, 2.0, 1.0], sample)
+        assert [lvl.dimension for lvl in study.levels] == [2, 2, 2]
+        for lvl in study.levels:
+            assert lvl.area_mm2 == pytest.approx(400.0)
+            assert lvl.volume_mm3 is None
+            assert lvl.element_type == "tri3"
+        # 400 mm^2 over 400 tris is 1 mm^2 each -> h = 1 mm, and 25 tris -> 4 mm.
+        assert study.levels[0].representative_size_mm == pytest.approx(1.0)
+        assert study.levels[-1].representative_size_mm == pytest.approx(4.0)
+
+    def test_a_mesh_that_is_neither_is_refused_by_what_it_is_missing(self) -> None:
+        """Not an `AttributeError` on `tet_count`, which reads as a bug in the
+        study rather than in the sampler, and not a recorded failure either — a
+        longer grid sequence will not fix an object that is not a mesh."""
+
+        class _NotAMesh:
+            node_count = 10
+            element_type = "mystery"
+
+        def sample(size: float) -> tuple[object, float]:
+            return _NotAMesh(), 1.0
+
+        with pytest.raises(TypeError) as excinfo:
+            run_study("q", "mm", [4.0, 2.0, 1.0], sample)  # type: ignore[arg-type]
+
+        message = str(excinfo.value)
+        assert "_NotAMesh" in message
+        assert "tet_count" in message and "volume" in message
+        assert "element_count" in message and "area" in message
+
+    def test_the_refusal_names_only_the_members_that_are_actually_absent(self) -> None:
+        """A near-miss is the case that matters: a plane mesh that forgot `area`
+        must be told about `area`, not handed the whole vocabulary twice."""
+
+        class _AreaLessPlane:
+            node_count = 10
+            element_type = "tri3"
+            element_count = 4
+
+        def sample(size: float) -> tuple[object, float]:
+            return _AreaLessPlane(), 1.0
+
+        with pytest.raises(TypeError, match=r"a plane mesh must expose.*missing area"):
+            run_study("q", "mm", [4.0, 2.0, 1.0], sample)  # type: ignore[arg-type]
+
+
+class TestTheVonMisesReaderStaysThreeDimensional:
+    """It is the one reader here that is per element rather than per node, so it
+    needs tetrahedral connectivity. A plane mesh gets a refusal, never a
+    different number under the same quantity name."""
+
+    def test_it_refuses_a_mesh_with_no_tetrahedra_by_name(self) -> None:
+        from app.verify.quantities import von_mises_near
+
+        class _PlaneIsh:
+            nodes = np.zeros((3, 3))
+
+        class _Output:
+            von_mises = np.array([1.0])
+
+        with pytest.raises(ValueError, match="needs tetrahedral connectivity"):
+            von_mises_near((0.0, 0.0, 0.0)).read(_PlaneIsh(), _Output())  # type: ignore[arg-type]
+
+    def test_it_still_reads_a_solid_mesh(self) -> None:
+        from app.verify.quantities import von_mises_near
+
+        mesh = box_mesh((10.0, 10.0, 10.0), divisions=(1, 1, 1))
+
+        class _Output:
+            von_mises = np.arange(float(mesh.tet_count))
+
+        value = von_mises_near((0.0, 0.0, 0.0)).read(mesh, _Output())
+        assert value in set(np.arange(float(mesh.tet_count)))
+
+    def test_a_nodal_stress_component_reads_a_plane_mesh_unchanged(self) -> None:
+        """The counterpart claim: `stress_component_at` only ever touches
+        `mesh.nodes`, so it means the same thing in 2-D and in 3-D and must work
+        on a mesh that has no `tets` at all."""
+        from app.verify.quantities import stress_component_at
+
+        class _PlaneIsh:
+            nodes = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+
+        class _Output:
+            nodal_stress = np.array([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [7.0] * 6])
+
+        read = stress_component_at((10.0, 0.0, 0.0), "yy").read
+        assert read(_PlaneIsh(), _Output()) == pytest.approx(7.0)  # type: ignore[arg-type]

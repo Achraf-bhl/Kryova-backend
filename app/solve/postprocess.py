@@ -27,13 +27,26 @@ def nodal_average(mesh: TetMesh, element_values: NDArray[np.float64]) -> NDArray
 
     Midside nodes are included for a tet10 mesh, so every node the viewer might
     address carries a value rather than a hole.
+
+    Works on a scalar field (n_elements,) and on a tensor field (n_elements, k)
+    alike, mirroring `element_average` — the two are inverses and an asymmetry
+    between them is how a caller ends up transposing a stress tensor. A benchmark
+    that reads one stress component at a point needs the tensor form: von Mises
+    is unsigned and cannot stand in for `sigma_yy` on a plate in bending, where
+    the two faces carry equal and opposite stress.
     """
+    values = np.asarray(element_values, dtype=np.float64)
     connectivity = mesh.connectivity
-    totals = np.zeros(mesh.node_count, dtype=np.float64)
+    shape = (mesh.node_count,) if values.ndim == 1 else (mesh.node_count, values.shape[1])
+    totals = np.zeros(shape, dtype=np.float64)
     counts = np.zeros(mesh.node_count, dtype=np.int64)
-    np.add.at(totals, connectivity, element_values[:, None])
+    # `values[:, None]` broadcasts one element's value across its nodes; for a
+    # tensor that has to become `values[:, None, :]`, which is the same
+    # statement with the component axis kept on the end.
+    np.add.at(totals, connectivity, values[:, None] if values.ndim == 1 else values[:, None, :])
     np.add.at(counts, connectivity, 1)
-    return np.divide(totals, counts, out=np.zeros_like(totals), where=counts > 0)
+    divisor = counts if values.ndim == 1 else counts[:, None]
+    return np.divide(totals, divisor, out=np.zeros_like(totals), where=divisor > 0)
 
 
 def element_average(mesh: TetMesh, nodal_values: NDArray[np.float64]) -> NDArray[np.float64]:

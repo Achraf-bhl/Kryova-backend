@@ -118,6 +118,30 @@ SITES: Final[tuple[Site, ...]] = (
         wired=True,
     ),
     Site(
+        name="solve.plane",
+        module="app.solve.plane",
+        what="in-house plane stress / plane strain assembly, factorisation and stress recovery",
+        # `state` as well as the three `solve.linear_static` reports, because the
+        # two idealisations solve the same size of system at different cost and
+        # a report that could not tell them apart would show the difference as
+        # unexplained variance.
+        fields=("nodes", "elements", "degrees_of_freedom", "state"),
+        wired=True,
+    ),
+    Site(
+        name="solve.conduction",
+        module="app.solve.conduction",
+        what="in-house steady-state conduction assembly, factorisation and flux recovery",
+        # The same three `solve.linear_static` reports, and no fourth. The
+        # analysis has no state to distinguish the way `solve.plane` does, and
+        # `degrees_of_freedom` equals `nodes` here — one temperature per node
+        # against three displacements — which is exactly why it is carried:
+        # without it a conduction duration and a static duration of the same
+        # node count look like the same amount of work.
+        fields=("nodes", "elements", "degrees_of_freedom"),
+        wired=True,
+    ),
+    Site(
         name="kernel.rebuild",
         module="app.kernel.occt.document",
         what="one OCCT regeneration of a part from its plan",

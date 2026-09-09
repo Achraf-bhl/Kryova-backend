@@ -96,6 +96,9 @@ def create_simulation(
         load_case=payload.load_case.model_dump(),
         element_size_mm=payload.element_size_mm,
         element_order=payload.element_order,
+        grids=payload.grids,
+        analysis=payload.analysis,
+        thickness_mm=payload.thickness_mm,
     )
     db.add(job)
     db.commit()

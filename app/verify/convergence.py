@@ -26,6 +26,19 @@ Three properties earned it the job over the alternatives:
   definition for unstructured meshes — measured from the mesh, never from the
   size that was *asked* for. Asking gmsh for 4 mm and getting 3.7 mm is normal,
   and a ratio computed from the request would be wrong by exactly that much.
+
+**The root must match the dimension of the model**, and this is the one piece of
+arithmetic here that fails silently. Celik's `h = (V/N)^(1/3)` is the cube root
+of a *volume* per element; the same statement for a plane model is the square
+root of an *area* per element, `h = (A/N)^(1/2)`. Take the cube root of an area
+and every refinement ratio comes back as `r^(2/3)` of the true one, so the
+observed order — which is `ln|e32/e21| / ln r` — is inflated by exactly 3/2. A
+second-order plane element then reports order 3.0, an entirely plausible number
+that no reviewer could catch from the report, and the GCI band computed from it
+is too narrow. `GridLevel` therefore carries its `dimension` and raises the
+measure to `1/dimension`; the measure itself is stored under a name that says
+its unit (`volume_mm3` or `area_mm2`) so the two can never be added up or
+compared as one field.
 * **It is a number a reviewer can argue with.** GCI is quoted as a percentage
   band on the fine-grid answer, with the safety factor and the observed order
   printed beside it.
@@ -69,9 +82,9 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
-from app.mesh.types import MeshError, TetMesh
+from app.mesh.types import MeshError
 from app.solve.types import SolverError
 
 #: Celik's safety factor for a three-or-more-grid study with an observed order.
@@ -120,46 +133,168 @@ class UnconvergedError(RuntimeError):
     """A converged value was demanded from a study that has none."""
 
 
-@dataclass(frozen=True)
+#: The unit each spatial dimension measures its domain in. The key is the
+#: dimension, the value is the unit string a caller may ask `GridLevel.measure`
+#: for; there is deliberately no entry for 1, because a beam study's
+#: representative size is a length and needs no root at all.
+MEASURE_UNIT: dict[int, str] = {2: "mm^2", 3: "mm^3"}
+
+
+@dataclass(frozen=True, kw_only=True)
 class GridLevel:
-    """One grid in a study: what was meshed, and what it said.
+    """One grid in a study: what was meshed, in how many dimensions, and what it
+    said.
 
     `element_size_mm` is what was *asked* for and is recorded only for the
     report and for the "try this next" message. Every ratio in the maths uses
     `representative_size_mm`, which is measured from the mesh that was actually
     produced.
+
+    ## Why the measure is two fields rather than one
+
+    The obvious design is a single `measure` field holding mm^3 on a solid level
+    and mm^2 on a plane one. That is exactly the unit blur this codebase refuses
+    everywhere else — `Quantity` keeps a unit string precisely so "a target
+    quoted in MPa can never be silently compared against a value read in mm" —
+    and it is worse here than usual, because the two are *numerically
+    comparable*: a 1000 mm^3 level and a 1000 mm^2 level would sort, subtract
+    and average without a murmur, and the resulting representative size would be
+    wrong by a factor nobody could see.
+
+    So the measure is stored under a name that carries its unit. Exactly one of
+    `volume_mm3` and `area_mm2` is present, `dimension` says which, and
+    `__post_init__` refuses any other combination — a plane level offered a
+    volume is a modelling mistake, not a field to coerce. Reading the wrong one
+    yields `None`, which is the same refusal `stated_value` makes: arithmetic on
+    it raises rather than producing a plausible figure. `measure()` is the
+    dimension-agnostic read and it makes you name the unit you expect, so a
+    caller that asks a plane level for mm^3 is told so instead of answered.
+
+    `dimension` defaults to 3 because every study that existed before plane
+    models did was a solid one, including the recorded validation artefact.
     """
 
     element_size_mm: float
     node_count: int
     element_count: int
     element_type: str
-    volume_mm3: float
     value: float
+    #: 3 for a solid (tet) mesh, 2 for a plane (tri) mesh. Fixes the root taken
+    #: in `representative_size_mm`; see the module docstring for what a wrong
+    #: one does to the observed order.
+    dimension: int = 3
+    #: Total meshed volume, mm^3. Present on a 3-D level and `None` on a 2-D one.
+    volume_mm3: float | None = None
+    #: Total meshed area, mm^2. Present on a 2-D level and `None` on a 3-D one.
+    area_mm2: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.dimension not in MEASURE_UNIT:
+            raise ValueError(
+                f"A grid level is 2-D (a plane mesh, measured in mm^2) or 3-D (a solid "
+                f"mesh, measured in mm^3); got dimension={self.dimension}. A 1-D study "
+                "would need no root at all and is not supported here."
+            )
+        if self.dimension == 3:
+            if self.volume_mm3 is None:
+                raise ValueError(
+                    "A 3-D grid level is described by its meshed volume; pass "
+                    "volume_mm3. Without it there is no measure to take a cube root of "
+                    "and the level cannot be placed on a refinement axis."
+                )
+            if self.area_mm2 is not None:
+                raise ValueError(
+                    "A 3-D grid level carries volume_mm3, not area_mm2. Two measures on "
+                    "one level is how mm^2 ends up being cube-rooted; pass exactly the "
+                    "one that matches the dimension."
+                )
+        else:
+            if self.area_mm2 is None:
+                raise ValueError(
+                    "A 2-D grid level is described by its meshed area; pass area_mm2. "
+                    "Without it there is no measure to take a square root of and the "
+                    "level cannot be placed on a refinement axis."
+                )
+            if self.volume_mm3 is not None:
+                raise ValueError(
+                    "A 2-D grid level carries area_mm2, not volume_mm3. A plane model "
+                    "has no meshed volume — the out-of-plane extent is an idealisation "
+                    "the solver supplies, not something the mesh knows."
+                )
+
+    @property
+    def measure_unit(self) -> str:
+        """`mm^3` on a solid level, `mm^2` on a plane one."""
+        return MEASURE_UNIT[self.dimension]
+
+    def measure(self, unit: str) -> float:
+        """The level's d-dimensional measure, in the unit you name.
+
+        You name the unit and it is checked, which is the whole defence this
+        design exists to provide: the number is meaningless without one, and a
+        caller that asks a plane level for a volume has asked a question with no
+        answer and is told so rather than handed an area.
+        """
+        if unit != self.measure_unit:
+            raise ValueError(
+                f"This is a {self.dimension}-D grid level, measured in "
+                f"{self.measure_unit}; {unit!r} was asked for. A plane mesh has no "
+                "volume and a solid mesh has no single area, so there is no number to "
+                "return and converting one into the other is not defined."
+            )
+        measure = self.volume_mm3 if self.dimension == 3 else self.area_mm2
+        if measure is None:  # pragma: no cover - __post_init__ forbids it
+            raise ValueError(f"This grid level carries no {self.measure_unit}.")
+        return float(measure)
 
     @property
     def representative_size_mm(self) -> float:
-        """`h = (V/N)^(1/3)` — Celik's representative cell size for an
-        unstructured mesh. The average edge length a cell of this mesh would
-        have if the cells were cubes, which is the only mesh-independent way to
-        put a tetrahedral grid on a refinement axis."""
-        if self.element_count <= 0 or self.volume_mm3 <= 0.0:
+        """`h = (M/N)^(1/d)` — Celik's representative cell size for an
+        unstructured mesh, with `M` the meshed measure, `N` the element count
+        and `d` the dimension of the model.
+
+        The average edge length a cell of this mesh would have if the cells were
+        cubes (3-D) or squares (2-D), which is the only mesh-independent way to
+        put an unstructured grid on a refinement axis.
+
+        **The root must match the dimension, and getting it wrong is silent.**
+        `h` only behaves like a length — halving when the elements halve — if
+        the measure is reduced by the root of its own dimension. Cube-rooting an
+        area yields `h ∝ (A/N)^(1/3)`, so every refinement ratio comes out as
+        the true one to the power 2/3 and the observed order, `ln|e32/e21|/ln r`,
+        is inflated by exactly 3/2. Nothing downstream can detect that: the
+        verdict, the extrapolation and the GCI band are all arithmetic on ratios
+        that are individually plausible.
+        """
+        measure = self.volume_mm3 if self.dimension == 3 else self.area_mm2
+        if self.element_count <= 0 or measure is None or measure <= 0.0:
             raise ValueError(
-                "A grid level with no elements or no volume has no representative "
-                "size. The mesh for this level did not build."
+                f"A grid level with no elements or no {self.measure_unit} has no "
+                "representative size. The mesh for this level did not build."
             )
-        return float((self.volume_mm3 / self.element_count) ** (1.0 / 3.0))
+        return float((measure / self.element_count) ** (1.0 / self.dimension))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        """The machine-readable form.
+
+        Emits the measure under its own unit-bearing key — `volume_mm3` for a
+        solid level, exactly as it always did, so an existing reader of the
+        recorded artefact is unaffected — and never both.
+        """
+        payload: dict[str, Any] = {
             "element_size_mm": self.element_size_mm,
             "representative_size_mm": self.representative_size_mm,
             "node_count": self.node_count,
             "element_count": self.element_count,
             "element_type": self.element_type,
-            "volume_mm3": self.volume_mm3,
+            "dimension": self.dimension,
             "value": self.value,
         }
+        if self.dimension == 3:
+            payload["volume_mm3"] = self.volume_mm3
+        else:
+            payload["area_mm2"] = self.area_mm2
+        return payload
 
 
 @dataclass(frozen=True)
@@ -575,12 +710,114 @@ def assess(
     )
 
 
+@runtime_checkable
+class SolidMesh(Protocol):
+    """The part of a solid mesh a grid level is built from.
+
+    Structural, not nominal, and that is the layering rule rather than a
+    preference: `app.verify` may not import `app.mesh.planar` (or any other
+    concrete mesh module) to find out what a mesh is, because the study is
+    supposed to have no opinion about which mesher produced the numbers — the
+    same reason the sampler is injected. A protocol lets a surrogate, a
+    CalculiX-side mesh or a future hex mesh satisfy the study without an edit
+    here.
+    """
+
+    @property
+    def node_count(self) -> int: ...
+
+    @property
+    def element_type(self) -> str: ...
+
+    @property
+    def tet_count(self) -> int: ...
+
+    @property
+    def volume(self) -> float: ...
+
+
+@runtime_checkable
+class PlaneMesh(Protocol):
+    """The part of a plane mesh a grid level is built from.
+
+    Disjoint from `SolidMesh` by accident of history and kept that way on
+    purpose: `TetMesh` spells its element count `tet_count` and has no
+    `element_count`, `TriMesh` spells it `element_count` and has no `volume`, so
+    no object can satisfy both and the dimension is decided by which one matches
+    rather than by anybody remembering to pass a flag.
+    """
+
+    @property
+    def node_count(self) -> int: ...
+
+    @property
+    def element_type(self) -> str: ...
+
+    @property
+    def element_count(self) -> int: ...
+
+    @property
+    def area(self) -> float: ...
+
+
+#: Either kind of mesh a study can be run on.
+StudyMesh = SolidMesh | PlaneMesh
+
 #: What a study asks of its caller for one grid size: build the mesh you want at
 #: that target size, solve, and hand back the mesh you actually made together
 #: with the quantity you read off it. Returning the mesh rather than a node count
 #: is the point — the representative grid size is measured from it, so a level
 #: can never be described by a mesh other than the one it was solved on.
-Sampler = Callable[[float], tuple[TetMesh, float]]
+Sampler = Callable[[float], tuple[StudyMesh, float]]
+
+
+def _level_from(mesh: object, *, element_size_mm: float, value: float) -> GridLevel:
+    """Describe one solved mesh as a grid level, in whatever dimension it is.
+
+    Refuses **by name** rather than raising `AttributeError`, because the two
+    read completely differently in a study log: an `AttributeError` on
+    `tet_count` looks like a bug in this module, and the actual fault is a
+    sampler handing back something that is not a mesh this study can measure.
+    """
+    if isinstance(mesh, SolidMesh):
+        return GridLevel(
+            element_size_mm=element_size_mm,
+            node_count=mesh.node_count,
+            element_count=mesh.tet_count,
+            element_type=mesh.element_type,
+            dimension=3,
+            volume_mm3=mesh.volume,
+            value=value,
+        )
+    if isinstance(mesh, PlaneMesh):
+        return GridLevel(
+            element_size_mm=element_size_mm,
+            node_count=mesh.node_count,
+            element_count=mesh.element_count,
+            element_type=mesh.element_type,
+            dimension=2,
+            area_mm2=mesh.area,
+            value=value,
+        )
+
+    solid_missing = [
+        name
+        for name in ("node_count", "element_type", "tet_count", "volume")
+        if not hasattr(mesh, name)
+    ]
+    plane_missing = [
+        name
+        for name in ("node_count", "element_type", "element_count", "area")
+        if not hasattr(mesh, name)
+    ]
+    raise TypeError(
+        f"The sampler returned a {type(mesh).__name__}, which this study cannot place "
+        f"on a refinement axis. A solid mesh must expose node_count, element_type, "
+        f"tet_count and volume (mm^3) — missing {', '.join(solid_missing) or 'nothing'}; "
+        f"a plane mesh must expose node_count, element_type, element_count and area "
+        f"(mm^2) — missing {', '.join(plane_missing) or 'nothing'}. Add the missing "
+        "members, or hand back a mesh type that already has them."
+    )
 
 
 def run_study(
@@ -599,6 +836,14 @@ def run_study(
     which mesher, which solver or which geometry produced the numbers, so a
     CalculiX run, an in-process run and a surrogate all converge the same way.
 
+    **The dimension comes from the mesh, not from an argument.** A sampler
+    returning a solid mesh produces 3-D levels and a sampler returning a plane
+    mesh produces 2-D ones, so a plane study cannot be assessed with a solid
+    study's cube root by forgetting a flag. A returned object that is neither is
+    a `TypeError` naming the members it lacks — it is a bug in the sampler, not
+    a level that failed to build, and it must not be recorded as a failure that
+    a longer grid sequence would fix.
+
     A level that fails to mesh or to solve is **recorded, not raised**. One
     element size being too coarse to mesh a fillet is normal and should not
     destroy the study; three levels still surviving is enough to assess, and if
@@ -615,16 +860,7 @@ def run_study(
         except (MeshError, SolverError, ValueError) as exc:
             failures.append(f"element_size_mm={size:g}: {exc}")
             continue
-        levels.append(
-            GridLevel(
-                element_size_mm=size,
-                node_count=mesh.node_count,
-                element_count=mesh.tet_count,
-                element_type=mesh.element_type,
-                volume_mm3=mesh.volume,
-                value=value,
-            )
-        )
+        levels.append(_level_from(mesh, element_size_mm=size, value=value))
     return assess(
         quantity,
         unit,
@@ -638,13 +874,17 @@ def run_study(
 __all__ = [
     "DEFAULT_GCI_THRESHOLD",
     "MAXIMUM_CREDIBLE_ORDER",
+    "MEASURE_UNIT",
     "MINIMUM_REFINEMENT_RATIO",
     "NEGLIGIBLE_CHANGE",
     "RECOMMENDED_REFINEMENT_RATIO",
     "SAFETY_FACTOR",
     "ConvergenceStudy",
     "GridLevel",
+    "PlaneMesh",
     "Sampler",
+    "SolidMesh",
+    "StudyMesh",
     "UnconvergedError",
     "Verdict",
     "assess",

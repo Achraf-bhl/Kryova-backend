@@ -15,6 +15,14 @@ because a *result* is what Decision 3 binds to its provenance. So there is no
 "use CalculiX if it is installed" — the operator names the solver, and a named
 solver that cannot run is an error rather than a quiet substitution.
 
+**Two tables, one per ABC.** `build_solver` selects a `Solver`;
+`build_conduction_solver` selects a `ConductionSolver`. They are separate because
+the ABCs are separate, and merging them would push a union-typed return into
+every caller — the same branch the four ABCs in `base.py` exist to keep out of
+callers. `solver_version` serves both, because a version is a fact about the
+*backend* (`internal` = this codebase, `calculix` = that binary) and not about
+which analysis asked. The reasoning in full is on `_CONDUCTION_FACTORIES`.
+
 **The import is lazy, and that is load-bearing.** `app.solve` is imported by the
 API, the job layer and the AI layer; `app.solve.calculix` pulls in a subprocess
 boundary, a deck writer and an `.frd` parser that most of those have no use for.
@@ -31,7 +39,7 @@ import subprocess
 from collections.abc import Callable, Mapping
 from typing import Final
 
-from app.solve.base import Solver
+from app.solve.base import ConductionSolver, Solver
 from app.solve.types import SolverError
 
 #: The in-house linear-static solver. The default, so an existing deployment is
@@ -82,6 +90,86 @@ def build_solver(
             f"No solver called {name!r}. This build has: {known}. Set SOLVER_BACKEND "
             "to one of those — it is never chosen automatically, because a result "
             "computed by a solver nobody selected cannot be relied on."
+        )
+    return factory(executable)
+
+
+def _internal_conduction(
+    executable: str | os.PathLike[str] | None = None,
+) -> ConductionSolver:
+    # Lazy for the same reason `_calculix` is, one step weaker: `app.solve.
+    # conduction` pulls in `linear_static`, `thermal` and `selection` for the
+    # coupling helpers, and a caller that only ever asks for a static solve
+    # should not pay for the thermal half of the package.
+    from app.solve.conduction import SteadyConductionSolver
+
+    return SteadyConductionSolver()
+
+
+#: Conduction backends, in a table of their own.
+#:
+#: **This is a parallel lookup and not an entry in `_FACTORIES`, and that is the
+#: decision rather than a shortcut.** `_FACTORIES` is typed `Callable[...,
+#: Solver]` and `build_solver` returns `Solver`, because that is what its callers
+#: hold: `simulation/runner.py` takes the result and calls `solve(mesh,
+#: load_case)` on it. A `ConductionSolver` is not a `Solver` — deliberately, see
+#: `base.ConductionSolver` — so putting one in that table means widening the
+#: return type to `Solver | ConductionSolver`, and then **every** caller of
+#: `build_solver` has to narrow it back before it can call anything. That is the
+#: union-typed `solve()` the four ABCs exist to avoid, moved one level up into
+#: the factory; the seam would still be there and nobody would be respecting it.
+#:
+#: The cost of two tables is one duplicated eight-line lookup. The cost of one
+#: table is a branch in every caller and a runtime `isinstance` standing in for
+#: a type the operator's setting was supposed to determine. Two tables.
+#:
+#: `solver_version` is deliberately **not** duplicated: it is keyed on the
+#: backend, not on the analysis. `internal` means "this codebase" whichever
+#: table selected it, and if CalculiX is federated for heat transfer later it
+#: will be the same `ccx` binary reporting the same version.
+_CONDUCTION_FACTORIES: Final[Mapping[str, Callable[..., ConductionSolver]]] = {
+    INTERNAL: _internal_conduction,
+}
+
+
+def conduction_available() -> tuple[str, ...]:
+    """Every conduction solver name this build knows, in a stable order."""
+    return tuple(sorted(_CONDUCTION_FACTORIES))
+
+
+def build_conduction_solver(
+    name: str, *, executable: str | os.PathLike[str] | None = None
+) -> ConductionSolver:
+    """The conduction solver called `name`, or a `SolverError` naming what exists.
+
+    Same contract as `build_solver` and the same refusal: never automatic, never
+    a `KeyError`, never a silent substitution.
+
+    **No setting names this yet, and saying so is part of the honesty.** There
+    is a `SOLVER_BACKEND` and no `CONDUCTION_BACKEND`, so a deployment that had
+    set `SOLVER_BACKEND=calculix` and then asked for a conduction solve would be
+    refused here rather than quietly handed the in-house one. That refusal is
+    the correct behaviour under Decision 3 — a result computed by a solver
+    nobody chose cannot be relied on — and adding the separate setting is a
+    change to `app/core/config.py`, which this lane does not own. It is worth
+    making only when the second backend exists; one table with one entry does
+    not need a dedicated environment variable to disambiguate it.
+    """
+    key = (name or "").strip().lower()
+    factory = _CONDUCTION_FACTORIES.get(key)
+    if factory is None:
+        known = ", ".join(conduction_available())
+        federated = (
+            " CalculiX can solve steady conduction with a *HEAT TRANSFER step, but that "
+            "step is not written and nothing is federated behind this seam yet, so asking "
+            "for it is refused rather than answered by a different solver."
+            if key == CALCULIX
+            else ""
+        )
+        raise SolverError(
+            f"No conduction solver called {name!r}. This build has: {known}.{federated} "
+            "It is never chosen automatically, because a result computed by a solver "
+            "nobody selected cannot be relied on."
         )
     return factory(executable)
 
@@ -149,6 +237,8 @@ __all__ = [
     "CALCULIX",
     "INTERNAL",
     "available",
+    "build_conduction_solver",
     "build_solver",
+    "conduction_available",
     "solver_version",
 ]

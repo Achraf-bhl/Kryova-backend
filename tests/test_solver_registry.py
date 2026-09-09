@@ -21,8 +21,16 @@ import sys
 
 import pytest
 
-from app.solve.base import Solver
-from app.solve.registry import CALCULIX, INTERNAL, available, build_solver, solver_version
+from app.solve.base import ConductionSolver, Solver
+from app.solve.registry import (
+    CALCULIX,
+    INTERNAL,
+    available,
+    build_conduction_solver,
+    build_solver,
+    conduction_available,
+    solver_version,
+)
 from app.solve.types import SolverError
 from tests.test_simulations import project_with_geometry  # noqa: F401 - fixture
 
@@ -75,6 +83,75 @@ class TestTheRegistry:
         assert available() == (CALCULIX, INTERNAL)
 
 
+class TestTheConductionRegistry:
+    """A second table, because `ConductionSolver` is a second ABC.
+
+    The alternative was one table returning `Solver | ConductionSolver`, and
+    that is the union-typed `solve()` the four ABCs exist to keep out of
+    callers, moved up one level into the factory: `simulation/runner.py` takes
+    what `build_solver` returns and calls `solve(mesh, load_case)` on it, so
+    every caller would have to narrow the union back before it could do
+    anything. Two eight-line lookups is the cheaper honest answer, and the
+    duplication is bounded — `solver_version` is deliberately **not** copied,
+    because a version is a fact about the backend and not about the analysis.
+    """
+
+    def test_the_internal_name_builds_a_conduction_solver(self) -> None:
+        assert isinstance(build_conduction_solver(INTERNAL), ConductionSolver)
+
+    def test_the_conduction_table_is_stable_and_sorted(self) -> None:
+        assert conduction_available() == (INTERNAL,)
+
+    def test_the_two_tables_do_not_answer_for_each_other(self) -> None:
+        """The point of keeping them apart. A `Solver` is not a conduction
+        solver and a conduction solver is not a `Solver`; if either of these
+        ever passed, the seam would be a name rather than a boundary."""
+        assert not isinstance(build_solver(INTERNAL), ConductionSolver)
+        assert not isinstance(build_conduction_solver(INTERNAL), Solver)
+
+    def test_calculix_is_refused_by_name_and_says_why(self) -> None:
+        """`ccx` really does solve steady conduction — `*HEAT TRANSFER` — and
+        nothing here writes that step yet. Answering the request with the
+        in-house solver would be exactly the silent substitution Decision 3
+        forbids, so it is refused and the refusal names the gap."""
+        with pytest.raises(SolverError) as refused:
+            build_conduction_solver(CALCULIX)
+
+        message = str(refused.value)
+        assert "HEAT TRANSFER" in message
+        assert "internal" in message
+
+    def test_an_unknown_name_names_what_there_is(self) -> None:
+        with pytest.raises(SolverError) as refused:
+            build_conduction_solver("condution")
+
+        assert "internal" in str(refused.value)
+
+    def test_the_refusal_says_it_is_never_automatic(self) -> None:
+        with pytest.raises(SolverError) as refused:
+            build_conduction_solver("")
+
+        assert "never chosen automatically" in str(refused.value)
+
+    def test_names_are_case_and_space_insensitive(self) -> None:
+        assert isinstance(build_conduction_solver("  Internal "), ConductionSolver)
+
+    def test_the_recorded_name_is_the_solvers_own_not_the_setting(self) -> None:
+        """Same rule as the static table: the registry key is a configuration
+        alias, and what a result is bound to is what actually ran."""
+        assert build_conduction_solver(INTERNAL).name == "steady-conduction"
+        assert build_conduction_solver(INTERNAL).name != INTERNAL
+
+    def test_one_version_function_serves_both_tables(self) -> None:
+        """`internal` means "this codebase" whichever table selected it, so
+        duplicating `solver_version` would be two places to keep in step for one
+        fact."""
+        from app.main import APP_VERSION
+
+        version = solver_version(INTERNAL)
+        assert version is not None and version.startswith(APP_VERSION)
+
+
 class TestTheImportStaysLazy:
     """`app.solve` is imported by the API, the job layer and the AI layer;
     `app.solve.calculix` drags in a subprocess boundary, a deck writer and an
@@ -98,6 +175,25 @@ class TestTheImportStaysLazy:
         build_solver(INTERNAL)
 
         assert not any(m.startswith("app.solve.calculix") for m in sys.modules)
+
+    def test_building_the_static_solver_does_not_import_conduction(self) -> None:
+        """`app.solve.conduction` pulls in the thermal coupling helpers, and a
+        deployment that only ever runs static jobs should not pay for them. Same
+        rule as CalculiX above, one step weaker: the cost is import time rather
+        than a subprocess boundary, and it creeps back the first time somebody
+        adds a convenience re-export."""
+        for module in [m for m in sys.modules if m.startswith("app.solve.conduction")]:
+            del sys.modules[module]
+
+        build_solver(INTERNAL)
+
+        assert "app.solve.conduction" not in sys.modules
+
+    def test_asking_for_a_conduction_solver_does_import_it(self) -> None:
+        """The other half — a lazy import that never fires is a broken one."""
+        build_conduction_solver(INTERNAL)
+
+        assert "app.solve.conduction" in sys.modules
 
     def test_asking_for_calculix_does_import_it(self) -> None:
         """The other half — a lazy import that never fires is a broken one."""

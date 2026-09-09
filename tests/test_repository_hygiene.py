@@ -253,3 +253,48 @@ def test_there_is_no_async_engine() -> None:
     source = Path(BASE_DIR / "app" / "core" / "database.py").read_text(encoding="utf-8")
     assert "create_async_engine" not in source
     assert "asyncpg" not in source
+
+
+class TestThePlanKnowsItsOwnProgress:
+    """The roll-up near the top of the master plan is generated from the status
+    lines under its tasks (`scripts/plan_progress.py`), and this is what stops it
+    from becoming a number that was true once.
+
+    The precedent is `data/verify/validation-outcomes.json`: a recorded artefact
+    is only trustworthy if forgetting to re-record it fails the suite. The same
+    argument applies with more force here, because a stale percentage is not
+    obviously stale to a reader -- it looks exactly like a fresh one.
+    """
+
+    def test_the_recorded_progress_matches_the_status_lines(self) -> None:
+        from scripts.plan_progress import main
+
+        assert main(["--check"]) == 0, (
+            "the master plan's progress block no longer matches its status lines -- "
+            "run `venv/bin/python -m scripts.plan_progress --write`"
+        )
+
+    def test_every_phase_is_covered_by_an_effort_figure(self) -> None:
+        """`attach_effort` aborts on a phase Part 4 does not price, rather than
+        weighting it zero: a phase silently missing from the denominator would
+        make the programme look further along than it is."""
+        from scripts.plan_progress import PLAN, attach_effort, read_phases
+
+        text = PLAN.read_text(encoding="utf-8")
+        phases = read_phases(text)
+        attach_effort(phases, text)  # raises SystemExit if Part 4 misses one
+        assert all(phase.months > 0 for phase in phases)
+
+    def test_a_phase_marked_complete_has_no_unfinished_task(self) -> None:
+        """Rule 5 of the plan's own maintenance section, enforced. A `PARTIAL`
+        under a phase carrying the complete marker is the one inconsistency that
+        makes every other status in the file less believable."""
+        from scripts.plan_progress import PLAN, read_phases
+
+        phases = read_phases(PLAN.read_text(encoding="utf-8"))
+        wrong = {
+            phase.key: dict(phase.counts)
+            for phase in phases
+            if phase.complete and phase.counts["DONE"] != phase.tasks
+        }
+        assert not wrong, f"marked ✅ PHASE COMPLETE with tasks still open: {wrong}"

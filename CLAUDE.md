@@ -45,7 +45,9 @@ lets the next session start.** Rules:
    intention, not a status.
 4. When every task in a phase is done, add `> ✅ PHASE COMPLETE (date) — all tasks done and
    tested.` under the phase heading. One open task means no marker, however much has shipped.
-5. **Never delete a status; supersede it.** Then append one line to the build plan's *Done*.
+5. **Never delete a status; supersede it.** Then append one line to the build plan's *Done*, and
+   re-stamp the plan's progress block (`python -m scripts.plan_progress --write`) — it is
+   generated from those status lines, and it is the one number in the plan nobody may type.
 6. **You may change the plan itself.** Add a task, split a phase, add a whole phase, or rewrite
    one that turned out to be wrong — when the work teaches you something the plan did not know.
    That is how the four defects recorded in its header got found. Say in the commit message what
@@ -55,6 +57,28 @@ lets the next session start.** Rules:
    hour — a trap, a command, a rule that is not inferable from one file — add it here, and delete
    anything you find that is no longer true. Two claims in this file were false for weeks (a venv
    that did exist, a SQLite refusal that was never implemented), and each one cost a session.
+
+## Decide, then say what you decided
+
+**Do not come back with a question when you could come back with a result.** Within a task,
+every choice is yours: which design, which trade-off, which of two defensible readings of an
+ambiguous instruction. Pick the one you would defend to a reviewer, do the work, and state the
+decision and its reason in the summary and in the plan. A session that stops to ask has spent
+the user's turn and delivered nothing.
+
+Three things this does **not** license, because they are the reasons the rule has limits:
+
+1. **Never invent a fact to avoid asking.** A number, a citation, a capability, a test result —
+   if you cannot establish it, the honest encoding is the one this codebase already has for it
+   (`UNKNOWN` with a reason, `unmeasured`, `blocked` with the missing capability named). Deciding
+   is not the same as guessing, and the whole of `app/verify/` exists to keep them apart.
+2. **Finish the phase if it can be finished, and say so plainly if it cannot.** Work stopped by
+   hardware goes in THE QUEUE (see below) with the claim it would settle. Work stopped by a
+   missing capability goes in the plan as a task, in the phase that owns the capability — not as
+   a silent gap and not as a task nobody will build.
+3. **A decision that changes an interface is still a decision, and it goes in the commit
+   message and the plan.** Widening `SolveOutput`, adding a `Selector`, changing a response
+   shape: take it, do not stall on it, and write down what it cost.
 
 ## Where the work runs — Linux writes it, Windows proves it
 
@@ -69,11 +93,36 @@ session.**
 2. Run `pytest` — the suite is local and fast now (see *Database*). Run `ruff` and `mypy`.
 3. Verify every new guard **by breaking the thing it guards** and watching a named test fail.
    Where a guard cannot be shown to fail, label it unpinned rather than shipping it as verified.
+   **Break one thing at a time and prove the restore, not just the failure.** A script that
+   mutates a source file, runs pytest and copies a backup back can poison its own backup —
+   re-run it, or start it on a tree a previous run left dirty, and every later "the guard caught
+   it" is measuring the *earlier* break. That happened on 2026-09-08 and it invalidated three
+   results in one pass: LE10's solid was left one-piece, so its three tests failed under every
+   subsequent break for a reason none of those breaks had caused. What caught it was
+   `code_fingerprint()` — the recorded artefact's hash of every file that decides an answer — so
+   after a break run, **check the fingerprint back to its recorded value**
+   (`data/verify/validation-outcomes.json`) rather than trusting `diff` against a backup that may
+   itself be the broken copy. If it does not match, the tree is dirty and nothing measured on it
+   counts.
+   **Key the backups on the full path, never `basename`.** This tree has
+   `app/models/simulation.py` *and* `app/schemas/simulation.py`; a script saving to
+   `/tmp/$(basename $f)` gives them one file, so the second `cp` overwrites the first and the
+   restore writes the model over the schema. It happened on 2026-09-09, `diff` against the
+   backup said IDENTICAL for both, and the symptom was an unrelated
+   `InvalidRequestError: Table 'simulation_jobs' is already defined`. Recovery is
+   `git checkout --` the clobbered file and re-apply, which only works because the edit was
+   small enough to remember — so make the backup path collision-proof instead.
 4. **There is no CATIA and no GUI run here.** Do not claim an end-to-end result from Linux.
    An integration claim between gates is unproven and is written as unproven.
 
 **On Windows (the machine with CATIA and the bridge — proving the product):**
 
+0. **Start from THE QUEUE at the top of [docs/WINDOWS_VERIFICATION.md](docs/WINDOWS_VERIFICATION.md)** —
+   a checkbox list of every item a Linux session was stopped on by missing hardware, grouped by
+   what it needs (`ccx`, a CATIA seat, a document, a vision model) and ordered by what a run
+   settles per minute. **A Linux session that hits a hardware wall adds its row there in the
+   same commit as the work**, the way a finished task updates the master plan. An unrecorded
+   blocker gets rediscovered from scratch, which has already cost two sessions.
 1. This is where the **whole application** is exercised: the real `/api/v1/ai/chat` endpoint
    through the web GUI, the CATIA seat through the bridge, the desktop shell.
 2. **Test with the prompt ladder** (`docs/GUI_PROMPT_LADDER.md`), not with improvised prompts.
@@ -138,6 +187,10 @@ Dev server    venv/bin/uvicorn app.main:app --reload    # with --reload also set
 Lint          venv/bin/python -m ruff check app/ tests/
 Types         venv/bin/python -m mypy app/
 Test          venv/bin/python -m pytest                 # whole suite, ~9 min against local Postgres
+Re-record V&V venv/bin/python -m app.verify.recorded     # after any solver/mesher/verify change
+V&V is stale? venv/bin/python -m app.verify.recorded --check   # instant; the CI form
+Plan progress  venv/bin/python -m scripts.plan_progress          # per-phase table, from the plan
+Re-stamp it    venv/bin/python -m scripts.plan_progress --write  # after moving any status line
 Offline only  venv/bin/python -m pytest tests/test_solver.py tests/test_mesh.py \
                   tests/test_geometry.py tests/test_kernel.py tests/test_interrogation.py \
                   tests/test_design_*.py tests/test_render.py tests/test_vision.py
@@ -176,8 +229,9 @@ app/
   media/          content-addressed blob store, chunked/resumable uploads, FAISS indexes
   documents/      attachment parsing and the untrusted-text boundary (Decision 8)
   geometry/       format detection, dependency-free file inspection
-  mesh/           gmsh tet meshing, quality metrics, exact primitives for tests
-  solve/          Solver + ModalSolver ABCs, in-house FEA, CalculiX federation, materials, loads
+  mesh/           gmsh tet and tri meshing, quality metrics, exact primitives for tests
+  solve/          Solver + ModalSolver + PlanarSolver ABCs, in-house FEA (solid and plane),
+                  CalculiX federation, materials, loads
   simulation/     runner.py — the geometry → mesh → solve job pipeline
   jobs/           JobQueue ABC; ThreadPoolJobQueue today, Celery/RQ later
   design/         a part as a compilable specification, not a tree to edit
@@ -469,12 +523,45 @@ lanes are genuinely separate. What makes it work rather than a merge conflict:
    choice is a slower version of doing it yourself.
 6. **Say which of the two a claim rests on** — the offline suite or a seat run. They prove
    different things and only one of them proves the path.
+7. **A new module usually owes something to a registry, and only the full suite knows which.**
+   Every lane in E7.5 was green on its own files, `ruff` and `mypy` were clean, and the whole
+   suite still came back with one failure: `app/solve/plane.py` opened an `observe.span` named
+   `solve.plane` that `app/observe/catalogue.py` did not declare. Nothing in the lane could have
+   seen it. Two tests caught it in the right order — one that every span in `app/` is declared,
+   and a snapshot of the wired set that makes a human acknowledge the new one rather than letting
+   a hook appear unannounced. So: **run the whole suite after integrating parallel lanes, not
+   just the touched files**, and when adding a module ask what registry it owes an entry to —
+   `observe/catalogue.py`, `solve/registry.py`, `db/models.py`, `api/router.py` are all
+   "unregistered means invisible" in their own way.
+8. **Give each lane the contract it codes against, not just its file list.** E7.5 ran four lanes
+   over one new mesh type; the two that never saw each other's code compiled against a `TriMesh`
+   spelled out in their briefs — field names, shapes, units, which properties exist — and
+   integrated with no edits. What a brief cannot supply is the seams a lane will *discover*, so
+   ask for those back explicitly: three of the four lanes reported a needed change in a file they
+   did not own instead of reaching for it, which is how `app/verify/provenance.py` got fixed once,
+   by the parent, rather than twice in two incompatible ways.
+9. **Expect the tree to be red between lanes landing, and know which red is expected.** Every
+   fingerprinted file is shared state: each lane that touches `app/solve/**`, `app/mesh/**` or a
+   fingerprinted `app/verify/*` orphans the recorded validation artefact, so the register and
+   trust tests fail on staleness until **the last lane in re-records**. That is the guard working,
+   not a regression — but it looks identical to one, so say so in the plan rather than
+   rediscovering it, and never re-record in the middle expecting it to hold.
+10. **`while pgrep -f "python -m pytest"; do sleep …; done` never exits** — the waiting shell's own
+   command line contains the pattern, so it matches itself. Two lanes and the parent all lost time
+   to it. Match on something the waiter does not contain, or just run the tests: the physics and
+   verification files request no database fixture, and `conftest.py`'s schema fixture is requested
+   rather than autouse, so those runs do not collide. Only DB-touching runs must be serialised.
 
 ## Tools
 
 **Use `rg` (ripgrep), not `grep`**, for code search — it respects `.gitignore`, so it will not
 drown you in `venv/`, `node_modules/` or `data/bm25/`. `rg -n "pattern" app/` for a search,
-`rg --files -g "*.py"` to list. It is verified working correctly in this repo (2026-09-08).
+`rg --files -g "*.py"` to list. It is verified working correctly in this repo — re-checked
+2026-09-09 by running `rg` and `grep` over the same file and diffing, which agree exactly.
+**But a subagent reported it corrupting matched text on the same day** (`catalogue` printed as
+`n`), which is the failure mode the root `CLAUDE.md` warns about for a wrapped `rg`, so it is
+environment-dependent rather than settled. If a search returns text that does not look like the
+file, do not debug the file: re-run the search with `grep -rn` and believe that instead.
 `fd` and `ast-grep` are not installed; use `find` or `rg --files`. `gh` for GitHub, `jq`/`yq` for
 JSON/YAML.
 
@@ -563,10 +650,49 @@ All verified against closed-form solutions, not recorded output.
 2. **Modal** — `solve/modal.py`, `ModalCase`, checked against the bar `f=(2n−1)/4L·√(E/ρ)`,
    cantilever Euler-Bernoulli modes 1–3, six rigid-body modes free-free.
 3. **Buckling** — `solve/buckling.py`, `BucklingCase`, checked against Euler `P=π²EI/(KL)²`.
-4. **Thermal stress** — `solve/thermal.py` via `LoadCase.delta_t_k`, checked against the
-   restrained bar `σ = −EαΔT`.
+4. **Thermal stress** — `solve/thermal.py`, checked against the restrained bar `σ = −EαΔT`.
+   Takes a uniform `LoadCase.delta_t_k` **or a temperature that varies with position**: every
+   function there accepts one number or one value per element, and `LinearStaticSolver.solve`
+   takes an optional `temperatures=` array. A *prescribed* field (a formula of position, as
+   NAFEMS LE11 gives) and a *solved* one (from conduction) are different sources for the same
+   thing — the field is a solver argument and deliberately not on `LoadCase`, which is JSONB on
+   the job row and would then hold data the size of the mesh.
+5. **Steady conduction** — `solve/conduction.py`, `ThermalCase`, checked against the linear bar
+   profile, the logarithmic tube wall, and the convecting bar's Biot tip temperature
+   `T_tip=(T_b+Bi·T_inf)/(1+Bi)`. Dirichlet, convection (Robin) and heat-flux boundaries over the
+   existing `Selector` vocabulary. **Conductivity is on the case, not on `Material`** — so
+   nothing inherits an unchecked default — and **watts enter the unit system here**, converting
+   exactly once, the way density does in the CalculiX deck writer. Steady state only: there is no
+   time integration, so "how long until" is not a question it answers.
+6. **Plane stress and plane strain** — `solve/plane.py`, `PlaneCase` on a `mesh/planar.TriMesh`
+   (tri3/tri6), checked against σ = F/A, δ = FL/AE, `G = E/(2(1+ν))` from pure shear, and Lame's
+   thick-walled cylinder. `PlanarSolver` is a **sibling** of `Solver`, for `ModalSolver`'s
+   reason — different mesh, different case — but returns the same `SolveOutput`, so the
+   verification, provenance and viewer paths need no fork. Three things to know before using it:
+   a plane mesh carries **(n, 3) nodes at z = 0** so every existing region selector works
+   unchanged, and drifting off that plane is refused rather than projected; `nodal_stress[:, 2]`
+   is **0 for plane stress and ν(σxx+σyy) for plane strain**, which is the only difference
+   between the two idealisations and is the easy thing to get plausibly wrong; and a load on a
+   quadratic **edge** splits L/6 – 2L/3 – L/6, which is *not* the quadratic *face* rule in
+   `selection.distribute_force` where the corner functions integrate to zero.
+   **Asked for by `analysis: "plane-stress" | "plane-strain"` on a simulation, with a
+   `thickness_mm`** (migration `490d3f517ca6`). The job needs a *planar face in z = 0*, not a
+   thin solid — `generate_tri_mesh` refuses a solid by name, because meshing its boundary
+   succeeds and hands back a closed shell. `thickness_mm` is refused rather than defaulted on a
+   plane run and refused rather than ignored on a solid: every plane stress scales with it, and
+   silently dropping one leaves the engineer believing it was used.
 
-Three things that are easy to get wrong and are pinned by tests:
+**A run states its own mesh dependence, and can be asked to measure it.** Every `StaticResult`
+carries `mesh_convergence`, always present and defaulting to `single-grid` — `converged` is never
+true on one grid however fine it is, because a single solve holds no evidence about its own
+discretisation error. Pass `grids: 3` (or more, capped at 5) on a simulation and the runner
+solves the same case on successively finer meshes and assesses the peak stress with a Grid
+Convergence Index. **The size you give is the coarsest grid**, so a study costs more time and
+never more memory; the finest grid's result is what is stored, with the verdict beside it; two
+grids are refused because they cannot form a study. Spacing is 1.4 — 1.2 is inside gmsh's
+remeshing noise, measured.
+
+Five things that are easy to get wrong and are pinned by tests:
 
 1. **Thermal strain must be subtracted during stress recovery**, not only added as a load. Leaving
    it out reports the stress of a freely-expanding part — wrong sign and wrong size.
@@ -575,6 +701,32 @@ Three things that are easy to get wrong and are pinned by tests:
 3. **The modal mass matrix is integrated analytically** in barycentric coordinates, not with the
    stiffness assembly's four-point Gauss rule — that rule is exact only to degree 2 and tet10's
    `N^T N` is quartic, so reusing it would be wrong by a few percent: plausible-looking, and wrong.
+4. **The centroid and the nodes answer different questions, and averaging the first is not the
+   second.** `SolveOutput.nodal_stress` is the full tensor in Voigt order **SXX SYY SZZ SXY SYZ
+   SZX** (CalculiX's own order, so the adapter never permutes), and it is recovered by evaluating
+   tet10's gradient at **each node's own natural coordinate** — `_TET10_NATURAL_NODES`, derived
+   from `TET10_EDGES` rather than typed out. The element centroid stays the superconvergent point
+   and still feeds the headline peak and the factor of safety. Averaging centroid values onto
+   nodes was the previous behaviour and it **under-reads a plate surface in bending by ~25%**,
+   which would be survivable except that the error *shrinks with refinement* — so a convergence
+   study reads it as a converging answer rather than as an offset, and the GCI looks healthy while
+   the number is wrong. Read `nodal_stress` for a stress at a point; it is `None` on a solver that
+   does not produce one, and `quantities.stress_component_at` refuses **by name** rather than
+   returning a substitute.
+5. **A coarse mesh of a curved solid is a smaller part, not a coarser mesh.** gmsh chords a
+   curved face, so the meshed volume falls as the element size grows — 7% short on NAFEMS LE10 at
+   h = 300 mm. That is a different *problem*, not a coarser discretisation of the same one, and
+   feeding it to Richardson extrapolation pollutes the observed order with a geometry trend.
+   Compute the exact volume where the shape is analytic and refuse a level that misses it (LE10
+   uses 0.5%); `run_study` records the refusal as a level failure, which is the honest outcome.
+   Relatedly, **gmsh remeshes rather than refines**, so consecutive levels are not nested and the
+   quantity wanders between them — space the levels wide enough (≈1.4× in representative size)
+   that the discretisation trend dominates the remeshing noise, and choose the spacing on a rule
+   stated *before* the sweep rather than by picking the best-looking triple afterwards.
+   And a support that lands on an interior plane needs an **edge** for gmsh to put a node ring
+   on: LE10's plate is built as two half-thickness solids fused for exactly this reason, because
+   the one-piece extrusion put 2, 38 and 5 nodes under a symmetry support on three meshes and the
+   answer scattered by a factor of two while looking like solver noise.
 
 ### CalculiX: there is no `ccx` on this Linux machine, and it shapes what may be claimed
 
@@ -618,11 +770,72 @@ the ratio to the compressive case.
 2. **`solve.ModalSolver`** (ABC) — a sibling, not a method on `Solver`: natural frequencies come
    from a different input and return a different output, so folding them in would make every
    caller branch on what it got back.
-3. **`jobs.JobQueue`** (ABC) — one method, `submit`. Moving to Celery must not touch routes.
-4. **`media.LocalMediaStore`** — content addressing and chunked IO behind a small surface, so an
+3. **`solve.PlanarSolver`** (ABC) — the third sibling, for plane stress and plane strain. Takes a
+   `TriMesh` and a `PlaneCase` and returns the *same* `SolveOutput`: the input differs, so it
+   cannot be a method on `Solver`; the output does not, so forking `SolveOutput` would fork the
+   verification, provenance and viewer paths for nothing.
+4. **`jobs.JobQueue`** (ABC) — one method, `submit`. Moving to Celery must not touch routes.
+5. **`media.LocalMediaStore`** — content addressing and chunked IO behind a small surface, so an
    S3 store is a swap, not a rewrite.
 
 **Never reach around a seam.** If a route needs to know which solver ran, put it on the job row.
+
+## Validation (`app/verify/`) — the one place a number may not come from you
+
+Decision 3 says verification is the product. `app/verify/` is where that is enforced:
+`convergence.py` refuses to state an unconverged number, `provenance.py` binds every result to
+the mesh, material, case and solver that produced it, `benchmarks.py` defines what a benchmark
+may claim, `nafems.py` is the catalogue of cases, and `register.py` publishes the roll-up on an
+unauthenticated trust page.
+
+1. **A benchmark target must be read off a document, never recalled.** `Target` refuses a
+   `PUBLISHED` basis with no `source`, and `register.py` republishes that string to readers
+   outside this repository — so a remembered figure carrying a plausible citation is
+   indistinguishable, on the published page, from one somebody checked. Every citation lives in
+   `nafems.SOURCES` with the manual, the section, the NAFEMS publication it credits, the URL and
+   the date it was read; a test refuses one typed at the call site. This is not theoretical: a
+   figure recalled for FV52 was 4% off the reference row.
+2. **`TargetBasis.UNKNOWN` is the honest shape for a case you cannot source** — fully encoded,
+   run where possible, `MEASURED`, and never a pass. It *forbids* carrying a value.
+3. **A case that cannot run names its blocker in a countable vocabulary** (`nafems.Blocker`), not
+   in free text, because "two cases wait on one thing" is the report the catalogue exists to
+   produce. A blocker no case backs fails a test, and so does a case with no blocker.
+   **And every blocker needs an owner somewhere outside the catalogue** — a master-plan task, or
+   a row in THE QUEUE if it needs hardware. Four blockers sat here for a day naming capabilities
+   that appeared in no task anywhere, which reads as diligence and is a silent gap: the catalogue
+   was describing work nobody was going to do. Before recording a blocker, ask *whose* it is.
+   Also check whether the manual that reproduces the target also carries the **geometry** before
+   declaring a case blocked on a document nobody has — LE10 was recorded that way and the Abaqus
+   entry states all four semi-axes.
+4. **The published register never runs anything.** `assert_publishable` refuses a runnable case
+   at import, and `PUBLISHED_SUITE` *filters* on `runnable` rather than trusting anyone to
+   remember — otherwise the day a blocked case becomes executable is the day the application
+   stops booting. A runnable benchmark reaches the register only as a recorded outcome passed to
+   `Register.build`.
+5. **The page's prose is published beside its counts, and only a test keeps them agreeing.**
+   `PUBLISHED_NOTES` is static text and `Summary` is computed, so the day a third case validated
+   a note still read "Nothing in this register is validated today" next to a summary saying two
+   analyses were. On a trust page that is worse than either statement alone: a reader cannot tell
+   which half is stale, so neither is usable, and not having to decide that is the whole value of
+   the page. `TestTheNotesDoNotContradictTheNumbers` reads both. Any count written into a test as
+   a literal has the same problem from the other side — the blocked-case count was hand-written
+   as 3 and made unblocking LE1 look like a regression twice; derive it from `CASES`.
+6. **A published result comes from a recorded run, and a recording expires.** The register never
+   executes a benchmark (a public unauthenticated route that solves is a denial-of-service tool
+   with a nice name), so a case that runs reaches it through
+   `data/verify/validation-outcomes.json`. That file carries a fingerprint of every source file
+   that decides an answer — `app/solve/`, `app/mesh/`, and `benchmarks/convergence/nafems/
+   provenance/quantities` — and a mismatch publishes **nothing**, with the reason, rather than a
+   result nobody re-checked. `register.py` and `recorded.py` are outside the fingerprint on
+   purpose: an artefact that expires when somebody rewords a note is one people regenerate
+   without reading. Re-record with `venv/bin/python -m app.verify.recorded` after touching a
+   solver, a mesher or a verification rule; `--check` is the instant CI form and the same
+   comparison is a test, so forgetting fails the suite.
+7. **The path scrubber replaces the whole string, so it must not fire on a URL.** `_PATH_RE`'s
+   drive-letter branch matched the `s:/` inside `https://` until 2026-09-08, which would have
+   published every citation as "[withheld: looked like a filesystem path]" — the guard destroying
+   what it protects. A drive letter is one character and the lookbehind says so. The same pattern
+   is duplicated in `tests/test_trust.py`; change both or neither.
 
 ## Reference manuals (`app/retrieval/`) and the CATIA KB (`app/catia_kb/`)
 

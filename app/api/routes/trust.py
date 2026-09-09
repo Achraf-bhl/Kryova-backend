@@ -21,7 +21,11 @@ by the payload containing nothing that came from a database:
   `app.verify.commitments.COMMITMENTS`, `app.verify.changelog.CHANGES` — plus
   benchmark outcomes, which come from a recorded suite and not from a tenant's
   work. No session, no `DbSession`, no `CurrentUser`, and no dependency in this
-  file can reach one.
+  file can reach one. The recording is one committed file read from the
+  repository (`data/verify/validation-outcomes.json`), never a path a request can
+  influence, and `app.verify.recorded.load` returns *nothing* rather than raising
+  for every way of failing to read it — a trust page that 500s over a malformed
+  artefact publishes less than one that says the evidence could not be read.
 * `PUBLISHED_SUITE` is asserted at import to contain nothing runnable, so an
   unauthenticated request cannot make this process solve anything. Without that,
   a public route over a benchmark suite is a way to spend the server's CPU by

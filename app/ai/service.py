@@ -60,6 +60,13 @@ def _result_payload(
             "loads": load_case.get("loads"),
         },
         "solver_warnings": result.get("warnings") or [],
+        # Always sent, and sent even when it says "one mesh". Gate G1 reported a
+        # factor of safety of 1303 off a single 411-element tet4 mesh with
+        # nothing beside it saying so; a payload that omitted this on the
+        # ordinary path would leave the model explaining an unconverged number
+        # as though it were settled, which is the failure that item exists for.
+        "mesh_convergence": result.get("mesh_convergence")
+        or {"converged": False, "basis": "single-grid"},
     }
     return json.dumps(payload, indent=2, sort_keys=True, default=str)
 
@@ -105,6 +112,11 @@ def draft_load_case(
     wrong. `SketchProblem` -- a description with no load magnitude in it --
     is an `LLMError` here because to every caller it is the same thing: the
     draft did not come, and this is why.
+
+    **The bounding box goes to `realise` as well as to the prompt**, and that
+    is the fix gate G1 asked for on 2026-09-08. It reached only the prompt, so
+    the words `far end` and `near end` could not be resolved and no drafted
+    case could be checked against the part it was drafted for.
     """
     completion = provider.complete(
         system=prompts.PARSE_LOAD_CASE_SYSTEM,
@@ -117,7 +129,7 @@ def draft_load_case(
         max_tokens=settings.ai_max_tokens,
     )
     try:
-        draft = realise(completion.value)
+        draft = realise(completion.value, bounding_box)
     except SketchProblem as exc:
         raise LLMError(str(exc)) from exc
     return Completion(value=draft, usage=completion.usage)

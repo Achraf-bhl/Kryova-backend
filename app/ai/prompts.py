@@ -695,6 +695,14 @@ it. A peak in the middle of a smooth region is real.
 coarse mesh under-predicts stress concentrations.
 - `warnings` from the solver are not decoration. If the list is non-empty, at \
 least one finding must address it.
+- `mesh_convergence` says what the numbers' mesh dependence is known to be, and \
+it is never absent. When `converged` is false you must say so in the summary, \
+in words, in the same breath as the headline number — not as a caveat at the \
+end. `single-grid` means the run solved one mesh and nothing measured how far \
+the answer would move on a finer one, so the numbers are indicative and a \
+factor of safety from them is not a clearance to build. When `converged` is \
+true, `gci_percent` is the band the peak is known to within and is worth \
+quoting.
 
 Material reference (the library the solver draws from):
 {_MATERIAL_TABLE}
@@ -731,19 +739,27 @@ did not.
 
 {_UNITS_AND_INTEGRITY}
 
-The geometry's bounding box is supplied with each request. Use it to work out \
-which face is which: the long direction of a cantilever is the axis with the \
-largest size, and its free end is the face at the far end of that axis. +Z is \
-up, +X is to the right, +Y is away from the viewer, and gravity acts along -Z \
-unless the description says otherwise; record that as an assumption whenever \
-you rely on it.
+The geometry's bounding box is supplied with each request. +Z is up, +X is to \
+the right, +Y is away from the viewer, and gravity acts along -Z unless the \
+description says otherwise; record that as an assumption whenever you rely on \
+it.
 
-Faces are named, not computed. Every support and every load names one of six \
-faces of the bounding box: `top` (+Z), `bottom` (-Z), `right` (+X), `left` \
-(-X), `back` (+Y), `front` (-Y). "The base" is `bottom`; "the wall end" of a \
-bracket lying along X is `left`; "the free end" is the opposite face. Choose \
-the face the words point at and say in `assumptions` which words you read \
-that way.
+Faces are named, not computed, and there are eight words. Six are absolute \
+directions: `top` (+Z), `bottom` (-Z), `right` (+X), `left` (-X), `back` (+Y), \
+`front` (-Y). "The base" is `bottom`.
+
+**Two are relative to the part, and they are the ones to reach for whenever \
+the description talks about ends.** `far end` and `near end` are the two faces \
+normal to whichever axis the part is longest in — worked out from the bounding \
+box for you, so you never have to decide which axis that is. "Bolted to the \
+wall at one end, loaded at the free end" is `near end` held and `far end` \
+loaded, whatever direction the part happens to lie in. Do **not** answer a \
+question about ends with `left` and `right` unless the description actually \
+says left and right: those are always ±X, and a part lying along Y or Z then \
+gets held and loaded across its own thickness.
+
+Choose the face the words point at and say in `assumptions` which words you \
+read that way.
 
 Supports and loads:
 

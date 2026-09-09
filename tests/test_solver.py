@@ -417,3 +417,262 @@ class TestTet10ShapeFunctions:
         translation = np.tile([1.0, -2.0, 3.0], mesh.node_count)
         forces = stiffness @ translation
         assert abs(forces).max() < 1e-6 * abs(stiffness).max()
+
+
+class TestTheNodalStressTensor:
+    """`SolveOutput.nodal_stress` — six signed components, at the nodes.
+
+    Added 2026-09-08 for NAFEMS LE10, whose target is `sigma_yy` at a named
+    point. Von Mises cannot stand in for it: the invariant is unsigned and the
+    two faces of a plate in bending carry equal and opposite stress, so a
+    magnitude passes a part bent the wrong way.
+
+    The check that earns the field is the last one. Evaluating the element's
+    stress *at the node* and evaluating it at the centroid and averaging sound
+    like the same operation and are not — a tet10's strain is linear, so on a
+    plate in bending the centroid sits halfway to the neutral axis. The centroid
+    route under-reads the surface, and it under-reads it by less on every
+    refinement, which is exactly what a converging answer looks like.
+    """
+
+    def test_a_bar_in_tension_reports_f_over_a_at_every_node(self) -> None:
+        """Against the closed form, not against a recorded field."""
+        mesh = promote_to_tet10(box_mesh((10.0, 10.0, 40.0), divisions=(2, 2, 6)))
+        force = 5000.0
+        output = LinearStaticSolver().solve(mesh, uniaxial_case(STEEL, force))
+
+        assert output.nodal_stress is not None
+        sigma_zz = output.nodal_stress[:, 2]
+        expected = force / (10.0 * 10.0)
+        # Away from the loaded and restrained ends, where Saint-Venant applies.
+        interior = (mesh.nodes[:, 2] > 8.0) & (mesh.nodes[:, 2] < 32.0)
+        assert np.allclose(sigma_zz[interior], expected, rtol=1e-6)
+
+    def test_the_off_diagonal_components_of_a_uniaxial_bar_are_zero(self) -> None:
+        mesh = promote_to_tet10(box_mesh((10.0, 10.0, 40.0), divisions=(2, 2, 6)))
+        output = LinearStaticSolver().solve(mesh, uniaxial_case(STEEL, 5000.0))
+
+        assert output.nodal_stress is not None
+        shear = output.nodal_stress[:, 3:]
+        assert abs(shear).max() < 1e-6 * abs(output.nodal_stress[:, 2]).max()
+
+    def test_the_component_order_is_the_one_von_mises_reads(self) -> None:
+        """SXX SYY SZZ SXY SYZ SZX — CalculiX's order, adopted here so its
+        adapter does not permute on every read. A transposed pair is invisible
+        in a uniaxial case, so this rebuilds the invariant from the tensor and
+        compares it against the solver's own von Mises field."""
+        from app.solve.linear_static import von_mises
+        from app.solve.postprocess import element_average
+
+        mesh = promote_to_tet10(box_mesh((10.0, 10.0, 40.0), divisions=(2, 2, 4)))
+        output = LinearStaticSolver().solve(mesh, uniaxial_case(STEEL, 5000.0))
+
+        assert output.nodal_stress is not None
+        rebuilt = von_mises(element_average(mesh, output.nodal_stress))
+        assert np.allclose(rebuilt, output.von_mises, rtol=0.05)
+
+    def test_a_tet4_mesh_still_reports_a_tensor(self) -> None:
+        """Constant strain, so nodal and element values necessarily agree — the
+        field is present rather than absent, because a caller cannot be asked to
+        know which element order produced its answer."""
+        mesh = box_mesh((10.0, 10.0, 40.0), divisions=(2, 2, 6))
+        output = LinearStaticSolver().solve(mesh, uniaxial_case(STEEL, 5000.0))
+
+        assert output.nodal_stress is not None
+        assert output.nodal_stress.shape == (mesh.node_count, 6)
+
+    def test_the_surface_of_a_plate_in_bending_is_not_the_centroid_value(self) -> None:
+        """The defect the field exists to avoid, measured.
+
+        A cantilever plate under a tip load: the top surface carries the peak
+        bending stress. Averaging centroid values onto the nodes reports
+        materially less of it than evaluating the element at the node does, and
+        the gap is the half-element the centroid sits inside the surface.
+        """
+        from app.solve.postprocess import nodal_average
+
+        mesh = promote_to_tet10(box_mesh((120.0, 20.0, 12.0), divisions=(12, 2, 3)))
+        case = LoadCase(
+            name="cantilever",
+            material=STEEL,
+            fixtures=[Fixture(where=FaceSelector(axis="x", side="min"), kind="clamp")],
+            loads=[
+                ForceLoad(
+                    where=FaceSelector(axis="x", side="max"), force_n=(0.0, 0.0, -800.0)
+                )
+            ],
+        )
+        solver = LinearStaticSolver()
+        output = solver.solve(mesh, case)
+        assert output.nodal_stress is not None
+
+        displacements = output.displacements.reshape(-1)
+        centroid_route = nodal_average(
+            mesh, solver._recover_stress(mesh, STEEL, displacements)
+        )
+
+        # The most stressed top-surface node, in the region Saint-Venant covers.
+        top = np.flatnonzero((mesh.nodes[:, 2] > 11.9) & (mesh.nodes[:, 0] > 12.0))
+        node = int(top[np.argmax(np.abs(output.nodal_stress[top, 0]))])
+
+        at_node = abs(float(output.nodal_stress[node, 0]))
+        at_centroid = abs(float(centroid_route[node, 0]))
+        assert at_node > at_centroid * 1.15, (
+            f"the node reads {at_node:.3f} MPa and the centroid route "
+            f"{at_centroid:.3f} MPa; if these agree the nodal field is not being "
+            "evaluated at the nodes"
+        )
+
+
+class TestEveryResultSaysWhatMeshItCameFrom:
+    """Gate G1's third open item, from the other side.
+
+    The gate reported a peak stress and a factor of safety off one 411-element
+    tet4 mesh, with nothing beside the number saying that is all it was
+    (`docs/verification-2026-09-08-G1/`). The report's own words: "until then no
+    stress from this product is converged and it should say so in words".
+
+    The field is defaulted rather than optional, and that is the whole design.
+    An optional field is absent on every path nobody remembered, and absence
+    reads to a reader as "fine" — the same reason an empty `warnings` list could
+    not carry this, since empty means both "nothing was wrong" and "nobody
+    looked".
+    """
+
+    def _solved(self):
+        mesh = box_mesh(size=(20.0, 10.0, 200.0), divisions=(2, 1, 8))
+        case = LoadCase(
+            name="cantilever",
+            material=MATERIALS["steel-1018"],
+            fixtures=[Fixture(where=FaceSelector(axis="z", side="min"), kind="clamp")],
+            loads=[
+                ForceLoad(
+                    where=FaceSelector(axis="z", side="max"), force_n=(0.0, -200.0, 0.0)
+                )
+            ],
+        )
+        return LinearStaticSolver().solve(mesh, case).result
+
+    def test_an_ordinary_run_reports_a_single_grid_and_says_so(self) -> None:
+        claim = self._solved().mesh_convergence
+
+        assert claim.converged is False
+        assert claim.basis == "single-grid"
+        assert claim.grids == 1
+
+    def test_the_detail_is_a_sentence_a_reader_can_act_on(self) -> None:
+        """Not a status code. The person reading it has to know what it costs
+        them and what to do instead."""
+        detail = self._solved().mesh_convergence.detail
+
+        assert "one mesh" in detail
+        assert "finer" in detail
+
+    def test_it_survives_into_the_persisted_summary(self) -> None:
+        """`summary()` is what reaches the database row and the API, so a claim
+        that lived only on the object would be true and invisible."""
+        summary = self._solved().summary()
+
+        assert summary["mesh_convergence"]["basis"] == "single-grid"
+        assert summary["mesh_convergence"]["converged"] is False
+
+    def test_a_fine_mesh_is_still_not_converged(self) -> None:
+        """The one that matters. One solve contains no evidence about its own
+        discretisation error however many elements it has, and 'it looked fine'
+        is exactly the reasoning Decision 3 exists to refuse."""
+        mesh = box_mesh(size=(20.0, 10.0, 200.0), divisions=(6, 3, 40))
+        case = LoadCase(
+            name="cantilever",
+            material=MATERIALS["steel-1018"],
+            fixtures=[Fixture(where=FaceSelector(axis="z", side="min"), kind="clamp")],
+            loads=[
+                ForceLoad(
+                    where=FaceSelector(axis="z", side="max"), force_n=(0.0, -200.0, 0.0)
+                )
+            ],
+        )
+
+        claim = LinearStaticSolver().solve(mesh, case).result.mesh_convergence
+
+        assert claim.converged is False
+        assert claim.grids == 1
+
+    def test_a_result_built_by_hand_cannot_omit_the_claim(self) -> None:
+        """The default is what makes this an invariant rather than a habit: a
+        `StaticResult` constructed anywhere, by anyone, states its basis."""
+        from app.solve.types import StaticResult
+
+        bare = StaticResult(
+            max_displacement_mm=1.0,
+            max_displacement_node=0,
+            max_von_mises_mpa=10.0,
+            max_von_mises_element=0,
+            factor_of_safety=25.0,
+            yields=False,
+            mass_kg=1.0,
+            volume_mm3=1000.0,
+            node_count=8,
+            element_count=6,
+            solve_seconds=0.01,
+        )
+
+        assert bare.mesh_convergence.converged is False
+        assert bare.mesh_convergence.basis == "single-grid"
+
+
+class TestAConvergedStudyIsTheOnlyRouteToATrueClaim:
+    """`from_study` is the seam between `app/verify/` and a reported number.
+
+    Kept as a duck-typed constructor rather than an import of
+    `ConvergenceStudy`, because `app.verify` imports the solver: the arrow
+    between the two packages must point one way only.
+    """
+
+    def _study(self, verdict: str, **fields):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            verdict=verdict,
+            levels=(1, 2, 3),
+            gci_fine=fields.get("gci_fine", 0.02),
+            observed_order=fields.get("observed_order", 2.1),
+            reason=fields.get("reason", "because the arithmetic says so"),
+        )
+
+    def test_a_converged_study_makes_the_claim_true(self) -> None:
+        from app.solve.types import MeshConvergence
+
+        claim = MeshConvergence.from_study(self._study("converged"))
+
+        assert claim.converged is True
+        assert claim.basis == "grid-convergence-index"
+        assert claim.grids == 3
+
+    def test_the_gci_is_reported_as_a_percentage(self) -> None:
+        """The study carries a fraction and every reader of this field is a
+        person; 0.02 and 2% are the same number and only one of them is read
+        correctly at a glance."""
+        from app.solve.types import MeshConvergence
+
+        claim = MeshConvergence.from_study(self._study("converged", gci_fine=0.0223))
+
+        assert claim.gci_percent == pytest.approx(2.23)
+
+    def test_a_study_that_did_not_converge_does_not_make_the_claim_true(self) -> None:
+        """The verdict is the study's, and this must not launder it. A run that
+        refused to state a value is the strongest evidence there is that the
+        number is not settled."""
+        from app.solve.types import MeshConvergence
+
+        claim = MeshConvergence.from_study(self._study("not converged"))
+
+        assert claim.converged is False
+        assert claim.basis == "grid-convergence-index"
+        assert claim.grids == 3
+
+    def test_the_studys_own_reason_is_carried_rather_than_reworded(self) -> None:
+        from app.solve.types import MeshConvergence
+
+        claim = MeshConvergence.from_study(self._study("converged", reason="the GCI is 1.05%"))
+
+        assert claim.detail == "the GCI is 1.05%"

@@ -221,8 +221,9 @@ rebuilt the environment for nothing.
 
 **Both ruff and mypy are clean, and there is no list of errors to expect.** A tolerated error is
 one nobody reads, so the next real one hides behind it — if either prints anything, it is yours.
-`mypy app/` says *Success: no issues found in 343 source files*, with no exceptions, as of
-2026-09-08. **Clear `.mypy_cache/` before believing a stale answer**: adding an override to
+`mypy app/` says *Success: no issues found*, with no exceptions — last checked 2026-09-09. The
+file count it prints is whatever `app/` holds that day (355 on 2026-09-09) and is not worth
+pinning here; *Success* is the claim. **Clear `.mypy_cache/` before believing a stale answer**: adding an override to
 `pyproject.toml` did not take effect until the cache was removed, which looked exactly like the
 override not working.
 
@@ -491,7 +492,10 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
 
 ## Testing
 
-1. **One capability, one test file, mirroring `app/`.** The suite is ~6,400 tests.
+1. **One capability, one test file, mirroring `app/`.** 214 files, 7141 tests on 2026-09-09 —
+   a figure that rots on every phase, so get today's with
+   `venv/bin/python -m pytest --collect-only -q | tail -1` (2 s, opens no database) rather than
+   trusting this line. It is here for order of magnitude, not for arithmetic.
 2. **Physics and design tests never request a database fixture**, so they open no connection and
    run offline in under a second. Keep it that way — that tight loop is why meshing, FEA and
    design work is bearable. `app/design/`'s 338 tests run offline because `execute` takes its
@@ -1146,22 +1150,12 @@ entry before acting on it, and delete it the moment it stops being true.**
    untyped, so `mypy app/` reports *Success: no issues found* and the "if mypy prints anything, it
    is yours" rule is literally true again. Declaring it says the import is optional; it does not
    decide whether DXF should be a supported feature.
-7. ~~**The suite has pre-existing failures on `main` as of 2026-09-08**~~ — **fixed 2026-09-08.**
-   All twelve are green and the suite is 6,451 passing / 0 failing. Kept as a record of what they
-   turned out to be, because the split is the useful part: **one was a real defect** (the
-   verification nudge discarded the "nothing has actually been done" message that the exhausted
-   correction loop had just written, so a model that ran nothing closed the turn with "Done." and
-   a footnote — the exact silent failure `test_written_tool_calls.py` exists to prevent, arriving
-   from the other side); **one was a tripwire working correctly** (`KryovaFaceMap` was added to
-   the frozen VBA library and the test fails on purpose until a human reviews it — reviewed and
-   accepted); **one was a stale artefact** (the BM25 index predated the chunker changes; rebuilt,
-   P@1 back to 94.7%); and **the other nine were tests that had rotted**, each in a different way:
-   a fixture whose user message accidentally carried a measurable requirement, a stub one call
-   short of the code it fakes, a volume oracle coupled to how many times the code reads a volume,
-   a negative probe naming a tool the system prompt has since started teaching, and a `caplog`
-   assertion over every logger in the process rather than the one under test. **None of the nine
-   was wrong about what it claimed** — every one was wrong about how it checked it, which is why
-   they all failed on a change to something else.
+7. **The suite is green on `main`** (7,141 passing / 0 failing, 2026-09-09). Twelve failures that
+   stood here on 2026-09-08 were fixed that day, and **the breakdown of what they turned out to
+   be is worth reading before you assume a red test means a broken feature** — one real defect,
+   one tripwire working as designed, one stale artefact, and nine tests that were right about
+   what they claimed and wrong about how they checked it. Written up in `KRYOVA_BUILD_PLAN.md`'s
+   *Done*, 2026-09-08, where the history belongs.
 
 **Removed on 2026-09-08 because they were no longer true** — recorded so nobody reinstates them
 from memory: `SECRET_KEY="changeme"` boots (it is refused at startup, `config.py:450`); the rate

@@ -85,10 +85,14 @@ machine — a queue that accumulates items nobody re-examines is a list of excus
 
 ### A. CalculiX — needs `ccx` on PATH (there is none on the Linux machine)
 
-`app/solve/calculix/` is written **entirely from the CalculiX manual**, with a `[M]` citation
-per keyword and an `[S]` where the manual stops and ccx's source answers. Not one keyword in
-it has been through the real solver. The first run is the measurement that turns the whole
-package from *documented* into *verified*.
+`app/solve/calculix/` was written **entirely from the CalculiX manual**, with a `[M]` citation
+per keyword and an `[S]` where the manual stops and ccx's source answers.
+
+**A1–A5 ran on the seat on 2026-09-09 against ccx 2.23, and the package is now verified rather
+than documented.** Each box below carries its numbers. The run found two defects that no
+offline test could have seen, both fatal to beams — see A4 — and A6 remains open with its
+estimate corrected. `ccx` here is `C:\tools\calculix\bin\ccx.exe`, on both the Windows PATH the
+server inherits and the Git Bash one.
 
 - [x] **A1 — Any deck at all.** MEASURED 2026-09-09, ccx 2.23. The solid deck for a
       100 mm bar in tension solved and the `.frd` read back at the submitted node

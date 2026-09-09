@@ -9,20 +9,33 @@ owned its section could not be.
 
 Node coordinates are in **millimetres**, as everywhere else here.
 
-**Nothing produces one of these yet, and that is stated rather than implied.**
-gmsh's 2-D and 1-D meshers are not wired, so a `ShellMesh` today is authored — by
-a test, or by a caller that knows where its nodes go. That is worth writing down
-because it decides the one ordering question below.
+**A `ShellMesh` now has a producer; a `BeamMesh` still does not.**
+`app.mesh.gmsh_mesher.generate_shell_mesh` meshes a curved surface into one, in
+all four element types (2026-09-09). A `BeamMesh` is still authored — by a test,
+or by a caller that knows where its nodes go — because gmsh's 1-D mesher is not
+wired. That asymmetry is worth stating, because it is what the ordering question
+below now turns on.
 
 **The midside ordering is defined here to be CalculiX's, deliberately.** For
 tets it is not, and cannot be: `TET10_EDGES` is *gmsh's* order for its 10-node
 tet, gmsh is the producer, and `app/solve/calculix/deck.py` permutes at the
 boundary — a permutation whose absence swaps two nodes on every element and
-still solves. Here there is no producer to disagree with, so adopting the
-solver's order at the source removes a permutation that nobody could ever have
-watched fail. The consequence is a debt and is named: **a future gmsh shell or
-beam mesher must permute at the boundary, the way `_element_rows` does**, and
-must not be allowed to reorder these tables instead.
+still solves. When these tables were written there was no producer to disagree
+with, so adopting the solver's order at the source removed a permutation that
+nobody could ever have watched fail, and the debt was named: a future gmsh shell
+mesher must permute at the boundary rather than reorder these tables.
+
+**That debt came due and was settled by measurement, not by argument.** Against
+gmsh 4.15.2 the permutation is the **identity** for both shapes: gmsh numbers a
+6-node triangle's midside nodes 0-1, 1-2, 0-2 against `SHELL_TRI_EDGES`' 0-1,
+1-2, 2-0, and those are the same three node *pairs* with the last written the
+other way round, which selects the same node; the 8-node quadrilateral agrees
+outright. So the mesher writes these rows through unchanged — and
+`_assert_shell_midside_ordering` re-checks it by coordinate on every quadratic
+mesh, so a gmsh release that renumbered would fail loudly instead of returning a
+plausible, wrong stiffness matrix. **Do not "restore" a permutation here**; the
+identity is checked, not assumed. The beam half of the debt is still open and
+still theoretical, for want of a beam mesher.
 """
 
 from __future__ import annotations
@@ -313,10 +326,61 @@ def _triangle_area(
     return 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
 
 
+def shell_quality(mesh: ShellMesh) -> dict[str, float | int | str]:
+    """Quality summary for a shell mesh, on the same 0-to-1 scale as the others.
+
+    `min_quality` is `c * A / sum(edge^2)` with `c` chosen so that a perfect
+    element reads exactly 1: `4 * sqrt(3)` for a triangle, which is
+    `planar_quality`'s factor, and `4` for a quadrilateral, because a square of
+    side `s` has area `s^2` and an edge-square sum of `4 s^2`. Both fall to 0 as
+    the element degenerates. The two constants exist so a report can print a
+    triangular and a quadrilateral mesh side by side without a legend — the same
+    argument `app.mesh.types.quality` makes for the tet radius ratio.
+
+    Area comes from `face_areas`, so it is the *corner* area of a quadratic
+    element and the folded area of a warped quadrilateral. That is deliberate:
+    it is the same number `app.solve.shell_loads` distributes a load over, and a
+    quality figure computed from a different area than the load path uses would
+    let a mesh look good and load wrong.
+
+    **It measures skew and aspect ratio, and is close to blind to warp.** A 45
+    degree parallelogram reads 0.707, but a 10 mm quadrilateral with one corner
+    lifted 5 mm out of plane still reads 0.994 — only the four edge lengths
+    enter the denominator and `face_areas` sums the two folded triangles, so a
+    fold barely moves either. Warp is the characteristic defect of a
+    quadrilateral shell element, so **a clean `min_quality` here is not evidence
+    that a shell solver will be happy**; a warp measure is a separate quantity
+    and is not written yet.
+    """
+    points = mesh.nodes[mesh.faces]
+    areas = mesh.face_areas()
+    sides = np.stack(
+        [np.sum((points[:, b] - points[:, a]) ** 2, axis=1) for a, b in mesh.edge_table],
+        axis=1,
+    )
+    perimeter_sq = sides.sum(axis=1)
+    factor = 4.0 * np.sqrt(3.0) if mesh.is_triangular else 4.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        shape = np.where(perimeter_sq > 0.0, factor * areas / perimeter_sq, 0.0)
+    # `shape.min()` rather than `shape.min(initial=0.0)`, for the reason
+    # `planar_quality` spells out: `initial` seeds the reduction rather than
+    # standing in for an empty array, so `initial=0.0` would report every mesh
+    # as degenerate. `__post_init__` refuses a mesh with no faces.
+    return {
+        "element_type": mesh.element_type,
+        "element_count": int(mesh.face_count),
+        "node_count": int(mesh.node_count),
+        "area_mm2": float(mesh.area_mm2),
+        "min_quality": float(shape.min()),
+        "mean_quality": float(shape.mean()),
+    }
+
+
 __all__ = [
     "BEAM_EDGES",
     "SHELL_QUAD_EDGES",
     "SHELL_TRI_EDGES",
     "BeamMesh",
     "ShellMesh",
+    "shell_quality",
 ]

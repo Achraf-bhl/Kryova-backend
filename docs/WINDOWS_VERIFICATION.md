@@ -77,28 +77,50 @@ per keyword and an `[S]` where the manual stops and ccx's source answers. Not on
 it has been through the real solver. The first run is the measurement that turns the whole
 package from *documented* into *verified*.
 
-- [ ] **A1 — Any deck at all.** Submit the solid deck `write_deck` produces for the bar in
-      tension and read the `.frd` back. Everything below assumes this works.
-- [ ] **A2 — The thermal cards (E6.4, written 2026-09-08).** `*INITIAL CONDITIONS,
-      TYPE=TEMPERATURE`, `*EXPANSION, ZERO=` and `*TEMPERATURE` were added because
-      `delta_t_k` reached the in-house solver and reached CalculiX **not at all**. Run
-      `app/solve/oracle.py` on a **thermal** case — a restrained bar, `σ = −EαΔT` — and
-      confirm the two solvers now agree. Nobody has ever pointed the oracle at a thermal case.
-- [ ] **A3 — `OUTPUT=2D` on a shell deck and on a beam deck (E6.3).** The claim is that ccx
-      accepts the parameter on both `*SHELL SECTION` and `*BEAM SECTION`, and that with it the
-      `.frd` carries results at the node numbers **submitted** rather than at the expanded
-      model's. This is the one that produces a plausible wrong number rather than an error:
-      every node index is in range and there is no length mismatch, so
-      `frd.displacements(frd, mesh.node_count)` would quietly read another model's answer.
-      Submit one `write_frame_deck` shell deck and one beam deck and check the node count in
-      the `.frd` against `mesh.node_count`.
-- [ ] **A4 — `*BEAM SECTION` data-line order.** The deck writes the profile dimensions, then
-      the normalised direction cosines of `n1`, on the following line. Confirm against a run;
-      a wrong order gives a beam bent about the wrong axis, which for an RHS is a stiffness
-      error of 2.25× and looks entirely believable.
-- [ ] **A5 — The expansion pairs.** `EXPANSIONS` claims S3→C3D6, S4→C3D8I, S6→C3D15,
-      S8R→C3D20R, B31→C3D8I, B32→C3D20R. The `.frd` node count per element type settles all
-      six at once.
+- [x] **A1 — Any deck at all.** MEASURED 2026-09-09, ccx 2.23. The solid deck for a
+      100 mm bar in tension solved and the `.frd` read back at the submitted node
+      count (81/81). σ = F/A 25.000 → **25.0888 MPa (0.355%)**; δ = FL/AE 0.012195 →
+      **0.012491 mm (2.43%**, the peak including the far corner's Poisson
+      contraction). The oracle ran and agreed, displacement matching to six
+      significant figures.
+- [x] **A2 — The thermal cards (E6.4, written 2026-09-08).** MEASURED 2026-09-09 —
+      **the first thermal comparison ever run.** An axially restrained bar at ΔT = 50 K:
+      closed form σ = −EαΔT = −119.925 MPa, in-house **119.925000 (0.0000%)**,
+      CalculiX **119.925000 (0.0000%)**. Oracle `ran=True agrees=True`, and
+      `uniform_field=True`, so the stress was genuinely *judged* rather than reported.
+      The cards written blind on 2026-09-08 are correct.
+- [x] **A3 — `OUTPUT=2D` on a shell deck and on a beam deck (E6.3).** MEASURED
+      2026-09-09, and the claim holds on both keywords. Through Kryova's own
+      `write_frame_deck`, every shell element reported at the **submitted** node
+      count — S4 9/9, S8R 21/21, S3 9/9, S6 25/25 — and the beam deck 5/5. So the
+      quiet failure this item exists for (a reader indexing a `.frd` by the input
+      mesh's numbering and silently getting the expanded model's) cannot happen.
+- [x] **A4 — `*BEAM SECTION` data-line order.** MEASURED 2026-09-09. The order is
+      right — profile dimensions first, direction cosines of `n1` on the following
+      line — and a deck written exactly that way solves. **But running it found two
+      defects that mattered far more than the order, neither visible offline:**
+      (a) **CalculiX carries `SECTION=BOX` and `SECTION=PIPE` on `B32R` only**, and
+      Kryova wrote `B31`/`B32`, so an RHS — the profile `sections.py` calls "the
+      workhorse of a welded frame" — produced a deck refused at parse time:
+      *"*BEAM SECTION of type BOX can only be used for B32R elements."* Swept across
+      B31/B32/B32R × RECT/CIRC/PIPE/BOX and one-to-eight data values, so it is the
+      section type that decides it and not the value count. `choose_element` now
+      takes the section and substitutes B32R, refusing a *linear* mesh in words
+      because there is no three-node element to substitute.
+      (b) **`BeamMesh.connectivity` wrote `[start, end, middle]`** where ccx reads a
+      beam row along the member, so the far end was taken for the midside node and
+      the element folded back on itself: `*ERROR in e_c3d: nonpositive jacobian
+      determinant`. **No quadratic beam deck this repo ever wrote could solve.** The
+      test asserting that ordering was wrong in the same direction as the code,
+      which is why nothing offline saw it. Shells were unaffected and are checked.
+- [x] **A5 — The expansion pairs.** MEASURED 2026-09-09 by dropping `OUTPUT=2D` and
+      counting the nodes the `.frd` carries per element: **B31 → 8 (C3D8I)**,
+      **B32 → 20 (C3D20R)**, **S4 → 8 (C3D8I)** — the documented pairs hold.
+      **B32R → 20 (C3D20R)**, the same expansion as B32, which is what makes the A4
+      substitution above a change of element and not a change of answer. S3/S6/S8R
+      solve through the product's writer at their submitted node counts (A3) but
+      their expanded counts were not separately read back; that half is unticked in
+      spirit and worth ten minutes next session.
 - [ ] **A6 — NAFEMS LE3, the hemisphere, once a shell deck actually solves.** Added 2026-09-08,
       and now the **only** case in the catalogue this machine cannot eventually reach on its own
       (LE11 waits on physics, not hardware). Clearing it takes the trust page from three

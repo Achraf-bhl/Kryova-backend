@@ -1151,6 +1151,27 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    > mesher produces one of these meshes yet. Tested by: `tests/test_solver_calculix_elements.py`
    > (49), `tests/test_solver_sections.py` (26), `tests/test_mesh_structural.py` (35) — 14 guards
    > verified by breaking what they guard.
+   > **VERIFIED ON THE SEAT (2026-09-09), and it took two defects with it.** ccx 2.23 now
+   > reads every element this module chooses: `OUTPUT=2D` holds on both keywords — S4 9/9,
+   > S8R 21/21, S3 9/9, S6 25/25 and the beam 5/5 nodes, all at the *submitted* numbering —
+   > and the expansion table is confirmed by node count (B31→8, B32→20, S4→8). The two the
+   > run found were invisible offline and both made a *beam* unsolvable.
+   > **(a) `BeamMesh.connectivity` wrote `[start, end, middle]`.** ccx numbers a three-node
+   > beam along the member, so the far end was read as the midside and the element folded
+   > back on itself — `*ERROR in e_c3d: nonpositive jacobian determinant`. No quadratic beam
+   > deck this repo ever wrote could solve, and the test asserting that order was wrong in
+   > the same direction as the code. Shells were unaffected and are checked.
+   > **(b) A hollow profile needs `B32R`.** CalculiX carries `SECTION=BOX` and `SECTION=PIPE`
+   > on that element only, refusing B31 and B32 at parse time and naming it; the sweep across
+   > B31/B32/B32R × RECT/CIRC/PIPE/BOX and one-to-eight data values shows it is the section
+   > type that decides it, not the value count. So the RHS — the profile this task's own
+   > vocabulary calls the workhorse of a welded frame — produced a deck the solver would not
+   > read. `choose_element` now takes the section and substitutes B32R, and refuses a linear
+   > mesh in words because there is no three-node element to substitute.
+   > A4's original worry, the data-line order, is *correct as written*.
+   > Tested by: `tests/test_solver_calculix_elements.py` (55) and
+   > `tests/test_mesh_structural.py`. **Still unverified:** no mesher produces one of these
+   > meshes, so every shell and beam here is still an authored mesh.
 
 4. **Analysis types unlocked by task 1**: nonlinear static, large deformation, plasticity, contact,
    bolt pretension, modal, buckling, transient dynamics, coupled thermal-stress.

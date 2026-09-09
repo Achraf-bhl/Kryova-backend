@@ -214,6 +214,31 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-09 — ccx has now read a deck this repo wrote, and two beams could never have
+  solved.** THE QUEUE section A (A1–A5) is measured and ticked; `app/solve/calculix/` goes from
+  *documented* to *verified*. **A1**: the solid bar deck solves on ccx 2.23, `.frd` back at 81/81
+  nodes, σ = F/A 25.000 → 25.0888 MPa (0.355%), and the oracle agrees to six figures. **A2**, the
+  first thermal comparison ever run: a restrained bar at ΔT = 50 K gives −119.925 MPa closed form,
+  **119.925000 from both solvers (0.0000%)**, with `uniform_field=True` so the stress was judged
+  and not merely reported — the cards written blind on 2026-09-08 are right. **A3**: `OUTPUT=2D`
+  holds on `*SHELL SECTION` and `*BEAM SECTION` alike — S4 9/9, S8R 21/21, S3 9/9, S6 25/25, beam
+  5/5, all at the submitted numbering. **A5**: the expansion table is confirmed by node count
+  (B31→8/C3D8I, B32→20/C3D20R, S4→8/C3D8I).
+  **A4 is where it earned its place.** The data-line order it asks about is correct as written —
+  and running it found two defects neither offline test could see, both fatal to beams.
+  `BeamMesh.connectivity` returned `[start, end, middle]`, but ccx numbers a three-node beam
+  *along the member*, so the far end was taken for the midside node and the element folded back on
+  itself: `*ERROR in e_c3d: nonpositive jacobian determinant`. **No quadratic beam deck this repo
+  ever wrote could solve**, and the test pinning that order was wrong in the same direction as the
+  code, which is exactly the failure mode `docs/WINDOWS_VERIFICATION.md` warns a first run to look
+  for. Second, CalculiX carries `SECTION=BOX` and `SECTION=PIPE` on **B32R only** — swept across
+  B31/B32/B32R x RECT/CIRC/PIPE/BOX and one-to-eight data values, so it is the section type that
+  decides it and not the value count — while Kryova wrote B31/B32, so an RHS produced a deck
+  refused at parse time. `choose_element` now takes the section and substitutes B32R, refusing a
+  *linear* mesh in words because there is no three-node element to substitute. Both fixes checked
+  by submitting the product's own deck to the real solver: B32R + BOX now exits 0 with 5/5 nodes
+  where the same deck on B31 is still refused. Shells were unaffected, and all four are checked.
+  ruff and mypy clean; 609 solver/mesh tests green.
 - **2026-09-09 — the Windows seat runs the suite for the first time, and six defects fall out.**
   Tiers 1 and 2 of `docs/WINDOWS_VERIFICATION.md` are green here: **927 offline tests**
   (including the 124 that had only ever been import-checked, and an iso render looked at with

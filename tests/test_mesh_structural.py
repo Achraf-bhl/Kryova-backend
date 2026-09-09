@@ -286,9 +286,12 @@ class TestABeamMeshRefusesWhatItCannotBe:
 
 
 class TestConnectivityPutsCornersBeforeMidsideNodes:
-    """Every Abaqus-family quadratic element lists its corners first. A
-    connectivity that interleaved them would still have the right node count and
-    would describe a differently shaped element — the C3D10 trap, one shape up.
+    """Shells list their corners first. **Beams do not, and assuming they did
+    was a defect that shipped** — see the beam test below.
+
+    A connectivity in the wrong order still has the right node count and every
+    index in range, so it describes a differently shaped element rather than
+    failing — the C3D10 trap, one shape up.
     """
 
     def test_a_linear_shell_is_its_own_connectivity(self) -> None:
@@ -304,14 +307,41 @@ class TestConnectivityPutsCornersBeforeMidsideNodes:
         assert mesh.midside is not None
         assert np.array_equal(mesh.connectivity[:, 4:], mesh.midside)
 
-    def test_a_quadratic_beam_puts_the_middle_node_last(self) -> None:
+    def test_a_quadratic_beam_puts_the_middle_node_in_the_middle(self) -> None:
+        """The exception to the rule this class is named for, and it is CalculiX's.
+
+        This asserted `[0, 1, 2]` — corners then midside — until 2026-09-09, and
+        the code agreed with it, which is why nothing offline caught it: the test
+        was written from the same understanding as the code and was wrong in the
+        same direction. On the seat, ccx reads a beam row *along the member*, so
+        `[start, end, middle]` makes the far end the midside node and folds the
+        element back on itself:
+
+            *ERROR in e_c3d: nonpositive jacobian determinant in element 1
+
+        No quadratic beam deck this repo wrote had ever solved.
+        """
         mesh = BeamMesh(
             nodes=np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [5.0, 0.0, 0.0]]),
             segments=np.array([[0, 1]]),
             midside=np.array([[2]]),
         )
 
-        assert list(mesh.connectivity[0]) == [0, 1, 2]
+        assert list(mesh.connectivity[0]) == [0, 2, 1]
+
+    def test_the_middle_node_is_geometrically_between_the_ends(self) -> None:
+        """The property the ordering exists for, stated in coordinates rather
+        than indices — an index order is only right because the point it names
+        lies between the two it sits between."""
+        mesh = BeamMesh(
+            nodes=np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [5.0, 0.0, 0.0]]),
+            segments=np.array([[0, 1]]),
+            midside=np.array([[2]]),
+        )
+
+        xs = mesh.nodes[mesh.connectivity[0]][:, 0]
+
+        assert xs[0] < xs[1] < xs[2]
 
 
 class TestGeometryThatEveryMeshMustReport:

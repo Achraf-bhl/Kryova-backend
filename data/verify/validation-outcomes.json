@@ -1,28 +1,28 @@
 {
- "code_fingerprint": "sha256:0f9fb6f336649efe4b3889337183d1f63811b924a1b50125267dfce7de06f156",
+ "code_fingerprint": "sha256:b7abcf5310dc2dac38f8903eea6fb1660007f082ebe37f5f82465cabd07b7706",
  "outcomes": [
   {
    "analysis": "linear-static",
    "convergence": {
-    "asymptotic_ratio": 1.0013227616706073,
+    "asymptotic_ratio": 1.001322761672042,
     "cautions": [
      "The observed order 4.69 differs from the element's formal order 2.00 by more than 1.0."
     ],
-    "extrapolated_value": 92.44362288554167,
+    "extrapolated_value": 92.44362288575081,
     "failures": [],
-    "fine_value": 92.40782637309455,
-    "gci_fine": 0.0004842191653577217,
+    "fine_value": 92.40782637321011,
+    "gci_fine": 0.00048421916662317905,
     "gci_threshold": 0.05,
     "levels": [
      {
-      "area_mm2": 5448700.131609165,
+      "area_mm2": 5448700.131609164,
       "dimension": 2,
       "element_count": 8108,
       "element_size_mm": 40.0,
       "element_type": "tri6",
       "node_count": 16473,
       "representative_size_mm": 25.923258085535092,
-      "value": 92.40782637309455
+      "value": 92.40782637321011
      },
      {
       "area_mm2": 5448684.517764652,
@@ -32,20 +32,20 @@
       "element_type": "tri6",
       "node_count": 8795,
       "representative_size_mm": 35.580307738089346,
-      "value": 92.28575431455575
+      "value": 92.28575431453893
      },
      {
-      "area_mm2": 5448692.530819199,
+      "area_mm2": 5448692.5308192,
       "dimension": 2,
       "element_count": 2380,
       "element_size_mm": 74.0,
       "element_type": "tri6",
       "node_count": 4899,
-      "representative_size_mm": 47.84732604428275,
-      "value": 91.81095838276778
+      "representative_size_mm": 47.84732604428276,
+      "value": 91.81095838277167
      }
     ],
-    "observed_order": 4.686259566477871,
+    "observed_order": 4.686259562741047,
     "quantity": "sigma_yy at point D on the inner free edge",
     "reason": "The fine-grid GCI is 0.05%, within the 5.00% band, with a monotone observed order of 4.69 over 3 grids.",
     "refinement_ratios": [
@@ -53,36 +53,36 @@
      1.344769876542168
     ],
     "safety_factor": 1.25,
-    "stated_value": 92.40782637309455,
+    "stated_value": 92.40782637321011,
     "unit": "MPa",
     "verdict": "converged"
    },
    "detail": "92.4078 against 92.7 MPa (-0.315%, band \u00b12.000%)",
    "id": "nafems-le1",
-   "measured_value": 92.40782637309455,
+   "measured_value": 92.40782637321011,
    "outcome": "validated",
    "provenance": {
     "analysis": "linear-static",
     "convergence": {
-     "asymptotic_ratio": 1.0013227616706073,
+     "asymptotic_ratio": 1.001322761672042,
      "cautions": [
       "The observed order 4.69 differs from the element's formal order 2.00 by more than 1.0."
      ],
-     "extrapolated_value": 92.44362288554167,
+     "extrapolated_value": 92.44362288575081,
      "failures": [],
-     "fine_value": 92.40782637309455,
-     "gci_fine": 0.0004842191653577217,
+     "fine_value": 92.40782637321011,
+     "gci_fine": 0.00048421916662317905,
      "gci_threshold": 0.05,
      "levels": [
       {
-       "area_mm2": 5448700.131609165,
+       "area_mm2": 5448700.131609164,
        "dimension": 2,
        "element_count": 8108,
        "element_size_mm": 40.0,
        "element_type": "tri6",
        "node_count": 16473,
        "representative_size_mm": 25.923258085535092,
-       "value": 92.40782637309455
+       "value": 92.40782637321011
       },
       {
        "area_mm2": 5448684.517764652,
@@ -92,20 +92,20 @@
        "element_type": "tri6",
        "node_count": 8795,
        "representative_size_mm": 35.580307738089346,
-       "value": 92.28575431455575
+       "value": 92.28575431453893
       },
       {
-       "area_mm2": 5448692.530819199,
+       "area_mm2": 5448692.5308192,
        "dimension": 2,
        "element_count": 2380,
        "element_size_mm": 74.0,
        "element_type": "tri6",
        "node_count": 4899,
-       "representative_size_mm": 47.84732604428275,
-       "value": 91.81095838276778
+       "representative_size_mm": 47.84732604428276,
+       "value": 91.81095838277167
       }
      ],
-     "observed_order": 4.686259566477871,
+     "observed_order": 4.686259562741047,
      "quantity": "sigma_yy at point D on the inner free edge",
      "reason": "The fine-grid GCI is 0.05%, within the 5.00% band, with a monotone observed order of 4.69 over 3 grids.",
      "refinement_ratios": [
@@ -113,18 +113,18 @@
       1.344769876542168
      ],
      "safety_factor": 1.25,
-     "stated_value": 92.40782637309455,
+     "stated_value": 92.40782637321011,
      "unit": "MPa",
      "verdict": "converged"
     },
     "environment": {
      "numpy": "2.5.2",
-     "platform": "linux",
-     "python": "3.12.3",
+     "platform": "win32",
+     "python": "3.14.3",
      "scipy": "1.18.0"
     },
     "geometry": {
-     "digest": "sha256:16d79e74b14ec4986eaadc2d7e30c681b7f357e778dc6e9d3735ffa6d9e6b3ab",
+     "digest": "sha256:f308f743c10d055f4cc79dc45db5f2c897a1a6664af509beb1c7ff51719d1ee7",
      "source": "quarter elliptical annular membrane built with OCCT as a planar face and meshed from STEP: outer 3250 x 2750 mm, inner 2000 x 1000 mm, 100 mm thick, plane stress"
     },
     "load_case": {
@@ -141,12 +141,12 @@
      "youngs_modulus_mpa": 210000.0
     },
     "mesh": {
-     "area_mm2": 5448700.131609165,
+     "area_mm2": 5448700.131609164,
      "element_count": 8108,
      "element_order": 2,
      "element_size_mm": 40.0,
      "element_type": "tri6",
-     "min_quality": 0.8705324947069095,
+     "min_quality": 0.8705324947068729,
      "node_count": 16473,
      "sliver_count": 0
     },
@@ -189,14 +189,14 @@
     },
     "quantity": "sigma_yy at point D on the inner free edge",
     "solver": {
-     "code_digest": "sha256:ae7169028026a4e5d9cd51789412761703f69fc3dcd52fc9516871eedc7a1abb",
+     "code_digest": "sha256:8bd3af79ba0754e0a659902c19ae5ca0ff0af58b88f5c527c34593a31ab49b65",
      "name": "plane"
     },
     "unit": "MPa",
-    "value": 92.40782637309455
+    "value": 92.40782637321011
    },
-   "relative_deviation": -0.003151819060468738,
-   "seconds": 2.034,
+   "relative_deviation": -0.003151819059222107,
+   "seconds": 1.065,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE1 'Elliptic membrane under a uniformly distributed load', reproducing NAFEMS publication TNSB Rev. 3, 'The Standard NAFEMS Benchmarks', October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le1.htm on 2026-09-08.",
@@ -228,123 +228,123 @@
   {
    "analysis": "linear-static",
    "convergence": {
-    "asymptotic_ratio": 0.9781278255947404,
+    "asymptotic_ratio": 0.9811084183584886,
     "cautions": [],
-    "extrapolated_value": -5.2681874398656765,
+    "extrapolated_value": -5.306679249577817,
     "failures": [],
-    "fine_value": -5.363757072286861,
-    "gci_fine": 0.022272082593693593,
+    "fine_value": -5.358199412881403,
+    "gci_fine": 0.012019001005199753,
     "gci_threshold": 0.05,
     "levels": [
      {
       "dimension": 3,
-      "element_count": 11452,
+      "element_count": 11544,
       "element_size_mm": 115.0,
       "element_type": "tet10",
-      "node_count": 18581,
-      "representative_size_mm": 65.84424382721761,
-      "value": -5.363757072286861,
-      "volume_mm3": 3269149509.228634
+      "node_count": 18707,
+      "representative_size_mm": 65.66886168649569,
+      "value": -5.358199412881403,
+      "volume_mm3": 3269149509.148212
      },
      {
       "dimension": 3,
-      "element_count": 3978,
+      "element_count": 3940,
       "element_size_mm": 165.0,
       "element_type": "tet10",
-      "node_count": 6916,
-      "representative_size_mm": 93.6675958061934,
-      "value": -5.4836974595080425,
-      "volume_mm3": 3269135324.6641474
+      "node_count": 6870,
+      "representative_size_mm": 93.96776376683144,
+      "value": -5.4613733942356575,
+      "volume_mm3": 3269135313.2830753
      },
      {
       "dimension": 3,
-      "element_count": 1503,
+      "element_count": 1504,
       "element_size_mm": 245.0,
       "element_type": "tet10",
-      "node_count": 2928,
-      "representative_size_mm": 129.56697711844765,
-      "value": -5.723747610937323,
-      "volume_mm3": 3269203537.083308
+      "node_count": 2929,
+      "representative_size_mm": 129.53824769322682,
+      "value": -5.720928953791424,
+      "volume_mm3": 3269203009.1328626
      }
     ],
-    "observed_order": 2.307074898727676,
+    "observed_order": 3.068361874729291,
     "quantity": "sigma_yy at point D on the pressed surface",
-    "reason": "The fine-grid GCI is 2.23%, within the 5.00% band, with a monotone observed order of 2.31 over 3 grids.",
+    "reason": "The fine-grid GCI is 1.20%, within the 5.00% band, with a monotone observed order of 3.07 over 3 grids.",
     "refinement_ratios": [
-     1.4225631636379221,
-     1.3832636143083386
+     1.430933342737616,
+     1.3785392192013723
     ],
     "safety_factor": 1.25,
-    "stated_value": -5.363757072286861,
+    "stated_value": -5.358199412881403,
     "unit": "MPa",
     "verdict": "converged"
    },
-   "detail": "-5.36376 against -5.38 MPa (-0.302%, band \u00b12.000%)",
+   "detail": "-5.3582 against -5.38 MPa (-0.405%, band \u00b12.000%)",
    "id": "nafems-le10",
-   "measured_value": -5.363757072286861,
+   "measured_value": -5.358199412881403,
    "outcome": "validated",
    "provenance": {
     "analysis": "linear-static",
     "convergence": {
-     "asymptotic_ratio": 0.9781278255947404,
+     "asymptotic_ratio": 0.9811084183584886,
      "cautions": [],
-     "extrapolated_value": -5.2681874398656765,
+     "extrapolated_value": -5.306679249577817,
      "failures": [],
-     "fine_value": -5.363757072286861,
-     "gci_fine": 0.022272082593693593,
+     "fine_value": -5.358199412881403,
+     "gci_fine": 0.012019001005199753,
      "gci_threshold": 0.05,
      "levels": [
       {
        "dimension": 3,
-       "element_count": 11452,
+       "element_count": 11544,
        "element_size_mm": 115.0,
        "element_type": "tet10",
-       "node_count": 18581,
-       "representative_size_mm": 65.84424382721761,
-       "value": -5.363757072286861,
-       "volume_mm3": 3269149509.228634
+       "node_count": 18707,
+       "representative_size_mm": 65.66886168649569,
+       "value": -5.358199412881403,
+       "volume_mm3": 3269149509.148212
       },
       {
        "dimension": 3,
-       "element_count": 3978,
+       "element_count": 3940,
        "element_size_mm": 165.0,
        "element_type": "tet10",
-       "node_count": 6916,
-       "representative_size_mm": 93.6675958061934,
-       "value": -5.4836974595080425,
-       "volume_mm3": 3269135324.6641474
+       "node_count": 6870,
+       "representative_size_mm": 93.96776376683144,
+       "value": -5.4613733942356575,
+       "volume_mm3": 3269135313.2830753
       },
       {
        "dimension": 3,
-       "element_count": 1503,
+       "element_count": 1504,
        "element_size_mm": 245.0,
        "element_type": "tet10",
-       "node_count": 2928,
-       "representative_size_mm": 129.56697711844765,
-       "value": -5.723747610937323,
-       "volume_mm3": 3269203537.083308
+       "node_count": 2929,
+       "representative_size_mm": 129.53824769322682,
+       "value": -5.720928953791424,
+       "volume_mm3": 3269203009.1328626
       }
      ],
-     "observed_order": 2.307074898727676,
+     "observed_order": 3.068361874729291,
      "quantity": "sigma_yy at point D on the pressed surface",
-     "reason": "The fine-grid GCI is 2.23%, within the 5.00% band, with a monotone observed order of 2.31 over 3 grids.",
+     "reason": "The fine-grid GCI is 1.20%, within the 5.00% band, with a monotone observed order of 3.07 over 3 grids.",
      "refinement_ratios": [
-      1.4225631636379221,
-      1.3832636143083386
+      1.430933342737616,
+      1.3785392192013723
      ],
      "safety_factor": 1.25,
-     "stated_value": -5.363757072286861,
+     "stated_value": -5.358199412881403,
      "unit": "MPa",
      "verdict": "converged"
     },
     "environment": {
      "numpy": "2.5.2",
-     "platform": "linux",
-     "python": "3.12.3",
+     "platform": "win32",
+     "python": "3.14.3",
      "scipy": "1.18.0"
     },
     "geometry": {
-     "digest": "sha256:332ccf863a984b83c1fe77bac9e7b0f207674393bde8b259b0d3518a0af44a44",
+     "digest": "sha256:a5667aae141e390631a029808fde92ff85cdfca53d1a82ab0ef2725012ea04b7",
      "source": "quarter elliptical annular plate built with OCCT and meshed from STEP: outer 3250 x 2750 mm, inner 2000 x 1000 mm, 600 mm thick"
     },
     "load_case": {
@@ -361,14 +361,14 @@
      "youngs_modulus_mpa": 210000.0
     },
     "mesh": {
-     "element_count": 11452,
+     "element_count": 11544,
      "element_order": 2,
      "element_size_mm": 115.0,
      "element_type": "tet10",
-     "min_quality": 0.391827305073308,
-     "node_count": 18581,
+     "min_quality": 0.3911452315813408,
+     "node_count": 18707,
      "sliver_count": 0,
-     "volume_mm3": 3269149509.228634
+     "volume_mm3": 3269149509.148212
     },
     "notes": {
      "benchmark": "nafems-le10"
@@ -409,14 +409,14 @@
     },
     "quantity": "sigma_yy at point D on the pressed surface",
     "solver": {
-     "code_digest": "sha256:e558100af62cf3010b35c5f31eac15050cf85970cbaee4e366f8778b4dc1e05d",
+     "code_digest": "sha256:48866084e89002b456d8eafc9e5aea938706645b2448e903df07811bb524ebd4",
      "name": "linear-static"
     },
     "unit": "MPa",
-    "value": -5.363757072286861
+    "value": -5.358199412881403
    },
-   "relative_deviation": -0.003019131545193176,
-   "seconds": 38.232,
+   "relative_deviation": -0.004052153739516192,
+   "seconds": 24.353,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE10 'Thick plate under pressure', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le10.htm on 2026-09-08.",
@@ -434,7 +434,7 @@
     "cautions": [],
     "extrapolated_value": null,
     "failures": [],
-    "fine_value": -105.29061995179211,
+    "fine_value": -105.29061995179492,
     "gci_fine": null,
     "gci_threshold": 0.05,
     "levels": [
@@ -445,7 +445,7 @@
       "element_type": "tet10",
       "node_count": 8889,
       "representative_size_mm": 59.449991816603884,
-      "value": -105.29061995179211,
+      "value": -105.29061995179492,
       "volume_mm3": 1081877999.617826
      },
      {
@@ -455,7 +455,7 @@
       "element_type": "tet10",
       "node_count": 2892,
       "representative_size_mm": 89.65300606689713,
-      "value": -106.66696460838155,
+      "value": -106.66696460838286,
       "volume_mm3": 1081621372.9235353
      },
      {
@@ -465,11 +465,11 @@
       "element_type": "tet10",
       "node_count": 1127,
       "representative_size_mm": 126.80085375019613,
-      "value": -107.07567227106668,
+      "value": -107.07567227106557,
       "volume_mm3": 1080543866.7198339
      }
     ],
-    "observed_order": -2.718808017325728,
+    "observed_order": -2.7188080173380986,
     "quantity": "sigma_zz at point A on the base plane",
     "reason": "The observed order of convergence is -2.719, which is not positive: refining the mesh is not reducing the error. The coarse-to-medium step is -0.408708 MPa and the medium-to-fine step is -1.37634 MPa, so the change is holding or growing as the mesh refines rather than shrinking. Check the mesh quality and the boundary conditions before refining further; no extrapolation is offered, because Richardson extrapolation of a diverging sequence produces a number with no meaning at all.",
     "refinement_ratios": [
@@ -492,7 +492,7 @@
      "cautions": [],
      "extrapolated_value": null,
      "failures": [],
-     "fine_value": -105.29061995179211,
+     "fine_value": -105.29061995179492,
      "gci_fine": null,
      "gci_threshold": 0.05,
      "levels": [
@@ -503,7 +503,7 @@
        "element_type": "tet10",
        "node_count": 8889,
        "representative_size_mm": 59.449991816603884,
-       "value": -105.29061995179211,
+       "value": -105.29061995179492,
        "volume_mm3": 1081877999.617826
       },
       {
@@ -513,7 +513,7 @@
        "element_type": "tet10",
        "node_count": 2892,
        "representative_size_mm": 89.65300606689713,
-       "value": -106.66696460838155,
+       "value": -106.66696460838286,
        "volume_mm3": 1081621372.9235353
       },
       {
@@ -523,11 +523,11 @@
        "element_type": "tet10",
        "node_count": 1127,
        "representative_size_mm": 126.80085375019613,
-       "value": -107.07567227106668,
+       "value": -107.07567227106557,
        "volume_mm3": 1080543866.7198339
       }
      ],
-     "observed_order": -2.718808017325728,
+     "observed_order": -2.7188080173380986,
      "quantity": "sigma_zz at point A on the base plane",
      "reason": "The observed order of convergence is -2.719, which is not positive: refining the mesh is not reducing the error. The coarse-to-medium step is -0.408708 MPa and the medium-to-fine step is -1.37634 MPa, so the change is holding or growing as the mesh refines rather than shrinking. Check the mesh quality and the boundary conditions before refining further; no extrapolation is offered, because Richardson extrapolation of a diverging sequence produces a number with no meaning at all.",
      "refinement_ratios": [
@@ -541,12 +541,12 @@
     },
     "environment": {
      "numpy": "2.5.2",
-     "platform": "linux",
-     "python": "3.12.3",
+     "platform": "win32",
+     "python": "3.14.3",
      "scipy": "1.18.0"
     },
     "geometry": {
-     "digest": "sha256:e1594dafd2130abc35463a90a121e0251a5bc4aa4f6314ed1e42e1dc02246d1d",
+     "digest": "sha256:a3bd9c69b14d3a32b2e34fa9ebfdad0a47488b5a0c1ba4112e76243d30822467",
      "source": "quarter cylinder/taper/sphere built with OCCT and meshed from STEP; see app/verify/le11_geometry.py and docs/nafems-le11-geometry.md"
     },
     "load_case": {
@@ -611,13 +611,13 @@
     },
     "quantity": "sigma_zz at point A on the base plane",
     "solver": {
-     "code_digest": "sha256:e558100af62cf3010b35c5f31eac15050cf85970cbaee4e366f8778b4dc1e05d",
+     "code_digest": "sha256:48866084e89002b456d8eafc9e5aea938706645b2448e903df07811bb524ebd4",
      "name": "linear-static"
     },
     "unit": "MPa"
    },
    "relative_deviation": null,
-   "seconds": 10.738,
+   "seconds": 7.33,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE11 'Solid cylinder/taper/sphere-temperature', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le11.htm on 2026-09-08.",
@@ -631,12 +631,12 @@
   {
    "analysis": "modal",
    "convergence": {
-    "asymptotic_ratio": 0.9892340777615293,
+    "asymptotic_ratio": 0.9892340777615767,
     "cautions": [],
-    "extrapolated_value": 43.25807099132619,
+    "extrapolated_value": 43.2580709913337,
     "failures": [],
-    "fine_value": 43.62402403875098,
-    "gci_fine": 0.01048599525973668,
+    "fine_value": 43.62402403875498,
+    "gci_fine": 0.010485995259635283,
     "gci_threshold": 0.05,
     "levels": [
      {
@@ -646,7 +646,7 @@
       "element_type": "tet10",
       "node_count": 4375,
       "representative_size_mm": 337.9001108651889,
-      "value": 43.62402403875098,
+      "value": 43.62402403875498,
       "volume_mm3": 100000000000.00009
      },
      {
@@ -656,7 +656,7 @@
       "element_type": "tet10",
       "node_count": 1445,
       "representative_size_mm": 506.85016629778306,
-      "value": 44.09878816342609,
+      "value": 44.09878816342802,
       "volume_mm3": 99999999999.99992
      },
      {
@@ -666,11 +666,11 @@
       "element_type": "tet10",
       "node_count": 243,
       "representative_size_mm": 1013.7003325955667,
-      "value": 46.742786798882655,
+      "value": 46.74278679888455,
       "volume_mm3": 100000000000.00012
      }
     ],
-    "observed_order": 2.0513485570200594,
+    "observed_order": 2.0513485570273127,
     "quantity": "fundamental flexural frequency (mode 4, after three rigid-body modes)",
     "reason": "The fine-grid GCI is 1.05%, within the 5.00% band, with a monotone observed order of 2.05 over 3 grids.",
     "refinement_ratios": [
@@ -678,23 +678,23 @@
      2.0000000000000013
     ],
     "safety_factor": 1.25,
-    "stated_value": 43.62402403875098,
+    "stated_value": 43.62402403875498,
     "unit": "Hz",
     "verdict": "converged"
    },
    "detail": "43.624 against 44.092 Hz (-1.061%, band \u00b15.000%)",
    "id": "nafems-fv52",
-   "measured_value": 43.62402403875098,
+   "measured_value": 43.62402403875498,
    "outcome": "validated",
    "provenance": {
     "analysis": "modal",
     "convergence": {
-     "asymptotic_ratio": 0.9892340777615293,
+     "asymptotic_ratio": 0.9892340777615767,
      "cautions": [],
-     "extrapolated_value": 43.25807099132619,
+     "extrapolated_value": 43.2580709913337,
      "failures": [],
-     "fine_value": 43.62402403875098,
-     "gci_fine": 0.01048599525973668,
+     "fine_value": 43.62402403875498,
+     "gci_fine": 0.010485995259635283,
      "gci_threshold": 0.05,
      "levels": [
       {
@@ -704,7 +704,7 @@
        "element_type": "tet10",
        "node_count": 4375,
        "representative_size_mm": 337.9001108651889,
-       "value": 43.62402403875098,
+       "value": 43.62402403875498,
        "volume_mm3": 100000000000.00009
       },
       {
@@ -714,7 +714,7 @@
        "element_type": "tet10",
        "node_count": 1445,
        "representative_size_mm": 506.85016629778306,
-       "value": 44.09878816342609,
+       "value": 44.09878816342802,
        "volume_mm3": 99999999999.99992
       },
       {
@@ -724,11 +724,11 @@
        "element_type": "tet10",
        "node_count": 243,
        "representative_size_mm": 1013.7003325955667,
-       "value": 46.742786798882655,
+       "value": 46.74278679888455,
        "volume_mm3": 100000000000.00012
       }
      ],
-     "observed_order": 2.0513485570200594,
+     "observed_order": 2.0513485570273127,
      "quantity": "fundamental flexural frequency (mode 4, after three rigid-body modes)",
      "reason": "The fine-grid GCI is 1.05%, within the 5.00% band, with a monotone observed order of 2.05 over 3 grids.",
      "refinement_ratios": [
@@ -736,14 +736,14 @@
       2.0000000000000013
      ],
      "safety_factor": 1.25,
-     "stated_value": 43.62402403875098,
+     "stated_value": 43.62402403875498,
      "unit": "Hz",
      "verdict": "converged"
     },
     "environment": {
      "numpy": "2.5.2",
-     "platform": "linux",
-     "python": "3.12.3",
+     "platform": "win32",
+     "python": "3.14.3",
      "scipy": "1.18.0"
     },
     "geometry": {
@@ -812,14 +812,14 @@
     },
     "quantity": "fundamental flexural frequency (mode 4, after three rigid-body modes)",
     "solver": {
-     "code_digest": "sha256:7ad8b4014204fe3cab6555613a002810c8cd48a5a17cea77ab398abd7c6f78c3",
+     "code_digest": "sha256:74e6df7154ee8fd19345ce68313c7f713fe2fbd46b9bc44b3196431c292430c5",
      "name": "modal-lanczos"
     },
     "unit": "Hz",
-    "value": 43.62402403875098
+    "value": 43.62402403875498
    },
-   "relative_deviation": -0.01061362517574656,
-   "seconds": 3.133,
+   "relative_deviation": -0.010613625175655832,
+   "seconds": 1.709,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), FV52 'Simply supported \"solid\" square plate', reproducing NAFEMS publication TNSB Rev. 3, 'The Standard NAFEMS Benchmarks', October 1990. Reference row read verbatim \u2014 modes 1-3 rigid body, then 44.092, 106.66, 106.66, 156.23, 193.58, 200.13, 200.13 Hz \u2014 at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-fv52.htm on 2026-09-08.",
@@ -831,7 +831,7 @@
    "title": "FV52 \u2014 simply supported \"solid\" square plate"
   }
  ],
- "recorded_at": "2026-09-09T02:18:06.076958+00:00",
+ "recorded_at": "2026-09-09T11:24:46.842894+00:00",
  "schema_version": 1,
  "suite": "nafems-standard-benchmarks"
 }

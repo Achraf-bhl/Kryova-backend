@@ -52,12 +52,16 @@ from app.solve.constraints import (
     local_dofs,
 )
 from app.solve.materials import MATERIALS
-from app.solve.sections import BeamSection, BoxProfile, ShellSection
+from app.solve.sections import BeamSection, BoxProfile, RectangularProfile, ShellSection
 from app.solve.types import BoxSelector, FaceSelector, Fixture, SolverError
 
 STEEL = MATERIALS["steel-1018"]
 RHS = BeamSection(
     profile=BoxProfile(width_mm=60.0, height_mm=40.0, wall_mm=4.0),
+    n1=(0.0, 1.0, 0.0),
+)
+BAR = BeamSection(
+    profile=RectangularProfile(width_mm=60.0, height_mm=40.0),
     n1=(0.0, 1.0, 0.0),
 )
 PLATE = ShellSection(thickness_mm=1.5)
@@ -67,6 +71,24 @@ def _beam(segments: int = 4, length: float = 800.0) -> BeamMesh:
     xs = np.linspace(0.0, length, segments + 1)
     nodes = np.stack([xs, np.zeros_like(xs), np.zeros_like(xs)], axis=1)
     return BeamMesh(nodes=nodes, segments=np.array([[i, i + 1] for i in range(segments)]))
+
+
+def _quadratic_beam(segments: int = 2, length: float = 800.0) -> BeamMesh:
+    """Three-node segments -- the only mesh a hollow profile can go on.
+
+    Measured on ccx 2.23 (2026-09-09): `SECTION=BOX` and `SECTION=PIPE` are
+    refused at parse time on B31 and B32 alike, and ccx names the element it
+    wants -- "*BEAM SECTION of type BOX can only be used for B32R elements."
+    """
+    ends = np.linspace(0.0, length, segments + 1)
+    mids = (ends[:-1] + ends[1:]) / 2.0
+    xs = np.concatenate([ends, mids])
+    nodes = np.stack([xs, np.zeros_like(xs), np.zeros_like(xs)], axis=1)
+    return BeamMesh(
+        nodes=nodes,
+        segments=np.array([[i, i + 1] for i in range(segments)]),
+        midside=np.array([[len(ends) + i] for i in range(segments)]),
+    )
 
 
 def _shell(quadratic: bool = False) -> ShellMesh:
@@ -242,7 +264,7 @@ class TestTheResultsAreAskedForAtTheNodesThatWereSubmitted:
             _beam(),
             STEEL,
             _clamped_end(),
-            RHS,
+            BAR,
             forces=_tip_force(_beam()),
         )
 
@@ -334,7 +356,7 @@ class TestAClampOnABeamIsBuiltInAndNotPinned:
         assert local_dofs(symmetry, rotations=True) == (0, 4, 5)
 
     def test_the_deck_writes_degrees_of_freedom_four_to_six_for_a_clamped_beam(self) -> None:
-        _lines, boundary = write_frame_model(_beam(), STEEL, _clamped_end(), RHS)
+        _lines, boundary = write_frame_model(_beam(), STEEL, _clamped_end(), BAR)
         held = {int(row.split(",")[1]) for row in boundary}
 
         assert held == {1, 2, 3, 4, 5, 6}
@@ -400,7 +422,7 @@ class TestARestraintCheckThatUnderstandsRotations:
         ]
 
         with pytest.raises(SolverError, match="under-constrained"):
-            write_frame_deck(_beam(), STEEL, loose, RHS, forces=_tip_force(_beam()))
+            write_frame_deck(_beam(), STEEL, loose, BAR, forces=_tip_force(_beam()))
 
 
 class TestTheSectionCardSaysWhatTheMeshDoesNot:
@@ -430,8 +452,15 @@ class TestTheSectionCardSaysWhatTheMeshDoesNot:
 
     def test_a_beam_states_its_profile_then_its_orientation_in_that_order(self) -> None:
         """Two rows of floats. Swapping them is not a parse error — it is a
-        section of the wrong size pointing the wrong way."""
-        lines, _boundary = write_frame_model(_beam(), STEEL, _clamped_end(), RHS)
+        section of the wrong size pointing the wrong way.
+
+        THE QUEUE A4, settled on the seat 2026-09-09: this order is the one ccx
+        2.23 reads. A `B32R` deck written exactly like this solves; the profile
+        row first and the direction cosines second is right, and the 2.25×
+        stiffness error A4 worried about does not arise from the order.
+        """
+        mesh = _quadratic_beam()
+        lines, _boundary = write_frame_model(mesh, STEEL, _clamped_end(), RHS)
         deck = "\n".join(lines)
 
         assert "*BEAM SECTION" in deck
@@ -444,7 +473,9 @@ class TestTheSectionCardSaysWhatTheMeshDoesNot:
         """ccx wants direction *cosines*. An unnormalised vector is a direction
         with a magnitude attached, and nothing here would notice."""
         section = BeamSection(profile=RHS.profile, n1=(0.0, 3.0, 4.0))
-        lines, _boundary = write_frame_model(_beam(), STEEL, _clamped_end(), section)
+        lines, _boundary = write_frame_model(
+            _quadratic_beam(), STEEL, _clamped_end(), section
+        )
 
         assert _rows("\n".join(lines), "*BEAM SECTION")[1] == "0.0, 0.6, 0.8"
 
@@ -476,7 +507,7 @@ class TestASectionThatDoesNotBelongIsRefused:
 
     def test_a_beam_section_on_a_shell_mesh_is_refused(self) -> None:
         with pytest.raises(SolverError, match="shell mesh needs a ShellSection"):
-            require_section_for(_shell(), RHS)
+            require_section_for(_shell(), BAR)
 
     def test_a_shell_section_on_a_beam_mesh_is_refused(self) -> None:
         with pytest.raises(SolverError, match="beam mesh needs a BeamSection"):
@@ -535,7 +566,7 @@ class TestASectionThatDoesNotBelongIsRefused:
 class TestTheFrameDeckAsAWhole:
     def test_the_element_card_names_the_chosen_element(self) -> None:
         deck = write_frame_deck(
-            _beam(), STEEL, _clamped_end(), RHS, forces=_tip_force(_beam())
+            _beam(), STEEL, _clamped_end(), BAR, forces=_tip_force(_beam())
         )
 
         assert "*ELEMENT, TYPE=B31, ELSET=EALL" in deck
@@ -559,7 +590,7 @@ class TestTheFrameDeckAsAWhole:
 
     def test_the_load_reaches_the_node_the_caller_meant(self) -> None:
         mesh = _beam()
-        deck = write_frame_deck(mesh, STEEL, _clamped_end(), RHS, forces=_tip_force(mesh))
+        deck = write_frame_deck(mesh, STEEL, _clamped_end(), BAR, forces=_tip_force(mesh))
 
         # Node 5 (1-based), degree of freedom 3, -1000 N.
         assert _rows(deck, "*CLOAD") == [f"{mesh.node_count}, 3, -1000.0"]
@@ -569,7 +600,7 @@ class TestTheFrameDeckAsAWhole:
         would still be in range."""
         with pytest.raises(SolverError, match="three translational components"):
             write_frame_deck(
-                _beam(), STEEL, _clamped_end(), RHS, forces=np.zeros(7)
+                _beam(), STEEL, _clamped_end(), BAR, forces=np.zeros(7)
             )
 
     def test_a_temperature_change_reaches_a_frame_deck_too(self) -> None:
@@ -577,7 +608,7 @@ class TestTheFrameDeckAsAWhole:
         thermal-stress problem there is."""
         mesh = _beam()
         deck = write_frame_deck(
-            mesh, STEEL, _clamped_end(), RHS, forces=_tip_force(mesh), delta_t_k=60.0
+            mesh, STEEL, _clamped_end(), BAR, forces=_tip_force(mesh), delta_t_k=60.0
         )
 
         assert "*INITIAL CONDITIONS, TYPE=TEMPERATURE" in deck
@@ -589,7 +620,7 @@ class TestTheFrameDeckAsAWhole:
 
         with pytest.raises(SolverError, match="thermal_expansion_per_k"):
             write_frame_deck(
-                mesh, cold, _clamped_end(), RHS, forces=_tip_force(mesh), delta_t_k=60.0
+                mesh, cold, _clamped_end(), BAR, forces=_tip_force(mesh), delta_t_k=60.0
             )
 
     def test_the_deck_is_in_the_order_calculix_reads_it(self) -> None:
@@ -598,7 +629,7 @@ class TestTheFrameDeckAsAWhole:
         worst."""
         mesh = _beam()
         deck = write_frame_deck(
-            mesh, STEEL, _clamped_end(), RHS, forces=_tip_force(mesh), delta_t_k=10.0
+            mesh, STEEL, _clamped_end(), BAR, forces=_tip_force(mesh), delta_t_k=10.0
         )
         lines = deck.splitlines()
         step = lines.index("*STEP")
@@ -615,18 +646,85 @@ class TestTheFrameDeckAsAWhole:
         """An element written without its section is refused by ccx — the one
         loud failure in this module — and a section naming a set that does not
         exist is the same mistake spelled differently."""
+        mesh = _quadratic_beam()
         deck = write_frame_deck(
-            _beam(), STEEL, _clamped_end(), RHS, forces=_tip_force(_beam())
+            mesh, STEEL, _clamped_end(), RHS, forces=_tip_force(mesh)
         )
 
-        assert "*ELEMENT, TYPE=B31, ELSET=EALL" in deck
+        assert "*ELEMENT, TYPE=B32R, ELSET=EALL" in deck
         assert "*BEAM SECTION, ELSET=EALL, MATERIAL=STEEL_1018, SECTION=BOX" in deck
 
     def test_the_density_conversion_is_the_solid_path_s_own(self) -> None:
         """One material writer, so a frame and a solid cannot disagree about what
         steel weighs. Out by 1e12 is what the alternative looks like."""
         deck = write_frame_deck(
-            _beam(), STEEL, _clamped_end(), RHS, forces=_tip_force(_beam())
+            _beam(), STEEL, _clamped_end(), BAR, forces=_tip_force(_beam())
         )
 
         assert float(_rows(deck, "*DENSITY")[0]) == pytest.approx(7.87e-9, rel=1e-12)
+
+
+class TestAHollowProfileNeedsTheElementCalculixWillReadItOn:
+    """THE QUEUE A4/A5, settled against ccx 2.23 on 2026-09-09.
+
+    **CalculiX carries `SECTION=BOX` and `SECTION=PIPE` on `B32R` only.** Every
+    other combination is refused before anything is solved:
+
+        *ERROR reading *BEAM SECTION:
+               *BEAM SECTION of type BOX  can
+               only be used for B32R elements.
+               Element            1  is not a B32R    element.
+
+    Swept on the seat across `B31`/`B32`/`B32R` x `RECT`/`CIRC`/`PIPE`/`BOX`
+    with data lines of one to eight values, so it is the *section type* that
+    decides this and not the value count -- `RECT` solves on all three element
+    types at every count, and `CIRC` parses everywhere but needs a quadratic
+    beam to expand.
+
+    Until this was measured, Kryova wrote `B31` for every linear beam mesh and
+    `BoxProfile` is the profile `sections.py` calls "the workhorse of a welded
+    frame" -- so the commonest frame member in the vocabulary produced a deck
+    the solver would not read, and the failure arrived as a parse error naming
+    an element type rather than a profile.
+    """
+
+    def test_a_hollow_profile_on_a_quadratic_mesh_chooses_b32r(self) -> None:
+        assert choose_element(_quadratic_beam(), RHS).calculix_type == "B32R"
+
+    def test_a_solid_profile_is_left_on_the_ordinary_beam_elements(self) -> None:
+        """The substitution is for the sections that need it and no others."""
+        assert choose_element(_beam(), BAR).calculix_type == "B31"
+        assert choose_element(_quadratic_beam(), BAR).calculix_type == "B32"
+
+    def test_the_mesh_alone_still_answers_when_no_section_is_given(self) -> None:
+        """`section` is optional, and a caller with none behaves as before."""
+        assert choose_element(_beam()).calculix_type == "B31"
+        assert choose_element(_quadratic_beam()).calculix_type == "B32"
+
+    def test_a_hollow_profile_on_a_linear_mesh_is_refused_by_name(self) -> None:
+        """There is no element to substitute -- B32R has three nodes and the mesh
+        has two-node segments -- so this is a refusal, not a promotion."""
+        with pytest.raises(SolverError) as raised:
+            choose_element(_beam(), RHS)
+
+        message = str(raised.value)
+        assert "BOX" in message
+        assert "B32R" in message
+        assert "quadratic" in message
+
+    def test_b32r_expands_the_same_way_b32_does(self) -> None:
+        """Measured on the seat by dropping `OUTPUT=2D` and counting the nodes
+        the `.frd` carries: one element became 20 nodes, as B32 does."""
+        assert EXPANSIONS["B32R"].into == "C3D20R"
+        assert EXPANSIONS["B32R"].nodes == 20
+        assert EXPANSIONS["B32R"].into == EXPANSIONS["B32"].into
+
+    def test_every_beam_element_this_module_can_choose_has_an_expansion(self) -> None:
+        """A choice with no expansion recorded is a result nobody can read
+        correctly, and B32R was added to one table and not the other once."""
+        for mesh, section in (
+            (_beam(), BAR),
+            (_quadratic_beam(), BAR),
+            (_quadratic_beam(), RHS),
+        ):
+            assert choose_element(mesh, section).calculix_type in EXPANSIONS

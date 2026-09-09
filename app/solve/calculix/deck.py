@@ -425,7 +425,7 @@ def write_frame_model(
        degenerate. Both would be refusals of a model that is perfectly correct.
     """
     require_section_for(mesh, section)
-    choice = choose_element(mesh)
+    choice = choose_element(mesh, section)
     if isinstance(mesh, BeamMesh) and isinstance(section, BeamSection):
         require_orientation(mesh, section)
 
@@ -482,7 +482,7 @@ def write_frame_deck(
     """
     lines, boundary = write_frame_model(mesh, material, fixtures, section, name=name)
     require_restrained(mesh, fixtures, dofs_per_node=STRUCTURAL_DOFS)
-    choice = choose_element(mesh)
+    choice = choose_element(mesh, section)
 
     expected = 3 * mesh.node_count
     if forces.size != expected:

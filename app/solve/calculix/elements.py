@@ -168,6 +168,16 @@ EXPANSIONS: Final[dict[str, Expansion]] = {
             "of an RHS is not something this model contains"
         ),
     ),
+    "B32R": Expansion(
+        into="C3D20R",
+        nodes=20,
+        consequence=(
+            "a single 20-node brick with reduced integration per element — the same "
+            "expansion B32 gets, so the reading of the result is the same; the "
+            "element differs only in being the one CalculiX will accept a hollow "
+            "section on"
+        ),
+    ),
 }
 
 
@@ -322,23 +332,82 @@ _BEAMS: Final[dict[int, ElementChoice]] = {
     ),
 }
 
+#: The three-node beam with reduced integration. Same connectivity as `B32` and
+#: the same expansion, so it is a substitution rather than a different mesh --
+#: which is what makes `_HOLLOW_SECTIONS` below cheap to honour.
+_B32R: Final = ElementChoice(
+    calculix_type="B32R",
+    family=BEAM,
+    nodes_per_element=3,
+    section_keyword="*BEAM SECTION",
+    reason=(
+        "the mesh is three-node segments and the profile is hollow — CalculiX "
+        "carries a BOX or PIPE section on B32R only"
+    ),
+)
 
-def choose_element(mesh: TetMesh | ShellMesh | BeamMesh) -> ElementChoice:
+#: `SECTION=` names CalculiX will read **only** on a `B32R` element. Measured on
+#: ccx 2.23 (2026-09-09), not read off the manual: every other combination is
+#: refused at parse time with
+#:
+#:     *BEAM SECTION of type BOX can only be used for B32R elements.
+#:     Element 1 is not a B32R element.
+#:
+#: swept across `B31`/`B32`/`B32R` x `RECT`/`CIRC`/`PIPE`/`BOX` and data lines of
+#: one to eight values, so it is the section type that decides this and not the
+#: value count. `RECT` solves on all three; `CIRC` parses everywhere but needs a
+#: quadratic beam to expand.
+_HOLLOW_SECTIONS: Final[frozenset[str]] = frozenset({"BOX", "PIPE"})
+
+
+def choose_element(
+    mesh: TetMesh | ShellMesh | BeamMesh, section: Section | None = None
+) -> ElementChoice:
     """The CalculiX element for this mesh, with the reason it was chosen.
 
     One function rather than three, because the question a caller has is "what
     element is this mesh" and a caller that had to know the family already to ask
     would be doing the dispatch itself, in a place with no table to consult.
+
+    **`section` is not decoration: for a beam the element and the profile are one
+    choice, not two.** A hollow profile is readable by ccx only on `B32R`, so a
+    caller that picked the element from the mesh alone and the section from the
+    profile alone would write a deck naming a combination the solver refuses --
+    which is what Kryova did until this was measured on the seat, and it made an
+    RHS, the profile `sections.py` calls "the workhorse of a welded frame",
+    unsolvable. Optional because a solid or a shell has no such coupling and most
+    callers have no section to hand.
     """
     if isinstance(mesh, TetMesh):
         return _SOLIDS[mesh.element_order]
     if isinstance(mesh, ShellMesh):
         return _SHELLS[(mesh.is_triangular, mesh.element_order)]
     if isinstance(mesh, BeamMesh):
+        if isinstance(section, BeamSection) and section.calculix_section_name in _HOLLOW_SECTIONS:
+            return require_b32r(mesh, section)
         return _BEAMS[mesh.element_order]
     raise SolverError(  # pragma: no cover - the union makes this unreachable
         f"No CalculiX element is defined for a {type(mesh).__name__}."
     )
+
+
+def require_b32r(mesh: BeamMesh, section: BeamSection) -> ElementChoice:
+    """`B32R` for a hollow profile, or a refusal that says what to change.
+
+    A linear beam mesh cannot carry one at all: `B32R` has three nodes and the
+    mesh has two-node segments, so there is no element to substitute. Refused in
+    words here rather than left to ccx, whose own message names the element type
+    and not the profile -- true, and no help to somebody who asked for an RHS.
+    """
+    if mesh.element_order != 2:
+        raise SolverError(
+            f"A {section.calculix_section_name} profile needs a quadratic beam mesh. "
+            "CalculiX reads a hollow section only on B32R, which has three nodes "
+            f"per segment, and this mesh has {_BEAMS[mesh.element_order].nodes_per_element}. "
+            "Mesh the frame with quadratic segments, or give the member a solid "
+            "profile (RECT or CIRC) instead."
+        )
+    return _B32R
 
 
 def require_section_for(mesh: ShellMesh | BeamMesh, section: Section) -> None:

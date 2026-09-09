@@ -229,11 +229,35 @@ class BeamMesh:
 
     @property
     def connectivity(self) -> NDArray[np.int64]:
-        """Ends first, then the middle node — corners before midside, which is
-        what every other quadratic element in this family does."""
+        """Start, **middle**, end — the midside node between its two ends.
+
+        Not corners-then-midside, which is what every other quadratic element in
+        this family does and what this returned until 2026-09-09. CalculiX
+        numbers a three-node beam along the member, so a row of
+        `[start, end, middle]` is read as `[start, middle, end]`: the far end is
+        taken for the midside node and the midside node for the far end, which
+        folds the element back on itself.
+
+        **Measured on the seat rather than reasoned about.** The deck is accepted
+        — the connectivity is the right length and every index is in range — and
+        the solve then dies with
+
+            *ERROR in e_c3d: nonpositive jacobian determinant in element 1
+
+        once per integration point, naming the element and not the ordering. So
+        no quadratic beam deck this repo has ever written could solve, and
+        nothing offline could have seen it: `element_rows` renumbers and does not
+        reorder, on the strength of the module docstring's claim that the
+        ordering here *is* CalculiX's. It was, for shells; it was not, for beams.
+
+        The shell tables above are unaffected and stay as they are — an S4 deck
+        solves, checked at the same time.
+        """
         if self.midside is None:
             return self.segments
-        return np.ascontiguousarray(np.hstack([self.segments, self.midside]))
+        return np.ascontiguousarray(
+            np.hstack([self.segments[:, :1], self.midside, self.segments[:, 1:]])
+        )
 
     @property
     def node_count(self) -> int:

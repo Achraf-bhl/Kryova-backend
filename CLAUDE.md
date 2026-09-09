@@ -30,7 +30,10 @@ them substitutes for another.
    test with a tool call.
 
 Supporting: [KRYOVA_CAPABILITY_ROADMAP.md](KRYOVA_CAPABILITY_ROADMAP.md) (the audit the plan grew
-out of), [KRYOVA_PRD.md](KRYOVA_PRD.md), [KRYOVA_STATE_OF_THE_PROJECT.md](KRYOVA_STATE_OF_THE_PROJECT.md).
+out of), [KRYOVA_PRD.md](KRYOVA_PRD.md), [KRYOVA_STATE_OF_THE_PROJECT.md](KRYOVA_STATE_OF_THE_PROJECT.md),
+and **[docs/MAKING_IT_FASTER.md](docs/MAKING_IT_FASTER.md) — read it before optimising
+anything**, because most of the obvious moves here are already made, structurally impossible,
+or actively harmful, and the file says which is which.
 
 ### Keeping the master plan current — this is not optional bookkeeping
 
@@ -567,6 +570,30 @@ lanes are genuinely separate. What makes it work rather than a merge conflict:
    to it. Match on something the waiter does not contain, or just run the tests: the physics and
    verification files request no database fixture, and `conftest.py`'s schema fixture is requested
    rather than autouse, so those runs do not collide. Only DB-touching runs must be serialised.
+
+## Performance — read the file before you touch anything
+
+**[docs/MAKING_IT_FASTER.md](docs/MAKING_IT_FASTER.md)** is the standing answer to "can we make
+this faster". Four things from it that are asked most often and answered wrongly most often:
+
+1. **Measure first, with the spans that already exist.** `app/observe/catalogue.py` declares
+   every timed site, and each records fields beside the duration — `mesh.gmsh.wait` versus
+   `mesh.gmsh.session` alone answers *is meshing slow or is meshing queued*, and those need
+   opposite fixes. A change with no before-and-after from those spans is a rewrite with a
+   hopeful commit message.
+2. **The model is the cost, and it is not close.** A turn is 4–7 minutes on the workstation;
+   every other subsystem here is seconds. Model choice, GPU residency and turns-per-task are
+   the only levers that move what a user feels.
+3. **"More threads" is not one of the levers.** Requests are sync `def` (so FastAPI already
+   threadpools them), jobs already run in a pool, BLAS is already threaded inside `spsolve` —
+   and what is left is serialised by the gmsh lock, CATIA's one-in-flight COM surface, or the
+   GPU. Adding threads queues the same work behind the same lock, and
+   `job_workers × BLAS threads` oversubscribes the cores. Process-level parallelism behind the
+   `JobQueue` seam is the designed path.
+4. **Three speedups are forbidden outright** because they trade the product for seconds:
+   coarsening a mesh silently, skipping a convergence study, and sampling where the provenance
+   says measured. Each buys real time and each converts an honest slow answer into a fast
+   dishonest one.
 
 ## Tools
 

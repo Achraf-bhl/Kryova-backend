@@ -44,6 +44,13 @@ You have three jobs, in this order, and the order matters:
   A session that finishes work and leaves the plan unchanged has thrown away the only thing
   that lets the next session start.
 
+**If something is slow on that machine, read
+[MAKING_IT_FASTER.md](MAKING_IT_FASTER.md) before changing anything.** Two facts from it apply
+directly to a gate run: the model is 4–7 minutes a turn and every other subsystem is seconds,
+so a slow gate is almost always the model rather than the product; and a timing taken while
+Ollama is on the CPU measures patience, not the application — check `ollama ps` and
+`nvidia-smi` first.
+
 **What "done" means for an item here.** Either a measurement recorded with the number and
 the date, or a defect recorded with what was expected and what happened. Never "looked
 fine". If an item cannot be settled, say what blocked it and leave the box unchecked — an

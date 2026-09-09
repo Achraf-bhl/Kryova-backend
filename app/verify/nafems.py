@@ -255,9 +255,11 @@ class Blocker(StrEnum):
     free-text reasons cannot tell those apart.
     """
 
-    #: `app/mesh/structural.py` and `app/solve/sections.py` describe shells, and
-    #: `app/solve/calculix/elements.py` writes them into a deck — but nothing
-    #: solves one here and no mesher produces one. E6's named residual.
+    #: `app/mesh/structural.py` and `app/solve/sections.py` describe shells,
+    #: `app/solve/calculix/elements.py` writes them into a deck, and since
+    #: 2026-09-09 `gmsh_mesher.generate_shell_mesh` produces one and
+    #: `shell_loads` loads it — but no `Solver` accepts a `ShellMesh`, so
+    #: nothing here solves one end to end. E6's named residual, narrowed.
     NO_SHELL_SOLVER = "no-shell-solver"
 
 
@@ -265,10 +267,12 @@ class Blocker(StrEnum):
 #: report can print the sentence without every call site inventing its own.
 BLOCKER_DETAIL: Final[dict[Blocker, str]] = {
     Blocker.NO_SHELL_SOLVER: (
-        "The benchmark is posed on shell elements. `app.mesh.structural.ShellMesh` "
-        "and `app.solve.sections.ShellSection` describe one and "
-        "`app.solve.calculix.elements` writes one into a deck, but no solver here "
-        "takes one and no mesher produces one. E6's named residual."
+        "The benchmark is posed on shell elements. A shell can now be meshed "
+        "(`app.mesh.gmsh_mesher.generate_shell_mesh`), loaded "
+        "(`app.solve.shell_loads`) and written into a deck "
+        "(`app.solve.calculix.elements`), but the `Solver` interface takes a "
+        "`TetMesh`, so no solver here accepts a `ShellMesh` and nothing joins "
+        "those three into a run. E6's named residual, narrowed to the seam."
     ),
 }
 

@@ -469,9 +469,15 @@ def write_frame_deck(
     equally between the selected nodes would run, look right, and be
     mesh-dependent in exactly the way 6.2's tributary-area rule exists to
     prevent: refine the mesh and the applied load moves. So the caller supplies
-    the `(3 * n_nodes,)` vector it means, `cload_data_lines` writes it, and
-    "loads on 1-D and 2-D regions" stays a piece of work somebody has to do
-    rather than one that looks done.
+    the `(3 * n_nodes,)` vector it means and `cload_data_lines` writes it.
+
+    **The shell half of that work now exists**, and a caller with a `ShellMesh`
+    should not hand-build the vector: `app.solve.shell_loads.assemble_shell_loads`
+    turns a list of `Load`s into exactly this array, area-weighted by the shape
+    function integrals. This signature is unchanged all the same — taking the
+    vector keeps the *beam* case honest, which still has no distribution, and
+    keeps this function a writer rather than a second place where load rules
+    live.
 
     Rotational loads are not written either. `*CLOAD` can name degrees of freedom
     4 to 6 on these elements — a moment applied straight to a node — and there is

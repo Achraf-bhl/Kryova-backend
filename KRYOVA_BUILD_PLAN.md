@@ -195,6 +195,13 @@ alone would be new phases (E8–E10, E12, E13, E15–E17) rather than finishing 
 is left of the phases in flight is exactly what the Windows seat exists to settle. So the next
 session is the Windows one, and its brief is the top of `docs/WINDOWS_VERIFICATION.md`.
 
+> **That last sentence was overtaken within the day, and the correction is the useful part.**
+> The seat ran A1–A5, and what it measured *created* Linux work rather than only consuming it:
+> once a shell deck was known to solve, the reason LE3 could not run stopped being the deck and
+> became a missing mesher and a missing load rule — both pure Linux. So the two machines are
+> not sequential, they alternate, and the queue is the thing that hands work between them.
+> A Windows measurement that reclassifies an item is expected to leave Linux something to do.
+
 **2026-09-09, third stretch: `*E11` and `*E5`.** Nine of twenty-nine phases are now complete
 and the programme is at 52% of tasks. What is left in flight is E7 (LE11's convergence, and
 LE3 waiting on `ccx`), E15/E16 and the product track. The pattern that closed all four phases
@@ -214,6 +221,97 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-09 — LE3's geometry is sourced, and it does not have the hole everyone says it
+  has.** `docs/nafems-le3-geometry.md`, written to `nafems-le11-geometry.md`'s pattern.
+  **R = 10 m, t = 0.04 m, a 90 degree quarter sector, and the shell is _closed at the pole_.**
+  The primary source is a **scan of the original NAFEMS dimensioned figure** (TechSoft3D's HOOPS
+  report, p. 6), which states the radius twice — as `x²+y²+z²=100` and as `r = 10m` — and it is
+  corroborated by ESRD p. 12 (which, unlike LE11, gives LE3's dimensions in *text*), Altair
+  OS-V:0030, the DIANA verification manual, and a committed Abaqus deck (`c3m-labs/ImportMesh`,
+  `NAFEMS TEST LE3`) whose **80 nodes were downloaded and measured**: radius 9.999935–10.000061,
+  polar angle 0.0000–90.0000 degrees, azimuth 0.000–90.000.
+  **The "hemisphere with an 18 degree hole at the pole" is a different benchmark wearing LE3's
+  name**, and this repository's own notes — including the entry immediately below, as first
+  written — asserted the hole from memory for several hours before the sourcing caught it. Node
+  121 of the committed deck is `(0, 0, 10)`: the pole is a node, so there is no hole. That is
+  `C1`'s "do not transcribe a value from memory" rule earning its keep twice in one day, the
+  first being FV52's 4% figure.
+  Three disagreements were found and resolved rather than smoothed: Altair's **4000 N** is a
+  *pair* total and the load is **2 kN per point** (its own next sentence proves it); the last
+  rigid-body z restraint sits at E in three sources and at A in the committed deck, shown to be
+  the same model; and Altair cites NAFEMS R0015, a natural-frequency publication, which is a slip
+  on that page. **Do not halve the loads for the symmetry planes** — two independent quarter-model
+  sources apply the full 2 kN, and halving is the plausible-looking mistake that would report
+  roughly half the displacement. One value is INFERRED and marked: that the 10 m is the
+  *mid-surface* radius, which is moot if LE3 is encoded as a shell, which it should be.
+  §5 carries `SOURCES` entries drafted for paste into `app/verify/nafems.py`; they are **not**
+  pasted yet, because that edit belongs in the same commit as the `run_le3` it cites for, and
+  `run_le3` waits on a `ccx` run. Dead ends are recorded in §7 so nobody re-spends the time —
+  notably **FeenoX has no LE3 example**, so the LE1/LE11 technique does not work here.
+- **2026-09-09 — a shell can now be meshed and loaded, and what stopped LE3 is down to one
+  seam.** THE QUEUE A6 was reclassified that morning from a tick to a phase task, on the
+  strength of the seat's finding that the shell *deck* was never the only obstacle. Two of the
+  three things it then named are now built, on Linux, and A6 is back to being small.
+  **The mesher**: `gmsh_mesher.generate_shell_mesh` turns a curved surface in three dimensions
+  into a `ShellMesh` in all four element types — the thing `generate_tri_mesh` exists to
+  refuse, and they cannot share a loader because a plane model is a cross-section that must lie
+  in z = 0 and a shell is a surface whose whole point is to be curved. Checked against a
+  revolved 90 degree spherical zone, open at the pole, whose exact area it recovers to 0.1%,
+  converging from *below* as straight-edged elements chord a sphere. (This entry said "LE3's
+  own shape" until LE3's geometry was sourced hours later. It is not: **LE3 is closed at the
+  pole**, and the hole here is a fixture convenience — see below.)
+  **It settled the ordering debt `app/mesh/structural.py` had carried since 6.3 was written.**
+  That module adopted CalculiX's midside order rather than gmsh's, because there was no
+  producer to disagree with, and named the consequence: a future mesher must permute at the
+  boundary. Measured against gmsh 4.15.2 the permutation is the **identity** for both shapes —
+  gmsh's 6-node triangle numbers 0-1, 1-2, 0-2 against CalculiX's 0-1, 1-2, 2-0, which are the
+  same node *pairs* with the last wound the other way. It stays absent because
+  `_assert_shell_midside_ordering` re-checks it by coordinate on every quadratic mesh, not
+  because the two were assumed to agree; a gmsh release that renumbered fails loudly instead of
+  returning a plausible, wrong stiffness matrix.
+  **The load path**: `app/solve/shell_loads.py`, E6.3's other named residual — "loads on 1-D
+  and 2-D regions have no tributary-area rule". The 2-D half now has one, and the fact worth
+  carrying out of it is that **an S8R face's four corners take −1/12 of the area each**, not a
+  positive share: the serendipity corner shape functions integrate negative, so a
+  tributary-area intuition loads a quadratic quadrilateral wrongly in a way that solves
+  cleanly and reports the right *resultant*. Mesh-independence is tested by refining rather
+  than asserted, and the guards were checked by breaking each one and watching a named test
+  fail — which is how the first draft was found to catch an equal-split regression with only
+  one test, since an equal split delivers the correct resultant and passes everything else.
+  66 tests across `tests/test_mesh_shell.py` and `tests/test_shell_loads.py`; ruff and mypy
+  clean; V&V re-recorded, still 3/5 validated.
+  **An adversarial review of the two new files found three things and they are worth carrying.**
+  The eight shape-function integrals were re-derived independently, twice — once from textbook
+  shape functions and once from gmsh's own `getBasisFunctions` — and all eight are right. What
+  was wrong was around them. **(a) The solid refusal was bypassed for STL**: the check is an
+  `elif` on file format, an STL has no topology to ask about, and a watertight box therefore
+  meshed cleanly into the hollow shell the docstring promised to refuse, reporting exactly
+  6200 mm². Now refused on the *mesh* — every edge shared by two faces means it encloses a
+  volume — which catches a sewn-closed STEP as well. **(b) `np.allclose`'s default `rtol=1e-5`
+  is relative to the absolute coordinate**, so the midside-ordering assertion silently stopped
+  detecting a swapped slot on a part authored far from the origin: caught at x = 0 and x = 1e3,
+  passed at x = 1e5, which is an ordinary assembly-coordinate export. Fixed with `rtol=0`; note
+  the tet and plane versions of that line have the same defect and were left alone.
+  **(c) There is no consistent *edge* load**, so a cantilever tip load — how most shell
+  benchmarks are posed — falls into the equal-split fallback and puts 2.7× too much on an end
+  corner. Warned rather than silent, and named in the module docstring rather than fixed.
+  **And then the seam itself closed, the same day.** `app/solve/calculix/shell.py` —
+  `ShellSolver.solve(mesh, case, section)` joins mesher, load path, deck writer, `run_ccx` and
+  `frd.py` into one run returning a `SolveOutput`. It is **not** a `Solver` subclass and that is
+  the decision: the ABC is `solve(mesh: TetMesh, case: LoadCase)`, a shell needs its
+  `ShellSection` as a third argument, and widening the ABC would put an argument on every solver
+  in the codebase that is mandatory for exactly one of them — `PlaneSolver` declined the same
+  widening for the same reason. **No shell `.frd` reader turned out to be needed**: `displacements`
+  and `nodal_stress_tensor` key off node count, and `OUTPUT=2D` — which the seat measured in A3 —
+  makes that the submitted numbering. `write_shell_deck` is split out from `solve` deliberately,
+  because that is the half a machine with no `ccx` can test, and that is the machine it was
+  written on. `summarise_shell_static` shares `_summarise` with the solid path so the two cannot
+  drift on what a factor of safety means. 16 more tests.
+  **So what is left of A6 is one measurement and one piece of research**, both named in
+  `docs/WINDOWS_VERIFICATION.md`: **nothing has ever run this through a real `ccx`**, and LE3's
+  geometry is **not sourced** — the Abaqus page carries the loads, the material and the target
+  but puts the radius, thickness and hole angle in a figure, so it needs the LE11 treatment and a
+  `docs/nafems-le3-geometry.md` before any number reaches code.
 - **2026-09-09 — the ladder's first run under the new method: L1 passes, L2 does not, three
   defects between the model and the tools.** Report: `docs/verification-2026-09-09/`; run log in
   `docs/GUI_PROMPT_LADDER.md`. Driven through the web GUI on `occt` with `qwen3.5:9b` at 81% GPU.

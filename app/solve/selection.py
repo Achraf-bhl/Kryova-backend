@@ -31,7 +31,11 @@ class PointCloud(Protocol):
 
     Deliberately narrow. `distribute_force` below stays on `TetMesh`, because
     tributary area is defined over a solid's boundary triangles and a shell or a
-    beam needs its own distribution — a named gap rather than one papered over
+    beam needs its own distribution. The shell half of that gap is now closed
+    somewhere else rather than here — `app/solve/shell_loads.py`, whose factors
+    are not these ones: a quadratic *shell* face has four negative corner
+    weights and a solid's boundary triangle does not. The beam half is still
+    open — a named gap rather than one papered over
     with an equal split that would look like it had worked.
     """
 

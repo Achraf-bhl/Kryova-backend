@@ -96,6 +96,12 @@ session.**
 2. Run `pytest` — the suite is local and fast now (see *Database*). Run `ruff` and `mypy`.
 3. Verify every new guard **by breaking the thing it guards** and watching a named test fail.
    Where a guard cannot be shown to fail, label it unpinned rather than shipping it as verified.
+   **`git checkout <file>` does not restore a file you have just created.** It is a silent
+   no-op on an untracked path, so mutation-testing a *new* module the usual way leaves the
+   break sitting in the tree while the terminal shows nothing wrong — and the next `pytest`
+   run measures the mutant, green. Seen on 2026-09-09 while pinning `shell_loads.py`, where
+   the "restore" left an inverted quad8 factor in place. Copy the file aside first (`cp` to
+   the scratchpad) and restore with `cp`, then `diff -q` it, until the file is committed.
    **Break one thing at a time and prove the restore, not just the failure.** A script that
    mutates a source file, runs pytest and copies a backup back can poison its own backup —
    re-run it, or start it on a tree a previous run left dirty, and every later "the guard caught
@@ -892,8 +898,81 @@ eight data values, so it is the section type that decides it and not the value c
 would not read. `choose_element` now takes the section, substitutes B32R, and refuses a *linear*
 mesh in words.
 
-**Still documented rather than verified:** nothing meshes a shell or a beam, so every one of
-these is an authored mesh, and no `Solver` accepts a `ShellMesh` at all.
+**Still documented rather than verified:** a *beam* mesh is still authored, because gmsh's 1-D
+mesher is not wired. Shells are no longer — see below — and no `Solver` accepts a `ShellMesh`.
+
+### A shell can be meshed and loaded; nothing solves one end to end
+
+Three of the four pieces exist and the missing one is a seam, not a capability (2026-09-09).
+
+- **`gmsh_mesher.generate_shell_mesh`** meshes a curved surface in three dimensions into a
+  `ShellMesh`, in all four element types, with `face_shape="tri"|"quad"`. **It is not
+  `generate_tri_mesh` and the two must not be merged**: a plane model is a cross-section and is
+  refused anywhere but z = 0, a shell is a surface whose whole point is to be curved. It refuses
+  a *solid* by name for the opposite reason the plane mesher does — meshing a solid's boundary
+  would silently substitute a hollow shell of your chosen thickness for the body in the file.
+- **The solid refusal is enforced on the mesh, not on the file, and it has to be.** The
+  topology check only works where the file has topology: **an STL is a bag of triangles**, so
+  `getEntities(3)` is empty for a watertight solid exported as one and the STEP branch is
+  skipped for STL anyway. A 50×30×20 box went straight through and reported an area of exactly
+  6200 mm² — the closed boundary — until `_refuse_a_closed_surface` was added. It tests the
+  geometry instead: **every edge shared by exactly two faces means the surface encloses a
+  volume**, and a mid-surface has a boundary. A sewn-closed STEP fails the same way and is
+  caught by the same guard.
+- **`Mesh.SecondOrderIncomplete` is load-bearing** on the quad path. Without it gmsh writes a
+  9-node quadrilateral with a bubble node; CalculiX's S8R is the 8-node element.
+- **Recombination is a request, not a guarantee.** Asking for quads on an awkward surface
+  returns quads where gmsh managed and triangles where it did not. `_extract_shell` refuses a
+  mixed result rather than keeping the wanted rows, because keeping them returns a surface with
+  holes in it that still reports a plausible area.
+- **The gmsh-to-CalculiX midside permutation is the identity, and that is measured rather than
+  assumed.** `app/mesh/structural.py` predicted a permutation would be needed; the two tables
+  turn out to name the same node pairs. It stays absent only because
+  `_assert_shell_midside_ordering` re-checks it by coordinate on every quadratic mesh. **Do not
+  "restore" a permutation there.**
+- **That assertion passes `rtol=0` on purpose.** `np.allclose`'s default `rtol=1e-5` is relative
+  to the absolute *coordinate*, so a part authored far from the origin — a small component in
+  assembly coordinates, the ordinary CATIA export — gets a tolerance that grows with its
+  position and swallows the swap. A deliberately exchanged midside slot is caught at x = 0 and
+  x = 1e3 and passes silently at x = 1e5. **`_assert_midside_ordering` (tet) and
+  `_assert_tri_midside_ordering` (plane) still have the defaulted `rtol` and are unfixed** —
+  same one-line change, not made here because it belongs with its own test.
+- **`app/solve/shell_loads.py` is the tributary-area rule for a 2-D region**, the residual E6.3
+  named. The fact to carry: **an S8R face's four corners take −1/12 of the area each**, not a
+  positive share. The serendipity corner shape functions integrate negative, so distributing by
+  a tributary-area intuition loads a quadratic quadrilateral wrongly *and delivers the correct
+  resultant*, which is why it survives every obvious test. `tri6` corners take zero, the same
+  way a tet10 face's do in `selection.distribute_force`.
+- **There is no consistent *edge* load, and an edge load is the common shell load.** A traction
+  on a free edge — a cantilever tip, and how most shell benchmarks are posed — selects a band of
+  nodes one row deep, matches no whole face, and takes the equal-split fallback. The resultant
+  is right; the distribution is not. On a quad8 plate an end corner gets 1/9 where the
+  consistent (1/6, 2/3, 1/6) rule gives 1/24 — **2.7× too much**. It *warns*, so whatever
+  eventually calls `assemble_shell_loads` must surface that warning. `app/solve/plane.py` has
+  the 1-D analogue and is the shape to copy when someone writes it.
+- **`shell_quality` measures skew and is close to blind to warp.** A 10 mm quad with a corner
+  lifted 5 mm out of plane still reads 0.994. Warp is the characteristic defect of a
+  quadrilateral shell element, so a clean `min_quality` is not evidence a shell solver will be
+  happy.
+- **A shell's pressure sign is the caller's problem, not the mesher's.** A solid's boundary is
+  oriented outward, so a positive pressure pushes into the material without anyone saying which
+  way that is. A mid-surface has material on both sides; the winding is the only answer
+  available, and `face_normals` says so rather than inventing an outward side.
+- **`ShellSolver` joins them up** (`app/solve/calculix/shell.py`) — mesh + `LoadCase` +
+  `ShellSection` → deck → `ccx` → `SolveOutput`. **It is deliberately not a `Solver` subclass**:
+  the ABC is `solve(mesh: TetMesh, case: LoadCase)` and a shell needs a third argument, so
+  widening it would put an argument on every solver that is mandatory for one. `PlaneSolver`
+  declined the same widening. The cost is stated: a caller must know it has a shell, and the
+  job layer cannot dispatch to this yet.
+- **No shell `.frd` reader was needed** — `displacements` and `nodal_stress_tensor` key off node
+  count, and `OUTPUT=2D` makes that the submitted numbering. `write_shell_deck` is split out
+  from `solve` so the deck is testable on a machine with no `ccx`, which is where it was written.
+- **What has never run**: any of it, through a real `ccx`. The deck is pinned by
+  `tests/test_shell_solver.py`; what CalculiX does with it is a Windows measurement (A6).
+  Separately, **LE3's geometry is not sourced**: the cited Abaqus page carries the loads, the
+  material and the 185 mm target but puts the radius, thickness and hole angle in a figure.
+  That needs the LE11 treatment (`docs/nafems-le11-geometry.md` is the pattern) before a number
+  reaches code.
 
 Three things about shells and beams that produce a plausible wrong number rather than an error
 (master plan 6.3, all pinned by `tests/test_solver_calculix_elements.py`):
@@ -990,6 +1069,14 @@ unauthenticated trust page.
    without reading. Re-record with `venv/bin/python -m app.verify.recorded` after touching a
    solver, a mesher or a verification rule; `--check` is the instant CI form and the same
    comparison is a test, so forgetting fails the suite.
+   **It hashes source, so a *comment* counts as a change, and re-recording is the last step,
+   not a middle one.** Rewording a docstring in `app/verify/nafems.py` or `app/mesh/` expires
+   the artefact exactly as an algorithm change does — `register.py` and `recorded.py` are
+   carved out, nothing else is. On 2026-09-09 a re-record was done, then four docstrings were
+   tidied, and the suite came back with **11 red across `test_trust`, `test_verify_recorded`
+   and `test_verify_register`** — all of them the one stale fingerprint wearing three different
+   test names. Run `--check` before believing a failure in those three files is real, and
+   re-record only once the edits are actually finished.
 7. **The path scrubber replaces the whole string, so it must not fire on a URL.** `_PATH_RE`'s
    drive-letter branch matched the `s:/` inside `https://` until 2026-09-08, which would have
    published every citation as "[withheld: looked like a filesystem path]" — the guard destroying

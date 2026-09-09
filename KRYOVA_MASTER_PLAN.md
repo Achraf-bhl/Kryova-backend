@@ -1099,15 +1099,30 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 
 ##### Phase E6 — The solver federation #####
 
-> ✅ PHASE COMPLETE (2026-09-08) — all six tasks done and tested, with three residuals named
-> in the tasks that carry them rather than hidden: **nothing in this phase has been
-> round-tripped through a real `ccx`** (there is none on the Linux machine — every keyword is
-> read from the manual, and the first Windows run is the measurement that turns it from
-> documented into verified); **nothing produces a shell or beam mesh yet**, so the element
-> strategy in task 3 is exercised by authored meshes and not by a mesher; and **loads on 1-D
-> and 2-D regions have no tributary-area rule**, so `write_frame_deck` takes a nodal force
-> vector rather than a `LoadCase` and says why. Each is a stated gap, not a gap the code
-> pretends is closed.
+> ✅ PHASE COMPLETE (2026-09-08) — all six tasks done and tested. It carried three named
+> residuals and **all three have since been narrowed or closed, on two different machines**;
+> what is left of each is written here rather than left to the reader to re-derive.
+>
+> 1. ~~**Nothing has been round-tripped through a real `ccx`.**~~ **CLOSED on the Windows
+>    seat, 2026-09-09** (THE QUEUE A1–A5, ccx 2.23). The package is verified rather than
+>    documented, and the run found two defects that were fatal to every quadratic beam deck
+>    this repo had ever written — see task 3.
+> 2. ~~**Nothing produces a shell or beam mesh.**~~ **HALF CLOSED on Linux, 2026-09-09.**
+>    `gmsh_mesher.generate_shell_mesh` produces a `ShellMesh` in all four element types, so
+>    task 3's element strategy is now exercised by a mesher and not only by authored meshes.
+>    **A `BeamMesh` still has no producer** and its meshes are still authored.
+> 3. ~~**Loads on 1-D and 2-D regions have no tributary-area rule.**~~ **HALF CLOSED on
+>    Linux, 2026-09-09.** `app/solve/shell_loads.py` is the 2-D rule, with consistent-load
+>    factors per element type. **The 1-D rule is still absent**, which is why
+>    `write_frame_deck` still takes a nodal force vector rather than a `LoadCase`.
+>
+> The seam those three left open — nothing joined mesh, load and deck into a *run* — closed the
+> same day: `app/solve/calculix/shell.py`. `ShellSolver` is **not** a `Solver` subclass, because
+> the ABC is `solve(mesh: TetMesh, case: LoadCase)` and a shell needs its `ShellSection` as a
+> third argument; `PlaneSolver` declined the same widening. **The residual that replaces it is
+> honest and small: none of the shell path has ever been through a real `ccx`.** The deck it
+> writes is pinned offline; what CalculiX does with that deck is THE QUEUE's A6 and belongs to
+> the seat. That is a stated gap, not a gap the code pretends is closed.
 
 **~7 engineer-months.**
 
@@ -1170,8 +1185,15 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    > mesh in words because there is no three-node element to substitute.
    > A4's original worry, the data-line order, is *correct as written*.
    > Tested by: `tests/test_solver_calculix_elements.py` (55) and
-   > `tests/test_mesh_structural.py`. **Still unverified:** no mesher produces one of these
-   > meshes, so every shell and beam here is still an authored mesh.
+   > `tests/test_mesh_structural.py`. ~~**Still unverified:** no mesher produces one of these
+   > meshes~~ — **a shell mesher landed on Linux the same day**
+   > (`gmsh_mesher.generate_shell_mesh`, `tests/test_mesh_shell.py`), so S3/S4/S6/S8R are now
+   > exercised on meshed geometry — a revolved hemispherical zone whose area the mesh recovers
+   > to 0.1% — and not only on grids written out by hand. It settled the ordering debt
+   > `app/mesh/structural.py` named: the gmsh-to-CalculiX midside permutation is the
+   > **identity** for both shapes, and is re-checked by coordinate on every quadratic mesh
+   > rather than assumed. **Still authored:** every *beam* mesh here, for want of a 1-D
+   > mesher — which is the half of this residual that is still open.
 
 4. **Analysis types unlocked by task 1**: nonlinear static, large deformation, plasticity, contact,
    bolt pretension, modal, buckling, transient dynamics, coupled thermal-stress.
@@ -1221,13 +1243,25 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
 
 > ✅ PHASE COMPLETE (2026-09-09) — **on this machine.** Tasks 2, 3, 4, 5 and 6 are done and
-> tested; task 1 stays `PARTIAL` on one case, **LE3**, which needs a shell deck through a real
-> `ccx` and cannot be run on Linux at all. The marker is taken here rather than withheld
-> indefinitely because the phase's remaining work is not work — it is a *hardware wait*, it is
-> `A6` in THE QUEUE with its prerequisites named, and holding the marker for it would make this
-> phase indistinguishable from one with unwritten code in it. Precedent is E1, whose marker
-> carries the same shape of residual. **Anyone reading this on the Windows machine: E7 is not
-> finished until A1–A6 have run.**
+> tested; task 1 stays `PARTIAL` on one case, **LE3**. The marker is taken here rather than
+> withheld indefinitely because holding it for one case would make this phase indistinguishable
+> from one with unwritten code in it. Precedent is E1, whose marker carries the same shape of
+> residual. **Anyone reading this on the Windows machine: E7 is not finished until A1–A6 have
+> run.**
+>
+> **This marker said LE3's remainder "is not work — it is a *hardware wait*", and that was
+> wrong within the day.** The seat's A1–A5 run showed the shell *deck* was never the only
+> obstacle, and A6 was reclassified from a tick to a phase task; two of its three prerequisites
+> were then built on Linux the same day (a shell mesher and a shell load path — see E6's
+> marker), and the seam followed within hours: `ShellSolver` joins mesh, load, deck, run and
+> reader into one call, and no shell `.frd` reader was needed because the existing one keys off
+> node count. **So the code half is done.** What LE3 waits on now is exactly two things:
+> **sourcing** — its radius, thickness and hole angle are in a figure the cited Abaqus page does
+> not put in its text, so they are not sourced and must not be recalled; and **hardware** —
+> nothing in the shell path has ever been through a real `ccx`, and `tests/test_shell_solver.py`
+> pins what the deck *says* rather than what the solver *does* with it. Anyone tempted to write
+> "hardware wait" against a blocked case should check which of the three it actually is; for
+> most of a day this one was neither.
 
 **~4 engineer-months.**
 
@@ -1526,9 +1560,12 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    > guards verified by breaking what they guard.
 
 **Where this phase stands, and why the marker above says what it says.** Tasks 2 through 6 are
-done. Task 1 is `PARTIAL` and **cannot be closed on this machine**: LE3 is a shell benchmark, a
-shell deck needs `ccx`, and there is no `ccx` on Linux. It is `A6` in
-`docs/WINDOWS_VERIFICATION.md`, sitting after the four CalculiX items it depends on. LE11 is
+done. Task 1 is `PARTIAL` and **cannot be closed on this machine**: LE3 is a shell benchmark and
+running one needs `ccx`, of which there is none on Linux. It is `A6` in
+`docs/WINDOWS_VERIFICATION.md`. **But most of what stood between LE3 and a run turned out to be
+Linux work rather than the wait** — a shell mesher and a shell load path, both built 2026-09-09
+— and what is left before the seat is useful here is the `Solver`/`ShellMesh` seam, a shell
+`.frd` reader, and LE3's unsourced geometry. LE11 is
 encoded, cited, runs, and its recorded outcome is `unconverged` — the target quantity is a point
 stress at a corner in a steep gradient and it scatters with where nodes land, so the study
 correctly refuses to state a value from a non-monotone triple. That is a measurement, published

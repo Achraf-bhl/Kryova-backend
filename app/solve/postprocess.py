@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from app.mesh.structural import ShellMesh
 from app.mesh.types import TetMesh
 from app.solve.types import LoadCase, StaticResult
 
@@ -67,6 +68,26 @@ def element_average(mesh: TetMesh, nodal_values: NDArray[np.float64]) -> NDArray
     return np.asarray(nodal_values)[corners].mean(axis=1)
 
 
+def shell_element_average(
+    mesh: ShellMesh, nodal_values: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """`element_average` for a shell: a nodal field read back per face.
+
+    **Corner nodes only, for exactly the reason the solid version gives** — a
+    midside node sits on an edge shared by more faces than a corner is, so
+    including it drags a face's own value towards its neighbours, and a uniform
+    field would no longer come back exactly uniform. That last property is what
+    an oracle comparison against a closed-form uniform stress state rests on, so
+    it is the property to preserve rather than the averaging that is convenient.
+
+    A separate function rather than a widened `element_average`, because the two
+    differ in the one line that matters — `mesh.tets[:, :4]` against
+    `mesh.faces` — and a single function branching on the mesh type would put a
+    silent choice between two averaging rules inside a call that reads like one.
+    """
+    return np.asarray(nodal_values)[mesh.faces].mean(axis=1)
+
+
 def summarise_static(
     mesh: TetMesh,
     case: LoadCase,
@@ -82,6 +103,66 @@ def summarise_static(
     matters, at the concentration. `nodal_average` above exists for display and
     says the same thing from the other side.
     """
+    return _summarise(
+        case,
+        displacements,
+        von_mises_per_element,
+        warnings,
+        seconds,
+        volume_mm3=mesh.volume,
+        node_count=mesh.node_count,
+        element_count=mesh.tet_count,
+    )
+
+
+def summarise_shell_static(
+    mesh: ShellMesh,
+    case: LoadCase,
+    thickness_mm: float,
+    displacements: NDArray[np.float64],
+    von_mises_per_element: NDArray[np.float64],
+    warnings: list[str],
+    seconds: float,
+) -> StaticResult:
+    """`summarise_static` for a shell, which differs only in what it is made of.
+
+    A shell mesh has no volume of its own — `volume_mm3` is area times the
+    thickness the mesh deliberately does not carry, which is what makes
+    `mass_kg` mean the same thing here as it does for a solid. It is taken as an
+    argument rather than read off a section object so this stays a function of
+    the numbers it reports.
+
+    **The two share `_summarise` rather than each building a `StaticResult`.**
+    This module's whole argument is that two solvers summarising separately are
+    free to drift on what "factor of safety" means, and 6.5's oracle comparison
+    is only meaningful if both sides computed the summary identically. A shell
+    twin that reimplemented the peak-and-divide would be that drift, arriving by
+    the door this module exists to hold shut.
+    """
+    return _summarise(
+        case,
+        displacements,
+        von_mises_per_element,
+        warnings,
+        seconds,
+        volume_mm3=mesh.volume_mm3(thickness_mm),
+        node_count=mesh.node_count,
+        element_count=mesh.face_count,
+    )
+
+
+def _summarise(
+    case: LoadCase,
+    displacements: NDArray[np.float64],
+    von_mises_per_element: NDArray[np.float64],
+    warnings: list[str],
+    seconds: float,
+    *,
+    volume_mm3: float,
+    node_count: int,
+    element_count: int,
+) -> StaticResult:
+    """The one definition of what a static result means. See both callers."""
     magnitudes = np.linalg.norm(displacements.reshape(-1, 3), axis=1)
     peak_node = int(np.argmax(magnitudes))
     peak_element = int(np.argmax(von_mises_per_element))
@@ -89,7 +170,6 @@ def summarise_static(
 
     yield_strength = case.material.yield_strength_mpa
     fos = yield_strength / peak_stress if peak_stress > 0.0 else float("inf")
-    volume_mm3 = mesh.volume
 
     return StaticResult(
         max_displacement_mm=float(magnitudes[peak_node]),
@@ -100,11 +180,17 @@ def summarise_static(
         yields=peak_stress >= yield_strength,
         mass_kg=volume_mm3 * 1e-9 * case.material.density_kg_m3,
         volume_mm3=volume_mm3,
-        node_count=mesh.node_count,
-        element_count=mesh.tet_count,
+        node_count=node_count,
+        element_count=element_count,
         solve_seconds=seconds,
         warnings=warnings,
     )
 
 
-__all__ = ["element_average", "nodal_average", "summarise_static"]
+__all__ = [
+    "element_average",
+    "nodal_average",
+    "shell_element_average",
+    "summarise_shell_static",
+    "summarise_static",
+]

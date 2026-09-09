@@ -64,6 +64,63 @@ item quietly ticked is worse than one left open, because nobody re-examines it.
 
 ---
 
+## THE NEXT WINDOWS SESSION — written 2026-09-09 after the second Linux stretch
+
+**Read this before THE QUEUE.** The seat has had exactly one session (2026-09-09, tiers 1–2
+green, A1–A5 ticked). Since then Linux has gone as far as it can go a second time, and the
+result is that **the shell path is now built end to end and has never been executed.** That is
+this session's centre of gravity.
+
+**Start here, always:** `git fetch --all && git pull` on **both** repos (`Kryova-backend` and
+`Kryova-frontend`). The backend moved a long way on 2026-09-09 and a session that starts on a
+stale tree will "find" defects that were fixed before it sat down.
+
+**Do not run a smoke test and call it verified.** The bar on this machine is the one in *What
+"done" means* above: a number and a date, or a defect with expected-versus-actual.
+
+### The order, and why it is this order
+
+1. **Regression first — tiers 1 and 2 below.** Fast, and it tells you whether the Linux stretch
+   broke anything on a real Postgres. **Check which engine tier 2 ran on before believing it**
+   — `TEST_DATABASE_URL` unset silently falls back to in-memory SQLite, which is how the first
+   seat session got a meaningless green. Expected: ~7,177 passed on Linux at the point of
+   handover; a lower count is a collection error, not a smaller suite.
+2. **A6 — run a shell deck through `ccx`. This is the new work and the highest value.**
+   Everything but the run exists: `generate_shell_mesh` meshes a curved surface,
+   `shell_loads.py` distributes the load, `ShellSolver.solve(mesh, case, section)` joins it up.
+   `tests/test_shell_solver.py` pins what the deck *says*; nothing has checked what `ccx` does
+   with it. Work up: solve a flat plate whose answer you can compute by hand, **then** attempt
+   NAFEMS LE3. Note LE3 additionally needs its geometry sourced — see the A6 row.
+3. **Queue E3 — the conduction oracle against `ccx`.** A1 and A2 have passed, so this is
+   unblocked and it converts the in-house conduction solver from *verified against mathematics*
+   into *cross-checked against another implementation*.
+4. **Tier 3 and section B — the CATIA seat.** B1, B2, B3 have never run at all; `compare_backends`
+   has never had a real seat on its right-hand side, and **Decision 1 rests on it**.
+5. **Job 3 — the GUI ladder, and gate G1.** G1 ran twice and did not pass either time. Two of
+   its three open items were closed on Linux on 2026-09-09, and A2/A3/A4 discharged the thermal
+   and shell/beam deck items, so **G1 is dischargeable at this run for the first time.**
+6. **D1** (`ollama pull llava`) and **queue E1** (sheet metal at the seat) if time remains.
+
+### What the GUI must be driven through, specifically
+
+`docs/GUI_PROMPT_LADDER.md` is the method and its three rules are hard. The ladder's own run log
+says the next run is the first under that method and that the prompts must be written against
+**what shipped between 2026-09-06 and 2026-09-09**, which is now:
+
+- **plane analyses** (`analysis: "plane-stress" | "plane-strain"` with a `thickness_mm`),
+- **conduction** (`analysis: "thermal-conduction"` with a `thermal_case`),
+- **convergence studies** (`grids: 3` on a simulation — the answer must state its own mesh
+  dependence rather than a single-grid number),
+- **the requirements check** and **sheet-metal folding**,
+- **the assembly repository** (a product holding two authors without one erasing the other),
+- **the resume block** — reopen a conversation after real time has passed and confirm the
+  frontend says where the work got to, not merely what was said.
+
+Each of those is a *level*: one prompt, one screenshot, no moving on until it passes. A level
+that half-passes has not passed.
+
+---
+
 ## THE QUEUE — everything a Linux session could not finish
 
 **Maintained as of 2026-09-09, the day the Linux stretch stopped. This is the list to work
@@ -154,22 +211,68 @@ server inherits and the Git Bash one.
         2.23 through `write_frame_deck`, reporting at the submitted node count (S4 9/9,
         S8R 21/21, S3 9/9, S6 25/25). `Blocker.NO_SHELL_SOLVER`'s first clause — "no solver
         here takes one" — is cleared for the *deck* path.
-      * **Nothing meshes a shell.** The probes above hand-built their grids node by node.
-        LE3 is a hemisphere with a hole at the pole and two symmetry edges; that is a
-        mesher, not a fixture.
-      * **No `Solver` accepts a `ShellMesh`.** The ABC is `solve(mesh: TetMesh, case:
-        LoadCase)`, and the shell path is `write_frame_deck` plus a raw force vector — it
-        has no `LoadCase`, no tributary-area distribution for a shell's faces (E6.3's own
-        named residual), and no reader turning a `.frd` into a `BenchmarkRun`.
-      * **A validated case needs a convergence study**, which needs the two above to exist
-        at more than one refinement. LE11 sits at `unconverged` for a related reason.
+      * ~~**Nothing meshes a shell.**~~ **CLEARED on Linux, 2026-09-09.**
+        `app.mesh.gmsh_mesher.generate_shell_mesh` meshes a curved surface in three
+        dimensions into a `ShellMesh` in all four element types, and is checked against a
+        revolved 90 degree spherical zone open at the pole, whose area
+        it recovers to 0.1%. The midside ordering debt `app/mesh/structural.py` named is
+        settled by measurement: the gmsh-to-CalculiX permutation is the **identity** for
+        both shapes, re-checked by coordinate on every quadratic mesh.
+      * ~~**No tributary-area distribution for a shell's faces.**~~ **CLEARED on Linux,
+        2026-09-09.** `app/solve/shell_loads.py`, with the consistent-load factors per
+        element type. The one to know: an **S8R face's four corners take −1/12 each**, so a
+        tributary-area intuition loads it wrongly in a way that solves cleanly.
+      * ~~**No `Solver` accepts a `ShellMesh`.**~~ **CLEARED on Linux, 2026-09-09.**
+        `app/solve/calculix/shell.py` — `ShellSolver.solve(mesh, case, section)` joins the
+        mesher, the load path, `write_frame_deck`, `run_ccx` and `frd.py` into one run and
+        returns a `SolveOutput`. It is **not** a `Solver` subclass: the ABC is
+        `solve(mesh: TetMesh, case: LoadCase)` and a shell needs a third argument, its
+        `ShellSection`; `PlaneSolver` declined the same widening. The `.frd` reader needed
+        no shell version — `displacements` and `nodal_stress_tensor` key off node count,
+        and `OUTPUT=2D` (which you measured in A3) makes that the submitted numbering.
+      * **A validated case needs a convergence study**, which is now buildable, because the
+        mesher takes an `element_size_mm` and the load path is mesh-independent by
+        construction (tested by refining). LE11 sits at `unconverged` for a related reason.
 
-      So A6 is a **phase task, not a queue tick**: it is E6.3's "no mesher produces one of
-      these meshes" plus a shell load path, and only then a `run_le3`. Its *geometry* must
-      come from the cited Abaqus page and not from memory — C1's rule applies here exactly,
-      and a remembered radius carrying a citation is indistinguishable from a real one.
-      Unblocking is still: drop the blocker, add a `run_le3`, re-record with
-      `venv/bin/python -m app.verify.recorded`, and commit the artefact.
+      **What is left is one measurement and one piece of research.** The deck-writing half
+      is fully tested offline (`tests/test_shell_solver.py`, 16 tests: element type, section
+      card, `OUTPUT=2D` on both keywords, six-DOF clamp, and the exact `*CLOAD` values
+      including S8R's negative corners). **Nothing has run it**, because there is no `ccx`
+      here — that is yours.
+
+      **The geometry is sourced too, as of 2026-09-09**, to the LE11 standard and recorded in
+      `docs/nafems-le3-geometry.md`: R = 10 m, t = 0.04 m, a 90 degree sector, corroborated by
+      a scan of the *original* NAFEMS dimensioned figure plus a committed Abaqus deck whose
+      node coordinates were checked numerically. **Read §1.5 before you encode anything.**
+
+      > **LE3 HAS NO HOLE AT THE POLE.** The shell is *closed* at the pole and point E **is**
+      > the pole. The widely repeated "hemisphere with an 18 degree hole" is a **different
+      > benchmark** wearing LE3's name, and this repository's own notes asserted it from
+      > memory for several hours on 2026-09-09 before the sourcing caught it. That is the
+      > `C1` rule earning its keep twice in one day. Four independent sources settle it, one
+      > of them by node coordinates.
+
+      **So A6 is now a hardware measurement and nothing else** — every prerequisite it named
+      has been built or sourced. What it needs from you, in order:
+
+      1. **A shell deck through `ccx` at all.** Solve a flat plate with `ShellSolver` whose
+         answer you can compute by hand before going anywhere near a benchmark.
+      2. **Then LE3** — and read §6 of the geometry record first, because it names a real
+         difficulty that is *not* a sourcing gap: LE3 is loaded by **point forces**, and a
+         point load has no finite displacement in 3-D elasticity. In shell theory the
+         divergence is extremely slow, which is why shell reproductions land within a
+         percent — but **a convergence study on the loaded node would be measuring the
+         singularity, not the discretisation.** Decide and write down what you are
+         extrapolating *before* you sweep, exactly as LE11's residual says.
+      3. Then: drop `Blocker.NO_SHELL_SOLVER`, add a `run_le3`, re-record with
+         `venv/bin/python -m app.verify.recorded`, and commit the artefact.
+         **Re-record last, after every source edit** — the fingerprint hashes source, so even
+         a docstring change expires it and the failure surfaces as ~11 red tests across
+         `test_trust`, `test_verify_recorded` and `test_verify_register`.
+
+      Note §6's other warning: the 2% tolerance is tight, and two of six published
+      reproductions miss it. **Do not loosen it to make a run pass** — a model that needs 5%
+      is telling you something true.
 
 ### B. CATIA seat — needs a licensed V5 seat and the bridge
 

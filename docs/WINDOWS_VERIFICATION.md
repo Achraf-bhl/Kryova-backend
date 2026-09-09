@@ -1,11 +1,17 @@
 # Verifying Kryova on the Windows seat
 
-Everything in this repo up to 2026-09-05 was **written on Linux and lint/type-checked
-there, and most of it has never been executed**. This is the runbook for the machine that
-can actually run it: Windows, with CATIA installed and the bridge available.
+Everything in this repo was **written on Linux and lint/type-checked there**. This is the
+runbook for the machine that can actually run it: Windows, with CATIA installed and the
+bridge available.
 
 Read the honest expectation first, then work down the tiers. Each tier is independent —
 a failure in one does not block the next.
+
+**Tiers 1 and 2 have now run here (2026-09-09) and are green; the RESULTS section below
+records what they found. Tier 3 (the CATIA seat) and tier 4 (the vision model) have not,
+and neither has Job 3, the GUI ladder.** So "most of it has never been executed" is no
+longer true of the offline and database halves and remains exactly true of everything that
+needs the seat.
 
 ---
 

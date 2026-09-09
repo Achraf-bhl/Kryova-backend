@@ -835,20 +835,41 @@ Five things that are easy to get wrong and are pinned by tests:
    the one-piece extrusion put 2, 38 and 5 nodes under a symmetry support on three meshes and the
    answer scattered by a factor of two while looking like solver noise.
 
-### CalculiX: there is no `ccx` on this Linux machine, and it shapes what may be claimed
+### CalculiX: written from the manual on Linux, and now measured on the seat
 
-`app/solve/calculix/` is written entirely from the CalculiX manual. Every module in it says so
-about itself (`steps.py`, `frd.py`, `elements.py`) with a `[M]` citation per keyword and a
-`[S]` where the manual stops and ccx's own source answers. **A deck written here is documented,
-not verified**, and the difference is a status line: the first Windows run is the measurement.
-Keep facts as *tables of constants* rather than inline format strings, so that run corrects one
+`app/solve/calculix/` was written entirely from the CalculiX manual, with a `[M]` citation per
+keyword and an `[S]` where the manual stops and ccx's own source answers. **That run has now
+happened** — ccx 2.23 on the Windows seat, 2026-09-09, THE QUEUE section A. Keep facts as
+*tables of constants* rather than inline format strings; that is what let the run correct one
 value instead of a scatter of them.
+
+**What it settled.** The solid deck solves and agrees with σ = F/A. The thermal cards written
+blind the day before are exact: a restrained bar gives 119.925000 MPa from both solvers against
+−EαΔT of −119.925. `OUTPUT=2D` holds on `*SHELL SECTION` and `*BEAM SECTION` alike, every
+element reporting at the *submitted* node numbering. The expansion table is confirmed by node
+count.
+
+**What it found, and neither was visible offline.** `BeamMesh.connectivity` wrote
+`[start, end, middle]`, but **ccx numbers a three-node beam along the member**, so the far end
+was read as the midside node and the element folded back on itself — `*ERROR in e_c3d:
+nonpositive jacobian determinant`, naming the element and never the ordering. No quadratic beam
+deck this repo had ever written could solve, and *the test pinning that order asserted the same
+thing the code did*. And **CalculiX carries `SECTION=BOX` and `SECTION=PIPE` on `B32R` only**,
+refusing B31 and B32 at parse time; swept across B31/B32/B32R × RECT/CIRC/PIPE/BOX and one-to-
+eight data values, so it is the section type that decides it and not the value count. So an RHS
+— the profile `sections.py` calls the workhorse of a welded frame — produced a deck the solver
+would not read. `choose_element` now takes the section, substitutes B32R, and refuses a *linear*
+mesh in words.
+
+**Still documented rather than verified:** nothing meshes a shell or a beam, so every one of
+these is an authored mesh, and no `Solver` accepts a `ShellMesh` at all.
 
 Three things about shells and beams that produce a plausible wrong number rather than an error
 (master plan 6.3, all pinned by `tests/test_solver_calculix_elements.py`):
 
 1. **ccx has no shell or beam formulation — it expands them into solids** (S4/B31 → C3D8I,
-   S8R/B32 → C3D20R) and ties the expansion back with MPCs. One element through the thickness,
+   S8R/B32/B32R → C3D20R) and ties the expansion back with MPCs. Confirmed by node count on the
+   seat, 2026-09-09. One element through the thickness,
    whatever the surface mesh density, so a through-thickness stress *distribution* is not
    something these elements contain.
 2. **The results file is written for the expanded model unless `OUTPUT=2D` is asked for.** The
@@ -1093,6 +1114,29 @@ Live defects, not style opinions. Read before touching the file.
 earlier and never removed from here. That is worse than an empty section: a stale landmine sends
 you to re-fix something that works, and it teaches you to skim the ones that are real. **Verify an
 entry before acting on it, and delete it the moment it stops being true.**
+
+**Three that only bite on Windows, all measured 2026-09-09 on the seat.** Each was invisible on
+Linux by construction, which is the pattern worth carrying: a difference between the two machines
+hides in whatever neither one has to state out loud.
+
+- **Text IO without an explicit `encoding=` reads as cp1252 here.** Python 3.14 still takes the
+  *locale* codec, so `Path.read_text()` on any file carrying an em-dash raises
+  `UnicodeDecodeError`. `scripts/plan_progress.py` — the command this file tells every session to
+  run when it finishes work — died on it. Pass `encoding="utf-8"` on every text read and write,
+  and an explicit LF `newline` on writes to a tracked file, or the platform default rewrites
+  every line ending and turns a one-line edit into a whole-file diff.
+- **`core.autocrlf=true` is the default on a Windows git install**, so the working tree has CRLF
+  where the committed blob has LF. Anything that hashes source *bytes* therefore hashes the
+  checkout's line-ending policy: `verify.recorded.code_fingerprint` did, discarded every recorded
+  validation outcome, and published *nothing is validated* on the trust page. It also keyed on
+  `str(path)`, which is `app\solve\...` here. **Neither normalisation alone reproduces a Linux
+  digest** — both are needed, and both are pinned by their own test.
+- **A test that reads real machine state answers differently depending on the machine.** Eight
+  `test_catia_local_bridge` tests hit a `sys.platform`-guarded `tasklist` probe for the first
+  time: the process double is not a context manager, so `subprocess.run` raised inside a broad
+  handler, and the probe's own call shifted every positional index into the captured spawn list.
+  Two of them read the *real* probe, so **their result depended on whether CATIA happened to be
+  open**. Pin the probe; do not let a suite ask an unrelated application for its verdict.
 
 1. **`data/bm25/` holds ~450 MB of tracked Dassault Systèmes PDFs, on purpose** (2026-09-01) so the
    corpus syncs to the Windows workstation with a plain `git pull`. They are third-party

@@ -12,6 +12,15 @@ engine:
   disagree about a parameter they both import. Fix the contract, or one of the two
   specs — and the message names **both** parties, because a contract violation with
   only one name on it sends the wrong team to look.
+* `LockError` — the product is fine and *somebody else is holding it*. A lease on a
+  component another author has taken, or a commit written against a revision that is
+  no longer the head. Nothing is wrong with either version; the recovery is to wait,
+  to take the change somewhere else, or to merge — so it is deliberately not a
+  `StructureError`, which means "fix the definition".
+* `MergeConflict` — two authors changed the same component from the same base and
+  arithmetic cannot say which is right. A `LockError`, because it is the same family
+  of problem seen after the fact, and it names **both** sides for `ContractError`'s
+  reason.
 * `AssemblyError` — the base, so a caller that does not care can catch one thing.
 
 Note what is *not* here. A contract whose claim came out false is not an exception: it
@@ -39,4 +48,18 @@ class ContractError(AssemblyError):
     """An interface contract is malformed, or its two sides cannot both be satisfied."""
 
 
-__all__ = ["AssemblyError", "ContractError", "StructureError"]
+class LockError(AssemblyError):
+    """Someone else holds this part of the product, or the work is written on a stale base."""
+
+
+class MergeConflict(LockError):
+    """Two authors changed the same component from the same base."""
+
+
+__all__ = [
+    "AssemblyError",
+    "ContractError",
+    "LockError",
+    "MergeConflict",
+    "StructureError",
+]

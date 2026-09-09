@@ -17,6 +17,7 @@ app/assembly/
   contracts.py    14.2/14.3/14.4 — the boundary between two things, as an assertion
   clash.py        does anything hit anything, and what was actually looked at
   mass.py         what it weighs, where its centre is, and what was left out
+  locking.py      14.5 — several authors on one product: revisions, leases, merges
 ```
 
 Reading order: `structure.py` first (what a product *is* here), then `contracts.py`
@@ -48,11 +49,29 @@ the walk and are independent of each other.
 ~166 MB of OCP; keeping it out of module import is what lets the structure and contract
 tests run offline in milliseconds — the property `app.design` keeps, for the same reason.
 
+* **Nothing shared is mutable, and there is exactly one exception.** Components,
+  structures, revisions and leases are all frozen; `locking.Workspace` is a plain
+  dataclass because a workspace *is* the moving part — it advances onto its own
+  commit and drops the leases it held. Two workspaces on one repository still cannot
+  edit anything through each other.
+
 **What Phase 14 asks for and this does not have, stated plainly.** 14.1's *effectivity*
 (a component valid from serial 400) is not implemented — `Component.revision` is free
-text and nothing selects on it. 14.5, concurrency and locking for several agents on one
-product, is not started: nothing here takes a lock, and two callers editing one
-structure will simply produce two structures.
+text and nothing selects on it.
+
+**14.5 landed 2026-09-09 in `locking.py`.** A `ProductRepository` is the only way to
+write a product: every commit names the revision it was written against and one
+against a stale head is refused with what moved and who moved it, so the lost update
+two callers used to produce is now a refusal rather than a silent erasure. `LeaseBook`
+adds the early half — a component claimed by one author blocks another author's commit
+that touches it — and `merge` combines two disjoint descendants of one base, refusing
+by name where both changed the same component. **There is no clock in that module**:
+every call that cares about time takes `now`, because a lease whose expiry comes from
+the machine's clock cannot be tested without sleeping and cannot be reasoned about
+between two processes. What it is *not* is a distributed lock: the repository is one
+in-process object, so two API workers each holding their own would each be internally
+consistent and collectively wrong. Persisting it is the phase's next question, and it
+is written down rather than assumed.
 """
 
 from app.assembly.clash import (
@@ -76,7 +95,23 @@ from app.assembly.contracts import (
     check_all,
     measurements,
 )
-from app.assembly.errors import AssemblyError, ContractError, StructureError
+from app.assembly.errors import (
+    AssemblyError,
+    ContractError,
+    LockError,
+    MergeConflict,
+    StructureError,
+)
+from app.assembly.locking import (
+    Change,
+    Lease,
+    LeaseBook,
+    ProductRepository,
+    Revision,
+    Workspace,
+    changes_between,
+    merged_view,
+)
 from app.assembly.mass import MassRollup, MissingMass, WeighedOccurrence, roll_up
 from app.assembly.placement import Box, at, compose, invert, relative, turned
 from app.assembly.structure import (
@@ -98,28 +133,38 @@ __all__ = [
     "Component",
     "ContractError",
     "ContractResult",
+    "Change",
     "Impact",
     "Instance",
+    "Lease",
+    "LeaseBook",
+    "LockError",
     "Interface",
     "MassRollup",
+    "MergeConflict",
     "MissingMass",
     "Occurrence",
+    "ProductRepository",
     "ProductStructure",
+    "Revision",
     "SkippedPair",
     "StructureBuilder",
     "StructureError",
     "Violation",
+    "Workspace",
     "WeighedOccurrence",
     "affected",
     "at",
     "bind_both",
     "bind_into",
     "check",
+    "changes_between",
     "check_all",
     "compose",
     "find_clashes",
     "invert",
     "measurements",
+    "merged_view",
     "occt_bounds",
     "occt_measurer",
     "relative",

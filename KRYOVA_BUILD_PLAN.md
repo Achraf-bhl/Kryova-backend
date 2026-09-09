@@ -616,6 +616,23 @@ needs a different extraction stated up front rather than chosen after the sweep.
   teach it turns red. `tests/test_load_case_sketch.py` (23 → 47). **G1's third item, a
   convergence check in the request path, stays open and is E7's**: the machinery exists and is
   validated, and nothing calls it.
+- **2026-09-08 — twelve pre-existing failures on `main`, and what the split turned out to be.**
+  All twelve green; the suite went to 6,451 passing / 0 failing (7,141 as of 2026-09-09). The
+  useful part is the breakdown, not the fix. **One was a real defect**: the verification nudge
+  discarded the "nothing has actually been done" message the exhausted correction loop had just
+  written, so a model that ran nothing closed the turn with "Done." and a footnote — the exact
+  silent failure `test_written_tool_calls.py` exists to prevent, arriving from the other side.
+  **One was a tripwire working correctly**: `KryovaFaceMap` was added to the frozen VBA library
+  and the test fails on purpose until a human reviews it (reviewed, accepted). **One was a stale
+  artefact**: the BM25 index predated the chunker changes; rebuilt, P@1 back to 94.7%. **The
+  other nine were tests that had rotted**, each differently — a fixture whose user message
+  accidentally carried a measurable requirement, a stub one call short of the code it fakes, a
+  volume oracle coupled to how many times the code reads a volume, a negative probe naming a
+  tool the system prompt has since started teaching, and a `caplog` assertion over every logger
+  in the process rather than the one under test. **None of the nine was wrong about what it
+  claimed** — every one was wrong about *how it checked it*, which is why they all failed on a
+  change to something else. Moved here from `CLAUDE.md`'s landmine list on 2026-09-09: a
+  struck-through entry telling you not to act on it is history, and history lives in this file.
 - **2026-09-08 — E7.5: the plane-stress element family, and LE1 validated through it.** Built in
   four lanes by parallel agents on disjoint files, integrated here. `app/mesh/planar.py` holds
   `TriMesh` (tri3/tri6), `gmsh_mesher.generate_tri_mesh` meshes a planar face,

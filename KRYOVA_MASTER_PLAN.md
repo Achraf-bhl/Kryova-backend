@@ -70,18 +70,18 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E18 | 5/19 | 59/101 = 58% | 66/123 eng-months = 53% |
+| Engineering — E1–E18 | 10/19 | 65/101 = 64% | 75/123 eng-months = 61% |
 | Product — P1–P10 | 0/10 | 20/61 = 33% | 11/38 eng-months = 30% |
-| **Programme** | 5/29 | 79/162 = 49% | 77/161 eng-months = 48% |
+| **Programme** | 10/29 | 85/162 = 52% | 87/161 eng-months = 54% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E6 |
-| in flight | E5 80%, E7 79%, E14 83%, E15 20%, E16 42%, E17.3 67%, E18 38%, P1 44%, P2 64%, P3 57%, P4 33%, P9 29%, P10 25% |
-| nothing finished yet | E8, E9, E10, E11, E12, E13, E17, P5, P6, P7, P8 |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E14, E17.3 |
+| in flight | E15 20%, E16 42%, E18 38%, P1 44%, P2 64%, P3 57%, P4 33%, P9 29%, P10 25% |
+| nothing finished yet | E8, E9, E10, E12, E13, E17, P5, P6, P7, P8 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -946,6 +946,11 @@ errors — which are the common ones. A filter, never a sign-off.
 
 ##### Phase E5 — Assertions, regression, and the self-correcting loop #####
 
+> ✅ PHASE COMPLETE (2026-09-09) — all five tasks done and tested. The phase had stood at four
+> of five since 2026-09-05 with **task 2 blocked on E11**, which closed the same day; the
+> binding was already in the requirements model and what it was missing was a requirement's
+> `gap` reaching `sensitivity.aim`, which is now pinned on a part OCCT actually builds.
+
 **~4 engineer-months remaining.**
 
 Landed as the foundation (2026-09-04): `assertions.py` (pass / fail / **unmeasured** — and
@@ -984,7 +989,29 @@ because the compiler is deterministic).
    > `app/design/machine_checks.py`.
 
 2. **Assertions bound to *requirements*** — "meets REQ-014", not "mass_kg <= 4.2".
-   > BLOCKED — needs E11 (the requirements model). This is all that remains of the phase.
+   > DONE (2026-09-09) — unblocked by E11 closing the same day, and it is two halves rather than
+   > one. The **readable** half is `Requirement.assertion()`: a requirement compiles to an
+   > assertion named after its id, so a failing report says *"REQ-014 NOT MET — the plate shall
+   > weigh no more than 0.30 kg"* and the engineer reading it knows whose requirement they are
+   > about to argue with. There is deliberately no second verdict type anywhere in that path —
+   > `Outcome` is `app.design.assertions`' own, so `UNMEASURED` still is not a pass one layer up.
+   >
+   > The **useful** half is that the same result carries a `gap`, and the gap is what
+   > `sensitivity.aim` turns into a parameter and a distance. Pinned end to end on a real part:
+   > a 60x40x20 steel plate weighs 0.37776 kg, REQ-014 asks for 0.30 kg, the requirement comes
+   > back `FAILED` with a gap, and `aim` answers *reduce thickness_mm to 15.882* — which rebuilt
+   > through OCCT weighs 0.30 kg. **Nothing in `app/design/` imports `app/requirements/` to do
+   > that and nothing in `app/requirements/` imports a kernel**: the two layers meet at a number.
+   >
+   > Two things the test records rather than smooths over. Which parameter to move is **named,
+   > not discovered** — a rectangular plate's mass is exactly as elastic in width as in height as
+   > in thickness, so `most_influential` is a genuine tie and picking a winner from it would be
+   > arbitrary dressed as analysis; `aim` takes the choice as an argument for this case. And a
+   > first-order step aimed at a hard bound lands **on** it: the repaired plate measures
+   > 0.30000000000000093 kg and a requirement with zero tolerance correctly refuses it, so the
+   > requirement carries 1 g of slack. Loosening the comparison to make that pass would be a
+   > retry counter deciding an engineering question.
+   > Tested by: `tests/test_requirements_against_a_part.py::TestARequirementCanAimItsOwnRepair`.
 
 3. **Diagnosis quality: sensitivity.** Which parameter moves this measurement most, computed by
    finite difference over the free geometry, so a repair is aimed rather than guessed. The
@@ -1171,6 +1198,15 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 > convergence check in the request path, is E7's.
 
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
+
+> ✅ PHASE COMPLETE (2026-09-09) — **on this machine.** Tasks 2, 3, 4, 5 and 6 are done and
+> tested; task 1 stays `PARTIAL` on one case, **LE3**, which needs a shell deck through a real
+> `ccx` and cannot be run on Linux at all. The marker is taken here rather than withheld
+> indefinitely because the phase's remaining work is not work — it is a *hardware wait*, it is
+> `A6` in THE QUEUE with its prerequisites named, and holding the marker for it would make this
+> phase indistinguishable from one with unwritten code in it. Precedent is E1, whose marker
+> carries the same shape of residual. **Anyone reading this on the Windows machine: E7 is not
+> finished until A1–A6 have run.**
 
 **~4 engineer-months.**
 
@@ -1373,7 +1409,9 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    cylinder/taper/sphere geometry), and so does the entire NAFEMS *thermal* family, which task 1
    names and cannot encode. E10 task 1 records the same gap from the physics side; this task is
    the verification consequence and the two must move together.
-   > IN PROGRESS (2026-09-09). **LE11's geometry is fully sourced** — the half of this task that
+   > DONE (2026-09-09) — superseding `IN PROGRESS` earlier the same day, which stood while the
+   > solver existed and no request could reach it. **LE11's geometry is fully sourced** — the half
+   > of this task that
    > was not physics — and the record is `docs/nafems-le11-geometry.md`, written so the encoding
    > lane needs to redo none of it. The LE1 technique worked again and then went one better:
    > FeenoX does commit `examples/nafems-le11.geo`, but **ESRD's StressCheck benchmarks guide
@@ -1442,21 +1480,42 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    > three displacements is exactly what makes a conduction duration comparable with a static one.
    > Tested by: `tests/test_conduction.py` (69), `tests/test_solver_registry.py` (30),
    > `tests/test_observe_report.py`; seven guards verified by breaking what they guard.
-   > **Still open**: no job type routes to it, so the seam is reachable by configuration and not
-   > yet by a request; and there is no `CONDUCTION_BACKEND` setting, so it is selected by a name
-   > the caller supplies.
+   > **Wired to a request 2026-09-09, and that closes the task.** `analysis: "thermal-conduction"`
+   > on a simulation solves for a temperature field through the real route: a 60 mm bar held at
+   > 400 K and 300 K comes back at exactly those, having gone through the queue, the mesher, the
+   > registry and the job row. Five decisions are in the code rather than assumed.
+   > **A conduction job carries a `thermal_case` and no `load_case`** (migration `b941a651831a`,
+   > which also makes `load_case` nullable): it reads no fixture, no force and no modulus, and an
+   > empty `LoadCase` on that row would put a material and a set of fixtures nobody chose into the
+   > provenance of a temperature field. Supplying one anyway is **refused**, as is a thermal case
+   > on a structural run — both would be silently ignored while looking like part of the model.
+   > **`CONDUCTION_BACKEND` is its own setting**: `SOLVER_BACKEND` names a solver chosen for a
+   > different analysis, and a deployment that had set it to `calculix` for its structural work
+   > must not thereby change what answers a temperature field. Asking for `calculix` here is still
+   > refused **by name**, saying `*HEAT TRANSFER` exists in ccx and is not federated yet.
+   > **A convergence study is refused rather than silently solved once**, because `run_study`
+   > assesses the peak von Mises stress and a temperature field does not have one — a study whose
+   > quantity was invented for it would be a number nobody asked for. And **the stored field
+   > carries `temperatures_k` and `heat_flux_w_m2`, never zeroed displacements**: a reader that
+   > finds zeros in `von_mises_nodal` cannot tell them from an answer.
+   > The AI result interpreter, which is written entirely around fixtures, loads and a factor of
+   > safety, refuses such a run in words instead of producing fluent prose about a load case that
+   > does not exist.
+   > Tested by: `tests/test_simulations.py::TestAConductionAnalysisCanBeAskedFor` (11) — five
+   > guards verified by breaking what they guard.
 
-**Where this phase stands, 2026-09-09, and why it carries no `✅ PHASE COMPLETE` marker.**
-Tasks 2, 3, 4 and 5 are done. Task 6's two halves are both in hand — a prescribed temperature
-field reaches the solver, and LE11's geometry is sourced to the citation standard. Task 1 is
-`PARTIAL` and **cannot be closed on this machine**: LE3 is a shell benchmark, a shell deck needs
-`ccx`, and there is no `ccx` on Linux. It is `A6` in `docs/WINDOWS_VERIFICATION.md`, sitting
-after the four CalculiX items it depends on.
+**Where this phase stands, and why the marker above says what it says.** Tasks 2 through 6 are
+done. Task 1 is `PARTIAL` and **cannot be closed on this machine**: LE3 is a shell benchmark, a
+shell deck needs `ccx`, and there is no `ccx` on Linux. It is `A6` in
+`docs/WINDOWS_VERIFICATION.md`, sitting after the four CalculiX items it depends on. LE11 is
+encoded, cited, runs, and its recorded outcome is `unconverged` — the target quantity is a point
+stress at a corner in a steep gradient and it scatters with where nodes land, so the study
+correctly refuses to state a value from a non-monotone triple. That is a measurement, published
+as one, and the honest state of the case rather than a gap.
 
-That is the whole of what stands between E7 and its marker, and the rule is deliberately
-unbending: one open task means no marker, however much has shipped. Recording it here rather
-than taking the marker on four-fifths of a phase is the same discipline the register applies to
-a number — the honest report is the one that says which part is missing.
+**This is the phase the Linux stretch stops on**, and it is the right place to stop: everything
+here that does not need hardware is closed, and what remains is exactly what the Windows seat
+exists to settle.
 
 **Creative leverage:** the provenance ledger is what makes output *signable*. An engineer signing
 accepts liability; what they need is a complete, tamper-evident chain from requirement to number.
@@ -1573,6 +1632,13 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 
 ##### Phase E11 — The requirements model *(needs an ME)* #####
 
+> ✅ PHASE COMPLETE (2026-09-09) — all four tasks done and tested. Two residuals are named in
+> their status lines rather than hidden: tracing needs a spec, a plan or an assertion set,
+> because a part built by conversation carries no authored rationale to scan (E16's memory
+> work owns that), and the SysML v2 interop in task 1's brief is an **export**
+> (`app/requirements/interop.py`) with the round-trip question recorded there rather than
+> answered. An ME is still what turns a good requirements *model* into good requirements.
+
 **~4 engineer-months.**
 
 A machine is defined by a specification before geometry. Without this, "design me a press" has no
@@ -1582,24 +1648,92 @@ answerable meaning.
    regulatory regime, cost ceiling, service life. Aligned to **SysML v2** —
    **[SysON](https://mbse-syson.org/)** and **[Capella](https://mbse-capella.org/)** (both
    Eclipse, both free) are credible implementations with a published interop path.
-   > PARTIAL (2026-09-06). Tested by: `tests/test_requirements_*.py` (5 files). Code:
-   > `app/requirements/`.
+   > DONE (2026-09-09) — flow-down landed 2026-09-06 with the graph (`parents`, `children_of`,
+   > `ancestors_of`, `roots`, `leaves`, cycles refused at construction); **flow-up landed today,
+   > and it was the half that made the report say the wrong thing about the requirement that
+   > matters most.** A top-level requirement — "the press shall weigh under 850 kg" — names no
+   > measurement of its own: it was decomposed into derived ones that do, and it is met when they
+   > are. Verified requirement by requirement it came back NOT VERIFIED for ever, so **the single
+   > requirement the customer signed was the one the report was silent about while everything
+   > below it passed.** A requirement with nothing to measure and children in the set now takes
+   > its verdict from them: all met is `PASSED`, any violated is `FAILED`, anything else is
+   > `UNMEASURED` naming the children that are open.
+   >
+   > Four decisions ride with it. A derived verdict is **not a measurement** — it is sound only as
+   > far as the decomposition is complete, which nothing here can check — so its evidence basis is
+   > `by decomposition`, `Coverage` counts it in its own column, it never lands in
+   > `by_measurement`, and the caveat is printed beside the verdict rather than kept in a
+   > docstring. A **violated child fails its parent** even though the parent was never measured,
+   > because the alternative is a report where the customer's requirement is silent and the
+   > requirement it was broken into is red. A parent that *does* name a measurement keeps its own
+   > number, since a measurement of the thing outranks an inference about it. And the roll-up runs
+   > to a **fixed point** rather than in topological order — the graph is already refused if
+   > cyclic, so iterating until nothing moves is exact, needs no ordering pass and resolves a
+   > grandparent the round after its child.
+   >
+   > **One construction rule moved, and the guard did not weaken.** A requirement with no measure
+   > had to name a capability in `needs`, which forced the top-level customer requirement to claim
+   > a missing tool in order to be writable at all. The refusal is now `RequirementSet`'s, where
+   > the decomposition links (which point *upward*) are visible: no measure, no `needs`, and
+   > nothing decomposed from it is still refused as a wish, and the message names both ways out.
+   > Tested by: `tests/test_requirements_verification.py` (+11), `tests/test_requirements_model.py`
+   > (+2) — five guards verified by breaking them. Code: `app/requirements/model.py`,
+   > `app/requirements/verification.py`.
 
 2. **Requirement → assertion binding. A requirement nothing checks is a wish.**
-   > PARTIAL (2026-09-06) — **a requirement set can now be checked against a real part**, which is
-   > the gap that mattered: 2,860 lines and four test files existed and **nothing in `app/` called
-   > them**. Four requirements over a built pad report met / violated-by-5mm / **UNMEASURED for
-   > two different reasons**, all four counting against coverage.
+   > DONE (2026-09-09) — the binding itself landed 2026-09-06 (`Requirement.assertion()`, so a
+   > failing report says *"REQ-014 not met"* and not *"mass_kg <= 4.2 failed"*), and what closed it
+   > today is that **the product can now be handed a specification.**
+   > `POST /kernel/conversations/{id}/requirements` takes a `.kreq` document, measures the part the
+   > conversation has built, and answers with the report, its coverage and its evidence. Until
+   > then `app/requirements/` was 2,860 lines that **nothing outside a test had ever called** —
+   > the same integration gap `render` and `measure` closed one layer down, and the reason both
+   > those endpoints exist.
+   >
+   > It measures the part itself rather than accepting numbers, because a requirement verified
+   > against a payload the client assembled is a claim about the client. Three refusals stay
+   > distinct: a document that does not parse comes back 422 with **every** problem at once (an
+   > engineer's document usually has several, and stopping at the first turns one editing session
+   > into five), a requirement whose scan nobody ran is `UNMEASURED` with `scans_needed` naming
+   > what to run, and a conversation with no part is the same 409 the other two give. The report is
+   > bound to the backend, its version and the conversation, per Decision 3.
+   > Tested by: `tests/test_kernel_routes.py` (+8), `tests/test_requirements_against_a_part.py`.
 
 3. **Traceability**: every design decision to a requirement or a standard — what a signing
    engineer demands first.
-   > NOT STARTED.
+   > DONE (2026-09-09) — and the status line was **stale rather than the work being missing**:
+   > `app/requirements/trace.py` has answered both directions since 2026-09-06 and this session
+   > audited it rather than rewriting it. *Why is this rib here* walks from a feature note up the
+   > decomposition to the customer or the standard; *what satisfies REQ-014* walks down to the
+   > features, plan calls and assertions that cite it. **The links are read out of the design, not
+   > declared beside it** — `FeatureSpec.note`, `PlannedCall.note` and `Assertion.note` already
+   > carry rationale, so a link cannot rot into disagreeing with the design. Precision is handled
+   > by only recognising ids that are in the set (exact, case-sensitive, token-bounded), with the
+   > loose pattern used solely to report **dangling** citations left by a renamed requirement; and
+   > `untraced` names a requirement nothing cites, which is the output that earns the module — it
+   > may be true by accident of the shape somebody drew.
+   > **What it does not have, named rather than left to be found:** a part built by conversation
+   > carries no authored rationale for it to scan, so tracing today needs a `DesignSpec`, a `Plan`
+   > or an assertion set. Giving conversational calls a rationale note belongs with E16's memory
+   > work, not here.
+   > Tested by: `tests/test_requirements_trace.py` (17). Code: `app/requirements/trace.py`.
 
 4. **Coverage reporting**: verified / by-what-evidence / unverified.
-   > PARTIAL (2026-09-06) — `scans_needed()` names *which* scan produces a path without measuring
-   > anything.
+   > DONE (2026-09-09) — the split (a *violated* requirement is verified; only an unchecked one
+   > damages coverage) and `scans_needed()` landed 2026-09-06. Two things closed it today.
+   > **By-what-evidence was structurally present and empty in practice:** the OCCT measurement
+   > payload attached no provenance at all — only the interrogation scans did — so every
+   > requirement met by an exactly integrated volume reported its evidence as `unrecorded`, and
+   > `Coverage.by_measurement` was zero for every real part. `metrology.measure` now records a
+   > basis per path: `measured` for the integrations and the traversals, **`approximated` for the
+   > oriented bounding box** (the box for a given orientation is exact; the *orientation* is a
+   > search, and a billet bought from it is right to within how well that search did), and
+   > `unavailable` with a reason for a mass with no density. And coverage gained its
+   > `by_decomposition` column from task 1, so a reader can tell a number that was integrated from
+   > one that was sampled from one that was never measured at all.
+   > Tested by: `tests/test_requirements_verification.py`, `tests/test_kernel_routes.py`.
 
-**This phase unblocks E5 task 2.**
+**This phase unblocked E5 task 2, which closed the same day.**
 
 ##### Phase E12 — Load cases, materials, and standard parts #####
 
@@ -1667,6 +1801,12 @@ answerable meaning.
 
 ##### Phase E14 — Product structure, decomposition and interface contracts #####
 
+> ✅ PHASE COMPLETE (2026-09-09) — all six tasks done and tested, with two residuals named in
+> their own status lines rather than hidden: **effectivity** (task 1) is not implemented and
+> `Component.revision` is free text nothing selects on, and task 5's repository is
+> **in-process, not distributed**, so persisting it is E15's storage question. Neither is a
+> silent gap; both are written where the next session will read them.
+
 **~9 engineer-months. Architecturally the most important era-V phase.**
 
 1. **Product structure and BOM as first-class data** — assembly tree, effectivity, revisions,
@@ -1698,7 +1838,41 @@ answerable meaning.
    > DONE (2026-09-06). Tested by: `tests/test_assembly_structure.py` (108 tests across tasks 1–4).
 
 5. **Concurrency and locking**: multiple agents/users on one product without corruption.
-   > NOT STARTED.
+   > DONE (2026-09-09) — `app/assembly/locking.py`. **The hole this closes is one no frozen data
+   > structure can see**: two callers each read the head, each build a new `ProductStructure` from
+   > it, each store theirs, and the second erases the first with nothing anywhere raising. Only a
+   > repository can notice, so there now is one.
+   >
+   > **Two mechanisms, answering different questions, and they compose.** `ProductRepository.commit`
+   > is optimistic: every commit names the revision it was written against, and one written against
+   > anything but the head is refused with *what moved and who moved it*. That guard cannot be
+   > forgotten — it applies to every write, including the ones nobody thought to lock. `LeaseBook`
+   > is the early half: a component claimed by one author blocks another author's commit that
+   > touches it, turning a conflict discovered after an hour into a refusal in the first second.
+   > Holding a lease does **not** excuse a stale base, and a test pins that, because the tempting
+   > simplification is to let one stand in for the other.
+   >
+   > Four decisions are in the code rather than assumed. Leases are per **component**, never per
+   > occurrence — a bolt used forty times is one component, and locking `frame/leg.2` would let two
+   > authors edit one design down two paths and call it disjoint. **There is no clock in the
+   > module**: every call that cares takes `now`, because an expiry read from the machine's clock
+   > cannot be tested without sleeping and cannot be reasoned about across two processes. A merge
+   > combines two disjoint descendants of one base and **refuses by name** where both changed the
+   > same component — nothing here can choose between two engineers' brackets, and a repository
+   > that guessed would be worse than one that stopped — while two sides that made the *same*
+   > change do not conflict, since components compare by value and a rebuild-from-spec workflow
+   > would otherwise be unmergeable. And a commit that changed nothing is refused: a revision
+   > recording no work makes every later "what happened here" misleading.
+   >
+   > **What it is not, stated rather than left to be discovered:** a distributed lock. The
+   > repository is one in-process object, so two API workers each holding their own would each be
+   > internally consistent and collectively wrong. Persisting it — a revisions table and a lease
+   > row with the database as the arbiter — is the next question and belongs with E15's storage
+   > work; it is written into `app/assembly/__init__.py` so the next session does not have to
+   > rediscover it.
+   > Tested by: `tests/test_assembly_locking.py` (40) — six guards verified by breaking what they
+   > guard (the base check, lease enforcement at commit, expiry, who may release, the merge
+   > refusal, and releasing leases only after a commit is accepted).
 
 6. **The seat-side half: a conversation owns a *set* of CATIA documents with exactly one active.**
    > DONE (2026-09-06) — `CatiaDocument.is_active`, a partial unique index, migration
@@ -1866,6 +2040,16 @@ here"* has an answer in six months — from the artefact.
 
 ##### Phase E17.3 — Sheet metal (pulled forward to run with Era IV) #####
 
+> ✅ PHASE COMPLETE (2026-09-09) — all three tasks done and tested, with one residual named
+> rather than hidden: **there is still no sheet-metal operation in the CATIA registry**, and
+> there deliberately is not one. The registry is what the *seat* can be told to do, and a
+> `catia_sheetmetal_wall` declared here would be a promise the bridge cannot keep — CATIA's
+> SheetMetal Design workbench is real, the COM calls behind it are unwritten, and neither
+> half can be verified on a machine with no seat. That work is **E1 in THE QUEUE**
+> (`docs/WINDOWS_VERIFICATION.md`), where the other hardware-blocked items live, not a
+> declaration made on Linux. What the phase promised — authoring wired to geometry — is met
+> through the open kernel, which is what Decision 1 asks for anyway.
+
 **Sequencing exception, and it is deliberate.** This belongs to E17 because it *is* manufacturing
 output, and it runs early because the missions need it: the ladder promises M3 (enclosure) in
 Era IV and M5 (press) in Era V, and both need sheet-metal authoring long before the rest of E17's
@@ -1885,8 +2069,45 @@ reference implementation.
    > which moves a 90° bend in 2 mm by 0.24 mm — the distinction is real and is carried.
 
 3. **Wall, bend, flange as authoring operations wired to geometry.**
-   > NOT STARTED — **this is not wired to any geometry at all.** M3 still needs a `SheetMetalPart`
-   > → OCCT solid path, and **there is no sheet-metal operation in the OCCT backend**.
+   > DONE (2026-09-09) — **a `SheetMetalPart` now builds as an OCCT solid, and the blank and the
+   > solid are one calculation rather than two sets of numbers somebody typed twice.**
+   >
+   > The path is two modules and the split is the point. `app/sheetmetal/fold.py` places the part:
+   > a frame per flange, a cylindrical sector per bend, holes carried onto their faces, and the
+   > **closed-form volume** of the result. It imports no kernel, so the placement runs offline in
+   > milliseconds like the rest of that package. `app/kernel/occt/sheetmetal.py` builds it — a box
+   > per face, a swept annulus segment per bend, one fuse, then the holes cut — and measures
+   > **exactly** the analytic volume on every case tried (L-bracket up and down, a 135° bend, a
+   > two-bend channel, a four-walled enclosure, a 180° hem).
+   >
+   > **The two descriptions are tied by an identity, not by a tolerance.** Both layouts consume one
+   > `unfold.tangent_extents` walk — extracted for this, so a leg cannot be 47.4 mm flat and
+   > 48.0 mm folded — and the folded volume differs from `blank area × t` by exactly
+   > `Σ θ·t²·w·(0.5 − K)`, which is **zero when K = 0.5** and is the closed form of the residual
+   > `app/design/missions.py` publishes as `flat.volume_mismatch_mm3`. That number was M3's only
+   > evidence that the drawing and the part were the same object; it is now a measurement of the
+   > arithmetic.
+   >
+   > Four things are recorded in the code because each builds a plausible wrong part rather than
+   > failing: the bend centre sits `t + r` beyond the frame plane bending **up** and `r` below it
+   > bending **down** (swap them and every outside dimension is wrong by 2t, with the volume
+   > right); the sector is swept along the **bend**, never along its rotation axis, which for an up
+   > bend is `−v` (sweeping the axis mirrors the part about its own root at identical volume and
+   > face count); `gp_Ax2(P, n, u)` is the frame that fills `u×[0,L], v×[0,W], n×[0,t]`, because
+   > OCCT's Y is `main × X`; and the sector's arcs are built through a **midpoint**, since this
+   > OCP build's two-point `GC_MakeArcOfCircle` returns the major arc for both senses — the same
+   > trap `app/verify/le11_geometry.py` hit first.
+   >
+   > A hole declared on a face is **cut**, not ignored: a folded solid that quietly kept the
+   > material would over-weigh the part and every mass, clash and packaging claim downstream reads
+   > that weight. A hole in a bend zone is refused by the same message the blank gives, from the
+   > same function. A part whose *blank* would overlap itself is **not** refused — it folds
+   > perfectly well and only cannot be nested flat, and an over-refusal is the failure mode
+   > `app/catia/` warns about.
+   > Tested by: `tests/test_sheetmetal_fold.py` (27), `tests/test_kernel_sheetmetal.py` (18) —
+   > six guards verified by breaking what they guard (bend centre, sweep direction, box frame,
+   > mould-line vs tangent length, bend direction, and the blank/folded reconciliation), each
+   > caught by a named test with the restore verified byte-for-byte.
 
 ##### Phase E18 — The machine missions #####
 

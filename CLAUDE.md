@@ -117,16 +117,32 @@ session.**
 
 **On Windows (the machine with CATIA and the bridge — proving the product):**
 
+> **The Linux stretch stopped on 2026-09-09 at phase E7**, with ten of twenty-nine phases
+> complete, the suite green, and everything closed that could be closed without hardware. If
+> you are reading this on the Windows machine, **you are the next session, and your brief is
+> the top of [docs/WINDOWS_VERIFICATION.md](docs/WINDOWS_VERIFICATION.md)** — read it before
+> anything else. Three jobs, in order: verify what Linux wrote, **finish THE QUEUE** (sections
+> A–D are measurements, **section E is code you have to write on that machine**), and drive
+> the product through the GUI with `docs/GUI_PROMPT_LADDER.md`.
+
 0. **Start from THE QUEUE at the top of [docs/WINDOWS_VERIFICATION.md](docs/WINDOWS_VERIFICATION.md)** —
    a checkbox list of every item a Linux session was stopped on by missing hardware, grouped by
-   what it needs (`ccx`, a CATIA seat, a document, a vision model) and ordered by what a run
-   settles per minute. **A Linux session that hits a hardware wall adds its row there in the
-   same commit as the work**, the way a finished task updates the master plan. An unrecorded
-   blocker gets rediscovered from scratch, which has already cost two sessions.
+   what it needs (`ccx`, a CATIA seat, a document, a vision model, **a seat to write against**)
+   and ordered by what a run settles per minute. **A Linux session that hits a hardware wall
+   adds its row there in the same commit as the work**, the way a finished task updates the
+   master plan. An unrecorded blocker gets rediscovered from scratch, which has already cost
+   two sessions. **Section E is not measurement — it is unwritten code**: the CATIA side of
+   sheet metal (E1), the four stop gates (E2), and the conduction oracle against ccx (E3).
 1. This is where the **whole application** is exercised: the real `/api/v1/ai/chat` endpoint
-   through the web GUI, the CATIA seat through the bridge, the desktop shell.
-2. **Test with the prompt ladder** (`docs/GUI_PROMPT_LADDER.md`), not with improvised prompts.
-   Levels 1–4 measure the product; 5 and 6 measure the distance to it.
+   through the web GUI on `localhost`, the CATIA seat through the bridge, the desktop shell.
+2. **Test with the prompt ladder** (`docs/GUI_PROMPT_LADDER.md`), which as of 2026-09-09 is a
+   **method rather than a script**: six levels, each saying what it must test and what it must
+   not re-test, and **you write one prompt per level on the day** against what the plan says
+   has just been built. Three rules from that file are absolute and are repeated here because
+   they are the ones a hurried session drops: **one prompt per level**, **a screenshot every
+   time a prompt finishes**, and **you do not move to the next level until the current one
+   passes properly** — a Level 4 pass on top of a shaky Level 2 measures nothing. Prompts are
+   driven in the browser, never through `dispatch` and never from `pytest`.
 3. Two pictures per prompt where CATIA is involved: `catia_capture_view` (the part as CATIA draws
    it, through the product's own tool) **and** a screenshot of the application window (the spec
    tree, any dialog, any greyed command). A run with no picture has not been verified, it has
@@ -241,13 +257,13 @@ app/
   retrieval/      BM25 over the reference manuals the agent consults
   render/         deterministic hidden-line rendering, section cuts, render diffing
   ai/             agent, tools, prompts, state, resume, tool retrieval, providers, vision
-  assembly/       product structure, interface contracts, clash, mass roll-up
+  assembly/       product structure, interface contracts, clash, mass roll-up, locking
   dynamics/       multibody kinematics and reactions
   fatigue/        rainflow and damage, federated to pyLife
   optimise/       optimisation drivers, gradients, honesty rules
   requirements/   the requirements model and coverage
   rules/          design rules, DFM, GD&T
-  sheetmetal/     bend allowance, unfold, K-factor
+  sheetmetal/     bend allowance, unfold, K-factor, the folded layout
   manufacture/    drawings, dimensions, sheet layout, DXF/STEP export
   verify/         convergence, the validation register, commitments, the accuracy changelog
   observe/        spans and the metering listener
@@ -641,6 +657,88 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
 8. **Only what `occt/binding.py` registers is reachable through `symbol()`.** Go through
    `classify.edge_curve_type` and `BRepAdaptor_Surface(...).Plane()`, or add the symbol to the
    registry deliberately rather than importing OCP at the call site.
+9. **`gp_Ax2(P, main, X)` has Y = `main × X`.** So the box that fills `u×[0,L], v×[0,W], n×[0,t]`
+   from a frame `(u, v, n)` is `BRepPrimAPI_MakeBox(gp_Ax2(P, n, u), L, W, t)` — pass `(P, u, n)`
+   and the part is silently mirrored. Same asymmetry `render/project.py` documents from the other
+   side; `occt/sheetmetal.py` is the second place it has bitten.
+10. **`GC_MakeArcOfCircle(gp_Circ, p1, p2, sense)` returns the *major* arc for both senses** on
+   this OCP build, measured twice (`verify/le11_geometry.py`, `occt/sheetmetal.py`). Always use
+   the three-point form through an explicit midpoint.
+
+## Sheet metal reaches geometry (`app/sheetmetal/fold.py`, `app/kernel/occt/sheetmetal.py`)
+
+A `SheetMetalPart` builds as a real solid, and the blank and the solid are **one calculation**.
+`fold.py` places the part — a frame per flange, a cylindrical sector per bend, holes on their
+faces, plus the closed-form volume — importing no kernel, so it stays as cheap to test as the
+flat pattern; `occt/sheetmetal.py` builds and fuses it, then cuts the holes.
+
+1. **Both layouts consume one `unfold.tangent_extents` walk.** A leg cannot be 47.4 mm flat and
+   48.0 mm folded, which is what makes `missions.py`'s `flat.volume_mismatch_mm3` evidence rather
+   than noise. The folded volume differs from `blank area × t` by exactly `Σ θ·t²·w·(0.5 − K)` —
+   **zero at K = 0.5** — so the reconciliation is an identity, not a tolerance.
+2. **The bend centre is `t + r` beyond the frame plane bending up and `r` below it bending down.**
+   Swap them and the part builds, weighs exactly the right amount, and every outside dimension is
+   wrong by 2t.
+3. **A sector sweeps along the bend (`width_dir`), never along its rotation axis** — for an up
+   bend those are opposite. Sweeping the axis mirrors the part about its own root at identical
+   volume, face count, length and height.
+4. **A hole is cut and a hole in a bend zone is refused**, by the flat pattern's own message from
+   the shared `unfold.hole_on_face`. But a part whose *blank* would overlap itself is **not**
+   refused: it folds perfectly well, and over-refusal is the failure mode `app/catia/` warns about.
+5. **No sheet-metal operation exists in the CATIA registry, deliberately.** The registry is what
+   the seat can be told to do, and the COM half is unwritten and unverifiable here — it is `E1` in
+   THE QUEUE, not a declaration made on Linux.
+
+## Several authors on one product (`app/assembly/locking.py`)
+
+Master plan 14.5. `ProductStructure` is frozen and safe; the *product* was not, because two
+callers could each read the head, each rebuild, and the second erase the first with nothing
+raising. `ProductRepository` is now the only way in.
+
+1. **Optimistic first, leases second, and they compose.** Every commit names the revision it was
+   written against; a stale one is refused with what moved and who moved it. A lease blocks
+   another author's commit that touches a claimed component. **Holding a lease does not excuse a
+   stale base** — pinned by a test, because that is the tempting simplification.
+2. **There is no clock in the module.** Every call that cares takes `now`. A lease whose expiry
+   comes from the machine's clock cannot be tested without sleeping and cannot be reasoned about
+   across two processes.
+3. **Leases are per component, never per occurrence** — a bolt used forty times is one component,
+   and locking `frame/leg.2` would let two authors edit one design down two paths.
+4. **A merge refuses by name where both sides changed one component**, and does *not* conflict
+   where both made the same change (components compare by value, so rebuild-from-spec stays
+   mergeable). A commit that changed nothing is refused.
+5. **It is not a distributed lock.** One in-process object: two API workers would each be
+   internally consistent and collectively wrong. Persisting it is E15's storage question.
+
+## Requirements, and what a verdict may rest on (`app/requirements/`)
+
+Master plan E11, closed 2026-09-09. A requirement is an assertion with a source, a rationale and
+a place in a decomposition graph; `app.design.assertions.Outcome` is reused, never re-declared.
+
+1. **Validation flows *up*.** A requirement with nothing to measure and children in the set takes
+   its verdict from them — all met is `PASSED`, any violated is `FAILED`, anything else is
+   `UNMEASURED` naming what is open. Without it the one requirement the customer signed is the
+   one the report is silent about while everything below it passes.
+2. **A derived verdict is not a measurement.** Its evidence basis is `by decomposition`, it has
+   its own coverage column, it never counts as `by_measurement`, and the caveat — sound only as
+   far as the decomposition is complete, which nothing checks — is printed beside the verdict.
+3. **"A requirement nothing checks is a wish" is refused by the *set*, not by the requirement**,
+   because the decomposition links point upward and only the assembled set can see them. No
+   measure, no `needs`, and nothing decomposed from it is still refused.
+4. **`POST /kernel/conversations/{id}/requirements`** is how the product is handed a
+   specification: it parses `.kreq`, measures the conversation's part *itself* (a requirement
+   verified against numbers the client supplied is a claim about the client), and returns the
+   report with coverage, evidence and `scans_needed`.
+5. **Every measurement carries its own provenance** (`occt/metrology.measure`): `measured` for
+   integrations and traversals, `approximated` for the oriented bounding box — the box is exact
+   for a given orientation and the *orientation* is a search — and `unavailable` with a reason
+   for a mass with no density. Until 2026-09-09 the base payload attached none, so every
+   requirement met by an integrated volume reported its evidence as `unrecorded`.
+6. **A requirement's `gap` is what aims a repair** (`sensitivity.aim`), and that is the whole of
+   E5.2. Neither package imports the other; they meet at a number. Two traps: `most_influential`
+   is a genuine tie on a plate (mass is equally elastic in all three dimensions), so which
+   parameter to move is an argument, not a discovery; and a first-order step aimed at a hard
+   bound lands *on* it, so a requirement with zero tolerance refuses its own repair by one ulp.
 
 ## Analyses available
 
@@ -657,7 +755,16 @@ All verified against closed-form solutions, not recorded output.
    NAFEMS LE11 gives) and a *solved* one (from conduction) are different sources for the same
    thing — the field is a solver argument and deliberately not on `LoadCase`, which is JSONB on
    the job row and would then hold data the size of the mesh.
-5. **Steady conduction** — `solve/conduction.py`, `ThermalCase`, checked against the linear bar
+5. **Steady conduction** — asked for by `analysis: "thermal-conduction"` with a `thermal_case`
+   (migration `b941a651831a`, which also makes `load_case` nullable — a conduction run has no
+   fixture, no force and no modulus, and an empty `LoadCase` on that row would put a material
+   nobody chose into the provenance of a temperature field). **`CONDUCTION_BACKEND` is its own
+   setting**: `SOLVER_BACKEND` names a structural solver, and a deployment that set it to
+   `calculix` must not thereby change what answers a temperature field. A `grids > 1` study is
+   refused by name (the study assesses peak von Mises stress, which a temperature field has
+   none of), the stored field carries `temperatures_k` and never zeroed displacements, and the
+   AI result interpreter refuses such a run rather than writing prose about a load case that
+   does not exist. `solve/conduction.py`, `ThermalCase`, checked against the linear bar
    profile, the logarithmic tube wall, and the convecting bar's Biot tip temperature
    `T_tip=(T_b+Bi·T_inf)/(1+Bi)`. Dirichlet, convection (Robin) and heat-flux boundaries over the
    existing `Selector` vocabulary. **Conductivity is on the case, not on `Material`** — so

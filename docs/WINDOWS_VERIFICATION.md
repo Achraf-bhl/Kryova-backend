@@ -9,9 +9,52 @@ a failure in one does not block the next.
 
 ---
 
+## READ THIS FIRST — you are the Windows session, and this is your brief
+
+**The Linux stretch stopped on 2026-09-09 at phase E7.** Ten of twenty-nine phases are
+complete, the whole suite is green on Linux (7,000+ tests), `ruff` and `mypy` are clean, and
+**everything that could be closed without hardware has been closed.** What is left in the
+plan for this machine is not leftovers — it is the work that was *deliberately deferred*
+because a Linux box cannot do it honestly.
+
+You have three jobs, in this order, and the order matters:
+
+1. **Verify.** Run the tiers below. Every claim written on Linux is a claim about code that
+   has mostly never executed on a real seat. A failure here is information, not a setback.
+2. **Finish THE QUEUE.** Every item is work a Linux session was stopped on. Sections A–D are
+   *measurements* — run the thing, record what happened. **Section E is code you have to
+   write**, because writing it on Linux would have meant guessing at an API nobody could
+   call.
+3. **Drive the product through the GUI.** Not `pytest`, not `dispatch` — the actual web
+   application at `localhost`, as a user. `docs/GUI_PROMPT_LADDER.md` is the method, and it
+   has hard rules: **one prompt per level, a screenshot every time, and you do not move to
+   the next level until the current one passes.**
+
+**Three standing rules for this machine, none of them optional.**
+
+* **A run with no picture has not been verified, it has been believed.** Every prompt you
+  drive through the GUI ends with a screenshot saved into `docs/verification-<date>/`.
+  Where CATIA is involved, two: `catia_capture_view` (the part as CATIA draws it, through
+  the product's own tool) *and* a screenshot of the application window.
+* **Test in the GUI, never through the dispatcher.** Calling `dispatch` directly tests the
+  tools; it does not test the product, and every defect that has mattered here lived between
+  the model and the tools.
+* **Write down what you did in the same commit as the work.** A status line in
+  `KRYOVA_MASTER_PLAN.md`, a line in `KRYOVA_BUILD_PLAN.md`'s *Done*, and a checked box here.
+  A session that finishes work and leaves the plan unchanged has thrown away the only thing
+  that lets the next session start.
+
+**What "done" means for an item here.** Either a measurement recorded with the number and
+the date, or a defect recorded with what was expected and what happened. Never "looked
+fine". If an item cannot be settled, say what blocked it and leave the box unchecked — an
+item quietly ticked is worse than one left open, because nobody re-examines it.
+
+---
+
 ## THE QUEUE — everything a Linux session could not finish
 
-**Maintained as of 2026-09-08. This is the list to work from when you sit at that machine.**
+**Maintained as of 2026-09-09, the day the Linux stretch stopped. This is the list to work
+from when you sit at that machine, and it is now the *whole* of what Linux left undone.**
 
 Every entry here is work that was *stopped on Linux by missing hardware*, not work that was
 skipped. Each one names the claim that is currently unverified, so a run either turns it into
@@ -130,6 +173,54 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       `AI_VISION_MODEL=llava`. Confirm you get the *refusal* first with the text-only default
       — that refusal is the guard working (Ollama drops an image handed to a text-only model
       and answers anyway, so a check that trusted it would manufacture agreement).
+
+### E. Needs a seat to *write*, not only to verify — **this section is coding work**
+
+These are not "run it and see". They are pieces of the product that can only be *written* on
+the machine that has the thing they drive, because every line of them is a guess otherwise.
+Treat each one as a normal task under this repo's rules: write the tests with the work, run
+`pytest`/`ruff`/`mypy`, verify each new guard by breaking what it guards, and update the
+master plan's status line in the same commit.
+
+- [ ] **E1 — Sheet metal on the CATIA side (E17.3 task 3, written 2026-09-09).** A
+      `SheetMetalPart` now builds as an OCCT solid (`app/kernel/occt/sheetmetal.py`), which is
+      the open-kernel half and is verified against closed-form volumes here. The seat half —
+      CATIA's SheetMetal Design workbench through the bridge, so a folded part *lands* where
+      the customer works, as Decision 1 requires of everything else — does not exist and was
+      deliberately not declared: a `catia_sheetmetal_wall` in the registry is a promise the
+      bridge cannot keep, and the registry is read by the agent as a list of things it can do.
+      What a session at the seat settles, in order: whether `AddNewWall`/`AddNewFlange` behave
+      as the COM documentation says on this V5-R33 install; whether the sheet-metal parameters
+      (thickness, default radius, K) can be set before the first wall or only after; and
+      whether a part built by these calls unfolds in CATIA to the same blank
+      `app.sheetmetal.unfold` computes — the last one being the measurement that matters,
+      because the two arithmetics are independent implementations of the same standard.
+      Until then the fold path is open-kernel only and says so.
+      **Where the work goes:** a new `app/catia/ops/sheet_metal.py` declaring the operations
+      (mirroring an existing ops module — read `part_design.py` first), the daemon-side
+      handlers in `scripts/catia_bridge/`, and `app/catia_kb/commands/sheet_metal.py` already
+      holds the workbench knowledge (French labels included). The OCCT side —
+      `app/kernel/occt/sheetmetal.py` and `app/sheetmetal/fold.py` — is written, tested and
+      is the reference for what the geometry must come out as: the folded volume is a closed
+      form, so a CATIA-built part can be measured against the same arithmetic.
+      Master plan: **E17.3 task 3** carries this residual in its status line.
+
+- [ ] **E2 — Run the four gates the plan defines, in order (master plan Part 2).** G1 ran on
+      2026-09-06 and did **not** pass (rung 3 failed); it is carried forward and is now also
+      the only thing that can verify E6's CalculiX work. G2, G3 and G4 have never run. Each
+      gate is driven from `docs/GUI_PROMPT_LADDER.md` through the chatbot in the browser —
+      never through `dispatch` — with a screenshot per prompt and a dated report in
+      `docs/verification-<date>/`.
+
+- [ ] **E3 — The conduction analysis through the GUI, and against CalculiX once A2 passes.**
+      Added 2026-09-09 with the work. `analysis: "thermal-conduction"` now reaches a request
+      and is verified against three closed forms on Linux (linear bar to 6.6e-12 K, the
+      logarithmic tube wall, the convecting-bar Biot tip temperature). What Linux cannot do
+      is compare it with anything: ccx has a `*HEAT TRANSFER` step and this build does not
+      federate it. Once A1–A2 pass, write the deck and point `app/solve/oracle.py` at a
+      thermal case — that turns the in-house conduction solver from *verified against
+      mathematics* into *cross-checked against another implementation*, which is the stronger
+      claim and the one `CONDUCTION_BACKEND` was given its own setting to make possible.
 
 ---
 

@@ -260,6 +260,60 @@ drags in ~640 MB of VTK.
 
 ---
 
+## RESULTS — first run on the seat, 2026-09-09 (backend `656e598`)
+
+**Tiers 1 and 2 are done and green. Six defects found, all fixed; four of them
+were invisible on Linux by construction.** Tier 3 (seat) and tier 4 (vision) are
+still open, and so is THE QUEUE.
+
+| Tier | Result |
+|---|---|
+| 1 — offline | **927 passed, 0 failed**, including the 124 tests that had only ever been import-checked (`test_render`, `test_vision`, `test_design_machine_checks`, `test_design_sensitivity`). The iso render was looked at: a 60×40×20 box, right proportions, hidden lines dashed, **right way up**. |
+| 2 — database | **7,244 passed, 2 skipped, 1 xpassed, 0 failed** on real PostgreSQL 18.6. `alembic check` clean at `b941a651831a`. |
+
+The first tier-2 run was **not a Postgres run at all**, and that is the finding
+worth carrying: `TEST_DATABASE_URL` was unset, so `conftest.py` fell back to
+in-memory SQLite exactly as CLAUDE.md warns. It reported *23 failed, 7,204
+passed, 17 skipped*. Pointed at a real `kryova_test` it reported *10 failed,
+7,234 passed, 2 skipped, 1 xpassed* — fifteen tests that had been skipping
+themselves started running, and the RLS test began to XPASS. **A green tick from
+this tier means nothing until you have checked which engine it ran on.**
+
+What was fixed, and where the fault was:
+
+1. **`code_fingerprint` was not stable across checkouts**, though its docstring
+   said it was — it keyed on `str(path)` (`app\solve\…` on Windows) and hashed
+   raw bytes (CRLF under `core.autocrlf=true`). Every recorded validation
+   outcome was therefore discarded here and the trust page published *nothing is
+   validated*. **Neither normalisation alone is enough**; both together
+   reproduce a Linux recording. 11 tests. *Code was wrong.*
+2. **The local Postgres role was `SUPERUSER`**, so RLS was inert on this
+   machine — the recipe in `docs/LOCAL_POSTGRES.md` said to create it that way.
+   Recipe and machine both corrected. *Documentation was wrong.*
+3. **`scripts/plan_progress.py` crashed on Windows** with `UnicodeDecodeError`:
+   `read_text()` with no encoding takes the locale codec, cp1252 here, and the
+   plan has em-dashes. This is the command the workflow tells every session to
+   run when it finishes work. The progress block was current all along. *Code
+   was wrong.*
+4. **Eight `test_catia_local_bridge` tests** exercised a Windows-only branch for
+   the first time. `catia_process_is_running` shells out to `tasklist` behind a
+   `sys.platform` guard; the `_FakeProcess` double is not a context manager, so
+   `subprocess.run` raised inside a broad handler, and the probe's own call
+   shifted every positional index into the captured spawn list. Two of them also
+   read the *real* probe, so **their result depended on whether CATIA happened
+   to be open**. *Tests were wrong.*
+5. **A conduction tolerance was absolute where it had to be relative**:
+   `fixed_temperature_heat_w` is the global solve residual, and `1e-12 W`
+   passed on Linux and failed here at `1.28e-12` — relative `1.7e-13`, which is
+   LAPACK, not physics. Rescaled to the Robin terms that cancel. Worth knowing:
+   that assertion checks *convergence*, not assembly — a 0.1% error in the film
+   load is caught by the temperature assertion above it and does not move the
+   residual. *Test was wrong.*
+6. **`CONDUCTION_BACKEND` was undocumented in `.env.example`.** Added with E7 and
+   never written down. This one fails on Linux too. *Documentation was wrong.*
+
+---
+
 ## 1. Offline — no database, no CATIA, no model
 
 The fast loop. If any of this fails, nothing above it is worth running yet.

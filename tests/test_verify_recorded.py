@@ -22,6 +22,7 @@ publishes nothing at all.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -88,6 +89,72 @@ class TestARecordedRunSurvivesTheRoundTrip:
         assert artefact["schema_version"] == SCHEMA_VERSION
 
 
+class TestTheFingerprintIsStableAcrossCheckouts:
+    """The claim in `code_fingerprint`'s own docstring, which was false.
+
+    Measured on the Windows seat 2026-09-09: a run recorded on Linux was
+    discarded and the trust page published *nothing is validated*, because the
+    digest folded in two things that are properties of the checkout rather than
+    of the source. Each is pinned separately here — normalising only one of them
+    still does not reproduce a Linux recording, so a single combined test could
+    pass with half the fix in place.
+    """
+
+    def _tree(self, root: Path, newline: bytes) -> Path:
+        (root / "app/solve").mkdir(parents=True)
+        (root / "app/mesh").mkdir(parents=True)
+        (root / "app/verify").mkdir(parents=True)
+        for rel in (
+            "app/solve/linear_static.py",
+            "app/mesh/primitives.py",
+            "app/verify/benchmarks.py",
+            "app/verify/convergence.py",
+            "app/verify/nafems.py",
+            "app/verify/provenance.py",
+            "app/verify/quantities.py",
+        ):
+            (root / rel).write_bytes(b"def f():" + newline + b"    return 1" + newline)
+        return root
+
+    def test_line_endings_do_not_move_it(self, tmp_path: Path) -> None:
+        """`core.autocrlf=true` is the default on a Windows git install, so the
+        working tree has CRLF where the committed blob has LF. Hashing raw bytes
+        hashes the checkout's line-ending policy along with the source."""
+        lf = code_fingerprint(self._tree(tmp_path / "lf", b"\n"))
+        crlf = code_fingerprint(self._tree(tmp_path / "crlf", b"\r\n"))
+
+        assert lf == crlf
+
+    def test_the_key_is_the_posix_path(self, tmp_path: Path) -> None:
+        """`str(PurePath)` is `app\\solve\\deck.py` on Windows and
+        `app/solve/deck.py` on Linux. The key must be the posix form on both.
+
+        Checked against a digest computed here with posix keys, so it goes
+        through `code_fingerprint` rather than restating `as_posix()`.
+        **On a posix machine the two spellings are identical and this cannot
+        fail** — it is a guard for Windows checkouts, and it is the
+        artefact test below that catches the same fault on either.
+        """
+        tree = self._tree(tmp_path / "sep", b"\n")
+
+        expected = hashlib.sha256()
+        for path in recorded._fingerprinted_files(tree):
+            expected.update(path.relative_to(tree).as_posix().encode("utf-8"))
+            expected.update(b"\0")
+            expected.update(hashlib.sha256(path.read_bytes()).digest())
+
+        assert code_fingerprint(tree) == "sha256:" + expected.hexdigest()
+
+    def test_the_committed_artefact_matches_this_checkout(self) -> None:
+        """The end the two above serve: whatever platform this is read on, the
+        recorded run must describe it. This is the assertion that failed."""
+        recorded_fp = json.loads(ARTEFACT_PATH.read_text(encoding="utf-8"))[
+            "code_fingerprint"
+        ]
+
+        assert code_fingerprint() == recorded_fp
+
+
 class TestAFingerprintThatMovesWhenTheAnswerCould:
     def test_it_moves_when_a_solver_changes(self, tmp_path: Path) -> None:
         tree = tmp_path / "repo"
@@ -109,8 +176,11 @@ class TestAFingerprintThatMovesWhenTheAnswerCould:
     def test_it_does_not_move_when_only_the_publisher_changes(self) -> None:
         """The exclusion is deliberate and is the difference between a guard
         people obey and one they learn to regenerate past."""
+        # `as_posix`, not `str`: on Windows the latter gives `app\verify\...`
+        # and every assertion below would fail on a platform difference rather
+        # than on the exclusion this test is about.
         fingerprinted = {
-            str(path.relative_to(Path(recorded._REPO_ROOT)))
+            path.relative_to(Path(recorded._REPO_ROOT)).as_posix()
             for path in recorded._fingerprinted_files(Path(recorded._REPO_ROOT))
         }
 

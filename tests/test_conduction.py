@@ -518,7 +518,20 @@ class TestAConvectionBoundary:
         field = SteadyConductionSolver().solve(mesh, case)
         # Nothing else adds or removes heat, so the whole part settles at ambient.
         assert field.temperatures_k == pytest.approx(self.AMBIENT, abs=1e-9)
-        assert field.result.fixed_temperature_heat_w == pytest.approx(0.0, abs=1e-12)
+
+        # `fixed_temperature_heat_w` is the *global* residual `sum(K @ T - q)`,
+        # not a sum over fixed nodes, so with no fixed temperature anywhere it
+        # is a cancellation of Robin terms of order `h * A * T_ambient` -- about
+        # 7.5 W here. That makes it a check on the **linear solve**, not on the
+        # assembly: a converged solve drives it to zero for any self-consistent
+        # K and q, so a mis-scaled film moves the temperature above rather than
+        # this. Measured 2026-09-09 by scaling the Robin load 0.1%: the line
+        # above caught it at 300.3 K and this one did not move.
+        # Its floor is therefore double precision on that scale, not an absolute
+        # wattage -- an absolute `1e-12` passed on Linux and failed on Windows at
+        # 1.28e-12 (relative 1.7e-13), which measured LAPACK and nothing else.
+        scale = self.FILM * (BAR_SIZE[0] * BAR_SIZE[1] * 1e-6) * self.AMBIENT
+        assert abs(field.result.fixed_temperature_heat_w) <= 1e-10 * scale
 
     def test_the_base_supplies_the_heat_the_film_removes(self) -> None:
         mesh = bar()

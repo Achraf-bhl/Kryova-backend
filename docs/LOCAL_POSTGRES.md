@@ -57,18 +57,36 @@ $env:USERPROFILE\pg\pgsql\bin\initdb.exe -D $env:USERPROFILE\pgdata `
 $env:USERPROFILE\pg\pgsql\bin\pg_ctl.exe -D $env:USERPROFILE\pgdata `
     -l $env:USERPROFILE\pgdata\server.log -w start
 
-# 4. Role and database
-psql -U postgres -h localhost -d postgres -c "CREATE ROLE kryova LOGIN PASSWORD '...' SUPERUSER;"
-psql -U postgres -h localhost -d postgres -c "CREATE DATABASE kryova OWNER kryova ENCODING 'UTF8';"
+# 4. Role and BOTH databases. NOBYPASSRLS, not SUPERUSER -- see the warning below.
+psql -U postgres -h localhost -d postgres -c "CREATE ROLE kryova LOGIN PASSWORD '...' CREATEDB CREATEROLE NOBYPASSRLS;"
+psql -U postgres -h localhost -d postgres -c "CREATE DATABASE kryova      OWNER kryova ENCODING 'UTF8';"
+psql -U postgres -h localhost -d postgres -c "CREATE DATABASE kryova_test OWNER kryova ENCODING 'UTF8';"
 
 # 5. Point the app at it -- in .env.local, which is read AFTER .env and wins
 #    (Settings.model_config reads (".env", ".env.local")).
 #    DATABASE_URL=postgresql://kryova:...@localhost:5432/kryova?sslmode=disable
+#    TEST_DATABASE_URL=postgresql://kryova:...@localhost:5432/kryova_test?sslmode=disable
 
 # 6. Schema. migrations/env.py creates the `kryova` schema itself.
 venv\Scripts\python.exe -m alembic upgrade head
 venv\Scripts\python.exe -m alembic check     # expect "No new upgrade operations detected"
 ```
+
+**Corrected on the seat, 2026-09-09.** This recipe used to create the role
+`SUPERUSER` and only one database, and the Windows machine had been built from
+it. Both halves cost a measurement:
+
+* **`SUPERUSER` makes every RLS policy inert**, because a superuser outranks
+  `ENABLE` and `FORCE ROW LEVEL SECURITY` alike — so
+  `test_the_application_role_must_not_bypass_row_level_security` xfailed here
+  while XPASSing on Linux and in CI. Decision 7 calls RLS the safety net under
+  application scoping, and on this machine there was no net. `ALTER ROLE kryova
+  NOSUPERUSER CREATEDB CREATEROLE NOBYPASSRLS;` fixes an existing install; the
+  role still owns both databases, so nothing else needed changing.
+* **No `kryova_test` meant no `TEST_DATABASE_URL`**, and the fallback for that is
+  in-memory SQLite. The whole database tier had been running on SQLite: 17 tests
+  silently skipped themselves and the Postgres-only ones passed by never
+  executing. Real Postgres turned 23 failures into 10 and 17 skips into 2.
 
 **`sslmode=disable` is required, not a shortcut.** A stock local Postgres has
 `ssl = off` and refuses the handshake, so a connection asking for `require`

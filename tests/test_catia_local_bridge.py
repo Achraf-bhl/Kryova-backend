@@ -94,6 +94,38 @@ class _FakeProcess:
         self.killed = True
 
 
+@pytest.fixture(autouse=True)
+def _catia_is_not_consulted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the CATIA process probe, because on the seat it is live and real.
+
+    `catia_process_is_running` shells out to `tasklist` behind a
+    `sys.platform != "win32": return None` guard. On Linux the branch is dead
+    and nothing in this file ever noticed it; on Windows it runs, and it made
+    eight tests here fail on the first seat run (2026-09-09) in two different
+    ways:
+
+    * `subprocess.run` uses `Popen` as a context manager and `_FakeProcess` is
+      not one, so the probe raised `TypeError` inside `ensure_started`'s broad
+      handler — logged as "supervision failed" and otherwise invisible — while
+      its `tasklist` call still landed in the `spawned` list. Assertions that
+      index that list positionally then read a probe where they expect a daemon
+      spawn (`KeyError: 'env'`).
+    * Two tests that patch `is_supported` by hand reached the *real* probe, so
+      **their result depended on whether CATIA happened to be open on the
+      machine running the suite** — green with it closed, red with it running.
+      A suite that answers differently depending on an unrelated application is
+      not measuring the thing it names.
+
+    `None` is exactly what the real function returns on Linux — *cannot tell* —
+    so this makes the module mean the same thing on both platforms rather than
+    inventing a state. Autouse rather than folded into `spawned` because the
+    hazard is the module's, not that fixture's: the two tests above take
+    `monkeypatch` directly. Nothing here tests the probe; that belongs with the
+    seat tests, where a real `tasklist` can answer.
+    """
+    monkeypatch.setattr(local_bridge, "catia_process_is_running", lambda: None)
+
+
 @pytest.fixture
 def spawned(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Capture spawns instead of starting a real daemon."""

@@ -214,6 +214,35 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-09 — the Windows seat runs the suite for the first time, and six defects fall out.**
+  Tiers 1 and 2 of `docs/WINDOWS_VERIFICATION.md` are green here: **927 offline tests**
+  (including the 124 that had only ever been import-checked, and an iso render looked at with
+  human eyes — right way up) and **7,244 passed / 2 skipped / 1 xpassed / 0 failed** against real
+  PostgreSQL 18.6 at `b941a651831a`.
+  **The first database run was not a database run.** `TEST_DATABASE_URL` was unset, so
+  `conftest.py` fell back to in-memory SQLite exactly as CLAUDE.md warns, and reported *23 failed,
+  7,204 passed, 17 skipped*. Against a real `kryova_test`: *10 failed, 7,234 passed, 2 skipped,
+  1 xpassed* — fifteen tests that had been skipping themselves started running and the RLS test
+  began to XPASS. A green tick from that tier means nothing until you know which engine it ran on.
+  Four of the six defects were invisible on Linux by construction. **`code_fingerprint` was not
+  stable across checkouts** though its docstring said it was — it keyed on `str(path)`
+  (`app\solve\...` on Windows) and hashed raw bytes (CRLF under `core.autocrlf=true`), so every
+  recorded validation outcome was discarded here and the trust page published *nothing is
+  validated*; neither normalisation alone reproduces a Linux recording, and both are pinned
+  separately. **The local Postgres role was `SUPERUSER`**, which outranks `FORCE ROW LEVEL
+  SECURITY` and left Decision 7's safety net inert on this machine — the recipe in
+  `docs/LOCAL_POSTGRES.md` said to create it that way, and both recipe and machine are corrected.
+  **`scripts/plan_progress.py` crashed on Windows** with `UnicodeDecodeError`, because
+  `read_text()` takes the locale codec and cp1252 cannot read the plan's em-dashes — the very
+  command this file tells every session to run when it finishes work; the block was current all
+  along. **Eight `test_catia_local_bridge` tests** hit a `sys.platform`-guarded `tasklist` probe
+  for the first time: the process double is not a context manager, so `subprocess.run` raised
+  inside a broad handler, and the probe's own call shifted every positional index into the
+  captured spawn list — and two of them read the *real* probe, so their result depended on whether
+  CATIA happened to be open. A conduction tolerance was absolute where it had to be relative
+  (`1e-12 W` vs a measured `1.28e-12`, relative `1.7e-13` — LAPACK, not physics), and
+  `CONDUCTION_BACKEND` was undocumented in `.env.example`. Guards verified by breaking each
+  normalisation separately and watching a named test fail, restores checked back.
 - **2026-09-09 — E7 closes and the Linux stretch stops here (`*E7`, 10/29 phases).**
   Task 6's last third: **a temperature field now reaches a request.** `analysis:
   "thermal-conduction"` with a `thermal_case` solves through the queue, the mesher, the

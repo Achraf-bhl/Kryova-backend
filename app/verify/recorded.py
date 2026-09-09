@@ -113,13 +113,33 @@ def code_fingerprint(root: Path | None = None) -> str:
     Over the file *contents* keyed by relative path, sorted, so it is stable
     across machines and checkouts and moves the moment anything that decides an
     answer does.
+
+    **Both normalisations below exist to make that first claim true, and it was
+    false until 2026-09-09.** Measured on the Windows seat, where a recorded run
+    made on Linux was discarded and the trust page published *nothing is
+    validated* — the honest response to a fingerprint mismatch, and here a
+    mismatch that meant nothing at all:
+
+    * **The key is `as_posix()`, not `str()`.** `str(PurePath)` is
+      `app\\solve\\deck.py` on Windows and `app/solve/deck.py` on Linux, so the
+      same tree fingerprints differently by platform.
+    * **CRLF is folded out of the content.** Git's `core.autocrlf=true` is the
+      default on a Windows install, so every `.py` in the working tree arrives
+      with CRLF while the committed blob has LF. Hashing raw bytes therefore
+      hashes the checkout's line-ending policy along with the source.
+
+    Neither alone is enough — the two together are what reproduce the digest a
+    Linux recording carries, and `TestTheFingerprintIsStableAcrossCheckouts`
+    pins each separately. Normalising here rather than demanding a
+    `.gitattributes` because this must hold on any checkout it is handed,
+    including one made before such a file existed.
     """
     base = _REPO_ROOT if root is None else root
     digest = hashlib.sha256()
     for path in _fingerprinted_files(base):
-        digest.update(str(path.relative_to(base)).encode("utf-8"))
+        digest.update(path.relative_to(base).as_posix().encode("utf-8"))
         digest.update(b"\0")
-        digest.update(hashlib.sha256(path.read_bytes()).digest())
+        digest.update(hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).digest())
     return "sha256:" + digest.hexdigest()
 
 

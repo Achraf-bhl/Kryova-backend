@@ -294,14 +294,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--date", default=_dt.date.today().isoformat())
     args = parser.parse_args(argv)
 
-    text = PLAN.read_text()
+    # Explicit encoding, and an explicit newline on the way out. Python 3.14
+    # still picks the *locale* codec for text IO, which on Windows is cp1252 and
+    # cannot decode this plan's em-dashes: `--check` died with a
+    # UnicodeDecodeError on the seat (2026-09-09), in the very command the
+    # workflow tells every session to run when it finishes work. The write pins
+    # newline as well, because the platform default there would translate every
+    # line ending and rewrite the whole plan as one enormous diff.
+    text = PLAN.read_text(encoding="utf-8")
     phases = read_phases(text)
     attach_effort(phases, text)
     fresh = render(phases, args.date)
 
     if args.write:
         head, _, tail = _split(text)
-        PLAN.write_text(head + fresh + tail)
+        PLAN.write_text(head + fresh + tail, encoding="utf-8", newline="\n")
         print(f"{PLAN.name}: progress block regenerated ({args.date})")
         return 0
 

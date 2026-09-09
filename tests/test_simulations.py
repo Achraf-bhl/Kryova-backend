@@ -819,3 +819,195 @@ class TestAConvergedAnswerCanBeAskedFor:
 
         assert response.status_code == 422
         assert "three" in response.text
+
+
+class TestAConductionAnalysisCanBeAskedFor:
+    """E7 task 6's last piece: the temperature field reaches a request.
+
+    The physics landed on 2026-09-09 and the seam — `ConductionSolver` beside
+    `Solver`, `ModalSolver` and `PlanarSolver`, with its own registry table — the
+    same day, and neither made it reachable: the solver could be *selected by
+    configuration* and never *asked for*. That is this project's oldest failure
+    mode and the third time in four days it has turned up, so what these tests
+    check is the route, the row and the arithmetic through the real path.
+
+    The oracle is the one-dimensional bar: hold one end at 400 K and the other at
+    300 K, and every plane between them sits on the straight line joining them.
+    The box is 60 mm long in z, so the mid-plane is at 350 K and the peak is 400.
+    """
+
+    def _bar_case(self, hot_k: float = 400.0, cold_k: float = 300.0) -> dict:
+        return {
+            "name": "Bar between two plates",
+            "conductivity_w_mk": 51.9,  # mild steel
+            "boundaries": [
+                {
+                    "type": "fixed_temperature",
+                    "where": {"type": "face", "axis": "z", "side": "min"},
+                    "temperature_k": hot_k,
+                },
+                {
+                    "type": "fixed_temperature",
+                    "where": {"type": "face", "axis": "z", "side": "max"},
+                    "temperature_k": cold_k,
+                },
+            ],
+        }
+
+    def _run(self, client: AuthenticatedTestClient, project_id: str, **overrides) -> dict:
+        payload = {
+            "analysis": "thermal-conduction",
+            "thermal_case": self._bar_case(),
+            "element_size_mm": 10.0,
+            **overrides,
+        }
+        response = client.post(f"/api/v1/projects/{project_id}/simulations", json=payload)
+        assert response.status_code == 202, response.text
+        return response.json()
+
+    def test_the_bar_between_two_plates_comes_back_at_the_right_temperatures(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["status"] == "succeeded", job["error"]
+        assert job["result"]["max_temperature_k"] == pytest.approx(400.0, abs=1e-6)
+        assert job["result"]["min_temperature_k"] == pytest.approx(300.0, abs=1e-6)
+
+    def test_the_row_records_the_analysis_and_the_case_it_solved(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """A conduction row carries a thermal case and **no** load case. Writing an
+        empty one would put a material and a set of fixtures nobody chose into the
+        provenance of a temperature field."""
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["analysis"] == "thermal-conduction"
+        assert job["load_case"] is None
+        assert job["thermal_case"]["conductivity_w_mk"] == pytest.approx(51.9)
+
+    def test_the_row_names_the_conduction_solver_that_ran(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """`SOLVER_BACKEND` names a *structural* solver and does not choose this
+        one; `CONDUCTION_BACKEND` does, and the row records what actually ran."""
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["solver"] == "steady-conduction"
+
+    def test_the_stored_field_carries_temperatures_and_not_zeroed_stresses(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """A conduction run has no displacement and no stress. Writing zeros for
+        them would put a field into the archive that reads as an answer."""
+        import io
+
+        import numpy as np
+
+        job = self._run(auth_client, project_with_geometry)
+        media = auth_client.get(f"/api/v1/media/{job['fields_media_id']}/content")
+        assert media.status_code == 200
+        archive = np.load(io.BytesIO(media.content))
+        assert "temperatures_k" in archive
+        assert "heat_flux_w_m2" in archive
+        assert "von_mises_nodal" not in archive
+
+    def test_a_conduction_run_without_a_thermal_case_is_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={"analysis": "thermal-conduction", "element_size_mm": 10.0},
+        )
+        assert response.status_code == 422
+        assert "thermal_case" in response.text
+
+    def test_a_conduction_run_that_also_carries_a_load_case_is_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """It would be ignored while looking like part of the model."""
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={
+                "analysis": "thermal-conduction",
+                "thermal_case": self._bar_case(),
+                "load_case": load_case(),
+                "element_size_mm": 10.0,
+            },
+        )
+        assert response.status_code == 422
+        assert "takes no load_case" in response.text
+
+    def test_a_structural_run_that_carries_a_thermal_case_is_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={
+                "load_case": load_case(),
+                "thermal_case": self._bar_case(),
+                "element_size_mm": 10.0,
+            },
+        )
+        assert response.status_code == 422
+        assert "takes no thermal_case" in response.text
+
+    def test_a_convergence_study_of_a_temperature_field_is_refused_by_name(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The study assesses peak von Mises stress, which a temperature field does
+        not have. Refused rather than silently solved once."""
+        job = self._run(auth_client, project_with_geometry, grids=3)
+
+        assert job["status"] == "failed"
+        assert "temperature field does not have" in job["error"]
+
+    def test_a_thickness_is_refused_on_a_conduction_run(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """Same rule as a solid: the geometry carries its own thickness, and one
+        supplied here would be silently dropped."""
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={
+                "analysis": "thermal-conduction",
+                "thermal_case": self._bar_case(),
+                "thickness_mm": 5.0,
+                "element_size_mm": 10.0,
+            },
+        )
+        assert response.status_code == 422
+
+    def test_the_ai_interpreter_refuses_a_run_with_no_load_case(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """It is written entirely around fixtures, loads and a factor of safety, so
+        it would produce fluent prose about a load case that does not exist."""
+        job = self._run(auth_client, project_with_geometry)
+        response = auth_client.post(
+            f"/api/v1/projects/{job['project_id']}/simulations/{job['id']}/interpretation"
+        )
+
+        assert response.status_code == 409
+        assert "no load case" in response.json()["detail"]
+
+    def test_the_conduction_backend_setting_is_what_selects_the_solver(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
+    ) -> None:
+        """`CONDUCTION_BACKEND`, never `SOLVER_BACKEND`.
+
+        The two default to the same value, so a run that succeeded could not tell
+        which one was read — this asks for a conduction backend that does not
+        exist and checks the refusal comes from the conduction registry, naming
+        `*HEAT TRANSFER`. Pointing `SOLVER_BACKEND` at the same name would not
+        move this job at all, which is the property being pinned: a deployment
+        that set `SOLVER_BACKEND=calculix` for its structural work must not
+        thereby change what answers a temperature field.
+        """
+        from app.simulation import runner as simulation_runner
+
+        monkeypatch.setattr(simulation_runner.settings, "conduction_backend", "calculix")
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["status"] == "failed"
+        assert "HEAT TRANSFER" in job["error"]

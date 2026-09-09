@@ -160,13 +160,19 @@ PLANE_STATES: dict[str, PlaneState] = {
     "plane-strain": PlaneState.STRAIN,
 }
 
+#: The analysis that solves for a temperature field rather than a displacement.
+#: Named rather than written as a literal in three places, and kept out of
+#: `PLANE_STATES` because it is not an idealisation of a structural problem — it
+#: is a different equation with a different case, a different solver ABC and a
+#: different result type.
+CONDUCTION: str = "thermal-conduction"
+
 #: Every value `SimulationJob.analysis` may hold.
-ANALYSES: tuple[str, ...] = ("solid", *PLANE_STATES)
+ANALYSES: tuple[str, ...] = ("solid", *PLANE_STATES, CONDUCTION)
 
 
 def _execute(job: SimulationJob, media: MediaService, solver: Solver, usage: UsageScope):
     version = job.geometry_version
-    case = LoadCase.model_validate(job.load_case)
 
     # Before gmsh, not after: the post-mesh check below only fires once the
     # machine has already paid for the mesh, and a small enough element size
@@ -176,6 +182,16 @@ def _execute(job: SimulationJob, media: MediaService, solver: Solver, usage: Usa
     # Blobs live on this machine, so gmsh can read the file in place -- no
     # staging copy, however large the part is.
     path = media.local_path(version.media)
+
+    if job.analysis == CONDUCTION:
+        return _execute_conduction(job, path, version.file_format, usage)
+
+    if job.load_case is None:
+        raise ValueError(
+            f"This {job.analysis} job has no load case, so there is nothing to solve. "
+            "Only a thermal-conduction run is written without one."
+        )
+    case = LoadCase.model_validate(job.load_case)
 
     if job.analysis in PLANE_STATES:
         return _execute_plane(job, path, version.file_format, case, usage)
@@ -279,6 +295,64 @@ def _execute_study(
     output.result.mesh_convergence = MeshConvergence.from_study(study)
     mesh_stats = dict(mesh_stats) | {"study": study.to_dict()}
     return mesh, mesh_stats, output, solver.name
+
+
+def _execute_conduction(
+    job: SimulationJob,
+    path: Path,
+    file_format: str,
+    usage: UsageScope,
+) -> tuple[TetMesh, dict, object, str]:
+    """A steady-state conduction run: temperatures out, no displacement anywhere.
+
+    **The last of E7 task 6's three pieces.** The physics landed on 2026-09-09 and
+    the seam the same day — `ConductionSolver` beside `Solver`, `ModalSolver` and
+    `PlanarSolver`, with its own registry table — and neither made it reachable
+    from a request: the solver could be selected by configuration and never
+    *asked for*. This is that call, and it is the third time in four days this
+    codebase has found a capability built and never connected.
+
+    Two things it does not share with the structural path, both deliberate. The
+    solver comes from `build_conduction_solver` and `CONDUCTION_BACKEND` rather
+    than from the injected `Solver`: `SOLVER_BACKEND` names a solver for a
+    different analysis, and reading it here is how `calculix` would come to
+    select the in-house conduction solver by accident. And there is no
+    convergence study: `run_study` assesses one scalar over successive grids and
+    the quantity it is pointed at (`MAX_VON_MISES`) does not exist in a
+    temperature field, so a `grids > 1` conduction job is refused by name rather
+    than silently solved once — a study whose quantity was invented for it would
+    be a number nobody asked for.
+    """
+    from app.solve.conduction import ThermalCase
+    from app.solve.registry import build_conduction_solver
+
+    if job.thermal_case is None:
+        raise ValueError(
+            "A thermal-conduction job needs a thermal case — a conductivity and at "
+            "least one boundary condition. This one has none, so there is nothing to "
+            "solve."
+        )
+    if job.grids > 1:
+        raise ValueError(
+            "A convergence study is not available for a thermal-conduction run yet: "
+            "the study assesses the peak von Mises stress, which a temperature field "
+            "does not have. Ask for one grid, or run the structural analysis whose "
+            "convergence you want measured."
+        )
+
+    case = ThermalCase.model_validate(job.thermal_case)
+    mesh, mesh_stats = generate_tet_mesh(
+        path, file_format, job.element_size_mm, element_order=job.element_order
+    )
+    usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
+    if mesh.tet_count > settings.max_elements:
+        raise MeshError(
+            f"The mesh has {mesh.tet_count:,} elements, over the {settings.max_elements:,} "
+            "limit. Increase element_size_mm to coarsen it."
+        )
+
+    conduction = build_conduction_solver(settings.conduction_backend)
+    return mesh, mesh_stats, conduction.solve(mesh, case), conduction.name
 
 
 def _automatic_size(job: SimulationJob) -> float:
@@ -386,11 +460,32 @@ def _store_fields(
     if isinstance(mesh, TriMesh):
         cells = mesh.tris
         surface = mesh.tris
-        nodal = _nodal_average_over(mesh.node_count, mesh.tris, output.von_mises)
     else:
         cells = mesh.tets
         surface = mesh.surface_triangles
-        nodal = nodal_average(mesh, output.von_mises)
+
+    # A conduction run has no displacement and no stress, and writing zeros for
+    # them would put a field into the archive that reads as an answer. The keys
+    # differ because the physics differs; a reader that finds `temperatures_k`
+    # knows it is not looking at a structural result, where one that found
+    # `von_mises_nodal` full of zeros would not.
+    if hasattr(output, "temperatures_k"):
+        arrays: dict[str, Any] = {
+            "temperatures_k": output.temperatures_k,
+            "heat_flux_w_m2": output.heat_flux_w_m2,
+        }
+    else:
+        nodal = (
+            _nodal_average_over(mesh.node_count, mesh.tris, output.von_mises)
+            if isinstance(mesh, TriMesh)
+            else nodal_average(mesh, output.von_mises)
+        )
+        arrays = {
+            "displacements": output.displacements,
+            "von_mises_element": output.von_mises,
+            "von_mises_nodal": nodal,
+        }
+
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir) / "fields.npz"
         np.savez_compressed(
@@ -398,9 +493,7 @@ def _store_fields(
             nodes=mesh.nodes,
             tets=cells,
             surface_triangles=surface,
-            displacements=output.displacements,
-            von_mises_element=output.von_mises,
-            von_mises_nodal=nodal,
+            **arrays,
         )
         return media.store_path(
             owner_id=job.project.owner_id,

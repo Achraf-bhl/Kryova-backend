@@ -179,6 +179,20 @@ def interpret_simulation(
             detail=f"Simulation is {job.status.value}; there is nothing to interpret yet",
         )
 
+    if job.load_case is None:
+        # A thermal-conduction job has no mechanical case, and the interpreter is
+        # written entirely around one — fixtures, loads, a factor of safety. It
+        # would produce fluent prose about a load case that does not exist rather
+        # than fail, which is the worst of the three possible outcomes.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This is a {job.analysis} run and has no load case, so the structural "
+                "interpretation has nothing to read. Its result carries the temperature "
+                "field directly."
+            ),
+        )
+
     _enforce_budget(db, current_user)
     provider = _provider_or_503()
     try:

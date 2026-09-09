@@ -256,6 +256,14 @@ class Settings(BaseSettings):
     # result to what produced it. A named solver that cannot run is an error, not
     # a substitution.
     solver_backend: str = "internal"
+    # Which solver runs a *conduction* job, and it is deliberately its own
+    # setting. `SOLVER_BACKEND` names a structural solver: a deployment that had
+    # set it to `calculix` and then asked for a temperature field would be asking
+    # a name chosen for a different analysis to answer this one, and today that
+    # is refused by name rather than quietly handed the in-house solver. When
+    # ccx's `*HEAT TRANSFER` step is federated behind the seam, this is the knob
+    # that selects it -- separately, because the two choices are independent.
+    conduction_backend: str = "internal"
     # Where `ccx` is, when it is not on PATH. Empty means "look on PATH" --
     # `app/solve/calculix/run.py` refuses to fall back to PATH when this names a
     # path that does not exist, so a wrong setting is reported rather than

@@ -54,20 +54,32 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
     #: whose provenance says only "calculix" cannot be reproduced in two years.
     solver_version: Mapped[str | None] = mapped_column(String(64), default=None)
 
-    load_case: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    #: The mechanical case: fixtures, loads, material. **Nullable since
+    #: 2026-09-09**, because a steady-conduction run genuinely has none — no
+    #: fixture, no force, and a conductivity where a modulus would be. Storing an
+    #: empty `LoadCase` on such a row would have put a material and a set of
+    #: fixtures nobody chose into the provenance of a temperature field.
+    load_case: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    #: The thermal case for a `thermal-conduction` run: conductivity, boundaries
+    #: and any volumetric source. A sibling column rather than a widened
+    #: `load_case`, for the reason `ThermalCase` is a sibling of `LoadCase` —
+    #: folding them together invites a reader to believe the mechanical loads
+    #: influenced the temperature.
+    thermal_case: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     element_size_mm: Mapped[float | None] = mapped_column(Float, default=None)
     # 1 = tet4, 2 = tet10. Stored rather than derived because the mesh it
     # produced is not kept, and a result is only reproducible alongside the
     # element order that computed it.
     element_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
-    #: Which idealisation was solved: `solid`, `plane-stress` or `plane-strain`.
+    #: Which idealisation was solved: `solid`, `plane-stress`, `plane-strain` or
+    #: `thermal-conduction`.
     #: Stored for the same reason `element_order` is — the mesh is not kept, and
     #: plane stress and plane strain give *different answers on the same mesh and
     #: the same load*, so a result whose row does not say which one ran cannot be
     #: reproduced or even argued with. `solid` is the server default, so every
     #: row written before this column existed keeps the meaning it had.
     analysis: Mapped[str] = mapped_column(
-        String(16), default="solid", server_default="solid"
+        String(32), default="solid", server_default="solid"
     )
     #: How many successively finer grids to solve. 1 is one mesh and the
     #: default, which is what every run before this column did. 3 or more turns

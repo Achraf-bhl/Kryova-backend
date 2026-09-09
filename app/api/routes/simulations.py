@@ -91,9 +91,18 @@ def create_simulation(
         geometry_version_id=geometry.id,
         status=JobStatus.QUEUED,
         # What was *asked for*. The runner overwrites it with the solver that
-        # actually ran, which is the one a result can be attributed to.
-        solver=settings.solver_backend,
-        load_case=payload.load_case.model_dump(),
+        # actually ran, which is the one a result can be attributed to — and for
+        # a conduction run that is a different solver entirely, chosen by
+        # `CONDUCTION_BACKEND` rather than by `SOLVER_BACKEND`.
+        solver=(
+            settings.conduction_backend
+            if payload.analysis == "thermal-conduction"
+            else settings.solver_backend
+        ),
+        load_case=payload.load_case.model_dump() if payload.load_case else None,
+        thermal_case=(
+            payload.thermal_case.model_dump() if payload.thermal_case else None
+        ),
         element_size_mm=payload.element_size_mm,
         element_order=payload.element_order,
         grids=payload.grids,

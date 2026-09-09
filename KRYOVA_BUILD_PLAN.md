@@ -221,6 +221,34 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-10 — ladder Levels 2 and 3 both pass for the first time, on DeepSeek.** Report:
+  `docs/verification-2026-09-10/`; run log in the ladder. `AI_PROVIDER=openai_compatible`
+  against `https://api.deepseek.com` with `deepseek-v4-pro` — **no provider code was needed**,
+  only settings, and the key lives in the gitignored `.env.local`. A tool-calling probe returns
+  a correct structured call in 1.27 s against 8–15 s locally.
+  **L2 passed with the same prompt that failed four times on 2026-09-09**: 0.8600238 kg against
+  a hand-checked 0.86002, fourteen operations, **zero refusals**, and
+  `sketch_create(support="top")` succeeding first try — the bare face word added the day before,
+  and the exact call that had failed four times.
+  **L3 passed and is the best answer this product has produced.** Asked whether a peak stress
+  was converged, it ran a real grid study (8 mm/1,620 el → 144.9 MPa, 4 mm/12,550 el →
+  176.5 MPa) and said plainly that it is **not** converged — +22% on one refinement step —
+  because a fully-clamped sharp corner is a stress singularity that rises without bound. It
+  separated that from the quantity that does converge (tip deflection 2.213 → 2.158 mm), and
+  offered the two real fixes. Beam theory gives 208.3 MPa and 2.258 mm; the FE deflection sits
+  4% below, which is correct for a clamp that restrains warping.
+  **One new defect, and it is why L3 had to move to the seat: a part built on the open kernel
+  cannot reach the solver.** `catia_export_step` is not among the 116 occt operations, and
+  nothing in them matches `export|save|step|geometry|sync|mesh|solve`; both geometry→solver
+  routes are CATIA-only. It is a seam rather than a missing capability —
+  `manufacture.export.write_step` works and the kernel document holds the shape — and it blocks
+  ladder Levels 3–5 on `occt` along with every analysis feature this run was told to test. Same
+  shape as CLAUDE.md's D2: the agent can build a part and then do nothing to it, invisible to
+  the offline suite because the gap sits one layer above `dispatch`.
+  **And `draft_load_case` still guesses the wrong axis** (recorded 2026-09-08, unfixed). The
+  agent caught and corrected it itself this time, which makes it less visible rather than less
+  real. The 32,768-token context wall from 2026-09-09 is gone: 18+ operations across three
+  meshes in one conversation without truncation.
 - **2026-09-09 — a shell deck goes through ccx, and LE3 does not reach 185 mm.** Second seat
   session. Regression first and the engine checked before believing it: **7,374 passed / 2
   skipped / 1 xpassed / 0 failed** against real PostgreSQL (`TEST_DATABASE_URL` verified to

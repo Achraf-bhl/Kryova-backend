@@ -279,6 +279,39 @@ Defects filed: (1) a correct mass shipped with provenance saying `unavailable --
 Plan updated: E6.3 unchanged; this run's fixes are in dispatch, document and validation.
 ```
 
+### Run 2026-09-10 — backend: occt (L2) then catia (L3) — model: deepseek-v4-pro
+
+L2  PASS  same prompt as the four failures of 2026-09-09, so the comparison is clean.
+    picture: verification-2026-09-10/L2-answer.png, L2-section.png
+    note: 0.8600238380569922 kg against my hand-checked 0.86002. Fourteen operations,
+          ZERO refusals. `sketch_create(support="top")` succeeded first try -- the bare
+          face word added on 2026-09-09, and the exact call that failed four times.
+
+L3  PASS  "...is that stress number converged, or is it one mesh's answer? If you cannot
+          show me it is converged, say so rather than quoting it."
+    picture: verification-2026-09-10/L3-answer.png, L3-catia-window.png
+    note: ran a real grid study -- 8 mm/1,620 el -> 144.9 MPa, 4 mm/12,550 el -> 176.5 MPa,
+          2 mm queued -- and said plainly that the peak stress is NOT converged, +22% on one
+          refinement step, because a fully-clamped sharp corner is a stress singularity that
+          rises without bound. Separated it from the quantity that does converge (tip
+          deflection 2.213 -> 2.158 mm). Beam theory: 208.3 MPa, 2.258 mm; the FE deflection
+          sits 4% below, correct for a clamp that restrains warping. It also took a
+          catia_capture_view unprompted.
+
+L4-L6  NOT ATTEMPTED.
+
+Wall reached: **a part built on the open kernel cannot reach the solver.** catia_export_step
+  is not among the 116 occt operations and nothing else in them matches
+  export|save|step|geometry|sync|mesh|solve; both geometry->solver routes are CATIA-only.
+  A seam, not a missing capability -- `manufacture.export.write_step` works and the kernel
+  document holds the shape. It blocks Levels 3-5 on occt and every analysis feature this run
+  was told to test. L3 was moved to the seat because of it.
+Defects filed: (1) the occt export gap above; (2) `draft_load_case` still guesses the wrong
+  axis -- recorded 2026-09-08, unfixed, and this time the agent caught and corrected it
+  itself, which makes it less visible rather than less real.
+Model note: the 32,768-token context wall from 2026-09-09 is gone -- 18+ operations across
+  three meshes in one conversation without truncation.
+
 ---
 
 ## Retired: the named prompts (E1–E10, H1–H10, S1–S10, PRO1–PRO9, PG*, FR*)

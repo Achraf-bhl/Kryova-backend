@@ -64,3 +64,8 @@ _probe*.py
 
 # Claude Code personal overrides
 .claude/settings.local.json
+
+# A backup of a secrets file is still a secrets file. `.env.local` is ignored
+# below; `.env.local.bak` was not, and a session that copies one aside before
+# editing would have committed the database password (2026-09-10).
+.env*.bak

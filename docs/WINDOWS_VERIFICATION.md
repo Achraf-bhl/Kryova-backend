@@ -195,7 +195,45 @@ server inherits and the Git Bash one.
       solve through the product's writer at their submitted node counts (A3) but
       their expanded counts were not separately read back; that half is unticked in
       spirit and worth ten minutes next session.
-- [ ] **A6 — NAFEMS LE3, the hemisphere, once a shell deck actually solves.** Added 2026-09-08,
+- [ ] **A6 — NAFEMS LE3, the hemisphere.** MEASURED 2026-09-09 (second seat session):
+      **a shell deck solves, LE3 does not reproduce 185 mm, and the box stays unticked.**
+
+      *The half that works.* A flat cantilever plate under pressure was solved first, as the
+      order requires, and all four shell element types went through ccx 2.23 and behaved
+      exactly as shell theory says they should — against a closed form of 36.585 mm (beam)
+      / 33.51 mm (wide plate): **S3 14.009 mm (−61.7%, linear triangles lock hard), S4
+      33.131 (−9.4%), S6 35.541 (−2.9%), S8R 35.557 (−2.8%)**. The quadratic answers sit
+      between the beam and plate bounds, where an aspect ratio of 5 puts them. **The S8R
+      negative corner loads do not upset ccx** — that was the specific worry, and S8R gave
+      the best answer of the four.
+
+      *The half that does not.* LE3 encoded as a shell (closed pole, quarter sector,
+      R = 10 000 mm, t = 40 mm, E = 68 250, ν = 0.3, full 2 kN at A and C, not halved)
+      **does not reach 185 mm on any mesh**, and two readings of the symmetry edges bracket
+      it without either being right:
+
+      | edge condition | u_x(A), converged | vs 185 |
+      |---|---|---|
+      | uy/θx/θz on AE and ux/θy/θz on CE — the correct symmetry set | **1.21 mm** | −99.3% |
+      | translations only (uy on AE, ux on CE) | **199.5 mm** | **+7.8%** |
+
+      The pole treatment is irrelevant: z at the pole, z at A (the deck's reading) and a
+      fully clamped pole all give 1.206 mm to three decimals. It is the **rotational
+      constraints on the symmetry edges** that stiffen the model 150×. Both sets were
+      derived from first principles — under reflection an axial vector picks up a sign, so
+      symmetry about y = 0 gives θx = θz = 0 with θy free — and they agree with §2.3.
+      A six-DOF `clamp` works correctly on the flat plate above, so rotational BCs do reach
+      ccx; it is specifically an *edge* of them that over-constrains. The suspicion to test
+      next is CalculiX's knot mechanism: a rotational DOF on an expanded shell node makes
+      that node's expanded cross-section rigid, and a whole edge of those adds hoop
+      stiffness to a problem whose entire subject is inextensional bending.
+
+      **The 2% tolerance was not loosened.** +7.8% is not a pass, and the reading that
+      produces it is under-constrained rather than correct — it omits a condition the
+      benchmark requires, which is why it comes out soft. One mesh (tri6, 700 mm, 815
+      faces) returned **7.686 mm**, a second instability worth chasing separately.
+
+      Original entry follows. Added 2026-09-08,
       and now the **only** case in the catalogue this machine cannot eventually reach on its own
       (LE11 waits on physics, not hardware). Clearing it takes the trust page from three
       validated cases to four, and from two validated *analyses* to three — LE1 and LE10 are

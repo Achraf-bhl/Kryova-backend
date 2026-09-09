@@ -221,6 +221,28 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-09 — a shell deck goes through ccx, and LE3 does not reach 185 mm.** Second seat
+  session. Regression first and the engine checked before believing it: **7,374 passed / 2
+  skipped / 1 xpassed / 0 failed** against real PostgreSQL (`TEST_DATABASE_URL` verified to
+  resolve to `kryova_test`, not the SQLite fallback), ruff and mypy clean, V&V artefact current.
+  **A6, the half that works.** A flat cantilever plate under pressure, solved first as the order
+  requires: all four shell element types through ccx 2.23, against 36.585 mm (beam) / 33.51 mm
+  (wide plate) — S3 **14.009** (−61.7%, linear triangles locking as they should), S4 **33.131**
+  (−9.4%), S6 **35.541** (−2.9%), S8R **35.557** (−2.8%). The quadratic answers land between the
+  beam and plate bounds. **The S8R negative corner loads do not upset ccx**, which was the
+  specific thing to confirm.
+  **A6, the half that does not, and the box stays unticked.** LE3 as a shell — closed pole,
+  quarter sector, R = 10 000, t = 40, E = 68 250, ν = 0.3, the full 2 kN at A and C — reaches
+  **1.21 mm** with the correct symmetry rotational constraints (−99.3%) and **199.5 mm** with
+  translations only (+7.8%). Neither is 185. The pole treatment makes no difference at all: z at
+  the pole, z at A and a clamped pole agree to three decimals. It is the **rotational constraints
+  on the symmetry edges** that stiffen it 150×, and a six-DOF `clamp` works correctly on the flat
+  plate, so rotational BCs do reach ccx — an *edge* of them is what over-constrains. Next
+  suspicion is CalculiX's knot mechanism making each constrained node's expanded cross-section
+  rigid. **The 2% tolerance was not loosened**; +7.8% comes from a reading that omits a condition
+  the benchmark requires, so it is soft rather than right. One mesh returned 7.686 mm, a separate
+  instability.
+  Not reached this session: queue E3, tier 3 / section B, and Job 3.
 - **2026-09-09 — sketching on a face was never the missing capability; one operation had been
   left behind a shipped phase.** `elements.plane_frame` is the single resolver every "which
   plane" argument goes through, and `catia_sketch_create` was the last one still holding a

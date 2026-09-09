@@ -18,6 +18,10 @@ Reading order:
    it flattens to. Its docstring lists exactly what can and cannot be unfolded.
 5. `formability.py` — the three limits that decide whether it can be formed,
    each refusing rather than warning.
+6. `fold.py` — the same part placed in space rather than flat: a frame per
+   flange, a cylindrical sector per bend, and the closed-form volume of the
+   solid. `app.kernel.occt.sheetmetal` builds geometry from it; nothing here
+   imports a kernel, so the placement stays as cheap to test as the blank.
 
 The package runs offline with no geometry kernel, no solver and no database —
 the property `app/design/` keeps and for the same reason: a flat pattern is
@@ -45,6 +49,14 @@ from app.sheetmetal.errors import (
     FormabilityError,
     SheetMetalError,
     UnfoldError,
+)
+from app.sheetmetal.fold import (
+    FoldedBend,
+    FoldedFace,
+    FoldedLayout,
+    blank_volume_difference_mm3,
+    fold_layout,
+    folded_volume_mm3,
 )
 from app.sheetmetal.formability import (
     AIR_BEND_DIE_RATIO,
@@ -87,6 +99,8 @@ from app.sheetmetal.unfold import (
     Joint,
     Polyline,
     SheetMetalPart,
+    TangentExtents,
+    tangent_extents,
     unfold,
 )
 
@@ -110,6 +124,9 @@ __all__ = [
     "FlatFace",
     "FlatHole",
     "FlatPattern",
+    "FoldedBend",
+    "FoldedFace",
+    "FoldedLayout",
     "FormabilityError",
     "FormabilityReport",
     "Hole",
@@ -123,18 +140,23 @@ __all__ = [
     "SheetMaterial",
     "SheetMetalError",
     "SheetMetalPart",
+    "TangentExtents",
     "UnfoldError",
     "air_bend_die_opening_mm",
     "assumed",
     "bend_allowance_mm",
+    "blank_volume_difference_mm3",
     "bend_deduction_mm",
     "check_part",
     "din6935",
+    "fold_layout",
+    "folded_volume_mm3",
     "machinerys_handbook",
     "measured",
     "minimum_flange_mm",
     "setback_mm",
     "sheet_material",
+    "tangent_extents",
     "unfold",
     "unstated",
 ]

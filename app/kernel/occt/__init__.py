@@ -9,7 +9,8 @@ Read in this order:
 * `selectors` — resolving the registry's selector words against real geometry;
 * `document` — a part mid-construction, and the label tree that survives regeneration;
 * `operations/` — one module per domain, assembled into the handler table;
-* `runner` — the `CallRunner` the executor drives.
+* `runner` — the `CallRunner` the executor drives;
+* `sheetmetal` — a folded `SheetMetalPart` built as one solid (phase 17.3).
 
 Nothing here imports `app.design`. The dependency runs one way: the design layer knows
 about `CallRunner`, and this implements it.
@@ -27,6 +28,7 @@ from app.kernel.occt.naming import (
 )
 from app.kernel.occt.runner import OcctRunner
 from app.kernel.occt.selectors import select_edges
+from app.kernel.occt.sheetmetal import build_layout, fold
 
 __all__ = [
     "DISTRIBUTION",
@@ -37,7 +39,9 @@ __all__ = [
     "PartDocument",
     "allocate_feature_labels",
     "available",
+    "build_layout",
     "evolution_of",
+    "fold",
     "import_error",
     "occt_version",
     "record_derived",

@@ -73,7 +73,7 @@ on drawings.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final
@@ -488,6 +488,111 @@ class _Placed:
     left_setback_mm: float
 
 
+@dataclass(frozen=True)
+class TangentExtents:
+    """How much of one flange is still flat, once its bends have taken their setbacks.
+
+    The rectangle between a flange's tangent lines, in millimetres, plus the
+    setback each of its four edges gave up to get there. It is **public and
+    computed in one place on purpose**: the flat pattern and the folded solid
+    (`app.kernel.occt.sheetmetal.fold`) are two descriptions of one part, and the
+    residual between them is the only thing standing between "the blank makes the
+    part in the picture" and "somebody typed the same numbers twice". A leg that
+    is 47.4 mm long in one description and 48.0 mm in the other would show up
+    there as a volume mismatch nobody could attribute.
+
+    `declared_width_mm` is the mould-line width the flange was given, or the
+    parent edge it was told to span; `tangent_width_mm` is what is left of it.
+    """
+
+    flange: Flange
+    declared_width_mm: float
+    tangent_length_mm: float
+    tangent_width_mm: float
+    setbacks_mm: Mapping[Edge, float]
+
+    @property
+    def near_setback_mm(self) -> float:
+        return self.setbacks_mm[Edge.NEAR]
+
+    @property
+    def left_setback_mm(self) -> float:
+        return self.setbacks_mm[Edge.LEFT]
+
+
+def tangent_extents(part: SheetMetalPart) -> dict[str, TangentExtents]:
+    """Every flange's flat rectangle, by name, and every refusal that decides it.
+
+    Raises `UnfoldError` for a leg its own bends have eaten, a flange whose sides
+    leave nothing flat between them, and a flange hanging off the end of the edge
+    it is bent from. All three are properties of the *part*, not of the blank —
+    they refuse a folded solid exactly as they refuse a flat pattern — which is
+    why they live here rather than in `unfold`.
+    """
+    thickness = part.material.thickness_mm
+    convention = part.convention
+    out: dict[str, TangentExtents] = {}
+    for flange, parent_flange, joint in part.walk():
+        parent = out[parent_flange.name] if parent_flange is not None else None
+        setbacks = _setbacks(
+            flange, parent_joint=joint, thickness_mm=thickness, convention=convention
+        )
+        width = _resolve_width(
+            flange,
+            parent=parent,
+            parent_joint=joint,
+            side_setbacks_mm=setbacks[Edge.LEFT] + setbacks[Edge.RIGHT],
+        )
+        tangent_length = flange.length_mm - setbacks[Edge.NEAR] - setbacks[Edge.FAR]
+        tangent_width = width - setbacks[Edge.LEFT] - setbacks[Edge.RIGHT]
+        if tangent_length <= 0.0:
+            raise UnfoldError(
+                f"Flange {flange.name!r} is {flange.length_mm:g} mm to the {convention}, "
+                f"and the bends at its ends consume "
+                f"{setbacks[Edge.NEAR] + setbacks[Edge.FAR]:.3f} mm of that. There is no "
+                f"flat portion left: the two bends run into each other. Lengthen it past "
+                f"{setbacks[Edge.NEAR] + setbacks[Edge.FAR]:.3f} mm, open the radii, or "
+                f"drop a bend."
+            )
+        if tangent_width <= 0.0:
+            raise UnfoldError(
+                f"Flange {flange.name!r} is {width:g} mm wide and the bends on its sides "
+                f"consume {setbacks[Edge.LEFT] + setbacks[Edge.RIGHT]:.3f} mm of that, "
+                f"leaving nothing flat between them. Widen it or open the radii."
+            )
+        if parent is not None and joint is not None:
+            available = (
+                parent.tangent_width_mm
+                if joint.edge in (Edge.NEAR, Edge.FAR)
+                else parent.tangent_length_mm
+            )
+            if joint.offset_mm < -TOUCH_TOLERANCE_MM:
+                raise UnfoldError(
+                    f"Flange {flange.name!r} is offset {joint.offset_mm:g} mm along the "
+                    f"{joint.edge} edge of {parent.flange.name!r}, which puts it off the "
+                    f"start of that edge. Offsets run from the edge's start and are "
+                    f"positive."
+                )
+            if joint.offset_mm + tangent_width > available + TOUCH_TOLERANCE_MM:
+                raise UnfoldError(
+                    f"Flange {flange.name!r} spans {tangent_width:.3f} mm from "
+                    f"{joint.offset_mm:g} mm along the {joint.edge} edge of "
+                    f"{parent.flange.name!r}, whose flat extent there is only "
+                    f"{available:.3f} mm. A flange cannot be bent off material that is "
+                    f"already in another bend — relieve the corner and narrow it to "
+                    f"{available - joint.offset_mm:.3f} mm, or leave its width as None "
+                    f"to span the edge exactly."
+                )
+        out[flange.name] = TangentExtents(
+            flange=flange,
+            declared_width_mm=width,
+            tangent_length_mm=tangent_length,
+            tangent_width_mm=tangent_width,
+            setbacks_mm=setbacks,
+        )
+    return out
+
+
 def _setbacks(
     flange: Flange,
     *,
@@ -507,7 +612,7 @@ def _setbacks(
 def _resolve_width(
     flange: Flange,
     *,
-    parent: _Placed | None,
+    parent: TangentExtents | None,
     parent_joint: Joint | None,
     side_setbacks_mm: float,
 ) -> float:
@@ -717,59 +822,17 @@ def unfold(part: SheetMetalPart) -> FlatPattern:
     rectangles: list[tuple[float, float, float, float]] = []
     named_rectangles: list[tuple[str, tuple[float, float, float, float]]] = []
 
+    extents = tangent_extents(part)
+
     for flange, parent_flange, joint in part.walk():
         parent = placed[parent_flange.name] if parent_flange is not None else None
-        setbacks = _setbacks(
-            flange, parent_joint=joint, thickness_mm=thickness, convention=convention
-        )
-        width = _resolve_width(
-            flange,
-            parent=parent,
-            parent_joint=joint,
-            side_setbacks_mm=setbacks[Edge.LEFT] + setbacks[Edge.RIGHT],
-        )
-        tangent_length = flange.length_mm - setbacks[Edge.NEAR] - setbacks[Edge.FAR]
-        tangent_width = width - setbacks[Edge.LEFT] - setbacks[Edge.RIGHT]
-        if tangent_length <= 0.0:
-            raise UnfoldError(
-                f"Flange {flange.name!r} is {flange.length_mm:g} mm to the {convention}, "
-                f"and the bends at its ends consume "
-                f"{setbacks[Edge.NEAR] + setbacks[Edge.FAR]:.3f} mm of that. There is no "
-                f"flat portion left: the two bends run into each other. Lengthen it past "
-                f"{setbacks[Edge.NEAR] + setbacks[Edge.FAR]:.3f} mm, open the radii, or "
-                f"drop a bend."
-            )
-        if tangent_width <= 0.0:
-            raise UnfoldError(
-                f"Flange {flange.name!r} is {width:g} mm wide and the bends on its sides "
-                f"consume {setbacks[Edge.LEFT] + setbacks[Edge.RIGHT]:.3f} mm of that, "
-                f"leaving nothing flat between them. Widen it or open the radii."
-            )
+        entry_extents = extents[flange.name]
+        setbacks = entry_extents.setbacks_mm
+        tangent_length = entry_extents.tangent_length_mm
+        tangent_width = entry_extents.tangent_width_mm
         if parent is None or joint is None:
             frame = _Frame(origin=(0.0, 0.0), u_dir=(1.0, 0.0), v_dir=(0.0, 1.0))
         else:
-            available = (
-                parent.tangent_width_mm
-                if joint.edge in (Edge.NEAR, Edge.FAR)
-                else parent.tangent_length_mm
-            )
-            if joint.offset_mm < -TOUCH_TOLERANCE_MM:
-                raise UnfoldError(
-                    f"Flange {flange.name!r} is offset {joint.offset_mm:g} mm along the "
-                    f"{joint.edge} edge of {parent.flange.name!r}, which puts it off the "
-                    f"start of that edge. Offsets run from the edge's start and are "
-                    f"positive."
-                )
-            if joint.offset_mm + tangent_width > available + TOUCH_TOLERANCE_MM:
-                raise UnfoldError(
-                    f"Flange {flange.name!r} spans {tangent_width:.3f} mm from "
-                    f"{joint.offset_mm:g} mm along the {joint.edge} edge of "
-                    f"{parent.flange.name!r}, whose flat extent there is only "
-                    f"{available:.3f} mm. A flange cannot be bent off material that is "
-                    f"already in another bend — relieve the corner and narrow it to "
-                    f"{available - joint.offset_mm:.3f} mm, or leave its width as None "
-                    f"to span the edge exactly."
-                )
             allowance = joint.bend.allowance_mm(thickness)
             frame = _child_frame(
                 parent, joint, allowance_mm=allowance, child_width_mm=tangent_width
@@ -833,7 +896,7 @@ def unfold(part: SheetMetalPart) -> FlatPattern:
                     f"relieve the corner between them."
                 )
 
-    holes = _place_holes(part, placed, convention=convention)
+    holes = _place_holes(part, placed, extents, convention=convention)
     blank_outline = _trace_outline(rectangles)
     low_x = min(r[0] for r in rectangles)
     low_y = min(r[1] for r in rectangles)
@@ -858,9 +921,40 @@ def unfold(part: SheetMetalPart) -> FlatPattern:
     )
 
 
+def hole_on_face(
+    extents: TangentExtents, hole: Hole, *, convention: LengthConvention
+) -> Vector:
+    """Where a hole sits in its face's **tangent** coordinates, in millimetres.
+
+    A hole is declared from the flange's own edges in the part's length
+    convention; the flat pattern and the folded solid both need it from the
+    tangent lines instead. Refuses a hole outside the flat portion of the face —
+    a hole in a bend zone is a hole that deforms — which is a fact about the part
+    and refuses a solid exactly as it refuses a blank, so it lives here rather
+    than in either consumer.
+    """
+    u_tangent = hole.u_mm - extents.near_setback_mm
+    v_tangent = hole.v_mm - extents.left_setback_mm
+    if not (
+        -TOUCH_TOLERANCE_MM <= u_tangent <= extents.tangent_length_mm + TOUCH_TOLERANCE_MM
+        and -TOUCH_TOLERANCE_MM <= v_tangent <= extents.tangent_width_mm + TOUCH_TOLERANCE_MM
+    ):
+        raise UnfoldError(
+            f"Hole {hole.name!r} sits at ({hole.u_mm:g}, {hole.v_mm:g}) mm on "
+            f"{extents.flange.name!r}, which is off the flat part of that face — its flat "
+            f"portion runs 0 to {extents.tangent_length_mm:.3f} mm by 0 to "
+            f"{extents.tangent_width_mm:.3f} mm from the tangent lines "
+            f"({extents.near_setback_mm:.3f} and {extents.left_setback_mm:.3f} mm in "
+            f"from the {convention}). A hole in the bend zone is a hole that "
+            f"deforms; move it or drop the bend."
+        )
+    return (u_tangent, v_tangent)
+
+
 def _place_holes(
     part: SheetMetalPart,
     placed: dict[str, _Placed],
+    extents: dict[str, TangentExtents],
     *,
     convention: LengthConvention,
 ) -> tuple[FlatHole, ...]:
@@ -869,22 +963,9 @@ def _place_holes(
     for flange, _parent, _joint in part.walk():
         entry = placed[flange.name]
         for hole in flange.holes:
-            u_tangent = hole.u_mm - entry.near_setback_mm
-            v_tangent = hole.v_mm - entry.left_setback_mm
-            if not (
-                -TOUCH_TOLERANCE_MM <= u_tangent <= entry.tangent_length_mm + TOUCH_TOLERANCE_MM
-                and -TOUCH_TOLERANCE_MM <= v_tangent <= entry.tangent_width_mm
-                + TOUCH_TOLERANCE_MM
-            ):
-                raise UnfoldError(
-                    f"Hole {hole.name!r} sits at ({hole.u_mm:g}, {hole.v_mm:g}) mm on "
-                    f"{flange.name!r}, which is off the flat part of that face — its flat "
-                    f"portion runs 0 to {entry.tangent_length_mm:.3f} mm by 0 to "
-                    f"{entry.tangent_width_mm:.3f} mm from the tangent lines "
-                    f"({entry.near_setback_mm:.3f} and {entry.left_setback_mm:.3f} mm in "
-                    f"from the {convention}). A hole in the bend zone is a hole that "
-                    f"deforms; move it or drop the bend."
-                )
+            u_tangent, v_tangent = hole_on_face(
+                extents[flange.name], hole, convention=convention
+            )
             out.append(
                 FlatHole(
                     name=hole.name,
@@ -948,5 +1029,7 @@ __all__ = [
     "Joint",
     "Polyline",
     "SheetMetalPart",
+    "TangentExtents",
+    "tangent_extents",
     "unfold",
 ]

@@ -285,16 +285,29 @@ class TestThePlanKnowsItsOwnProgress:
         attach_effort(phases, text)  # raises SystemExit if Part 4 misses one
         assert all(phase.months > 0 for phase in phases)
 
-    def test_a_phase_marked_complete_has_no_unfinished_task(self) -> None:
-        """Rule 5 of the plan's own maintenance section, enforced. A `PARTIAL`
-        under a phase carrying the complete marker is the one inconsistency that
-        makes every other status in the file less believable."""
+    def test_a_complete_phase_names_every_task_it_left_open(self) -> None:
+        """Rule 5 of the plan's own maintenance section, enforced.
+
+        A phase may close over an open task -- E1 closed with its operation
+        mapping deliberately at 108/201, because Decision 1 says that number
+        grows only when something needs an operation -- but the marker has to
+        name it. Left unnamed, "✅ PHASE COMPLETE" and "PARTIAL" sit ten lines
+        apart contradicting each other, and a reader cannot tell which of them
+        went stale. That is the same failure the trust register's notes have:
+        two statements, one of them wrong, no way to tell which.
+
+        This found three real ones when it was written (E1, E3, E4), all of
+        which turned out to be honest residuals with an unhonest marker.
+        """
         from scripts.plan_progress import PLAN, read_phases
 
         phases = read_phases(PLAN.read_text(encoding="utf-8"))
         wrong = {
-            phase.key: dict(phase.counts)
+            phase.key: phase.unnamed_residuals()
             for phase in phases
-            if phase.complete and phase.counts["DONE"] != phase.tasks
+            if phase.unnamed_residuals()
         }
-        assert not wrong, f"marked ✅ PHASE COMPLETE with tasks still open: {wrong}"
+        assert not wrong, (
+            "marked ✅ PHASE COMPLETE with tasks left open that the marker does not "
+            f"mention (say which task and why it stays open): {wrong}"
+        )

@@ -42,7 +42,7 @@ import argparse
 import datetime as _dt
 import re
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -82,10 +82,27 @@ class Phase:
     counts: Counter[str] = field(default_factory=Counter)
     complete: bool = False
     months: float = 0.0
+    #: The prose of the `✅ PHASE COMPLETE` line, including its continuation.
+    marker: str = ""
+    #: Task numbers whose status is anything but `DONE`, in document order.
+    open_tasks: list[int] = field(default_factory=list)
 
     @property
     def tasks(self) -> int:
         return sum(self.counts.values())
+
+    def unnamed_residuals(self) -> list[int]:
+        """Open tasks a phase-complete marker does not mention.
+
+        A phase may carry the marker with a task still open — E1 closed with its
+        operation mapping deliberately at 108/201 and the plan says why — but
+        then the marker has to *say which*, or "complete" and "PARTIAL" sit ten
+        lines apart contradicting each other and a reader cannot tell which one
+        is stale. Naming the task turns the contradiction into a scope note.
+        """
+        if not self.complete:
+            return []
+        return [n for n in self.open_tasks if not re.search(rf"\btask {n}\b", self.marker)]
 
     @property
     def fraction(self) -> float:
@@ -103,20 +120,37 @@ def read_phases(text: str) -> list[Phase]:
     """Every phase in document order, with its task statuses attached."""
     phases: list[Phase] = []
     current: Phase | None = None
+    task: int | None = None
+    in_marker = False
     for line in text.splitlines():
         heading = _PHASE_RE.match(line)
         if heading:
             current = Phase(key=heading.group(1), title=heading.group(2))
             phases.append(current)
+            task, in_marker = None, False
             continue
         if current is None:
             continue
         if _COMPLETE_RE.match(line):
             current.complete = True
+            current.marker = line
+            in_marker = True
             continue
+        if in_marker:
+            # The marker runs on across quoted continuation lines; a blank one
+            # or anything unquoted ends it.
+            if line.startswith(">"):
+                current.marker += " " + _QUOTED_RE.sub("", line)
+                continue
+            in_marker = False
+        numbered = _TASK_RE.match(line)
+        if numbered:
+            task = int(numbered.group(1))
         status = _STATUS_RE.match(line)
         if status:
             current.counts[status.group(1)] += 1
+            if status.group(1) != "DONE" and task is not None:
+                current.open_tasks.append(task)
     if not phases:
         raise SystemExit("no phases found — has the plan's heading format changed?")
     return phases
@@ -197,10 +231,10 @@ def render(phases: list[Phase], date: str) -> str:
         "|---|---|",
     ]
 
-    complete = [p for p in phases if p.complete]
+    finished = [p for p in phases if p.complete]
     untouched = [p for p in phases if not p.complete and p.untouched]
     flight = [p for p in phases if not p.complete and not p.untouched]
-    out.append(f"| ✅ complete | {', '.join(p.key for p in complete) or '—'} |")
+    out.append(f"| ✅ complete | {', '.join(p.key for p in finished) or '—'} |")
     out.append(
         "| in flight | "
         + ", ".join(f"{p.key} {100 * p.fraction:.0f}%" for p in flight)

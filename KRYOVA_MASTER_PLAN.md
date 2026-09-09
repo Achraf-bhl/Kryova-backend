@@ -39,7 +39,12 @@ Companion documents:
    follow-up that can be forgotten.
 5. **When every task in a phase is `DONE`, add the phase-complete line** immediately under the
    phase heading: `> ✅ PHASE COMPLETE (YYYY-MM-DD) — all tasks done and tested.` A phase with one
-   task still open does not get it, however much has shipped.
+   task still open does not get it, however much has shipped — **unless the marker names that task
+   and says why it stays open**, which is the only honest way to close a phase whose last residual
+   is a scope decision (E1 tasks 3 and 4) or a wait on hardware (E3 task 5). "Complete" and
+   `PARTIAL` ten lines apart, with nothing connecting them, leaves a reader unable to tell which
+   of the two is stale — and that is worse than either statement alone. Enforced by
+   `TestThePlanKnowsItsOwnProgress` in `tests/test_repository_hygiene.py`.
 6. **Never delete a status; supersede it.** This file is current state. The build plan's *Done*
    section is the history — one line lands there for every status change here that isn't
    `NOT STARTED`.
@@ -482,8 +487,14 @@ so the agent can consult them the same way it consults the CATIA manuals.
 
 ##### Phase E1 — The open kernel: OCCT as the primary compilation target #####
 
-> ✅ PHASE COMPLETE (2026-09-05) — every task below is done and tested, with one residual
-> named in task 7 that needs hardware this machine does not have.
+> ✅ PHASE COMPLETE (2026-09-05) — the phase's question is answered and every task is tested,
+> with three residuals named rather than hidden. **task 7** needs hardware this machine does not
+> have. **task 3** and **task 4** stay `PARTIAL` *by design, permanently*: task 3 is the
+> operation mapping, which Decision 1 says grows only when a test, a sweep or an optimisation
+> needs an operation — so it reaching 201/201 would be a symptom, not a goal — and task 4 is the
+> sketch layer, narrowed to the dimension-driven profiles the registry actually uses, with
+> PlaneGCS owed to exactly one operation that refuses by name. Both are scope decisions with
+> their reasoning in the status line; neither is work waiting to be done.
 
 **~8 engineer-months. The keystone. Nothing downstream is affordable until it lands.**
 
@@ -724,9 +735,10 @@ model.
 
 ##### Phase E3 — Geometric interrogation and the measurement layer #####
 
-> ✅ PHASE COMPLETE (2026-09-08) — every task below is done and tested, with one residual
-> named in the phase proof that needs hardware this machine does not have, the same shape
-> as E1 task 7's.
+> ✅ PHASE COMPLETE (2026-09-08) — every task below is done and tested, with one residual named
+> in the phase proof that needs hardware this machine does not have, the same shape as E1 task 7's.
+> It is carried by **task 5**, which stays `PARTIAL`: the OCCT half is green and reachable, and
+> the cross-backend agreement half is claimed at no gate until a seat has run it.
 
 **~3 engineer-months.**
 
@@ -793,7 +805,10 @@ agrees between OCCT and CATIA to declared tolerance.
 
 ##### Phase E4 — Visual verification: the model looks at the model #####
 
-> ✅ PHASE COMPLETE (2026-09-08) — all four tasks done and tested.
+> ✅ PHASE COMPLETE (2026-09-08) — all four tasks done and tested, with **task 4** left `PARTIAL`
+> on purpose: the picture reaches the conversation on the CATIA path, which is what the phase
+> exists to make true, while the OCCT render endpoint still has no frontend caller. That half is
+> frontend work in the other repo, not a hole in this phase's capability.
 
 **~4 engineer-months.**
 

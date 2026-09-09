@@ -128,9 +128,30 @@ package from *documented* into *verified*.
       both linear-static, so LE3 is worth more per hour than either of them was.
       LE3 is fully encoded and cited in `app/verify/nafems.py` and blocked on
       `NO_SHELL_SOLVER`: the deck writer produces a shell deck and nothing on Linux can run it.
-      A2–A5 are the prerequisites, so this costs almost nothing once they pass and it is worth
-      a third validated analysis on the trust page. Unblock it by giving the case a runnable
-      `Case` (drop the blocker, add a `run_le3`), re-record with
+      **A1-A5 CLEARED ONE OF ITS THREE PRECONDITIONS, AND THE ESTIMATE ABOVE IS WRONG**
+      (measured 2026-09-09). "Costs almost nothing once A2-A5 pass" was written from the
+      belief that the shell *deck* was the obstacle. It was not the only one. What is now
+      true and what is not:
+
+      * **The deck writer and the solver are fine.** All four shell elements solve on ccx
+        2.23 through `write_frame_deck`, reporting at the submitted node count (S4 9/9,
+        S8R 21/21, S3 9/9, S6 25/25). `Blocker.NO_SHELL_SOLVER`'s first clause — "no solver
+        here takes one" — is cleared for the *deck* path.
+      * **Nothing meshes a shell.** The probes above hand-built their grids node by node.
+        LE3 is a hemisphere with a hole at the pole and two symmetry edges; that is a
+        mesher, not a fixture.
+      * **No `Solver` accepts a `ShellMesh`.** The ABC is `solve(mesh: TetMesh, case:
+        LoadCase)`, and the shell path is `write_frame_deck` plus a raw force vector — it
+        has no `LoadCase`, no tributary-area distribution for a shell's faces (E6.3's own
+        named residual), and no reader turning a `.frd` into a `BenchmarkRun`.
+      * **A validated case needs a convergence study**, which needs the two above to exist
+        at more than one refinement. LE11 sits at `unconverged` for a related reason.
+
+      So A6 is a **phase task, not a queue tick**: it is E6.3's "no mesher produces one of
+      these meshes" plus a shell load path, and only then a `run_le3`. Its *geometry* must
+      come from the cited Abaqus page and not from memory — C1's rule applies here exactly,
+      and a remembered radius carrying a citation is indistinguishable from a real one.
+      Unblocking is still: drop the blocker, add a `run_le3`, re-record with
       `venv/bin/python -m app.verify.recorded`, and commit the artefact.
 
 ### B. CATIA seat — needs a licensed V5 seat and the bridge

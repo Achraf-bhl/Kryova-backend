@@ -181,7 +181,16 @@ class TestSketchingOnAConstructedPlane:
         message = str(caught.value)
         assert "mid" in message, "it should list the planes that do exist"
         assert "XY" in message
-        assert "Phase 2.2" in message, "and name what sketching on a face still needs"
+        # This asserted `"Phase 2.2" in message` — "and name what sketching on a
+        # face still needs" — until 2026-09-09, and the code agreed with it. The
+        # phase had already shipped: `catia_plane_offset(reference="slab#top")`
+        # resolved a face while `catia_sketch_create` refused one and cited the
+        # phase as the reason. The test was written from the same belief as the
+        # code and pinned it there. What the message must carry now is the
+        # *syntax*, with a feature this part really has — a phase number is not
+        # something a model can act on, and this one read as unbuilt.
+        assert "#top" in message, "it should name the face syntax, not a phase"
+        assert "Phase 2.2" not in message
 
     def test_an_origin_plane_cannot_be_shadowed_by_a_constructed_one(self):
         """`XY` is vocabulary, not a name. `app.design.names` refuses it as a semantic

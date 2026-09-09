@@ -133,3 +133,65 @@ class TestWhatIsStillRefused:
         fixed = _run({"reference": "XY", "distance_mm": "10", "bogus": 1})
         with pytest.raises(SchemaError):
             validate(fixed, PLANE)
+
+
+class TestAnEmptyOptionalListMeansTheDefault:
+    """`components: []` on an optional filter is the same as not sending it.
+
+    Every `name_list` in the operation specs carries `minItems: 1`, so an empty
+    list is refused — including on the dozen parameters that are *optional* and
+    documented as filters defaulting to everything. So the two spellings of "no
+    restriction" disagreed: omitting the field means "all of them", sending `[]`
+    means `components must have at least 1 item(s)`.
+
+    Measured at ladder Level 2 on 2026-09-09: `catia_assembly_clash(components=[])`,
+    refused on the item count, with nothing in the message saying the field was
+    optional in the first place.
+    """
+
+    CLASH = {
+        "type": "object",
+        "properties": {
+            "components": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "clearance_mm": {"type": "number"},
+        },
+        "additionalProperties": False,
+    }
+
+    PATTERN = {
+        "type": "object",
+        "properties": {"points": {"type": "array", "minItems": 1, "items": {"type": "string"}}},
+        "required": ["points"],
+        "additionalProperties": False,
+    }
+
+    def test_the_measured_call_now_goes_through(self) -> None:
+        fixed = _normalise("catia_assembly_clash", {"components": []}, self.CLASH)
+
+        assert "components" not in fixed
+        validate(fixed, self.CLASH)
+
+    def test_a_populated_list_is_untouched(self) -> None:
+        fixed = _normalise("catia_assembly_clash", {"components": ["a", "b"]}, self.CLASH)
+
+        assert fixed["components"] == ["a", "b"]
+
+    def test_other_arguments_survive(self) -> None:
+        fixed = _normalise(
+            "catia_assembly_clash", {"components": [], "clearance_mm": 2.0}, self.CLASH
+        )
+
+        assert fixed["clearance_mm"] == 2.0
+
+    def test_a_required_empty_list_is_still_refused(self) -> None:
+        """A pattern with no points is a real error, not a filter meaning 'all'."""
+        fixed = _normalise("catia_pattern", {"points": []}, self.PATTERN)
+
+        assert fixed["points"] == []
+        with pytest.raises(SchemaError):
+            validate(fixed, self.PATTERN)
+
+    def test_the_dictionary_is_not_copied_when_nothing_changes(self) -> None:
+        arguments = {"components": ["a"]}
+
+        assert _normalise("catia_assembly_clash", arguments, self.CLASH) is arguments

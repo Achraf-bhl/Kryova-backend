@@ -259,12 +259,17 @@ L2  FAIL  prompt: "Make a steel base plate 120 x 80 x 10 mm. Put a cylindrical b
 
 L3-L6  NOT ATTEMPTED. Rule 3: a Level 4 pass on a shaky Level 2 measures nothing.
 
-Wall reached: **there is no way to sketch on a face.** `support="top"` is refused because
-  face selection needs `feature#selector` (roadmap A3, blocked behind A1). The working route
-  is `catia_plane_offset` then sketch on that plane, and the refusal names it -- but "put a
-  boss on the top face" is the most ordinary Level 2 sentence there is, and reaching it
-  depends on a 9B model discovering a two-step workaround from an error message. It tried
-  `support="top"`, `limit="up_to_surface"`, `catia_shaft` and a surface extrude first.
+Wall reached (CORRECTED later the same day -- see the report's addendum): the first
+  reading was "there is no way to sketch on a face", and that was **wrong**.
+  `catia_sketch_create` refused one while citing Phase 2.2, a phase that had already
+  shipped, and I believed the message for the same reason the model did. Face selection
+  worked in `elements.plane_frame` -- every other "which plane" argument used it, and
+  `catia_sketch_create` was the last operation still holding a private accept-list. The
+  **seat had accepted a bare `support="top"` all along**, resolving it against the bounding
+  box, so the identical call built a part on `catia` and was refused on `occt`. Both are
+  fixed and the two backends now share the table. The real wall on the seat is the
+  **32,768-token context window**: a 24-operation part exhausts it before four features are
+  finished.
 
 Defects filed: (1) a correct mass shipped with provenance saying `unavailable -- no density
   has been set`, so `assertions.py` would verify it UNMEASURED for ever; (2) an unsupported

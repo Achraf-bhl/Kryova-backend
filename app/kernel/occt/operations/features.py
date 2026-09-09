@@ -330,8 +330,11 @@ def _refuse_a_feature_that_changed_nothing(
         f"{tool} removed no material: the part is exactly the volume it was "
         f"({before:.3f} mm3). The profile does not overlap the part at all, so the "
         "cut fell in the air beside it — a boolean cut with no overlap succeeds and "
-        "returns the part unchanged. Check where the profile actually is: a hole on "
-        "a bolt circle bigger than the part lands off the edge."
+        "returns the part unchanged. Two things cause this. The profile is beside the "
+        "part: a hole on a bolt circle bigger than the part lands off the edge. Or the "
+        "cut is going the wrong way — a sketch on a **face of the part** extrudes along "
+        "that face's outward normal, which points away from the material, so pass "
+        "reversed: true to cut into it."
     )
 
 

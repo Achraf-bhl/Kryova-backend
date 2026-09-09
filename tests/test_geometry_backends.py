@@ -11,6 +11,7 @@ session and honesty tests need nothing at all.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pytest
@@ -277,3 +278,158 @@ class TestARefusalMustNotDenyATheToolExists:
         message = str(raised.value)
         assert "is not implemented in the open kernel yet" in message
         assert "operations are" in message
+
+
+class TestSketchingOnAFaceOfThePart:
+    """`support="slab#top"` works, and this module said for months that it did not.
+
+    `elements.plane_frame` is the one resolver every "which plane" argument goes
+    through, and its own docstring records that each operation once had a private
+    accept-list. `catia_sketch_create` was the last one still holding its own: it
+    refused a planar face and blamed Phase 2.2, **a phase that had already
+    shipped**. `catia_plane_offset(reference="slab#top")` resolved a face while
+    `catia_sketch_create(support="slab#top")` did not, and no message on either
+    side hinted at the difference.
+
+    Measured at ladder Level 2 on 2026-09-09, four runs of one prompt: the agent
+    asked for `support="top"`, read that face sketching needed an unbuilt phase,
+    and never tried the syntax that would have worked — it went to
+    `limit="up_to_surface"`, to `catia_shaft`, to a surface extrude, and finally
+    told the user the kernel had no pad. A boss on the top face is the most
+    ordinary thing a Level 2 part asks for.
+    """
+
+    def _plate(self):
+        runner = backends.session_for("faces")
+        runner("catia_new_part", {"name": "Plate"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        runner(
+            "catia_sketch_rectangle",
+            {"sketch": "outline", "width_mm": 120.0, "height_mm": 80.0},
+        )
+        runner("catia_pad", {"sketch": "outline", "length_mm": 10.0, "name": "slab"})
+        return runner
+
+    def test_a_sketch_lands_on_a_named_face(self, occt: None) -> None:
+        runner = self._plate()
+
+        created = runner("catia_sketch_create", {"support": "slab#top", "name": "boss"})
+
+        assert created["sketch"] == "boss"
+
+    def test_a_boss_built_on_the_top_face_adds_material(self, occt: None) -> None:
+        """The sentence the ladder could not reach, end to end."""
+        runner = self._plate()
+        runner("catia_sketch_create", {"support": "slab#top", "name": "boss"})
+        runner("catia_sketch_circle", {"sketch": "boss", "diameter_mm": 30.0})
+        runner("catia_pad", {"sketch": "boss", "length_mm": 30.0})
+
+        volume = runner("catia_measure", {})["volume_mm3"]
+
+        assert volume == pytest.approx(120 * 80 * 10 + math.pi * 225 * 30)
+
+    def test_the_catia_style_name_resolves_too(self, occt: None) -> None:
+        """The agent reads feature names out of `catia_list_features`, which
+        reports `Pad.1`, not the semantic name the design used."""
+        runner = self._plate()
+
+        assert runner("catia_sketch_create", {"support": "Pad.1#top", "name": "s"})
+
+    def test_the_two_resolvers_agree(self, occt: None) -> None:
+        """`catia_plane_offset` resolved a face while `catia_sketch_create` did
+        not. Whatever one accepts as a plane, the other must."""
+        runner = self._plate()
+
+        runner("catia_plane_offset", {"reference": "slab#top", "distance_mm": 0.0, "name": "p"})
+        runner("catia_sketch_create", {"support": "slab#top", "name": "s"})
+
+    def test_an_unknown_plane_names_the_syntax_with_a_real_feature(
+        self, occt: None
+    ) -> None:
+        """The refusal the model actually hits, since it writes `support="top"`.
+
+        It must carry the syntax and a feature this part really has — a phase
+        number is not something a model can act on, and it read as unbuilt.
+
+        `"top"` itself no longer reaches here: it resolves against the bounding
+        box, the way the seat has always resolved it. So this asks with a name
+        that really is unknown.
+        """
+        from app.kernel.errors import GeometryError
+
+        runner = self._plate()
+        with pytest.raises(GeometryError) as raised:
+            runner("catia_sketch_create", {"support": "nowhere", "name": "boss"})
+
+        message = str(raised.value)
+        assert "#top" in message
+        assert "Pad.1" in message or "slab" in message
+        assert "Phase 2.2" not in message
+
+
+class TestABareFaceWordMeansTheSameOnBothBackends:
+    """`support="top"` built a part on the seat and was refused here.
+
+    `scripts/catia_bridge/com/_context.py::resolve_support` has resolved bare
+    face words against the part's bounding box for some time — `FACE_PLANES` and
+    `FACE_AXES` — and the open kernel had no equivalent. So the identical call
+    succeeded on `GEOMETRY_BACKEND=catia` and failed on `occt`, which is the one
+    thing Decision 1's conformance rests on not happening, and no message on
+    either side hinted at it.
+
+    Measured at ladder Level 2 on 2026-09-09: `support="top"` is the *first*
+    thing the model reaches for, on both backends. The table here is copied from
+    the bridge rather than invented, so the two cannot drift apart by taste.
+    """
+
+    def _plate(self):
+        runner = backends.session_for("bareword")
+        runner("catia_new_part", {"name": "Plate"})
+        runner("catia_sketch_create", {"support": "XY", "name": "outline"})
+        runner(
+            "catia_sketch_rectangle",
+            {"sketch": "outline", "width_mm": 120.0, "height_mm": 80.0},
+        )
+        runner("catia_pad", {"sketch": "outline", "length_mm": 10.0, "name": "slab"})
+        return runner
+
+    def test_top_puts_the_boss_on_top(self, occt: None) -> None:
+        """Not merely accepted — accepted *and* on the right side. A support that
+        resolved to the bottom face would build a boss hanging underneath and
+        report the same success."""
+        runner = self._plate()
+        runner("catia_sketch_create", {"support": "top", "name": "boss"})
+        runner("catia_sketch_circle", {"sketch": "boss", "diameter_mm": 30.0})
+        runner("catia_pad", {"sketch": "boss", "length_mm": 30.0})
+
+        size = runner("catia_measure", {})["bounding_box_mm"]["size"]
+
+        assert size[2] == pytest.approx(40.0, abs=1e-3), "the boss went the wrong way"
+
+    def test_bottom_is_the_other_end(self, occt: None) -> None:
+        runner = self._plate()
+        runner("catia_sketch_create", {"support": "bottom", "name": "pin"})
+        runner("catia_sketch_circle", {"sketch": "pin", "diameter_mm": 20.0})
+        runner("catia_pad", {"sketch": "pin", "length_mm": 5.0, "reversed": True})
+
+        low = runner("catia_measure", {})["bounding_box_mm"]["min"]
+
+        assert low[2] == pytest.approx(-5.0, abs=1e-3)
+
+    def test_the_words_are_the_bridge_s_own(self, occt: None) -> None:
+        """Copied, not invented — if the bridge grows a word this must too."""
+        from app.kernel.occt.operations.sketcher import _BOUNDING_BOX_FACES
+
+        assert set(_BOUNDING_BOX_FACES) == {
+            "top", "bottom", "front", "back", "left", "right",
+        }
+
+    def test_a_face_word_needs_a_part_to_measure(self, occt: None) -> None:
+        """With no solid there is no bounding box, so the word means nothing and
+        the ordinary refusal applies rather than a guess at the origin plane."""
+        from app.kernel.errors import GeometryError
+
+        runner = backends.session_for("empty")
+        runner("catia_new_part", {"name": "Nothing"})
+        with pytest.raises(GeometryError):
+            runner("catia_sketch_create", {"support": "top", "name": "s"})

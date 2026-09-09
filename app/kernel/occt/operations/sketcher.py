@@ -73,6 +73,45 @@ def sketch_create(context: BuildContext, arguments: Mapping[str, Any]) -> Mappin
     return {"feature": sketch.name, "sketch": sketch.name, **sketch.to_dict()}
 
 
+#: A bare face word -> the origin plane it is parallel to, and which end of the
+#: bounding box along that plane's normal it sits at. **Copied from the CATIA
+#: bridge's own `FACE_PLANES`/`FACE_AXES`** (`scripts/catia_bridge/com/_context.py`)
+#: rather than invented, because the seat has accepted `support="top"` for some
+#: time and the open kernel refused it — the same call building a part on one
+#: backend and refusing on the other is precisely what Decision 1's conformance
+#: rests on not happening.
+#:
+#: Measured at ladder Level 2 on 2026-09-09: `support="top"` is the first thing
+#: the model reaches for, it succeeded on the seat and was refused here, and no
+#: message on either side hinted that the backends disagreed.
+_BOUNDING_BOX_FACES: dict[str, tuple[str, int, int]] = {
+    # word: (origin plane, index into the bounding box, which end)
+    "top": ("XY", 2, +1),
+    "bottom": ("XY", 2, -1),
+    "front": ("ZX", 1, -1),
+    "back": ("ZX", 1, +1),
+    "left": ("YZ", 0, -1),
+    "right": ("YZ", 0, +1),
+}
+
+
+def _bounding_box_face_frame(document: Any, word: str) -> Any:
+    """The plane of a named bounding-box face.
+
+    The seat's own limit applies here and is worth restating: this is the *plane
+    of* the face, not the face itself, so it is right for sketching on and wrong
+    for anything needing the face's real boundary. `feature#top` resolves the
+    actual face and is what an operation in that second category should take.
+    """
+    from app.kernel.occt.metrology import bounding_box_mm
+    from app.kernel.occt.reference import offset_frame
+
+    plane, index, end = _BOUNDING_BOX_FACES[word]
+    box = bounding_box_mm(document.shape)
+    distance = box["max"][index] if end > 0 else box["min"][index]
+    return offset_frame(frame_of(plane), float(distance))
+
+
 def resolve_support(
     document: Any,
     support: str,
@@ -88,10 +127,26 @@ def resolve_support(
     and checking the vocabulary first makes that guarantee local rather than something to
     trust from another module.
 
-    Sketching on a *face* of the part is the remaining case, and it is refused with the
-    reason rather than approximated: naming a face needs `feature#selector` (Phase 2.2),
-    and quietly falling back to the nearest origin plane would put the profile on a plane
-    the author did not choose.
+    **Sketching on a face of the part works, and this used to say it did not.**
+    `elements.plane_frame` is the one resolver every "which plane" argument goes
+    through — mirror, symmetry, scale, pattern direction, plane-offset — and its own
+    docstring records that each of those once had a private accept-list. This was the
+    last one left holding its own, and it refused a planar face while blaming Phase 2.2,
+    a phase that had already shipped. `catia_plane_offset(reference="slab#top")` had
+    resolved a face for some time while `catia_sketch_create(support="slab#top")` did
+    not, which is a difference nobody could have guessed from either message.
+
+    Measured at ladder Level 2 on 2026-09-09, over four runs of one prompt: the agent
+    asked for `support="top"`, was told face sketching needs a phase that reads as
+    unbuilt, and never tried the syntax that would have worked. It went to
+    `limit="up_to_surface"`, to `catia_shaft`, to a surface extrude, and finally told the
+    user the kernel had no pad. **A boss on the top face is the most ordinary thing a
+    Level 2 part asks for**, and this message is what made it unreachable.
+
+    So the refusal now names the syntax with a feature the part actually has, rather
+    than a phase number. Falling back to the nearest origin plane is still refused
+    rather than approximated: that would put the profile on a plane the author did not
+    choose.
     """
     from app.kernel.occt.reference import translated_frame
 
@@ -102,13 +157,30 @@ def resolve_support(
         base = document.plane(support).frame
         return translated_frame(base, origin) if any(origin) else base
 
+    text = str(support or "").strip()
+
+    if text.lower() in _BOUNDING_BOX_FACES and getattr(document, "shape", None) is not None:
+        base = _bounding_box_face_frame(document, text.lower())
+        return translated_frame(base, origin) if any(origin) else base
+
+    if "#" in text:
+        # A face selector. Straight to the shared resolver, whose refusal already
+        # lists the selector words and is better than anything composed here.
+        from app.kernel.occt.elements import plane_frame
+
+        base = plane_frame(document, text, tool=tool)
+        return translated_frame(base, origin) if any(origin) else base
+
     known = ", ".join(document.plane_names()) or "none yet"
+    features = document.feature_names()
+    example = f"{features[-1]}#top" if features else "Pad.1#top"
     raise GeometryError(
         f"{tool} cannot find a plane called {support!r}. The origin planes are "
         f"{', '.join(vocabulary.ORIGIN_PLANES)}; planes this design has constructed: "
-        f"{known}. Build one with catia_plane_offset, or sketch on an origin plane. "
-        "(Sketching directly on a face of the part needs the feature#selector syntax, "
-        "which is Phase 2.2.)"
+        f"{known}. To sketch on a face of the part, name the feature and the face: "
+        f"support={example!r} — after the # use one of all, bottom, concave, convex, "
+        "horizontal, top, vertical. Or build a plane with catia_plane_offset, or "
+        "sketch on an origin plane."
     )
 
 

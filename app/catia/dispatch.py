@@ -960,7 +960,10 @@ def _normalise(
     schema, where it can be read.
     """
     arguments = _repair_escapes(
-        _parse_number_strings(_parse_array_strings(arguments, schema), schema)
+        _drop_empty_optional_arrays(
+            _parse_number_strings(_parse_array_strings(arguments, schema), schema),
+            schema,
+        )
     )
     if tool == "catia_hole" and arguments.get("through_all", True):
         if arguments.get("depth_mm") == 0:
@@ -1021,6 +1024,50 @@ def _parse_number_strings(
             parsed = dict(arguments)
         parsed[name] = int(candidate) if "number" not in wanted else candidate
     return parsed if parsed is not None else arguments
+
+
+def _drop_empty_optional_arrays(
+    arguments: dict[str, Any], schema: dict[str, Any] | None
+) -> dict[str, Any]:
+    """`components: []` on an optional list is the same as not sending it.
+
+    Every `name_list` in the operation specs carries `minItems: 1`, so an empty
+    list is refused — including on the many parameters that are *optional* and
+    documented as a filter that defaults to everything. The two spellings of "no
+    restriction" therefore disagree: omitting the field means "all of them", and
+    sending `[]` means `components must have at least 1 item(s)`.
+
+    Measured at ladder Level 2 on 2026-09-09: the agent called
+    `catia_assembly_clash(components=[])` and was refused on the item count. The
+    refusal is accurate and says nothing about the field being optional, so
+    nothing in it points at the one-character fix.
+
+    Dropping the key rather than rewriting the count, because absence is what the
+    schema already understands: the documented default then applies, and the
+    operation gets exactly the call it would have got from a model that omitted
+    the field. **Optional only.** A *required* list sent empty is a real error —
+    a pattern with no points, a fillet with no edges — and still reaches the
+    validator untouched.
+    """
+    if not schema:
+        return arguments
+    properties = schema.get("properties") or {}
+    required = set(schema.get("required") or ())
+    pruned: dict[str, Any] | None = None
+    for name, value in arguments.items():
+        if value != [] or not isinstance(value, list):
+            continue
+        if name in required:
+            continue
+        declared = properties.get(name) or {}
+        types = declared.get("type")
+        wanted = types if isinstance(types, list) else [types]
+        if "array" not in wanted:
+            continue
+        if pruned is None:
+            pruned = dict(arguments)
+        pruned.pop(name, None)
+    return pruned if pruned is not None else arguments
 
 
 def _as_number(value: str) -> float | None:

@@ -221,6 +221,35 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-09 — sketching on a face was never the missing capability; one operation had been
+  left behind a shipped phase.** `elements.plane_frame` is the single resolver every "which
+  plane" argument goes through, and `catia_sketch_create` was the last one still holding a
+  private accept-list: it refused a planar face while citing Phase 2.2, **which had already
+  shipped**. So `catia_plane_offset(reference="slab#top")` resolved a face while
+  `catia_sketch_create(support="slab#top")` refused one, and nothing on either side said the
+  two disagreed. Worse, the **CATIA seat had accepted a bare `support="top"` all along**,
+  resolving it against the part's bounding box — so the identical call built a part on
+  `GEOMETRY_BACKEND=catia` and was refused on `occt`, which is the one thing Decision 1's
+  conformance rests on not happening.
+  Fixed: `catia_sketch_create` uses the shared resolver, and the open kernel gained the bare
+  face words with the table **copied from `scripts/catia_bridge/com/_context.py`** rather than
+  invented, so the two cannot drift apart by taste. Pinned by a test that checks the boss lands
+  on the *right side* — a support resolving to the wrong face builds a boss hanging underneath
+  and reports the same success. The unknown-plane refusal now names the syntax with a feature
+  the part really has instead of a phase number, and a test that had asserted `"Phase 2.2" in
+  message` was corrected: it had pinned the stale claim, written from the same belief as the
+  code. Also: `catia_assembly_clash(components=[])` no longer refuses, because an empty
+  *optional* list is the same as not sending it (a *required* empty list still reaches the
+  validator), and the "removed no material" refusal now names its second cause — a sketch on a
+  face extrudes along that face's outward normal, so a cut needs `reversed: true`.
+  With those, the ladder's Level 2 part builds from the sentence as written: 109,278.760 mm³
+  and 0.86002 kg, exactly the hand calculation.
+  Re-run on a **rebooted CATIA** with the backend started without the `occt` override — which
+  is what had sent the earlier run to the open kernel and is why nothing appeared in CATIA. It
+  built on the seat for real (`Extrusion.1`, `Révolution.1`, `Poche.1`, `Congé arête.2`, seat
+  timings, part in the tree) and stopped on the **32,768-token context window**, not on a
+  defect. That is now the binding constraint on a seat run of this length, ahead of tool
+  coverage.
 - **2026-09-09 — LE3's geometry is sourced, and it does not have the hole everyone says it
   has.** `docs/nafems-le3-geometry.md`, written to `nafems-le11-geometry.md`'s pattern.
   **R = 10 m, t = 0.04 m, a 90 degree quarter sector, and the shell is _closed at the pole_.**

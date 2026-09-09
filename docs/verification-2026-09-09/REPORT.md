@@ -144,3 +144,86 @@ measures nothing.
 The next run should decide one of two things first — whether to unblock face sketching (A1/A3),
 or whether the offer needs to teach the offset-plane route explicitly, the way the four frozen
 prompts teach their sixteen tools.
+
+---
+
+# Addendum — 2026-09-09, later: the face-sketching wall was ours, not the model's
+
+**I was wrong in the section above.** "There is no way to sketch on a face" is not true, and
+was not true when I wrote it. What was true is that `catia_sketch_create` refused one while
+citing a phase that had already shipped, and I believed the message for the same reason the
+model did.
+
+`elements.plane_frame` is the single resolver every "which plane" argument goes through, and
+its own docstring records that each operation once had a private accept-list.
+`catia_sketch_create` was the last one still holding its own. So
+`catia_plane_offset(reference="slab#top")` resolved a planar face while
+`catia_sketch_create(support="slab#top")` refused it — and nothing on either side hinted the
+two disagreed.
+
+Worse, **the CATIA seat had accepted a bare `support="top"` all along**, resolving it against
+the part's bounding box (`FACE_PLANES`/`FACE_AXES` in the bridge). The identical call built a
+part on `GEOMETRY_BACKEND=catia` and was refused on `occt`. That is the one thing Decision 1's
+conformance rests on not happening, and it is why the run above kept failing on the seat's
+most ordinary sentence.
+
+## Fixed
+
+1. **`catia_sketch_create` now uses the shared resolver**, so `support="slab#top"` and
+   `support="Pad.1#top"` work. The refusal for an unknown plane names the *syntax* with a
+   feature the part actually has (`support='Pad.1#top'`) and the selector words, instead of a
+   phase number that reads as unbuilt.
+2. **Bare face words resolve on the open kernel too** — `top`, `bottom`, `front`, `back`,
+   `left`, `right` — with the table **copied from the bridge** rather than invented, so the
+   two backends cannot drift apart by taste. Pinned by a test that checks the boss lands on
+   the *right side*, because a support resolving to the wrong face builds a boss hanging
+   underneath and reports the same success.
+3. **`catia_assembly_clash(components=[])` no longer refuses.** An empty *optional* list is
+   the same as not sending it, so the documented default ("all of them") applies. A
+   *required* empty list — a pattern with no points — still reaches the validator.
+4. **The "removed no material" refusal now names the second cause.** A sketch on a face
+   extrudes along that face's outward normal, which points away from the material, so a cut
+   needs `reversed: true`. That is a real sharp edge and the message now says so.
+
+With those, the Level 2 part builds from the sentence as written:
+
+```
+sketch on "top" -> circle 30 -> pad 30 -> sketch on "top" -> circle 15
+  -> pocket 40 reversed -> fillet R10 vertical -> steel
+= 109,278.760 mm3, 0.86002 kg   (hand calculation: 109,278.760, 0.86002)
+```
+
+## The retry on a rebooted CATIA
+
+CATIA and both Kryova servers were shut down and restarted, and the backend was started
+**without the `occt` override** — which is what had sent the earlier run to the open kernel
+and is why nothing appeared in CATIA. The chip read *"This workstation is connected, running
+V5-R33."*
+
+It then built on the seat for real: `Extrusion.1` at 0.75456 kg, `Révolution.1`, `Poche.1`,
+`Congé arête.2` — French names, seat timings of 0.5–2.9 s per operation, and a part in the
+tree (`L2-catia-after-reboot.png`, title `Steel-base-plate-v2.CATPart`, tree carrying
+`Corps principal`, `Kryova Construction`, `Steel`).
+
+**It stopped on the context window**, not on a defect:
+
+> The conversation no longer fits the model's 32768-token context window (32753 tokens sent),
+> so the oldest messages were dropped before the model saw them.
+
+That is the wall for a seat run of this length: 24+ operations at ~150 tokens of result each,
+plus a 25-tool payload, exhausts `qwen3.5:9b`'s window before a four-feature part is finished.
+The plate was right (0.75456 kg against 0.7555 expected); the boss and bore were undersized
+and it had begun a `v2` part after catching its own Ø90-instead-of-Ø30 error.
+
+`catia_capture_view` could not be obtained for this run: the conversation was already at its
+context limit, so any further turn — including one asking only for a picture — fails the same
+way. The application-window screenshot is the evidence that stands.
+
+## Still open
+
+- **The context window is now the binding constraint on the seat**, ahead of tool coverage.
+  Worth measuring before the next ladder run: how many operations a part of this size costs,
+  and whether the result payloads can be trimmed.
+- The seat and the open kernel now agree on face words. **Nothing tests that they agree** —
+  that is queue item B1 (`compare_backends`), still unrun with a real seat on its right-hand
+  side.

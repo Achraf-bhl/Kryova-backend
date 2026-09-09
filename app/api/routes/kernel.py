@@ -6,10 +6,14 @@ this module existed **nothing outside a test ever called it**. Same for
 `app/kernel/measurement`. The capability was green on the board and unreachable
 from the product, which is a different thing from being finished.
 
-Two endpoints, both about the part a *conversation* owns:
+Three endpoints, all about the part a *conversation* owns:
 
 * `GET .../render` — a PNG of the current state, from any canonical view.
 * `GET .../measure` — what the kernel measures on it, with provenance.
+* `POST .../requirements` — a `.kreq` document checked against it, with coverage
+  and per-requirement evidence (added 2026-09-09, the same gap one layer up:
+  `app/requirements/` could verify a specification against a measurement payload
+  and nothing outside a test had ever handed it one).
 
 **These serve the open-kernel backend only, and say so rather than guessing.** On
 `GEOMETRY_BACKEND=catia` the part lives on the workstation, not in this process;
@@ -30,6 +34,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, DbSession
@@ -216,6 +221,120 @@ def measure_conversation_part(
         "backend_version": backends.backend_version(),
         "detail": level.value,
         "measurements": payload,
+    }
+
+
+class RequirementCheck(BaseModel):
+    """A requirements document to check the conversation's part against.
+
+    The document is `.kreq` text, the format `app.requirements.parse` reads — the
+    thing an engineer writes, rather than a JSON shape a client would have to
+    build. It arrives in the request rather than being stored because a
+    requirement set belongs to a project and this endpoint answers a narrower
+    question: *does the part on the screen right now meet these*.
+    """
+
+    document: str = Field(
+        min_length=1,
+        max_length=200_000,
+        description="A .kreq requirements document, as written.",
+        examples=[
+            "REQ-001: The bracket shall weigh no more than 1.5 kg.\n"
+            "  measure: mass_kg <= 1.5\n"
+            "  source: customer\n"
+        ],
+    )
+    name: str = Field(
+        default="requirements",
+        max_length=200,
+        description="What to report the set under.",
+    )
+    detail: str = Field(
+        default="full",
+        description="How much to measure before checking: shape, bounds, full or inertia.",
+    )
+
+
+@router.post("/conversations/{conversation_id}/requirements")
+def check_conversation_requirements(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+    body: RequirementCheck,
+) -> dict[str, Any]:
+    """Check a requirements document against the part this conversation has built.
+
+    The third step of the same integration gap `render` and `measure` closed:
+    `app/requirements/` could read a document, compile every requirement into an
+    assertion, verify a set against a payload and report coverage — and **nothing
+    outside a test had ever called it**, so an engineer could not hand the product
+    a specification and be told whether the part met it. This is that call.
+
+    It measures the part here rather than taking numbers from the caller, for the
+    reason the whole package exists: a requirement verified against a payload the
+    client assembled is a claim about the client. The measurement carries its
+    provenance sidecar, so the report can say per requirement whether the number
+    behind it was integrated or sampled — which is half of what 11.4 means by
+    *by what evidence*.
+
+    Three refusals, and they are different problems with different fixes: a
+    document that does not parse comes back 422 with **every** problem listed at
+    once (an engineer's document usually has several, and a parser that stopped at
+    the first would turn one editing session into five); a set that needs a scan
+    nobody ran is reported per requirement as `UNMEASURED`, never as a pass, with
+    `scans_needed` naming what to run; and a conversation with no part yet is the
+    same 409 the other two endpoints give.
+    """
+    _owned_conversation(db, current_user, conversation_id)
+    document = _live_document(conversation_id)
+
+    from app.kernel.measurement import Detail
+    from app.requirements import parse_requirements, verify_requirements
+    from app.requirements.errors import RequirementError
+
+    try:
+        level = Detail(body.detail.strip().lower())
+    except ValueError as exc:
+        allowed = ", ".join(one.value for one in Detail)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{body.detail!r} is not a detail level. Use one of: {allowed}.",
+        ) from exc
+
+    parsed = parse_requirements(body.document, name=body.name, origin="conversation")
+    try:
+        requirements = parsed.require()
+    except RequirementError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    try:
+        measurements = document.measure(detail=level)
+    except Exception as exc:  # noqa: BLE001 - a kernel fault must not 500 the check
+        logger.exception("Measuring failed for conversation %s", conversation_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"The part could not be measured: {exc}",
+        ) from exc
+
+    report = verify_requirements(
+        requirements,
+        measurements,
+        bound_to={
+            "backend": backends.selected_backend(),
+            "backend_version": backends.backend_version(),
+            "conversation": conversation_id,
+            "detail": level.value,
+        },
+    )
+    return {
+        "report": report.to_dict(),
+        "summary": report.summary(),
+        # What the caller would have to run for the still-unmeasured ones to be
+        # answerable. Empty is the normal answer and does not mean everything was
+        # measured — the per-requirement outcomes say that.
+        "scans_needed": list(requirements.scans_needed()),
     }
 
 

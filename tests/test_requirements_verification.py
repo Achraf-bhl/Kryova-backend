@@ -266,3 +266,177 @@ class TestAPlainIterableIsAccepted:
         report = verify_requirements([mass()], {"mass_kg": 800.0})
         assert report.ok
         assert report.coverage.total == 1
+
+
+# -- 11.1's second half: validation flows back up the decomposition -----------
+#
+# A top-level requirement names no measurement of its own — it was decomposed
+# into derived ones that do. Verified requirement by requirement it comes back
+# NOT VERIFIED for ever, so the one requirement the customer signed is the one
+# the report is silent about while everything below it passes.
+
+
+def decomposed(**overrides: object) -> Requirement:
+    """The customer's top-level requirement: no measurement, met through others."""
+    fields: dict[str, object] = {
+        "id": "REQ-000",
+        "statement": "The press shall be light enough for a pallet truck.",
+        "source": Source.CUSTOMER,
+        "rationale": "The customer moves it between two bays with a hand truck.",
+    }
+    fields.update(overrides)
+    return Requirement(**fields)  # type: ignore[arg-type]
+
+
+def under(parent: str, one: Requirement) -> Requirement:
+    """The same requirement, decomposed from `parent`."""
+    return Requirement(
+        id=one.id,
+        statement=one.statement,
+        measure=one.measure,
+        comparison=one.comparison,
+        target=one.target,
+        tolerance=one.tolerance,
+        source=Source.DERIVED,
+        rationale=one.rationale,
+        parents=(parent,),
+        needs=one.needs,
+    )
+
+
+class TestValidationFlowsUpTheDecomposition:
+    def test_a_decomposed_requirement_is_met_when_its_children_are(self) -> None:
+        given = RequirementSet.of(
+            "press", [decomposed(), under("REQ-000", mass()), under("REQ-000", wall())]
+        )
+        report = verify_requirements(
+            given, {"mass_kg": 800.0, "minimum_wall_mm": 8.0}
+        )
+        top = report.result_for("REQ-000")
+        assert top.outcome is Outcome.PASSED
+        assert top.derived_from == ("REQ-001", "REQ-002")
+        assert report.ok
+
+    def test_a_violated_child_fails_its_parent(self) -> None:
+        """Even though the parent itself was never measured — the alternative is a
+        report where the customer's requirement is silent and the derived one is red."""
+        given = RequirementSet.of(
+            "press", [decomposed(), under("REQ-000", mass()), under("REQ-000", wall())]
+        )
+        report = verify_requirements(
+            given, {"mass_kg": 900.0, "minimum_wall_mm": 8.0}
+        )
+        top = report.result_for("REQ-000")
+        assert top.outcome is Outcome.FAILED
+        assert "REQ-001 is not met" in top.reason
+        assert not report.ok
+
+    def test_an_unverified_child_leaves_its_parent_unverified(self) -> None:
+        given = RequirementSet.of(
+            "press", [decomposed(), under("REQ-000", mass()), under("REQ-000", wall())]
+        )
+        report = verify_requirements(given, {"mass_kg": 800.0})
+        top = report.result_for("REQ-000")
+        assert top.outcome is Outcome.UNMEASURED
+        assert "REQ-002 was never verified" in top.reason
+
+    def test_a_derived_verdict_is_never_counted_as_measured(self) -> None:
+        """It rests on the decomposition being complete, which nothing checks."""
+        given = RequirementSet.of(
+            "press", [decomposed(), under("REQ-000", mass()), under("REQ-000", wall())]
+        )
+        payload: dict[str, object] = {"mass_kg": 800.0, "minimum_wall_mm": 8.0}
+        provenance.attach(
+            payload, "mass_kg", provenance.measured("BRepGProp volume integration")
+        )
+        provenance.attach(
+            payload,
+            "minimum_wall_mm",
+            provenance.approximated("ray cast from 64 points per face"),
+        )
+        report = verify_requirements(given, payload)
+        coverage = report.coverage
+        assert coverage.by_decomposition == 1
+        assert coverage.by_measurement == 1
+        assert coverage.by_approximation == 1
+        assert report.result_for("REQ-000").evidence.derived
+        assert not report.result_for("REQ-000").evidence.exact
+        assert "decomposition is complete" in report.result_for("REQ-000").reason
+
+    def test_the_caveat_is_printed_where_a_reader_meets_the_verdict(self) -> None:
+        given = RequirementSet.of("press", [decomposed(), under("REQ-000", mass())])
+        report = verify_requirements(given, {"mass_kg": 800.0})
+        assert "not measured at all" in str(report.coverage)
+        assert "met through REQ-001" in str(report.result_for("REQ-000"))
+
+    def test_it_flows_up_more_than_one_level(self) -> None:
+        """A grandparent resolves the round after its child, not never."""
+        given = RequirementSet.of(
+            "press",
+            [
+                decomposed(),
+                Requirement(
+                    id="REQ-100",
+                    statement="The frame subassembly shall be light.",
+                    source=Source.DERIVED,
+                    parents=("REQ-000",),
+                ),
+                under("REQ-100", mass()),
+                under("REQ-100", wall()),
+            ],
+        )
+        report = verify_requirements(given, {"mass_kg": 800.0, "minimum_wall_mm": 8.0})
+        assert report.result_for("REQ-100").outcome is Outcome.PASSED
+        assert report.result_for("REQ-000").outcome is Outcome.PASSED
+        assert report.result_for("REQ-000").derived_from == ("REQ-100",)
+        assert report.coverage.by_decomposition == 2
+
+    def test_a_requirement_waiting_on_a_capability_does_not_flow_up(self) -> None:
+        """`needs` says nothing measures it; children are what a verdict comes from,
+        and this one has none. It stays unverified with its own reason."""
+        report = verify_requirements(RequirementSet.of("press", [life()]), {})
+        result = report.result_for("REQ-003")
+        assert result.outcome is Outcome.UNMEASURED
+        assert result.derived_from == ()
+        assert "fatigue solver" in result.reason
+
+    def test_a_measured_parent_keeps_its_own_number(self) -> None:
+        """A measurement of the thing itself outranks an inference about it."""
+        given = RequirementSet.of(
+            "press",
+            [
+                mass(id="REQ-000", target=850.0),
+                under("REQ-000", wall()),
+            ],
+        )
+        report = verify_requirements(
+            given, {"mass_kg": 900.0, "minimum_wall_mm": 8.0}
+        )
+        top = report.result_for("REQ-000")
+        assert top.outcome is Outcome.FAILED
+        assert top.derived_from == ()
+        assert top.measured == pytest.approx(900.0)
+
+    def test_an_obsolete_child_is_not_asked(self) -> None:
+        """It is retired, and a retired requirement holding up its parent for ever
+        would make retiring one cost coverage."""
+        given = RequirementSet.of(
+            "press",
+            [
+                decomposed(),
+                under("REQ-000", mass()),
+                Requirement(
+                    id="REQ-009",
+                    statement="Old thickness rule.",
+                    measure="minimum_wall_mm",
+                    comparison=">=",
+                    target=99.0,
+                    source=Source.DERIVED,
+                    parents=("REQ-000",),
+                    status=Status.OBSOLETE,
+                ),
+            ],
+        )
+        report = verify_requirements(given, {"mass_kg": 800.0})
+        assert report.result_for("REQ-000").outcome is Outcome.PASSED
+        assert report.result_for("REQ-000").derived_from == ("REQ-001",)

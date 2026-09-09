@@ -147,13 +147,45 @@ class TestConstructionRefusals:
 
 
 class TestSomethingUnmeasurableMustSayWhatWouldChangeThat:
-    def test_no_measure_and_no_needs_is_refused(self) -> None:
+    def test_no_measure_no_needs_and_nothing_decomposed_from_it_is_refused(self) -> None:
         """11.2 — a requirement nothing checks is a wish. Broken to verify: dropped
-        the `needs` branch, and a bare statement imported as a silent requirement
-        that would never appear as a gap."""
+        the branch, and a bare statement imported as a silent requirement that would
+        never appear as a gap.
+
+        The refusal moved to the **set** on 2026-09-09, when flow-up landed: the
+        decomposition links point upward, so only the assembled set knows whether
+        anything flows down from an id, and requiring `needs` at construction meant
+        a top-level customer requirement had to claim a missing capability to be
+        writable at all. The rule itself did not weaken — it fires here, and the
+        message now names both ways out.
+        """
         with pytest.raises(RequirementError) as caught:
-            Requirement(id="REQ-009", statement="The frame shall be robust.")
+            RequirementSet.of(
+                "press",
+                [Requirement(id="REQ-009", statement="The frame shall be robust.")],
+            )
         assert "wish" in str(caught.value)
+
+    def test_a_bare_statement_is_writable_on_its_own(self) -> None:
+        """It is only a wish once nothing is decomposed from it, and a set says that."""
+        Requirement(id="REQ-009", statement="The frame shall be robust.")
+
+    def test_a_decomposed_requirement_needs_no_capability_of_its_own(self) -> None:
+        """The top-level customer requirement: measured by nothing, met through its
+        children. Refusing this was the wart flow-up removed."""
+        top = Requirement(id="REQ-001", statement="The press shall weigh under 850 kg.")
+        child = Requirement(
+            id="REQ-002",
+            statement="The frame shall weigh under 600 kg.",
+            measure="mass_kg",
+            comparison="<=",
+            target=600.0,
+            source=Source.DERIVED,
+            parents=("REQ-001",),
+        )
+        given = RequirementSet.of("press", [top, child])
+        assert given.children_of("REQ-001") == (child,)
+        assert not given.get("REQ-001").measurable
 
     def test_no_measure_with_needs_is_accepted_and_is_not_measurable(self) -> None:
         one = Requirement(

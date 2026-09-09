@@ -10,6 +10,16 @@ in mm³ and area in mm². The single exception is mass, because density arrives 
 (the unit every material table uses); that conversion lives in
 `app.kernel.measurement.mass_kg` and appears nowhere else.
 
+**Provenance travels with every number.** Each path gets an
+`app.kernel.provenance` record saying how it was arrived at — `measured` for the
+integrations and the traversals, `approximated` for the oriented box (the box for
+a given orientation is exact; the *orientation* is a search), `unavailable` with a
+reason for a mass with no density. The scans in `app.kernel.interrogation` already
+did this and the base payload did not, so until 2026-09-09 every requirement met
+by an exactly integrated volume reported its evidence as `unrecorded` — a
+coverage table that could not tell an integration from a payload that recorded
+nothing, which is half of what master plan 11.4 means by *by what evidence*.
+
 **Cost.** Each of volume, surface area and centre of mass is a `BRepGProp` integration
 over the whole shape — the expensive part of measuring, and the reason `Detail` exists.
 Volume properties are computed **once** and read three times where the naive version
@@ -19,15 +29,18 @@ operations that difference is the run.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Final
 
-from app.kernel import interrogation
+from app.kernel import interrogation, provenance
 from app.kernel import measurement as spec
 from app.kernel.errors import MeasurementError
 from app.kernel.interrogation import OrientedBox
 from app.kernel.measurement import Detail
 from app.kernel.occt import topology
 from app.kernel.occt.binding import require, symbol
+
+logger = logging.getLogger(__name__)
 
 #: How close an oriented box's axis must be to a global axis to be called aligned.
 #: Loose enough to absorb the orientation search's own arithmetic, far tighter than any
@@ -154,6 +167,21 @@ def inertia_tensor_mm5(shape: Any) -> list[list[float]]:
     return [[float(matrix.Value(row, col)) for col in range(1, 4)] for row in range(1, 4)]
 
 
+def _record(payload: dict[str, Any], path: str, record: Any) -> None:
+    """Attach one provenance record, and never let doing so break a measurement.
+
+    Provenance is a *description* of a number, so a fault while describing must
+    not cost the number itself — the same reasoning `app/ai/vision.py` applies to
+    its own check. In practice `attach` cannot fail on a dict this function
+    controls; the guard is here because the alternative is a measurement path that
+    can 500 for a reason nobody would guess from the traceback.
+    """
+    try:
+        provenance.attach(payload, path, record)
+    except Exception:  # noqa: BLE001 - see above
+        logger.debug("Could not record provenance for %s", path, exc_info=True)
+
+
 def measure(
     shape: Any,
     *,
@@ -171,14 +199,20 @@ def measure(
     require()
     payload: dict[str, Any] = {spec.HAS_SOLID: topology.has_solid(shape)}
     payload.update(topology.census(shape))
+    for path in topology.census(shape):
+        _record(payload, path, provenance.measured("TopExp traversal, de-duplicated"))
 
     if not detail.includes(Detail.BOUNDS):
         return payload
     payload[spec.BOUNDING_BOX_MM] = bounding_box_mm(shape)
+    _record(payload, spec.BOUNDING_BOX_MM, provenance.measured("Bnd_Box over the B-rep"))
 
     if not detail.includes(Detail.FULL):
         return payload
     payload[spec.SURFACE_AREA_MM2] = surface_area_mm2(shape)
+    _record(
+        payload, spec.SURFACE_AREA_MM2, provenance.measured("BRepGProp surface integration")
+    )
 
     if not payload[spec.HAS_SOLID]:
         # Area is defined on an open shell; volume, centre of mass and mass are not.
@@ -189,14 +223,29 @@ def measure(
     centre = properties.CentreOfMass()
     payload[spec.VOLUME_MM3] = volume
     payload[spec.CENTRE_OF_MASS_MM] = [centre.X(), centre.Y(), centre.Z()]
+    integration = provenance.measured("BRepGProp volume integration")
+    _record(payload, spec.VOLUME_MM3, integration)
+    _record(payload, spec.CENTRE_OF_MASS_MM, integration)
 
     if density_kg_m3 is None:
         # Never invent a density. A mass from a guessed density is precisely a number
         # that looks measured and is not.
         payload["mass_is_provisional"] = True
+        _record(
+            payload,
+            spec.MASS_KG,
+            provenance.unavailable("no density has been set on this part"),
+        )
     else:
         payload["density_kg_m3"] = density_kg_m3
         payload[spec.MASS_KG] = spec.mass_kg(volume, density_kg_m3)
+        _record(
+            payload,
+            spec.MASS_KG,
+            provenance.measured(
+                f"volume integration times the assigned density, {density_kg_m3:g} kg/m^3"
+            ),
+        )
 
     # The billet question, and it was documented in `contract.py` for months while
     # nothing emitted it. `oriented_bounding_box` existed, was exported, and had no
@@ -219,6 +268,16 @@ def measure(
         "size": list(oriented.size),
         "volume_mm3": oriented.size[0] * oriented.size[1] * oriented.size[2],
     }
+    # `approximated`, not `measured`, and the distinction is the point: the box for
+    # a *given* orientation is exact, and the orientation is the result of OCCT's
+    # search. A billet bought from it is right to within how well that search did,
+    # which is not something this build can bound — so a requirement met on it is
+    # visibly not a requirement met on an integrated volume.
+    _record(
+        payload,
+        interrogation.ORIENTED_BOUNDING_BOX_MM,
+        provenance.approximated("Bnd_OBB orientation search (AddOBB, optimal)"),
+    )
 
     if detail.includes(Detail.INERTIA):
         matrix = properties.MatrixOfInertia()

@@ -414,3 +414,182 @@ class TestRunningTheScanTheSetAsksFor:
                 # than the table names.
                 continue
             assert path in emitted[kind], f"{path} is not produced by {kind!r}"
+
+
+# -- master plan 5.2: a requirement's shortfall aims the repair ---------------
+#
+# The last thing standing between a requirement and the self-correcting loop.
+# `Requirement.assertion()` already makes a failing report say "REQ-002 not met"
+# rather than "size[2] >= 25 failed" — which is the readable half of 5.2 — and
+# what this pins is the useful half: that the same result carries a `gap` the
+# sensitivity layer can turn into *which parameter to move and how far*, without
+# `app.design` knowing that requirements exist or `app.requirements` knowing that
+# geometry does.
+
+
+def parametric_plate() -> Any:
+    """The same plate as a `DesignSpec`, so its thickness is a free parameter."""
+    from app.design.params import Parameter, ParameterSet, Unit
+    from app.design.spec import DesignSpec, FeatureSpec, expr, ref
+
+    return DesignSpec(
+        name="plate",
+        parameters=ParameterSet.of(
+            [
+                Parameter(name="width_mm", value=WIDTH, unit=Unit.MM),
+                Parameter(name="height_mm", value=HEIGHT, unit=Unit.MM),
+                Parameter(name="thickness_mm", value=THICKNESS, unit=Unit.MM),
+            ]
+        ),
+        features=(
+            FeatureSpec("plate.outline", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "plate.profile",
+                "catia_sketch_rectangle",
+                {
+                    "sketch": ref("plate.outline"),
+                    "width_mm": expr("width_mm"),
+                    "height_mm": expr("height_mm"),
+                },
+            ),
+            FeatureSpec(
+                "plate.slab",
+                "catia_pad",
+                {"sketch": ref("plate.outline"), "length_mm": expr("thickness_mm")},
+                note="Extrude the footprint to thickness — the parameter a repair moves.",
+            ),
+            FeatureSpec("plate.material", "catia_set_material", {"material": "steel-1018"}),
+        ),
+    )
+
+
+def occt_probe(spec: Any) -> dict[str, Any]:
+    """Build a spec on the open kernel and hand back what it measures.
+
+    The probe `sensitivity` injects. Decision 1 in one function: this is a few
+    milliseconds headless, and it was minutes of a licensed workstation.
+    """
+    from app.design.compile import compile_spec
+    from app.design.execute import execute_plan
+    from app.kernel import OcctRunner
+
+    runner = OcctRunner()
+    report = execute_plan(compile_spec(spec), runner)
+    assert report.ok, report.failure
+    return dict(runner("catia_measure", {}))
+
+
+class TestARequirementCanAimItsOwnRepair:
+    def test_the_gap_on_a_violated_requirement_names_a_parameter_and_a_distance(
+        self,
+    ) -> None:
+        from app.design.sensitivity import aim, baseline_values, sensitivity
+
+        spec = parametric_plate()
+        wanted_kg = 0.30  # the 20 mm plate is 0.37776 kg, so this is violated
+        requirement = Requirement(
+            id="REQ-014",
+            statement="The plate shall weigh no more than 0.30 kg.",
+            measure="mass_kg",
+            comparison="<=",
+            target=wanted_kg,
+            source=Source.CUSTOMER,
+            rationale="One person lifts it into the fixture, repeatedly.",
+        )
+        payload = occt_probe(spec)
+        report = verify_requirements(RequirementSet.of("plate", [requirement]), payload)
+
+        result = report.result_for("REQ-014")
+        assert result.outcome is Outcome.FAILED
+        assert "REQ-014 NOT MET" in str(result)
+        assert result.gap is not None and result.gap > 0.0
+
+        influence = sensitivity(spec, "mass_kg", probe=occt_probe)
+        # **Which** parameter is named here, and why it is named rather than
+        # discovered: a rectangular plate's mass is exactly as elastic in width as
+        # in height as in thickness — double any one and it doubles — so
+        # `most_influential` is genuinely a tie and picking a winner from it would
+        # be arbitrary dressed as analysis. Choosing the thickness is an
+        # engineering decision (the footprint is what bolts to the fixture), and
+        # `aim` takes it as an argument for exactly this case.
+        suggestion = aim(
+            influence,
+            result.gap,
+            values=baseline_values(spec),
+            parameter="thickness_mm",
+        )
+        assert suggestion is not None
+        assert suggestion.parameter == "thickness_mm"
+        # Mass is linear in thickness, so first order is exact here: the step that
+        # lands on 0.30 kg is thickness * 0.30/0.37776 = 15.882 mm.
+        assert suggestion.to_value == pytest.approx(
+            THICKNESS * wanted_kg / MASS_KG, rel=1e-3
+        )
+        assert suggestion.change < 0.0
+        assert suggestion.caveat
+
+    def test_moving_the_parameter_it_names_makes_the_requirement_met(self) -> None:
+        """The loop closed: requirement -> gap -> parameter -> rebuild -> met.
+
+        Nothing in `app/design/` imports `app/requirements/` to do this, and
+        nothing in `app/requirements/` imports a kernel. The two meet at the gap,
+        which is a number.
+
+        **The requirement carries 1 g of tolerance and it has to.** A first-order
+        step aimed at a hard bound lands *on* the bound, and on a bound with no
+        slack the verdict is then decided by the last bit of the arithmetic — this
+        exact case rebuilds to 0.30000000000000093 kg against a target of 0.30 and
+        is correctly refused. That is not a defect in either layer: it is what
+        aiming at an inequality means, and the two honest answers are to give the
+        requirement the slack a real one has or to aim inside the bound. A
+        correction loop that "fixed" it by loosening the comparison would be
+        deciding an engineering question in a retry counter.
+        """
+        from app.design.sensitivity import aim, baseline_values, sensitivity
+
+        spec = parametric_plate()
+        requirement = Requirement(
+            id="REQ-014",
+            statement="The plate shall weigh no more than 0.30 kg.",
+            measure="mass_kg",
+            comparison="<=",
+            target=0.30,
+            tolerance=0.001,  # 1 g — see the docstring
+            source=Source.CUSTOMER,
+        )
+        given = RequirementSet.of("plate", [requirement])
+        failing = verify_requirements(given, occt_probe(spec)).result_for("REQ-014")
+        assert failing.gap is not None
+
+        influence = sensitivity(spec, "mass_kg", probe=occt_probe)
+        suggestion = aim(
+            influence,
+            failing.gap,
+            values=baseline_values(spec),
+            parameter="thickness_mm",
+        )
+        assert suggestion is not None
+
+        assert suggestion.to_value is not None
+        repaired = with_thickness(spec, suggestion.to_value)
+        after = verify_requirements(given, occt_probe(repaired)).result_for("REQ-014")
+        assert after.outcome is Outcome.PASSED
+        assert after.measured == pytest.approx(0.30, rel=1e-9)
+
+
+def with_thickness(spec: Any, thickness_mm: float) -> Any:
+    """The same spec with one parameter moved — an edit is a rebuild, not a mutation."""
+    from app.design.params import Parameter, ParameterSet, Unit
+
+    return type(spec)(
+        name=spec.name,
+        parameters=ParameterSet.of(
+            [
+                Parameter(name=one.name, value=one.value, unit=one.unit)
+                if one.name != "thickness_mm"
+                else Parameter(name=one.name, value=thickness_mm, unit=Unit.MM)
+                for one in spec.parameters
+            ]
+        ),
+        features=spec.features,
+    )

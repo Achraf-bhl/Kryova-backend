@@ -191,3 +191,152 @@ class TestMeasuring:
         )
         assert response.status_code == 400
         assert "bounds" in response.json()["detail"]
+
+
+# -- checking a specification against the part on the screen ------------------
+
+
+PLATE_REQUIREMENTS = """
+# The plate `_build_plate` makes: 60 x 40 x 20, so 48 000 mm^3.
+
+REQ-001: The plate shall enclose no more than 50 000 cubic millimetres.
+    measure: volume_mm3
+    target: <= 50000
+    source: customer
+    rationale: It has to fit the pocket in the fixture.
+
+REQ-002: The plate shall present no more than 10 000 square millimetres to be finished.
+    measure: surface_area_mm2
+    target: <= 10000
+    source: derived
+    parent: REQ-001
+"""
+
+
+class TestCheckingRequirementsAgainstTheLivePart:
+    """Master plan 11.2/11.4 reaching the product — the third step of the same gap.
+
+    Until this endpoint existed, `app/requirements/` could compile a requirement
+    into an assertion, verify a set against a payload and report coverage, and
+    **nothing outside a test had ever handed it one**. An engineer could not give
+    the product a specification and be told whether the part met it.
+    """
+
+    def _check(self, auth_client: Any, conversation_id: str, **body: Any) -> Any:
+        payload = {"document": PLATE_REQUIREMENTS, "name": "plate"}
+        payload.update(body)
+        return auth_client.post(
+            f"/api/v1/kernel/conversations/{conversation_id}/requirements", json=payload
+        )
+
+    def test_a_met_specification_comes_back_met_with_its_evidence(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(auth_client, mine.id)
+        assert response.status_code == 200
+        body = response.json()
+        report = body["report"]
+        assert report["ok"] is True
+        assert report["coverage"]["verified"] == 2
+        by_id = {one["id"]: one for one in report["results"]}
+        assert by_id["REQ-001"]["measured"] == pytest.approx(48_000.0)
+        assert by_id["REQ-001"]["evidence"]["basis"] == "measured"
+
+    def test_a_violated_requirement_names_the_gap_and_is_not_ok(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(
+            auth_client,
+            mine.id,
+            document=PLATE_REQUIREMENTS.replace("<= 50000", "<= 40000"),
+        )
+        body = response.json()
+        assert body["report"]["ok"] is False
+        failed = next(
+            one for one in body["report"]["results"] if one["id"] == "REQ-001"
+        )
+        assert failed["outcome"] == "failed"
+        assert failed["gap"] == pytest.approx(8_000.0)
+        assert "REQ-001 NOT MET" in body["summary"]
+
+    def test_the_report_is_bound_to_what_produced_it(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """Decision 3: a result nobody can trace back to a build is not evidence."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        body = self._check(auth_client, mine.id).json()
+        bound = body["report"]["bound_to"]
+        assert bound["backend"] == "occt"
+        assert bound["conversation"] == mine.id
+        assert body["report"]["contract_version"]
+
+    def test_a_requirement_nothing_measured_is_reported_never_dropped(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        document = PLATE_REQUIREMENTS + (
+            "\nREQ-003: The plate shall survive ten years.\n"
+            "    needs: no fatigue solver is federated yet\n"
+            "    source: customer\n"
+        )
+        body = self._check(auth_client, mine.id, document=document).json()
+        assert body["report"]["ok"] is False
+        waiting = next(
+            one for one in body["report"]["results"] if one["id"] == "REQ-003"
+        )
+        assert waiting["outcome"] == "unmeasured"
+        assert "fatigue solver" in waiting["reason"]
+        assert body["report"]["coverage"]["unverified"] == 1
+
+    def test_a_document_that_does_not_parse_lists_every_problem_at_once(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(
+            auth_client,
+            mine.id,
+            document="REQ-001: The plate shall be light.\n    measur: mass_kg\n",
+        )
+        assert response.status_code == 422
+        assert "measur" in response.json()["detail"]
+
+    def test_a_conversation_with_no_part_is_the_same_409_as_the_others(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        response = self._check(auth_client, mine.id)
+        assert response.status_code == 409
+        assert "Ask for a part first" in response.json()["detail"]
+
+    def test_someone_elses_conversation_is_404_never_403(
+        self, auth_client: Any, db_session: Session
+    ) -> None:
+        other = User(email="req-other@kryova.dev", hashed_password="x")
+        db_session.add(other)
+        db_session.flush()
+        theirs = _conversation(db_session, other.id)
+        assert self._check(auth_client, theirs.id).status_code == 404
+
+    def test_it_names_the_scan_a_wall_requirement_would_need(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """A payload does not carry wall thickness until somebody asks for it, so
+        the honest answer is UNMEASURED plus what to run — not a pass."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        document = (
+            "REQ-010: No wall thinner than 6 mm.\n"
+            "    measure: minimum_wall_mm\n"
+            "    target: >= 6\n"
+            "    source: customer\n"
+        )
+        body = self._check(auth_client, mine.id, document=document).json()
+        assert body["report"]["results"][0]["outcome"] == "unmeasured"
+        assert body["scans_needed"]

@@ -226,15 +226,13 @@ class Requirement:
                     "measurement path, or drop the comparison and say in `needs` what "
                     "would make it checkable."
                 )
-            if not str(self.needs).strip():
-                raise RequirementError(
-                    f"{self.id}: has no measurement and does not say what would make it "
-                    "checkable. A requirement nothing checks is a wish (master plan "
-                    "11.2). If it genuinely cannot be measured in this build — service "
-                    "life, duty cycle, cost — set needs='...' naming the phase or the "
-                    "tool that would answer it. It will be reported UNMEASURED and "
-                    "counted as uncovered, which is the truth."
-                )
+            # A requirement with nothing to measure is either *waiting* on a
+            # capability — which `needs` names — or *decomposed*, met through the
+            # requirements it flows down into. Only the set knows which, because
+            # the links point upward from the children, so the refusal for
+            # "neither" lives in `RequirementSet._check_unmeasurable` rather than
+            # here. Refusing at construction would mean a top-level customer
+            # requirement had to claim a missing capability to be writable at all.
             return
 
         if str(self.needs).strip():
@@ -450,6 +448,7 @@ class RequirementSet:
             seen[one.id] = index
         self._check_parents(seen)
         self._check_acyclic()
+        self._check_unmeasurable()
 
     def _check_parents(self, index: Mapping[str, int]) -> None:
         for one in self.requirements:
@@ -460,6 +459,29 @@ class RequirementSet:
                         f"{one.id} is decomposed from {parent!r}, which is not in this "
                         f"set. Add it, or correct the id. Requirements here: {known}."
                     )
+
+    def _check_unmeasurable(self) -> None:
+        """A requirement with nothing to measure must be waiting or decomposed.
+
+        The third way — nothing to measure, nothing said about what would measure
+        it, and nothing decomposed from it — is a wish, and it verifies as an
+        honest-looking gap forever. It is refused here rather than on
+        `Requirement` because the decomposition links point *upward*, so only the
+        assembled set knows whether anything flows down from a given id.
+        """
+        with_children = {parent for one in self.requirements for parent in one.parents}
+        for one in self.requirements:
+            if one.measurable or str(one.needs).strip() or one.id in with_children:
+                continue
+            raise RequirementError(
+                f"{one.id}: has no measurement, says nothing about what would make it "
+                "checkable, and nothing is decomposed from it. A requirement nothing "
+                "checks is a wish (master plan 11.2). Either set needs='...' naming the "
+                "capability that would answer it — it is then reported UNMEASURED and "
+                "counted as uncovered, which is the truth — or decompose it into "
+                "requirements that name a measurement, and it will be verified through "
+                "them."
+            )
 
     def _check_acyclic(self) -> None:
         """Refuse a cycle, naming the loop.

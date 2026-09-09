@@ -36,6 +36,24 @@ by an integrated mass. `Coverage` reports the split, because a signing engineer
 who is told "94% verified" will ask how much of it was sampled, and should not
 have to.
 
+**4. Validation flows back up the decomposition** (11.1's second half). A
+top-level requirement — "the press shall weigh under 850 kg" — usually names no
+measurement of its own: it was *decomposed* into derived requirements that do,
+and it is met when they are. Verified requirement by requirement, that one comes
+back `UNMEASURED` for ever, so the single requirement the customer signed is the
+one the report is silent about while every requirement below it passes. So a
+requirement with nothing to measure and children in the set takes its verdict
+**from them**: every child met is `PASSED`, any child violated is `FAILED`, and
+anything else is `UNMEASURED` naming the children that are open.
+
+Two honesty rules ride with it, and both are the point rather than decoration.
+A derived verdict is **not a measurement** — it is sound only as far as the
+decomposition is complete, which nothing here can check — so its evidence basis
+is `by decomposition`, `Coverage` counts it in its own column, and it never lands
+in `by_measurement`. And a **violated child fails its parent** even though the
+parent was never measured: the alternative is a report where the customer's
+requirement is silent while the requirement it was broken into is red.
+
 **A result is bound to what produced it** (Decision 3). `bound_to` carries the
 geometry version, plan digest, backend and solver version the caller had — free
 text, because this package cannot know what a caller measures with — and
@@ -64,6 +82,20 @@ UNRECORDED: Final = "unrecorded"
 #: What is recorded when there was nothing to measure in the first place.
 NOT_ATTEMPTED: Final = "not attempted"
 
+#: What is recorded for a requirement whose verdict came from the requirements it
+#: was decomposed into rather than from a number. Deliberately not a `Basis`
+#: member: `app.kernel.provenance.Basis` describes how a *measurement* was
+#: arrived at, and this one was not measured at all.
+BY_DECOMPOSITION: Final = "by decomposition"
+
+#: Printed beside every derived verdict. A parent is met through its children only
+#: as far as the decomposition captured the parent, and nothing in this build can
+#: check that it did — so the caveat travels with the answer instead of living in
+#: a docstring nobody reads at the moment they need it.
+DECOMPOSITION_CAVEAT: Final = (
+    "sound only as far as the decomposition is complete; nothing checks that"
+)
+
 
 @dataclass(frozen=True)
 class Evidence:
@@ -91,6 +123,11 @@ class Evidence:
     @property
     def approximate(self) -> bool:
         return self.basis == "approximated"
+
+    @property
+    def derived(self) -> bool:
+        """True when the verdict came from the decomposition, not from a number."""
+        return self.basis == BY_DECOMPOSITION
 
     def __str__(self) -> str:
         if self.basis == NOT_ATTEMPTED:
@@ -122,6 +159,11 @@ class RequirementResult:
 
     #: Why it could not be checked, when it could not be. Empty otherwise.
     reason: str = ""
+
+    #: The requirements this verdict was taken from, when it flowed up the
+    #: decomposition instead of coming from a measurement. Empty for a measured
+    #: one, so "was this actually measured" is answerable without reading prose.
+    derived_from: tuple[str, ...] = ()
 
     @property
     def id(self) -> str:
@@ -163,10 +205,17 @@ class RequirementResult:
         if self.outcome is Outcome.UNMEASURED:
             return f"{req.id} NOT VERIFIED — {self.reason} ({req.statement})"
         if self.outcome is Outcome.PASSED:
+            if self.derived_from:
+                return (
+                    f"{req.id} met through {', '.join(self.derived_from)} — "
+                    f"{req.statement}"
+                )
             tail = "" if self.evidence.exact else f" [{self.evidence.basis}]"
             return f"{req.id} met{tail} — {req.statement}"
         gap = self.gap
         over = f", out by {abs(gap):g}{(' ' + req.unit) if req.unit else ''}" if gap else ""
+        if self.derived_from:
+            return f"{req.id} NOT MET — {self.reason} ({req.statement})"
         return f"{req.id} NOT MET{over} — {req.statement}"
 
     def to_dict(self) -> dict[str, Any]:
@@ -187,6 +236,8 @@ class RequirementResult:
             out["gap"] = self.gap
         if self.reason:
             out["reason"] = self.reason
+        if self.derived_from:
+            out["derived_from"] = list(self.derived_from)
         return out
 
 
@@ -205,6 +256,11 @@ class Coverage:
     unverified: int = 0
     by_measurement: int = 0
     by_approximation: int = 0
+
+    #: Verified through the decomposition rather than through a number. Its own
+    #: column because it is a weaker claim than either of the two above: it rests
+    #: on the decomposition being complete, which nothing checks.
+    by_decomposition: int = 0
 
     @property
     def verified(self) -> int:
@@ -233,6 +289,11 @@ class Coverage:
                 f" {self.by_approximation} of the {self.verified} verified rest on an "
                 "approximated measurement."
             )
+        if self.by_decomposition:
+            line += (
+                f" {self.by_decomposition} were not measured at all and follow from the "
+                "requirements they were decomposed into."
+            )
         return line
 
     def to_dict(self) -> dict[str, Any]:
@@ -245,6 +306,7 @@ class Coverage:
             "unverified": self.unverified,
             "by_measurement": self.by_measurement,
             "by_approximation": self.by_approximation,
+            "by_decomposition": self.by_decomposition,
         }
 
 
@@ -386,9 +448,7 @@ def verify_requirements(
                 RequirementResult(
                     requirement=one,
                     outcome=Outcome.UNMEASURED,
-                    reason=(
-                        f"nothing in this build measures it: {one.needs.rstrip('.')}."
-                    ),
+                    reason=_waiting_reason(one),
                     evidence=Evidence(basis=NOT_ATTEMPTED),
                 )
             )
@@ -404,6 +464,8 @@ def verify_requirements(
             )
         )
 
+    results = _flow_up(given, results)
+
     return RequirementReport(
         name=given.name,
         results=tuple(results),
@@ -411,6 +473,127 @@ def verify_requirements(
         obsolete=given.obsolete,
         bound_to=dict(bound_to or {}),
         contract_version=vocabulary.contract_version(),
+    )
+
+
+def _waiting_reason(one: Requirement) -> str:
+    """Why an unmeasurable requirement was not checked, before flow-up is tried.
+
+    A requirement with no `needs` is one that was decomposed — the set refuses any
+    other kind — so it says that rather than claiming nothing measures it. If the
+    flow-up then reaches a verdict this string is replaced; if it does not, this
+    is what the reader gets, and "nothing in this build measures it: ." is not a
+    sentence.
+    """
+    if str(one.needs).strip():
+        return f"nothing in this build measures it: {one.needs.rstrip('.')}."
+    return (
+        "it names no measurement of its own and is verified through the "
+        "requirements it was decomposed into."
+    )
+
+
+def _flow_up(
+    given: RequirementSet, results: list[RequirementResult]
+) -> list[RequirementResult]:
+    """Give every decomposed requirement the verdict of the requirements below it.
+
+    Master plan 11.1's *validation flow-up*. Runs after the direct pass and only
+    over requirements that have **nothing to measure and children in the set** —
+    a requirement that names a measurement keeps its own number, because a
+    measurement of the thing itself outranks an inference about it, and one
+    waiting on a capability has no children to ask.
+
+    Repeated to a fixed point rather than sorted topologically: the graph is a
+    DAG (`RequirementSet` refuses cycles at construction) and depth here is a
+    handful, so iterating until nothing changes is exact, needs no ordering pass,
+    and cannot loop — each round either resolves at least one requirement or
+    stops. A parent of a parent therefore resolves in the round after its child.
+    """
+    index = {one.id: position for position, one in enumerate(results)}
+    for _round in range(len(results) + 1):
+        changed = False
+        for position, result in enumerate(results):
+            requirement = result.requirement
+            if requirement.measurable or result.derived_from:
+                continue
+            children = [
+                results[index[child.id]]
+                for child in given.children_of(requirement.id)
+                if child.id in index
+            ]
+            if not children:
+                continue
+            derived = _derive(result, children)
+            if derived is not None:
+                results[position] = derived
+                changed = True
+        if not changed:
+            break
+    return results
+
+
+def _derive(
+    parent: RequirementResult, children: list[RequirementResult]
+) -> RequirementResult | None:
+    """One parent's verdict from its children, or `None` while they are open.
+
+    `None` means "not yet" — a child that is itself waiting on its own children
+    will be resolved in a later round, and settling the parent now would freeze a
+    verdict taken from an unresolved one. Once nothing moves, an unresolved child
+    is genuinely unverified and the parent says which.
+    """
+    names = tuple(child.id for child in children)
+    if any(_awaiting_its_own_children(child) for child in children):
+        return None
+    violated = [child.id for child in children if child.outcome is Outcome.FAILED]
+    if violated:
+        return RequirementResult(
+            requirement=parent.requirement,
+            outcome=Outcome.FAILED,
+            reason=(
+                f"it was decomposed into {', '.join(names)}, and "
+                f"{', '.join(violated)} {'are' if len(violated) > 1 else 'is'} not met."
+            ),
+            evidence=Evidence(basis=BY_DECOMPOSITION, method=DECOMPOSITION_CAVEAT),
+            derived_from=names,
+        )
+    if all(child.outcome is Outcome.PASSED for child in children):
+        return RequirementResult(
+            requirement=parent.requirement,
+            outcome=Outcome.PASSED,
+            reason=(
+                f"met through {', '.join(names)}, all of which are met. "
+                f"This is {DECOMPOSITION_CAVEAT}."
+            ),
+            evidence=Evidence(basis=BY_DECOMPOSITION, method=DECOMPOSITION_CAVEAT),
+            derived_from=names,
+        )
+    open_ids = [child.id for child in children if child.outcome is Outcome.UNMEASURED]
+    return RequirementResult(
+        requirement=parent.requirement,
+        outcome=Outcome.UNMEASURED,
+        reason=(
+            f"it was decomposed into {', '.join(names)}, and "
+            f"{', '.join(open_ids)} {'were' if len(open_ids) > 1 else 'was'} never "
+            "verified, so nothing can be said about this one either."
+        ),
+        evidence=Evidence(basis=NOT_ATTEMPTED),
+        derived_from=names,
+    )
+
+
+def _awaiting_its_own_children(child: RequirementResult) -> bool:
+    """Whether this child is a decomposed requirement no verdict has reached yet.
+
+    Deciding a parent from one of these would freeze a verdict taken from a
+    requirement that is about to change in the next round — which is how a
+    grandparent comes to read `UNMEASURED` while everything under it passes.
+    """
+    return (
+        not child.requirement.measurable
+        and not str(child.requirement.needs).strip()
+        and not child.derived_from
     )
 
 
@@ -444,6 +627,7 @@ def _evidence(
 
 def _coverage(results: Iterable[RequirementResult]) -> Coverage:
     passed = failed = unverified = by_measurement = by_approximation = 0
+    by_decomposition = 0
     total = 0
     for one in results:
         total += 1
@@ -457,7 +641,9 @@ def _coverage(results: Iterable[RequirementResult]) -> Coverage:
         # Only a verified requirement contributes evidence. An unverified one has
         # none by definition, and counting its absent basis would put "unrecorded"
         # rows into a table that is supposed to say what the checking rested on.
-        if one.evidence.exact:
+        if one.evidence.derived:
+            by_decomposition += 1
+        elif one.evidence.exact:
             by_measurement += 1
         elif one.evidence.approximate:
             by_approximation += 1
@@ -468,6 +654,7 @@ def _coverage(results: Iterable[RequirementResult]) -> Coverage:
         unverified=unverified,
         by_measurement=by_measurement,
         by_approximation=by_approximation,
+        by_decomposition=by_decomposition,
     )
 
 
@@ -485,6 +672,8 @@ def _provenance() -> Any:
 
 
 __all__ = [
+    "BY_DECOMPOSITION",
+    "DECOMPOSITION_CAVEAT",
     "NOT_ATTEMPTED",
     "UNRECORDED",
     "Coverage",

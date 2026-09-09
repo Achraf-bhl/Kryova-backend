@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app import observe
-from app.kernel import measurement
+from app.kernel import measurement, provenance
 from app.kernel.errors import GeometryError, NamingError
 from app.kernel.measurement import Detail
 from app.kernel.occt import metrology
@@ -657,6 +657,23 @@ class PartDocument:
         leaving it on beside a real mass would be the same lie in the other
         direction. A detail level below FULL carries no volume, so there is
         nothing to weigh and the flag is not touched.
+
+        **The provenance record has to come off with it, and it did not.** The
+        cached half is measured density-free on purpose, so its sidecar says
+        `mass_kg: unavailable — no density has been set on this part`. Writing the
+        mass here and leaving that record behind shipped a payload carrying a
+        real, exact mass *and* a note denying it. Nothing raises: the number is
+        right, and `assertions.py` reads the sidecar per path, so an assertion on
+        `mass_kg` verified UNMEASURED for ever against a mass the kernel had
+        integrated correctly — Decision 3's "unmeasured is never a pass" firing on
+        a number that was measured. Found at ladder Level 1, 2026-09-09: an
+        aluminium tube reported 0.178 kg beside `no density has been set`.
+
+        The sidecar is copied before it is written to, because the caller hands us
+        `dict(cached)` — a *shallow* copy whose `provenance` is still the cache's
+        own dict. Attaching to it directly would write today's density into the
+        cache that exists precisely to be density-free, and the next part to reuse
+        that entry would inherit it.
         """
         if self.density_kg_m3 is None:
             return payload
@@ -667,6 +684,17 @@ class PartDocument:
         payload["density_kg_m3"] = self.density_kg_m3
         payload[measurement.MASS_KG] = measurement.mass_kg(
             float(volume), self.density_kg_m3
+        )
+        sidecar = payload.get(provenance.PROVENANCE_KEY)
+        if isinstance(sidecar, dict):
+            payload[provenance.PROVENANCE_KEY] = dict(sidecar)
+        provenance.attach(
+            payload,
+            measurement.MASS_KG,
+            provenance.measured(
+                "volume integration times the assigned density, "
+                f"{self.density_kg_m3:g} kg/m^3"
+            ),
         )
         return payload
 

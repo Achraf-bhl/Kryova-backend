@@ -230,9 +230,49 @@ Plan updated: <which status lines moved>
 * **2026-09-06 (gate G1)** — did **not** pass: rung 3 failed. Carried forward; it is `E2` in
   THE QUEUE (`docs/WINDOWS_VERIFICATION.md`) and is now also the only thing that can verify
   the CalculiX work written since.
-* **Next run** — first one under this method. Ten phases complete; write each prompt against
-  what shipped between 2026-09-06 and 2026-09-09: plane analyses, conduction, convergence
-  studies, the requirements check, sheet-metal folding, and the assembly repository.
+* **2026-09-09** — first run under this method, on `occt`. **L1 passed, L2 did not, and the
+  run stopped there.** Three Kryova defects found and fixed, all between the model and the
+  tools. Full write-up in `docs/verification-2026-09-09/`.
+
+```
+### Run 2026-09-09 — backend: occt — model: qwen3.5:9b (81% GPU, num_ctx 32768)
+
+L1  PASS  prompt: "Make an aluminium tube 120 mm long, 40 mm outside diameter, with a
+          30 mm bore straight through. Tell me its volume and its mass."
+    picture: verification-2026-09-09/L1-tube-answer.png, L1-tube-section.png
+    note: 65,973 mm3 and 0.178 kg against my 65,973.446 and 0.17813. Section cut shows a
+          concentric bore with the cut face hatched. 18 operations, several wasted, every
+          misstep refused by name and recovered from.
+
+L2  FAIL  prompt: "Make a steel base plate 120 x 80 x 10 mm. Put a cylindrical boss on the
+          middle of its top face, 30 mm tall, with a diameter three times the plate
+          thickness. Then drill one hole straight down the centre, through the boss and out
+          the bottom of the plate, with a diameter half the boss diameter. Finally round the
+          four vertical corners of the plate with a radius equal to the plate thickness.
+          Tell me the finished mass."
+    picture: verification-2026-09-09/L2-attempt1.png, L2-attempt4.png
+    note: four attempts. Expected 109,278.760 mm3 / 0.86002 kg. The part IS buildable and
+          measures exactly that through the runner, so this is not a missing capability --
+          it is the model failing four different ways to find the route. Attempt 2 and
+          attempt 3 were Kryova's fault and are fixed (below); 1 and 4 were the model
+          looping, caught cleanly each time.
+
+L3-L6  NOT ATTEMPTED. Rule 3: a Level 4 pass on a shaky Level 2 measures nothing.
+
+Wall reached: **there is no way to sketch on a face.** `support="top"` is refused because
+  face selection needs `feature#selector` (roadmap A3, blocked behind A1). The working route
+  is `catia_plane_offset` then sketch on that plane, and the refusal names it -- but "put a
+  boss on the top face" is the most ordinary Level 2 sentence there is, and reaching it
+  depends on a 9B model discovering a two-step workaround from an error message. It tried
+  `support="top"`, `limit="up_to_surface"`, `catia_shaft` and a surface extrude first.
+
+Defects filed: (1) a correct mass shipped with provenance saying `unavailable -- no density
+  has been set`, so `assertions.py` would verify it UNMEASURED for ever; (2) an unsupported
+  *limit* was reported as `catia_pad is not implemented`, which is false and made the agent
+  abandon padding and reach for CATIA's interface; (3) `distance_mm="10"` refused
+  unrecoverably -- the scalar case of the H4/H5 array repair, now `_parse_number_strings`.
+Plan updated: E6.3 unchanged; this run's fixes are in dispatch, document and validation.
+```
 
 ---
 

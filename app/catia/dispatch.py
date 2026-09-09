@@ -741,6 +741,23 @@ def _execute_locally(
     try:
         result = runner(spec.name, arguments)
     except OperationNotSupported as exc:
+        if exc.subject != spec.name:
+            # A capability *within* an implemented operation — a limit, a selector
+            # kind, a primitive. `OperationNotSupported` carries the subject and a
+            # reason precisely so this case can be told from the one below, and the
+            # sentence it composes already names what to do instead.
+            #
+            # **Rewriting it as "the tool is not implemented" is a false statement,
+            # and it cost ladder Level 2 twice on 2026-09-09.** The agent called
+            # `catia_pad` with `limit='up_to_surface'`, was told *catia_pad is not
+            # implemented in the open kernel yet*, believed it — reasonably, having
+            # used `catia_pad` successfully two calls earlier — abandoned padding
+            # altogether, tried a shaft and a surface extrude, and finally announced
+            # that "the pad operation isn't implemented in this kernel" and went
+            # looking for CATIA's interface. The kernel's own message would have
+            # kept it on the rails: it says to extrude past and cut, or to use
+            # `limit='up_to_plane'`.
+            raise CatiaError(str(exc)) from exc
         coverage = backends.local_coverage()
         implemented = coverage.get("implemented", 0)
         declared = coverage.get("declared", 0)
@@ -942,11 +959,79 @@ def _normalise(
     before. Anything that would actually widen what is accepted belongs in the
     schema, where it can be read.
     """
-    arguments = _repair_escapes(_parse_array_strings(arguments, schema))
+    arguments = _repair_escapes(
+        _parse_number_strings(_parse_array_strings(arguments, schema), schema)
+    )
     if tool == "catia_hole" and arguments.get("through_all", True):
         if arguments.get("depth_mm") == 0:
             return {k: v for k, v in arguments.items() if k != "depth_mm"}
     return arguments
+
+
+def _parse_number_strings(
+    arguments: dict[str, Any], schema: dict[str, Any] | None
+) -> dict[str, Any]:
+    """`"10"` where a number is declared is that number, sent as text.
+
+    The scalar sibling of `_parse_array_strings`, added for the same reason and
+    on the same evidence. Measured at ladder Level 2 on 2026-09-09, three runs
+    of the same prompt: the model called
+
+        catia_plane_offset(name="Plane_top", reference="XY", distance_mm="10")
+
+    and was refused with `distance_mm must be number, got str`. It then told the
+    user, in its own words, that "the distance_mm argument keeps being reported
+    as a string when it should be a number, despite me passing a numeric value
+    ... a tool-system quirk that won't resolve by retrying", and stopped to ask
+    what to do. The refusal is accurate and the model cannot act on it, which is
+    exactly the case `_parse_array_strings` records.
+
+    **Nothing is guessed.** The string has to parse as JSON and has to yield a
+    real number: `"10"` and `"10.5"` and `"-2e3"` do, and `"10 mm"`, `"ten"`,
+    `""` and `"1,5"` do not and are left exactly as they arrived for the
+    validator to refuse as before. `true` is excluded because `bool` is a
+    subclass of `int` in Python and the schema's own `number` check excludes it
+    for the same reason. A unit-carrying string is deliberately *not* repaired:
+    this codebase is mm-N-MPa throughout and converts nothing, so "10 mm" and
+    "10 in" differ in a way no repair here is entitled to resolve.
+
+    The schema still runs afterwards, so a number out of range or in a field
+    that wanted something else is still refused.
+    """
+    if not schema:
+        return arguments
+    properties = schema.get("properties") or {}
+    parsed: dict[str, Any] | None = None
+    for name, value in arguments.items():
+        if not isinstance(value, str):
+            continue
+        declared = properties.get(name) or {}
+        types = declared.get("type")
+        wanted = types if isinstance(types, list) else [types]
+        if "number" not in wanted and "integer" not in wanted:
+            continue
+        candidate = _as_number(value)
+        if candidate is None:
+            continue
+        if "number" not in wanted and not float(candidate).is_integer():
+            # An integer field was declared and the text is not one. Refusing is
+            # right: rounding here would silently change what was asked for.
+            continue
+        if parsed is None:
+            parsed = dict(arguments)
+        parsed[name] = int(candidate) if "number" not in wanted else candidate
+    return parsed if parsed is not None else arguments
+
+
+def _as_number(value: str) -> float | None:
+    """The number this text is, or None when it is not exactly one."""
+    try:
+        parsed = json.loads(value.strip())
+    except (ValueError, TypeError):
+        return None
+    if isinstance(parsed, bool) or not isinstance(parsed, (int, float)):
+        return None
+    return float(parsed)
 
 
 def _augment(

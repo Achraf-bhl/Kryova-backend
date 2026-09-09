@@ -217,3 +217,103 @@ class TestAPartWithNoMaterialStillSaysSo:
         payload = runner.document.measure(detail=Detail.SHAPE)
 
         assert "mass_kg" not in payload
+
+
+class TestTheProvenanceSaysTheMassWasMeasured:
+    """The other half of the same defect, found at ladder Level 1 on 2026-09-09.
+
+    The tests above fixed the *value*: a material set after the first measurement
+    now reaches a mass. The **provenance record was left behind**, and it is what
+    decides whether that mass may be stated.
+
+    The cached half is measured density-free on purpose, so its sidecar carries
+    `mass_kg: unavailable — no density has been set on this part`. `_weighed` wrote
+    the mass on top and never touched the record, so `catia_measure` returned a
+    real, exact mass beside a note denying it existed. Nothing raises and the
+    number is right — but `assertions.py` reads the sidecar per path, so an
+    assertion on `mass_kg` verified UNMEASURED for ever, which is Decision 3's
+    "unmeasured is never a pass" firing on a number the kernel had integrated
+    correctly. Measured through the real chat endpoint: an aluminium tube reported
+    0.178 kg with `no density has been set on this part` attached to it.
+    """
+
+    def _prov(self, payload, path="mass_kg"):
+        return (payload.get("provenance") or {}).get(path)
+
+    def test_a_mass_with_a_density_is_recorded_as_measured(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        _plate(runner)
+        runner("catia_measure", {})
+        runner("catia_set_material", {"material": "aluminium-6061-t6",
+                                      "density_kg_m3": ALUMINIUM_KG_M3})
+
+        after = runner("catia_measure", {})
+
+        assert after["mass_kg"] == pytest.approx(
+            _mass_of(100.0 * 100.0 * 12.0, ALUMINIUM_KG_M3)
+        )
+        assert self._prov(after)["basis"] == "measured"
+
+    def test_the_record_names_the_density_it_used(self) -> None:
+        """A method nobody can check is not provenance. The density is the whole
+        of what turns an integrated volume into a mass."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        _plate(runner)
+        runner("catia_set_material", {"material": "aluminium-6061-t6",
+                                      "density_kg_m3": ALUMINIUM_KG_M3})
+
+        method = self._prov(runner("catia_measure", {}))["method"]
+
+        assert "2700" in method
+
+    def test_with_no_material_it_is_still_unavailable_with_the_reason(self) -> None:
+        """The fix must not make every mass look measured — that is the same
+        defect pointing the other way, and it is the worse direction."""
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        _plate(runner)
+
+        record = self._prov(runner("catia_measure", {}))
+
+        assert record["basis"] == "unavailable"
+        assert "density" in record["reason"]
+
+    def test_changing_the_material_moves_the_record_too(self) -> None:
+        from app.kernel import OcctRunner
+
+        runner = OcctRunner()
+        _plate(runner)
+        runner("catia_set_material", {"material": "aluminium-6061-t6",
+                                      "density_kg_m3": ALUMINIUM_KG_M3})
+        runner("catia_measure", {})
+        runner("catia_set_material", {"material": "steel-s235",
+                                      "density_kg_m3": STEEL_KG_M3})
+
+        method = self._prov(runner("catia_measure", {}))["method"]
+
+        assert str(int(STEEL_KG_M3)) in method
+        assert "2700" not in method
+
+    def test_writing_the_record_does_not_poison_the_density_free_cache(self) -> None:
+        """`measure` hands `_weighed` a *shallow* copy, so the sidecar it receives
+        is the cache's own dict. Attaching to it directly would write today's
+        density into the cache that exists precisely to be density-free."""
+        from app.kernel import OcctRunner
+        from app.kernel.measurement import Detail
+
+        runner = OcctRunner()
+        _plate(runner)
+        runner("catia_set_material", {"material": "aluminium-6061-t6",
+                                      "density_kg_m3": ALUMINIUM_KG_M3})
+        runner("catia_measure", {})
+
+        document = runner.document
+        cached = document._measurement_cache[Detail.FULL]
+
+        assert (cached.get("provenance") or {})["mass_kg"]["basis"] == "unavailable"
+        assert "mass_kg" not in cached

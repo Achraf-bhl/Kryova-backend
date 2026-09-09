@@ -214,6 +214,30 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-09 — the ladder's first run under the new method: L1 passes, L2 does not, three
+  defects between the model and the tools.** Report: `docs/verification-2026-09-09/`; run log in
+  `docs/GUI_PROMPT_LADDER.md`. Driven through the web GUI on `occt` with `qwen3.5:9b` at 81% GPU.
+  **L1 passed** — an aluminium tube measured 65,973 mm³ and 0.178 kg against a hand-checked
+  65,973.446 and 0.17813, with a hatched section cut proving a real bore. **L2 failed four
+  times**, and the part is not the problem: driving the same sequence through the runner gives
+  109,278.760 mm³ and 0.86002 kg, exactly the hand calculation. The wall is that **there is no
+  way to sketch on a face** — `support="top"` is refused because face selection needs
+  `feature#selector` (roadmap A3, blocked behind A1) — so the most ordinary Level 2 sentence
+  there is depends on a 9B model finding a two-step offset-plane workaround from an error
+  message.
+  Three fixes, each verified by breaking it. **A correct mass shipped with provenance denying
+  it**: the measurement cache is density-free by design and `_weighed` wrote the mass on top
+  without touching the sidecar, so `catia_measure` returned 0.178 kg beside `unavailable — no
+  density has been set on this part`, and `assertions.py` would have verified it UNMEASURED for
+  ever — Decision 3 firing on a number that *was* measured. **A refusal denied a working tool
+  existed**: `catia_pad` with `limit="up_to_surface"` came back as "catia_pad is not implemented
+  in the open kernel yet", though it had succeeded two calls earlier; `OperationNotSupported`
+  carries a subject precisely so a capability gap can be told from a missing operation, and
+  dispatch discarded it along with a reason naming what to do instead. The agent believed it and
+  went looking for CATIA's interface. **And `distance_mm="10"` was refused unrecoverably** — the
+  validator is right, the model sent a string, but this is the scalar case of the H4/H5 array
+  repair and now has `_parse_number_strings`, scoped so `"10 mm"`, `"1,5"`, `"ten"` and `"true"`
+  still reach the validator untouched.
 - **2026-09-09 — ccx has now read a deck this repo wrote, and two beams could never have
   solved.** THE QUEUE section A (A1–A5) is measured and ticked; `app/solve/calculix/` goes from
   *documented* to *verified*. **A1**: the solid bar deck solves on ccx 2.23, `.frd` back at 81/81

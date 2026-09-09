@@ -181,3 +181,99 @@ class TestTheAgentCanBuildWithoutASeat:
         runner("catia_new_part", {"name": "Bracket"})
         with pytest.raises(OperationNotSupported):
             runner("catia_measure_part", {})  # a declared tool this backend lacks
+
+
+def _missing_tool() -> str:
+    """A declared operation this backend does not implement, found rather than named.
+
+    Hard-coding one would rot the moment it is implemented, and the test would
+    then pass for the wrong reason -- it would be asserting about a tool that
+    works.
+    """
+    from app.catia.ops.registry import OPERATIONS_BY_NAME
+    from app.geometry import backends
+
+    handled = backends.local_tool_names()
+    for name in sorted(OPERATIONS_BY_NAME):
+        if name not in handled:
+            return name
+    raise AssertionError("every declared operation is implemented; pick another probe")
+
+
+class TestARefusalMustNotDenyATheToolExists:
+    """An unsupported *option* is not an unimplemented *tool*, and saying so cost
+    ladder Level 2 two runs on 2026-09-09.
+
+    `OperationNotSupported` is raised for both — a whole operation this backend
+    lacks, and a capability within one it has — and it carries a `subject` so the
+    two can be told apart. `_execute_locally` used to discard the subject and the
+    reason and substitute *"<tool> is not implemented in the open kernel yet"* for
+    both.
+
+    For a capability that is a **false statement**, and the agent acts on it. It
+    called `catia_pad` with `limit='up_to_surface'`, was told catia_pad is not
+    implemented — having used `catia_pad` successfully two calls earlier — and
+    concluded the kernel had no pad at all: it tried a shaft, tried a surface
+    extrude, told the user "the pad operation isn't implemented in this kernel"
+    and reached for CATIA's interface. The part was never finished. The kernel's
+    own sentence names the limit and says to extrude past and cut, or to use
+    `limit='up_to_plane'`.
+    """
+
+    def _refusal(self, arguments: dict[str, Any]) -> str:
+        from app.catia.dispatch import CatiaError, _execute_locally
+        from app.catia.ops.registry import OPERATIONS_BY_NAME
+
+        spec = OPERATIONS_BY_NAME["catia_pad"]
+        runner = backends.session_for("refusal")
+        runner("catia_new_part", {"name": "Plate"})
+        runner("catia_sketch_create", {"support": "XY", "name": "profile"})
+        runner("catia_sketch_rectangle", {"sketch": "profile", "width_mm": 60.0, "height_mm": 40.0})
+        with pytest.raises(CatiaError) as raised:
+            _execute_locally(spec=spec, conversation_id="refusal", arguments=dict(arguments))
+        return str(raised.value)
+
+    def test_an_unsupported_limit_does_not_claim_the_tool_is_missing(
+        self, occt: None
+    ) -> None:
+        message = self._refusal(
+            {"sketch": "profile", "length_mm": 30.0, "limit": "up_to_surface"}
+        )
+
+        assert "is not implemented in the open kernel yet" not in message
+
+    def test_it_names_the_option_that_was_refused(self, occt: None) -> None:
+        message = self._refusal(
+            {"sketch": "profile", "length_mm": 30.0, "limit": "up_to_surface"}
+        )
+
+        assert "up_to_surface" in message
+
+    def test_it_keeps_the_reason_that_says_what_to_do_instead(self, occt: None) -> None:
+        """The reason is the whole value of the refusal: without it the agent has
+        been told no and given nowhere to go."""
+        message = self._refusal(
+            {"sketch": "profile", "length_mm": 30.0, "limit": "up_to_surface"}
+        )
+
+        assert "up_to_plane" in message or "catia_boolean" in message
+
+    def test_a_genuinely_missing_tool_still_reports_the_coverage(self, occt: None) -> None:
+        """The other half must not regress: when the *operation* is absent, the
+        coverage number is what makes 'not built yet' checkable rather than a
+        shrug."""
+        from app.catia.dispatch import CatiaError, _execute_locally
+        from app.catia.ops.registry import OPERATIONS_BY_NAME
+
+        runner = backends.session_for("missing")
+        runner("catia_new_part", {"name": "Plate"})
+        with pytest.raises(CatiaError) as raised:
+            _execute_locally(
+                spec=OPERATIONS_BY_NAME[_missing_tool()],
+                conversation_id="missing",
+                arguments={},
+            )
+
+        message = str(raised.value)
+        assert "is not implemented in the open kernel yet" in message
+        assert "operations are" in message

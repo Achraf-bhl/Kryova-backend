@@ -312,6 +312,83 @@ Defects filed: (1) the occt export gap above; (2) `draft_load_case` still guesse
 Model note: the 32,768-token context wall from 2026-09-09 is gone -- 18+ operations across
   three meshes in one conversation without truncation.
 
+### Run 2026-09-10 (night) — backend: occt — model: deepseek-v4-pro (L1–L2), then qwen3.5:9b (L3–L4)
+
+Second run of 2026-09-10; the 01:15 seat run is the other one. Full write-up in
+`docs/verification-2026-09-10-night/`.
+
+**The model changed mid-run and it was not a choice.** DeepSeek returned HTTP 402
+*Insufficient Balance* partway through L3 — an external billing limit, surfaced honestly
+by the product with the provider's own message. Everything from L3 on ran on local
+`qwen3.5:9b` at **100% GPU, num_ctx 32768, 6.1 GB of 8,151 MiB**.
+
+```
+L1  PASS  "Make a steel hexagonal prism 60 mm across the flats and 25 mm tall. Tell me
+          its volume and its mass."
+    picture: verification-2026-09-10-night/L1-answer.png, L1-part-iso.png
+    note: 77,942 mm3 against my 77,942.286. 8 steps, ZERO refusals, 23 s. Mass 0.6134 kg
+          quoted with its density NAMED (steel-1018, 7870) rather than assumed -- better
+          than my own 7850 arithmetic. Derived the 69.282 mm circumscribed diameter
+          itself. Deliberately not a rectangular pad and not the 2026-09-09 tube.
+
+L2  PASS  "...plate 140 x 90 x 12 mm. Boss on the centre of its top face, 20 mm tall,
+          diameter TWICE the plate thickness. Bore a hole HALF the boss diameter through
+          boss and plate. A 10 mm hole in each corner, inset ONE AND A HALF TIMES the
+          plate thickness."
+    picture: verification-2026-09-10-night/L2-answer.png, L2-part-top.png, L2-part-section.png
+    note: mass 0.4127186544971364 kg against my 0.412719 -- EXACT to six decimals. All
+          three relationships resolved (boss 24, bore 12, inset 18). 21 steps, 273 s, one
+          clean refusal recovered from (sketch_circle would not guess between two sketches
+          and named both). Defect filed: the prose says "everything requested is verified"
+          directly above a panel saying "20 mm tall -- nothing measured this".
+
+L3  PASS  "Make a mild steel bracket 100 x 60 x 8 mm, then round all four of its vertical
+          corners with a 40 mm radius. Tell me the finished mass." (impossible: 40 mm on a
+          60 mm width)
+    picture: verification-2026-09-10-night/L3-model-no-tool-call.png (before the fix),
+             L3-refusal-and-question.png (after)
+    note: FIRST TWO ATTEMPTS RAN ZERO TOOL CALLS, and it was our fault, not the model's --
+          see the defect below. After the fix, the same prompt on the same model: 6 steps,
+          refused by name ("40.0 mm on 4 edge(s) did not produce a shape ... larger than
+          the narrowest face the feature runs along -- reduce it") and escalated with a
+          SPECIFIC question offering three options. Model-quality note: it blames the 8 mm
+          thickness when the 60 mm width is the limit -- right refusal, wrong reason.
+
+L4  FAIL -- Kryova
+          "...cantilever bracket: flat bar 200 x 40 x 10 mm. Clamp one end, hang 300 N off
+          the free end, run the stress. It has to stay under 150 MPa."
+    picture: verification-2026-09-10-night/L4-progress-a/b/c.png,
+             L4-convergence-answer.png, L4-escalation-banner.png
+    note: THE MORNING'S WALL IS GONE -- part -> STEP -> mesh -> solve -> results ran end to
+          end on the open kernel, including `Exporting STEP to Kryova`. The load case is
+          correct. It then answered "PASSES ... approximately 9 MPa of margin" from a
+          single-grid 808-element tet4 mesh whose own record says `converged: false` and
+          "treat the numbers as indicative". Tip deflection 0.31 mm against my beam theory
+          1.17 mm -- 3.7x too stiff, one linear tet through a 10 mm thickness. Challenged
+          in the same conversation it got it entirely right: tet10 at 5 mm and 3.5 mm give
+          1.14 / 1.13 mm and 77.8 / 73.6 MPa, and it said plainly the first answer was not
+          converged. So the peak stress was OVERSTATED by ~90% and the "pass with margin"
+          was luck.
+
+L5, L6  NOT ATTEMPTED. Rule 2: a Level 5 pass on top of an L4 that states unconverged
+        numbers as verdicts measures nothing.
+
+Wall reached: **a verdict stated from a single-grid solve.** Not a missing capability --
+  every piece of the evidence exists and the agent produces it correctly the moment it is
+  asked. What is missing is that the result interpretation states a pass/fail against the
+  user's own limit without reading the `converged: false` sitting in the result it just
+  read. The frontend already refuses to paint that green; the chat does not.
+Defects filed and FIXED: (1) **a streamed tool call was discarded, so no local model could
+  run a single tool** -- Ollama puts them on the chunk before `done`, not on `done`, and
+  `stream_chat` read only `done`; isolated by showing raw Ollama emits the call with 1 and
+  with 37 tools and through Kryova's full system prompt non-streamed. (2) `needs_input` and
+  `awaiting_approval` were dropped by an allow-list in `use-agent-chat.ts`, so a turn that
+  stopped at step 12 of 60 to ask a question was captioned "ran out of tool rounds".
+Defects filed, NOT fixed: the L4 verdict-without-convergence above; the tet4 default mesh
+  for a slender part; the L2 prose/panel contradiction.
+Plan updated: E7.4, E16.4, P5.1.
+```
+
 ---
 
 ## Retired: the named prompts (E1–E10, H1–H10, S1–S10, PRO1–PRO9, PG*, FR*)

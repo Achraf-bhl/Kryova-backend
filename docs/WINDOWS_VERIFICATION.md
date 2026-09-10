@@ -482,6 +482,15 @@ master plan's status line in the same commit.
       gate is driven from `docs/GUI_PROMPT_LADDER.md` through the chatbot in the browser —
       never through `dispatch` — with a screenshot per prompt and a dated report in
       `docs/verification-<date>/`.
+      **Still open after the 2026-09-10 night run, and the box stays unchecked** — that was a
+      ladder run, not a formal gate. What it settled is worth carrying: **L1, L2 and L3 pass
+      and L4 does not**, so a gate attempted today would fail at the same rung. The blocker is
+      master plan **E7 task 7** (added by that run): the agent states a pass/fail verdict
+      against the user's stress limit from a single-grid solve whose own record says
+      `converged: false`. Two Kryova defects found and fixed on the way — a streamed tool call
+      discarded on every local-model turn, and two stop reasons dropped in the browser — are in
+      `docs/verification-2026-09-10-night/`. **Fix E7.7 before attempting G1 again**, or the
+      gate will re-measure a known failure.
 
 - [ ] **E3 — The conduction analysis through the GUI, and against CalculiX once A2 passes.**
       Added 2026-09-09 with the work. `analysis: "thermal-conduction"` now reaches a request

@@ -64,23 +64,23 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-10** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-11** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 12/24 | 76/126 = 60% | 91/151 eng-months = 60% |
+| Engineering — E1–E23 | 11/24 | 76/127 = 59% | 90/151 eng-months = 60% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 18/34 | 122/187 = 66% | 119/189 eng-months = 63% |
+| **Programme** | 17/34 | 122/188 = 65% | 118/189 eng-months = 62% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, P1, P2, P3, P5, P8, P10 |
-| in flight | E15 70%, E18 50%, P4 75%, P9 57% |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E11, E12, E14, E16, E17.3, P1, P2, P3, P5, P8, P10 |
+| in flight | E7 79%, E15 70%, E18 50%, P4 75%, P9 57% |
 | nothing finished yet | E8, E9, E10, E13, E17, E19, E20, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -1298,7 +1298,25 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
 
-> ✅ PHASE COMPLETE (2026-09-09) — **on this machine.** Tasks 2, 3, 4, 5 and 6 are done and
+> ⚠️ **PHASE-COMPLETE MARKER WITHDRAWN (2026-09-11)** — a seventh task was added below after
+> the GUI run of 2026-09-10 (night), and one open task means no marker however much has shipped.
+> Nothing that was done has been undone; what changed is that driving the product through a
+> browser showed this phase's central claim being broken on the surface the user actually reads.
+> **The agent stated a pass/fail verdict against the engineer's own stress limit, with a
+> quantified margin, from a single-grid solve whose own record said `converged: false`.** Every
+> layer underneath was honest — the result carried the flag and the words "treat the numbers as
+> indicative", and the frontend already refuses to paint an unconverged number green. The chat
+> did not read either, and **the chat is the product**. That is exactly the failure Decision 3
+> exists to prevent, so it belongs in this phase rather than in a UI backlog. See task 7 and
+> `docs/verification-2026-09-10-night/`.
+>
+> The 2026-09-09 marker read as follows, and the rest of it still stands. Its heading is
+> hyphenated on purpose: `scripts/plan_progress.py` recognises the unhyphenated spelling, so a
+> withdrawn marker reproduced verbatim would still be read as a live one — which is the "two
+> statements, one of them stale" failure that parser exists to catch. (This sentence may not
+> spell it either, for the same reason.)
+>
+> ✅ *PHASE-COMPLETE (2026-09-09)* — **on this machine.** Tasks 2, 3, 4, 5 and 6 are done and
 > tested; task 1 stays `PARTIAL` on one case, **LE3**. The marker is taken here rather than
 > withheld indefinitely because holding it for one case would make this phase indistinguishable
 > from one with unwritten code in it. Precedent is E1, whose marker carries the same shape of
@@ -1614,6 +1632,40 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    > does not exist.
    > Tested by: `tests/test_simulations.py::TestAConductionAnalysisCanBeAskedFor` (11) — five
    > guards verified by breaking what they guard.
+
+7. **A verdict may not be stated from a solve that holds no evidence about itself.** The answer
+   the agent writes must carry the result's own convergence basis whenever it states a pass, a
+   fail, or a margin against a number the user gave — or say plainly that it cannot.
+   > NOT STARTED — added 2026-09-11, measured through the GUI, `docs/verification-2026-09-10-night/`.
+   > **What happened.** Asked for a cantilever that "has to stay under 150 MPa", the product
+   > built it, solved it, and replied: *"PASSES. The peak stress of 140.6 MPa is below your limit
+   > of 150 MPa. The bracket has approximately 9 MPa of margin."* The result it had just read
+   > carried `mesh_convergence: {converged: false, basis: "single-grid"}` and the sentence
+   > "Solved on one mesh. Nothing here measures how much the answer would move on a finer one, so
+   > treat the numbers as indicative." Neither reached the answer.
+   > **It was not a close call.** The mesh was 808 linear tet4 elements — one element through a
+   > 10 mm thickness — and tet4 is pathologically stiff in bending: tip deflection came out
+   > 0.31 mm against beam theory's 1.17 mm. Challenged in the same conversation the agent got it
+   > entirely right, running tet10 at 5 mm and 3.5 mm for 1.14 and 1.13 mm, and saying plainly
+   > that the first answer was not converged. So **the evidence exists, the agent can produce it,
+   > and nothing made it look before issuing a verdict.**
+   > **The direction was luck.** The coarse mesh *overstated* peak stress by ~90% (140.6 against
+   > a converged ~74), so a part that passes comfortably was reported as passing with a thin
+   > margin. The same error the other way fails a good part, or passes a bad one.
+   > **This is not a UI gap.** `app/verify/` is honest, the job row is honest, and the frontend
+   > already refuses to paint an unconverged number green (`unmeasured is amber and never
+   > green`). Only the sentence the engineer actually reads is wrong, which makes it this
+   > phase's problem rather than P5's: Decision 3 says an unmeasured claim is never a pass, and
+   > this is that claim being made in prose.
+   > **Two things to decide when it is built**, neither obvious: whether a single-grid run may
+   > state a verdict *at all* or only a caveated observation; and whether the agent should
+   > **run the study itself** when a stated limit is in play, rather than reporting and waiting
+   > to be challenged. The second is the difference between honest and useful.
+   > Related but separate, and worth its own task: **the default mesh for a slender part.**
+   > `generate_tet_mesh` defaults to `element_order=1` with no size control, which is what
+   > produced 808 elements here. The same class was already measured at gate G1 — "a factor of
+   > safety of 1303 off one 411-element tet4 mesh". Whether the default becomes tet10, or a size
+   > derived from the part's smallest dimension, is a real decision about cost against accuracy.
 
 **Where this phase stands, and why the marker above says what it says.** Tasks 2 through 6 are
 done. Task 1 is `PARTIAL` and **cannot be closed on this machine**: LE3 is a shell benchmark and
@@ -3531,6 +3583,36 @@ scroll?
    poll-schedule/api-client machinery; WebSockets only if bidirectionality is ever actually
    needed), reconnect-and-resume — `conversation-resume` exists and is tested, so extend, don't
    replace.
+   > DONE (2026-09-11) — both halves built and now **driven through the GUI on the Windows
+   > seat**, which found that one sentence of the status below was false and load-bearing.
+   > **"Tool calls arrive on the final Ollama chunk" is wrong, and `stream_chat` was written to
+   > it.** Measured on the seat against Ollama and `qwen3.5:9b`: a 102-chunk reply carried the
+   > tool call whole on **chunk 101 with `done: false`**, and the `done` chunk that followed
+   > carried none. Reading only the final object therefore discarded **every** tool call, so the
+   > agent saw a text-only turn and the product answered "I'll create the part…" with **zero
+   > steps run** — reproduced on three prompts, one as simple as a 40 mm cube. The entire
+   > local-model path did nothing, and had done nothing since P5.1 landed.
+   > It was invisible from below by construction: the non-streaming `chat` path is fine because
+   > the whole body carries the calls, and that is the path every provider test drove; a mocked
+   > stream written to the same wrong assumption passes; and **nothing goes red** — the turn
+   > completes and only the "nothing measured this" footnote hints that no work happened.
+   > Isolated rather than guessed: raw Ollama emits a correct call with 1 tool, with 37 tools,
+   > and through Kryova's full 23,369-character system prompt non-streamed; only the streaming
+   > assembly loses it. Calls are now collected from *whichever* chunk carries them, and a call
+   > repeated on both a mid-stream chunk and `done` runs once.
+   > The rule that survives unchanged is the one that matters: `Finished.turn.text` is the
+   > answer and the deltas are never reassembled — the reason is simply that the calls are not
+   > *in* the deltas, not that they are on the last chunk.
+   > **The frontend half of the same turn was also wrong**: `use-agent-chat.ts` carried
+   > `stopReason` through an allow-list of three, so E16.4's `needs_input` and P5.5's
+   > `awaiting_approval` were dropped and a turn that stopped at step 12 of 60 to ask a question
+   > was captioned "ran out of tool rounds. Ask for one thing at a time".
+   > Tested by: `tests/test_ollama_streaming_tool_calls.py` (5, one of them the double-count
+   > guard), `../Kryova-frontend/src/components/chat/chat-view.test.tsx` (2 added). Verified by
+   > breaking both, and end to end through the browser — the prompt that ran 0 steps before the
+   > fix ran 6 after it. Run: `docs/verification-2026-09-10-night/`.
+
+   <!-- superseded 2026-09-11 -->
    > DONE (2026-09-10) — both halves built, and each was exactly where the superseded status
    > said it was rather than in the client.
    > **Token streaming is a provider-contract change** (`app/ai/provider.py`): `stream_chat`

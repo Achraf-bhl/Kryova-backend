@@ -221,6 +221,43 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-10 (night, Windows seat) — the tree arrived red, and the GUI found two defects the
+  suite structurally cannot see.** Verified the push, fixed everything red, drove the ladder to
+  L4. Report: `docs/verification-2026-09-10-night/`.
+  **The suite was pushed red**: `plan_work` entered `BUILTIN_TOOL_LABELS` in `25d758e` and broke
+  a pre-existing test nobody re-ran. Eight failures, all static and so failing on Linux too, in
+  four groups — one real product defect (E16.2's three planning tools plus `catia_export_step`
+  took the OCCT registry 138 → 142, moving the common-word ceiling 27 → 28, so `sketch`, carried
+  by exactly **28** tools, flipped from noise to "discriminating"; `COMMON_TERM_SHARE` retuned
+  0.20 → 0.15 to hold the *absolute* ceiling its own comment records it was measured at on a
+  110-tool corpus), and three tests right about their claim and wrong about their method.
+  **Two defects only a browser could find.** (1) **A streamed tool call was discarded, so no
+  local model could run a single tool.** Ollama puts the call on the chunk *before* `done`;
+  `stream_chat` read only `done`. Zero steps ran on three prompts, one as simple as a 40 mm
+  cube, while the product answered "I'll create the part…". Isolated by showing raw Ollama emits
+  the call with 1 tool, with 37, and through Kryova's full 23,369-char system prompt
+  non-streamed — only the streaming assembly loses it. (2) `needs_input` and `awaiting_approval`
+  were dropped by an **allow-list of three** in `use-agent-chat.ts`, so a turn that stopped at
+  step 12 of 60 to ask a question was captioned "ran out of tool rounds. Ask for one thing at a
+  time".
+  **A Windows-only leak**: the suite spawned real `catia_bridge run --wait-for-catia` daemons
+  that outlived it — two alive twenty minutes after pytest — making the suite non-idempotent
+  here (run 2 went red in `test_catia_*` against run 1's daemons) and contending for the
+  one-per-machine `bridge.lock`. Closed with an autouse fixture modelled on `conftest.outbox`;
+  proved by breaking it (one test file strands two daemons without it, zero with it, **80 tests
+  green either way**).
+  **Ladder: L1 PASS, L2 PASS, L3 PASS, L4 FAIL — Kryova.** L2's mass matched hand arithmetic to
+  six decimals (0.4127186544971364 vs 0.412719). **The open kernel reached the solver for the
+  first time** — the wall the morning run stopped at is gone. L4 fails because the agent stated
+  "PASSES … approximately 9 MPa of margin" from an 808-element tet4 single-grid solve whose own
+  record said `converged: false`; challenged, it ran tet10 at 5 and 3.5 mm and got it right
+  (1.14/1.13 mm against beam theory's 1.17). Filed as **E7 task 7**, which withdrew E7's
+  phase-complete marker — 18/34 phases → **17/34, 65.2%**.
+  Model note: DeepSeek hit HTTP 402 *Insufficient Balance* mid-L3, so L3–L4 ran on local
+  `qwen3.5:9b` at 100% GPU, num_ctx 32768.
+  Suite: **8054 passed / 0 failed** backend, **407** frontend, ruff + mypy + recorded + plan all
+  clean.
+
 - **2026-09-10 (evening) — plan hygiene repaired, P5.2 closed properly, and four half-lanes
   stashed rather than pushed.** An eleven-lane coding-only stretch hit a rate limit and left a
   tree that could not build: a migration revising a parent nobody wrote, a model using an

@@ -1347,9 +1347,32 @@ earlier and never removed from here. That is worse than an empty section: a stal
 you to re-fix something that works, and it teaches you to skim the ones that are real. **Verify an
 entry before acting on it, and delete it the moment it stops being true.**
 
-**Three that only bite on Windows, all measured 2026-09-09 on the seat.** Each was invisible on
-Linux by construction, which is the pattern worth carrying: a difference between the two machines
-hides in whatever neither one has to state out loud.
+**Five that only bite on Windows** — the first three measured 2026-09-09, the last two
+2026-09-10. Each was invisible on Linux by construction, which is the pattern worth carrying: a
+difference between the two machines hides in whatever neither one has to state out loud.
+
+- **Never mutate a source file with PowerShell's `Set-Content` when you are about to measure the
+  result.** `Set-Content -Encoding utf8` writes a **BOM** on PowerShell 5.1, and `-NoNewline`
+  strips the trailing newline; the file then fails to parse, and every test in the run goes red
+  for a reason your break did not cause. Measured 2026-09-10 mutating
+  `app/ai/providers/ollama.py`: the guard was supposed to fail in **one** parametrised case and
+  failed in all three, which reads as "the guard is too broad" and is actually "the file is not
+  Python any more". This is the Windows sibling of the `git checkout` trap above, and it poisons
+  a measurement the same way — so **apply a break with the `Edit` tool, not with a shell
+  rewrite**, and confirm the restore with `git status --short <file>` or a file hash rather than
+  by eye.
+
+- **The test suite used to spawn real CATIA bridge daemons here, and they outlived the run.**
+  Fixed 2026-09-10 by `conftest._no_real_catia_bridge`, but the *class* is the thing to carry:
+  `app/catia/local_bridge.py` is gated on `sys.platform == "win32"` first, so on Linux the path
+  is dead and the suite is silent, while here it spawned
+  `python -m catia_bridge run --wait-for-catia` — which by design waits forever rather than
+  exiting when CATIA is absent. Two survived twenty minutes past pytest. The suite was therefore
+  **not idempotent on this machine** (the second full run went red in `tests/test_catia_*`
+  against the first run's daemons), and a stranded daemon holds the one-per-machine
+  `bridge.lock` that a real GUI session needs. **Before a gate run, check nothing is holding the
+  bridge:** `Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object
+  { $_.CommandLine -match 'catia_bridge run' }` should come back empty.
 
 - **Text IO without an explicit `encoding=` reads as cp1252 here.** Python 3.14 still takes the
   *locale* codec, so `Path.read_text()` on any file carrying an em-dash raises
@@ -1559,8 +1582,26 @@ escalates anyway, quoting verbatim — the same contract `app/solve/calculix/dia
 then exactly one `Finished`. The base implementation emits **no deltas at all** rather than the
 whole answer as one — otherwise "the model wrote this in one go" is indistinguishable from "this
 provider does not stream", and the UI renders the text twice. `Finished.turn.text` is the answer;
-**never reassemble the deltas**, because tool calls arrive on the final chunk and a caller
-building its own copy would silently drop the half of the turn that does the work.
+**never reassemble the deltas**, because the tool calls are not in them and a caller building its
+own copy would silently drop the half of the turn that does the work.
+
+**Where the tool calls actually are is a measurement, and this file had it wrong.** Until
+2026-09-10 the line above read "tool calls arrive on the final chunk", and
+`ollama.py::stream_chat` was written to that — it assembled the turn from the `done: true` chunk
+alone. Measured on the seat against Ollama and `qwen3.5:9b`: a 102-chunk reply carried the call
+whole on **chunk 101, with `done: false`**, and the `done` chunk that followed carried none. So
+every local-model tool call was discarded, and the product answered "I'll create the part…" with
+**zero steps run**. Collect tool calls from *whichever* chunk carries them; never key on the
+`done` flag. `tests/test_ollama_streaming_tool_calls.py` pins it, including that a call repeated
+on both chunks runs once.
+
+**This is the third defect of one shape**, and the shape is worth naming: *the non-streaming path
+is fine, the mocked test agrees with the wrong assumption, and nothing goes red.* The turn
+completes, the prose reads as deliberate, and only the "nothing measured this" footnote hints
+that no work happened. `catia_new_part` recording no `CatiaDocument` row (2026-09-05) and
+`catia_export_step` being CATIA-only (2026-09-10) were the first two. **A provider seam needs at
+least one test driven through the real thing**, because a mock of a wire format is a copy of what
+you believed it to be.
 
 **`turn_events` is a ten-minute resume buffer, not a record.** A reconnect lands on whichever
 worker is free, so an in-process ring buffer resumes perfectly under `--workers 1` and nothing in

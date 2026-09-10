@@ -64,6 +64,59 @@ item quietly ticked is worse than one left open, because nobody re-examines it.
 
 ---
 
+## THE NEXT WINDOWS SESSION — written 2026-09-10 after the third Linux stretch
+
+**Read this first. The 2026-09-09 section below is history; its order is superseded by this
+one.** Since the last seat session (L2 and L3 passed, L4–L6 not attempted) Linux closed P5 and
+E16. **None of it has been driven through the GUI.**
+
+**Four unfinished lanes were deliberately not pushed:**
+- E15 task 1's CATIA half (batch execution on the seat);
+- E15 task 2's database-backed job queue;
+- attachment tables and load-table import (P4 tasks 2, 3 and 6);
+- P9's container-health pins.
+
+They are in `git stash` on the Linux machine and do not build yet. Do not test them, and do not
+start those tasks here: a second copy would collide with the first.
+
+**Start here, always:** `git fetch --all && git pull` on **both** repos, then `scripts\setup.ps1`
+(re-running it is the update), then `alembic upgrade head` and `alembic check`. There is no new
+migration; the head stays `ef4d9b93d3ca`.
+
+### The order, and why it is this order
+
+1. **Regression first.** Backend `pytest` (check it ran on PostgreSQL: the RLS and JSONB tests
+   run rather than skip), `ruff`, `mypy`, `app.verify.recorded --check`,
+   `scripts.plan_progress --check`. Frontend `npm run test`, `lint`, `type-check`. A red here is
+   written up as expected-versus-actual before anything else happens.
+2. **The GUI ladder, from Level 1**, with prompts written against the list below.
+3. **Then the next phases**, seat-bound work first: E15 task 4 (the CATIA session pool and crash
+   recovery — it needs a seat to write against), THE QUEUE section E, then **P7** (the desktop
+   app and the bridge; task 1 stays blocked behind P9 task 4).
+
+### What the GUI must be driven through this time
+
+The wall the 2026-09-10 run hit is gone: **a part built on `occt` now reaches the solver**
+(`tests/test_geometry_backends.py::TestThePartCanReachTheSolver`), so Levels 3–5 are reachable
+on the open kernel for the first time. Write one prompt per level against these:
+
+- **Level 1–2:** the editable spec panel — change a parameter from the panel mid-conversation
+  and check that the part, the revision summary and the mass agree (P5.3). The agent's own plan
+  with a checkpoint that stops the turn (E16.2).
+- **Level 3:** a retry that keeps failing must end in a specific question (E16.4). Stopping a
+  running simulation must say the solve already handed to CalculiX runs out (P5.6).
+- **Level 4:** on `occt`, part → STEP → mesh → solve → results, watching the stage line change
+  (P5.2, never a percentage). Re-run the identical case and confirm a cache hit (E15.2).
+- **Level 5:** every number in the answer traces to a run, a measurement or a citation, and an
+  approval gate shows exactly what was signed (P5.5).
+- **Level 6:** M4 (gearbox) or M5 (stamping press). Record the rung reached.
+
+**Pictures:** a screenshot every time a prompt finishes, and with CATIA involved two —
+`catia_capture_view` through the product, and the CATIA window itself. Also capture each new
+surface as it is exercised: the progress line, the stop button, the gate page and the spec panel. Everything goes in `docs/verification-<date>/`.
+
+---
+
 ## THE NEXT WINDOWS SESSION — written 2026-09-09 after the second Linux stretch
 
 **Read this before THE QUEUE.** The seat has had exactly one session (2026-09-09, tiers 1–2

@@ -221,6 +221,26 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-10 (evening) — plan hygiene repaired, P5.2 closed properly, and four half-lanes
+  stashed rather than pushed.** An eleven-lane coding-only stretch hit a rate limit and left a
+  tree that could not build: a migration revising a parent nobody wrote, a model using an
+  unimported `func`, settings that did not exist, and docstrings citing files never created.
+  What was complete was pushed. What was not went to `git stash` on the Linux machine, backend
+  and frontend, named by lane:
+  - E15.1's CATIA half — the new CATScript encoding, `scripts/catia_bridge/batch.py`, and a batch
+    frame the server never sends;
+  - E15.2's database queue worker — `app/jobs/{database,claims,kinds,autoscale}.py`, plus claim
+    columns on `SimulationJob` that have no migration;
+  - P4.2/4.3/4.6 — `app/documents/{tables,spreadsheet,loadtable}.py`, `AttachmentUse` with
+    migration `c4a6b3d4e003`, and the frontend attachment components, whose five backend routes
+    were never built;
+  - P9's container-health pins, which have no tests and read variables the Dockerfile never sets.
+
+  Pushed: `scripts/release_notes.py` with its tests. The six supersession markers the parser
+  could not see (P4.1, E16.2–4, P5.1, P5.3) are moved to the canonical shape. P5.2 is converted
+  to DONE with the three simulation-page tests its progress line lacked, each verified by breaking
+  the page. CLAUDE.md gains the marker rule, the half-lane trap, and the user's rule of at most one
+  subagent at a time.
 - **2026-09-10 — P5 and E16 closed; E15, P4, P9 and E18 advanced. Six phases in one session.**
   The thread running through all of it is that **every one of the four residuals P5 and E16 were
   carrying turned out to be a backend gap wearing a frontend label**, and naming them properly is

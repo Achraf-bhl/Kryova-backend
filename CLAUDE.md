@@ -51,6 +51,12 @@ lets the next session start.** Rules:
 5. **Never delete a status; supersede it.** Then append one line to the build plan's *Done*, and
    re-stamp the plan's progress block (`python -m scripts.plan_progress --write`) — it is
    generated from those status lines, and it is the one number in the plan nobody may type.
+   **The shape is exact, because a parser reads it:** the new `> DONE …` block first, a blank
+   line, an *unquoted* `   <!-- superseded <date> -->`, then the old `> PARTIAL …` block.
+   `scripts/plan_progress.py` treats what follows an unquoted marker as history; written as
+   `> <!-- superseded -->` inside the quote and above the old status, it is not a marker at all
+   and the old status is read as current. Six tasks were written that way on 2026-09-10, and
+   `TestThePlanKnowsItsOwnProgress` reported P5 and E16 complete with open tasks until they moved.
 6. **You may change the plan itself.** Add a task, split a phase, add a whole phase, or rewrite
    one that turned out to be wrong — when the work teaches you something the plan did not know.
    That is how the four defects recorded in its header got found. Say in the commit message what
@@ -540,12 +546,15 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    goes through `call_catia` — `tests/test_geometry_backends.py::TestThePartCanReachTheSolver` is
    the shape to copy. The ladder exists because this class is only visible from the outside.
 
-## Build with parallel agents — the default, not an optimisation
+## Subagents — never more than one at a time
 
-A phase here is usually five or six pieces touching disjoint files — a module, its tests, a wiring
-change, a document check, an install — and running them one after another spends the night on the
-ordering rather than on the code. Six agents on one phase is normal; ten is not too many when the
-lanes are genuinely separate. What makes it work rather than a merge conflict:
+**The user's rule, 2026-09-10: use at most one subagent at a time.** Do the work yourself, in
+this session, and delegate one bounded piece only when it clearly pays for itself. Never fan out
+lanes. The last fan-out ran eleven lanes into a rate limit, left the tree unbuildable (item 11
+below) and spent a whole session stopping, stashing and repairing it instead of shipping.
+
+The numbered notes below were written when parallel lanes were the default. Keep them for the one
+subagent you may run — assign it files by path, give it the contract, and nobody commits but you:
 
 1. **Assign by FILE, not by topic.** Every brief names exactly what that agent owns and what it
    must not touch, **by path**. "You own `app/verify/**` and `tests/test_verify*.py`" is a lane;
@@ -594,6 +603,14 @@ lanes are genuinely separate. What makes it work rather than a merge conflict:
    to it. Match on something the waiter does not contain, or just run the tests: the physics and
    verification files request no database fixture, and `conftest.py`'s schema fixture is requested
    rather than autouse, so those runs do not collide. Only DB-touching runs must be serialised.
+11. **A stretch cut off mid-lane leaves half-lanes, and they read like finished work.** On
+   2026-09-10 an eleven-lane coding-only stretch hit a rate limit. The uncommitted tree had a
+   migration revising a parent nobody wrote (`alembic heads` died with `KeyError`), a module
+   importing a sibling that did not exist, and docstrings citing a script, a manifest and two
+   test files that were never created — each lane plausible alone, and nothing had run the suite.
+   Before building on a tree a previous session left dirty, run `alembic heads`, `ruff`, `mypy`
+   and `pytest --collect-only` first; and never let a docstring name a file the same change does
+   not create.
 
 ## Performance — read the file before you touch anything
 

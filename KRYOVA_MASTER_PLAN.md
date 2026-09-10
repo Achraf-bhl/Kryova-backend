@@ -70,9 +70,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 12/24 | 77/129 = 60% | 89/151 eng-months = 59% |
-| Product — P1–P10 | 6/10 | 48/64 = 75% | 27/38 eng-months = 70% |
-| **Programme** | 18/34 | 125/193 = 65% | 116/189 eng-months = 61% |
+| Engineering — E1–E23 | 12/24 | 76/126 = 60% | 91/151 eng-months = 60% |
+| Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
+| **Programme** | 18/34 | 122/187 = 66% | 119/189 eng-months = 63% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -80,7 +80,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, P1, P2, P3, P5, P8, P10 |
-| in flight | E15 70%, E18 50%, P4 71%, P9 57% |
+| in flight | E15 70%, E18 50%, P4 75%, P9 57% |
 | nothing finished yet | E8, E9, E10, E13, E17, E19, E20, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2225,12 +2225,6 @@ answerable meaning.
    > `docs/verification-2026-09-08/REPORT.md`.
 
 2. **Planning.** "Design a swingarm" → an ordered, dependency-aware task graph with checkpoints.
-   > <!-- superseded 2026-09-10 -->
-   > PARTIAL (2026-09-06) — a tested seam and one first step, **deliberately unwired**.
-   > `app/ai/planning.py` turns a request into the list of requirements it states, with the numbers
-   > and tolerances attached and a three-state record where "nobody checked" is never "fine". No
-   > sequencing, no dependency graph, no replanning. Half-wiring it would add a schema to the
-   > payload task 1 is shrinking, or describe machinery to the model that is not there.
    > DONE (2026-09-10) — the sequencing half, and it is **deliberately not an autonomous
    > planner**. `app/ai/taskgraph.py` holds a plan the agent declared (`plan_work`) and enforces
    > its order (`update_task`); it does not generate one, re-generate one, or ask a model to
@@ -2254,13 +2248,18 @@ answerable meaning.
    > Tested by: `tests/test_taskgraph.py` (28), `tests/test_agent_planning_tools.py` (21). Code:
    > `app/ai/taskgraph.py`, migration `314c1981036f`.
 
+   <!-- superseded 2026-09-10 -->
+   > PARTIAL (2026-09-06) — a tested seam and one first step, **deliberately unwired**.
+   > `app/ai/planning.py` turns a request into the list of requirements it states, with the numbers
+   > and tolerances attached and a three-state record where "nobody checked" is never "fine". No
+   > sequencing, no dependency graph, no replanning. Half-wiring it would add a schema to the
+   > payload task 1 is shrinking, or describe machinery to the model that is not there.
+
 3. **Long-horizon memory.** The 2026 literature converges on hierarchical working memory —
    subgoals as chunks with summarised observations (HiAgent-class results: ~2× success on
    long-horizon tasks). Kryova already has the right instinct: `resume.py` reads the operation log,
    not the transcript, because a trimmed window and an LLM paraphrase cannot be trusted about last
    week. That principle generalises to the whole design record.
-   > <!-- superseded 2026-09-10 -->
-   > PARTIAL (2026-09-03) — resume-from-log shipped. Code: `app/ai/resume.py`.
    > DONE (2026-09-10) — the principle generalised to the whole design record, which is what
    > this task asked for and what `resume.py` alone could not give. Three accounts now reach the
    > state block from the *record* rather than from the transcript, and each answers a different
@@ -2278,13 +2277,11 @@ answerable meaning.
    > Tested by: `tests/test_agent_planning_tools.py::TestTheStateBlock`. Code: `app/ai/state.py`,
    > `app/ai/resume.py`, `app/core/designs.py`.
 
+   <!-- superseded 2026-09-10 -->
+   > PARTIAL (2026-09-03) — resume-from-log shipped. Code: `app/ai/resume.py`.
+
 4. **Failure recovery.** Diagnose → repair → bounded retry → escalate with a *specific* question
    (E5's machinery is the foundation).
-   > <!-- superseded 2026-09-10 -->
-   > PARTIAL (2026-09-08) — a third behavioural guard landed from the Level-4 runs:
-   > **`MAX_EMPTY_DOCUMENTS`**, because opening a document is the one mutation that changes nothing
-   > about the part, and both existing guards counted it as progress — five empty parts in one turn
-   > tripped neither. Measured effect: one document instead of five.
    > DONE (2026-09-10) — the three behavioural guards bound the *retrying*; `app/ai/recovery.py`
    > is the last word, **escalate with a specific question**, which is what the bounded loop
    > could not produce on its own.
@@ -2309,6 +2306,12 @@ answerable meaning.
    > Tested by: `tests/test_recovery.py` (21),
    > `tests/test_agent.py::TestOpeningDocumentsIsNotBuildingParts`. Code: `app/ai/recovery.py`,
    > `app/ai/agent.py`.
+
+   <!-- superseded 2026-09-10 -->
+   > PARTIAL (2026-09-08) — a third behavioural guard landed from the Level-4 runs:
+   > **`MAX_EMPTY_DOCUMENTS`**, because opening a document is the one mutation that changes nothing
+   > about the part, and both existing guards counted it as progress — five empty parts in one turn
+   > tripped neither. Measured effect: one document instead of five.
 
 5. **Human checkpoints.** Structured approval gates — a reviewable diff with a sign-off record, not
    a chat message (P5 owns the surface).
@@ -3389,8 +3392,6 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    store (dedup for free; the same datasheet attached twice costs one blob). Type sniffing by
    content, size/type limits, per-org storage quotas (P3). Every attachment is a first-class
    object: owner, conversation link, extraction status, provenance.
-   > <!-- superseded 2026-09-10 -->
-   > PARTIAL — chunked upload and the content-addressed store exist. Code: `app/media/`.
    > DONE (2026-09-10) — the row was the missing half, and `SourceRef.attachment_id` had said so
    > since P4.2: its docstring read "None until P4.1 has a table". `app/models/attachment.py`
    > is that table.
@@ -3410,6 +3411,9 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    > datasheet attached to four conversations is one blob and four rows.
    > Tested by: `tests/test_attachments.py` (20). Code: `app/models/attachment.py`,
    > `app/core/attachments.py`, `app/api/routes/attachments.py`, migration `ef4d9b93d3ca`.
+
+   <!-- superseded 2026-09-10 -->
+   > PARTIAL — chunked upload and the content-addressed store exist. Code: `app/media/`.
 
 2. **The extraction pipeline**, tiered by format, all local and free:
    - **CAD (STEP/IGES/BREP/STL/DXF)** → the geometry pipeline (E1's kernel; `ezdxf` for DXF
@@ -3527,15 +3531,6 @@ scroll?
    poll-schedule/api-client machinery; WebSockets only if bidirectionality is ever actually
    needed), reconnect-and-resume — `conversation-resume` exists and is tested, so extend, don't
    replace.
-   > <!-- superseded 2026-09-10 -->
-   > PARTIAL (2026-09-10) — step events stream over SSE and `conversation-resume` rehydrates a
-   > reopened conversation; both are tested. **Two halves are genuinely absent and neither is a
-   > frontend gap.** *Token* streaming: the wire carries whole `narration` and `message` events,
-   > because `app/ai/provider.py` returns a completed turn — streaming tokens means changing the
-   > provider contract, not the client. *Reconnect-and-resume mid-turn*: a dropped stream loses
-   > the live view, though nothing is lost from the record — every step is persisted as it
-   > happens, so reopening shows what really ran. Closing it needs an event cursor on the wire so
-   > a reconnect can say where it got to.
    > DONE (2026-09-10) — both halves built, and each was exactly where the superseded status
    > said it was rather than in the client.
    > **Token streaming is a provider-contract change** (`app/ai/provider.py`): `stream_chat`
@@ -3566,9 +3561,31 @@ scroll?
    > `app/ai/turn_events.py`, `app/ai/provider.py`, `app/ai/providers/ollama.py`,
    > `../Kryova-frontend/src/lib/agent-stream.ts`.
 
+   <!-- superseded 2026-09-10 -->
+   > PARTIAL (2026-09-10) — step events stream over SSE and `conversation-resume` rehydrates a
+   > reopened conversation; both are tested. **Two halves are genuinely absent and neither is a
+   > frontend gap.** *Token* streaming: the wire carries whole `narration` and `message` events,
+   > because `app/ai/provider.py` returns a completed turn — streaming tokens means changing the
+   > provider contract, not the client. *Reconnect-and-resume mid-turn*: a dropped stream loses
+   > the live view, though nothing is lost from the record — every step is persisted as it
+   > happens, so reopening shows what really ran. Closing it needs an event cursor on the wire so
+   > a reconnect can say where it got to.
+
 2. **The step surface**: `agent-step-list` grows into the run view — plan steps, live geometry
    operations, solver progress, per-step timing, failure taxonomy classes surfaced in plain
    language.
+   > DONE (2026-09-10) — all five named surfaces render; the PARTIAL below already recorded the
+   > fifth landing and was left unconverted. Plan steps, live geometry operations and per-step
+   > timing are in `agent-step-list`; the failure taxonomy reaches the results page through
+   > `job.error`; and solver progress is written by `app/simulation/progress.py` and rendered on
+   > the simulation page by `describeProgress` as a stage — grid *k* of *n* only for a study, and
+   > "Meshing and solving" for a run that has not reported, never stage zero. The page's rendering
+   > of it had no test until this entry; three were added.
+   > Tested by: `tests/test_simulation_progress.py` (10),
+   > `../Kryova-frontend/src/app/dashboard/projects/[projectId]/simulations/[simulationId]/page.test.tsx`
+   > (`SimulationPage progress`, 3), `../Kryova-frontend/src/components/agent-step-list.test.tsx` (20).
+
+   <!-- superseded 2026-09-10 -->
    > PARTIAL (2026-09-10) — four of the five named surfaces are there. Plan steps and live
    > geometry operations render in `agent-step-list`; per-step timing is on every row
    > (`durationMs`); and the **failure taxonomy already reaches the user in plain language** by a
@@ -3598,9 +3615,6 @@ scroll?
    diffs rendered like code review** (what changed, what it reaches — `diff.py` already computes
    both). The conversation is the *log*; the spec is the *truth*; the UI must make that hierarchy
    legible.
-   > <!-- superseded 2026-09-10 -->
-   > PARTIAL (2026-09-10) — the diff half only; the editable panel was blocked on a persisted
-   > spec.
    > DONE (2026-09-10) — **the diff half was built first; the editable panel followed once the
    > spec was persisted.** `components/gates/spec-diff.tsx` renders `SpecDiff.to_dict()` as a code review
    > and the gate page is its first caller. It computes nothing: `app/design/diff.py` already
@@ -3639,6 +3653,10 @@ scroll?
    > Tested by: `tests/test_designs.py` (35), `src/components/design/spec-panel.test.tsx` (9),
    > `src/components/gates/spec-diff.test.tsx` (6). Code: `app/models/design.py`,
    > `app/core/designs.py`, `app/api/routes/designs.py`, migration `1ef5f6401c1f`.
+
+   <!-- superseded 2026-09-10 -->
+   > PARTIAL (2026-09-10) — the diff half only; the editable panel was blocked on a persisted
+   > spec.
 
 4. **The verification surface**: assertion dashboard (pass / fail / **unmeasured** rendered as
    first-class — unmeasured is amber, never green), requirement coverage, provenance drill-down
@@ -4060,6 +4078,16 @@ scene in the Tauri app.
 
 7. **Secrets and supply chain**: no default secrets boot (P1 task 4), dependency pinning + audit in
    CI, SBOM for the desktop app (enterprise buyers ask), release notes generated from the merge log.
+   > PARTIAL (2026-09-10) — **release notes are generated now; the desktop SBOM still waits on
+   > task 5.** `scripts/release_notes.py` reads the first-parent log between two tags, so a
+   > merged branch appears once, as its merge commit. Commits are grouped by the prefixes this
+   > history actually carries. Nothing is dropped: an unprefixed commit lands under *Other changes*.
+   > The output is deterministic, with no timestamp unless `--date` is given. **It is a script, not
+   > yet a CI step** — nothing runs it when a tag is cut, and wiring it in is what remains of
+   > this line besides the desktop SBOM.
+   > Tested by: `tests/test_delivery_release.py` (20), `tests/test_delivery.py::TestTheSBOM` (6).
+
+   <!-- superseded 2026-09-10 -->
    > PARTIAL (2026-09-10) — **SBOM, licence check and audit are in CI; release notes are not,
    > and the desktop SBOM waits on task 5.**
    > No-default-secrets boot shipped with P1.4 and dependency pinning was already the rule

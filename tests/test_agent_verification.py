@@ -219,9 +219,23 @@ class TestReadingInCirclesIsALoop:
     def test_six_barren_rounds_are_called_out(
         self, db_session: Session, user: User, project: Project, conversation: Conversation
     ) -> None:
+        # The reads have to SUCCEED and to VARY. `list_projects(n=...)` did
+        # neither -- the tool takes no arguments, so until 2026-09-10 every one
+        # of these failed identically, and once E16.4 landed the turn escalated
+        # a repeated failure long before six barren rounds had passed. What is
+        # under test is a model reading real things and changing nothing, so the
+        # calls are real reads with different arguments: `search_documentation`
+        # answers every time, cannot raise, and moves nothing.
         reads = [
             AssistantTurn(
-                text="", tool_calls=[ToolCall(id=str(n), name="list_projects", arguments={"n": n})]
+                text="",
+                tool_calls=[
+                    ToolCall(
+                        id=str(n),
+                        name="search_documentation",
+                        arguments={"query": f"how do I constrain face {n}"},
+                    )
+                ],
             )
             for n in range(MAX_READS_WITHOUT_PROGRESS + 2)
         ]

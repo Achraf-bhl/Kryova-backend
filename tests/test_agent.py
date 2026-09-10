@@ -168,12 +168,21 @@ class TestTermination:
         sooner and for a different reason -- see
         `TestATurnStopsRepeatingItself`. This is the backstop underneath that:
         a model doing genuinely new work forever still stops at the budget.
+
+        **The calls must also SUCCEED, and that is what this got wrong until
+        2026-09-10.** It drove the loop with `list_projects(limit=...)`, and
+        `_list_projects` takes no arguments -- so every step failed with the
+        same "Bad arguments" error. That was invisible while nothing counted
+        failures, and E16.4 now escalates a tool failing three times for the
+        same reason, so the turn ended at step 3 of 60 and this read as the
+        budget being broken. It was the escalation working. `update_project`
+        with a fresh name is real work, it varies, and it succeeds.
         """
         budget = max_steps()
         looping = [
             AssistantTurn(
                 tool_calls=[
-                    ToolCall(id=f"c{i}", name="list_projects", arguments={"limit": i + 1})
+                    ToolCall(id=f"c{i}", name="update_project", arguments={"name": f"step {i}"})
                 ]
             )
             for i in range(budget + 5)
@@ -431,12 +440,15 @@ class TestContextWindow:
         budget = max_steps()
         # Varied arguments, so the turn runs its full length rather than being
         # stopped early as a repeat -- what is under test here is the window,
-        # not the loop guard.
+        # not the loop guard. The calls must also succeed: `list_projects` takes
+        # no arguments, so the varied `limit` this used until 2026-09-10 failed
+        # every step and E16.4 escalated the turn at step 3. See
+        # `TestTermination.test_a_model_that_never_stops_is_cut_off`.
         provider = ScriptedProvider(
             [
                 AssistantTurn(
                     tool_calls=[
-                        ToolCall(id=f"c{i}", name="list_projects", arguments={"limit": i + 1})
+                        ToolCall(id=f"c{i}", name="update_project", arguments={"name": f"step {i}"})
                     ]
                 )
                 for i in range(budget)
@@ -1638,10 +1650,62 @@ class TestATurnStopsRepeatingItself:
 
         assert len(done) == 1
         assert done[0]["truncated"] is True
-        assert done[0]["stop_reason"] == "repeated_calls"
+        # `needs_input`, not `repeated_calls`, since E16.4 (2026-09-10). One
+        # tool hammered is now escalated rather than merely stopped: both
+        # counters reach three on the same step, and `recovery.exhausted()` is
+        # tested first on purpose. That is the better of the two endings here --
+        # the user gets the specific question E16.4 exists to ask instead of
+        # "the agent kept repeating itself", which PRO1 measured as true and
+        # unactionable. What this test protects is unchanged: the ending is
+        # named, and it is not the budget running out.
+        assert done[0]["stop_reason"] == "needs_input"
+        assert done[0]["stop_reason"] != "max_steps"
         # Well short of the budget -- which is the whole point, and what makes
         # "ran out of tool rounds" the wrong sentence for this ending.
         assert done[0]["steps"] < 12
+
+    def test_repeats_spread_across_tools_still_end_as_repeated_calls(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """`repeated_calls` did not become unreachable when E16.4 landed, and
+        this is what says so.
+
+        `recovery.exhausted()` counts by (tool, kind) and wins whenever one tool
+        is hammered. `MAX_BLOCKED_REPEATS` counts blocked repeats whatever the
+        tool, so three *different* refused writes, each re-issued once, reach it
+        with every per-tool counter still at two. Without this test the branch at
+        `agent.py`'s `blocked >= MAX_BLOCKED_REPEATS` would be dead and nothing
+        would say so.
+        """
+        from app.ai.agent import stream_agent
+
+        refused = [
+            ToolCall(id="a1", name="delete_simulation", arguments={"simulation_id": "x"}),
+            ToolCall(id="a2", name="delete_simulation", arguments={"simulation_id": "x"}),
+            ToolCall(id="b1", name="delete_project", arguments={"project_id": "y"}),
+            ToolCall(id="b2", name="delete_project", arguments={"project_id": "y"}),
+            ToolCall(id="c1", name="catia_delete_feature", arguments={"feature": "z"}),
+            ToolCall(id="c2", name="catia_delete_feature", arguments={"feature": "z"}),
+        ]
+        provider = ScriptedProvider(
+            [AssistantTurn(tool_calls=[call]) for call in refused]
+            + [AssistantTurn(text="I could not do that.")] * 3
+        )
+        done = [
+            event
+            for event in stream_agent(
+                db=db_session,
+                provider=provider,
+                toolbox=_toolbox(db_session, user, project),
+                conversation=conversation,
+                user_message="delete them",
+                allow_mutations=True,
+            )
+            if event["type"] == "done"
+        ]
+
+        assert len(done) == 1
+        assert done[0]["stop_reason"] == "repeated_calls"
 
     def test_a_finished_turn_says_so_rather_than_leaving_the_field_out(
         self, db_session: Session, user: User, project: Project, conversation: Conversation

@@ -821,10 +821,14 @@ class OllamaProvider(LLMProvider):
 
         Ollama answers NDJSON: one object per chunk carrying a `message.content`
         fragment, then a final object with `done: true` that carries the token
-        counts and `done_reason`. **Tool calls arrive on the final object**, not
-        as deltas — which is why the accumulated text is not what the caller
-        gets back. `Finished` carries a turn assembled from the last object plus
-        the joined content, and the deltas are for display only.
+        counts and `done_reason`. **Tool calls arrive whole, on one chunk, and
+        that chunk is not necessarily the final one** — corrected 2026-09-10
+        after the previous reading ("they arrive on the final object") was
+        measured false and had silently disabled every local-model tool call.
+        They are therefore collected from whichever chunk carries them. The
+        accumulated text is still not what the caller gets back: `Finished`
+        carries a turn assembled from the last object plus the joined content
+        and the collected calls, and the deltas are for display only.
 
         **A stream that fails part-way falls back to the whole request rather
         than raising.** `_post_chat`'s retry cannot help here: some of the answer
@@ -841,6 +845,9 @@ class OllamaProvider(LLMProvider):
         payload["stream"] = True
 
         pieces: list[str] = []
+        #: Tool calls seen on ANY chunk, because they do not reliably arrive on
+        #: the last one. See the note where these are put back.
+        streamed_calls: list[dict[str, Any]] = []
         final: dict[str, Any] | None = None
         started = time.perf_counter()
         try:
@@ -859,10 +866,13 @@ class OllamaProvider(LLMProvider):
                         # otherwise arriving fine.
                         logger.warning("Ollama sent an unreadable stream line; skipping it")
                         continue
-                    delta = (chunk.get("message") or {}).get("content") or ""
+                    streamed = chunk.get("message") or {}
+                    delta = streamed.get("content") or ""
                     if delta:
                         pieces.append(delta)
                         yield TextDelta(delta)
+                    if streamed.get("tool_calls"):
+                        streamed_calls.extend(streamed["tool_calls"])
                     if chunk.get("done"):
                         final = chunk
         except (httpx.HTTPError, json.JSONDecodeError) as exc:
@@ -884,6 +894,26 @@ class OllamaProvider(LLMProvider):
         message = dict(final.get("message") or {})
         if not message.get("content"):
             message["content"] = "".join(pieces)
+        # **Tool calls do not reliably arrive on the `done` chunk, and assuming
+        # they did made the entire local-model path do nothing.** Measured on
+        # the Windows seat 2026-09-10 against Ollama 0.13 and `qwen3.5:9b`: a
+        # 102-chunk reply carried the tool call on chunk 101 with `done: false`,
+        # and the `done` chunk that followed carried no `tool_calls` at all.
+        # Reading only the final object therefore discarded every call, the
+        # agent saw a text-only turn, and the user got a confident "I'll create
+        # the part..." with zero steps run -- twice, on two different prompts,
+        # including one as simple as a 40 mm cube.
+        #
+        # It is invisible from below: the non-streaming `chat` path is fine (the
+        # whole body carries them), and a mocked stream written to the old
+        # assumption passes. Only driving the real product against real Ollama
+        # shows it, which is what `docs/GUI_PROMPT_LADDER.md` exists for.
+        #
+        # Collected from every chunk rather than switched on a version check --
+        # the wire format is what it is, a build that does put them on the last
+        # chunk still works, and there is nothing to keep in step with a release.
+        if not message.get("tool_calls") and streamed_calls:
+            message["tool_calls"] = streamed_calls
         yield Finished(_turn_from({**final, "message": message}))
 
     def _chat_payload(

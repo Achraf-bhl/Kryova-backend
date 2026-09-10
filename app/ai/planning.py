@@ -6,6 +6,17 @@ an order, or replans after a failure.** What it does is turn a request into the
 list of requirements it contains, and keep that list somewhere the context
 window cannot trim. Anything more is 16.2 proper.
 
+**16.2 proper landed on 2026-09-10 and it is `app/ai/taskgraph.py`, not this.**
+The two are next to each other in the tree and answer different questions, so
+the distinction is worth stating once: taskgraph holds the plan *the model
+declares*, whose order the server then enforces, and it is exposed to the model
+as `plan_work`/`update_task`. This module holds the requirements *the engineer
+stated*, extracted by regex from their own sentence, and is still not a tool —
+no schema, and no prompt describes it. `TestItIsNotWiredIn` guards that, and it
+guards it against this module's `__all__` rather than against the substring
+"plan", which briefly made a correctly-wired taskgraph look like a wiring of
+this one.
+
 **Wired 2026-09-07**, and it is still not a tool: no schema was added to the
 payload 16.1 is busy shrinking, and no prompt describes a call the model was not
 given. Three consumers read it, all of them on the server. `state.py` renders

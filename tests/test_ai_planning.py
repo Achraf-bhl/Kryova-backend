@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.ai import planning
 from app.ai.planning import Objective, Plan, Quantity, extract_objectives, plan_for
 
 RUNG3 = (
@@ -253,7 +254,19 @@ class TestItIsNotWiredIn:
         )
 
         assert "plan_for" not in text
-        assert not [name for name in BUILTIN_TOOL_LABELS if "plan" in name]
+        # Narrowed 2026-09-10. This read `if "plan" in name`, and E16.2 shipped
+        # `plan_work` — which belongs to `app/ai/taskgraph.py`, a different
+        # module answering a different question: taskgraph is the plan the model
+        # *declares* and the server *orders*, this is the requirement list read
+        # out of the engineer's own sentence. A substring match could not tell
+        # them apart, so a correctly-wired taskgraph failed the test guarding an
+        # unwired planning.py. The claim being made is about this module, so it
+        # is made about this module's surface.
+        assert not [name for name in BUILTIN_TOOL_LABELS if name in set(planning.__all__)]
+        assert "plan_work" in BUILTIN_TOOL_LABELS, (
+            "E16.2's taskgraph tool has gone; if it was renamed, this test's "
+            "distinction between the two modules needs rewriting rather than deleting"
+        )
 
     def test_its_three_consumers_are_the_ones_that_should_be(self) -> None:
         """Wired 2026-09-06/07, and this test inverted with it.

@@ -116,13 +116,38 @@ class TestWhereItGoes:
     @pytest.mark.parametrize("method", ["chat", "complete", "look"])
     def test_every_request_carries_it(self, method: str) -> None:
         """Three call sites build their own options. A tool call on the GPU and
-        a vision call on the CPU would be a confusing pair of measurements."""
+        a vision call on the CPU would be a confusing pair of measurements.
+
+        **Follows one level of helper, added 2026-09-10.** This used to read the
+        method's own source text, and P5.1 moved `chat`'s payload into
+        `_chat_payload` so that `stream_chat` could send the same one — which is
+        the correct refactor and made a passing option look like a missing one.
+        Reading the method alone cannot tell "stopped passing `num_gpu`" from
+        "passes it from the helper it shares", and only the first is a defect.
+        """
         tree = ast.parse(SOURCE)
-        node = next(
-            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == method
+        functions = {
+            n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+        }
+        node = functions[method]
+
+        def passes_it(fn: ast.FunctionDef, depth: int = 1) -> bool:
+            body = ast.get_source_segment(SOURCE, fn) or ""
+            if "_with_gpu_layers(" in body:
+                return True
+            if depth == 0:
+                return False
+            # Any `self._helper(...)` this method calls, resolved once.
+            for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
+                attr = call.func
+                if isinstance(attr, ast.Attribute) and attr.attr in functions:
+                    if passes_it(functions[attr.attr], depth - 1):
+                        return True
+            return False
+
+        assert passes_it(node), (
+            f"{method}() does not pass num_gpu, directly or through a helper it calls"
         )
-        body = ast.get_source_segment(SOURCE, node) or ""
-        assert "_with_gpu_layers(" in body, f"{method}() does not pass num_gpu"
 
 
 class TestItIsWrittenDown:

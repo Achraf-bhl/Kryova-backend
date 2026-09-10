@@ -162,7 +162,20 @@ DOMAIN_WEIGHT: Final = 0.5
 #: scored 31 tools above zero, among them `catia_boolean`, `catia_curve_spiral`
 #: and `catia_analysis_part`, on shared words like "one", "start" and "part".
 #: Those are not matches; they are the corpus talking to itself.
-COMMON_TERM_SHARE: Final = 0.20
+#:
+#: **Re-tuned 0.20 -> 0.15 on 2026-09-10, to hold the ceiling this was measured
+#: at rather than to change it.** A share is not scale-free: 0.20 was chosen on
+#: the 110-tool registry named above, where it admitted a term carried by up to
+#: 22 tools. E16.2's three planning built-ins and `catia_export_step` took the
+#: registry to 142, which moved the same share to 28 — and `sketch`, carried by
+#: exactly 28, crossed from noise to "discriminating" on the strength of four
+#: tools that have nothing to do with sketching. Being told the answer is one of
+#: 28 sketch tools is no narrowing at all, which is what the filter exists to
+#: prevent. 0.15 of 142 is 21, so the absolute ceiling is back where it was
+#: measured. Caught by `TestTheNoiseFilters`, which is why both of its tests
+#: failed together: the second is the mutation check on the first, and a filter
+#: that has already stopped filtering cannot be made worse by widening it.
+COMMON_TERM_SHARE: Final = 0.15
 
 #: A term in a tool's *name* is a match. A term only in its description is
 #: corroboration, and one of those alone is not enough to offer the tool.

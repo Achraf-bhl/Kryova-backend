@@ -489,6 +489,36 @@ class TestTheNoiseFilters:
         assert "catia_boolean" not in chosen.names()
         assert "catia_point_on_surface" not in chosen.names()
 
+    def test_growing_the_registry_does_not_quietly_readmit_a_noise_word(
+        self, registry: list[SimpleNamespace]
+    ) -> None:
+        """The share is not scale-free, and that is how this broke once.
+
+        `COMMON_TERM_SHARE` was measured on a 110-tool registry. E16.2's three
+        planning built-ins plus `catia_export_step` took it to 142, the ceiling
+        moved 27 -> 28, and `sketch` — carried by exactly 28 tools — was
+        readmitted as "discriminating" by four tools that have nothing to do
+        with sketching. Nothing about sketching had changed.
+
+        So this asserts the *margin*, not just the verdict: a word carried by a
+        fifth of the registry must sit clear of the boundary, or the next four
+        tools anybody adds flip it back with no test to say so.
+        """
+        counts: dict[str, int] = {}
+        for spec in registry:
+            for term in tool_retrieval._spec_terms(str(spec.name), str(spec.description)):
+                counts[term] = counts.get(term, 0) + 1
+        ceiling = max(1, int(len(registry) * tool_retrieval.COMMON_TERM_SHARE))
+
+        # Four more tools is one ordinary phase's worth of registry growth.
+        headroom = max(1, int((len(registry) + 4) * tool_retrieval.COMMON_TERM_SHARE))
+        for noise in ("sketch", "part"):
+            assert counts[noise] > ceiling, f"{noise!r} is no longer filtered"
+            assert counts[noise] > headroom, (
+                f"{noise!r} is filtered only by {counts[noise] - headroom} tools' margin; "
+                "four more tools in the registry would readmit it"
+            )
+
     def test_a_term_in_the_name_is_a_match_and_one_in_the_prose_is_not(self) -> None:
         """`DESCRIPTION_WEIGHT`, shown by moving one word.
 

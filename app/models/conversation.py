@@ -110,6 +110,16 @@ class Conversation(UUIDPrimaryKey, TimestampMixin, Base):
     #: like, never which document it is.
     catia_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
 
+    #: The plan the agent declared for this conversation (E16 task 2), as
+    #: `TaskGraph.to_dict()`. `None` until one is declared, which is the
+    #: ordinary case — most conversations are one part and need no plan.
+    #:
+    #: Stored as the dict rather than as rows for the reason the design record
+    #: is: `app/ai/taskgraph.py` owns the vocabulary, and mirroring it into
+    #: tables would be a second schema that goes stale silently. Nothing queries
+    #: *into* a plan — it is read whole, by the conversation that owns it.
+    task_graph: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+
     #: Set by `POST /ai/conversations/{id}/cancel`; cleared when a turn starts
     #: (P5 task 6).
     #:
@@ -183,6 +193,54 @@ class ConversationMessage(UUIDPrimaryKey, TimestampMixin, Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, default=None)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+
+class TurnEvent(UUIDPrimaryKey, TimestampMixin, Base):
+    """One event from a streaming turn, kept long enough to reconnect to (P5.1).
+
+    **Why a table and not a buffer in the process.** A dropped stream reconnects
+    through the load balancer to whichever worker is free, which is almost never
+    the one the turn is streaming from. An in-memory ring buffer works perfectly
+    under `--workers 1` and silently resumes nothing in production — the same
+    failure shape, and for the same reason, as the cancellation flag two classes
+    up. Both readers go to the database.
+
+    **`sequence` is per conversation, not per turn.** A cursor has to be
+    unambiguous across a turn boundary: a client that reconnects saying "I had
+    up to 12" must not be handed turn 2's event 13 when it meant turn 1's. The
+    turn is identified separately, by `turn_id`, so the client can also tell
+    "this is the same turn I lost" from "that turn finished and another began".
+
+    **These are a short-lived resume buffer and nothing else.** The *record* of
+    what happened is `ConversationMessage`, written as each step completes, and
+    it is what `GET /ai/conversations/{id}` rehydrates from. These rows exist
+    only so a reader who lost the live view gets it back without waiting for the
+    turn to end, so they are pruned aggressively (`app/ai/turn_events.py`). A
+    reader who comes back tomorrow is served by the transcript, which is
+    complete; keeping these forever would mean carrying a second, redundant copy
+    of every conversation whose only distinctive content is the timing.
+    """
+
+    __tablename__ = "turn_events"
+    __table_args__ = (
+        # The cursor read: "everything after N for this conversation, in order".
+        # Unique because a duplicate sequence makes the cursor ambiguous — a
+        # client asking for everything after 12 would get one of two 13s.
+        Index("ix_turn_events_cursor", "conversation_id", "sequence", unique=True),
+        # The prune scan.
+        Index("ix_turn_events_created", "created_at"),
+    )
+
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    #: Monotonic within the conversation. Assigned by `app/ai/turn_events.py`.
+    sequence: Mapped[int] = mapped_column(Integer)
+    #: Which turn this belongs to. Opaque to the client except for equality.
+    turn_id: Mapped[str] = mapped_column(String(36), index=True)
+    #: The event exactly as it went on the wire, so a replay and a live read are
+    #: byte-identical. Reassembling it from columns would be a second encoder.
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
 
 
 class AITokenUsage(UUIDPrimaryKey, TimestampMixin, Base):

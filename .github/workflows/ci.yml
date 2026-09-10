@@ -263,3 +263,57 @@ jobs:
         env:
           PYTHONPATH: scripts
         run: pytest -q -p pytest_split --database-only
+
+  # -------------------------------------------------------------------------
+  # P9 task 7: the supply chain. What is installed, under what licence, and
+  # whether anything in it has a known vulnerability.
+  #
+  # A separate job rather than a step on `lint`, because it answers a different
+  # question and has a different failure mode: a lint failure is somebody's
+  # code, and a failure here is usually somebody *else's* release. It must be
+  # readable on its own in the checks list.
+  # -------------------------------------------------------------------------
+  supply-chain:
+    name: SBOM + dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit
+
+      # Generated from the *installed environment*, not from requirements.txt:
+      # a vulnerability lives in a transitive dependency, and the file lists
+      # only direct ones. See `scripts/sbom.py`.
+      - name: Generate SBOM
+        run: python -m scripts.sbom --out sbom.cyclonedx.json
+
+      # Decision 4 in a check. A copyleft package that is *linked* rather than
+      # invoked as a subprocess, or one whose licence nobody has established,
+      # fails here — because "this stack is free and the obligations are
+      # understood" is a claim, and an unchecked package is a hole in it.
+      - name: Licence check (Decision 4)
+        run: python -m scripts.sbom --check-licences > /dev/null
+
+      # Advisory, not blocking, and that is a deliberate and reviewable choice:
+      # a new CVE in a transitive dependency would otherwise turn every
+      # unrelated pull request red overnight, which is how a security signal
+      # gets muted by the people it is for. The finding is in the log and the
+      # SBOM artefact is attached; promoting this to a hard gate is a decision
+      # to take once somebody owns triaging it.
+      - name: pip-audit
+        continue-on-error: true
+        run: pip-audit --strict --desc
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: sbom.cyclonedx.json

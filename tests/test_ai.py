@@ -332,7 +332,13 @@ def test_app_exposes_the_ai_routes_in_the_schema() -> None:
     # response_model set on every JSON endpoint, so the schema is never `any`.
     # The SSE endpoint is exempt: it streams text/event-stream and genuinely
     # has no JSON body to describe.
-    streaming = {"/api/v1/ai/chat/stream"}
+    # Both SSE endpoints: `POST /ai/chat/stream` starts a turn, and
+    # `GET /ai/conversations/{id}/stream` rejoins one already in flight (P5.1).
+    # The second is a GET precisely so a reconnect cannot start a second turn.
+    streaming = {
+        "/api/v1/ai/chat/stream",
+        "/api/v1/ai/conversations/{conversation_id}/stream",
+    }
     for path, methods in paths.items():
         if path in streaming:
             continue

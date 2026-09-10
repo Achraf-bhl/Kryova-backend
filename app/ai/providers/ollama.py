@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any, TypeVar
 
 import httpx
@@ -25,10 +25,13 @@ from pydantic import BaseModel, ValidationError
 
 from app.ai.provider import (
     AssistantTurn,
+    ChatEvent,
     Completion,
+    Finished,
     LLMError,
     LLMProvider,
     LLMUnavailable,
+    TextDelta,
     TokenUsage,
     ToolCall,
     VisionUnsupported,
@@ -161,6 +164,42 @@ def _log_generation_speed(model: str, body: dict[str, Any], wall_seconds: float)
         tokens,
         rate,
         wall_seconds,
+    )
+
+
+def _turn_from(body: dict[str, Any]) -> AssistantTurn:
+    """Assemble an `AssistantTurn` from a finished `/api/chat` body.
+
+    Shared by `chat` and `stream_chat` so the two cannot disagree about what a
+    tool call is — the streaming path's whole risk is being a second, slightly
+    different parser of the same wire format.
+    """
+    message = body.get("message") or {}
+    calls = []
+    # Ollama omits call ids, so synthesise stable ones by position -- the loop
+    # only needs them to pair a result back to its request.
+    for index, raw in enumerate(message.get("tool_calls") or []):
+        function = raw.get("function") or {}
+        arguments = function.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                arguments = {}
+        calls.append(
+            ToolCall(
+                id=raw.get("id") or f"call_{index}",
+                name=function.get("name", ""),
+                arguments=arguments or {},
+            )
+        )
+    return AssistantTurn(
+        text=message.get("content") or "",
+        tool_calls=calls,
+        usage=_usage(body),
+        # Ollama stops on `num_predict` without saying so in a dedicated field;
+        # `done_reason` is the closest thing it reports.
+        truncated=body.get("done_reason") == "length",
     )
 
 
@@ -760,6 +799,102 @@ class OllamaProvider(LLMProvider):
     ) -> AssistantTurn:
         """Ollama speaks the OpenAI message and tool shape natively."""
         num_ctx = self._context_window()
+        payload = self._chat_payload(
+            system=system, messages=messages, tools=tools, max_tokens=max_tokens, num_ctx=num_ctx
+        )
+
+        started = time.perf_counter()
+        body = self._post_chat(payload)
+        _log_generation_speed(self._model, body, time.perf_counter() - started)
+        _refuse_if_truncated(body, num_ctx)
+        return _turn_from(body)
+
+    def stream_chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> Iterator[ChatEvent]:
+        """The same request with `stream: true`, yielding text as it is written.
+
+        Ollama answers NDJSON: one object per chunk carrying a `message.content`
+        fragment, then a final object with `done: true` that carries the token
+        counts and `done_reason`. **Tool calls arrive on the final object**, not
+        as deltas — which is why the accumulated text is not what the caller
+        gets back. `Finished` carries a turn assembled from the last object plus
+        the joined content, and the deltas are for display only.
+
+        **A stream that fails part-way falls back to the whole request rather
+        than raising.** `_post_chat`'s retry cannot help here: some of the answer
+        has already been shown, and re-issuing would double it. So a broken
+        stream is retried once as a *non-streaming* call, whose text replaces
+        what was shown rather than appending to it — which the caller can do
+        because `Finished.turn.text` is the answer and the deltas were never
+        authoritative. That is the whole reason the contract is written that way.
+        """
+        num_ctx = self._context_window()
+        payload = self._chat_payload(
+            system=system, messages=messages, tools=tools, max_tokens=max_tokens, num_ctx=num_ctx
+        )
+        payload["stream"] = True
+
+        pieces: list[str] = []
+        final: dict[str, Any] | None = None
+        started = time.perf_counter()
+        try:
+            with httpx.stream(
+                "POST", f"{self._base_url}/api/chat", json=payload, timeout=self._timeout
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        # One unreadable line is not a failed generation, and
+                        # aborting on it would throw away an answer that is
+                        # otherwise arriving fine.
+                        logger.warning("Ollama sent an unreadable stream line; skipping it")
+                        continue
+                    delta = (chunk.get("message") or {}).get("content") or ""
+                    if delta:
+                        pieces.append(delta)
+                        yield TextDelta(delta)
+                    if chunk.get("done"):
+                        final = chunk
+        except (httpx.HTTPError, json.JSONDecodeError) as exc:
+            logger.warning("Ollama stream failed (%s); falling back to a whole request", exc)
+            final = None
+
+        if final is None:
+            yield Finished(
+                self.chat(system=system, messages=messages, tools=tools, max_tokens=max_tokens)
+            )
+            return
+
+        _log_generation_speed(self._model, final, time.perf_counter() - started)
+        _refuse_if_truncated(final, num_ctx)
+        # The final chunk's `message.content` is empty on a stream — the text
+        # was in the deltas — so it is put back before the turn is assembled.
+        # Reading `content` off the final chunk without this is how a streaming
+        # provider silently returns an empty answer with the tool calls intact.
+        message = dict(final.get("message") or {})
+        if not message.get("content"):
+            message["content"] = "".join(pieces)
+        yield Finished(_turn_from({**final, "message": message}))
+
+    def _chat_payload(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+        num_ctx: int,
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self._model,
             "stream": False,
@@ -771,35 +906,4 @@ class OllamaProvider(LLMProvider):
         }
         if tools:
             payload["tools"] = tools
-
-        started = time.perf_counter()
-        body = self._post_chat(payload)
-        _log_generation_speed(self._model, body, time.perf_counter() - started)
-        _refuse_if_truncated(body, num_ctx)
-        message = body.get("message") or {}
-        calls = []
-        # Ollama omits call ids, so synthesise stable ones by position -- the
-        # loop only needs them to pair a result back to its request.
-        for index, raw in enumerate(message.get("tool_calls") or []):
-            function = raw.get("function") or {}
-            arguments = function.get("arguments")
-            if isinstance(arguments, str):
-                try:
-                    arguments = json.loads(arguments)
-                except json.JSONDecodeError:
-                    arguments = {}
-            calls.append(
-                ToolCall(
-                    id=raw.get("id") or f"call_{index}",
-                    name=function.get("name", ""),
-                    arguments=arguments or {},
-                )
-            )
-        return AssistantTurn(
-            text=message.get("content") or "",
-            tool_calls=calls,
-            usage=_usage(body),
-            # Ollama stops on `num_predict` without saying so in a dedicated
-            # field; `done_reason` is the closest thing it reports.
-            truncated=body.get("done_reason") == "length",
-        )
+        return payload

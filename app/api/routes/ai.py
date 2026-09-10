@@ -14,8 +14,10 @@ simulation without importing a queue itself.
 
 import json
 import logging
+import time
 from collections.abc import Iterator
 from typing import Annotated, Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -35,6 +37,7 @@ from app.ai import (
     generate_title,
     get_provider,
     interpret_result,
+    turn_events,
 )
 from app.ai import usage as token_usage
 from app.ai.agent import AgentReply, run_agent, stream_agent, summarise_step
@@ -657,11 +660,40 @@ def chat_stream(
     )
     conversation_id = conversation.id
 
+    # One id for this turn, so a reconnecting client can tell "the turn I lost"
+    # from "that turn ended and another began". Minted here rather than inside
+    # the loop because the `start` event carries it too.
+    turn_id = uuid4().hex
+
+    def emit(event: dict[str, Any]) -> str:
+        """Persist one event, then format it for the wire.
+
+        Recording before yielding is what makes the cursor meaningful: an event
+        the client saw is always an event that is stored, so a reconnect asking
+        for "everything after 12" cannot be told that 12 never happened.
+
+        A failure to record must never take down a turn that is otherwise
+        working. Losing the resume buffer costs a reconnecting reader a reload;
+        losing the turn costs them the work. The `seq` is then omitted rather
+        than invented, and `lib/agent-stream.ts` treats a missing cursor as
+        "cannot resume from here", which is the truth.
+        """
+        try:
+            sequence = turn_events.record(db, conversation_id, turn_id, event)
+            turn_events.prune(db)
+            db.commit()
+            body = {**event, "seq": sequence, "turn_id": turn_id}
+            return f"id: {sequence}\ndata: {json.dumps(body, default=str)}\n\n"
+        except Exception:  # noqa: BLE001 - the resume buffer must not break the turn
+            logger.exception("Could not record a turn event for conversation %s", conversation_id)
+            db.rollback()
+            return f"data: {json.dumps({**event, 'turn_id': turn_id}, default=str)}\n\n"
+
     def events() -> Iterator[str]:
         # The conversation id goes first so the client can store it before any
         # work happens -- a stream that dies mid-turn still leaves a resumable
         # conversation rather than an orphan.
-        yield f"data: {json.dumps({'type': 'start', 'conversation_id': conversation_id})}\n\n"
+        yield emit({"type": "start", "conversation_id": conversation_id})
         reply_text = ""
         spent = TokenUsage()
         recorded = False
@@ -716,7 +748,7 @@ def chat_stream(
                         prompt_tokens=event.get("prompt_tokens", 0),
                         completion_tokens=event.get("completion_tokens", 0),
                     )
-                yield f"data: {json.dumps(event, default=str)}\n\n"
+                yield emit(event)
 
             # Same adoption as the non-streaming route: a project created
             # mid-stream has to outlive this request.
@@ -724,14 +756,14 @@ def chat_stream(
                 conversation.project_id = toolbox.project_id
             _maybe_title(db, current_user, provider, conversation, payload.message, reply_text)
             settle()
-            yield ("data: " + json.dumps({"type": "title", "title": conversation.title}) + "\n\n")
+            yield emit({"type": "title", "title": conversation.title})
         except LLMError as exc:
             # Roll back the failed unit of work, then still bill the provider
             # calls this turn already made -- steps 1..N-1 of a multi-step turn
             # are real spend even though step N failed.
             db.rollback()
             settle()
-            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            yield emit({"type": "error", "message": str(exc)})
         finally:
             # Covers the client-disconnect path, where `GeneratorExit` unwinds
             # the generator without reaching either branch above.
@@ -1057,6 +1089,111 @@ def cancel_turn(
     return TurnCancelled(
         status="accepted",
         detail="Stopping after the current step. Everything already done is kept.",
+    )
+
+
+@router.get("/ai/conversations/{conversation_id}/stream")
+def resume_stream(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+    after: Annotated[int, Query(ge=0)] = 0,
+) -> StreamingResponse:
+    """Rejoin a turn already in flight, from where the last stream stopped (P5.1).
+
+    **A `GET`, and that is what makes it a resume.** `POST /ai/chat/stream`
+    *starts* a turn; reconnecting to it with a POST would start a second one, so
+    a client whose connection dropped would double every turn it lost. This
+    endpoint runs no agent and writes no message. It replays what was recorded
+    and then follows.
+
+    Pass `after` as the last `seq` the client saw. Everything after it is
+    replayed immediately, byte-identical to how it went out the first time, and
+    then new events are followed until the turn ends. `after=0` means "whatever
+    is still kept", which is what a client with no cursor asks for.
+
+    **A gap is reported, never smoothed over.** Events are kept for ten minutes
+    (`app/ai/turn_events.py`); a client away longer than that is sent a
+    `resume_gap` event and should reload the conversation, whose transcript is
+    complete. Handing back a turn with a silent bite out of the middle would
+    render as an agent that skipped three steps, which is the one reading that
+    must never be available.
+
+    It is polled rather than pushed, for the reason the module argues: a broker
+    would be a fifth interface and a second place to lose an event, for a
+    feature whose entire job is surviving a connection that was already lost.
+    """
+    conversation = _owned_conversation(db, current_user, conversation_id)
+    resolved = conversation.id
+
+    def events() -> Iterator[str]:
+        cursor = after
+        replay = turn_events.read_after(db, resolved, cursor)
+        if replay.gap:
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "resume_gap",
+                        "after": cursor,
+                        "message": (
+                            "This turn's live events are no longer kept. Reload the "
+                            "conversation — everything that ran is in the transcript."
+                        ),
+                    }
+                )
+                + "\n\n"
+            )
+            return
+
+        finished = False
+        for event in replay.events:
+            cursor = int(event.get("seq") or cursor)
+            yield f"id: {cursor}\ndata: {json.dumps(event, default=str)}\n\n"
+            if turn_events.is_terminal(event):
+                finished = True
+
+        idle = 0.0
+        while not finished and idle < turn_events.FOLLOW_IDLE_TIMEOUT_S:
+            time.sleep(turn_events.FOLLOW_INTERVAL_S)
+            # A fresh read each poll: the writer is another worker in another
+            # transaction, and this session would otherwise keep serving the
+            # snapshot it opened with and follow nothing at all.
+            db.rollback()
+            batch = turn_events.read_after(db, resolved, cursor)
+            if not batch.events:
+                idle += turn_events.FOLLOW_INTERVAL_S
+                continue
+            idle = 0.0
+            for event in batch.events:
+                cursor = int(event.get("seq") or cursor)
+                yield f"id: {cursor}\ndata: {json.dumps(event, default=str)}\n\n"
+                if turn_events.is_terminal(event):
+                    finished = True
+
+        if not finished:
+            # Two minutes of silence means the turn finished without writing a
+            # terminal event, or is wedged. Either way the reader is better
+            # served by being told than by a connection that never closes.
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "resume_idle",
+                        "after": cursor,
+                        "message": (
+                            "Nothing has arrived for two minutes. Reload the "
+                            "conversation to see where it got to."
+                        ),
+                    }
+                )
+                + "\n\n"
+            )
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
     )
 
 

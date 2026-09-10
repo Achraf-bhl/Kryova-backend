@@ -35,41 +35,18 @@ from tests.typing import AuthenticatedTestClient
 API = "/api/v1"
 
 
-def _routes():  # type: ignore[no-untyped-def]
-    """Every leaf route, descending through included routers.
-
-    `app.routes` is **not** flat on this FastAPI version: it holds six entries,
-    one of which is an `_IncludedRouter` wrapping everything under `/api/v1`.
-    Iterating it directly finds nine paths out of a hundred and fifty, so a
-    check written against it would pass by finding almost nothing — the worst
-    way for a guard to be wrong, because it looks like it is working.
-
-    The leaf paths come back **without** the `/api/v1` prefix, which is the same
-    way the routers and the guides both spell them, so nothing has to be
-    trimmed or re-typed.
-    """
-
-    def walk(routes):  # type: ignore[no-untyped-def]
-        for route in routes:
-            included = getattr(route, "original_router", None)
-            if included is not None:
-                yield from walk(included.routes)
-                continue
-            if getattr(route, "path", None) and getattr(route, "methods", None):
-                yield route
-
-    yield from walk(app.routes)
-
-
 def _declared_paths() -> set[tuple[str, str]]:
-    """Every `(METHOD, router-relative path)` this build actually serves."""
-    found = {
-        (method.upper(), route.path)
-        for route in _routes()
-        for method in route.methods
+    """Every `(METHOD, router-relative path)` this build actually serves.
+
+    The walk itself moved to `tests/routes.py` when a third test needed it. Its
+    docstring records why `app.routes` cannot be iterated directly, and it
+    asserts it found something, so this cannot pass by finding nothing.
+    """
+    from tests.routes import leaf_routes
+
+    return {
+        (method.upper(), route.path) for route in leaf_routes() for method in route.methods
     }
-    assert len(found) > 50, "the route walk found almost nothing; it is not walking"
-    return found
 
 
 class TestTheGuidesDescribeThisBuild:
@@ -383,6 +360,7 @@ class TestTheDocsRoutesTakeNoPrincipal:
         a dependency added three layers down still fails this.
         """
         from app.api.deps import get_current_user
+        from tests.routes import leaf_routes
 
         def reachable(dependant) -> set[object]:  # type: ignore[no-untyped-def]
             found = {dependant.call}
@@ -391,7 +369,7 @@ class TestTheDocsRoutesTakeNoPrincipal:
             return found
 
         checked = 0
-        for route in _routes():
+        for route in leaf_routes():
             path = route.path
             if not path.startswith("/handbook") and path != "/status":
                 continue
@@ -408,6 +386,7 @@ class TestTheDocsRoutesTakeNoPrincipal:
         would be a public route over a tenant-scoped session.
         """
         from app.core.database import get_db
+        from tests.routes import leaf_routes
 
         def reachable(dependant) -> set[object]:  # type: ignore[no-untyped-def]
             found = {dependant.call}
@@ -416,7 +395,7 @@ class TestTheDocsRoutesTakeNoPrincipal:
             return found
 
         checked = 0
-        for route in _routes():
+        for route in leaf_routes():
             if not route.path.startswith("/handbook"):
                 continue
             checked += 1

@@ -450,6 +450,71 @@ def _catia_ui_language(db: Session, user_id: str, conversation: Conversation) ->
 MAX_OBJECTIVES = 8
 
 
+def _design_lines(db: Session, conversation: Conversation) -> list[str]:
+    """The design this conversation owns, as a few lines (E16 task 3).
+
+    The hierarchical-memory principle `resume.py` established, applied to the
+    other artefact: *what was decided*, read from the record rather than
+    recalled. A parameter is a decision, and a model asking the user what the
+    wall thickness is — three turns after setting it — is the failure this
+    prevents, in the same shape as the one `resume.py` was written against.
+
+    **Parameters and not features.** The feature list can be forty lines and is
+    a call away (`read_design`); the parameters are the decisions, they are
+    short, and they are what a later turn gets wrong. An agent told everything
+    every turn stops being able to find anything, which is why `build_history`
+    is behind a tool and this is not.
+    """
+    from app.core import designs
+
+    document = designs.load(db, conversation)
+    if document is None:
+        return []
+    try:
+        spec = designs.spec_of(document)
+    except Exception:  # noqa: BLE001 - a stored spec this build cannot read is not fatal
+        # Named rather than dropped: silence here reads as "no design", and the
+        # model would start a second one over the top of the first.
+        return [
+            f"design: {document.name} (revision {document.revision_number}), stored in a "
+            "format this build cannot read — do not overwrite it; say so."
+        ]
+    parameters = ", ".join(
+        f"{p.name}={p.expression if p.expression is not None else f'{p.value:g}'}"
+        f"{(' ' + p.unit.value) if p.unit.value else ''}"
+        for p in spec.parameters
+    )
+    lines = [
+        f"design: {spec.name}, revision {document.revision_number}, "
+        f"{len(spec.features)} feature(s)"
+        + (f", material {spec.material}" if spec.material else "")
+    ]
+    if parameters:
+        lines.append(f"  parameters: {parameters}")
+    lines.append(
+        "  These are the decisions already made. Do not ask the user for one of them; "
+        "read_design has the features."
+    )
+    return lines
+
+
+def _plan_lines(conversation: Conversation) -> list[str]:
+    """The declared plan and what is ready in it (E16 task 2).
+
+    Empty for a conversation with no plan, which is most of them — a single part
+    needs no work breakdown, and a block that said "no plan" on every turn would
+    be furniture in the one place furniture is most expensive.
+    """
+    from app.ai.taskgraph import PlanError, TaskGraph
+
+    try:
+        graph = TaskGraph.from_dict(conversation.task_graph)
+    except PlanError as exc:
+        return [f"plan: stored in a format this build cannot read ({exc})"]
+    brief = graph.brief()
+    return brief.splitlines() if brief else []
+
+
 def _requirement_lines(conversation: Conversation) -> list[str]:
     """What the engineer asked for, held where the context window cannot trim it.
 
@@ -547,6 +612,13 @@ def build_state_block(db: Session, user: User, conversation: Conversation) -> st
     # summariser have been trimming, and the loose ends are exactly what they
     # trim first. See `resume.py`.
     lines.extend(resume_lines(db, conversation.id))
+    # The design as it stands, and the plan it is being built to (E16 task 3).
+    # Both are read from the record rather than recalled from the transcript,
+    # for the reason `resume.py` gives about the operation log: the transcript
+    # trims and the summary is a paraphrase, and the *design* is the one thing
+    # a week-old conversation must not be vague about.
+    lines.extend(_design_lines(db, conversation))
+    lines.extend(_plan_lines(conversation))
     # What was *asked for*, beside what was done. The two are complements and
     # neither can be derived from the other -- one is a log of calls, the other
     # a list of requirements.

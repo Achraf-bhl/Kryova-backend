@@ -1,0 +1,99 @@
+# The mission suite, nightly (master plan P9 task 4).
+#
+# **Why nightly and not on every push.** The missions are the ladder — E18's
+# proof that this system builds machines rather than brackets — and they are
+# slow, because each one compiles a real design and drives a real kernel. Running
+# them on every push would either be ignored for being slow or would be trimmed
+# until it proved nothing. Nightly is the cadence at which "did the ladder still
+# build this morning" is a question somebody can act on.
+#
+# **It runs against the same image the fleet runs**, which is the point of P9
+# task 3 and the reason this file builds one rather than installing packages
+# afresh. A mission suite green on a runner's ad-hoc environment and red in
+# production would be measuring the runner.
+#
+# **A failure here is a finding, not a flake.** The missions are deterministic:
+# the same spec compiles to the same plan, byte for byte (E1 task 7), and every
+# assertion is over a measured quantity. If this goes red overnight, something
+# changed — and the diff since yesterday is short enough to read.
+#
+# Still open, and stated rather than implied: this runs against **a container,
+# not a staging environment**. P9 task 4's "staging with seeded demo orgs" needs
+# somewhere to deploy to, which this deployment does not yet have. What runs
+# here is the offline half of the ladder, which is the half that exists.
+
+name: nightly
+
+on:
+  schedule:
+    # 03:00 UTC. Late enough that a day's merges are in, early enough that a
+    # failure is on somebody's screen before they start.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  DATABASE_URL: postgresql://kryova:kryova@localhost:5432/kryova_ci
+  SECRET_KEY: ci-only-not-a-secret-and-never-used-to-sign-anything-real
+
+jobs:
+  image:
+    name: build the fleet image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # Built and *health-checked*, not just built. An image that builds and
+      # cannot solve is the failure `scripts/container_health.py` exists for:
+      # the fleet reports healthy and every job fails.
+      - name: docker build
+        run: docker build -t kryova-backend:nightly .
+
+      - name: The image can actually solve
+        run: docker run --rm kryova-backend:nightly python -m scripts.container_health
+
+  missions:
+    name: the mission ladder
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: System libraries for OCCT and gmsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libgl1 libglu1-mesa
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # The ladder itself. `-p no:randomly` is not set: a mission that only
+      # passes in one order is a mission with a hidden dependency, and finding
+      # that out is worth a red night.
+      - name: Missions
+        run: pytest -q tests/test_design_missions.py tests/test_mission_*.py
+
+      # The ladder's own report, which names what each rung does **not** claim.
+      # Printed rather than merely computed: "M2 passed" must never be readable
+      # as "the welds are sized", and the caveats are what stop it.
+      - name: What the ladder does not claim
+        if: always()
+        run: |
+          python - <<'PY'
+          from app.handbook.gallery import gallery, headline
+
+          print(headline())
+          for entry in gallery():
+              caveats = "; ".join(entry.not_claimed) or "no caveats recorded"
+              print(f"  {entry.rung}: {caveats}")
+          PY

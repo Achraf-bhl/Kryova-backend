@@ -19,7 +19,7 @@ caller can tell "free" from "unknown" by asking which provider answered.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
@@ -96,6 +96,37 @@ class AssistantTurn:
         return bool(self.tool_calls)
 
 
+@dataclass(frozen=True)
+class TextDelta:
+    """One piece of the assistant's answer, as it is being generated.
+
+    P5 task 1's missing half. The wire used to carry only whole `narration` and
+    `message` events because `chat()` returns a completed turn — so "token
+    streaming" was never a frontend gap, it was this contract not having a shape
+    for a partial answer.
+    """
+
+    text: str
+
+
+@dataclass(frozen=True)
+class Finished:
+    """The completed turn, always last, always exactly once.
+
+    Carried rather than returned so a consumer is a plain `for` loop. A
+    generator that `return`ed the turn would put it in `StopIteration.value`,
+    which every caller would then have to unwrap by hand — and the one that
+    forgot would silently lose the tool calls, which is the half of the turn
+    that does the work.
+    """
+
+    turn: AssistantTurn
+
+
+#: What `stream_chat` yields: zero or more deltas, then exactly one `Finished`.
+ChatEvent = TextDelta | Finished
+
+
 class LLMError(RuntimeError):
     """The model could not be reached, or did not answer usably."""
 
@@ -170,6 +201,40 @@ class LLMProvider(ABC):
         `AssistantTurn`; a provider that cannot do tool calling raises
         `LLMUnavailable` rather than silently answering without them.
         """
+
+    def stream_chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> "Iterator[ChatEvent]":
+        """`chat`, but the text arrives while it is being written (P5 task 1).
+
+        Yields zero or more `TextDelta`, then exactly one `Finished`. The
+        contract is deliberately *not* "yields deltas whose concatenation is the
+        answer": `Finished.turn.text` is the answer, and a caller that
+        reassembles the deltas instead would be building a second copy of it
+        that can drift — most obviously on a provider that streams a corrected
+        token, and on every provider that streams nothing at all.
+
+        **Not abstract, and the default emits no deltas.** Streaming is a
+        capability, and the fallback here is the honest one: a provider that
+        cannot stream produces the finished turn and no partial text. It
+        deliberately does *not* emit the whole answer as a single delta —
+        that would make "the model wrote this all at once" indistinguishable
+        from "this provider does not stream", and the UI would render the same
+        text twice, once as a delta and once as the message that follows.
+
+        A provider that overrides this must keep both halves working: `chat` is
+        still what the non-streaming callers use (drafting a load case,
+        summarising a transcript, writing a title), and a provider that
+        implemented only the streaming path would break all three.
+        """
+        yield Finished(
+            self.chat(system=system, messages=messages, tools=tools, max_tokens=max_tokens)
+        )
 
     def look(
         self,

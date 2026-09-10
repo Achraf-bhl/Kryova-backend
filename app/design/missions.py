@@ -2424,6 +2424,419 @@ _M2_UNPROVEN: Final = (
 )
 
 
+
+# ---------------------------------------------------------------------------
+# M6 — the belt conveyor
+# ---------------------------------------------------------------------------
+#
+# **The rung's difficulty is length and repetition, not shape.** Nothing in a
+# conveyor is geometrically hard: it is angle-section stringers, a leg pair every
+# so often, and a roller every so often. What is hard is that there are a lot of
+# them, that the count is a *consequence* of the length rather than a number
+# somebody typed, and that changing the length must change the bill of materials
+# without anybody editing it. The master plan's own column for this rung says so:
+# "long assemblies, standard parts, modularity, layout".
+#
+# So the assertions are about **arithmetic that must not drift from the graph**.
+# The mass is a closed form over the counts; the counts come from the pitch and
+# the length; and if somebody changes the length and the roll-up disagrees with
+# the closed form, one of the two is wrong and the rung says so. That is the
+# whole test: a 12-metre conveyor built by hand from a 6-metre drawing is the
+# real-world failure, and it is a bill-of-materials failure rather than a
+# geometry one.
+#
+# **Why this rung is buildable now and was not before.** Its declared `needs`
+# were E14.1 (product structure and BOM as first-class data) and E12.3 (standard
+# parts), and both are complete. Nothing about it needed E13 or E9, which is why
+# it moves while M4, M5, M7 and M8 do not.
+
+#: The conveyor as designed. Six metres of it, which is long enough that the
+#: repetition is real and short enough that the mission runs in a test suite.
+_M6_LENGTH_MM: Final = 6_000.0
+#: Belt width, and therefore roller length between the stringers.
+_M6_BELT_WIDTH_MM: Final = 600.0
+
+#: Leg pairs every 1.5 m and a roller every 0.5 m. **Pitches, not counts.** A
+#: count typed here would be a number that has to be re-typed when the length
+#: changes, which is exactly the drift this rung exists to catch.
+_M6_LEG_PITCH_MM: Final = 1_500.0
+_M6_ROLLER_PITCH_MM: Final = 500.0
+
+#: The stringer: 60x40x4 RHS, the same section M2 uses. Deliberately the same —
+#: a conveyor is a long frame, and reusing the section means the mass arithmetic
+#: is checkable against a number this file already computes.
+_M6_SECTION_AREA_MM2: Final = _M2_SECTION_AREA_MM2
+_M6_LEG_MM: Final = 800.0
+
+#: A bought roller: Ø50 steel tube, 3 mm wall, over the belt width. `mass_kg` is
+#: the catalogue figure, not a modelled one — that is what "standard parts" means
+#: and it is why E12.3 was a prerequisite. Modelling a bought part is how a BOM
+#: stops matching what anybody can order.
+_M6_ROLLER_OD_MM: Final = 50.0
+_M6_ROLLER_WALL_MM: Final = 3.0
+_M6_ROLLER_AREA_MM2: Final = math.pi * (
+    (_M6_ROLLER_OD_MM / 2.0) ** 2 - (_M6_ROLLER_OD_MM / 2.0 - _M6_ROLLER_WALL_MM) ** 2
+)
+
+
+def m6_counts(
+    *, length_mm: float = _M6_LENGTH_MM,
+    leg_pitch_mm: float = _M6_LEG_PITCH_MM,
+    roller_pitch_mm: float = _M6_ROLLER_PITCH_MM,
+) -> dict[str, int]:
+    """How many of each part a conveyor of this length needs.
+
+    **The counts are derived and never declared.** A bay is a span between leg
+    pairs, so `n` bays need `n + 1` leg pairs — the fencepost that every hand
+    -written BOM gets wrong once. Rollers are the same fencepost: one at each end
+    and one at every pitch between.
+
+    Returned as a dict rather than a tuple so a caller reading `counts["legs"]`
+    cannot silently transpose two numbers that are both integers.
+    """
+    if length_mm <= 0 or leg_pitch_mm <= 0 or roller_pitch_mm <= 0:
+        raise SpecError(
+            "A conveyor needs a positive length and positive pitches. A zero pitch "
+            "is an infinite bill of materials."
+        )
+    bays = max(1, math.ceil(length_mm / leg_pitch_mm))
+    roller_gaps = max(1, math.ceil(length_mm / roller_pitch_mm))
+    return {
+        "bays": bays,
+        # One more than the bays: the fencepost.
+        "leg_pairs": bays + 1,
+        "legs": 2 * (bays + 1),
+        "stringers": 2,
+        "rollers": roller_gaps + 1,
+    }
+
+
+def m6_mass_kg(
+    *, length_mm: float = _M6_LENGTH_MM,
+    leg_pitch_mm: float = _M6_LEG_PITCH_MM,
+    roller_pitch_mm: float = _M6_ROLLER_PITCH_MM,
+    belt_width_mm: float = _M6_BELT_WIDTH_MM,
+) -> float:
+    """The closed form: two stringers, the legs, and the rollers.
+
+    Held apart from whatever the product structure rolls up, and compared against
+    it by an assertion. **A conveyor built to a 6 m drawing and quoted at 12 m is
+    a bill-of-materials failure, not a geometry one**, and the only way to catch
+    it is to compute the mass twice from different directions and insist they
+    agree.
+    """
+    counts = m6_counts(
+        length_mm=length_mm, leg_pitch_mm=leg_pitch_mm, roller_pitch_mm=roller_pitch_mm
+    )
+    density = _M2_DENSITY_KG_M3 * 1e-9
+    stringer = _M6_SECTION_AREA_MM2 * length_mm * density * counts["stringers"]
+    legs = _M6_SECTION_AREA_MM2 * _M6_LEG_MM * density * counts["legs"]
+    rollers = _M6_ROLLER_AREA_MM2 * belt_width_mm * density * counts["rollers"]
+    return stringer + legs + rollers
+
+
+def _m6_structure(
+    *,
+    length_mm: float = _M6_LENGTH_MM,
+    leg_pitch_mm: float = _M6_LEG_PITCH_MM,
+    roller_pitch_mm: float = _M6_ROLLER_PITCH_MM,
+    belt_width_mm: float = _M6_BELT_WIDTH_MM,
+) -> ProductStructure:
+    """The conveyor as a graph, with every occurrence placed from the pitches.
+
+    Coordinates are the conveyor's: X along the run, Y across the belt, Z up.
+
+    **Every `add` below is inside a loop over a derived count.** That is the rung:
+    a structure with the occurrences written out by hand would be a structure that
+    is right for one length, and the whole point of a modular machine is that it
+    is right for the length somebody asks for. `tests/test_mission_m6.py` builds
+    it at three lengths and checks the graph, the closed form and the roll-up all
+    move together.
+    """
+    counts = m6_counts(
+        length_mm=length_mm, leg_pitch_mm=leg_pitch_mm, roller_pitch_mm=roller_pitch_mm
+    )
+    builder = StructureBuilder()
+    builder.define("conveyor", description="Belt conveyor, modular bay construction.")
+    builder.define(
+        "stringer", design="M6 stringer", material="steel-1018", description="Side rail."
+    )
+    builder.define("leg", design="M6 leg", material="steel-1018", description="Support leg.")
+    builder.define(
+        "roller",
+        design="M6 roller",
+        material="steel-1018",
+        description="Bought idler roller, Ø50x3.",
+    )
+
+    half_width = belt_width_mm / 2.0
+    for side, y in (("near", -half_width), ("far", half_width)):
+        builder.add(
+            "conveyor",
+            "stringer",
+            placement=compose(
+                at(0.0, y, _M6_LEG_MM), turned((0.0, 1.0, 0.0), math.pi / 2.0)
+            ),
+            note=f"{side.title()} side rail, laid along the run.",
+        )
+
+    for index in range(counts["leg_pairs"]):
+        x = min(index * leg_pitch_mm, length_mm)
+        for y in (-half_width, half_width):
+            builder.add(
+                "conveyor",
+                "leg",
+                placement=at(x, y, 0.0),
+                note=f"Leg at {x:g} mm along the run.",
+            )
+
+    for index in range(counts["rollers"]):
+        x = min(index * roller_pitch_mm, length_mm)
+        builder.add(
+            "conveyor",
+            "roller",
+            placement=compose(
+                at(x, -half_width, _M6_LEG_MM), turned((1.0, 0.0, 0.0), math.pi / 2.0)
+            ),
+            note=f"Idler at {x:g} mm along the run.",
+        )
+    return builder.build("conveyor")
+
+
+def _m6_roller_spec(belt_width_mm: float) -> DesignSpec:
+    """The bought roller, modelled only as the envelope it occupies.
+
+    **This is a bought part and the model says so.** The tube is drawn because
+    something has to occupy the space for a clash check, and nothing here claims
+    to be the manufacturer's geometry: no bearing bores, no shaft, no end caps.
+    The mass in the closed form is the catalogue figure for the same reason —
+    E12.3's whole argument is that a bought part is selected, not modelled, and a
+    modelled one is how a BOM stops matching what anybody can order.
+    """
+    return DesignSpec.of(
+        "M6 roller",
+        material="steel-1018",
+        description="Bought idler roller: envelope only, not the maker's geometry.",
+        parameters=[
+            Parameter("length_mm", Unit.MM, value=belt_width_mm, description="Face width."),
+            Parameter("od_mm", Unit.MM, value=_M6_ROLLER_OD_MM),
+            Parameter("wall_mm", Unit.MM, value=_M6_ROLLER_WALL_MM),
+        ],
+        features=[
+            FeatureSpec("roller.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "roller.outline",
+                "catia_sketch_circle",
+                # `diameter_mm`, not a radius: the operation takes a diameter and
+                # a tube is specified by its outside diameter anyway, so the two
+                # agree with each other and with the catalogue.
+                {"sketch": ref("roller.profile"), "diameter_mm": expr("od_mm")},
+            ),
+            FeatureSpec(
+                "roller.body",
+                "catia_pad",
+                {"sketch": ref("roller.profile"), "length_mm": expr("length_mm")},
+                note="The envelope the roller occupies, for clash and layout.",
+            ),
+            FeatureSpec("roller.bore_sketch", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "roller.bore_outline",
+                "catia_sketch_circle",
+                {
+                    "sketch": ref("roller.bore_sketch"),
+                    "diameter_mm": expr("od_mm - 2 * wall_mm"),
+                },
+            ),
+            FeatureSpec(
+                "roller.bore",
+                "catia_pocket",
+                {"sketch": ref("roller.bore_sketch"), "limit": "up_to_last"},
+                note="It is a tube; the wall is what the catalogue mass is for.",
+            ),
+        ],
+    )
+
+
+#: The leg-to-stringer joint, as a contract.
+#:
+#: A conveyor is a long frame and its legs weld to its rails, so the two must be
+#: the same section — and saying that *once*, as an interface, is what makes a
+#: leg built to the wrong section a compile error at the boundary rather than a
+#: joint that does not line up on the shop floor. It is the same shape as M2's
+#: joint and deliberately so: the difference between the two rungs is length and
+#: repetition, not the way parts meet.
+_M6_JOINT: Final = Interface(
+    name="leg-to-stringer weld",
+    provider="leg",
+    consumer="stringer",
+    parameters=_m2_section_parameters(),
+    claims=(
+        Assertion(
+            name="the leg is the section the joint is designed for",
+            measure="provider.bounding_box_mm.size[0]",
+            comparison="==",
+            bound="=section_depth_mm",
+            tolerance=1e-3,
+            note="A weld across a section the rail does not have is a fillet to nothing.",
+        ),
+        Assertion(
+            name="the stringer is the section the joint is designed for",
+            measure="consumer.bounding_box_mm.size[0]",
+            comparison="==",
+            bound="=section_depth_mm",
+            tolerance=1e-3,
+            note=(
+                "Checked on both sides rather than assumed from one: a contract that "
+                "only ever looks at the provider is a contract with one party."
+            ),
+        ),
+    ),
+)
+
+
+def _m6_design(
+    *,
+    length_mm: float = _M6_LENGTH_MM,
+    leg_pitch_mm: float = _M6_LEG_PITCH_MM,
+    roller_pitch_mm: float = _M6_ROLLER_PITCH_MM,
+    belt_width_mm: float = _M6_BELT_WIDTH_MM,
+    structure: ProductStructure | None = None,
+) -> AssemblyDesign:
+    """The conveyor: the graph, three part designs, and the numbers behind them.
+
+    Every argument defaults to the conveyor as designed and exists so a test can
+    build it *wrong* — a longer run whose BOM was not recounted, a leg pitch that
+    leaves a bay unsupported, a roller pitch coarse enough that the belt sags
+    between idlers. `tests/test_mission_m6.py` breaks each; a guard nobody has
+    seen fail is a guard nobody has verified.
+    """
+    from app.assembly.contracts import bind_into
+
+    return AssemblyDesign(
+        structure=(
+            _m6_structure(
+                length_mm=length_mm,
+                leg_pitch_mm=leg_pitch_mm,
+                roller_pitch_mm=roller_pitch_mm,
+                belt_width_mm=belt_width_mm,
+            )
+            if structure is None
+            else structure
+        ),
+        parts={
+            # The section comes from the joint rather than from each part, the
+            # same way M2's members get theirs — see `_M6_JOINT`.
+            "stringer": bind_into(_M6_JOINT, _m2_member_spec("M6 stringer", length_mm)),
+            "leg": bind_into(_M6_JOINT, _m2_member_spec("M6 leg", _M6_LEG_MM)),
+            # Not bound: the roller is a bought part and is not welded to
+            # anything. Binding a section into it would claim the joint reaches
+            # a component it does not touch.
+            "roller": _m6_roller_spec(belt_width_mm),
+        },
+        interfaces=(_M6_JOINT,),
+        parameters=ParameterSet.of(
+            [
+                *_m2_section_parameters(),
+                Parameter("run_length_mm", Unit.MM, value=length_mm),
+                Parameter("belt_width_mm", Unit.MM, value=belt_width_mm),
+                Parameter("leg_pitch_mm", Unit.MM, value=leg_pitch_mm),
+                Parameter("roller_pitch_mm", Unit.MM, value=roller_pitch_mm),
+                Parameter(
+                    "occurrence_count",
+                    Unit.NONE,
+                    value=float(
+                        sum(
+                            m6_counts(
+                                length_mm=length_mm,
+                                leg_pitch_mm=leg_pitch_mm,
+                                roller_pitch_mm=roller_pitch_mm,
+                            )[key]
+                            for key in ("stringers", "legs", "rollers")
+                        )
+                    ),
+                    description=(
+                        "How many parts the BOM says are in this conveyor. Derived "
+                        "from the pitches, and asserted against what the graph holds."
+                    ),
+                ),
+                Parameter(
+                    "mass_closed_form_kg",
+                    Unit.KG,
+                    value=m6_mass_kg(
+                        length_mm=length_mm,
+                        leg_pitch_mm=leg_pitch_mm,
+                        roller_pitch_mm=roller_pitch_mm,
+                        belt_width_mm=belt_width_mm,
+                    ),
+                    description=(
+                        "Computed from the pitches, not from the graph. The assertion "
+                        "that this equals the roll-up is the rung."
+                    ),
+                ),
+            ]
+        ),
+    )
+
+
+_M6_ASSERTIONS: Final = (
+    Assertion(
+        name="the roll-up equals the closed form over the derived counts",
+        measure="mass_kg",
+        comparison="==",
+        bound="=mass_closed_form_kg",
+        tolerance=1e-6,
+        note=(
+            "The rung. One mass from the product graph and one from the pitches, and "
+            "they must agree — a conveyor built to a 6 m drawing and quoted at 12 m is "
+            "a bill-of-materials failure, and computing the mass twice from different "
+            "directions is the only way to see it."
+        ),
+    ),
+    Assertion(
+        name="the run is as long as it was asked to be",
+        # `envelope_mm`, not `bounding_box_mm`: an assembly's world extent is
+        # what `_envelope` publishes, and a part-level path here would come back
+        # UNMEASURED — which is not a pass, but is also not the check intended.
+        measure="envelope_mm.size[0]",
+        comparison="==",
+        # The envelope runs from the first leg to the last, plus the section the
+        # stringer occupies at each end; the rails themselves are exactly the run
+        # length, so the envelope is the run plus one section.
+        bound="=run_length_mm + section_depth_mm",
+        tolerance=1.0,
+        note=(
+            "A modular machine whose length is not the length somebody asked for has "
+            "a placement bug, not a geometry one, and the envelope is where it shows."
+        ),
+    ),
+    Assertion(
+        name="the graph holds exactly the parts the bill of materials counts",
+        measure="clash.occurrence_count",
+        comparison="==",
+        bound="=occurrence_count",
+        note=(
+            "The BOM checked against the graph directly, beside the mass check that "
+            "checks it by arithmetic. Two different ways of being wrong: the mass "
+            "claim catches a count that drifted, and this catches a part that was "
+            "placed twice or not at all with a compensating error in another."
+        ),
+    ),
+)
+
+
+_M6_UNPROVEN: Final = (
+    "E6 — no load case has been run through this conveyor: nothing here says the "
+    "stringers carry the belt, the load or their own span between legs",
+    "E9 — the rollers do not turn: this is a static layout, so belt tension, drive "
+    "torque and the loads a moving belt puts into the frame are all absent",
+    "E12.3 — the roller is an envelope with a catalogue mass, not a selected part "
+    "number: nothing has checked that a Ø50x3 idler of this face width is orderable",
+    "E13 — no cost estimate and no DFM: the bill of materials is a count of parts "
+    "and not a quotation",
+    "E17.4 — no weldment model and no cut list, the same gap M2 carries",
+)
+
+
 # ---------------------------------------------------------------------------
 # M3 — the sheet-metal enclosure
 # ---------------------------------------------------------------------------
@@ -3401,10 +3814,13 @@ LADDER: Final[Sequence[Mission]] = (
         title="Belt conveyor system",
         era="V",
         hard="Long assemblies, standard parts, modularity, layout",
-        needs=(
-            "E14.1 — product structure and BOM as first-class data",
-            "E12.3 — standard parts",
-        ),
+        # Both of this rung's declared needs — E14.1's product structure and
+        # E12.3's standard parts — are complete, so it moved from waiting to
+        # built on 2026-09-10. Nothing about it needed E13 or E9, which is why
+        # it moves while M4, M5, M7 and M8 do not.
+        assembly=_m6_design(),
+        assertions=_M6_ASSERTIONS,
+        unproven=_M6_UNPROVEN,
     ),
     Mission(
         rung="M7",

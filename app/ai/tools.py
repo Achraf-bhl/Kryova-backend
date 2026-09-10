@@ -102,6 +102,18 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     # `catia_` prefix: that prefix means "goes to the workstation", and this one
     # answers with CATIA closed. `tests/test_tool_registry.py` enforces it.
     "design_history": "Reading what was already built",
+    # Says what it produces — the specification — rather than that a row was
+    # written. A user watching the step list should read that the part is being
+    # written down, which is the thing that is actually happening.
+    "record_design": "Writing down the design",
+    "read_design": "Reading the design",
+    "set_design_parameter": "Changing a design parameter",
+    # The plan and its checkpoints (E16 tasks 2, 5, 6). Each says what is
+    # happening to the *work*, not which module answered.
+    "plan_work": "Planning the work",
+    "update_task": "Updating the plan",
+    "request_approval": "Asking you to sign this off",
+    "estimate_cost": "Checking what this will cost",
     # Says what it is for, not which module answers. A user watching the step
     # list should read that the work is being checked.
     "check_part": "Checking the part against the request",
@@ -472,6 +484,339 @@ class ToolBox:
                     ["claims"],
                 ),
                 handler=self._check_part,
+            ),
+            Tool(
+                name="record_design",
+                description=(
+                    "Write down the part as a specification: the parameters it is "
+                    "built from, the features it is made of, and why each one is "
+                    "there. This is the design itself -- the conversation is only "
+                    "the log of it -- and it is what the user sees beside the chat, "
+                    "what a reviewer signs off, and what a later change is diffed "
+                    "against.\n"
+                    "Call it once you know the shape of the part, and again whenever "
+                    "the design changes. Pass the WHOLE design every time, not a "
+                    "patch: what you send replaces what was stored, and anything you "
+                    "leave out is gone from the part.\n"
+                    "Give a dimension a parameter and refer to it, rather than "
+                    "repeating a number in four features -- that is what makes "
+                    "'make it 20% thicker' one edit instead of four. An argument "
+                    "starting '=' is a formula over the parameters; one starting '@' "
+                    "refers to another feature in this design by name.\n"
+                    "Recording a design does NOT build it. It is the description; "
+                    "the CATIA or kernel tools are what make geometry."
+                ),
+                parameters=_object(
+                    {
+                        "name": {
+                            "type": "string",
+                            "description": (
+                                "The part's name, e.g. 'motor_bracket'. Becomes the "
+                                "CATIA document name."
+                            ),
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "One or two lines on what this part is for.",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material key from list_materials, e.g. 'steel_s235'. "
+                                "Omit for a geometry-only design; a wrong key comes "
+                                "back as a mass roughly three times out, not an error."
+                            ),
+                        },
+                        "parameters": {
+                            "type": "array",
+                            "description": (
+                                "The named decisions the part is built from. Each has "
+                                "a name and either a value or an expression -- never "
+                                "both. A parameter with an expression is a consequence "
+                                "of the others and must not be given a number."
+                            ),
+                            "items": _object(
+                                {
+                                    "name": {"type": "string"},
+                                    "value": {"type": "number"},
+                                    "expression": {
+                                        "type": "string",
+                                        "description": (
+                                            "A formula over the other parameters, "
+                                            "without a leading '=', e.g. 'wall_mm * 2'."
+                                        ),
+                                    },
+                                    "unit": {
+                                        "type": "string",
+                                        "description": (
+                                            "mm, deg, kg, mm2, mm3 or empty for a "
+                                            "count or a ratio."
+                                        ),
+                                    },
+                                    "description": {"type": "string"},
+                                },
+                                required=["name"],
+                            ),
+                        },
+                        "features": {
+                            "type": "array",
+                            "description": (
+                                "What the part is made of, IN BUILD ORDER -- a pad "
+                                "cannot come before the sketch it extrudes. Order is "
+                                "kept exactly as given."
+                            ),
+                            "items": _object(
+                                {
+                                    "name": {
+                                        "type": "string",
+                                        "description": (
+                                            "A semantic name, e.g. 'plate.profile' or "
+                                            "'web.pad'. This is how other features "
+                                            "refer to it, so it must not change when "
+                                            "the geometry does."
+                                        ),
+                                    },
+                                    "op": {
+                                        "type": "string",
+                                        "description": (
+                                            "The operation that makes it, e.g. "
+                                            "'catia_pad'."
+                                        ),
+                                    },
+                                    "args": {
+                                        "type": "object",
+                                        "description": (
+                                            "The operation's arguments. '=formula' for "
+                                            "an expression, '@other.feature' for a "
+                                            "reference."
+                                        ),
+                                    },
+                                    "when": {
+                                        "type": "string",
+                                        "description": (
+                                            "A condition, without a leading '='. The "
+                                            "feature is skipped when it is false, and "
+                                            "stays in the design -- which is how a "
+                                            "part has an optional pocket without "
+                                            "having two half-maintained designs."
+                                        ),
+                                    },
+                                    "note": {
+                                        "type": "string",
+                                        "description": (
+                                            "Why this feature exists. Answer it for "
+                                            "somebody reading in six months, not for "
+                                            "yourself now."
+                                        ),
+                                    },
+                                },
+                                required=["name", "op"],
+                            ),
+                        },
+                    },
+                    required=["name"],
+                ),
+                handler=self._record_design,
+                mutating=True,
+            ),
+            Tool(
+                name="read_design",
+                description=(
+                    "The part's specification as it currently stands, with its "
+                    "revision history: what changed at each step and who changed it. "
+                    "Call this when picking a conversation back up, before editing a "
+                    "design you did not write in this turn, or when the user asks "
+                    "what a parameter is set to. It answers from the server's own "
+                    "record, so it is right even for work from days ago that is no "
+                    "longer in the conversation above you."
+                ),
+                parameters=_object({}),
+                handler=self._read_design,
+            ),
+            Tool(
+                name="set_design_parameter",
+                description=(
+                    "Change one number in the design and find out what it reaches. "
+                    "Use this for 'make the wall 8 mm' rather than re-sending the "
+                    "whole design: it is one edit, it records what moved, and it "
+                    "comes back telling you which features have to be rebuilt -- "
+                    "INCLUDING the ones nobody edited that stand on something that "
+                    "was, which are the ones that surprise people.\n"
+                    "A parameter that is derived from a formula is refused: change "
+                    "one of the parameters its formula reads instead."
+                ),
+                parameters=_object(
+                    {
+                        "name": {
+                            "type": "string",
+                            "description": "The parameter to change.",
+                        },
+                        "value": {"type": "number", "description": "Its new value."},
+                    },
+                    required=["name", "value"],
+                ),
+                handler=self._set_design_parameter,
+                mutating=True,
+            ),
+            Tool(
+                name="plan_work",
+                description=(
+                    "Write down the plan for a job that takes several stages: the "
+                    "steps, what each one waits on, and which of them a person has "
+                    "to sign off before the work goes past it.\n"
+                    "Use it for a machine, an assembly, or anything you expect to "
+                    "take more than a handful of operations. Do NOT use it for a "
+                    "single part you can build in a few calls — a plan for that is "
+                    "overhead, and the plan is meant to be read.\n"
+                    "The server holds the plan and enforces its order: a step "
+                    "cannot be marked done while something it waits on is not, and "
+                    "it will tell you which. Passing the whole plan replaces the "
+                    "one stored, so send it whole when the shape of the work "
+                    "changes and use update_task for a step moving along."
+                ),
+                parameters=_object(
+                    {
+                        "tasks": {
+                            "type": "array",
+                            "description": (
+                                "The steps, in the order you intend to do them. "
+                                "Dependencies decide the real order; this order only "
+                                "breaks ties."
+                            ),
+                            "items": _object(
+                                {
+                                    "id": {
+                                        "type": "string",
+                                        "description": (
+                                            "Short and stable, e.g. 'frame' or "
+                                            "'ram_sizing'. Other steps depend on it "
+                                            "by this id."
+                                        ),
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "description": "What this step is, for a person to read.",
+                                    },
+                                    "depends_on": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": (
+                                            "Ids of steps that must be finished (or "
+                                            "deliberately skipped) first."
+                                        ),
+                                    },
+                                    "checkpoint": {
+                                        "type": "boolean",
+                                        "description": (
+                                            "True when a person has to approve this "
+                                            "step before anything after it proceeds. "
+                                            "Use it where a wrong answer is expensive "
+                                            "to undo: a sizing decision, a material "
+                                            "choice, anything that will be "
+                                            "manufactured."
+                                        ),
+                                    },
+                                }
+                            ),
+                        }
+                    },
+                    required=["tasks"],
+                ),
+                handler=self._plan_work,
+                mutating=True,
+            ),
+            Tool(
+                name="update_task",
+                description=(
+                    "Move one step of the plan along. Mark it active when you start "
+                    "it, done when it is finished and checked, blocked when "
+                    "something outside your control is stopping it, or skipped when "
+                    "the design went a different way and it is no longer needed.\n"
+                    "A step cannot be marked done while something it waits on is "
+                    "not — you will be told which, and that is the answer, not an "
+                    "error to retry around. Blocked and skipped are different: "
+                    "blocked means say so and move on, skipped means it is settled "
+                    "and the work after it may proceed."
+                ),
+                parameters=_object(
+                    {
+                        "id": {"type": "string", "description": "The step's id."},
+                        "state": {
+                            "type": "string",
+                            "enum": ["pending", "active", "done", "blocked", "skipped"],
+                        },
+                        "note": {
+                            "type": "string",
+                            "description": (
+                                "Why. Required in spirit for blocked and skipped: a "
+                                "step that is blocked by nothing anybody wrote down "
+                                "cannot be unblocked by anybody else."
+                            ),
+                        },
+                    },
+                    required=["id", "state"],
+                ),
+                handler=self._update_task,
+                mutating=True,
+            ),
+            Tool(
+                name="request_approval",
+                description=(
+                    "Ask a person to sign off on something before you go further. "
+                    "Use it at a checkpoint in the plan, and any time you are about "
+                    "to do something expensive to undo that the user has not "
+                    "explicitly asked for.\n"
+                    "This ENDS YOUR TURN. The question and what you are showing are "
+                    "recorded as a gate the user can approve or reject; nothing "
+                    "waits on you in the meantime and nothing is lost. Say clearly "
+                    "in your message what you are asking and why, because that is "
+                    "what they will read.\n"
+                    "It is pinned to what you show it: if the design moves while the "
+                    "gate is open, the approval will not apply to the new one. That "
+                    "is deliberate — an approval of 'whatever it becomes' is not a "
+                    "sign-off."
+                ),
+                parameters=_object(
+                    {
+                        "title": {
+                            "type": "string",
+                            "description": "A few words naming the decision.",
+                        },
+                        "question": {
+                            "type": "string",
+                            "description": (
+                                "What you are asking, in full. State the options and "
+                                "what each one costs — a reviewer with one option is "
+                                "being told, not asked."
+                            ),
+                        },
+                        "task_id": {
+                            "type": "string",
+                            "description": (
+                                "The checkpoint in the plan this is for, if there is "
+                                "one."
+                            ),
+                        },
+                    },
+                    required=["title", "question"],
+                ),
+                handler=self._request_approval,
+                mutating=True,
+            ),
+            Tool(
+                name="estimate_cost",
+                description=(
+                    "What a simulation is likely to cost this account, before you "
+                    "start one. Call it before submitting a run that is large or "
+                    "that the user did not explicitly ask for — a convergence "
+                    "study, a fine mesh, a sweep.\n"
+                    "The number comes from this account's own recorded runs, so a "
+                    "new account gets told there is not enough history rather than "
+                    "a made-up figure. Report what it says; do not turn 'we cannot "
+                    "estimate this yet' into a guess."
+                ),
+                parameters=_object({}),
+                handler=self._estimate_cost,
             ),
             Tool(
                 name="list_projects",
@@ -849,6 +1194,375 @@ class ToolBox:
             limit=limit,
             failures_only=bool(failures_only),
         )
+
+    # -- the design record (P5.3, P5.6) -------------------------------------
+    #
+    # `app.design` is pure and must stay that way, so the imports below are
+    # local to these three handlers rather than module-level: nothing about a
+    # toolbox needs the compiler unless somebody actually records a design, and
+    # keeping them here is what stops `app.ai.tools` from quietly becoming the
+    # module that couples the agent to the design package's import graph.
+
+    def _design_conversation(self) -> Conversation:
+        conversation = self.conversation
+        if conversation is None:
+            raise ToolError(
+                "There is no conversation to attach a design to. A design belongs to "
+                "the conversation it was worked out in."
+            )
+        return conversation
+
+    def _record_design(
+        self,
+        name: str,
+        description: str = "",
+        material: str | None = None,
+        parameters: list[dict[str, Any]] | None = None,
+        features: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Store the whole design, replacing whatever was there.
+
+        Whole-document rather than a patch, and the tool description says so in
+        capitals. A merge would need a rule for "the model omitted a feature" —
+        deleted, or not mentioned? — and both readings are defensible, which
+        means whichever one was chosen would be wrong roughly half the time and
+        silently. Replacing has one reading.
+
+        A spec that does not compile is refused *before* anything is written
+        (`designs.save` diffs, which compiles both sides), and the compiler's
+        own message comes back to the model. That message names the feature and
+        says what is wrong with it, which is what the model needs in order to
+        fix it on the next step rather than to guess.
+        """
+        from app.core import designs
+        from app.design.errors import SpecError
+        from app.design.params import Parameter, Unit
+        from app.design.spec import DesignSpec, FeatureSpec
+
+        conversation = self._design_conversation()
+        try:
+            built_parameters = [
+                Parameter(
+                    name=str(entry["name"]),
+                    unit=Unit(str(entry.get("unit") or "")),
+                    value=entry.get("value"),
+                    expression=entry.get("expression"),
+                    description=str(entry.get("description") or ""),
+                )
+                for entry in (parameters or [])
+            ]
+            spec = DesignSpec.of(
+                name=name,
+                parameters=built_parameters,
+                features=[FeatureSpec.from_dict(entry) for entry in (features or [])],
+                material=material,
+                description=description,
+            )
+        except (SpecError, ValueError, KeyError, TypeError) as exc:
+            raise ToolError(f"That design cannot be read: {exc}") from None
+
+        try:
+            outcome = designs.save(
+                self.db, conversation, spec, author=designs.AUTHOR_AGENT, author_id=None
+            )
+        except SpecError as exc:
+            raise ToolError(f"That design does not compile: {exc}") from None
+
+        self.db.flush()
+        result: dict[str, Any] = {
+            "design": spec.name,
+            "digest": outcome.document.digest,
+            "revision": outcome.document.revision_number,
+            "changed": outcome.changed,
+            "parameters": list(spec.parameters.names()),
+            "features": list(spec.feature_names()),
+        }
+        if not outcome.changed:
+            # Said plainly rather than reported as a successful write. A model
+            # told "saved" after a no-op edit has no way to notice that the
+            # change it thought it made did not happen, and will report it to
+            # the user as done.
+            result["note"] = (
+                "This is byte-identical to the design already stored, so nothing "
+                "changed and no revision was written."
+            )
+        elif outcome.diff is not None:
+            result["diff"] = outcome.diff.to_dict()
+            result["rebuilds"] = outcome.diff.rebuild_sentence()
+        return result
+
+    def _read_design(self) -> dict[str, Any]:
+        from app.core import designs
+        from app.models.design import DesignRevision
+
+        conversation = self._design_conversation()
+        document = designs.load(self.db, conversation)
+        if document is None:
+            return {
+                "design": None,
+                "note": (
+                    "No design has been recorded for this conversation. Call "
+                    "record_design once you know the shape of the part."
+                ),
+            }
+        history = list(
+            self.db.scalars(
+                select(DesignRevision)
+                .where(DesignRevision.design_id == document.id)
+                .order_by(DesignRevision.revision_number.desc())
+                .limit(HISTORY_PAGE_LIMIT)
+            )
+        )
+        return {
+            "design": document.document,
+            "digest": document.digest,
+            "revision": document.revision_number,
+            "history": [
+                {
+                    "revision": row.revision_number,
+                    "summary": row.summary,
+                    "author": row.author,
+                    "at": row.created_at.isoformat(),
+                }
+                for row in history
+            ],
+        }
+
+    def _set_design_parameter(self, name: str, value: float) -> dict[str, Any]:
+        from app.core import designs
+        from app.design.errors import SpecError
+
+        conversation = self._design_conversation()
+        document = designs.load(self.db, conversation)
+        if document is None:
+            raise ToolError(
+                "There is no design to edit. Call record_design first — a parameter "
+                "can only be changed in a design that has been written down."
+            )
+        try:
+            outcome = designs.set_parameter(
+                self.db, document, name, float(value), author=designs.AUTHOR_AGENT, author_id=None
+            )
+        except SpecError as exc:
+            # Through as-is: the message names the parameters that do exist, or
+            # the formula a derived one is derived from. Rewriting it would make
+            # it less useful to the one reader it has.
+            raise ToolError(str(exc)) from None
+
+        self.db.flush()
+        result: dict[str, Any] = {
+            "design": outcome.document.name,
+            "parameter": name,
+            "value": value,
+            "revision": outcome.document.revision_number,
+            "digest": outcome.document.digest,
+        }
+        if outcome.diff is not None:
+            result["rebuilds"] = outcome.diff.rebuild_sentence()
+            result["affected"] = list(outcome.diff.affected)
+            result["downstream"] = list(outcome.diff.downstream)
+            if not outcome.diff.plan_changed:
+                result["note"] = (
+                    "Nothing that affects the built part changed — no feature reads "
+                    "this parameter."
+                )
+        return result
+
+    # -- the plan, its checkpoints, and what a run costs (E16 tasks 2, 5, 6) --
+
+    def _plan_work(self, tasks: list[dict[str, Any]]) -> dict[str, Any]:
+        """Store the declared plan, replacing whatever was there.
+
+        Whole-graph, for the same reason `record_design` is whole-document: a
+        merge needs a rule for "the model omitted a task" and both readings are
+        defensible, so whichever was chosen would be wrong half the time and
+        silently. `update_task` is the incremental path, and it moves a task
+        rather than redefining one.
+
+        Every refusal — a cycle, a dependency on nothing, a plan longer than the
+        ceiling — arrives as one `PlanError` naming what to change, and it is
+        passed through as-is.
+        """
+        from app.ai.taskgraph import PlanError, graph_from_tasks
+
+        conversation = self._design_conversation()
+        try:
+            graph = graph_from_tasks(tasks or [])
+        except PlanError as exc:
+            raise ToolError(str(exc)) from None
+
+        conversation.task_graph = graph.to_dict()
+        self.db.flush()
+        return {
+            "tasks": len(graph),
+            "order": [task.id for task in graph.order()],
+            "ready": [task.id for task in graph.ready()],
+            "checkpoints": [task.id for task in graph.checkpoints()],
+            "plan": graph.brief(),
+        }
+
+    def _update_task(self, id: str, state: str, note: str = "") -> dict[str, Any]:
+        from app.ai.taskgraph import PlanError, TaskGraph, TaskState
+
+        conversation = self._design_conversation()
+        try:
+            graph = TaskGraph.from_dict(conversation.task_graph)
+        except PlanError as exc:  # pragma: no cover - a stored plan this build cannot read
+            raise ToolError(str(exc)) from None
+        if not graph:
+            raise ToolError(
+                "There is no plan to update. Call plan_work first — a step can only be "
+                "moved in a plan that was written down."
+            )
+        try:
+            moved = graph.advance(id, TaskState(state), note=note)
+        except ValueError as exc:
+            # `PlanError` for an out-of-order move (its message names the
+            # dependencies), plain `ValueError` for a state this build does not
+            # know. Both are answers the model can act on.
+            raise ToolError(str(exc)) from None
+
+        conversation.task_graph = moved.to_dict()
+        self.db.flush()
+        result: dict[str, Any] = {
+            "task": id,
+            "state": state,
+            "ready": [task.id for task in moved.ready()],
+            "settled": f"{moved.settled_count()} of {len(moved)}",
+        }
+        open_checkpoints = [task.id for task in moved.open_checkpoints()]
+        if open_checkpoints:
+            result["awaiting_sign_off"] = open_checkpoints
+        if moved.complete:
+            result["note"] = "Every step of the plan is settled."
+        elif not moved.ready():
+            # The useful answer rather than an empty list. A model handed `[]`
+            # reads it as "nothing to do" and closes the turn reporting success.
+            result["note"] = (
+                "Nothing is ready: everything left is blocked or waiting on a sign-off. "
+                "Say what is needed rather than retrying."
+            )
+        return result
+
+    def _request_approval(
+        self, title: str, question: str, task_id: str | None = None
+    ) -> dict[str, Any]:
+        """Raise a gate and end the turn on it (E16 task 5).
+
+        **The gate is pinned to the design as it stands**, which is what makes
+        the eventual approval mean something. `core/gates.raise_gate` takes the
+        digest at this moment and `decide` re-digests what the decider is looking
+        at, so an approval cannot land on a design that moved while it was
+        pending. If there is no design yet the subject is the plan, which is
+        equally pinnable and equally worth signing off.
+
+        Ending the turn is the point rather than a side effect. A checkpoint the
+        agent announces and then walks past is not a checkpoint; the loop reads
+        `awaiting_approval` in the result and stops.
+        """
+        from app.ai.taskgraph import TaskGraph
+        from app.core import designs, gates
+
+        conversation = self._design_conversation()
+        organisation_id = self._organisation_id()
+        if organisation_id is None:
+            raise ToolError(
+                "This account has no organisation, so there is nobody to ask. Carry on "
+                "and say in your answer what you would have wanted signed off."
+            )
+
+        document = designs.load(self.db, conversation)
+        graph = TaskGraph.from_dict(conversation.task_graph)
+        if document is not None:
+            subject_type, subject_id = "design", document.id
+            subject: Any = document.document
+            evidence: dict[str, Any] = {
+                "design": document.name,
+                "revision": document.revision_number,
+                "digest": document.digest,
+            }
+        else:
+            subject_type, subject_id = "plan", conversation.id
+            subject = graph.to_dict()
+            evidence = {"plan": graph.brief()}
+        if task_id:
+            evidence["task"] = task_id
+
+        gate = gates.raise_gate(
+            self.db,
+            organisation_id=organisation_id,
+            requested_by=self.user,
+            title=title[:255],
+            question=question[:4000],
+            subject_type=subject_type,
+            subject_id=subject_id,
+            subject=subject,
+            evidence=evidence,
+            project_id=conversation.project_id,
+            conversation_id=conversation.id,
+        )
+        self.db.flush()
+        return {
+            # Read by the agent loop, which ends the turn on it. A key rather
+            # than an exception because the call *succeeded* — a gate exists —
+            # and raising would file a working checkpoint as a failure.
+            "awaiting_approval": True,
+            "gate_id": gate.id,
+            "title": gate.title,
+            "pinned_to": subject_type,
+            "next_step": (
+                "Stop here and tell the user what you are asking them to decide and why. "
+                "Nothing is lost while it is open; the work resumes when they answer."
+            ),
+        }
+
+    def _estimate_cost(self) -> dict[str, Any]:
+        """What a run is likely to cost this tenant (E16 task 6).
+
+        Reads P8's estimator rather than computing anything: the number has to
+        come from the meter that bills, or the estimate and the invoice are two
+        answers to one question. Each `Estimate` already carries its own
+        sentence, including the one that says there is not enough history — which
+        is passed through rather than turned into a zero.
+        """
+        from datetime import date
+
+        from app.core.estimates import estimate_run
+
+        organisation_id = self._organisation_id()
+        if organisation_id is None:
+            return {
+                "estimates": [],
+                "note": (
+                    "This account has no organisation, so there is no billing history "
+                    "to estimate from. Say so rather than guessing at a cost."
+                ),
+            }
+        estimates = estimate_run(self.db, organisation_id, today=date.today())
+        return {
+            "estimates": [
+                {
+                    "meter": estimate.meter.value,
+                    "sentence": estimate.human(),
+                    "known": estimate.known,
+                    "samples": estimate.samples,
+                }
+                for estimate in estimates
+            ],
+            "next_step": (
+                "Report these sentences as written. An estimate we do not have is not "
+                "a small one."
+            ),
+        }
+
+    def _organisation_id(self) -> str | None:
+        from app.models.organisation import organisation_ids_for_user
+
+        tenants = organisation_ids_for_user(self.db, self.user)
+        # Sorted so a user in two organisations gets a stable answer rather than
+        # whichever the set happened to yield first — a gate raised against a
+        # different tenant on each call would be unfindable.
+        return next(iter(sorted(tenants)), None)
 
     def _list_projects(self) -> dict[str, Any]:
         rows = self.db.scalars(

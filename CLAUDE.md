@@ -1413,6 +1413,17 @@ the right, `auth.py::_client_ip`); no list endpoint paginates (all four do, `pag
 9. Don't mark a master-plan task `DONE` without a test that proves it, and don't leave a finished
    task unmarked.
 10. Don't claim an end-to-end result from Linux. No CATIA here.
+11. Don't POST a whole `DesignSpec` from a client — the only write is one parameter, and
+    `tests/test_designs.py` asserts no such route exists.
+12. Don't reassemble `TextDelta`s into an answer. `Finished.turn.text` is the answer; the deltas
+    are for display and a provider that cannot stream emits none.
+13. Don't invent a percentage for a running solve. `progress.py` reports a stage, and a grid count
+    only where grids are genuinely countable.
+14. Don't route a CATIA call to a different seat when the one holding the document is offline.
+    `affinity.choose` answers `STRANDED` and names the machine; another seat is a wrong answer
+    that looks like a working one.
+15. Don't add a migration that drops something without a **rollback note** in its docstring —
+    `tests/test_delivery.py` enforces it, and the fourteen grandfathered names may only shrink.
 
 
 ## Stopping things (`app/core/interruption.py`) — added 2026-09-10 with P5.6
@@ -1460,6 +1471,108 @@ wrong. Three rules, each pinned by a test that fails when the check is removed:
 this column" since P2.2 while nothing did. `None` means *not stated* and does not qualify — the
 column is nullable precisely so that can be said.
 
+## The design record (`app/models/design.py`, `app/core/designs.py`) — added 2026-09-10 with P5.3
+
+`DesignSpec` is **persisted now**. One `DesignDocument` per conversation, with an append-only
+`DesignRevision` chain. Everything that used to say "the spec is an in-memory IR with no model
+and no route" is out of date.
+
+Three rules keep the chain a history rather than a log of saves:
+
+1. **A save whose spec is byte-identical to the head writes nothing.** The agent re-saves after
+   every step and most steps do not touch the design; appending each time gives a design six
+   hundred revisions of which four matter.
+2. **The summary is written at the time, from `app/design/diff.py`** — not derived on read.
+   Recomputing means recompiling both specs, and gives a *different answer* after an operation
+   registry change, because the diff is made after compilation on purpose.
+3. **A spec that does not compile is refused before the chain is touched**, so a refusal never
+   leaves the design in a state no build produced.
+
+**There is no route that accepts a whole spec, and `tests/test_designs.py` asserts there is
+none.** The only write is `PATCH /designs/{conversation_id}/parameters/{name}`. A route taking a
+spec would let a client author a design the server never compiled. A *derived* parameter is
+refused with its formula named, on both surfaces — the panel's field and the agent's
+`set_design_parameter` — because both go through `core/designs.set_parameter`.
+
+`DesignRevision.author` is `"user"` or `"agent"`, and a null `author_id` means **the agent, not
+"unknown"**. Conflating them makes "did a person do this" unanswerable, which is the question an
+audit of a signed-off design is entirely about.
+
+## The agent's plan (`app/ai/taskgraph.py`) — added 2026-09-10 with E16.2
+
+**Not an autonomous planner, and the evidence is in the master plan.** Era VIII records that
+memory scaffolds degraded long-horizon performance in *all ten* models tested, that additional
+orchestration does not consistently help, and that the strongest models fail hardest when they
+attempt the most ambitious strategies. What is measured to help is shortening the horizon.
+
+So the model declares a plan (`plan_work`) and **the server enforces its order** (`update_task`).
+It does not generate one, re-generate one, or ask a model to reason about it. A task cannot be
+marked done while something it stands on is not, and the refusal names which — that is the one
+thing this adds over the list `app/ai/planning.py` already provides.
+
+Two states that are easy to conflate and must not be: `SKIPPED` satisfies a dependency (the work
+downstream was cleared) while still telling a reader the thing was not done; `BLOCKED` does
+neither. And a plan where *everything* is blocked says so rather than returning an empty
+ready-list — a model handed `[]` reads it as "nothing to do" and closes the turn reporting
+success.
+
+`checkpoint: true` marks a task a human must sign off. `request_approval` raises the gate **and
+ends the turn**: a checkpoint the agent announces and then walks past is not a checkpoint, and a
+prompt asking it to stop is something it is free to ignore and has.
+
+## Escalating a bounded retry (`app/ai/recovery.py`) — added 2026-09-10 with E16.4
+
+The three behavioural guards (`MAX_IDENTICAL_READS`, `_refused_before`, `MAX_EMPTY_DOCUMENTS`)
+bound the *retrying*. This is the last word: **escalate with a specific question.**
+
+"The agent kept repeating a call that had already been refused" is true and unanswerable — the
+user reads it and has no idea what to type. What they can act on names a subject, a cause and two
+options. Failures are counted **by (tool, kind), not by message**: two attempts failing with
+slightly different wording are one problem, and a counter keyed on the message never reaches its
+bound, which is how a retry budget quietly stops existing.
+
+**Nothing here calls a model.** The question is built from the tool's own error text and the call's
+arguments, both already in hand. An LLM would put a paraphrase between the user and the failure on
+the one screen where the exact wording is the evidence. A failure the taxonomy does not recognise
+escalates anyway, quoting verbatim — the same contract `app/solve/calculix/diagnose.py` holds.
+
+## Streaming, resuming and progress — added 2026-09-10 with P5.1 and P5.2
+
+**`stream_chat` is the provider seam for token streaming.** It yields zero or more `TextDelta`
+then exactly one `Finished`. The base implementation emits **no deltas at all** rather than the
+whole answer as one — otherwise "the model wrote this in one go" is indistinguishable from "this
+provider does not stream", and the UI renders the text twice. `Finished.turn.text` is the answer;
+**never reassemble the deltas**, because tool calls arrive on the final chunk and a caller
+building its own copy would silently drop the half of the turn that does the work.
+
+**`turn_events` is a ten-minute resume buffer, not a record.** A reconnect lands on whichever
+worker is free, so an in-process ring buffer resumes perfectly under `--workers 1` and nothing in
+production — the same failure shape as the cancellation flag, mirrored. Every event is recorded
+*before* it is yielded, and `sequence` is monotonic **per conversation, not per turn**, so a
+cursor is unambiguous across a turn boundary. `GET /ai/conversations/{id}/stream?after=N` is a
+**GET** precisely so a reconnect cannot start a second turn. A client away longer than the
+retention gets `resume_gap` and reloads: a turn with a silent bite out of the middle renders as an
+agent that skipped three steps.
+
+**`app/simulation/progress.py` reports a stage and never a percentage.** For a linear-static run
+CalculiX reports one increment, so any fraction inside a solve would be invented — and an invented
+bar over a twenty-minute solve teaches a user to predict a finish time nobody measured. A
+convergence study *does* have countable grids and gets `index`/`total`; a count with only one half
+present is refused. Every write opens **its own session**: the runner holds one transaction for
+the whole job, so a progress update written inside it is invisible until the run is over.
+
+## Not solving twice (`app/simulation/cache.py`) — added 2026-09-10 with E15.2
+
+A cache in a verification product is a liability before it is an optimisation: the failure mode is
+not "slow", it is a confident number computed under different conditions. The key covers exactly
+what the result depends on, and a test asserts the parametrised list is **every field of the
+dataclass** — so an input added and not keyed is a failing test rather than a wrong answer.
+
+Three exclusions, each of which would be a bug: an **unmeasured solver version does not match a
+known one** (that is the claim Decision 3 forbids); the lookup is **scoped to the organisation**,
+which is a security boundary rather than tuning; and a hit **keeps its own timings**, or the
+fleet's figures absorb a three-week-old solve as though it happened now.
+
 ## An enum in a `String` column is a bug this codebase has shipped four times
 
 `mapped_column(String(16))` typed as an enum gives you the enum on a row *written* in this session
@@ -1474,6 +1587,13 @@ every gate a reviewer opened), then `Announcement.level` and `ShareLink.revocati
 announcement one was live, raising `AttributeError` on any deployment that had actually published
 a banner. **Use `app/models/types.EnumText`.** It emits the same VARCHAR DDL, so adopting it needs
 no migration.
+
+**One place it needs a hand: a *new* table's autogenerated migration.** Alembic renders the column
+as `app.models.types.EnumText(length=16)` — a name the migration file does not import, so
+`alembic upgrade head` dies with `NameError: name 'app' is not defined`. Replace it with
+`sa.String(length=16)`: identical DDL, and the model is where the enum belongs. (Hit 2026-09-10 on
+`attachments.status`; the four earlier adoptions were on existing columns, so no migration was
+generated and this never came up.)
 
 ## The public surfaces, and what each one costs
 

@@ -1,3 +1,4 @@
+from app.models.attachment import Attachment, ExtractionStatus
 from app.models.audit import (
     AuditAction,
     AuditEvent,
@@ -29,7 +30,9 @@ from app.models.conversation import (
     Conversation,
     ConversationMessage,
     MessageRole,
+    TurnEvent,
 )
+from app.models.design import DesignDocument, DesignRevision
 from app.models.gates import ApprovalGate, GateState
 from app.models.geometry import GeometryVersion
 from app.models.media import Media, MediaKind, MediaUploadSession, UploadStatus
@@ -60,6 +63,7 @@ from app.models.user import User
 __all__ = [
     "REUSE_GRACE_SECONDS",
     "AITokenUsage",
+    "Attachment",
     "ApprovalGate",
     "Announcement",
     "AnnouncementLevel",
@@ -74,7 +78,10 @@ __all__ = [
     "CatiaOperation",
     "Conversation",
     "ConversationMessage",
+    "DesignDocument",
+    "DesignRevision",
     "DomainRole",
+    "ExtractionStatus",
     "FeatureFlag",
     "FeatureFlagOverride",
     "GateState",
@@ -103,6 +110,7 @@ __all__ = [
     "SimulationJob",
     "StaffGrant",
     "StaffRole",
+    "TurnEvent",
     "TotpEnrolment",
     "UploadStatus",
     "UsageRecord",

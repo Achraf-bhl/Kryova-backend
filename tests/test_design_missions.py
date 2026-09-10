@@ -76,9 +76,16 @@ class TestTheLadderIsTheMasterPlansLadder:
         M2 joined it on 2026-09-06, when `app.assembly` gave the ladder its first
         rung that is a product rather than a part. M3 joined it the same day, when
         `app.sheetmetal` gave it the first rung that is folded.
+
+        **M6 joined it on 2026-09-10, and it joined by its own rule rather than by
+        anyone deciding it should.** Its declared `needs` were E14.1 and E12.3, and
+        both had landed; nothing about a conveyor needs E13's design rules or E9's
+        multibody, which is precisely why it moved while M4, M5, M7 and M8 did not.
+        A rung whose stated prerequisites are met and which is still marked pending
+        is a ladder that has stopped measuring anything.
         """
         buildable = [m.rung for m in LADDER if m.buildable]
-        assert buildable == ["M1", "M2", "M3"], (
+        assert buildable == ["M1", "M2", "M3", "M6"], (
             "If a rung became buildable, give it a spec, an assembly or a folded "
             "design and its assertions, and update this test deliberately — it is the "
             "coverage figure."
@@ -172,12 +179,16 @@ def _runner_returning(payload: Mapping[str, Any]):
 def _harness_ladder() -> tuple[Mission, ...]:
     """M1 and every rung nobody can build — the ladder a fake payload can answer for.
 
-    M2 and M3 are left out here, and only here. M2 is an assembly and M3 is a folded
-    sheet: their claims are measured off real geometry through `app.assembly` and
-    `app.sheetmetal`, so a mock payload cannot satisfy either, and their entirely
-    correct failures would drown out what these tests are about, which is how a
-    *pending* rung is reported. `tests/test_mission_m2.py` and
-    `tests/test_mission_m3.py` run them for real.
+    M2, M3 and M6 are left out here, and only here. M2 and M6 are assemblies and M3
+    is a folded sheet: their claims are measured off real geometry through
+    `app.assembly` and `app.sheetmetal`, so a mock payload cannot satisfy any of
+    them, and their entirely correct failures would drown out what these tests are
+    about, which is how a *pending* rung is reported. `tests/test_mission_m2.py`,
+    `tests/test_mission_m3.py` and `tests/test_mission_m6.py` run them for real.
+
+    Note that this is derived (`not m.buildable`) rather than a list of rung names,
+    so a rung becoming buildable drops out of here automatically — which is what
+    happened to M6 on 2026-09-10.
     """
     return (mission("M1"), *[m for m in LADDER if not m.buildable])
 
@@ -202,9 +213,10 @@ class TestAPendingRungIsNeverAPass:
 
         run_ladder(counting)
 
-        assert calls == ["made"] * 4, (
+        assert calls == ["made"] * 7, (
             "one runner for M1, one for each of M2's two members, one for M3's single "
-            "folded solid, and none for the six pending rungs"
+            "folded solid, one for each of M6's three part designs — stringer, leg and "
+            "the bought roller — and none for the five pending rungs"
         )
 
     def test_pending_rungs_do_not_make_the_report_red(self) -> None:
@@ -212,7 +224,7 @@ class TestAPendingRungIsNeverAPass:
         report = run_ladder(lambda: _runner_returning(_payload()), _harness_ladder())
 
         assert report.ok
-        assert len(report.pending) == 6
+        assert len(report.pending) == 5
 
     def test_but_the_ladder_is_not_complete(self) -> None:
         """`ok` is the regression question; `complete` is the programme question."""
@@ -226,8 +238,10 @@ class TestAPendingRungIsNeverAPass:
             lambda: _runner_returning(_payload()), _harness_ladder()
         ).summary()
 
-        assert "1/7 rungs pass" in summary
-        assert "6 not yet buildable" in summary
+        # M6 left the pending set on 2026-09-10, so the harness ladder — M1 plus
+        # everything nobody can build — is one rung shorter than it was.
+        assert "1/6 rungs pass" in summary
+        assert "5 not yet buildable" in summary
 
 
 class TestARungThatClaimsToBuildAndDoesNotIsAFailure:
@@ -312,7 +326,7 @@ class TestTheReportSerialises:
 
         assert data["ok"] is True
         assert data["complete"] is False
-        assert data["pending"] == 6
+        assert data["pending"] == 5
         m7 = next(r for r in data["results"] if r["rung"] == "M7")
         assert m7["outcome"] == "pending"
         assert any("E9" in need for need in m7["needs"])

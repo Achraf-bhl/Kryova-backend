@@ -221,6 +221,44 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-10 — P5 and E16 closed; E15, P4, P9 and E18 advanced. Six phases in one session.**
+  The thread running through all of it is that **every one of the four residuals P5 and E16 were
+  carrying turned out to be a backend gap wearing a frontend label**, and naming them properly is
+  what made them small.
+  *Token streaming* was a provider-contract gap: `provider.py` returned a completed turn, so there
+  was no shape for a partial answer. `stream_chat` yields `TextDelta`s then one `Finished`, and the
+  base implementation emits **no deltas** rather than the whole answer as one — otherwise "the
+  model wrote this at once" is indistinguishable from "this provider does not stream".
+  *Reconnect-and-resume* needed an event cursor that survives a different worker, which is the
+  mirror of P5.6's cancellation column: there the reader had to escape the runner's long
+  transaction, here the writer does. `turn_events` is a ten-minute buffer, every event recorded
+  before it is yielded, and the resume endpoint is a **GET** so a reconnect cannot start a second
+  turn.
+  *The editable spec panel* and *"edit a parameter mid-mission"* were both blocked on the same
+  sentence — "`DesignSpec` is an in-memory IR with no model and no route" — and both landed once
+  it was not. See `app/models/design.py`; the chain is append-only, a no-op save writes nothing,
+  and there is no route that accepts a whole spec.
+  **E16's three research-adjacent tasks were built deliberately small**, and the evidence is in
+  the plan's own Era VIII: memory scaffolds degraded long-horizon performance in *all ten* models
+  tested and additional orchestration does not consistently help. So the server holds the plan and
+  refuses out-of-order moves rather than generating one; the state block carries the decisions
+  rather than everything; and `recovery.py` escalates with a question built from the tool's own
+  words rather than from a model call.
+  **E15, P4 and P9 advanced with their residuals named rather than smoothed over.** The CATScript
+  emitter has never been driven (no seat); autoscale needs a fleet; staging needs somewhere to
+  deploy; the restore drill has never met a real backup; the container image has never been built.
+  Each of those is written into the status as the thing that is missing, because a batch path
+  nobody has run and a backup nobody has restored are the two failures this repository is most
+  likely to talk itself into.
+  **M6 joined the ladder by its own rule**: its declared `needs` (E14.1, E12.3) were both complete,
+  so it moved from waiting to built without anybody deciding it should. It is the first rung whose
+  difficulty is a *count* — the mass is computed twice, from the graph and from the pitches, and
+  the two must agree, because a 12-metre conveyor built to a 6-metre bill of materials is
+  arithmetic rather than geometry. Ladder now 4/9.
+  Two latent defects found on the way: a **missing blob was being reported as an unsupported
+  format** (advising "export it as PDF" about a file that had not finished uploading), and
+  **`EnumText` autogenerates into a migration as an unimportable name**, which killed
+  `alembic upgrade head` on the first new table to use it.
 - **2026-09-10 — P10 closed: onboarding, the docs site, and the public status page.** All four
   tasks. The property that ties them together is that **every page derives from something that
   cannot drift**: the mission gallery from `app.design.missions.LADDER`, the API reference from

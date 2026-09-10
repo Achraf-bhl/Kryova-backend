@@ -181,6 +181,11 @@ class SimulationRead(BaseModel):
     analysis: str
     thickness_mm: float | None
     mesh_stats: dict[str, Any] | None
+    #: Where a running job has got to (P5 task 2): `{stage, detail, index,
+    #: total, at}`. `None` until the run reports, and on any terminal job, where
+    #: the status already says what happened. It carries no percentage inside a
+    #: stage on purpose — see `app/simulation/progress.py`.
+    progress: dict[str, Any] | None = None
     result: dict[str, Any] | None
     fields_media_id: str | None
     error: str | None

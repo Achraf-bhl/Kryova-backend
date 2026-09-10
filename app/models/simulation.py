@@ -102,6 +102,37 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
     thickness_mm: Mapped[float | None] = mapped_column(Float, default=None)
 
     mesh_stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+
+    #: Where a running job has got to: stage, and for a study, grid k of n
+    #: (P5 task 2). Written by `app/simulation/progress.py` in its own committed
+    #: transaction — the runner holds one transaction for the whole job, so a
+    #: write inside it would be invisible until the run was over.
+    #:
+    #: Deliberately carries no percentage inside a stage. See that module: for
+    #: the linear-static workload CalculiX reports one increment, so a fraction
+    #: would be invented, and an invented progress bar over a twenty-minute
+    #: solve is worse than an honest spinner.
+    #:
+    #: `None` means "has not reported yet", which a client renders as starting —
+    #: never as stage zero of four, which would claim a stage had begun.
+    progress: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+
+    #: Hash of everything this result depends on (E15 task 2). Set when the job
+    #: starts, so a *later* job can find this one; see `app/simulation/cache.py`
+    #: for what is and is not in it. `None` on a job whose geometry blob has no
+    #: checksum to hash, which is a job nothing can match.
+    cache_key: Mapped[str | None] = mapped_column(String(64), index=True, default=None)
+    #: True when this job's result was copied from an earlier one rather than
+    #: solved. Recorded rather than left invisible: a result silently
+    #: reappearing with `solve_seconds` from three weeks ago makes the fleet's
+    #: timing figures meaningless, and "why was this instant" unanswerable.
+    cache_hit: Mapped[bool] = mapped_column(default=False)
+    #: The run this result came from. Always names a job that really solved —
+    #: `cache.adopt` follows the chain rather than pointing at another hit.
+    cache_source_id: Mapped[str | None] = mapped_column(
+        ForeignKey("simulation_jobs.id", ondelete="SET NULL"), default=None
+    )
+
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     fields_media_id: Mapped[str | None] = mapped_column(
         ForeignKey("media.id", ondelete="SET NULL"), default=None

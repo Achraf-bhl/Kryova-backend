@@ -47,7 +47,9 @@ from app.ai import prompts
 from app.ai.context import build_messages, maybe_summarise
 from app.ai.malformed import correction_for, find_written_tool_calls, is_contentless
 from app.ai.planning import extract_objectives
-from app.ai.provider import LLMError, LLMProvider, TokenUsage
+from app.ai.provider import LLMError, LLMProvider, TextDelta, TokenUsage
+from app.ai.recovery import Failure as Recovery_Failure
+from app.ai.recovery import Recovery
 from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
 from app.ai.tools import ToolBox, ToolError
 from app.ai.verification import (
@@ -387,6 +389,24 @@ def _serialise(value: Any) -> str:
     return fence_tool_result(text, max_chars=MAX_TOOL_RESULT_CHARS)
 
 
+def _failure_text(result: Any) -> str:
+    """The message out of a failed tool result, for the failure taxonomy.
+
+    A failed handler comes back as `{"error": "..."}` from the loop below, but a
+    tool that reports its own refusal inside a successful return uses `detail`
+    or `message`. Falling back to the whole serialised result rather than to an
+    empty string is deliberate: `recovery.py` classifies on a substring, and an
+    unclassifiable failure escalates quoting verbatim — which is only useful if
+    there is something to quote.
+    """
+    if isinstance(result, dict):
+        for key in ("error", "detail", "message"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return str(result)
+
+
 def _append(
     db: Session, conversation: Conversation, role: MessageRole, **fields: Any
 ) -> ConversationMessage:
@@ -485,6 +505,13 @@ def stream_agent(
     solids_built = 0
     #: Whether the empty-document nudge has already been given this turn.
     warned_about_empty_documents = False
+    #: What has failed this turn and how, for E16 task 4's escalation. The three
+    #: behavioural guards above bound the *retrying*; this is what turns the end
+    #: of a bounded retry into a question the user can answer.
+    recovery = Recovery()
+    #: The gate this turn stopped on, if it raised one (E16 task 5). Empty
+    #: string rather than None so the truthiness test below reads plainly.
+    awaiting_gate = ""
     #: Why the loop stopped, for the user-facing line at the end of a turn that
     #: did not finish. Two exits reach the same closing code -- falling out of
     #: the step budget, and breaking on repeated blocked calls -- and until
@@ -496,6 +523,10 @@ def stream_agent(
     #: at a time". Neither half was true -- half the budget was unspent, and
     #: asking for less would not have stopped the repeat. Advice that does not
     #: match the cause sends the user to change the one thing that was fine.
+    #:
+    #: `needs_input` joined them for E16 task 4: the same tool failed the same
+    #: way three times, so the turn ends carrying a specific question rather
+    #: than spending the rest of the budget on the same refusal.
     stop_reason = "step_budget"
 
     for step in range(budget):
@@ -531,12 +562,30 @@ def stream_agent(
         # separately, because a total tells you a turn was slow and nothing
         # about which half to look at.
         thinking_started = time.perf_counter()
-        turn = provider.chat(
+        # Streamed rather than awaited whole (P5.1). A provider that cannot
+        # stream yields no deltas and one `Finished`, so this loop is the same
+        # code path for both — and a non-streaming provider is not disguised as
+        # a model that happened to write its answer in one go.
+        turn = None
+        for chunk in provider.stream_chat(
             system=system,
             messages=build_messages(db, owner, conversation),
             tools=schemas,
             max_tokens=max_tokens,
-        )
+        ):
+            if isinstance(chunk, TextDelta):
+                yield {"type": "token", "content": chunk.text}
+            else:
+                turn = chunk.turn
+        if turn is None:
+            # The contract says exactly one `Finished`. A provider that ends
+            # without one has not produced a turn, and inventing an empty one
+            # here would present "the provider is broken" as "the model had
+            # nothing to say" — which reaches the user as a blank answer.
+            raise LLMError(
+                f"The {provider.name} provider ended a turn without finishing it. "
+                "Nothing was produced, so nothing has been written to the conversation."
+            )
         thinking_ms = (time.perf_counter() - thinking_started) * 1000.0
         usage += turn.usage
         step_timings: list[tuple[str, float]] = []
@@ -749,6 +798,25 @@ def stream_agent(
                 is_error=not ok,
                 duration_ms=elapsed_ms,
             )
+            if ok and isinstance(result, dict) and result.get("awaiting_approval"):
+                # E16 task 5. A checkpoint the agent announces and then walks
+                # past is not a checkpoint, so the *tool* raising a gate is what
+                # ends the turn — not a note in the prompt asking the model to
+                # stop, which it is free to ignore and has.
+                awaiting_gate = str(result.get("gate_id") or "")
+            if not ok:
+                # E16 task 4's missing last word. The three behavioural guards
+                # already bound the retry; this collects what failed so the
+                # turn can end with a question the user can answer rather than
+                # with "the agent kept repeating itself", which is true and is
+                # not actionable.
+                recovery.record(
+                    Recovery_Failure(
+                        tool=call.name,
+                        message=_failure_text(result),
+                        arguments=call.arguments or {},
+                    )
+                )
             yield {
                 "type": "tool_end",
                 "id": call.id,
@@ -798,6 +866,25 @@ def stream_agent(
             )
 
         db.commit()
+        if awaiting_gate:
+            logger.info(
+                "ending the turn on approval gate %s at step %d/%d",
+                awaiting_gate,
+                step + 1,
+                budget,
+            )
+            stop_reason = "awaiting_approval"
+            break
+        if recovery.exhausted() is not None:
+            # The same tool has failed the same way three times. Ending here
+            # rather than at the step cap is the difference between a user
+            # reading a specific question in ten seconds and watching fifty more
+            # rounds of the same refusal first.
+            logger.info(
+                "ending the turn to escalate a repeated failure at step %d/%d", step + 1, budget
+            )
+            stop_reason = "needs_input"
+            break
         if blocked >= MAX_BLOCKED_REPEATS:
             # Out of patience rather than out of budget. Ending here leaves the
             # remaining rounds unspent and gets the user a summary and a
@@ -869,6 +956,13 @@ def stream_agent(
         )
     if shortfall:
         text += unverified_footnote(plan)
+    escalation = recovery.escalation()
+    if escalation:
+        # Appended rather than substituted: the model's summary says what *was*
+        # built, which the user still needs, and this says what to decide. A
+        # question with the work it interrupted invisible behind it is a
+        # question nobody has the context to answer.
+        text += "\n\n" + escalation
 
     _append(db, conversation, MessageRole.ASSISTANT, content=text)
     db.commit()

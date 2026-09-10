@@ -38,6 +38,7 @@ from app.mesh.gmsh_mesher import (
 from app.mesh.planar import TriMesh
 from app.mesh.types import MeshError, TetMesh
 from app.models import JobStatus, MediaKind, SimulationJob
+from app.simulation import cache, progress
 from app.simulation.limits import check_mesh_request
 from app.solve.base import SolveOutput, Solver
 from app.solve.plane import PlaneCase, PlaneSolver, PlaneState
@@ -76,6 +77,23 @@ def run_simulation(
 
         job.status = JobStatus.RUNNING
         job.started_at = datetime.now(timezone.utc)
+
+        # E15 task 2. The cheapest solve is the one that already happened, and a
+        # convergence study is three of them. Checked *after* the job is marked
+        # running so a hit still has a `started_at` and a `finished_at` of its
+        # own — the fleet's timing figures must measure this run's wall-clock,
+        # not absorb a three-week-old solve as though it happened now.
+        inputs = cache.inputs_for(db, job)
+        if inputs is not None:
+            job.cache_key = inputs.digest()
+            reusable = cache.find(db, job, job.cache_key)
+            if reusable is not None:
+                cache.adopt(job, reusable)
+                job.status = JobStatus.SUCCEEDED
+                job.finished_at = datetime.now(timezone.utc)
+                db.commit()
+                logger.info("Simulation job %s: %s", job_id, cache.note(job, reusable))
+                return
         db.commit()
 
         # `LedgerSink(session_scope)`, not the session above: a metering write
@@ -122,6 +140,7 @@ def run_simulation(
                 job.solver_version = version
             usage.annotate(solver=ran, solver_version=version or "unavailable")
 
+            progress.report(session_scope, job_id, progress.Stage.STORING)
             fields = _store_fields(media, job, mesh, output)
             record_storage(
                 usage,
@@ -240,6 +259,7 @@ def _execute(
             job, path, version.file_format, case, solver, usage, session_scope
         )
 
+    progress.report(session_scope, job.id, progress.Stage.MESHING)
     mesh, mesh_stats = generate_tet_mesh(
         path, version.file_format, job.element_size_mm, element_order=job.element_order
     )
@@ -262,6 +282,12 @@ def _execute(
             "limit. Increase element_size_mm to coarsen it."
         )
 
+    progress.report(
+        session_scope,
+        job.id,
+        progress.Stage.SOLVING,
+        detail=f"{mesh.tet_count:,} elements",
+    )
     return mesh, mesh_stats, solver.solve(mesh, case), solver.name
 
 
@@ -320,6 +346,19 @@ def _execute_study(
     solved: dict[float, tuple[TetMesh, dict[str, Any], SolveOutput]] = {}
 
     def sample(element_size_mm: float) -> tuple[TetMesh, float]:
+        # A study is the one workload with genuinely countable progress: the
+        # grids are known up front and each is a whole solve. This is the count
+        # `progress.py` will report; the *inside* of a grid still gets none,
+        # because there is nothing there to count that is not invented.
+        grid = len(solved) + 1
+        progress.report(
+            session_scope,
+            job.id,
+            progress.Stage.MESHING,
+            detail=f"{element_size_mm:g} mm",
+            index=grid,
+            total=len(sizes),
+        )
         mesh, stats = generate_tet_mesh(
             path, file_format, element_size_mm, element_order=job.element_order
         )
@@ -334,6 +373,14 @@ def _execute_study(
         # each grid costs roughly `REFINEMENT_RATIO ** 3` times the one before:
         # stopping before the finest is where a cancel saves the most.
         _stop_here_if_asked(job, session_scope)
+        progress.report(
+            session_scope,
+            job.id,
+            progress.Stage.SOLVING,
+            detail=f"{mesh.tet_count:,} elements",
+            index=grid,
+            total=len(sizes),
+        )
         output = solver.solve(mesh, case)
         solved[element_size_mm] = (mesh, stats, output)
         return mesh, MAX_VON_MISES.read(mesh, output)

@@ -70,17 +70,17 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 11/24 | 68/126 = 54% | 81/151 eng-months = 53% |
-| Product — P1–P10 | 5/10 | 41/61 = 67% | 24/38 eng-months = 62% |
-| **Programme** | 16/34 | 110/187 = 59% | 104/189 eng-months = 55% |
+| Engineering — E1–E23 | 12/24 | 77/129 = 60% | 89/151 eng-months = 59% |
+| Product — P1–P10 | 6/10 | 48/64 = 75% | 27/38 eng-months = 70% |
+| **Programme** | 18/34 | 125/193 = 65% | 116/189 eng-months = 61% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E17.3, P1, P2, P3, P8, P10 |
-| in flight | E15 20%, E16 42%, E18 38%, P4 33%, P5 79%, P9 29% |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, P1, P2, P3, P5, P8, P10 |
+| in flight | E15 70%, E18 50%, P4 71%, P9 57% |
 | nothing finished yet | E8, E9, E10, E13, E17, E19, E20, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2060,20 +2060,108 @@ answerable meaning.
 
 1. **Batch compilation** — a `Plan` as one kernel session (OCCT); a CATScript executed once
    (CATIA), never 10⁵ COM calls.
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **the OCCT half is done and driven; the CATIA half is emitted and
+   > has never been executed.** `app/design/batch.py`.
+   > **What was actually missing on OCCT was the economics, not the session.** `OcctRunner`
+   > already holds one `PartDocument` for its lifetime, so a plan run through one runner was
+   > always one session — the OCAF labels that make naming work persist between calls. What made
+   > a large plan expensive is `Detail.FULL`: every mutating call measures the whole shape
+   > afterwards, because the interactive agent cannot react to a number it was not given, and
+   > measuring integrates over the part. At 10⁵ operations that *is* the run. `plan_for` decides,
+   > `build` executes, and the decision reaches the caller so the runner is constructed at the
+   > right detail rather than the threshold living in two places. A test pins that **batching
+   > does not change what gets built** — same plan digest, same calls — because a batch path
+   > that quietly issued something different would break determinism (I5) invisibly.
+   > **The CATIA half is a generated script and nothing has run it.** `as_catscript` emits a
+   > compiled plan as one CATScript calling one dispatcher per operation — not inlining CATIA's
+   > API, because the bridge already owns that mapping and a second copy would drift the day an
+   > operation gained an argument. Arguments are emitted as resolved literals, so nothing is
+   > recomputed at run time by a second compiler with its own opinion about `wall_mm * 2`. The
+   > escaping is where a generated script goes wrong *silently* — a doubled quote, a `bool`
+   > emitted as `1`, a list split on a comma inside a feature name — so that is what the tests
+   > cover. **There is no seat on this machine, so it has never been driven, and a batch path
+   > nobody has run is one nobody should ship on.** That is the residual.
+   > Tested by: `tests/test_design_batch.py` (19). Code: `app/design/batch.py`.
 
 2. **Simulation compute**: queue, autoscale, result caching keyed on the provenance digest.
    **FEA is not a request-path workload** and never becomes one.
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **the cache is built and the queue already existed; autoscale needs
+   > a fleet this deployment does not have.**
+   > **Result caching keyed on the provenance digest** is `app/simulation/cache.py`, and it is a
+   > liability before it is an optimisation: the failure mode of a cache in a verification
+   > product is not "slow", it is a confident number computed under different conditions. So the
+   > key covers exactly what the result depends on — geometry checksum, load case, thermal case,
+   > element size and order, analysis, grid count, thickness, solver and solver version — and a
+   > test asserts the parametrised list is *every field of the dataclass*, so an input added and
+   > not keyed shows up as a failing test rather than as a wrong answer.
+   > Three exclusions each of which would be a bug. **An unmeasured solver version does not match
+   > a known one**: treating "we do not know which CalculiX" as a match is the exact claim
+   > Decision 3 forbids. **The lookup is scoped to the organisation**, and that is a security
+   > boundary rather than tuning — a result crossing a tenant boundary tells one customer that
+   > another has a part with this checksum, load case and mass, which is a data leak wearing a
+   > performance improvement. And **the copy keeps its own timings**: a result reappearing with
+   > `finished_at` from three weeks ago makes the fleet's timing figures meaningless.
+   > A hit is recorded as a hit (`cache_hit`, `cache_source_id`), and the source follows the
+   > chain to a run that really solved, so "how much did we actually solve" stays answerable.
+   > **Autoscale is the residual and it is a deployment, not a module.** `ThreadPoolJobQueue`
+   > bounds concurrency in one process; scaling out needs a broker and machines to scale onto,
+   > and writing a policy against neither would be an untested guess in the one place a wrong
+   > guess costs money. P9 task 3's container image is its prerequisite.
+   > Tested by: `tests/test_simulation_cache.py` (28). Code: `app/simulation/cache.py`,
+   > `app/simulation/runner.py`, migration `753d57fdd4bb`.
 
 3. **Geometry storage/versioning**: content-addressed CAD with **semantic diffs under a tolerance
    policy** (line diffs on CAD are meaningless; reviewers should see only consequential change).
    Extends `app/media/`.
-   > NOT STARTED.
+   > DONE (2026-09-10) — content addressing already existed (`Media.sha256`, dedup for free);
+   > the semantic diff is `app/geometry/semantic_diff.py`.
+   > **The tolerance policy is the load-bearing part and it is relative, not absolute.** A
+   > 0.1 mm³ change is nothing on a gearbox casing and is the whole part on an O-ring groove, so
+   > there is no single absolute number that is right at both ends of the range. Every continuous
+   > quantity is compared as a fraction of the **larger** of the two values — symmetric, so a
+   > part that doubled and one that halved report the same movement, where dividing by `before`
+   > would put one edit on each side of the threshold. An absolute floor handles the one case a
+   > relative test cannot: a value that went to or from zero, where a hairline sliver would
+   > otherwise report as an unbounded change and become every panel's headline.
+   > **Counts are exact and are never tolerated.** There is no sense in which 41 faces is 40
+   > faces to within a tolerance, and a policy that smoothed that over would hide the most
+   > reviewable kind of change there is — including the one a volume comparison misses entirely,
+   > a boolean that split the part in two without moving its volume.
+   > **"No consequential change" is a positive answer**, said in words. A reviewer told the
+   > re-export was clean has learned something; one shown a blank panel assumes it is broken.
+   > And a comparison where a quantity was measured on one side only is reported **incomplete**
+   > rather than clean — the same rule Decision 3 applies to an unmeasured assertion.
+   > Tested by: `tests/test_geometry_semantic_diff.py` (19). Code:
+   > `app/geometry/semantic_diff.py`.
 
 4. **CATIA session pool, crash recovery, affinity** — a smaller problem now it is off the critical
    path.
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **affinity is built and is correctness rather than scheduling;
+   > crash recovery is named and needs a seat to develop against.**
+   > `app/catia/affinity.py`. A CATIA document is open on **one** workstation: it is not
+   > replicated, it cannot be migrated, and a call routed elsewhere does not fail with "wrong
+   > device" — it fails with "no such document", or worse, succeeds against a different part of
+   > the same name. So a conversation with a document is pinned to the machine holding it, and
+   > when that machine is offline the answer is `STRANDED`, naming it, rather than a fallback to
+   > another seat. **That refusal is the module**: routing around an offline seat is a wrong
+   > answer that looks like a working one, and the failure is silent — the agent reads a
+   > plausible error, decides the pad failed, and rebuilds a part that already exists somewhere
+   > nobody is looking at.
+   > `STRANDED` and `NONE_ONLINE` are deliberately different answers: one is solved by
+   > connecting any workstation, the other only by connecting *that* one, and collapsing them
+   > into "no workstation" sends a user to start the machine that is already running.
+   > Only the unpinned case is a choice, and it is least-loaded with ties broken by device id —
+   > two workers must not pick differently for one conversation, or both open a document.
+   > `rebalance_needed` reports an imbalance and never acts on one: moving a live conversation
+   > between seats is exactly what `choose` refuses to do, so the honest response is to let it
+   > drain.
+   > **Still open: crash recovery and a real session pool.** `Outcome.stranded` names the state
+   > — the document exists, the work is real, nothing can touch it until the machine returns —
+   > and what the product should *do* about it (resume from `CatiaCheckpoint`, or offer to
+   > rebuild elsewhere from the design record) needs a seat to develop against. `CatiaRegistry`
+   > is also still in-process and says so in its own docstring: several workers need a shared
+   > bus before a pool means anything.
+   > Tested by: `tests/test_catia_affinity.py` (14). Code: `app/catia/affinity.py`.
 
 5. **Observability**: per-operation success rates, agent trajectory traces, solver timings, failure
    taxonomy. Nothing measured op reliability before this, which made capability claims
@@ -2088,6 +2176,21 @@ answerable meaning.
 ## ERA VI — THE AGENT
 
 ##### Phase E16 — Tool retrieval, planning and long-horizon memory #####
+
+> ✅ PHASE COMPLETE (2026-09-10) — all six tasks done and tested, and the shape of what was
+> built is a decision worth reading before anyone "improves" it. Tasks 2, 3 and 4 are all
+> deliberately *restrained*, because Era VIII's research pass measured the alternative:
+> memory scaffolds degraded long-horizon performance in all ten models tested, additional
+> orchestration does not consistently help, and the strongest models fail hardest when they
+> attempt the most ambitious multi-step strategies. So the server holds the plan and refuses
+> out-of-order moves rather than generating or replanning; the state block carries the
+> decisions rather than everything; and failure recovery escalates with a question built from
+> the tool's own words rather than from a model call. **Task 1's residual is named and still
+> open**: per-workbench sub-agents were never built, and the un-narrowed alternative is what
+> `app/ai/tool_retrieval.py` already beats — that is a scope decision, not an unfinished one.
+> The real ceiling behind task 1 is also unchanged and is not this phase's to close: PRO1's
+> fourth run exhausted a 32,768-token window with four parts still to make, and what binds is
+> the transcript rather than the offer.
 
 **~10 engineer-months. Research-adjacent; the least predictable phase.**
 
@@ -2122,37 +2225,121 @@ answerable meaning.
    > `docs/verification-2026-09-08/REPORT.md`.
 
 2. **Planning.** "Design a swingarm" → an ordered, dependency-aware task graph with checkpoints.
+   > <!-- superseded 2026-09-10 -->
    > PARTIAL (2026-09-06) — a tested seam and one first step, **deliberately unwired**.
    > `app/ai/planning.py` turns a request into the list of requirements it states, with the numbers
    > and tolerances attached and a three-state record where "nobody checked" is never "fine". No
    > sequencing, no dependency graph, no replanning. Half-wiring it would add a schema to the
-   > payload task 1 is shrinking, or describe machinery to the model that is not there. It answers
-   > the failure of 2026-09-06 attempt 3: six stated requirements, three built, and a closing
-   > report of success, because nothing in the system was holding the list. Tested by:
-   > `tests/test_ai_planning.py`. Code: `app/ai/planning.py`.
+   > payload task 1 is shrinking, or describe machinery to the model that is not there.
+   > DONE (2026-09-10) — the sequencing half, and it is **deliberately not an autonomous
+   > planner**. `app/ai/taskgraph.py` holds a plan the agent declared (`plan_work`) and enforces
+   > its order (`update_task`); it does not generate one, re-generate one, or ask a model to
+   > reason about it.
+   > **The evidence for that restraint is in this document.** Era VIII records that memory
+   > scaffolds degraded long-horizon performance in *all ten* models tested, that additional
+   > orchestration does not consistently help, and that the strongest models show the highest
+   > catastrophic-failure rates because they attempt the most ambitious multi-step strategies.
+   > What is measured to help is shortening the horizon. So the model does the thinking and the
+   > **server holds the list and refuses the moves that are out of order** — which is the one
+   > thing a graph adds over the list `planning.py` already provides. `MAX_TASKS` is 40 for the
+   > same reason: a plan longer than that is a work breakdown structure, and refusing is more
+   > useful than accepting sixty steps nobody will follow.
+   > Three refusals carry it. A task cannot be marked done while something it stands on is not,
+   > and the message names which. A cycle is refused **at construction, naming the path** — "there
+   > is a cycle" in a twenty-task plan sends somebody reading every edge. And a plan that is
+   > entirely blocked says so rather than returning an empty ready-list, because a model handed
+   > `[]` reads it as "nothing to do" and closes the turn reporting success.
+   > `SKIPPED` is not `DONE`: it satisfies a dependency (the work downstream was cleared) while a
+   > reader asking "was the sizing worked out" is still told no.
+   > Tested by: `tests/test_taskgraph.py` (28), `tests/test_agent_planning_tools.py` (21). Code:
+   > `app/ai/taskgraph.py`, migration `314c1981036f`.
 
 3. **Long-horizon memory.** The 2026 literature converges on hierarchical working memory —
    subgoals as chunks with summarised observations (HiAgent-class results: ~2× success on
    long-horizon tasks). Kryova already has the right instinct: `resume.py` reads the operation log,
    not the transcript, because a trimmed window and an LLM paraphrase cannot be trusted about last
    week. That principle generalises to the whole design record.
+   > <!-- superseded 2026-09-10 -->
    > PARTIAL (2026-09-03) — resume-from-log shipped. Code: `app/ai/resume.py`.
+   > DONE (2026-09-10) — the principle generalised to the whole design record, which is what
+   > this task asked for and what `resume.py` alone could not give. Three accounts now reach the
+   > state block from the *record* rather than from the transcript, and each answers a different
+   > question no other can: `resume.py` says **what was done** (the operation log),
+   > `_design_lines` says **what was decided** (the persisted spec's parameters), and
+   > `_plan_lines` says **what is left and in what order** (the task graph). The hierarchy is the
+   > chunking the 2026 literature describes — subgoals with their observations underneath — and
+   > it is built from records nobody paraphrased.
+   > **Parameters in the block, features behind a tool.** The feature list can be forty lines and
+   > is one `read_design` away; the parameters are the decisions, they are short, and they are
+   > what a later turn gets wrong. An agent told everything every turn stops being able to find
+   > anything, which is the same reason `build_history` was kept out of the block in the first
+   > place. A model asking the user for a wall thickness it set three turns ago is the failure
+   > this closes, and it is the same shape as the one `resume.py` was written against.
+   > Tested by: `tests/test_agent_planning_tools.py::TestTheStateBlock`. Code: `app/ai/state.py`,
+   > `app/ai/resume.py`, `app/core/designs.py`.
 
 4. **Failure recovery.** Diagnose → repair → bounded retry → escalate with a *specific* question
    (E5's machinery is the foundation).
+   > <!-- superseded 2026-09-10 -->
    > PARTIAL (2026-09-08) — a third behavioural guard landed from the Level-4 runs:
    > **`MAX_EMPTY_DOCUMENTS`**, because opening a document is the one mutation that changes nothing
    > about the part, and both existing guards counted it as progress — five empty parts in one turn
-   > tripped neither. Measured effect: one document instead of five. Tested by:
-   > `tests/test_agent.py::TestOpeningDocumentsIsNotBuildingParts`.
+   > tripped neither. Measured effect: one document instead of five.
+   > DONE (2026-09-10) — the three behavioural guards bound the *retrying*; `app/ai/recovery.py`
+   > is the last word, **escalate with a specific question**, which is what the bounded loop
+   > could not produce on its own.
+   > **The distinction is the whole module.** A turn that ends on a guard currently says the
+   > agent stopped repeating itself. That is true and it is not answerable — the user reads it
+   > and has no idea what to type. What they can act on is *"`catia_pad` on plate.profile failed
+   > 3 times and each time the geometry will not take it. It said: 'Cannot be padded: open
+   > profile.' Should I change the geometry to make it fit, or is the current shape the one you
+   > want?"* — a subject, a cause, a verbatim quote and two options.
+   > **Nothing here calls a model.** The question is built from the tool's own error text and the
+   > arguments the call was made with, both already in hand. An LLM would put a paraphrase
+   > between the user and the failure on the one screen where the exact wording is the evidence,
+   > and would cost a model call at the moment the turn has already gone wrong.
+   > Failures are counted **by (tool, kind), not by message**: two attempts at the same pad
+   > failing with slightly different wording are one problem, and a counter keyed on the message
+   > would never reach its bound — which is how a retry budget quietly stops existing. A failure
+   > the taxonomy does not recognise escalates *anyway*, quoting verbatim and truncating visibly,
+   > the same contract `app/solve/calculix/diagnose.py` holds: a taxonomy that labelled
+   > everything would destroy the evidence the next pattern is written from.
+   > The loop gained a fifth exit, `needs_input`, which ends the turn on the third repeat rather
+   > than spending fifty more rounds on the same refusal first.
+   > Tested by: `tests/test_recovery.py` (21),
+   > `tests/test_agent.py::TestOpeningDocumentsIsNotBuildingParts`. Code: `app/ai/recovery.py`,
+   > `app/ai/agent.py`.
 
 5. **Human checkpoints.** Structured approval gates — a reviewable diff with a sign-off record, not
    a chat message (P5 owns the surface).
-   > NOT STARTED.
+   > DONE (2026-09-10) — P5.5 built the record, the rules and the reviewer's page; this is the
+   > agent reaching one. `request_approval` raises a gate and **ends the turn on it**, and the
+   > ending is the point rather than a side effect: a checkpoint the agent announces and then
+   > walks past is not a checkpoint, and a note in the system prompt asking it to stop is
+   > something it is free to ignore and has. The loop reads `awaiting_approval` off the tool
+   > result and breaks with `stop_reason: "awaiting_approval"`.
+   > **The gate is pinned to the design as it stands**, or to the declared plan when there is no
+   > design yet — both are digestible, and `core/gates.decide` re-digests what the decider is
+   > looking at, so an approval cannot land on something that moved while it was pending.
+   > A `checkpoint: true` task in the graph is the other half: `blocked_by` reports it as
+   > blocking everything downstream, transitively, so a task three steps behind an unfinished
+   > sign-off is told about the sign-off rather than about its immediate parent.
+   > Tested by: `tests/test_agent_planning_tools.py::TestRequestingApproval`, `tests/test_gates.py`
+   > (24). Code: `app/ai/tools.py`, `app/core/gates.py`, `app/ai/taskgraph.py`.
 
 6. **Cost/time estimation before starting** — "this is four hours of compute and $X" (P8 owns the
    meter).
-   > NOT STARTED.
+   > DONE (2026-09-10) — `estimate_cost`, and it **does no arithmetic**: it reads
+   > `app/core/estimates.estimate_run` and passes each `Estimate.human()` sentence through as
+   > written. That is P8.4's one-meter rule reaching the agent, the same way `cost-notice.tsx` is
+   > it reaching the screen — assembling a sentence here from `units` and `unit` would be a third
+   > place for the wording, and the honesty, to drift.
+   > **Too little history comes back as such**, never as zero and never hidden: below three
+   > comparable runs the estimator refuses, and the tool's own description tells the model not to
+   > turn "we cannot estimate this yet" into a guess. A cost estimate is the one number in a
+   > product nobody contradicts afterwards, which is exactly why a made-up one survives.
+   > Tested by: `tests/test_agent_planning_tools.py::TestEstimatingCost`. Code: `app/ai/tools.py`,
+   > `app/core/estimates.py`.
 
 **Creative leverage:** the design record replaces the transcript. Rationale already travels in
 `FeatureSpec.note`; extend to decisions, rejected alternatives and reasons, and *"why is this rib
@@ -2311,7 +2498,33 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
    > NOT STARTED — PENDING.
 
 6. **M6 — belt conveyor system.**
-   > NOT STARTED — PENDING.
+   > DONE (2026-09-10) — **and it moved by its own rule rather than by anyone deciding it
+   > should.** Its declared `needs` were E14.1 (product structure and BOM as first-class data)
+   > and E12.3 (standard parts); both had landed, and nothing about a conveyor needs E13's
+   > design rules or E9's multibody — which is exactly why it moves while M4, M5, M7 and M8 do
+   > not. A rung whose stated prerequisites are met and which is still marked pending is a
+   > ladder that has stopped measuring anything.
+   > **This is the first rung whose difficulty is a *count*.** Nothing in a conveyor is
+   > geometrically hard: rails, a leg pair every so often, a roller every so often. What is hard
+   > is that the counts are a consequence of the length rather than numbers somebody typed. So
+   > every occurrence in the product graph is placed inside a loop over a derived count, and the
+   > mission's headline assertion is that **the mass rolled up from the graph equals the mass
+   > computed from the pitches**. A 12-metre conveyor built to a 6-metre bill of materials is
+   > the real-world failure, it is arithmetic rather than geometry, and computing the mass twice
+   > from different directions is the only way to see it. A second assertion checks the same
+   > thing a different way — the occurrence count against the BOM — because the two fail
+   > differently: one catches a count that drifted, the other a part placed twice with a
+   > compensating error elsewhere.
+   > Both fenceposts are asserted longhand (`n` bays need `n + 1` leg pairs; `g` gaps need
+   > `g + 1` rollers), because those are the two places a hand-written BOM is wrong once.
+   > The roller is a **bought part modelled only as the envelope it occupies**, with the
+   > catalogue mass — E12.3's whole argument is that a bought part is selected rather than
+   > modelled, and a modelled one is how a BOM stops matching what anybody can order.
+   > What it does **not** claim is recorded on the rung and reaches the public gallery: no load
+   > case has been run, the rollers do not turn, the idler has no part number, there is no
+   > quotation, and there is no weldment model or cut list.
+   > Tested by: `tests/test_mission_m6.py` (21), `tests/test_design_missions.py`,
+   > `tests/test_mission_m2.py::TestTheLadderItself`.
 
 7. **M7 — 6-axis robot arm.**
    > NOT STARTED — PENDING, waiting on E9's multibody.
@@ -2319,7 +2532,7 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
 8. **M8 — motorcycle chassis + swingarm.**
    > NOT STARTED — PENDING.
 
-**Ladder standing at 3/9.**
+**Ladder standing at 4/9** (M1, M2, M3, M6).
 **Gate G5 opens after M2 upward.**
 
 ## ERA VIII — THE WORLD THIS HAS TO SURVIVE CONTACT WITH
@@ -3176,7 +3389,27 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    store (dedup for free; the same datasheet attached twice costs one blob). Type sniffing by
    content, size/type limits, per-org storage quotas (P3). Every attachment is a first-class
    object: owner, conversation link, extraction status, provenance.
+   > <!-- superseded 2026-09-10 -->
    > PARTIAL — chunked upload and the content-addressed store exist. Code: `app/media/`.
+   > DONE (2026-09-10) — the row was the missing half, and `SourceRef.attachment_id` had said so
+   > since P4.2: its docstring read "None until P4.1 has a table". `app/models/attachment.py`
+   > is that table.
+   > **An attachment that could not be read still gets a row and still appears in the list.**
+   > Refusing the upload loses the fact that the user handed us something and expects it to have
+   > been seen — and "why is my STEP file not in the list" is a much harder question to answer
+   > than "why does it say *not a document*".
+   > **`UNSUPPORTED` is not a kind of `FAILED`**, and the panel colours them differently. A STEP
+   > file in the document slot is geometry: the file is fine, it is in the wrong place, and the
+   > detail names what to do with it instead. Grouping the two tells somebody their file is
+   > corrupt when it is not — the same shape of error as grouping `cancelled` with `failed`.
+   > A defect found while writing the tests and fixed: a **missing blob** was being reported as
+   > an unsupported *format*, because `sniff` finds no header in a file that is not there. That
+   > filed a storage fault as a format one and advised "export it as PDF and attach that" about
+   > a file that had simply not finished uploading.
+   > The blob is not duplicated — `media_id` points at the content-addressed store, so one
+   > datasheet attached to four conversations is one blob and four rows.
+   > Tested by: `tests/test_attachments.py` (20). Code: `app/models/attachment.py`,
+   > `app/core/attachments.py`, `app/api/routes/attachments.py`, migration `ef4d9b93d3ca`.
 
 2. **The extraction pipeline**, tiered by format, all local and free:
    - **CAD (STEP/IGES/BREP/STL/DXF)** → the geometry pipeline (E1's kernel; `ezdxf` for DXF
@@ -3198,14 +3431,42 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    detection + a document transformer / fine-tuned VLM — Donut/Florence-2-class), explicitly *not*
    promised early, because a wrongly read tolerance is worse than an unread one. Until then,
    extracted drawing content is labelled "unverified read — confirm dimensions before use".
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **the labelling is built; the extraction itself is deliberately
+   > still staged.** `Reliability.INFERRED` means the characters were *guessed at* rather than
+   > transcribed, and `attachments.UNVERIFIED_NOTE` is the sentence that travels with them:
+   > "confirm every dimension against the drawing before using it". It is one string in one
+   > place, because a safety label with two wordings has two standards, and it is returned by
+   > the API rather than composed by the client for the same reason. The panel renders it
+   > **above** the extracted content, not below — a caveat under something already believed is
+   > a footnote, which is the argument P5.4 makes about factors of safety.
+   > `dimensions_in` surfaces the fragments a reader classified as dimensions, with their
+   > locators, and there is deliberately **no way to apply one**: no route, no button, no tool.
+   > That is this task's promise kept rather than broken early — a wrongly read tolerance is
+   > worse than an unread one, and `test_nothing_here_turns_a_dimension_into_a_parameter`
+   > asserts the absence rather than trusting it.
+   > **Still open, and it is the research-adjacent half named in the task**: layout detection
+   > and a document transformer (Donut/Florence-2-class) that reads dimensions and GD&T frames
+   > properly. Nothing here attempts it.
+   > Tested by: `tests/test_attachments.py::TestTheUnverifiedReadLabel`,
+   > `::TestDimensionsAreCandidatesOnly`,
+   > `../Kryova-frontend/src/components/attachments/attachment-panel.test.tsx` (9).
 
 4. **Provenance-tagged facts.** Everything extracted enters the conversation as quoted material
    with a source pointer (file, page/sheet/cell). When an extracted number flows into a design
    parameter, the *spec records the source* — `FeatureSpec.note` and the requirement links (E11
    task 3) already give it somewhere to live. "Where did 42 mm come from?" must answer "cell C7 of
    loads.xlsx, attached 2026-09-05".
-   > NOT STARTED.
+   > DONE (2026-09-10) — `attachments.cite_fact` produces exactly that line, and the place for
+   > it to live now exists: P5.3 persisted the `DesignSpec`, so a parameter's description is a
+   > durable slot rather than an in-memory one.
+   > The citation comes from `SourceRef.cite()` — one implementation, already sanitising the
+   > user-supplied filename — rather than being assembled at the call site, so a second wording
+   > cannot drift from the first.
+   > **An inferred read carries its warning *inside* the citation.** A provenance line reading
+   > only "cell C7 of loads.xlsx" for a number OCR guessed at would be a citation that made an
+   > unverified value look checked, which is worse than no citation: it is the form of evidence
+   > without the substance.
+   > Tested by: `tests/test_attachments.py::TestProvenanceTaggedFacts`.
 
 5. **The injection boundary (Decision 8).** Extracted text is *data*: rendered as quoted context,
    never merged into system instructions; the agent may not take a tool action whose sole
@@ -3223,13 +3484,38 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    extraction status, an attachment panel per conversation, inline previews (tables, images,
    geometry via P6 viewer), and "insert as parameter / as requirement / as load case" affordances —
    the moment extraction earns its keep.
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **the panel is built; the insert affordances are deliberately not,
+   > and inline previews wait on P6.**
+   > `components/attachments/attachment-panel.tsx` lists what this conversation was handed,
+   > with the extraction status, the reader that produced it, what was seen and *not*
+   > interpreted, and the fragment citations. It renders nothing until something is attached —
+   > a permanent empty box above every composer is furniture, and furniture is what makes people
+   > stop reading the area a real panel will appear in.
+   > **"Insert as parameter" is the one affordance that is not built, and that is task 3's
+   > decision reaching the UI rather than an omission.** The values it would insert are
+   > candidate readings; a button that turned one into a design parameter would be the product
+   > acting on an unverified number, which is precisely what "a wrongly read tolerance is worse
+   > than an unread one" forbids. It becomes buildable when dimension extraction stops being
+   > staged. Inline previews of tables and geometry are P6's viewer, not this panel's.
+   > Upload progress and drag-drop remain as they were — `AttachPill` and `chunked-upload.ts`
+   > already carry the geometry path, and the document path reuses it.
+   > Tested by: `../Kryova-frontend/src/components/attachments/attachment-panel.test.tsx` (9).
 
 **Phase proof:** the hostile-document suite passes; a load-case spreadsheet becomes a named,
 provenance-tagged load case applied to a design; a STEP attachment becomes geometry through the
 same kernel as everything else.
 
 ##### Phase P5 — The conversation and agent experience #####
+
+> ✅ PHASE COMPLETE (2026-09-10) — all seven tasks done and tested, and every one of the three
+> residuals the 2026-09-10 partials named was in the *backend*, not the client: token streaming
+> needed a provider contract with a shape for a partial answer, reconnect-and-resume needed an
+> event cursor that survives a different worker, and the editable spec panel needed a
+> `DesignSpec` the server actually stores. All three landed the same day. One thing this phase
+> deliberately does **not** deliver: a percentage inside a solve. `app/simulation/progress.py`
+> reports stage, and grid *k* of *n* for a study, and refuses a numerator with no denominator —
+> for a linear-static run CalculiX reports a single increment, so a fraction would be invented.
+> That is a scope decision recorded here rather than an open task.
 
 **~5 engineer-months. Continuous; the frontend face of E4, E5 and E16.**
 
@@ -3241,6 +3527,7 @@ scroll?
    poll-schedule/api-client machinery; WebSockets only if bidirectionality is ever actually
    needed), reconnect-and-resume — `conversation-resume` exists and is tested, so extend, don't
    replace.
+   > <!-- superseded 2026-09-10 -->
    > PARTIAL (2026-09-10) — step events stream over SSE and `conversation-resume` rehydrates a
    > reopened conversation; both are tested. **Two halves are genuinely absent and neither is a
    > frontend gap.** *Token* streaming: the wire carries whole `narration` and `message` events,
@@ -3249,8 +3536,35 @@ scroll?
    > the live view, though nothing is lost from the record — every step is persisted as it
    > happens, so reopening shows what really ran. Closing it needs an event cursor on the wire so
    > a reconnect can say where it got to.
-   > Superseded 2026-09-10: "resume exists and is tested" was true and said nothing about what
-   > was missing.
+   > DONE (2026-09-10) — both halves built, and each was exactly where the superseded status
+   > said it was rather than in the client.
+   > **Token streaming is a provider-contract change** (`app/ai/provider.py`): `stream_chat`
+   > yields zero or more `TextDelta` then exactly one `Finished`, and the Ollama provider
+   > implements it against `/api/chat` with `stream: true`. Two decisions carry the design. The
+   > default implementation on the base class emits **no deltas at all** rather than the whole
+   > answer as one — otherwise "the model wrote this in one go" is indistinguishable from "this
+   > provider does not stream", and the UI renders the text twice. And `Finished.turn.text` is
+   > the answer, never the joined deltas: tool calls arrive on the *final* Ollama chunk, so a
+   > caller reassembling deltas would hold a second copy that drifts, and would silently drop the
+   > half of the turn that does the work. A stream that breaks part-way falls back to one whole
+   > non-streaming request, which is only safe *because* of that rule.
+   > **Reconnect-and-resume is a table**, `turn_events`, and it is the mirror of P5.6's
+   > cancellation column: there the reader had to escape the runner's long transaction, here the
+   > *writer* does. A reconnect lands on whichever worker is free, so an in-process ring buffer
+   > would resume perfectly under `--workers 1` and nothing in production. Every event is
+   > recorded before it is yielded — so an event the client saw is always one that is stored —
+   > and carries a `seq` monotonic **per conversation, not per turn**, because a cursor has to be
+   > unambiguous across a turn boundary. `GET /ai/conversations/{id}/stream?after=N` replays and
+   > then follows; it is a **GET**, which is what makes it a resume rather than a second turn,
+   > and `tests/test_turn_events.py` asserts no POST exists at that path.
+   > **A retention gap is reported, never smoothed over.** Events are kept ten minutes; a client
+   > away longer is sent `resume_gap` and told to reload, because a turn handed back with a
+   > silent bite out of the middle renders as an agent that skipped three steps. Recording is
+   > also allowed to fail without taking the turn down — the `seq` is then omitted rather than
+   > invented, and the client reads a missing cursor as "cannot resume from here".
+   > Tested by: `tests/test_turn_events.py` (16), `tests/test_ai.py`. Code:
+   > `app/ai/turn_events.py`, `app/ai/provider.py`, `app/ai/providers/ollama.py`,
+   > `../Kryova-frontend/src/lib/agent-stream.ts`.
 
 2. **The step surface**: `agent-step-list` grows into the run view — plan steps, live geometry
    operations, solver progress, per-step timing, failure taxonomy classes surfaced in plain
@@ -3263,10 +3577,19 @@ scroll?
    > `job.error`, and the results page renders it. So a singular system arrives as the missing
    > restraint rather than as `returncode 201`. The run view also gained this phase's task 4, 6
    > and 7 surfaces.
-   > **Missing: live solver progress.** CalculiX offers no incremental progress channel that is
-   > plumbed, so a solve is a single opaque call — which is also why interruption (task 6) can
-   > only act at stage boundaries. A percentage here would have to be invented, and a made-up
-   > progress bar over a twenty-minute solve is worse than an honest spinner.
+   > **Live solver progress landed 2026-09-10, and it is a stage report rather than a bar.**
+   > `app/simulation/progress.py` writes `{stage, detail, index, total}` onto the job — meshing,
+   > solving, reading, storing — and for a convergence study, which grid of how many. It
+   > **carries no percentage inside a stage**, and a test asserts that: for the linear-static
+   > workload CalculiX reports a single increment, so a fraction would be invented, and an
+   > invented bar over a twenty-minute solve teaches a user to predict a finish time nobody
+   > measured. A count is refused unless both halves are present — a numerator with no
+   > denominator is not progress. Every write opens **its own session**, the mirror of P5.6's
+   > cancellation read: the runner holds one transaction for the whole job, so a progress update
+   > written inside it would be invisible until the run was over. A failed progress write is
+   > swallowed; it is worth a few seconds of a watcher's patience and never a run.
+   > Tested by: `tests/test_simulation_progress.py` (10). Code: `app/simulation/progress.py`,
+   > `app/simulation/runner.py`, migration `b06890354021`.
    > Superseded 2026-09-10: "steps and transcript exist" undercounted what shipped and named no
    > residual.
 
@@ -3275,8 +3598,11 @@ scroll?
    diffs rendered like code review** (what changed, what it reaches — `diff.py` already computes
    both). The conversation is the *log*; the spec is the *truth*; the UI must make that hierarchy
    legible.
-   > PARTIAL (2026-09-10) — **the diff half is built; the editable panel is not, and cannot be
-   > from here.** `components/gates/spec-diff.tsx` renders `SpecDiff.to_dict()` as a code review
+   > <!-- superseded 2026-09-10 -->
+   > PARTIAL (2026-09-10) — the diff half only; the editable panel was blocked on a persisted
+   > spec.
+   > DONE (2026-09-10) — **the diff half was built first; the editable panel followed once the
+   > spec was persisted.** `components/gates/spec-diff.tsx` renders `SpecDiff.to_dict()` as a code review
    > and the gate page is its first caller. It computes nothing: `app/design/diff.py` already
    > works out both halves, and a second implementation on the client would be a second answer to
    > "does this change the part" — the two would disagree the first time somebody edited a
@@ -3288,12 +3614,31 @@ scroll?
    > that was edited, and they may come out a different shape. A review showing only what was
    > typed is the one that approves a wall thickness and silently moves the bore pattern cut into
    > it.
-   > **What is missing and why**: `DesignSpec` is an in-memory IR — `grep` finds it in
-   > `app/design/`, `app/optimise/`, `app/requirements/` and `app/manufacture/`, and in **no**
-   > model and **no** route. There is nothing persisted to render beside the chat and nothing to
-   > PATCH a parameter into. That is E13/E16 work (persist the spec, expose it), not a frontend
-   > gap, and building a panel over an IR the server does not store would be a panel over a
-   > fiction. Tested by: `src/components/gates/spec-diff.test.tsx` (6).
+   > **The blocker named above was removed on 2026-09-10 and the panel is built.**
+   > `DesignSpec` is persisted: `app/models/design.py` holds one `DesignDocument` per
+   > conversation with an **append-only** `DesignRevision` chain, and
+   > `components/design/spec-panel.tsx` renders it beside the composer with the parameters
+   > editable.
+   > **Three rules make the chain a history rather than a log of saves.** A save whose spec is
+   > byte-identical to the head writes *nothing* — the agent re-saves after every step and most
+   > steps do not touch the design, so appending each time gives six hundred revisions of which
+   > four matter. A revision's summary is written **at the time** from `app/design/diff.py`, not
+   > derived on read: recomputing means recompiling both specs to render a list, and gives a
+   > *different answer* after an operation registry change, because the diff is made after
+   > compilation on purpose. And a spec that does not compile is refused **before** the chain is
+   > touched, so a refusal never leaves the design in a state no build produced.
+   > **The client cannot POST a spec, and a test asserts no such route exists.** The only write
+   > is a single parameter (`PATCH /designs/{id}/parameters/{name}`); a route taking a whole spec
+   > would let a client author a design the server never compiled, and the first malformed one
+   > would arrive as a compile error against a revision already written. A *derived* parameter is
+   > refused with the formula named, and the panel disables that field rather than letting it
+   > fail on submit — showing `= thick_mm / 2` in place of an input says what to change instead,
+   > which an error afterwards does not.
+   > The panel computes nothing: it renders the diff the server returns, and names the
+   > `downstream` features by name — the ones nobody edited that stand on something that was.
+   > Tested by: `tests/test_designs.py` (35), `src/components/design/spec-panel.test.tsx` (9),
+   > `src/components/gates/spec-diff.test.tsx` (6). Code: `app/models/design.py`,
+   > `app/core/designs.py`, `app/api/routes/designs.py`, migration `1ef5f6401c1f`.
 
 4. **The verification surface**: assertion dashboard (pass / fail / **unmeasured** rendered as
    first-class — unmeasured is amber, never green), requirement coverage, provenance drill-down
@@ -3366,9 +3711,15 @@ scroll?
    > `JobStatus.CANCELLED` is terminal and is **not** a kind of `FAILED` — a failure is the
    > product not working, a cancellation is it doing what it was told, and grouping them puts a
    > user who changed their mind into the fleet's failure rate.
-   > **Not delivered: "edit a parameter mid-mission".** That needs a persisted, addressable
-   > `DesignSpec` — the same thing task 3 is missing, and for the same reason. Stopping and
-   > resuming without loss works; steering by editing does not exist to be wired to.
+   > **"Edit a parameter mid-mission" was the one residual and it landed 2026-09-10**, once the
+   > design record existed for it to edit. A parameter change is a revision like any other — so a
+   > run in flight sees it the next time it reads the spec, and an audit afterwards sees who
+   > moved it and what moved with it. The `author` column says *user* or *agent* and null
+   > `author_id` means the agent rather than "unknown": conflating the two makes "did a person do
+   > this" unanswerable, which is the question an audit of a signed-off design is entirely about.
+   > Both surfaces exist — the panel's field and the agent's `set_design_parameter` — and both go
+   > through `app/core/designs.set_parameter`, so the rule refusing a derived parameter cannot
+   > soften on one of them.
    > Tested by: `tests/test_interruption.py` (16), `src/components/chat/chat-view.test.tsx` (3
    > new), `src/types/api.contract.test.ts`.
 
@@ -3618,11 +3969,53 @@ scene in the Tauri app.
 3. **Backend images that carry the fleet**: containers with OCCT + gmsh + CalculiX + (later) Chrono
    pinned — the determinism substrate (E1 task 7) and the deploy artefact are the same thing. GPL
    components live in their own layers/processes per Decision 4.
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **the image is written and its health check is real; nothing has
+   > built it yet, and an image nobody has built is a Dockerfile.** `nightly.yml` is where it
+   > gets built and health-checked; until that has run green the residual stands.
+   > Two stages, and the split is about size rather than tidiness: `cadquery-ocp` is ~166 MB and
+   > drags ~640 MB of unused VTK behind it, so the build toolchain never reaches the shipped
+   > layer. **GPL components sit at the process edge, which is where Decision 4 puts the
+   > boundary**: CalculiX is a system package invoked as a subprocess and never linked, and
+   > removing it yields an image whose `find_ccx` returns `None` and whose error message says so
+   > — the honest degradation the code already implements.
+   > **The health check asks whether the container can do the work, not whether it started.**
+   > `scripts/container_health.py` calls `find_ccx` and imports gmsh — the same code the solver
+   > and the mesher use — because a file at `/usr/bin/ccx` that will not execute passes a `stat`
+   > and fails every job. A green container that cannot solve anything is the most expensive
+   > kind of green there is: the fleet looks healthy and every run fails. OCCT is *optional* and
+   > its absence is reported rather than fatal, matching the contract `app/kernel/` already
+   > keeps — a CATIA-only image is a healthy image.
+   > It runs as a non-root user and **does not migrate on start**: N replicas racing one
+   > migration, and task 4 gates production migrations on a step somebody watches.
+   > Tested by: `tests/test_delivery.py::TestTheContainerHealthCheck`, `::TestTheDockerfile`
+   > (10). Code: `Dockerfile`, `scripts/container_health.py`.
 
 4. **Environments**: staging with seeded demo orgs and the mission suite running nightly against
    it; production migrations gated on `alembic check` and a rollback note per migration.
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **the nightly suite and the rollback-note rule exist; staging does
+   > not, because there is nowhere to deploy it to.**
+   > `.github/workflows/nightly.yml` builds the fleet image, health-checks it, and runs the
+   > mission ladder at 03:00 UTC — late enough that a day's merges are in, early enough that a
+   > failure is on a screen before anyone starts. It also prints **what each rung does not
+   > claim**, because "M2 passed" must never be readable as "the welds are sized". Nightly
+   > rather than per-push on purpose: the missions compile real designs against a real kernel,
+   > and a slow gate on every push is one that gets trimmed until it proves nothing.
+   > `alembic check` has gated the database job since P9.2. The **rollback note per migration**
+   > is now enforced: `tests/test_delivery.py::TestMigrationRollbackNotes` walks every migration,
+   > finds the ones whose `downgrade` drops a table, column or constraint, and requires the
+   > docstring to say what that would cost. A `downgrade` that silently drops the table holding
+   > every approval anybody ever signed is a rollback nobody should run without being told, and
+   > being told at 3am by reading DDL is not being told.
+   > **Fourteen historical migrations are grandfathered by name and the list may only shrink.**
+   > They are not back-filled because a rollback note invented by somebody who did not write the
+   > migration reads as considered and is a guess — on the one document consulted during an
+   > outage. A separate test asserts every grandfathered name still exists, so the list cannot
+   > quietly become permanent by going stale.
+   > **Still open: staging itself.** Seeded demo orgs and a nightly run *against a deployed
+   > environment* need an environment, which this deployment has not got. What runs nightly is
+   > the offline half of the ladder, which is the half that exists.
+   > Tested by: `tests/test_delivery.py::TestMigrationRollbackNotes` (2). Code:
+   > `.github/workflows/nightly.yml`.
 
 5. **Desktop release pipeline**: tauri build matrix (Windows first — the CATIA audience), signing,
    `latest.json` publication, channel promotion (beta → stable) as a pipeline step.
@@ -3639,11 +4032,61 @@ scene in the Tauri app.
 
 6. **Backups and restore *drills***: PITR verified by actually restoring; blob-store backup with
    refcount integrity check; a written RTO/RPO and a quarterly drill that proves it.
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **the drill is written and its refusals are tested; it has never
+   > been run against a real backup, because there is no backup to run it against yet.**
+   > `scripts/restore_drill.py`. Not a script that checks a dump exists: it restores one into a
+   > throwaway database, runs the migrations forward against it, counts what came back, and
+   > cross-checks the blob store against the rows pointing into it. **A backup nobody has
+   > restored is not a backup** — it is a file that is probably a backup, and the difference is
+   > discovered at the worst possible moment.
+   > **The refcount check reports two things apart, and that is the design.** A dump and a blob
+   > copy are taken at different instants by different tools, so they disagree at the edges by
+   > construction. A referenced blob that is missing is **data loss**; a stored blob nothing
+   > references is wasted disk. A single "integrity: FAIL" would bury the first under the
+   > second, so orphans are reported and deliberately do **not** fail the drill — failing over
+   > waste teaches people to ignore drill failures, which is how the one that matters gets
+   > ignored too.
+   > **RTO 240 minutes and RPO 15 minutes are written down here rather than in a wiki**, because
+   > a target nobody can find is a target nobody is measured against, and because this script is
+   > what proves or disproves them. The RPO figure is a continuous-archiving one: a nightly dump
+   > alone has an RPO of a day, so `--check-archiving` verifies `archive_mode` rather than
+   > assuming it.
+   > It **refuses a target whose URL contains `prod`, `production`, `live` or `main`** — blunt on
+   > purpose, because a false positive costs a rename and a false negative is the incident the
+   > drill exists to prevent.
+   > **Still open: a real backup, a real PITR restore, and a quarterly cadence somebody owns.**
+   > Tested by: `tests/test_delivery.py::TestTheRestoreDrill` (6). Code:
+   > `scripts/restore_drill.py`.
 
 7. **Secrets and supply chain**: no default secrets boot (P1 task 4), dependency pinning + audit in
    CI, SBOM for the desktop app (enterprise buyers ask), release notes generated from the merge log.
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **SBOM, licence check and audit are in CI; release notes are not,
+   > and the desktop SBOM waits on task 5.**
+   > No-default-secrets boot shipped with P1.4 and dependency pinning was already the rule
+   > (`requirements.txt` pins exact versions; the frontend pins its three). What is new is the
+   > `supply-chain` job: `scripts/sbom.py` emits CycloneDX **from the installed environment, not
+   > from `requirements.txt`** — the file lists direct dependencies and a vulnerability lives in
+   > a transitive one, most obviously the VTK that `cadquery-ocp` drags in.
+   > **The licence check is Decision 4 made checkable by somebody who does not trust us**, which
+   > is the entire point of a free stack. A copyleft package that is *linked* rather than invoked
+   > as a subprocess fails the job, and so does one whose licence nobody has established — an
+   > unchecked package is a hole in the claim rather than an absence of one. Exactly one package
+   > is accounted for today (gmsh, GPL, called through its API in a subprocess-isolated critical
+   > section) and it is **flagged in the file with its reason rather than hidden**. LGPL is
+   > deliberately not treated as a concern: linking is what it permits, and flagging it would be
+   > noise that teaches people to ignore the flag.
+   > The SBOM carries **no timestamp**, so two runs of an unchanged environment produce an
+   > identical document — diffing two SBOMs is the main thing anybody does with one, and a field
+   > that changes every run makes "the dependencies moved" indistinguishable from "somebody
+   > re-ran the script".
+   > `pip-audit` runs **advisory rather than blocking**, and that is a stated choice: a new CVE
+   > in a transitive dependency would otherwise turn every unrelated pull request red overnight,
+   > which is how a security signal gets muted by the people it is for. Promoting it is a
+   > decision to take once somebody owns triaging it.
+   > **Still open: release notes from the merge log, and an SBOM for the desktop app** — the
+   > latter waiting on task 5, since there is no desktop artefact to describe.
+   > Tested by: `tests/test_delivery.py::TestTheSBOM` (6). Code: `scripts/sbom.py`,
+   > `.github/workflows/ci.yml`.
 
 ##### Phase P10 — Documentation, onboarding and the trust surface #####
 

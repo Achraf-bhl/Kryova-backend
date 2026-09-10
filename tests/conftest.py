@@ -17,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 from app import mail
 from app.api.deps import get_media_service, get_session_scope
 from app.api.rate_limit import auth_limiter
+from app.catia import local_bridge
 from app.core import email_verification, maintenance
 from app.core.config import _as_psycopg_url, settings
 from app.core.database import Base, get_db
@@ -190,6 +191,36 @@ def outbox() -> Iterator[Outbox]:
         # Back to settings-derived, so a test that installs its own transport
         # cannot leak it into the next one.
         mail.use_transport(None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_catia_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The suite never spawns a real bridge daemon on the workstation.
+
+    Autouse for the same reason `outbox` is, and it is the stronger case of the
+    two: mail leaves the process, this *changes the machine and the change
+    outlives the run*. Measured on the Windows seat, 2026-09-10 — a full run
+    logged "Started the local CATIA bridge" twice, and two
+    `python -m catia_bridge run --wait-for-catia` processes were still alive
+    twenty minutes after pytest exited. They never leave on their own: the
+    daemon is spawned with `--wait-for-catia` precisely so it waits instead of
+    exiting when CATIA is absent, which is right for a desktop install and wrong
+    for a test.
+
+    Three things that cost, worst last: a process leak; a suite that is **not
+    idempotent**, because the second run's `test_catia_*` files fail against the
+    first run's stranded daemons; and a stranded daemon holding `bridge.lock`,
+    which is one-per-machine, so it contends with the bridge a real GUI session
+    spawns — and that surfaces as a misreported modal dialog rather than as a
+    held lock.
+
+    None of this is visible on Linux: `is_supported()` gates on
+    `sys.platform == "win32"` first, so the whole path is dead there and the
+    suite says nothing about it. That is what made it survive.
+
+    A test that wants the real thing monkeypatches `is_supported` back.
+    """
+    monkeypatch.setattr(local_bridge, "is_supported", lambda: False)
 
 
 @pytest.fixture(autouse=True)

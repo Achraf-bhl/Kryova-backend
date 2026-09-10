@@ -261,12 +261,42 @@ class TestCatiaRoutes:
 
 @requires_catia
 class TestLiveCatia:
+    @staticmethod
+    def _skip_without_an_open_document() -> None:
+        """A seat with CATIA up and nothing open is not a broken bridge.
+
+        Extends the reasoning already written into
+        `test_exported_geometry_meshes_in_the_kryova_pipeline` by one case. That
+        test skips when the active document holds no *solid*, because reading
+        whatever the engineer has in front means the verdict otherwise follows
+        ambient state nobody set. The case it does not cover is **no document at
+        all**, and both live export tests hit `export_active_document` before
+        any guard can run — so CATIA idling at its start screen failed them with
+        "CATIA has no document open", which reads like a broken export and is
+        nothing of the kind.
+
+        Measured on the seat 2026-09-10: the first full run of the night skipped
+        these (COM was not answering yet while CATIA finished starting) and the
+        second ran them against an open, empty CATIA and went red. Same tree,
+        same commit, two answers — which is the whole reason this is a skip.
+
+        Opening a document here instead would be the suite mutating the
+        engineer's live seat to make its own assertion true.
+        """
+        status = bridge.get_status()
+        if status.document_count == 0:
+            pytest.skip(
+                "CATIA is running with no document open, so there is nothing to "
+                "export. Open a part with geometry in it to exercise this path."
+            )
+
     def test_status_reports_a_real_version(self):
         status = bridge.get_status()
         assert status.running is True
         assert status.version and status.version.startswith("V")
 
     def test_export_active_document_writes_a_real_step_file(self, tmp_path):
+        self._skip_without_an_open_document()
         exported = bridge.export_active_document(tmp_path, ExportFormat.STEP, stem="live_test")
         assert exported.exists()
         assert exported.suffix == ".stp"
@@ -288,6 +318,7 @@ class TestLiveCatia:
         from app.geometry.inspect import inspect
         from app.mesh.gmsh_mesher import generate_tet_mesh
 
+        self._skip_without_an_open_document()
         exported = bridge.export_active_document(tmp_path, ExportFormat.STEP, stem="mesh_test")
         if not bridge.active_document_has_solid():
             pytest.skip(

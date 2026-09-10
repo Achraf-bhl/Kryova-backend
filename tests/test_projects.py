@@ -2,7 +2,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import Connection, event
+from sqlalchemy.orm import Session
 
+from app.core import maintenance
 from app.core.config import settings
 from tests.typing import AuthenticatedTestClient
 
@@ -126,7 +128,7 @@ def test_creating_a_project_reads_the_database_once(
 
 
 def test_the_first_project_creates_the_personal_organisation_without_a_lookup(
-    auth_client: AuthenticatedTestClient, db_connection: Connection
+    auth_client: AuthenticatedTestClient, db_connection: Connection, db_session: Session
 ) -> None:
     """A user with no memberships at all needs no confirming SELECT.
 
@@ -134,6 +136,12 @@ def test_the_first_project_creates_the_personal_organisation_without_a_lookup(
     memberships cannot hide a personal organisation -- the query it replaces
     joins through memberships to find one.
     """
+    # Warm the maintenance-window cache first. It is a per-process read every
+    # `maintenance.CACHE_SECONDS`, not a per-request one, so counting it here
+    # would measure process start rather than what this request costs -- and the
+    # cache itself is pinned in `test_platform.TestTheWindowIsCached`.
+    maintenance.current_window(db_session)
+
     with recorded_sql(db_connection) as captured:
         response = auth_client.post("/api/v1/projects", json={"name": "first ever"})
     assert response.status_code == 201, response.text

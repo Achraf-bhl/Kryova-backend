@@ -170,19 +170,21 @@ class TestTotalsOverAPeriodAreExact:
 
 
 class TestWhatCouldNotBeMeasuredIsNamed:
-    def test_an_unwired_meter_is_listed_with_its_reason_not_shown_as_zero(
+    def test_nothing_is_unmetered_now_that_every_meter_is_wired(
         self, auth_client: AuthenticatedTestClient, organisation_id: str
     ) -> None:
+        """P8.1 wired the last three meters on 2026-09-10.
+
+        This asserted `catia_seat_seconds` and `ai_tokens` appeared in
+        `unmetered` with a reason. They no longer do, and the *mechanism* that
+        mattered — an unwired meter is reported rather than rendered as zero —
+        is pinned at its own level in `tests/test_metering.py`, where it does
+        not depend on which meters happen to be wired today.
+        """
         summary = auth_client.get(
             f"/api/v1/organisations/{organisation_id}/billing/summary"
         ).json()
-        names = {row["meter"] for row in summary["unmetered"]}
-        assert "catia_seat_seconds" in names
-        assert "ai_tokens" in names
-        for row in summary["unmetered"]:
-            assert row["reason"]
-        # And it is genuinely absent from the totals rather than sitting at zero.
-        assert not [row for row in summary["totals"] if row["meter"] in names]
+        assert summary["unmetered"] == []
 
     def test_storage_reports_its_method_and_the_bytes_it_could_not_place(
         self, auth_client: AuthenticatedTestClient, organisation_id: str
@@ -202,7 +204,9 @@ class TestQuotasSayWhereTheirNumbersCameFrom:
         assert body["plan"] == "free"
         sources = {limit["name"]: limit["source"] for limit in body["quotas"]["limits"]}
         assert set(sources.values()) == {"global settings"}
-        assert "no price list" in body["quotas"]["note"]
+        # The note now says whose numbers the allowances are, rather than
+        # that there is no price list: P8.2 made them the operator's.
+        assert "set by whoever runs this Kryova" in body["quotas"]["note"]
 
     def test_reading_the_account_does_not_create_one(
         self, auth_client: AuthenticatedTestClient, organisation_id: str, db_session: Session

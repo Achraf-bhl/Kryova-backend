@@ -1,21 +1,29 @@
 import struct
+from datetime import date, timedelta
 from typing import Annotated
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 
 from app.api.deps import (
+    AuditDep,
+    CurrentUser,
     DbSession,
     JobQueueDep,
     MediaServiceDep,
     MediaStoreDep,
     OwnedProject,
+    PrincipalDep,
     SessionScopeDep,
 )
+from app.api.rate_limit import RateLimit
+from app.core import interruption
 from app.core.config import settings
+from app.core.metering import check_quota
 from app.media import MediaNotFound
-from app.models import GeometryVersion, JobStatus, Project, SimulationJob
+from app.models import GeometryVersion, JobStatus, Meter, Project, SimulationJob
+from app.models.audit import AuditAction, AuditOutcome
 from app.schemas import SimulationCreate, SimulationPage, SimulationRead, SurfaceField
 from app.simulation.runner import run_simulation
 
@@ -73,7 +81,58 @@ def _assert_within_quota(db: DbSession, owner_id: str) -> None:
         )
 
 
-@router.post("", response_model=SimulationRead, status_code=status.HTTP_202_ACCEPTED)
+def _assert_within_allowance(db: DbSession, organisation_id: str) -> None:
+    """Refuse a run the tenant has no allowance left for (P8.3).
+
+    **Never a bare 429.** The plan's words are "the honest envelope — what ran
+    out, what it costs to continue, what remains free", and
+    `QuotaDecision.detail()` is that envelope: the meter, what has been used,
+    what the allowance was, what remains, the credit balance and the plan. A
+    refusal that says only "quota exceeded" leaves somebody with a machine to
+    design and no idea what to do next, which is how a limit becomes a support
+    ticket instead of a purchase.
+
+    Checked against `SOLVER_SECONDS` alone. A simulation moves that meter and
+    `MESH_ELEMENT_SECONDS`, but refusing on the second would mean a tenant with
+    solver time left is stopped by a mesh number nobody prices, and one limit
+    per action is what a person can act on.
+
+    **A deployment with no allowances set is unaffected**, because `check_quota`
+    answers "allowed" with a reason when nothing is set rather than denying what
+    it has no policy for — which is what stops a quota system from stopping the
+    product the day it is switched on.
+    """
+    today = date.today()
+    period_start = today.replace(day=1)
+    decision = check_quota(
+        db, organisation_id, Meter.SOLVER_SECONDS, period_start, today + timedelta(days=1)
+    )
+    if decision.allowed:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        # 402, not 429: this is not "too fast", it is "there is none left", and
+        # the two need different responses from the person reading them. A 429
+        # invites a retry, which here would be a retry that can only fail.
+        detail=decision.detail(),
+    )
+
+
+#: Per-principal, like the chat limit (P1.6). Distinct from
+#: `max_concurrent_simulations_per_user`, which caps how many run at once: this
+#: caps how fast they can be *asked for*, which is what a client stuck in a
+#: retry loop does to a queue.
+_simulation_rate_limit = RateLimit(
+    "simulations.create", settings.simulation_requests_per_minute, window_seconds=60
+)
+
+
+@router.post(
+    "",
+    response_model=SimulationRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(_simulation_rate_limit)],
+)
 def create_simulation(
     payload: SimulationCreate,
     project: OwnedProject,
@@ -84,6 +143,7 @@ def create_simulation(
 ) -> SimulationJob:
     """Queue a mesh-and-solve run. Returns immediately with a job to poll."""
     _assert_within_quota(db, project.owner_id)
+    _assert_within_allowance(db, project.organisation_id)
     geometry = _resolve_geometry(db, project.id, payload.geometry_version)
 
     job = SimulationJob(
@@ -243,6 +303,47 @@ def read_surface_field_binary(
             media_type="application/octet-stream",
             headers={"Content-Disposition": f'attachment; filename="surface_{simulation_id}.bin"'},
         )
+
+
+@router.post("/{simulation_id}/cancel", response_model=SimulationRead)
+def cancel_simulation(
+    project: OwnedProject,
+    db: DbSession,
+    current_user: CurrentUser,
+    audit: AuditDep,
+    principal: PrincipalDep,
+    simulation_id: str,
+) -> SimulationJob:
+    """Stop a run (P5.6). What that means depends on where the run is.
+
+    **Queued** — cancelled outright. Nothing started, so nothing unwinds.
+
+    **Running** — the request is recorded and the runner honours it at its next
+    stage boundary: after meshing and before solving, and between the grids of
+    a study. Meshing and solving are each a single call into gmsh or CalculiX
+    that the API cannot reach into, so a solve already handed to CalculiX
+    finishes, **and the machine time it used is still billed**. The response
+    says so; a `202` that let the caller believe the work stopped would be a
+    small lie, and it is the kind a billing dispute is built out of.
+
+    The status therefore comes back as it *is*, `cancelled` or still `running`,
+    rather than as what was asked for.
+    """
+    job = _get_job(db, project.id, simulation_id)
+    refusal = interruption.request_simulation_stop(db, job, by=current_user)
+    if refusal is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refusal.reason)
+
+    audit.record(
+        AuditAction.RUN_CANCELLED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="simulation_job",
+        target_id=job.id,
+        detail={"status": job.status.value},
+    )
+    db.commit()
+    return job
 
 
 @router.delete("/{simulation_id}", status_code=status.HTTP_204_NO_CONTENT)

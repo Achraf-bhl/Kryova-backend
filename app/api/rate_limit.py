@@ -1,8 +1,21 @@
-"""Sliding-window rate limiter for auth endpoints.
+"""Sliding-window rate limiting, and what a limit is counted against.
 
 Uses Redis when REDIS_URL is configured so limits are shared across all
 workers. Falls back to the in-memory implementation for development and
 single-process deployments where Redis is not running.
+
+**The key matters as much as the window** (P1.6). A limit counted against the
+connecting address rations the wrong thing for an authenticated route: one
+office behind one NAT is a single IP and hundreds of engineers, so a per-IP
+budget either throttles a customer or is set so high it stops nothing. Where a
+principal exists, `limit_key` counts against *them* — the identity that actually
+owns the work — and falls back to the address only for routes where nobody has
+authenticated yet, which is where an IP is genuinely the best available
+denominator.
+
+`client_ip` lives here rather than in `routes/auth.py` because three modules had
+grown their own copy of the `X-Forwarded-For` rule, and a security decision with
+three implementations has three chances to be the wrong one.
 """
 
 import logging
@@ -10,7 +23,10 @@ import threading
 import time
 from abc import ABC, abstractmethod
 
+from fastapi import HTTPException, Request, status
+
 from app.core.config import settings
+from app.core.security import decode_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +112,11 @@ class RateLimiter:
         self._sweep_threshold = sweep_threshold
         self._backend: RateLimiterBackend | None = None
 
+    @property
+    def max_requests(self) -> int:
+        """The budget, so a refusal can state it rather than guess."""
+        return self._max
+
     def check(self, key: str) -> bool:
         """Return True if the request is allowed, False if rate-limited."""
         backend = self._get_backend()
@@ -132,3 +153,96 @@ class RateLimiter:
 
 
 auth_limiter = RateLimiter(max_requests=10, window_seconds=60)
+
+
+# ---------------------------------------------------------------------------
+# What a limit is counted against (P1.6)
+# ---------------------------------------------------------------------------
+
+
+def client_ip(request: Request) -> str:
+    """The address to count an unauthenticated request against.
+
+    `X-Forwarded-For` is written by whoever sends the request, so trusting it
+    unconditionally means a client that rotates the header has no rate limit at
+    all. It is read only when `trust_proxy_headers` says a reverse proxy is in
+    front, and then from the right: each trusted proxy appends the address it
+    saw, so with N of them the real client is N entries from the end. Everything
+    to the left of that was supplied by the caller.
+
+    Moved here from `routes/auth.py` on 2026-09-10 — `routes/catia.py` and
+    `core/audit.py` had each grown a variant, and one of them counting from the
+    left is the kind of difference nobody notices until a limit does nothing.
+    """
+    peer = request.client.host if request.client else "unknown"
+    if not settings.trust_proxy_headers:
+        return peer
+
+    forwarded = request.headers.get("x-forwarded-for")
+    if not forwarded:
+        return peer
+    hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+    index = len(hops) - settings.trusted_proxy_count
+    if not hops or index < 0:
+        # Fewer hops than the deployment claims: the chain is not what was
+        # configured, so believe the socket rather than guess.
+        return peer
+    return hops[index]
+
+
+def limit_key(request: Request, *, scope: str) -> str:
+    """`scope:user:<id>` where somebody is signed in, `scope:ip:<addr>` otherwise.
+
+    The token is decoded rather than the request's principal read, deliberately:
+    this runs as a dependency and must not require `get_current_user` to have
+    resolved first. A JWT decode is a signature check with no database in it, so
+    the cost is microseconds, and a token that fails to decode simply falls
+    through to the address — an attacker cannot get a *larger* budget by
+    presenting a broken token, only the one they already had.
+
+    The two namespaces cannot collide: a user id is a UUID and an address is
+    not, and they are prefixed regardless so that stays true if either changes.
+    """
+    token = request.cookies.get("kryova_access")
+    if token is None:
+        header = request.headers.get("authorization", "")
+        if header.lower().startswith("bearer "):
+            token = header[7:].strip()
+    if token:
+        user_id = decode_access_token(token)
+        if user_id is not None:
+            return f"{scope}:user:{user_id}"
+    return f"{scope}:ip:{client_ip(request)}"
+
+
+class RateLimit:
+    """A FastAPI dependency that refuses over-budget requests.
+
+    Attach with `dependencies=[Depends(RateLimit("ai.chat", 30, 60))]`. The
+    scope name is part of the key, so two limits on one principal are counted
+    separately and a noisy endpoint cannot spend another one's budget.
+
+    Refuses with `Retry-After`, which is not decoration: a client that knows
+    when to come back stops hammering, and one that does not retries in a tight
+    loop and turns a limit into the load it was meant to prevent.
+    """
+
+    def __init__(self, scope: str, max_requests: int, window_seconds: int) -> None:
+        self.scope = scope
+        self.window_seconds = window_seconds
+        self._limiter = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
+
+    def __call__(self, request: Request) -> None:
+        if not self._limiter.check(limit_key(request, scope=self.scope)):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"Too many requests. This limit is {self._limiter.max_requests} per "
+                    f"{self.window_seconds} seconds."
+                ),
+                headers={"Retry-After": str(self.window_seconds)},
+            )
+
+    def reset(self) -> None:
+        """Clear this limit's state. For tests and for the admin panel."""
+        self._limiter.reset()

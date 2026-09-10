@@ -330,6 +330,23 @@ server inherits and the Git Bash one.
       carried forward. G1 is now also the only thing that can verify E6 — see section A.
       Drive it from `docs/GUI_PROMPT_LADDER.md`, through the chatbot, never through
       `dispatch`, two pictures per prompt.
+- [ ] **B5 — E21 task 1, the cross-implementation half of the STEP matrix, and the one
+      measurement that settles a ×1000.** Kryova→STEP→Kryova is measured
+      (`app/manufacture/interop.py::measure_metadata_round_trip`): names, colours, layers,
+      validation properties and assembly occurrences all carry, and a **flatness tolerance
+      authored at 0.05 mm reads back as 50.0 mm** because the writer tags the measure
+      `SI_UNIT($,.METRE.)` while the model is `.MILLI.`. A round trip through one
+      implementation cannot tell you whose defect that is — both ends share it.
+      **What to do, in ten minutes:** run
+      `venv/bin/python -c "import tempfile; from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox; from app.manufacture.xde import *; d=tempfile.mkdtemp(); write_step_with_metadata(BRepPrimAPI_MakeBox(10.,20.,30.).Shape(), d+'/t.step', Annotations(name='Bracket', colour_rgb=(0.2,0.4,0.9), layer='KRYOVA-PART', tolerance=Tolerance(value_mm=0.05))); print(d)"`,
+      open the file **in CATIA on the seat**, and report four things: the part name, the
+      colour, the layer, and **what CATIA says the flatness tolerance is — 0.05 or 50**.
+      A screenshot of the tolerance in CATIA's tree is the deliverable.
+      **Why it is worth a seat slot:** if CATIA reads 50, OCCT's *writer* is wrong and Kryova
+      must never write semantic PMI through this path until it is fixed upstream. If CATIA
+      reads 0.05, OCCT's *reader* is wrong, the file is right, and the product may claim
+      semantic PMI export while its own re-import stays untrustworthy. Those are opposite
+      conclusions and nothing on Linux can choose between them.
 
 ### C. Not hardware — an input this machine does not have
 

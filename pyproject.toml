@@ -53,6 +53,15 @@ module = [
   # plan and not for a lint config.
   "ezdxf",
   "ezdxf.*",
+  # `stripe` backs the one payment adapter (app/core/payments.py). It is
+  # imported *inside* each method, never at module scope, so a build that does
+  # not sell -- which is every self-hosted one, Decision 4 -- neither needs it
+  # installed nor pays for it. A missing package surfaces as a
+  # `ProviderResult` naming what is absent rather than an ImportError at
+  # startup. Declared here for exactly the reason `ezdxf` above is: an
+  # undeclared optional import failed the mypy gate in CI on every run.
+  "stripe",
+  "stripe.*",
   # pyLife (E8, fatigue) and OpenMDAO (E10, optimisation) are the federated
   # libraries Decision 2 requires rather than hand-written solvers. Neither
   # ships a py.typed marker, and pandas comes in through pyLife's own API. They

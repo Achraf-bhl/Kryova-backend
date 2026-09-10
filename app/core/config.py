@@ -21,9 +21,22 @@ JOB_QUEUE_BACKENDS = ("threadpool", "inline")
 # security decision: the signing algorithm, a Set-Cookie attribute, and the
 # switch that turns the production guards on. A free-text field there means a
 # typo fails *open*, which is exactly what happened before these existed.
+#: Payment providers this build knows. Declared here so the validator can read
+#: it without importing `app/core/payments.py`, which imports these settings.
+PAYMENT_PROVIDERS = frozenset({"none", "stripe", "fake"})
+
 JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 COOKIE_SAMESITE_VALUES = frozenset({"lax", "strict", "none"})
 ENVIRONMENTS = frozenset({"development", "test", "staging", "production"})
+
+# Declared here rather than in `app/mail/transport.py` so the validator below can
+# read it without importing that module -- which imports these settings, and the
+# cycle would only show up as an ImportError at startup.
+MAIL_TRANSPORTS = frozenset({"smtp", "console", "memory"})
+
+# The transports that can reach somebody who is not us. `console` and `memory`
+# cannot, which is the whole of why production refuses them.
+DELIVERING_MAIL_TRANSPORTS = frozenset({"smtp"})
 
 
 def _as_psycopg_url(url: str) -> str:
@@ -97,6 +110,31 @@ class Settings(BaseSettings):
     trust_proxy_headers: bool = False
     trusted_proxy_count: int = 1
 
+    # Mail (P1.5). `console` writes messages to the log so a developer can click
+    # a verification link without running a mail server; production refuses it
+    # in `_harden_production`, because a deployment left on it still returns 204
+    # from a password reset and still tells the user to check an inbox nothing
+    # was sent to. `memory` is the test transport.
+    mail_transport: str = "console"
+    mail_from: str = "Kryova <no-reply@kryova.local>"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+
+    # How long a verification link stays usable, and how often one may be asked
+    # for. The resend window is per account rather than per IP: an attacker who
+    # wants to use us to post mail at somebody picks the address, not the route
+    # they ask from, so an IP budget is the wrong denominator for this one.
+    email_verification_ttl_hours: int = 24
+    email_verification_resend_seconds: int = 60
+
+    # Verification gates project creation, not sign-in (P1.5): friction where it
+    # protects and not where it annoys. Turning it off is for a deployment with
+    # no mail transport that still wants the product to work end to end.
+    require_verified_email_for_projects: bool = True
+
     # Local heavy-file store. CAD files, meshes, result fields and vector
     # indexes never leave this machine: only their small metadata rows go to
     # the cloud database.
@@ -123,6 +161,44 @@ class Settings(BaseSettings):
     # solving are the most expensive thing this service does, so the quota is
     # what stops a single account from occupying every worker.
     max_concurrent_simulations_per_user: int = 3
+
+    # Per-principal request budgets (P1.6). These are *rate* limits, distinct
+    # from the concurrency cap above and from P8's quotas: this is "how often
+    # may one identity ask", not "how much may they consume". A turn is minutes
+    # of GPU and a simulation is minutes of CPU, so the numbers are generous
+    # per minute and exist to stop a loop, not to ration ordinary work.
+    chat_requests_per_minute: int = 20
+    simulation_requests_per_minute: int = 10
+
+    # --- Billing (P8.2) ------------------------------------------------------
+    # `none` is the default and the only one a self-hosted install needs: plans
+    # are an operator action and no money moves. `stripe` needs the optional
+    # `stripe` package and a key; `fake` is for tests.
+    payment_provider: str = "none"
+    stripe_api_key: str = ""
+
+    # **Plan allowances are the operator's, not a Kryova price list.** Decision
+    # 4 says this product is free and open, so a self-hosted deployment sets
+    # what its own users may do and a hosted one sets what it sells. `0` means
+    # "no allowance set", which `check_quota` reads as unlimited and *says so*
+    # rather than letting an unset limit read as a policy. Nothing here is a
+    # number Kryova is claiming; see `core/metering.PROVISIONAL_PLANS`.
+    free_plan_solver_seconds: int = 0
+    free_plan_ai_tokens: int = 0
+    free_plan_storage_bytes: int = 0
+    team_plan_solver_seconds: int = 0
+    team_plan_ai_tokens: int = 0
+    team_plan_storage_bytes: int = 0
+
+    # --- Approval gates (P5.5) ----------------------------------------------
+    # Whether the person who raised a gate may approve it themselves. **False by
+    # default, so a team gets four-eyes without configuring anything.** It is a
+    # setting rather than a hard rule because most self-hosted installs have
+    # exactly one engineer, and a review process that cannot be completed is one
+    # people route around entirely -- which loses the record as well as the
+    # second opinion. Turning it on is a decision somebody makes knowingly, and
+    # the gate still records who approved and what they saw.
+    allow_self_approval: bool = False
 
     # AI. Which model serves the AI features -- see app/ai/providers/.
     # Ollama is the TEST-PHASE default (decided 2026-09-05): free, keyless, and
@@ -386,9 +462,41 @@ class Settings(BaseSettings):
             )
         return candidate
 
+    @field_validator("payment_provider")
+    @classmethod
+    def _known_payment_provider(cls, value: str) -> str:
+        candidate = value.strip().lower()
+        if candidate not in PAYMENT_PROVIDERS:
+            raise ValueError(
+                f"PAYMENT_PROVIDER must be one of {', '.join(sorted(PAYMENT_PROVIDERS))}; "
+                f"got {value!r}."
+            )
+        return candidate
+
+    @field_validator("mail_transport")
+    @classmethod
+    def _known_mail_transport(cls, value: str) -> str:
+        candidate = value.strip().lower()
+        if candidate not in MAIL_TRANSPORTS:
+            raise ValueError(
+                f"MAIL_TRANSPORT must be one of {', '.join(sorted(MAIL_TRANSPORTS))}; "
+                f"got {value!r}."
+            )
+        return candidate
+
     @property
     def is_production(self) -> bool:
         return self.environment.strip().lower() == "production"
+
+    @property
+    def mail_reaches_real_mailboxes(self) -> bool:
+        """Whether this deployment can actually send a person an email.
+
+        Read by `/setup` and the operations dashboard rather than inferred from
+        "is SMTP configured", because the answer has to include *console*, which
+        is configured, works, and reaches nobody.
+        """
+        return self.mail_transport in DELIVERING_MAIL_TRANSPORTS
 
     @model_validator(mode="after")
     def _harden_production(self) -> "Settings":
@@ -426,6 +534,20 @@ class Settings(BaseSettings):
             problems.append(
                 f"CORS_ORIGINS contains a plaintext http:// origin: {self.cors_origins}"
             )
+        if self.mail_transport not in DELIVERING_MAIL_TRANSPORTS:
+            # The failure this refuses is quiet and total: on the console
+            # transport `/auth/password-reset-request` still returns 204, the
+            # frontend still says "check your email", and the token goes to a
+            # log file. Every component reports success and the user is locked
+            # out with nothing to retry. Same class as SECRET_KEY=changeme, so
+            # it gets the same answer -- the process does not start.
+            problems.append(
+                f"MAIL_TRANSPORT is {self.mail_transport!r}, which delivers to nobody — "
+                "password resets, verification links and invitations would be written to "
+                "the log. Set MAIL_TRANSPORT=smtp and SMTP_HOST"
+            )
+        elif not self.smtp_host.strip():
+            problems.append("SMTP_HOST is empty, so the smtp transport has nowhere to connect")
         if any(origin.strip() == "*" for origin in self.cors_origins):
             # Starlette pairs `allow_origins=["*"]` with `allow_credentials=True`
             # by echoing whichever Origin asked, which is credentialed

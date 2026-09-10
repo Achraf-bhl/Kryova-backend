@@ -14,13 +14,17 @@ from sqlalchemy import Connection, Engine, create_engine, event, make_url, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from app import mail
 from app.api.deps import get_media_service, get_session_scope
 from app.api.rate_limit import auth_limiter
+from app.core import email_verification, maintenance
 from app.core.config import _as_psycopg_url, settings
 from app.core.database import Base, get_db
 from app.jobs import InlineJobQueue, get_job_queue
+from app.mail.message import Outbox
 from app.main import app
 from app.media import LocalMediaStore, MediaService, get_media_store
+from app.models import User
 from tests.typing import AuthenticatedTestClient
 
 # Shared by every connection in the process, so the schema one connection
@@ -166,6 +170,49 @@ def media_store(tmp_path: Path) -> LocalMediaStore:
     return LocalMediaStore(tmp_path / "media", chunk_size=64 * 1024)
 
 
+@pytest.fixture(autouse=True)
+def outbox() -> Iterator[Outbox]:
+    """Every message the suite sends, and nothing leaves the process.
+
+    Autouse deliberately. Without it the default transport is `console`, so a
+    suite run would write verification links and reset tokens into the pytest
+    log — and a machine that had configured SMTP for development would have the
+    test suite emailing real people. Installing the memory transport for every
+    test makes both impossible rather than unlikely.
+
+    Request it by name to assert on what was sent.
+    """
+    collected = Outbox()
+    mail.use_transport(mail.MemoryTransport(collected))
+    try:
+        yield collected
+    finally:
+        # Back to settings-derived, so a test that installs its own transport
+        # cannot leak it into the next one.
+        mail.use_transport(None)
+
+
+@pytest.fixture(autouse=True)
+def _forget_the_maintenance_window() -> Iterator[None]:
+    """No test inherits another test's cached maintenance state.
+
+    `core/maintenance` caches the window for `CACHE_SECONDS` in a module global,
+    which is right in a worker process and wrong in a suite: tests share one
+    process, so a test that starts maintenance would leave every test that runs
+    within ten seconds of it refusing writes, and a test that ran first would
+    hide a window a later one had just declared. Both failures would land
+    somewhere other than the test that caused them.
+
+    Autouse and on both sides of the yield, because either direction of leak is
+    the same bug.
+    """
+    maintenance.invalidate()
+    try:
+        yield
+    finally:
+        maintenance.invalidate()
+
+
 @pytest.fixture
 def client(
     db_session: Session, media_store: LocalMediaStore, tmp_path: Path, monkeypatch
@@ -192,12 +239,25 @@ def client(
 
 
 @pytest.fixture
-def auth_client(client: AuthenticatedTestClient) -> AuthenticatedTestClient:
-    """A client already registered and carrying a bearer token."""
+def auth_client(
+    client: AuthenticatedTestClient, db_session: Session
+) -> AuthenticatedTestClient:
+    """A client already registered, verified, and carrying a bearer token."""
     auth_limiter.reset()
     credentials = {"email": "eng@kryova.dev", "password": "correct-horse-battery"}
     response = client.post("/api/v1/auth/register", json=credentials)
     assert response.status_code == 201, response.text
+
+    # Verified directly rather than by following the emailed link (P1.5).
+    # Clicking it here would make every project-creating test in the suite
+    # depend on the verification flow, so one defect there would present as
+    # hundreds of unrelated failures. `tests/test_auth_verification.py` drives
+    # the real link end to end, where a failure names the thing that broke.
+    registered = db_session.get(User, response.json()["id"])
+    assert registered is not None
+    email_verification.mark_verified(registered, now=email_verification.utcnow())
+    db_session.flush()
+
     login_response = client.post(
         "/api/v1/auth/login",
         data={"username": credentials["email"], "password": credentials["password"]},
@@ -205,6 +265,35 @@ def auth_client(client: AuthenticatedTestClient) -> AuthenticatedTestClient:
     assert login_response.status_code == 200, login_response.text
     client.headers["x-csrf-token"] = client.cookies["kryova_csrf"]
     return client
+
+
+def register_verified(
+    client: TestClient,
+    db_session: Session,
+    email: str,
+    password: str = "correct-horse-battery",
+) -> str:
+    """Register an account and confirm its address. Returns the user id.
+
+    Since P1.5 an unverified account cannot create a project, so any fixture
+    that registers a *second* user and then makes something for them has to
+    confirm the address first. This exists so that step is one call rather than
+    four lines copied into a dozen fixtures — and so the day the rule changes
+    there is one place to change it.
+
+    Does not sign in: callers differ on whether they want the session on this
+    client or another.
+    """
+    response = client.post(
+        "/api/v1/auth/register", json={"email": email, "password": password}
+    )
+    assert response.status_code == 201, response.text
+    user_id: str = response.json()["id"]
+    user = db_session.get(User, user_id)
+    assert user is not None
+    email_verification.mark_verified(user, now=email_verification.utcnow())
+    db_session.flush()
+    return user_id
 
 
 @pytest.fixture

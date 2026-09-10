@@ -677,40 +677,26 @@ METER_SITES: Final[tuple[MeterSite, ...]] = (
     ),
     MeterSite(
         meter=Meter.KERNEL_OPERATIONS,
-        how="observed from kernel.rebuild spans inside a usage scope",
-        wired=False,
-        not_wired_because=(
-            "The mapping is in place and an OCCT rebuild inside a usage scope is "
-            "metered, but nothing opens a scope around the geometry agent yet: the "
-            "OCCT branch of app.catia.dispatch has no organisation on the call frame. "
-            "Wiring it means resolving the conversation's project to a tenant there "
-            "and wrapping the runner call in usage_scope()."
-        ),
+        how="observed from kernel.rebuild spans inside the usage scope "
+        "app.catia.dispatch opens around every operation (P8.1, wired 2026-09-10)",
     ),
     MeterSite(
         meter=Meter.AI_TOKENS,
-        how="record_tokens, beside the existing app.ai.usage ledger write",
-        wired=False,
-        not_wired_because=(
-            "app.ai.usage.record knows the user and the conversation but not the "
-            "tenant, and Conversation.project_id is nullable — so a token spend "
-            "cannot always be placed in an organisation today. Wiring it means "
-            "passing the organisation into usage.record and calling record_tokens "
-            "beside the ai_token_usage row; until then the ai_token_usage table is "
-            "the honest source and it is per-user, not per-tenant."
-        ),
+        how="record_tokens in app.api.routes.ai._meter_tokens, beside the existing "
+        "app.ai.usage ledger write (P8.1, wired 2026-09-10). The two ledgers answer "
+        "different questions and are deliberately not merged: app.ai.usage is a "
+        "per-user daily *budget* read before the next call, this is a per-tenant "
+        "*bill* summed over a period. A conversation with no project is attributed "
+        "through the user's own organisation; one whose user has no organisation at "
+        "all is skipped rather than guessed at.",
     ),
     MeterSite(
         meter=Meter.CATIA_SEAT_SECONDS,
         how="record_seat_time from the duration app.catia.dispatch already records "
-        "on every CatiaOperation",
-        wired=False,
-        not_wired_because=(
-            "app.catia.dispatch writes CatiaOperation.duration_ms for every call and "
-            "no usage scope surrounds it. Wiring it means resolving the "
-            "conversation's tenant in dispatch and calling record_seat_time; the "
-            "quantity is APPROXIMATED whatever happens — see CATIA_SEAT_METHOD."
-        ),
+        "on every CatiaOperation (P8.1, wired 2026-09-10). APPROXIMATED by "
+        "construction and always will be — see CATIA_SEAT_METHOD: it sums the calls "
+        "Kryova drove and a seat is also occupied between them, so the number is a "
+        "lower bound on occupancy.",
     ),
 )
 
@@ -1205,16 +1191,96 @@ class PlanAllowance:
     meter_allowances: Mapping[Meter, int] = _NO_ALLOWANCES
 
 
-PLANS: Final[Mapping[Plan, PlanAllowance]] = MappingProxyType(
-    {plan: PlanAllowance(plan=plan) for plan in Plan}
-)
+def _plan_meters(seconds: int, tokens: int, storage: int) -> Mapping[Meter, int]:
+    """Scaled per-period allowances, skipping anything the operator left at 0.
+
+    `0` means *unset*, not *none allowed*. An allowance of zero would refuse
+    every request on that meter the moment the setting was introduced, which is
+    the opposite of the intended default — so it is absent from the mapping,
+    and `check_quota` reads an absent allowance as unlimited and says so.
+    """
+    scaled = {
+        Meter.SOLVER_SECONDS: seconds * Meter.SOLVER_SECONDS.scale,
+        Meter.AI_TOKENS: tokens * Meter.AI_TOKENS.scale,
+        Meter.STORAGE_BYTES: storage * Meter.STORAGE_BYTES.scale,
+    }
+    return MappingProxyType({meter: units for meter, units in scaled.items() if units > 0})
+
+
+def build_plans() -> Mapping[Plan, PlanAllowance]:
+    """Plan allowances, from settings.
+
+    **These are the operator's numbers, not Kryova's.** Decision 4 makes this
+    product free and open: a self-hosted install has no price list at all and
+    its operator decides what its own users may do, while a hosted one sets what
+    it sells. Every default is 0 — unset — so a fresh deployment behaves exactly
+    as it did before allowances existed, and nothing here is a figure this
+    project is claiming.
+
+    Enterprise is deliberately never bounded here: "custom quotas" is what the
+    plan promises, and a custom quota is a per-tenant override on the billing
+    account, which already outranks a plan.
+    """
+    return MappingProxyType(
+        {
+            Plan.FREE: PlanAllowance(
+                plan=Plan.FREE,
+                meter_allowances=_plan_meters(
+                    settings.free_plan_solver_seconds,
+                    settings.free_plan_ai_tokens,
+                    settings.free_plan_storage_bytes,
+                ),
+            ),
+            Plan.TEAM: PlanAllowance(
+                plan=Plan.TEAM,
+                meter_allowances=_plan_meters(
+                    settings.team_plan_solver_seconds,
+                    settings.team_plan_ai_tokens,
+                    settings.team_plan_storage_bytes,
+                ),
+            ),
+            Plan.ENTERPRISE: PlanAllowance(plan=Plan.ENTERPRISE),
+        }
+    )
+
+
+#: Read through `plans()` rather than at import, so a test that changes a
+#: setting sees the change. A module-level snapshot froze the values at the
+#: first import and made every allowance test depend on collection order.
+def plans() -> Mapping[Plan, PlanAllowance]:
+    return build_plans()
+
+
+class _LazyPlans(Mapping[Plan, PlanAllowance]):
+    """`PLANS`, but read from settings at lookup rather than at import.
+
+    A module-level dict froze the allowances at the first import of this module,
+    so a test (or an operator reloading configuration) that changed a setting
+    saw the old value — and which value depended on collection order. Reading
+    through means the mapping is always the settings in force, and the name
+    `PLANS` stays what every existing caller already uses.
+    """
+
+    def __getitem__(self, key: Plan) -> PlanAllowance:
+        return build_plans()[key]
+
+    def __iter__(self) -> Iterator[Plan]:
+        return iter(build_plans())
+
+    def __len__(self) -> int:
+        return len(Plan)
+
+
+#: Kept as a name because callers and tests read it. It is a *view* built on
+#: demand; see `plans()`.
+PLANS: Final[Mapping[Plan, PlanAllowance]] = _LazyPlans()
 
 #: Said once, and printed by the quota surface, so nobody reads an unset
 #: allowance as an unlimited one.
 PROVISIONAL_PLANS = (
-    "No plan-level allowances are set. Kryova has no price list yet, so every "
-    "limit below comes from a per-tenant override or from the global settings, "
-    "and the plan a tenant is on does not currently change what they may do."
+    "Plan allowances are set by whoever runs this Kryova, not by a Kryova price "
+    "list. Any limit shown without one comes from a per-tenant override or from "
+    "the global settings, and a meter with no allowance cannot run out."
 )
 
 

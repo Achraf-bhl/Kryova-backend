@@ -18,6 +18,11 @@ python-dotenv==1.2.3
 
 python-jose[cryptography]==3.5.0
 bcrypt==5.0.0
+# Declared directly, not left as a transitive of python-jose: `core/security.py`
+# imports AESGCM and HKDF itself to seal TOTP secrets at rest (P1.7). An import
+# that no requirements file names is how `ezdxf` became a landmine here -- it was
+# present on the machine that wrote it and absent everywhere else.
+cryptography==50.0.0
 redis>=5.0,<9.0
 
 # Meshing and FEA

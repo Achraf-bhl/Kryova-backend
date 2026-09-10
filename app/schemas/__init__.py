@@ -1,10 +1,19 @@
 from app.schemas.auth import (
     DeviceSessionRead,
+    EmailVerification,
+    LoginResult,
+    MfaChallenge,
+    MfaCodeSubmission,
+    MfaEnrolmentRead,
+    MfaLogin,
+    MfaStatusRead,
     PasswordReset,
     PasswordResetRequest,
+    RecoveryCodesRead,
     SessionRead,
     UserCreate,
     UserRead,
+    VerificationStatusRead,
 )
 from app.schemas.geometry import GeometryVersionRead
 from app.schemas.media import MediaRead, UploadSessionCreate, UploadSessionRead
@@ -37,17 +46,24 @@ from app.schemas.simulation import (
 
 __all__ = [
     "DeviceSessionRead",
+    "EmailVerification",
     "GeometryVersionPage",
     "GeometryVersionRead",
     "InvitationAccept",
     "InvitationCreate",
     "InvitationIssued",
     "InvitationRead",
+    "LoginResult",
     "MaterialList",
     "MediaPage",
     "MediaRead",
     "MemberRead",
     "MemberUpdate",
+    "MfaChallenge",
+    "MfaCodeSubmission",
+    "MfaEnrolmentRead",
+    "MfaLogin",
+    "MfaStatusRead",
     "OrganisationCreate",
     "OrganisationMembershipRead",
     "OrganisationRead",
@@ -59,6 +75,7 @@ __all__ = [
     "ProjectPage",
     "ProjectRead",
     "ProjectUpdate",
+    "RecoveryCodesRead",
     "SessionRead",
     "SimulationCreate",
     "SimulationPage",
@@ -68,4 +85,5 @@ __all__ = [
     "UploadSessionRead",
     "UserCreate",
     "UserRead",
+    "VerificationStatusRead",
 ]

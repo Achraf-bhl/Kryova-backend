@@ -14,6 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
+from app import mail
 from app.api.deps import (
     AdminOrganisation,
     CurrentUser,
@@ -390,13 +391,43 @@ def create_invitation(
     db.add(invitation)
     db.commit()
 
+    delivery = mail.send(
+        mail.templates.org_invitation(
+            to=invitation.email,
+            organisation=organisation.name,
+            inviter=current_user.full_name or current_user.email,
+            token=raw_token,
+            expires_at=invitation.expires_at,
+        )
+    )
+
     issued = InvitationIssued.model_validate(invitation)
-    if settings.is_production:
-        # No mail transport exists yet (same gap as the password reset). In
-        # production the token is neither logged nor returned, because a token
-        # in a log file is a credential in a log file.
-        logger.info("Invitation created for organisation %s; no mail transport", organisation.id)
+    if delivery.reached_a_mailbox:
+        # It is in an inbox. Returning the token as well would put a live
+        # credential in the admin's browser history and in any log that records
+        # response bodies, for no gain — the recipient already has it.
         return issued
+    if settings.is_production:
+        # **Production never returns a token, even when the send failed.** This
+        # predates the mail transport and is deliberately kept: a token in a
+        # response body is a token in every proxy and access log that records
+        # one, and an SMTP outage is not a good enough reason to put one there.
+        # The operator's route is to fix mail and re-invite. Loosening this to
+        # "return it whenever delivery failed" would have been a silent
+        # weakening of an existing decision, which is why it is spelled out.
+        logger.warning(
+            "invitation email failed in production; the token is not returned",
+            extra={"organisation_id": organisation.id, "detail": delivery.detail},
+        )
+        return issued
+    # Development, or any deployment whose transport reaches nobody. Hand the
+    # token back so the inviter can pass it on themselves, rather than leaving
+    # them believing an invitation is in flight that is not.
+    if delivery.state is mail.DeliveryState.FAILED:
+        logger.warning(
+            "invitation email failed; returning the token to the inviter",
+            extra={"organisation_id": organisation.id, "detail": delivery.detail},
+        )
     return issued.model_copy(update={"token": raw_token})
 
 

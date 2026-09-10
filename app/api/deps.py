@@ -6,6 +6,7 @@ from fastapi import Cookie, Depends, HTTPException, Path, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session, joinedload
 
+from app.core import maintenance
 from app.core.audit import (
     SAFE_METHODS,
     AuditService,
@@ -170,9 +171,48 @@ def get_current_user(
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF failure")
 
+    _refuse_during_maintenance(request, db, user)
+
     request.state.principal = principal
     with tenant_scope(db, organisation_ids_for_user(db, user)):
         yield user
+
+
+def _refuse_during_maintenance(request: Request, db: Session, user: User) -> None:
+    """Read-only mode, checked once for every authenticated request (P3.7).
+
+    Here rather than in a middleware because the decision needs to know whether
+    the caller is staff, and staff standing is a database row this dependency
+    has already paid to be in a position to read. A middleware would either
+    repeat the lookup on every request including the reads it lets through, or
+    lock staff out of the console during the incident the console exists for.
+
+    A `503` with a sentence, never a 500: the point of a maintenance mode is
+    that somebody who tries to start a simulation during a migration is told
+    what is happening and when it ends, while reads keep working so the
+    application is not simply broken in front of them.
+
+    Reads the *cached* answer. `maintenance_windows` is empty almost always and
+    almost everywhere, and asking the database on every write was a SELECT per
+    request to learn nothing — see `core/maintenance.CACHE_SECONDS`. The staff
+    lookup below stays uncached because it only runs once a window is up.
+    """
+    if request.method.upper() in maintenance.SAFE_METHODS:
+        return
+    window = maintenance.current_window(db)
+    if window is None:
+        return
+    if not maintenance.refuses(
+        window, method=request.method, is_staff=live_staff_grant(db, user.id) is not None
+    ):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=maintenance.refusal_message(window),
+        # Tells a client to stop retrying in a tight loop, and tells a browser
+        # this is temporary rather than a broken endpoint.
+        headers={"Retry-After": "300"},
+    )
 
 
 def _impersonated_principal(
@@ -272,6 +312,42 @@ def _impersonated_principal(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def require_verified_email(current_user: CurrentUser) -> User:
+    """The caller, but only if they have proved their address (P1.5).
+
+    Applied to project creation and nothing else, deliberately. The plan's
+    wording is "friction where it protects, not where it annoys": an unverified
+    account can sign in, read the documentation, open the setup wizard and look
+    at the product. What it cannot do is create the durable, shareable,
+    quota-consuming object — which is the thing an address nobody owns would be
+    used to make.
+
+    `require_verified_email_for_projects` turns it off for a deployment with no
+    mail transport, and that switch is why it is a dependency rather than four
+    lines inside the route: a deployment-wide rule lives in one place.
+    """
+    if not settings.require_verified_email_for_projects:
+        return current_user
+    if current_user.is_verified:
+        return current_user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "Confirm your email address before creating a project. "
+            "We sent a link when you signed up — ask for another from Settings "
+            "if it has expired."
+        ),
+    )
+
+
+#: 403 rather than 404 here, and it is not a violation of the 404-not-403 rule:
+#: that rule is about *another tenant's* resource, where confirming existence is
+#: the leak. This is the caller's own account and the caller already knows it
+#: exists — a 404 would say "there is no such endpoint", which is false and
+#: leaves them with nothing to do.
+VerifiedUser = Annotated[User, Depends(require_verified_email)]
 
 
 def get_principal(request: Request, current_user: CurrentUser) -> Principal:

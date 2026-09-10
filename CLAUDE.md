@@ -278,6 +278,8 @@ app/
   verify/         convergence, the validation register, commitments, the accuracy changelog
   observe/        spans and the metering listener
   parts/          bought-in standard parts
+  handbook/       the docs site's content as data — guides, mission gallery, API reference.
+                  Named `handbook`, not `docs`: `documents/` above is a different thing
 migrations/       Alembic — versions/ is the only migration path
 scripts/          setup, admin provisioning, the CATIA bridge daemon
 docs/             the bridge protocol, the prompt ladder, verification reports, runbooks
@@ -498,7 +500,7 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
 
 ## Testing
 
-1. **One capability, one test file, mirroring `app/`.** 214 files, 7141 tests on 2026-09-09 —
+1. **One capability, one test file, mirroring `app/`.** 7,328 tests collected on 2026-09-10 —
    a figure that rots on every phase, so get today's with
    `venv/bin/python -m pytest --collect-only -q | tail -1` (2 s, opens no database) rather than
    trusting this line. It is here for order of magnitude, not for arithmetic.
@@ -525,6 +527,18 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
 7. **A one-off API-surface check is not a test** — does this OCCT symbol exist, does this method
    take these arguments — and is worth doing, because shipping code that calls a name that is not
    there wastes a seat session on an `AttributeError`.
+8. **A green suite cannot see what the agent was never offered, and this class has now shipped
+   twice.** Both times every tool worked, every test passed, and the product could not do the
+   thing: `catia_new_part` on `occt` built the document and recorded no `CatiaDocument` row, so
+   every document-scoped tool after it was refused one layer up (measured on the seat
+   2026-09-05); and `catia_export_step` was CATIA-only, so a part built on the open kernel could
+   never reach the solver and ladder Levels 3–5 were unreachable there (measured on the seat
+   2026-09-10). Neither gap was *in* a tool — both were in the vocabulary the agent is handed,
+   which lives above `dispatch` in `app/ai/tools.py` and `backends.local_tool_names()`. So: a
+   test that calls the dispatcher directly proves the tool and **not** the path. When you add a
+   capability, ask separately whether the agent is offered it, and write at least one test that
+   goes through `call_catia` — `tests/test_geometry_backends.py::TestThePartCanReachTheSolver` is
+   the shape to copy. The ladder exists because this class is only visible from the outside.
 
 ## Build with parallel agents — the default, not an optimisation
 
@@ -701,6 +715,34 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
 10. **`GC_MakeArcOfCircle(gp_Circ, p1, p2, sense)` returns the *major* arc for both senses** on
    this OCP build, measured twice (`verify/le11_geometry.py`, `occt/sheetmetal.py`). Always use
    the three-point form through an explicit midpoint.
+11. **`TDF_Label.FindAttribute(id, attr)` segfaults when the attribute is absent.** It does not
+   return `False` — it ends the interpreter, with no exception, no traceback and no assertion,
+   so a pytest run dies with exit 139 and looks like a hang. `IsAttribute(id)` answers the same
+   question safely and must be asked first, every time; `app/manufacture/xde.py::_attribute` is
+   the shape to copy. Measured 2026-09-10 and verified by removing the guard and watching the
+   whole run die. This is the OCAF sibling of the handle-by-value trap at item 6: the binding
+   compiles, reads naturally, and is lethal.
+12. **Three XDE accessors return a wrong answer rather than an error** (all measured 2026-09-10
+   against `STEPCAFControl`, all written up in `app/manufacture/xde.py`): a colour written as
+   `XCAFDoc_ColorGen` **comes back as `ColorSurf`+`ColorCurv`**, so a caller asking for the type
+   it wrote is told there is no colour; `XCAFDoc_LayerTool.GetLayers(label, seq)` returns
+   **`True` with an empty sequence** on a document read back from STEP, and the assignment is
+   reachable only through `GetShapesOfLayer_s`; and the reader **invents `'SOLID'` as the name**
+   of a part nobody named, so "something came back" is never evidence a name was carried.
+   `STEPCAFControl_Writer.SetPropsMode(True)` belongs beside them: it computes nothing, it
+   permits the transfer of `XCAFDoc_Volume`/`Area`/`Centroid` attributes that must already be on
+   the document, and with the mode on and the attributes absent the file gets no
+   `PROPERTY_DEFINITION` and nothing says so.
+13. **OCCT's STEP writer tags a geometric tolerance `SI_UNIT($,.METRE.)` while the model is
+   `.MILLI.`, so a tolerance authored at 0.05 mm reads back as 50.0 mm** — ×1000, measured
+   2026-09-10, on a file this build wrote and this build read. **Do not compensate for it.**
+   Scaling by 1/1000 on the way out puts a number in the file that no part of this codebase
+   believes and hides it from the receiving system; the units rule exists for exactly this and
+   the results page already shipped a `/1000` once. The product therefore **may not claim
+   semantic PMI**, the drawing stays the carrier of tolerance, and
+   `xde.write_step_with_metadata` refuses a tolerance under AP214 — where OCCT accepts the
+   request, returns `RetDone` and writes no tolerance at all. Whether the defect is the writer
+   or the reader is THE QUEUE **B5**, a ten-minute measurement that needs the seat.
 
 ## Sheet metal reaches geometry (`app/sheetmetal/fold.py`, `app/kernel/occt/sheetmetal.py`)
 
@@ -1001,6 +1043,61 @@ A bar in tension still returns a finite positive buckling factor (~68,000×), be
 small compressive pockets at the load introduction. That is correct; the meaningful statement is
 the ratio to the compressive case.
 
+## Sending email (`app/mail/`) — added 2026-09-10 with P1.5
+
+There was no mail transport in this service until P1 needed one, and four phases assume it
+(P1.5 verification, P2.5/6 invitations, P3.3/7 impersonation notices and announcements, P10.4
+status comms). `message.py` is the shape, `templates.py` is **every message this product will
+ever send**, `transport.py` is how it leaves, and `mail.send(...)` is the whole caller surface.
+
+1. **`send` returns a `Delivery`; it does not raise.** A registration that has already written
+   the user row must not 500 because SMTP blinked. But the opposite mistake is worse, so the
+   outcome is *data*: `SENT` / `LOGGED` / `FAILED`, and `reached_a_mailbox` is true only for the
+   first. Code that treats a truthy return as "sent" is wrong on every machine without SMTP.
+2. **Production refuses to boot on `MAIL_TRANSPORT=console` or `memory`** (`config.py`
+   `_harden_production`). This is the same failure class as `SECRET_KEY=changeme` booting: on
+   `console`, `/auth/password-reset-request` still returns 204, the frontend still says "check
+   your email", and the token goes to a log file — every component reports success and the user
+   is locked out with nothing to retry.
+3. **The suite installs a `MemoryTransport` autouse** (`conftest.outbox`). Without it a run would
+   print reset tokens into the pytest log, and a machine with SMTP configured for development
+   would have the test suite emailing real people. Request `outbox` by name to assert on what
+   was sent; `_token_from` in `tests/test_auth_verification.py` reads the credential out of the
+   message body the way a person does, which is what catches a link the user cannot use.
+4. **A message is built before the socket is opened.** Rendering needs no connection, and keeping
+   `_build` outside the `try` is what stops a bug in our own code being caught by the SMTP
+   handler and reported to an operator as "the mail server refused it". A test found this.
+5. **`MailKind` and `templates.BUILDERS` must agree**, and a test asserts it. A kind with no
+   builder is a message somebody intended to send and did not.
+
+## Second factor and secrets that must be readable (`app/core/totp.py`, `mfa.py`)
+
+RFC 6238 written from the specification and checked against **its own appendix-B vectors** —
+fifteen lines, so a library would have been a supply-chain edge on a security primitive for no
+saving. Three facts that are not in the RFC:
+
+1. **A code that was accepted is burned.** `last_step` on `totp_enrolments`; `consume` refuses a
+   step at or below it. Without this a code is replayable for the remaining ~90 s of its skew
+   window, which is exactly long enough for a real-time phishing page. `BigInteger`, because a
+   step is unix-seconds/30 and passes 2^31 in 2038.
+2. **Refusals are vague to the user and specific in the log.** "That code was already used" tells
+   an attacker holding a captured code that they have the right code and the wrong moment.
+   `MfaRefusal` carries the real reason; the route says one sentence either way.
+3. **`security.encrypt_at_rest` defends a stolen database and not a stolen host**, and the
+   docstring says so. The key is HKDF'd from `SECRET_KEY`, which is in the environment — so a
+   rooted machine has both. What it does buy is that a leaked backup, a read-only replica or SQL
+   injection does not hand over everybody's second factor. The envelope is versioned (`v1:…`) so
+   a key rotation can read old rows instead of silently locking every enrolled user out;
+   `decrypt_at_rest` returns `None` rather than raising, because the honest response to a rotated
+   key is "ask the user to re-enrol".
+
+**`register_verified` / `_confirm` in the test suite.** Since P1.5 an unverified account cannot
+create a project, so any fixture that registers a *second* user and then makes something for
+them must confirm the address. `auth_client` does it directly rather than by following the
+emailed link — driving the real link from every fixture would make one defect there present as
+failures across the whole suite, which is the opposite of a useful failure. The link flow is
+proved end to end in exactly one place, `tests/test_auth_verification.py`.
+
 ## Seams — respect them
 
 1. **`solve.Solver`** (ABC) — mesh in, load case in, fields out. A surrogate or neural solver must
@@ -1272,7 +1369,13 @@ hides in whatever neither one has to state out loud.
    the module really is Chrono. There is no dynamics engine and the docstrings say so.
 5. **The in-memory rate-limiter backend is per-process.** `RedisBackend` exists in
    `api/rate_limit.py`; with `InMemoryBackend` selected, multiple workers each enforce their own
-   budget. Check which backend is configured before reasoning about a limit.
+   budget. Check which backend is configured before reasoning about a limit. **Since P1.6 the
+   *key* is the other half of that question**: `limit_key` counts against the signed-in principal
+   where there is one and the address otherwise, so "the limit did nothing" can mean the backend
+   *or* that the route is one of the many still using the bare `auth_limiter` IP key. `client_ip`
+   lives in `api/rate_limit.py` and nowhere else — `routes/auth.py` keeps an alias, and
+   `core/audit.py::request_origin` still has its own reading of `X-Forwarded-For` for the audit
+   row, which is a different question and deliberately not merged.
 6. **`ezdxf` is imported by `manufacture/dxf.py` and `documents/readers.py` and is declared in no
    requirements file** (found 2026-09-08). Both guard the import and degrade, so **DXF export and
    DXF attachment reading can never run** — that half is still true and is a product decision
@@ -1281,7 +1384,8 @@ hides in whatever neither one has to state out loud.
    untyped, so `mypy app/` reports *Success: no issues found* and the "if mypy prints anything, it
    is yours" rule is literally true again. Declaring it says the import is optional; it does not
    decide whether DXF should be a supported feature.
-7. **The suite is green on `main`** (7,141 passing / 0 failing, 2026-09-09). Twelve failures that
+7. **The suite is green on `main`** (7,288 passing / 41 skipped / 1 xpassed / 0 failing,
+   2026-09-10, 9 min 57 s against local PostgreSQL). Twelve failures that
    stood here on 2026-09-08 were fixed that day, and **the breakdown of what they turned out to
    be is worth reading before you assume a red test means a broken feature** — one real defect,
    one tripwire working as designed, one stale artefact, and nine tests that were right about
@@ -1309,3 +1413,98 @@ the right, `auth.py::_client_ip`); no list endpoint paginates (all four do, `pag
 9. Don't mark a master-plan task `DONE` without a test that proves it, and don't leave a finished
    task unmarked.
 10. Don't claim an end-to-end result from Linux. No CATIA here.
+
+
+## Stopping things (`app/core/interruption.py`) — added 2026-09-10 with P5.6
+
+Two things here take long enough to be worth stopping — an agent turn and a simulation — and they
+stop very differently. The difference is stated in the product rather than smoothed over, because
+a "stop" button that quietly does nothing is worse than none: it teaches somebody the product
+ignores them at the moment they most want it to listen.
+
+1. **The signal is a database column, never an in-process flag.** Whoever presses stop is served
+   by one worker and the turn is streaming from another. An in-memory registry works perfectly
+   under `--workers 1` and silently does nothing in production, which is the worst available
+   failure shape for this particular button. Both readers go to the database rather than to an
+   attribute their own session loaded — `tests/test_interruption.py` simulates the stale reader
+   explicitly, because that is the mistake that passes every single-session test.
+2. **An agent turn stops at a step boundary, after the tool call in flight finishes.** Half an
+   applied CATIA operation is a worse thing to own than four more seconds of waiting. The stop
+   exit is also the one exit that costs no further model call: the user asked for this to end,
+   and spending another LLM call to write a farewell is the opposite of stopping.
+3. **A simulation stops at a stage boundary — and the compute already used is billed.** Meshing
+   and solving are each a single call into gmsh or CalculiX this process cannot reach into, so a
+   solve already handed to CalculiX runs to completion. The API says so in words. A cancel does
+   not make machine time retroactively free, and implying otherwise is the kind of small lie a
+   billing dispute is built out of.
+4. **`JobStatus.CANCELLED` is terminal and is not a kind of `FAILED`.** A failure is the product
+   not working; a cancellation is the product doing what it was told. Anything that groups them
+   puts a user who changed their mind into the fleet's failure rate.
+
+## Approval gates (`app/core/gates.py`) — added 2026-09-10 with P5.5
+
+A gate is a **row**, not a question in the conversation. The transcript is trimmed (`ai/resume.py`
+exists because of that), an LLM's paraphrase of an approval is not an approval, and "who signed
+this off and what did they see" is the question actually asked — always after something has gone
+wrong. Three rules, each pinned by a test that fails when the check is removed:
+
+1. **The subject is pinned by digest, not referenced by name.** `decide` re-digests what the
+   decider is looking at *now* and refuses if it has moved. A gate approving "the current spec"
+   is a signature on a blank page. Never pass the stored digest back in — that makes the check a
+   tautology.
+2. **A rejection carries a reason**, because the agent's next move depends entirely on why.
+3. **`EXPIRED` is not a fourth way of saying no.** `decided_by_id` stays null: filling it would
+   put a name against a decision nobody made.
+
+**This is the first reader of `Membership.domain_role`**, whose docstring has said "16.5/P5 read
+this column" since P2.2 while nothing did. `None` means *not stated* and does not qualify — the
+column is nullable precisely so that can be said.
+
+## An enum in a `String` column is a bug this codebase has shipped four times
+
+`mapped_column(String(16))` typed as an enum gives you the enum on a row *written* in this session
+and a plain `str` on one *loaded* from the database. Every `value is Thing.X` check then changes
+answer depending on whether the object came from the identity map or a SELECT — so it passes in
+any test that writes and reads in one session, and fails on the next request, where the row loads
+fresh. `StrEnum` makes it worse: `==` stays true either way, so only identity checks and attribute
+access break, silently.
+
+Found on `ConversationMessage.role`, then `ApprovalGate.state` (`gate.state.is_decided` raised on
+every gate a reviewer opened), then `Announcement.level` and `ShareLink.revocation` — the
+announcement one was live, raising `AttributeError` on any deployment that had actually published
+a banner. **Use `app/models/types.EnumText`.** It emits the same VARCHAR DDL, so adopting it needs
+no migration.
+
+## The public surfaces, and what each one costs
+
+Four routers answer with no principal, and they are not paid for identically. Read the module
+docstring before adding a fifth.
+
+- **`trust`** — module constants only. No `DbSession`, no `CurrentUser`, and a test walks each
+  route's dependency graph to keep it that way.
+- **`sharing.public_router`** — a token and no id, so there is nothing for a caller to substitute;
+  `core/sharing.resolve` is the whole gate.
+- **`handbook`** — module constants plus this process's own OpenAPI document. Touches no database
+  at all, and `tests/test_docs.py` asserts `get_db` is unreachable from it.
+- **`status`** — the one public route that takes a `DbSession`. Allowed because of *what* it
+  reads: `MaintenanceWindow` and `Announcement` are operator-declared rows with no tenant column,
+  and the free text it publishes is the text written for customers. It never reads a job, a
+  project, a user or a usage record, and it carries **none** of `/admin/health`'s numbers — those
+  are the size of the business and the hours nobody is watching.
+
+**Degraded is never inferred from a failure rate.** There is no threshold in `core/status.py` and
+a test parses its AST to keep it out: a rule nobody agreed to would put this product on a public
+outage page for a quiet hour with two bad runs.
+
+## The docs site (`app/handbook/`) — added 2026-09-10 with P10.2
+
+Everything it publishes is **derived**, because documentation is the part of a product most likely
+to quietly stop being true and deriving it is the only defence that does not rely on somebody
+remembering. The mission gallery comes from `app.design.missions.LADDER`; the API reference from
+this deployment's own OpenAPI document; and **every guide step naming a route is checked against
+the running router**. A guide pointing at an endpoint this build does not serve is worse than no
+guide — the reader believes it, it fails, and they conclude the product is broken.
+
+`not_covered` on a guide and `not_claimed` on a gallery entry are required fields, not decoration.
+A gallery that printed the passes and dropped `Mission.unproven` would be the most misleading page
+in the product, because it would be the most convincing one.

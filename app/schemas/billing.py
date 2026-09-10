@@ -196,3 +196,44 @@ class MeteringFaultRead(BaseModel):
     source: str
     failure: str
     detail: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Plans, credit and estimates (P8.2, P8.3, P8.4)
+# ---------------------------------------------------------------------------
+
+
+class PlanChange(BaseModel):
+    plan: Plan
+
+
+class CreditPurchase(BaseModel):
+    #: **Minor units** — cents, not dollars. Integer, because money is not
+    #: floating point and this is the representation the provider uses, so the
+    #: boundary is a transfer rather than a conversion.
+    amount_minor: int = Field(gt=0, le=10_000_000)
+
+
+class EstimateRead(BaseModel):
+    """One meter's projected cost, and whether we actually know it.
+
+    `units` is `None` when there is not enough history, and `basis` says
+    `unavailable` with `how` naming why. A cost estimate is the most tempting
+    place in a product to invent a number — advisory, shown before anything
+    happens, never contradicted afterwards — so this shape refuses to carry one.
+    """
+
+    meter: Meter
+    unit: str
+    units: int | None
+    basis: str
+    how: str
+    samples: int
+    #: The whole thing as one sentence, so a client renders the honest version
+    #: rather than assembling its own from the parts.
+    sentence: str
+
+
+class RunEstimateRead(BaseModel):
+    organisation_id: str
+    estimates: list[EstimateRead]

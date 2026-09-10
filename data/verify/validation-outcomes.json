@@ -1,5 +1,5 @@
 {
- "code_fingerprint": "sha256:28b291ee549b85b0ebe6c7eac6be10dfb7055d37bb34a8e0ff974bf7ab249635",
+ "code_fingerprint": "sha256:5e28ee40a43eaa02862214e5a886194b25734f80c00376baf07b2ace96616204",
  "outcomes": [
   {
    "analysis": "linear-static",
@@ -196,7 +196,7 @@
     "value": 92.40782637309455
    },
    "relative_deviation": -0.003151819060468738,
-   "seconds": 2.266,
+   "seconds": 2.641,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE1 'Elliptic membrane under a uniformly distributed load', reproducing NAFEMS publication TNSB Rev. 3, 'The Standard NAFEMS Benchmarks', October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le1.htm on 2026-09-08.",
@@ -348,7 +348,7 @@
      "source": "quarter elliptical annular plate built with OCCT and meshed from STEP: outer 3250 x 2750 mm, inner 2000 x 1000 mm, 600 mm thick"
     },
     "load_case": {
-     "digest": "sha256:2d83fc0c3ded84c61595e21b29426941422aee3800ff85f724dba02b1effb1db",
+     "digest": "sha256:cb65be3cc120d42213ef628a116ffbcb8f9f9efa91ee40f9e7b902d85f046919",
      "name": "NAFEMS LE10 thick plate under pressure",
      "type": "LoadCase"
     },
@@ -416,7 +416,7 @@
     "value": -5.363757072286861
    },
    "relative_deviation": -0.003019131545193176,
-   "seconds": 45.88,
+   "seconds": 53.425,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE10 'Thick plate under pressure', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le10.htm on 2026-09-08.",
@@ -550,7 +550,7 @@
      "source": "quarter cylinder/taper/sphere built with OCCT and meshed from STEP; see app/verify/le11_geometry.py and docs/nafems-le11-geometry.md"
     },
     "load_case": {
-     "digest": "sha256:425019d9da25f2a4a921177f1c6c4118d9080ae593f4b75c31cde080eefd4f96",
+     "digest": "sha256:e7014d6abd2e1b3afd0ed53de52b0c083881da917e0c9b0c220bc592f5362d22",
      "name": "NAFEMS LE11 cylinder/taper/sphere under a temperature field",
      "type": "LoadCase"
     },
@@ -617,7 +617,7 @@
     "unit": "MPa"
    },
    "relative_deviation": null,
-   "seconds": 12.025,
+   "seconds": 15.156,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE11 'Solid cylinder/taper/sphere-temperature', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le11.htm on 2026-09-08.",
@@ -631,12 +631,12 @@
   {
    "analysis": "modal",
    "convergence": {
-    "asymptotic_ratio": 0.9892340777615315,
+    "asymptotic_ratio": 0.9892340777614921,
     "cautions": [],
-    "extrapolated_value": 43.25807099132626,
+    "extrapolated_value": 43.25807099132188,
     "failures": [],
-    "fine_value": 43.62402403875077,
-    "gci_fine": 0.010485995259728903,
+    "fine_value": 43.624024038749475,
+    "gci_fine": 0.010485995259817341,
     "gci_threshold": 0.05,
     "levels": [
      {
@@ -646,7 +646,7 @@
       "element_type": "tet10",
       "node_count": 4375,
       "representative_size_mm": 337.9001108651889,
-      "value": 43.62402403875077,
+      "value": 43.624024038749475,
       "volume_mm3": 100000000000.00009
      },
      {
@@ -656,7 +656,7 @@
       "element_type": "tet10",
       "node_count": 1445,
       "representative_size_mm": 506.85016629778306,
-      "value": 44.09878816342577,
+      "value": 44.09878816342623,
       "volume_mm3": 99999999999.99992
      },
      {
@@ -666,11 +666,11 @@
       "element_type": "tet10",
       "node_count": 243,
       "representative_size_mm": 1013.7003325955667,
-      "value": 46.7427867988829,
+      "value": 46.74278679888263,
       "volume_mm3": 100000000000.00012
      }
     ],
-    "observed_order": 2.0513485570207863,
+    "observed_order": 2.051348557014209,
     "quantity": "fundamental flexural frequency (mode 4, after three rigid-body modes)",
     "reason": "The fine-grid GCI is 1.05%, within the 5.00% band, with a monotone observed order of 2.05 over 3 grids.",
     "refinement_ratios": [
@@ -678,23 +678,23 @@
      2.0000000000000013
     ],
     "safety_factor": 1.25,
-    "stated_value": 43.62402403875077,
+    "stated_value": 43.624024038749475,
     "unit": "Hz",
     "verdict": "converged"
    },
    "detail": "43.624 against 44.092 Hz (-1.061%, band \u00b15.000%)",
    "id": "nafems-fv52",
-   "measured_value": 43.62402403875077,
+   "measured_value": 43.624024038749475,
    "outcome": "validated",
    "provenance": {
     "analysis": "modal",
     "convergence": {
-     "asymptotic_ratio": 0.9892340777615315,
+     "asymptotic_ratio": 0.9892340777614921,
      "cautions": [],
-     "extrapolated_value": 43.25807099132626,
+     "extrapolated_value": 43.25807099132188,
      "failures": [],
-     "fine_value": 43.62402403875077,
-     "gci_fine": 0.010485995259728903,
+     "fine_value": 43.624024038749475,
+     "gci_fine": 0.010485995259817341,
      "gci_threshold": 0.05,
      "levels": [
       {
@@ -704,7 +704,7 @@
        "element_type": "tet10",
        "node_count": 4375,
        "representative_size_mm": 337.9001108651889,
-       "value": 43.62402403875077,
+       "value": 43.624024038749475,
        "volume_mm3": 100000000000.00009
       },
       {
@@ -714,7 +714,7 @@
        "element_type": "tet10",
        "node_count": 1445,
        "representative_size_mm": 506.85016629778306,
-       "value": 44.09878816342577,
+       "value": 44.09878816342623,
        "volume_mm3": 99999999999.99992
       },
       {
@@ -724,11 +724,11 @@
        "element_type": "tet10",
        "node_count": 243,
        "representative_size_mm": 1013.7003325955667,
-       "value": 46.7427867988829,
+       "value": 46.74278679888263,
        "volume_mm3": 100000000000.00012
       }
      ],
-     "observed_order": 2.0513485570207863,
+     "observed_order": 2.051348557014209,
      "quantity": "fundamental flexural frequency (mode 4, after three rigid-body modes)",
      "reason": "The fine-grid GCI is 1.05%, within the 5.00% band, with a monotone observed order of 2.05 over 3 grids.",
      "refinement_ratios": [
@@ -736,7 +736,7 @@
       2.0000000000000013
      ],
      "safety_factor": 1.25,
-     "stated_value": 43.62402403875077,
+     "stated_value": 43.624024038749475,
      "unit": "Hz",
      "verdict": "converged"
     },
@@ -816,10 +816,10 @@
      "name": "modal-lanczos"
     },
     "unit": "Hz",
-    "value": 43.62402403875077
+    "value": 43.624024038749475
    },
-   "relative_deviation": -0.010613625175751394,
-   "seconds": 3.713,
+   "relative_deviation": -0.010613625175780723,
+   "seconds": 5.426,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), FV52 'Simply supported \"solid\" square plate', reproducing NAFEMS publication TNSB Rev. 3, 'The Standard NAFEMS Benchmarks', October 1990. Reference row read verbatim \u2014 modes 1-3 rigid body, then 44.092, 106.66, 106.66, 156.23, 193.58, 200.13, 200.13 Hz \u2014 at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-fv52.htm on 2026-09-08.",
@@ -831,7 +831,7 @@
    "title": "FV52 \u2014 simply supported \"solid\" square plate"
   }
  ],
- "recorded_at": "2026-09-09T14:59:26.371689+00:00",
+ "recorded_at": "2026-09-10T10:15:00.710681+00:00",
  "schema_version": 1,
  "suite": "nafems-standard-benchmarks"
 }

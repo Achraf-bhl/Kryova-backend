@@ -21,7 +21,7 @@ is the gotcha that costs an afternoon.** `Interface_Static.SetCVal_s` returns
 initialised the STEP resource set, and constructing `STEPControl_Writer` is what
 does that. Set `write.step.schema` before the constructor and the call fails, the
 return value is discarded by every example on the internet, and the file comes out
-as AP214 with nothing anywhere saying so. `_configure` checks the return value and
+as AP214 with nothing anywhere saying so. `configure_writer` checks the return value and
 refuses, so a future OCCT that renames a parameter is a refusal rather than a
 wrong file.
 
@@ -151,8 +151,12 @@ def _step() -> dict[str, Any]:
     }
 
 
-def _configure(static: Any, schema: StepSchema) -> None:
+def configure_writer(static: Any, schema: StepSchema) -> None:
     """Tell the writer its schema and its unit, and refuse if it did not listen.
+
+    Public because `xde.py` writes through a *different* OCCT writer to the same
+    static parameters, and two copies of this would be two places for the schema
+    and the unit to disagree about what was asked for.
 
     `SetCVal_s` returns a bool and every example discards it. Checking it is the
     difference between "this file is AP242" and "this file is whatever OCCT
@@ -196,7 +200,7 @@ def write_step(
 
     step = _step()
     writer = step["writer"]()
-    _configure(step["static"], schema)
+    configure_writer(step["static"], schema)
 
     status = writer.Transfer(shape, step["as_is"])
     if status != step["done"]:
@@ -250,7 +254,7 @@ def step_schema_of(path: str | Path) -> str:
 
     Reading it back from the file rather than trusting what was requested is the
     only way to know the static parameter took effect, and the silent failure
-    mode it guards against is the one `_configure`'s docstring describes.
+    mode it guards against is the one `configure_writer`'s docstring describes.
     """
     source = Path(path)
     try:
@@ -273,6 +277,7 @@ __all__ = [
     "STEP_UNIT",
     "StepExport",
     "StepSchema",
+    "configure_writer",
     "read_step",
     "step_schema_of",
     "write_step",

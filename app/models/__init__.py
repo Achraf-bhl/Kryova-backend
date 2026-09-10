@@ -30,8 +30,10 @@ from app.models.conversation import (
     ConversationMessage,
     MessageRole,
 )
+from app.models.gates import ApprovalGate, GateState
 from app.models.geometry import GeometryVersion
 from app.models.media import Media, MediaKind, MediaUploadSession, UploadStatus
+from app.models.mfa import RecoveryCode, TotpEnrolment
 from app.models.organisation import (
     DomainRole,
     Membership,
@@ -42,14 +44,25 @@ from app.models.organisation import (
     organisation_ids_for,
     personal_organisation,
 )
+from app.models.platform import (
+    Announcement,
+    AnnouncementLevel,
+    FeatureFlag,
+    FeatureFlagOverride,
+    MaintenanceWindow,
+)
 from app.models.project import Project
 from app.models.session import REUSE_GRACE_SECONDS, SessionRevocation, UserSession
+from app.models.sharing import ProjectTransfer, ShareLink, ShareRevocation
 from app.models.simulation import JobStatus, SimulationJob
 from app.models.user import User
 
 __all__ = [
     "REUSE_GRACE_SECONDS",
     "AITokenUsage",
+    "ApprovalGate",
+    "Announcement",
+    "AnnouncementLevel",
     "AuditAction",
     "AuditEvent",
     "AuditOutcome",
@@ -62,10 +75,14 @@ __all__ = [
     "Conversation",
     "ConversationMessage",
     "DomainRole",
+    "FeatureFlag",
+    "FeatureFlagOverride",
+    "GateState",
     "GeometryVersion",
     "ImpersonationMode",
     "ImpersonationSession",
     "JobStatus",
+    "MaintenanceWindow",
     "Media",
     "MediaKind",
     "MediaUploadSession",
@@ -78,10 +95,15 @@ __all__ = [
     "OrganisationInvitation",
     "Plan",
     "Project",
+    "ProjectTransfer",
+    "RecoveryCode",
     "SessionRevocation",
+    "ShareLink",
+    "ShareRevocation",
     "SimulationJob",
     "StaffGrant",
     "StaffRole",
+    "TotpEnrolment",
     "UploadStatus",
     "UsageRecord",
     "UsageRollup",

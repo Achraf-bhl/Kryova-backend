@@ -78,23 +78,45 @@ def as_tenant(session: Session, organisation_ids: list[str]) -> Iterator[None]:
         yield
 
 
-def _p2_migration() -> ModuleType:
-    """The migration module that owns the RLS DDL, found by what it defines.
+def _rls_migrations() -> list[ModuleType]:
+    """**Every** migration module that ships RLS DDL, found by what it defines.
 
     By `rls_statements`, not by filename: a revision file gets renamed when
     somebody rewords the message, and a test that breaks on a reword is a test
     people delete.
+
+    This returned *the first match* until 2026-09-10, when P2.5 made three
+    migrations define `rls_statements` (P2's tables, billing's, and
+    `share_links`). One match meant the test schema got one migration's
+    policies while production got all three, and which one depended on
+    filename sort order — so the day a new migration happened to sort first,
+    every isolation assertion here would have been made against a schema with
+    no policies on the tables it was asserting about. Applying all of them is
+    both the honest thing and what production actually looks like.
     """
+    found: list[ModuleType] = []
     for path in sorted(VERSIONS.glob("*.py")):
-        if "rls_statements" not in path.read_text(encoding="utf-8"):
+        if "def rls_statements" not in path.read_text(encoding="utf-8"):
             continue
-        spec = importlib.util.spec_from_file_location(f"_p2_{path.stem}", path)
+        spec = importlib.util.spec_from_file_location(f"_rls_{path.stem}", path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
-        return module
-    raise AssertionError("No migration defines rls_statements(); the P2 policies are gone.")
+        found.append(module)
+    if not found:
+        raise AssertionError("No migration defines rls_statements(); the P2 policies are gone.")
+    return found
+
+
+def _p2_migration() -> ModuleType:
+    """The one that owns the *P2* tables, for the assertions that name them."""
+    for module in _rls_migrations():
+        # `_VIA_PROJECT` is unique to the P2 migration: it is the only one that
+        # policies tables reaching their tenant through a join.
+        if hasattr(module, "_VIA_PROJECT"):
+            return module
+    raise AssertionError("No migration defines the P2 tenant policies.")
 
 
 @pytest.fixture(scope="module")
@@ -103,7 +125,14 @@ def migration() -> ModuleType:
 
 
 @pytest.fixture(scope="module")
-def rls(db_connection: Connection, migration: ModuleType) -> Iterator[str]:
+def all_rls_migrations() -> list[ModuleType]:
+    return _rls_migrations()
+
+
+@pytest.fixture(scope="module")
+def rls(
+    db_connection: Connection, all_rls_migrations: list[ModuleType]
+) -> Iterator[str]:
     """Apply the shipped RLS policies to the test schema.
 
     Module-scoped so it lands before any test's transaction opens: this is DDL,
@@ -113,8 +142,9 @@ def rls(db_connection: Connection, migration: ModuleType) -> Iterator[str]:
         pytest.skip("RLS is a PostgreSQL feature; set TEST_DATABASE_URL to a Postgres database")
 
     schema = settings.test_schema
-    for statement in migration.rls_statements(schema):
-        db_connection.execute(text(statement))
+    for module in all_rls_migrations:
+        for statement in module.rls_statements(schema):
+            db_connection.execute(text(statement))
 
     # The probe role is what makes every assertion below mean anything on a
     # database whose owning role holds BYPASSRLS. Created idempotently: roles
@@ -140,8 +170,9 @@ def rls(db_connection: Connection, migration: ModuleType) -> Iterator[str]:
     try:
         yield schema
     finally:
-        for statement in migration.rls_teardown_statements(schema):
-            db_connection.execute(text(statement))
+        for module in all_rls_migrations:
+            for statement in module.rls_teardown_statements(schema):
+                db_connection.execute(text(statement))
         db_connection.commit()
 
 

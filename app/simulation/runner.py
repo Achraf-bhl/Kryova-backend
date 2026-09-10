@@ -25,7 +25,9 @@ from typing import Any
 import numpy as np
 from sqlalchemy.orm import Session
 
+from app.core import interruption
 from app.core.config import settings
+from app.core.interruption import Cancelled
 from app.core.metering import Cause, LedgerSink, UsageScope, record_storage, usage_scope
 from app.media import LocalMediaStore, MediaService
 from app.mesh.gmsh_mesher import (
@@ -83,7 +85,23 @@ def run_simulation(
             _usage_cause(job), LedgerSink(session_scope), fault_scope=session_scope
         ) as usage:
             try:
-                mesh, mesh_stats, output, ran = _execute(job, media, solver, usage)
+                mesh, mesh_stats, output, ran = _execute(
+                    job, media, solver, usage, session_scope
+                )
+            except Cancelled:
+                # Stopped between stages, at the user's request (P5 task 6).
+                # **Not `_fail`**: this run did what it was told, and filing it
+                # as a failure would put a user changing their mind into the
+                # fleet's failure rate. The meshing that really happened stays
+                # metered -- `usage_scope` posts on the way out either way --
+                # because a cancel does not make machine time retroactively
+                # free, and pretending otherwise is the kind of small lie a
+                # billing dispute is built on.
+                job.status = JobStatus.CANCELLED
+                job.finished_at = datetime.now(timezone.utc)
+                db.commit()
+                logger.info("Simulation job %s stopped on request", job_id)
+                return
             except (MeshError, SolverError, ValueError) as exc:
                 # Expected, explainable failures: a bad mesh or an ill-posed model.
                 _fail(db, job, str(exc))
@@ -118,6 +136,21 @@ def run_simulation(
             job.status = JobStatus.SUCCEEDED
             job.finished_at = datetime.now(timezone.utc)
             db.commit()
+
+
+def _stop_here_if_asked(job: SimulationJob, session_scope: SessionScope) -> None:
+    """Raise `Cancelled` if somebody has asked this run to stop (P5 task 6).
+
+    Opens its **own** session rather than reading `job.cancel_requested_at`.
+    The job object belongs to the runner's transaction, which began before the
+    request existed and is holding a stage-long snapshot; the request was
+    written by an API worker in another process entirely. Reading the attribute
+    would therefore work in a single-session test and never once in production
+    — see `app/core/interruption.py`, which is about exactly this failure.
+    """
+    with session_scope() as probe:
+        if interruption.simulation_stop_requested(probe, job.id):
+            raise Cancelled
 
 
 def _usage_cause(job: SimulationJob) -> Cause:
@@ -171,7 +204,13 @@ CONDUCTION: str = "thermal-conduction"
 ANALYSES: tuple[str, ...] = ("solid", *PLANE_STATES, CONDUCTION)
 
 
-def _execute(job: SimulationJob, media: MediaService, solver: Solver, usage: UsageScope):
+def _execute(
+    job: SimulationJob,
+    media: MediaService,
+    solver: Solver,
+    usage: UsageScope,
+    session_scope: SessionScope,
+):
     version = job.geometry_version
 
     # Before gmsh, not after: the post-mesh check below only fires once the
@@ -197,11 +236,19 @@ def _execute(job: SimulationJob, media: MediaService, solver: Solver, usage: Usa
         return _execute_plane(job, path, version.file_format, case, usage)
 
     if job.grids > 1:
-        return _execute_study(job, path, version.file_format, case, solver, usage)
+        return _execute_study(
+            job, path, version.file_format, case, solver, usage, session_scope
+        )
 
     mesh, mesh_stats = generate_tet_mesh(
         path, version.file_format, job.element_size_mm, element_order=job.element_order
     )
+    # The one interruption point in a single-grid run: between the two stages,
+    # each of which is a single call into gmsh or CalculiX that this process
+    # cannot reach into. Placed after the mesh so the meshing that was paid for
+    # is still counted, and before the solve because the solve is the expensive
+    # half worth not starting.
+    _stop_here_if_asked(job, session_scope)
     # Annotated here rather than after the solve, so a run that fails *in* the
     # solver is still billed for the meshing it really did. The gmsh span
     # declares no fields (`app.observe.catalogue`), so without this the
@@ -247,6 +294,7 @@ def _execute_study(
     case: LoadCase,
     solver: Solver,
     usage: UsageScope,
+    session_scope: SessionScope,
 ):
     """Solve the same case on successively finer grids and assess the result.
 
@@ -282,6 +330,10 @@ def _execute_study(
                 f"the {settings.max_elements:,} limit. A study refines from the size you "
                 "gave, so raise element_size_mm or ask for fewer grids."
             )
+        # Per grid, because a study is the longest thing this product runs and
+        # each grid costs roughly `REFINEMENT_RATIO ** 3` times the one before:
+        # stopping before the finest is where a cancel saves the most.
+        _stop_here_if_asked(job, session_scope)
         output = solver.solve(mesh, case)
         solved[element_size_mm] = (mesh, stats, output)
         return mesh, MAX_VON_MISES.read(mesh, output)

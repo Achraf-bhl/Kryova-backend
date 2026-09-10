@@ -518,3 +518,67 @@ class TestProvenance:
 
         for key in RECIPES:
             json.dumps(describe(key).describe())
+
+
+class TestACaseRecordsWhichRecipeMadeIt:
+    """E12.1's last gap, which this module named in its own docstring.
+
+    A `LoadCase` carried `name` and nothing that said which recipe and which
+    factor produced its loads, so "this is the 1.5 ultimate case" was a claim in
+    a string rather than a record somebody could check.
+    """
+
+    def test_a_hand_authored_case_has_no_provenance_and_that_is_correct(self) -> None:
+        # `None` means hand-authored. It never means unknown, and stamping a
+        # recipe onto a case nobody derived that way would be a citation for
+        # work that did not happen.
+        case = compose(
+            "By hand", STEEL, [Fixture(where=FaceSelector(axis='z', side='min'), dofs=['x', 'y', 'z'])], self_weight()
+        )
+        assert case.provenance is None
+
+    def test_naming_the_recipes_records_them_with_their_sources(self) -> None:
+        case = compose(
+            "Ultimate lift",
+            STEEL,
+            [Fixture(where=FaceSelector(axis='z', side='min'), dofs=['x', 'y', 'z'])],
+            self_weight(),
+            recipes=("self-weight",),
+            factor=1.5,
+        )
+
+        assert case.provenance is not None
+        assert case.provenance["factor"] == 1.5
+        recorded = case.provenance["recipes"]
+        assert len(recorded) == 1
+        assert recorded[0]["recipe"] == "self-weight"
+        # The source travels with it, which is the point of recording at all.
+        assert recorded[0]["source"]["citation"]
+
+    def test_claiming_a_recipe_that_does_not_exist_is_refused(self) -> None:
+        # A provenance naming a recipe nobody can look up is worse than none: it
+        # reads as checkable and is not.
+        with pytest.raises(ValueError, match="not in the library"):
+            compose(
+                "Wrong",
+                STEEL,
+                [Fixture(where=FaceSelector(axis='z', side='min'), dofs=['x', 'y', 'z'])],
+                self_weight(),
+                recipes=("gravity-but-more",),
+            )
+
+    def test_the_provenance_survives_a_json_round_trip(self) -> None:
+        # `LoadCase` is stored as JSONB on the simulation job row, so anything
+        # that cannot serialise is a field that silently disappears.
+        import json
+
+        case = compose(
+            "Ultimate lift",
+            STEEL,
+            [Fixture(where=FaceSelector(axis='z', side='min'), dofs=['x', 'y', 'z'])],
+            self_weight(),
+            recipes=("self-weight",),
+            factor=1.5,
+        )
+        restored = LoadCase.model_validate(json.loads(case.model_dump_json()))
+        assert restored.provenance == case.provenance

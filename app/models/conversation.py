@@ -18,7 +18,7 @@ makes a per-user daily budget enforceable and a per-conversation total cheap to
 read. FEA compute is already metered; this is the same for LLM spend.
 """
 
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +26,7 @@ from sqlalchemy import Date, ForeignKey, Index, Integer, String, Text, TypeDecor
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.base import TimestampMixin, UUIDPrimaryKey
+from app.models.base import TimestampMixin, UTCDateTime, UUIDPrimaryKey
 from app.models.types import JSONB_compat as JSONB
 
 if TYPE_CHECKING:
@@ -110,7 +110,27 @@ class Conversation(UUIDPrimaryKey, TimestampMixin, Base):
     #: like, never which document it is.
     catia_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
 
-    owner: Mapped["User"] = relationship()
+    #: Set by `POST /ai/conversations/{id}/cancel`; cleared when a turn starts
+    #: (P5 task 6).
+    #:
+    #: **A column rather than an in-process flag, and that is the whole point.**
+    #: The turn is streaming from one worker and the stop arrives at whichever
+    #: worker the load balancer picked, which is almost never the same one. An
+    #: in-memory registry would work perfectly on a laptop with `--workers 1`
+    #: and silently do nothing in production — the worst available failure
+    #: shape, because "stop" is a button people press when something is already
+    #: going wrong.
+    #:
+    #: Read once per step boundary, which is seconds apart, so it is not a hot
+    #: query. It is deliberately **not** read mid-tool-call: a CATIA operation
+    #: that has begun finishes, because a half-applied geometry change is a
+    #: worse outcome than a few more seconds of waiting.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    cancel_requested_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
+    owner: Mapped["User"] = relationship(foreign_keys=[owner_id])
     project: Mapped["Project | None"] = relationship()
     messages: Mapped[list["ConversationMessage"]] = relationship(
         back_populates="conversation",

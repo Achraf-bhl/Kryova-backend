@@ -283,6 +283,33 @@ class AuditAction(str, enum.Enum):
     QUOTA_READ = "quota.read"
     ADMIN_ACTION_REFUSED = "admin.refused"
 
+    #: A project changing tenants (P2.5). Recorded here as well as in
+    #: `project_transfers` because the two answer different questions: the
+    #: table is provenance that travels with the project, this row is "what
+    #: did this person do last month" and lives in the append-only chain.
+    PROJECT_TRANSFERRED = "project.transferred"
+    #: An account suspended or reinstated, and a deletion scheduled or
+    #: cancelled (P3.4). Destructive and reversible respectively, and both
+    #: are things an org owner is entitled to see happened to them.
+    USER_SUSPENDED = "user.suspended"
+    USER_REINSTATED = "user.reinstated"
+    USER_DELETION_SCHEDULED = "user.deletion_scheduled"
+    USER_DELETION_CANCELLED = "user.deletion_cancelled"
+    USER_PURGED = "user.purged"
+    #: Feature flags and maintenance mode (P3.5, P3.7): small switches with
+    #: large blast radius, so who flipped one is worth keeping.
+    FLAG_CHANGED = "flag.changed"
+    MAINTENANCE_CHANGED = "maintenance.changed"
+    ANNOUNCEMENT_PUBLISHED = "announcement.published"
+    #: An approval gate approved, rejected, or refused a decision (P5.5). The
+    #: refusals are recorded too — an attempt to approve one's own gate is
+    #: precisely the event somebody comes looking for afterwards.
+    GATE_DECIDED = "gate.decided"
+    #: A run or an agent turn stopped on request (P5.6). Kept because "who
+    #: stopped the overnight study" is a real question, and because a
+    #: cancellation must never be mistaken for a failure.
+    RUN_CANCELLED = "run.cancelled"
+
 
 class AuditOutcome(str, enum.Enum):
     """What happened, and the four answers are deliberately not three.

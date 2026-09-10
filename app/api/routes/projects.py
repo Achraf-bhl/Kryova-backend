@@ -3,7 +3,14 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 from sqlalchemy import func, select
 
-from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject, ReadableProject
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    MediaServiceDep,
+    OwnedProject,
+    ReadableProject,
+    VerifiedUser,
+)
 from app.models import Project
 from app.schemas import ProjectCreate, ProjectPage, ProjectRead, ProjectUpdate
 
@@ -11,7 +18,8 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 @router.post("", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
-def create_project(payload: ProjectCreate, db: DbSession, current_user: CurrentUser) -> Project:
+def create_project(payload: ProjectCreate, db: DbSession, current_user: VerifiedUser) -> Project:
+    """Create a project. The one route that requires a confirmed address (P1.5)."""
     project = Project(name=payload.name, description=payload.description, owner_id=current_user.id)
     db.add(project)
     db.commit()

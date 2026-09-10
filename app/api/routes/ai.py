@@ -17,7 +17,7 @@ import logging
 from collections.abc import Iterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -52,7 +52,10 @@ from app.api.deps import (
     OwnedProject,
     SessionScopeDep,
 )
+from app.api.rate_limit import RateLimit
+from app.core import interruption
 from app.core.config import settings
+from app.core.metering import Cause, LedgerSink, record_tokens, usage_scope
 from app.models import (
     Conversation,
     ConversationMessage,
@@ -62,6 +65,8 @@ from app.models import (
     SimulationJob,
     User,
 )
+from app.models.organisation import organisation_ids_for_user
+from app.simulation.runner import SessionScope
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +138,21 @@ def _record(
     purpose: str,
     provider: LLMProvider,
     conversation: Conversation | None = None,
+    session_scope: SessionScope | None = None,
 ) -> None:
+    """Record a turn's tokens against the daily budget **and** the bill (P8.1).
+
+    Two ledgers on purpose, and they answer different questions.
+    `app/ai/usage.py` is the *budget* — a daily ceiling that stops a runaway
+    loop, keyed on the user, read before the next call. `app/core/metering.py`
+    is the *bill* — keyed on the tenant, summed over a period, and the thing an
+    invoice is reconstructed from. Merging them would mean either billing on a
+    per-user counter that resets every day, or enforcing a ceiling by scanning
+    a ledger, and neither is the shape the other needs.
+
+    This is the single funnel every AI path already went through, which is why
+    the billing half is wired here rather than at four call sites.
+    """
     token_usage.record(
         db,
         user=user,
@@ -144,6 +163,60 @@ def _record(
         conversation=conversation,
     )
     db.commit()
+    _meter_tokens(
+        db, user, usage, purpose=purpose, provider=provider,
+        conversation=conversation, session_scope=session_scope,
+    )
+
+
+def _meter_tokens(
+    db: Session,
+    user: User,
+    usage: TokenUsage,
+    *,
+    purpose: str,
+    provider: LLMProvider,
+    conversation: Conversation | None,
+    session_scope: SessionScope | None,
+) -> None:
+    """Post the turn's tokens to the usage ledger.
+
+    Nothing here may fail the request: the reply has already been generated and
+    paid for, and a metering write that 500s would lose the answer *and* the
+    record. `usage_scope` absorbs its own write failures into a `MeteringFault`
+    row; this guard covers the rest — a user with no organisation, most
+    obviously, since a personal tenant is created lazily on first project.
+
+    `LedgerSink(session_scope)` rather than the request session, for the reason
+    `simulation/runner.py` gives: a metering write inside the caller's
+    transaction could roll back the work it was measuring.
+    """
+    if session_scope is None:
+        return
+    try:
+        tenants = organisation_ids_for_user(db, user)
+        if not tenants:
+            # No tenant to bill. Skipped rather than attributed to a guess —
+            # a wrong organisation on an invoice is worse than a missing line.
+            return
+        cause = Cause(
+            organisation_id=next(iter(sorted(tenants))),
+            source="ai.chat",
+            subject_type="conversation" if conversation else "user",
+            subject_id=conversation.id if conversation else user.id,
+            conversation_id=conversation.id if conversation else None,
+            user_id=user.id,
+            detail={"purpose": purpose, "provider": provider.name},
+        )
+        with usage_scope(cause, LedgerSink(session_scope), fault_scope=session_scope) as scope:
+            record_tokens(
+                scope,
+                prompt=usage.prompt_tokens,
+                completion=usage.completion_tokens,
+                model=provider.model,
+            )
+    except Exception:  # noqa: BLE001 - metering must never fail the work
+        logger.exception("Could not meter AI tokens for user %s", user.id)
 
 
 @router.get("/ai/status", response_model=AIStatus)
@@ -162,7 +235,11 @@ def ai_status() -> AIStatus:
     response_model=ResultInterpretation,
 )
 def interpret_simulation(
-    project: OwnedProject, db: DbSession, current_user: CurrentUser, simulation_id: str
+    project: OwnedProject,
+    db: DbSession,
+    current_user: CurrentUser,
+    session_scope: SessionScopeDep,
+    simulation_id: str,
 ) -> ResultInterpretation:
     """Explain a finished run: what the numbers mean and what to change.
 
@@ -212,6 +289,7 @@ def interpret_simulation(
         completion.usage,
         purpose=token_usage.PURPOSE_INTERPRET,
         provider=provider,
+        session_scope=session_scope,
     )
     return completion.value
 
@@ -221,6 +299,7 @@ def draft_project_load_case(
     project: OwnedProject,
     db: DbSession,
     current_user: CurrentUser,
+    session_scope: SessionScopeDep,
     payload: Annotated[LoadCaseRequest, ...],
 ) -> LoadCaseDraft:
     """Draft a load case from a sentence, against a real geometry's bounding box.
@@ -262,6 +341,7 @@ def draft_project_load_case(
         completion.usage,
         purpose=token_usage.PURPOSE_LOAD_CASE,
         provider=provider,
+        session_scope=session_scope,
     )
     return completion.value
 
@@ -312,6 +392,23 @@ class ChatResponse(BaseModel):
     )
     prompt_tokens: int
     completion_tokens: int
+
+
+class TurnCancelled(BaseModel):
+    """The answer to a stop request (P5.6).
+
+    A model rather than a bare `dict[str, str]` so the schema describes a shape
+    instead of "an object with string values" — `tests/test_ai.py` asserts every
+    AI endpoint's success response is described, and it is right to.
+    """
+
+    status: str = Field(
+        description=(
+            "Always 'accepted'. This endpoint does not wait for the turn to end, "
+            "and never claims to have stopped it — the stream reports that itself."
+        )
+    )
+    detail: str
 
 
 def _owned_conversation(db: Session, user: User, conversation_id: str) -> Conversation:
@@ -425,7 +522,19 @@ def _message_count(db: Session, conversation_id: str) -> int:
     )
 
 
-@router.post("/ai/chat", response_model=ChatResponse)
+#: Counted against the signed-in principal, not the address (P1.6). One office
+#: behind one NAT is a single IP and a whole engineering team, so an
+#: address-keyed budget on the most expensive route in the product either
+#: throttles a customer or is set so high it stops nothing. Both chat routes
+#: share one budget deliberately: they are two ways to ask for the same turn,
+#: and separate budgets would just mean a client alternating between them gets
+#: double.
+_chat_rate_limit = RateLimit(
+    "ai.chat", settings.chat_requests_per_minute, window_seconds=60
+)
+
+
+@router.post("/ai/chat", response_model=ChatResponse, dependencies=[Depends(_chat_rate_limit)])
 def chat(
     db: DbSession,
     current_user: CurrentUser,
@@ -490,6 +599,7 @@ def chat(
         purpose=token_usage.PURPOSE_CHAT,
         provider=provider,
         conversation=conversation,
+        session_scope=session_scope,
     )
 
     return ChatResponse(
@@ -506,7 +616,7 @@ def chat(
     )
 
 
-@router.post("/ai/chat/stream")
+@router.post("/ai/chat/stream", dependencies=[Depends(_chat_rate_limit)])
 def chat_stream(
     db: DbSession,
     current_user: CurrentUser,
@@ -580,6 +690,7 @@ def chat_stream(
                     purpose=token_usage.PURPOSE_CHAT,
                     provider=provider,
                     conversation=conversation,
+                    session_scope=session_scope,
                 )
             except Exception:  # noqa: BLE001 - accounting must not mask the real error
                 logger.exception(
@@ -917,6 +1028,36 @@ def rename_conversation(
     conversation.title = payload.title.strip()[:255]
     db.commit()
     return read_conversation(db, current_user, conversation_id)
+
+
+@router.post(
+    "/ai/conversations/{conversation_id}/cancel",
+    response_model=TurnCancelled,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def cancel_turn(
+    db: DbSession, current_user: CurrentUser, conversation_id: str
+) -> TurnCancelled:
+    """Ask the turn streaming for this conversation to stop (P5.6).
+
+    **`202`, and it means accepted rather than done.** The turn is streaming
+    from another worker and will end at its next step boundary — after any tool
+    call already in flight finishes, because half an applied CATIA operation is
+    a worse thing to own than four more seconds of waiting. The stream itself
+    sends the `done` event with `stop_reason: "cancelled"`; this endpoint never
+    pretends to have delivered it.
+
+    Never refuses. There is no reliable way to know from here whether a turn is
+    running, and refusing on a stale belief would deny the request in exactly
+    the case that matters. A flag with nothing to stop is spent by the next turn
+    that starts.
+    """
+    conversation = _owned_conversation(db, current_user, conversation_id)
+    interruption.request_turn_stop(db, conversation, by=current_user)
+    return TurnCancelled(
+        status="accepted",
+        detail="Stopping after the current step. Everything already done is kept.",
+    )
 
 
 @router.delete("/ai/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

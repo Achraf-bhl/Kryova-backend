@@ -338,13 +338,22 @@ def test_app_exposes_the_ai_routes_in_the_schema() -> None:
             continue
         if "/ai/" in path or path.endswith("/interpretation"):
             for operation in methods.values():
-                # A 204 endpoint (DELETE) genuinely has no body to describe.
-                success = operation["responses"].get("200")
-                if success is None:
-                    assert "204" in operation["responses"], f"{path} has no success response"
+                # **Any 2xx, not only 200.** `POST .../cancel` answers 202 on
+                # purpose: it accepts a stop request and does not wait for the
+                # turn to end, and insisting on 200 here would push a route into
+                # claiming an outcome it is in no position to report. A 204
+                # endpoint (DELETE) genuinely has no body to describe.
+                successes = {
+                    code: body
+                    for code, body in operation["responses"].items()
+                    if code.startswith("2")
+                }
+                assert successes, f"{path} has no success response"
+                if "204" in successes:
                     continue
+                code, success = next(iter(sorted(successes.items())))
                 schema = success["content"]["application/json"]["schema"]
-                assert schema.get("$ref"), f"{path} has an untyped 200 response"
+                assert schema.get("$ref"), f"{path} has an untyped {code} response"
 
 
 def test_the_streaming_endpoint_is_registered_and_declares_sse() -> None:

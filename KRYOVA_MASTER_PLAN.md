@@ -26,7 +26,7 @@ Companion documents:
 ## How to read and maintain this file
 
 1. **Every phase is a numbered task list.** `##### Phase E1 #####` … `##### Phase P10 #####`.
-   Engineering Track phases are `E1`–`E18` (plus `E17.3`); Product Track phases are `P1`–`P10`.
+   Engineering Track phases are `E1`–`E23` (plus `E17.3`); Product Track phases are `P1`–`P10`.
 2. **Every task carries a status line beginning `>`.** Exactly five forms, and nothing else:
    - `> NOT STARTED`
    - `> IN PROGRESS (since YYYY-MM-DD)`
@@ -64,24 +64,24 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-09** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-10** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E18 | 10/19 | 65/101 = 64% | 75/123 eng-months = 61% |
-| Product — P1–P10 | 0/10 | 20/61 = 33% | 11/38 eng-months = 30% |
-| **Programme** | 10/29 | 85/162 = 52% | 87/161 eng-months = 54% |
+| Engineering — E1–E23 | 11/24 | 68/126 = 54% | 81/151 eng-months = 53% |
+| Product — P1–P10 | 5/10 | 41/61 = 67% | 24/38 eng-months = 62% |
+| **Programme** | 16/34 | 110/187 = 59% | 104/189 eng-months = 55% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E14, E17.3 |
-| in flight | E15 20%, E16 42%, E18 38%, P1 44%, P2 64%, P3 57%, P4 33%, P9 29%, P10 25% |
-| nothing finished yet | E8, E9, E10, E12, E13, E17, P5, P6, P7, P8 |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E17.3, P1, P2, P3, P8, P10 |
+| in flight | E15 20%, E16 42%, E18 38%, P4 33%, P5 79%, P9 29% |
+| nothing finished yet | E8, E9, E10, E13, E17, E19, E20, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -352,7 +352,8 @@ typed and tested; a working desktop shell.
 
 ## Part 2 — Two tracks, one ladder
 
-1. **Engineering Track — phases E1–E18 in seven eras.** The machine-building capability.
+1. **Engineering Track — phases E1–E23 in eight eras.** The machine-building capability, and
+   (Era VIII) what has to be true outside this repository for the machine to be worth building.
 2. **Product Track — phases P1–P10.** The platform around it: identity, tenancy, admin, files,
    frontend experience, viewer scale, desktop, billing, delivery, trust.
 
@@ -487,9 +488,13 @@ so the agent can consult them the same way it consults the CATIA manuals.
 
 ##### Phase E1 — The open kernel: OCCT as the primary compilation target #####
 
-> ✅ PHASE COMPLETE (2026-09-05) — the phase's question is answered and every task is tested,
-> with three residuals named rather than hidden. **task 7** needs hardware this machine does not
-> have. **task 3** and **task 4** stay `PARTIAL` *by design, permanently*: task 3 is the
+> ✅ PHASE COMPLETE (2026-09-05, and **task 8 added and closed 2026-09-10**) — the phase's
+> question is answered and every task is tested, with three residuals named rather than hidden.
+> **Task 8 is here because the phase was complete on every task it had and still did not deliver
+> its own promise**: the kernel built parts that could not reach the solver, because the route
+> from geometry to a `GeometryVersion` was a seam no task owned. Found by driving the product,
+> not by reading the plan — which is the argument for the ladder. **task 7** needs hardware this
+> machine does not have. **task 3** and **task 4** stay `PARTIAL` *by design, permanently*: task 3 is the
 > operation mapping, which Decision 1 says grows only when a test, a sweep or an optimisation
 > needs an operation — so it reaching 201/201 would be a symptom, not a goal — and task 4 is the
 > sketch layer, narrowed to the dimension-driven profiles the registry actually uses, with
@@ -574,6 +579,47 @@ deterministically, in CI, at machine scale?
    > plan built on a real V5 seat, compared. Pointing `compare_backends`' right-hand side at
    > `app.catia.dispatch` on a Windows seat is the remaining step. Until that has run the
    > *cross-backend* claim is untested and is written as untested.
+
+8. **The open kernel's part reaches the solver.** *Added 2026-09-10, after the phase was already
+   marked complete.* A part built on `occt` must become a `GeometryVersion` the mesher can read,
+   the way `catia_export_step` does on a seat. Not a kernel capability — the shape is already in
+   the process and `manufacture.export.write_step` already writes it — but a route, and until it
+   existed the open kernel was a modelling toy rather than the product.
+   > DONE (2026-09-10) — **the defect the 2026-09-10 ladder run found, and the reason Level 3 had
+   > to be driven on the seat.** On `GEOMETRY_BACKEND=occt` the agent built the bracket correctly
+   > and could then do nothing whatever to it: `catia_export_step` and `sync_geometry_from_catia`
+   > were the only two geometry→solver routes in its entire vocabulary and **both were
+   > CATIA-only**, so `run_simulation` had nothing to mesh. That blocked ladder Levels 3, 4 and 5
+   > on the open kernel and with them every analysis feature the run was told to test — plane
+   > analyses, conduction, convergence studies.
+   >
+   > **Why no test could have caught it.** Every tool worked. `write_step` worked. The kernel
+   > document held the shape. The gap sat one layer above `dispatch`, in what the agent was
+   > *offered* rather than in what any tool did — the same shape as the `catia_new_part` binding
+   > defect measured on the seat on 2026-09-05, and the second time this exact class has been
+   > invisible to a green suite. The new tests go through `call_catia` rather than a runner for
+   > that reason.
+   >
+   > **The design decision, because it is the part a later reader will want to undo.**
+   > `catia_export_step` is served on the open kernel from the dispatcher, via
+   > `backends.LOCALLY_SERVED`, and is deliberately **not** in `HANDLERS`. That table declares
+   > what OCCT implements of the *geometry vocabulary*, and both `local_coverage()` and the
+   > cross-backend conformance harness read it as exactly that — an export added there would
+   > inflate the coverage number with something the kernel does not implement and would make
+   > `compare_backends` try to build a part with it. So `local_tool_names()` answers *what is
+   > offered* and `local_coverage()` answers *what the kernel implements*, and they are now
+   > different questions with a test pinning the difference.
+   >
+   > Two smaller things fixed alongside: `import_step_export` had `"catia_bridge"` hardcoded as
+   > the blob's source and said "check the part in CATIA" in its refusals, which sends somebody
+   > running the open kernel to an application they do not have; and a multi-body document
+   > exports its **active body**, with the bodies left behind named in the result rather than
+   > silently dropped.
+   > Tested by: `tests/test_geometry_backends.py::TestThePartCanReachTheSolver` (6 tests, driven
+   > through `call_catia`) plus the coverage-separation test — three guards verified by breaking
+   > them (the offering, the empty-shape refusal, the coverage separation), 10 failures observed,
+   > all files restored byte-for-byte. Code: `app/catia/dispatch.py::_export_locally`,
+   > `app/geometry/backends.py::LOCALLY_SERVED`, `app/catia/geometry_import.py`.
 
 **Phase proof:** M1 — a machined bracket — compiles, builds on OCCT in CI, builds on CATIA on a
 real seat, and the two agree on every interrogated quantity to declared tolerance. Ten times,
@@ -805,10 +851,20 @@ agrees between OCCT and CATIA to declared tolerance.
 
 ##### Phase E4 — Visual verification: the model looks at the model #####
 
-> ✅ PHASE COMPLETE (2026-09-08) — all four tasks done and tested, with **task 4** left `PARTIAL`
-> on purpose: the picture reaches the conversation on the CATIA path, which is what the phase
-> exists to make true, while the OCCT render endpoint still has no frontend caller. That half is
-> frontend work in the other repo, not a hole in this phase's capability.
+> ✅ PHASE COMPLETE (2026-09-08) — all four tasks done and tested, **task 4 included since the
+> same day**: a picture reaches the conversation on both backends now, by two deliberately
+> different routes (in the step row on a CATIA seat, pinned above the composer on the open
+> kernel, because the OCCT render endpoint has no history and a copy beside turn 3 would redraw
+> itself into turn 9's part).
+>
+> *Corrected 2026-09-10.* This marker read "with **task 4** left `PARTIAL` on purpose … the OCCT
+> render endpoint still has no frontend caller" for two days after that stopped being true. The
+> sentence was not written from the code; it was written to satisfy
+> `test_a_complete_phase_names_every_task_it_left_open`, which was reporting task 4 open because
+> `scripts/plan_progress.py` counted the superseded `PARTIAL` sitting under this task's
+> `<!-- superseded 2026-09-08 -->` comment alongside the `DONE` that replaced it. The parser now
+> honours that comment. Worth keeping in view: a measurement tool that is wrong pushes its error
+> *into* the document it measures, and the wrong sentence is the one a human then defends.
 
 **~4 engineer-months.**
 
@@ -1795,16 +1851,33 @@ answerable meaning.
 
 ##### Phase E12 — Load cases, materials, and standard parts #####
 
+> ✅ PHASE COMPLETE (2026-09-10) — all four tasks done and tested. **Task 3's premise turned out
+> to be wrong and is superseded rather than met**: BOLTS is not on PyPI, has had no commit since
+> May 2023, and — fatally — carries dimensions and no engineering data at all, which is precisely
+> the half a bought-in part has to contribute here. That was measured on 2026-09-06 and written
+> up in `app/parts/fasteners.py`; the set is first-party ISO instead, and `PartSource` is the
+> seam a `.blt` importer would arrive through if that ever changes.
+
 **~8 engineer-months, mostly needs an ME.**
 
 1. **Load-case library** — standardised, per-domain, *executable*: pothole strike, panic braking,
    curb drop, proof/ultimate factors, press tonnage cycles. Today invented per conversation, so no
    two runs are comparable.
-   > PARTIAL (2026-09-06) — the library *composes* the existing vocabulary (Decision 2), pinned by
-   > reading the load types out of `types.Load`'s own union so a new one automatically joins the
-   > set it must stay inside. One composed case is **actually solved**: 12 MPa of pressure gives
-   > σ = 12.0 MPa exactly. Tested by: `tests/test_load_library.py` (43 tests). Code:
-   > `app/solve/load_library.py`.
+   > DONE (2026-09-10), superseding PARTIAL (2026-09-06) — the library *composes* the existing
+   > vocabulary (Decision 2), pinned by reading the load types out of `types.Load`'s own union so
+   > a new one automatically joins the set it must stay inside. One composed case is **actually
+   > solved**: 12 MPa of pressure gives σ = 12.0 MPa exactly.
+   > **The last gap the module named in its own docstring is closed**: a `LoadCase` carried
+   > `name` and nothing that said which recipe and which factor produced its loads, so "this is
+   > the 1.5 ultimate case" was a claim in a string rather than a record. `LoadCase.provenance`
+   > exists and `compose(..., recipes=(...), factor=...)` fills it with each recipe's own source.
+   > A case built by hand leaves it **`None`, meaning hand-authored and never unknown** —
+   > stamping a recipe onto a case nobody derived that way would be a citation for work that did
+   > not happen, which is the `app/verify/` rule applied to the input side. A `recipes` argument
+   > naming something not in the library is **refused**, because a provenance nobody can look up
+   > reads as checkable and is not. Tested by: `tests/test_load_library.py` (47).
+   > **API note:** `LoadCase` gained an optional `provenance` object; it is JSONB on the job row
+   > and mirrored in `../Kryova-frontend/src/types/api.ts`.
 
 2. **Materials.** The honest research finding: **the open materials databases are the wrong kind of
    open** — Materials Project, AFLOW, OQMD, OPTIMADE are DFT/atomistic; superb, and useless for an
@@ -1812,17 +1885,54 @@ answerable meaning.
    partial and licence-varied. Deliverable: the **schema, provenance model and ingestion path** —
    every property carries source and confidence; buying Granta/MatWeb later becomes data-loading,
    not re-architecture.
-   > PARTIAL (2026-09-06) — tested. Code: `app/solve/materials.py`.
+   > DONE (2026-09-10), superseding PARTIAL (2026-09-06) — all three deliverables the task names
+   > are built and tested: the **schema** (`Property`, with no unit argument — the unit is looked
+   > up from `PROPERTY_UNITS` by name, so a datasheet figure in GPa has nowhere downstream to
+   > hide), the **provenance model** (`Source` + `Status`, where `SPECIFIED` is deliberately a
+   > fourth member because a standard's minimum is a floor you may size to and a typical value is
+   > not), and the **ingestion path** (`transcribe`, the one place a conversion happens).
+   > What is *not* done is loading a commercial database, and the task says so itself: buying
+   > Granta or MatWeb "becomes data-loading, not re-architecture". That is the state this task
+   > was written to reach. Tested by: `tests/test_materials.py`. Code: `app/solve/materials.py`.
 
 3. **Standard parts. 70%+ of any real machine is bought.**
    **[BOLTS](https://boltsparts.github.io/)** (open library of parametric ISO/DIN parts with
    dimension metadata) as the base; supplier CAD (TraceParts, McMaster) via *import*, respecting
    their terms, never redistribution.
-   > PARTIAL (2026-09-06) — tested. Code: `app/parts/`.
+   > DONE (2026-09-10), superseding PARTIAL (2026-09-06) — **and the BOLTS premise is
+   > superseded, not met.** Checked 2026-09-06: not on PyPI under any name, no commit since May
+   > 2023, and it carries `d1`, `k`, `s`, `e`, `l`, `pitch` and nothing else — everything needed
+   > to *draw* a bolt and no proof load, property class, stress area, mass or torque. The half
+   > BOLTS has is the cheap half. So the shipped set is first-party ISO 4014/4032/7089 in M5–M16
+   > across classes 8.8/10.9/12.9, with ISO 898-1/898-2 strengths marked `SPECIFIED` because they
+   > are minima a supplier is held to; mass is computed and marked `ESTIMATED`; tightening torque
+   > is **not stored at all**, because it is not a property of the bolt. `PartSource` is the seam
+   > a `.blt` importer would implement, and its LGPL data is not redistributed.
+   > Extended 2026-09-10 with `app/parts/bearings.py` — see task 4. Tested by:
+   > `tests/test_parts_catalogue.py`, `tests/test_bearings.py`. Code: `app/parts/`.
 
 4. **A parts *selection* engine**: given load, speed, life — choose the bearing; never model what
    should be bought.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `app/parts/bearings.py`. **The line between the standard's arithmetic
+   > and the manufacturer's data is the whole design.** ISO 281 rating life is arithmetic —
+   > `L10 = (C/P)^p`, `p = 3` ball and `10/3` roller — reproduced from the standard and checked
+   > against worked examples computed by hand in the test, the same treatment the solver gets
+   > against closed-form solutions. **`C` and `C0` are the maker's numbers and are not shipped**:
+   > they depend on internal geometry that differs between makers for the same ISO boundary
+   > dimensions, and ISO 281's formula for `C` needs an `f_c` table indexed on geometry nobody
+   > publishes. So `SHIPPED_BEARINGS` carries **ISO 15 boundary dimensions only** — a standard,
+   > citable, identical for every maker — and `select` **refuses** on a bearing with no sourced
+   > rating, naming which one is missing. A selection computed from an invented rating looks
+   > exactly like engineering and is not.
+   > Four more refusals that are the substance: nothing-fits and everything-that-fits-is-unrated
+   > are **different `Refusal`s** with different fixes; a duty 4% past the largest bearing is
+   > refused rather than rounded; a bearing that passes on life and fails the static check is
+   > skipped, because a selection that fails a stated check is not a selection; and every
+   > `Selection` carries `STANDING_CAVEATS` — L10 is a 90% population life and not a guarantee,
+   > no `a_ISO` is applied (it needs two operating conditions nobody has stated), and
+   > lubrication, temperature, limiting speed and fits are not checked. `X` and `Y` are
+   > arguments with no defaults beyond the exact pure-radial case, for the same reason.
+   > Tested by: `tests/test_bearings.py` (27).
 
 **Gate G2 opens after E11 + E12.**
 
@@ -2211,6 +2321,490 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
 
 **Ladder standing at 3/9.**
 **Gate G5 opens after M2 upward.**
+
+## ERA VIII — THE WORLD THIS HAS TO SURVIVE CONTACT WITH
+
+*Added 2026-09-09 from a fan-out research pass over primary sources — regulation, standards
+bodies, licence texts, benchmark papers and vendor announcements — with each claim put through
+adversarial verification before it was written here. Every phase below exists because something
+outside this repository is already true and the plan did not know it.*
+
+**The era's argument in one sentence:** every era before this one makes the machine *right*;
+this one makes the rightness **transferable** — to a market surveillance authority, to a
+signing engineer, to a customer's licence auditor, and to anyone comparing us against a
+competitor who has raised three hundred million dollars.
+
+Four things the research changed, stated up front because they contradict what the earlier parts
+of this plan assume:
+
+1. **"STEP AP242 — the one that carries PMI" (E17 task 2) is a promise the kernel does not
+   currently keep.** OCCT's STEP *writer* offers AP242 only as **`AP242DIS`** — the Draft
+   International Standard schema — while for AP214 it offers a published-IS option; the reader
+   is documented as supporting "some parts of AP242"; and the base translator carries geometry,
+   topology and assembly structure only, with colours, names, layers, validation properties and
+   GD&T all living in the separate XDE layer whose documented contract for PMI round-trip is one
+   enumerating sentence. FreeCAD — the other large OCCT consumer — filed the same gap on
+   2025-02-23, labelled it `3rd party: OCC`, and sized closing it at 350 hours. E21 owns this.
+2. **Passing NAFEMS benchmarks is verification and can never be validation**, in ASME's own
+   words, and the benchmark *targets themselves have been corrected twice* — P18 Revision 2
+   changed both the magnitude and the location of LE10's target stress. E7's suite is right to
+   exist and is citing numbers whose revision it does not record. E20 owns this.
+3. **The agent literature has moved from "worry" to "measurement", and two of the mitigations
+   this plan reaches for are measured as not working**: memory scaffolds degraded long-horizon
+   performance in **all ten** models tested, additional orchestration does not consistently help,
+   and the strongest models show the *highest* catastrophic-failure rates (up to 19%) because
+   they attempt the most ambitious multi-step strategies. What is measured to work is shortening
+   the horizon — which is exactly E14's interface contracts, so the plan's instinct was right and
+   its reasoning was under-evidenced. E22 owns this.
+4. **The regulation moved in 2026 and the dates now land inside this plan's window.** The
+   Machinery Regulation applies from January 2027, its Annex I high-risk list contains *software
+   ensuring safety functions* and *safety components with self-evolving behaviour*, and the
+   EU AI Act's obligations for AI embedded in Annex I products were pushed to **2 August 2028**
+   by an Omnibus in force since 27 July 2026 — with the binding technical content for
+   AI-in-machinery still unwritten, owed by delegated act to that same date. E19 owns this.
+
+**~28 engineer-months.** It is the cheapest era per unit of commercial consequence in this
+document and the easiest one to keep postponing, because nothing in it makes a part.
+
+##### Phase E19 — Conformity: the Machinery Regulation, the AI Act, and what a signature means in law #####
+
+**~5 engineer-months. Needs a compliance-literate engineer for tasks 2 and 6; the rest is ours.**
+
+**The question it answers:** when a customer takes a machine Kryova designed through CE marking,
+what does Kryova have to hand them — and what must it never have claimed?
+
+**Read the Official Journal text, not a summary.** The research that produced this phase returned
+**two different application dates** for Regulation (EU) 2023/1230 — 20 January 2027 and
+14 January 2027, one source explicitly calling the other "a widely repeated error" — from sources
+that were otherwise accurate. That disagreement is why task 1 exists and why no date in this
+phase is written as settled until it has been read off the OJ text itself. It is the
+documentation-first rule (Part 2) applied to law.
+
+1. **Pin the dates and the repeal from the primary text.** Article by article, from
+   [the OJ consolidated text](https://eur-lex.europa.eu/eli/reg/2023/1230/oj/eng): the
+   application date, the repeal of Directive 2006/42/EC, and the articles that already applied
+   from January 2024 (notified bodies, Articles 26–42). Recorded as a dated register in the repo
+   with the clause number beside every claim — the same shape as the validation register, for the
+   same reason.
+   > NOT STARTED.
+
+2. **Decide in writing whether anything Kryova produces is an Annex I item.** Annex I — the
+   high-risk list that triggers mandatory third-party conformity assessment — includes item 18
+   **"software ensuring safety functions"** and item 19 **"safety components with fully or
+   partially self-evolving behaviour"**. Kryova's own position is almost certainly *neither*: it
+   is a design tool, and the machine it helps design is the regulated product. **But "almost
+   certainly" is not a position**, and Decision 5's honest-scope statement is the natural home
+   for the answer. The output of this task is a written boundary — what Kryova may generate, what
+   it must refuse to generate unattended, and the sentence a salesperson is allowed to say.
+   > NOT STARTED.
+
+3. **The technical file is an export format, because the law can demand our output.** Verified
+   against the OJ text: the manufacturer keeps the technical documentation and the EU declaration
+   of conformity available to market surveillance authorities for **at least 10 years**, and
+   *"where relevant, the source code or the programming logic included in the technical
+   documentation shall, upon a reasoned request, be made available to the competent national
+   authorities"* where needed to check the Annex III essential health and safety requirements.
+   A machine designed here therefore has a plausible path to a national authority reading a
+   `DesignSpec`. The consequence is a deliverable, not a worry: the design record must export as
+   a coherent technical file — geometry, provenance, analyses with their convergence basis,
+   requirement coverage, and the plan calls that produced them — and it must still open in ten
+   years, which is an argument about formats (E21) and about storage (E15).
+   > NOT STARTED.
+
+4. **Digital instructions, to the conditions the regulation actually sets.** Instructions for use
+   may be supplied digitally — but they must be printable, downloadable and storable on a device,
+   kept accessible online for the expected lifetime of the machine and **at least 10 years** after
+   it is placed on the market, and supplied on **paper on request at no extra cost**. That is a
+   hard constraint on E17 task 6's technical documentation, and it is cheaper to build it in than
+   to discover it during a customer's audit.
+   > NOT STARTED.
+
+5. **"Substantial modification" is a trap this product walks into by design.** Article 3(16)
+   defines it to include modification **"by physical or digital means"** after placing on the
+   market, not foreseen by the manufacturer, that creates a new hazard or increases an existing
+   risk — and whoever performs it becomes the manufacturer of the modified machine. Kryova's whole
+   value proposition is regenerating a machine from a changed requirement. The deliverable is the
+   distinction, in the product: a *design-time* regeneration of a machine not yet placed on the
+   market, versus a change to one already in service — which is a different legal act and must
+   read differently on screen.
+   > NOT STARTED.
+
+6. **The AI Act register, kept current because it is still moving.** As of the research date the
+   position is: the **AI Omnibus entered into force 27 July 2026**, extending timelines;
+   high-risk AI **embedded in Annex I products (machinery explicitly named) applies from
+   2 August 2028**; standalone Annex III high-risk applies from **2 December 2027**; the
+   machinery-specific technical requirements are to be written into the Machinery Regulation by
+   **delegated act, deadline 2 August 2028**, and *are unwritten now*; in the interim a
+   manufacturer may rely on harmonised standards or common specifications under the AI Act for
+   presumption of conformity; and a manufacturer performs **one** conformity assessment under the
+   Machinery Regulation rather than two. **The narrowing matters as much as the dates**: AI used
+   solely for user assistance, performance optimisation, efficiency, automation, convenience or
+   quality control is not high-risk merely by being embedded. Two cautions ride with this: one
+   claim in the set (the 2028 date) survived adversarial verification only **2–1**, and the
+   Omnibus was a provisional political agreement before it was law, so a version of this
+   paragraph was true and stale within weeks. Hence a *register with dates and sources*, re-read
+   at every legislative change, rather than a paragraph in a plan.
+   > NOT STARTED.
+
+**Phase proof:** a package from the mission ladder (M2 upward) is reviewed by someone who has
+taken real machinery through CE marking, against the register this phase produces, and their
+findings are recorded — including the ones we cannot fix. A compliance claim nobody outside this
+repository has read is the same class of evidence as a test suite nobody has run.
+
+**Risks:** writing law into code and having it change (mitigated by the register being data, not
+prose); over-claiming compliance, which is worse than claiming none; and the honest risk that a
+proper answer to task 2 narrows what the product may say about itself.
+
+##### Phase E20 — Simulation credibility as somebody else's standard #####
+
+**~5 engineer-months. Needs an ME for task 3.**
+
+**The question it answers:** when Kryova says an analysis is *verified*, does that word mean what
+it means to the people who define it — and can we name the document?
+
+1. **Adopt ASME's vocabulary exactly, including where it excludes us.** The solid-mechanics
+   portfolio is **V&V 10-2019** (*Standard for Verification and Validation in Computational Solid
+   Mechanics*), **V&V 10.1-2012** (the worked illustration) and **VVUQ 10.2-2021** (the role of
+   uncertainty quantification); the fluids/heat base is **V&V 20-2009** — over fifteen years old —
+   extended by **VVUQ 20.1-2024**; terminology is **VVUQ 1-2022**. Two corrections to a natural
+   assumption ride with this: **V&V 40-2018 is scoped to medical devices** and citing it as our
+   risk-informed credibility framework would be borrowing another industry's standard, and the
+   ASME subcommittee on machine learning, **VVUQ 70, has no published standard** — so there is no
+   ASME-normative basis for validating an ML surrogate, which bounds what E10 task 4 may ever
+   claim. Deliverable: the trust surface (P10 task 3) names the document behind every word it
+   uses.
+   > NOT STARTED.
+
+2. **E7's NAFEMS targets must carry the revision they came from.** P18 — *The Standard NAFEMS
+   Benchmarks* — has been corrected at least twice: **Revision 2** corrected LE8, LE10, LE11 and
+   T3, with LE10's target changing in **both magnitude and location**, and **Revision 3**
+   corrected LE4, LE7, LE9 and LE10. Our targets are reproduced from vendor verification manuals
+   (E7's deliberate, legitimate route, since P18 itself is £45 and not openly licensed), and a
+   vendor manual reproduces whichever revision it was written against. So each case records the
+   manual, its date, **and the P18 revision that manual reproduces** — and a case that cannot
+   establish the third says so rather than implying it.
+   > NOT STARTED.
+
+3. **Say "verification" and "validation" the way ASME does, everywhere the product speaks.**
+   Verification asks whether the computational model fits the mathematical description;
+   validation asks whether it represents the real-world application; UQ asks how parameter
+   variation moves the answer. Kryova has closed-form benchmarks and no experimental data, so
+   **everything it has ever done is verification**, and the validation register's own name is a
+   claim it must not make on its own behalf. Part 4 already lists physical testing among the
+   things no amount of code fixes; this task makes the product say so at the point a user reads a
+   number.
+   > NOT STARTED.
+
+4. **Inherit the solvers' own corpora, and be precise about what they prove.** Two findings, both
+   verified: CalculiX's manual frames its **528 examples** as feature smoke-tests and installation
+   checks — *"suitable to test distinct features … to check whether the installation of CalculiX
+   is correct"* — with no reference solutions, tolerances, accuracy criteria or NAFEMS cases
+   anywhere in the list; and code_aster ships a public validation manual of **1,262 documented
+   cases** organised V0–V9 (V3 being linear statics, the family Kryova lives in) under its own
+   naming scheme, so mapping them onto NAFEMS is our work, and the widely mirrored copies are
+   version-stale. Deliverable: both corpora run in CI against our pinned solver builds as a
+   third-party regression, with a written statement of what a green run does and does not
+   establish. The assumption this kills is *"we ship CalculiX, so the solver is verified"* — the
+   solver's own documentation refuses that reading.
+   > NOT STARTED.
+
+5. **Solution verification, which is the open half of G1.** Numerical error is what verification
+   bounds, and the accepted instrument is mesh refinement toward convergence — but NAFEMS' own
+   simulation-governance working group states that actionable published guidance on error
+   estimators is thin *even inside the ASME and NAFEMS corpus*, and that refinement is
+   cost-constrained on real problems, which is exactly what `MAX_ELEMENTS` encodes. E7's
+   convergence machinery exists and is validated; nothing in the request path runs a study. Until
+   it does, **every stress this product reports comes from one mesh** and must be labelled as
+   such — the third open item from the 2026-09-08 gate report, restated here because it is a
+   credibility obligation and not only a feature.
+   > NOT STARTED.
+
+**Phase proof:** a results page states a number, and every word around it — *verified*, *not
+validated*, *converged to X% on N refinements*, *against P18 Rev. 3 via the Ansys manual of
+&lt;date&gt;* — is traceable to a document a reader can buy or open. Nothing in the sentence is a
+word we coined.
+
+##### Phase E21 — Data and interchange under licence #####
+
+**~7 engineer-months. Mostly integration; the licence work is not optional and does not compress.**
+
+**The question it answers:** can a machine designed here leave the building — as data a
+manufacturer's system reads, with material allowables somebody is allowed to use — without either
+lying about fidelity or breaching somebody's licence?
+
+1. **AP242 as it actually is in our kernel, not as the register describes it.** OCCT's writer
+   exposes AP242 only as the **draft** schema (`AP242DIS`) while exposing a published-IS option
+   for AP214; its reader is documented as covering *"some parts of AP242"*; the base
+   `STEPControl` translator carries geometry, topology and assembly structure only, with colours,
+   names, layers, validation properties and GD&T requiring **XDE** (`STEPCAFControl`); and the
+   OCCT user guide names GD&T in a single enumerating sentence with no specification of semantic
+   tolerance, datum, dimension or saved-view round-trip. FreeCAD's tracker records the same gap
+   from the same layer (`3rd party: OCC`), sized at 350 hours. Deliverable: **a measured
+   round-trip matrix** — what survives a Kryova→STEP→Kryova and Kryova→STEP→CATIA trip, by
+   entity class — published as a capability statement. Where PMI does not survive, E17 task 1's
+   drawings remain the carrier of tolerance, and the plan says so instead of implying MBD.
+   > PARTIAL (2026-09-10), superseding `PARTIAL (2026-09-09)` — **the XDE half is now measured,
+   > the lead that stood open resolves as our own authoring, and the trip has a defect in it
+   > that neither `CARRIED` nor `LOST` could express.** What remains open is the
+   > cross-implementation half, which needs the seat.
+   >
+   > **The matrix exists and is measured, and the AP242 finding is now
+   > this build's own rather than a citation.** `app/manufacture/interop.py` performs the trip
+   > through the shipped export path and reports per entity class, with `NOT_ATTEMPTED` kept
+   > distinct from `LOST` — "we wrote it and it vanished" is a defect in OCCT, "we never wrote
+   > it" is scope, and collapsing the two files a bug report against somebody else's code for
+   > work we have not done.
+   >
+   > **Measured on OCP 7.9.3.1 / OCCT 7.9.3, and re-measured by the test rather than recorded:**
+   > `write.step.schema` accepts `AP242DIS` and **refuses `AP242IS` and `AP242`**, while
+   > accepting the published-IS spelling `AP214IS` for AP214. The asymmetry is the evidence: OCCT
+   > knows how to name a published IS and does not do it for AP242. So no sentence in this
+   > product may claim an AP242 **IS** edition (Ed.1 2014, Ed.2 2020, Ed.3 2022,
+   > ISO 10303-242:2025), and `test_this_build_cannot_write_a_published_ap242_edition` **fails on
+   > purpose** the day a future OCCT gains the spelling — which is how the claim gets widened
+   > deliberately instead of staying narrow for years after it needed to.
+   > The header of a file written that way says three things that do not agree: `FILE_SCHEMA`
+   > names `…MIM_LF {1 0 10303 442 1 1 4 }`, `APPLICATION_PROTOCOL_DEFINITION` says
+   > *'international standard'*, and the year beside it is **2013** — before AP242's first IS
+   > publication. The module records the strings and adjudicates nothing, because the only body
+   > that can settle what the file *is* is the system reading it.
+   >
+   > **The XDE half is measured now, and the lead recorded on 2026-09-09 was ours.** The
+   > "flatness tolerance produced no `GEOMETRIC_TOLERANCE` entity" was two mistakes stacked:
+   > the tolerance had been bound to a label the shape tool does not know (OCCT drops it and
+   > returns success), and **AP242 writes the concrete subtype `FLATNESS_TOLERANCE` — the
+   > literal string `GEOMETRIC_TOLERANCE` appears in a correct file zero times**, so the probe
+   > was grepping for a string that is absent on success. Bound to the part label, the tolerance
+   > is written. `app/manufacture/xde.py` is that path — names, colours, layers, validation
+   > properties, assembly occurrences and a geometric tolerance through `STEPCAFControl_Writer`
+   > — and `measure_metadata_round_trip` is its matrix. **Nothing in the product exports through
+   > it**; wiring it in is E17's, and the row below is why that has not happened.
+   >
+   > **Six classes moved from "nobody tried" to a measurement.** Part names, assembly
+   > occurrences (`instance.1`/`instance.2` back with their names, 2
+   > `NEXT_ASSEMBLY_USAGE_OCCURRENCE`), colours, layers and validation properties (volume, area
+   > and centroid exact) all **carry**. Three traps found on the way, each of which returns a
+   > wrong answer rather than an error: a colour written as `ColorGen` **comes back as
+   > `ColorSurf`+`ColorCurv`** and a caller asking for the type it wrote is told there is no
+   > colour; `GetLayers(shapeLabel, seq)` returns **`True` with an empty sequence** and the
+   > assignment is reachable only through `GetShapesOfLayer_s`; and `SetPropsMode(True)`
+   > **computes nothing** — it is a permission to transfer `XCAFDoc_Volume`/`Area`/`Centroid`
+   > attributes that must already be on the document, and with the mode on and the attributes
+   > absent the file gets no `PROPERTY_DEFINITION` and nothing says so.
+   >
+   > **Semantic PMI is neither carried nor lost, and the vocabulary gained a third verdict for
+   > it.** A flatness tolerance authored at **0.05 mm reads back as 50.0 mm** — ×1000 — because
+   > the writer emits the magnitude unchanged under `SI_UNIT($,.METRE.)` while the model's own
+   > length unit is `SI_UNIT(.MILLI.,.METRE.)`. **A value written and read by one build, through
+   > that build's own writer and reader, does not survive its own round trip**, which is what
+   > makes this a defect rather than a convention we misread. `Carriage.CORRUPTED` exists
+   > because `LOST` would have been a lie in the safe direction: an absent tolerance gets
+   > queried by the receiving system, and one that arrives a thousand times too loose gets
+   > manufactured to. **Nothing compensates for it** — scaling by 1/1000 on the way out would
+   > put a number in the file that no part of this codebase believes and would hide it from the
+   > system that needs to know (the units rule, and the `/1000` the results page once shipped).
+   > The consequence for the product: **semantic PMI may not be claimed**, the drawing stays the
+   > carrier of tolerance as this task's own text says, and `write_step_with_metadata` **refuses
+   > a tolerance under AP214**, where OCCT accepts the request, returns `RetDone` and writes no
+   > tolerance at all.
+   >
+   > **The cross-implementation half — Kryova→STEP→CATIA — needs the seat and is untouched.** A
+   > round trip through one implementation is the weakest interoperability evidence there is:
+   > both ends share the same bugs, and this trip now has a measured one. THE QUEUE section D
+   > carries the row; the ×1000 makes it the highest-value STEP measurement on that list,
+   > because whether CATIA reads 0.05 or 50 decides whether the defect is OCCT's writer or its
+   > reader.
+   > Tested by: `tests/test_manufacture_xde.py` (20 tests) and
+   > `tests/test_manufacture_interop.py` (33 tests) — five guards verified by breaking what they
+   > guard (the AP214 refusal, the `IsAttribute` guard, the assembly part-label descent, the
+   > colour-type sweep and the `CORRUPTED` verdict), 17 failures and one deliberate segfault
+   > observed, all three files restored byte-for-byte. Code: `app/manufacture/interop.py`,
+   > `app/manufacture/xde.py`.
+
+2. **Pin which AP242 edition anything here means.** The community site lists editions 1 (2014),
+   2 (2020) and 3 (2022) with edition 4 in development; the ISO catalogue shows
+   **ISO 10303-242:2025** as current, revising the 2022 text — so the community site is stale
+   against ISO, and a plan that cites "AP242" without an edition is citing four different
+   documents. Ed2/Ed3 are where 3D PMI, additive, harness and composite data live; Ed4 adds 3D
+   assembly constraints, visual issue management and bounding-box/LOD, and pulls **AP243
+   (MoSSEC)** into its interoperation set — with **AP209** remaining the protocol for analysis
+   data. Two consequences: the normative text must be **bought** and cannot be redistributed by
+   this repository, and FEA interchange is AP209/AP243 territory rather than something AP242 will
+   grow into.
+   > NOT STARTED.
+
+3. **Tessellated STEP, which OCCT does support, wired to the viewer and the attachment path.**
+   `read.step.tessellated` / `write.step.tessellated` (0 = off, 1 = on, 2 = `OnNoBRep`, the write
+   default) cover the tessellated shape/shell/solid entities. This is a real capability sitting
+   unused: it is a route for a heavy assembly to travel to P6's viewer, and a route for a
+   customer's tessellated STEP to arrive through P4 without a B-rep rebuild.
+   > NOT STARTED.
+
+4. **The materials licence position, written before any data is bought.** Two findings that
+   settle E12 task 2's shape. **MatWeb cannot seed anything**: the licence is personal,
+   non-transferable and non-sublicensable, caps a locally stored subset at **500 materials**,
+   forbids mass export and building any public database, terminates on breach without notice —
+   and, decisively, has the user agree **not to rely on the data for structural or engineering
+   decisions and calculations**, AS IS, with no pedigree of the kind a credibility argument
+   needs. **MMPDS is buyable and expensive**: Volume I 2025 is 2,744 pages at **$939**, the 2026
+   edition 2,784 pages at **$1,049** — an ~11.7% annual rise, so it is a recurring line item, not
+   a purchase — DRM-locked and licensed per named seat with no site, redistribution or API
+   licence at retail, geo-restricted from a named list of countries, and decomposable into
+   chapters (steel alloys from ~$399) for a platform that needs one family. The deliverable is
+   therefore **not data**: it is the provenance and entitlement model E12 task 2 already
+   sketched, hardened so that a customer's licensed allowables can be used **inside their
+   deployment without Kryova ever holding, redistributing or seeing them**, and so that every
+   property on screen names its source and the right under which it is being shown.
+   > NOT STARTED.
+
+5. **Establish what free-and-normative fatigue data actually exists, as a spike.** The plan
+   currently gestures at Eurocode detail categories and the FKM guideline; the research pass
+   returned **nothing verified** on either's licence terms or free availability, which is itself
+   the finding — an assumption with no source behind it. This task is the spike: what
+   EN 1993-1-9's detail categories are, what the FKM guideline costs and permits, and what may be
+   *implemented* (a method is not copyrightable; its text is) versus *reproduced*. E8 task 3's
+   weld classification depends on the answer.
+   > NOT STARTED.
+
+6. **QIF, for E17 task 5's inspection plans, with its state read correctly.** The DMSC download
+   page — carrying a 2026 copyright — still advertises **QIF 3.0 (December 2018)** as current, is
+   free but form-gated with **no licence or redistribution grant stated on the page**, and points
+   implementers at a public QIF Community GitHub for free read/write tooling; MBC and DMIS are
+   distributed through the same channel as separately versioned standards. So the metrology
+   interop stack is three documents, not one, and the redistribution question is unanswered on
+   the page and must be asked before anything is vendored.
+   > NOT STARTED.
+
+**Phase proof:** a full machine leaves Kryova as STEP with its edition named, is opened by a
+system nobody here controls, and a written matrix says in advance exactly which of its
+tolerances, datums, colours and assembly relationships survived — and the file agrees with the
+matrix.
+
+##### Phase E22 — The measured ceiling: surrogates, generation, and the long-horizon agent #####
+
+**~8 engineer-months. Research-adjacent, like E16, and it is largely *measurement* work.**
+
+**The question it answers:** what is the published, adversarially-checked ceiling on the two
+capabilities this plan is betting on — a surrogate that stands in for a solver, and an agent that
+holds intent across a machine — and how does Kryova measure its own distance from it?
+
+1. **An acceptance rule for surrogates, derived from the best published example rather than from
+   hope.** NVIDIA's DoMINO on the DrivAerML benchmark reports surface relative-L2 errors of
+   **0.15 for pressure and 0.21–0.34 for wall shear** — 12–50%, not sub-1% — while reaching
+   **R² = 0.96 on drag**, the one integrated quantity a designer acts on; and the authors
+   themselves record **non-monotonic errors when ranking successive designs**, which is precisely
+   the use a design loop puts a surrogate to. It is trained on 500 morphs of **one** car, and the
+   paper reports **no wall-clock inference time, no training time and no speedup factor** despite
+   claiming real-time inference. The rule this yields for E10 task 4: **a surrogate may rank, and
+   may never decide**; every surrogate answer carries its error basis; and the decision point
+   always spends a real solve. With VVUQ 70 unpublished (E20 task 1) there is no standard to
+   appeal to, so this rule is ours and must be written where users read it.
+   > NOT STARTED.
+
+2. **Measure silent corruption, because that is the failure mode of this interaction model.** The
+   2026 benchmark literature on LLM-authored CAD is blunt about where it breaks: on an
+   execution-verified corpus of ~17,900 CadQuery programs across 106 industrial part families
+   (half of them anchored to real ISO/DIN/EN/ASME/IEC standards), **roughly 64% of nominally
+   successful natural-language edits silently corrupt geometry the instruction did not target**;
+   frontier models reach only **~0.27 IoU** generating parametric code from part images, with a
+   **15–20 point gap** between reasoning about a part from code (0.84) and from an image (0.58);
+   invalidity on advanced-feature tiers runs **68–70%**; and a specialised model achieves a **2%**
+   invalidity rate while producing the *worst* geometric fidelity of anything measured — so
+   *"it produced a valid solid"* is not a metric, it is a distractor. Kryova's answer already
+   exists in E5's assertions and E4's visual verification; what does not exist is the number.
+   Deliverable: a harness that measures **silent-corruption rate on edits** against our own
+   registry, run like a benchmark and published like one.
+   > NOT STARTED.
+
+3. **Re-found E14 and E16 on what the horizon literature measures, including where it refutes
+   this plan's instincts.** Failures compound **non-linearly** with task length, with an abrupt
+   transition from partial robustness to near-systematic failure past a small compositional
+   depth; a 3,100-trajectory / 700-task attribution study splits failures **72.5% process-level
+   vs 27.5% design-level** across seven categories, with subplanning, catastrophic forgetting,
+   history-error accumulation and memory limitation dominant; reliability decay is
+   **domain-stratified**, with code/tool-driving domains falling from 0.90 to 0.44 on a graceful
+   degradation score across duration buckets while document processing stays flat; the strongest
+   models show the **highest catastrophic-failure rates, up to 19%**; **memory scaffolds degraded
+   long-horizon performance in all ten models tested**; added orchestration does not reliably
+   help; and single-attempt benchmark scores cannot predict long-task reliability, with capability
+   and reliability rankings inverting at long horizons. Two consequences, and they point opposite
+   ways: **E14's interface contracts are the mitigation the evidence supports** — they shorten
+   every horizon rather than trying to survive a long one — and **E16 task 3's hierarchical
+   memory is now a claim under contest** and must be measured on our own traces before it is
+   built out. Deliverable: Kryova's agent measured per duration bucket, on our missions, with
+   model selection driven by that and never by a leaderboard.
+   > NOT STARTED.
+
+4. **Finish the tool-retrieval argument at the half the papers skip: arguments.** The published
+   measurements back E16 task 1 squarely — tool descriptions cost **~200 tokens each**, so a
+   100-tool offer is ~20k tokens before the request is read; an adaptive shortlist averaging
+   ~8 tools scored **93.1 ± 0.5%** gold-tool selection against a 370-tool registry where showing
+   everything scored lower; the loss concentrates on the **hard** cases (60.9% on
+   medium-difficulty queries even when the right tool was always on screen); and on a
+   3,251-tool registry a **fixed K = 5 beat the learned policy** on coverage, so adaptivity is
+   not free. But every one of those papers **explicitly scopes out argument correctness** — and
+   in CAD a wrong numeric argument is not a failure, it is a plausible wrong part, which is this
+   codebase's entire threat model. Deliverable: selection accuracy *and* argument accuracy
+   measured together, on the registry, per turn.
+   > NOT STARTED.
+
+**Phase proof:** three numbers exist for Kryova that today exist only for other people's systems —
+silent-corruption rate on edits, success by task-duration bucket, and argument accuracy given the
+right tool — each measured by a harness in this repository, each re-measured on every model
+change, and each published.
+
+##### Phase E23 — The claim only a free stack can make #####
+
+**~3 engineer-months, then continuous.**
+
+**The question it answers:** with a competitor holding a $2.4 billion valuation and the CAD
+incumbents shipping agents, what is left that Kryova can say that is both true and unavailable to
+them?
+
+1. **A competitor register, dated and sourced, kept like the validation register.** What the
+   research found, as of mid-2026: **Zoo** runs a **proprietary, closed-source geometry engine**
+   built from scratch — not OCCT, not Parasolid — with an open-source *client*, a canonical text
+   representation (KCL) that every GUI action emits, metered per-second API billing plus
+   "reasoning minutes", a free and open text-to-CAD that produces **single objects and cannot do
+   assemblies**, and a product FAQ that **admits its agent produces incorrect geometry and designs
+   that may be unmanufacturable or unsafe**. **PTC/Onshape** had exactly one AI feature generally
+   available in March 2026 — a documentation assistant — with agentic CAD stated as *in
+   development*, **MCP** named as the third-party integration surface, and a stated moat that is
+   *data architecture*, not model quality: a fileless history capturing every modelling action,
+   including failures. **FreeCAD 1.1** (2026-03-25) announced **no AI feature at all**.
+   **PhysicsX** raised **$300M at ~$2.4B (2026-06-08)** for pre-trained "Large Physics Models" —
+   surrogates, not a CAD or solver stack — and its announcement contains **no mention of
+   certification, V&V or validation**. Each of those is a checkable claim with a date, and each
+   will rot; the deliverable is the register, not this paragraph.
+   > NOT STARTED.
+
+2. **Read the map before believing the position.** The register above says the funded competition
+   is buying **speed and design exploration**, and that nobody in it is selling **credibility**.
+   That is the gap Decision 3 already aims at, and this task is the discipline of re-checking
+   quarterly whether it is still open — because a plan that assumes an unoccupied niche for four
+   years without looking is how a differentiator becomes an assumption.
+   > NOT STARTED.
+
+3. **Speak MCP, because the incumbent chose it.** Kryova's registry is already a declarative
+   table of operations with schemas; exposing it as an MCP server is a small piece of work with
+   an outsized consequence — a customer's own agent, or Onshape's, can drive Kryova's kernel, and
+   the interop surface is one somebody else is standardising rather than one we invented. Scoped
+   behind the same tenancy and CSRF guarantees as the HTTP API; it is another caller, not another
+   trust boundary.
+   > NOT STARTED.
+
+4. **Enter a public benchmark and publish the score, including when it is bad.** An
+   execution-verified CadQuery benchmark on 106 industrial part families exists, and it runs on
+   the exact stack this plan chose. Running it against Kryova's pipeline converts "AI-native" from
+   an adjective into a number, and publishing the number — beside the silent-corruption rate from
+   E22 — is a thing a company with a valuation to defend structurally cannot do first. That
+   asymmetry, not the technology, is what open source is actually for here.
+   > NOT STARTED.
+
+**Phase proof:** a page on the public trust surface (P10 task 3) carries our benchmark score, our
+verification coverage and our refusals, dated, beside a register of what everyone else claims —
+and an engineer choosing between us and a funded competitor can tell which of the two is telling
+them what it cannot do.
 ---
 
 # PRODUCT TRACK
@@ -2219,6 +2813,15 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
 the engineering track; each names what it gates and what gates it.*
 
 ##### Phase P1 — Identity, sessions and tokens done right #####
+
+> ✅ PHASE COMPLETE (2026-09-10) — all eight tasks done and tested. Two things it forced that
+> were not in the task list and are worth knowing: **this service had no mail transport at all**
+> (task 5 cannot exist without one, and neither can P2's invitations, P3's impersonation notice
+> or P10's status comms), so `app/mail/` was built here and is shared; and **the password reset
+> was not revoking sessions** — it cleared `refresh_token_hash`, a column nothing has read since
+> task 1 replaced it, so a password changed *because* it was stolen left every device family
+> alive. Found while wiring the theft notice, fixed here, pinned by
+> `TestChangingAPasswordEndsEveryDevice`.
 
 **~3 engineer-months. Starts immediately; blocks any external user.**
 
@@ -2251,7 +2854,13 @@ stolen refresh token was a 30-day capability with no detection; no absolute sess
 3. **Session management UX** (frontend): device list with last-seen, "sign out this device", "sign
    out everywhere". Backed by revocation that actually revokes — the session row is the truth, not
    the cookie.
-   > PARTIAL (2026-09-06) — **backend DONE, the UI is open.**
+   > DONE (2026-09-10), superseding PARTIAL (2026-09-06) — `components/account/device-list.tsx`,
+   > wired into `/dashboard/settings`. Each row carries last-seen as *relative* time against the
+   > reader's own clock, which is why `relativeTime` is a pure function taking `now` rather than
+   > reading one. "Sign out everywhere" `router.replace`s rather than pushing: this device is
+   > signed out too, so leaving the dashboard in history means the back button lands on a page
+   > that can only fail. Tested by: `../Kryova-frontend/src/lib/format.test.ts`; the revocation
+   > underneath is `tests/test_auth_sessions.py`.
 
 4. **Startup refusals.** `SECRET_KEY` unset or `"changeme"` ⇒ the server does not start, with a
    message that says what to do. Same for an empty CORS origin list in production mode.
@@ -2260,21 +2869,71 @@ stolen refresh token was a 30-day capability with no detection; no absolute sess
 5. **Email verification and password flows hardened**: verification required before first project
    creation (not before first look — friction where it protects, not where it annoys); the reset
    flow already hashes one-time tokens, keep; add resend throttling.
-   > NOT STARTED.
+   > DONE (2026-09-10). **The blocker was that this service had no way to send email**, so
+   > `app/mail/` was built first: a `Mail`/`Delivery` pair with no behaviour, three transports
+   > (`smtp` / `console` / `memory`), and every message the product sends as a named builder so
+   > the set is enumerable rather than a grep. **Production refuses to start on a transport that
+   > delivers to nobody** — same class as `SECRET_KEY=changeme` booting, and for the same reason:
+   > on `console` a password reset still returns 204 and still tells the user to check an inbox.
+   > The resend throttle is **per account, not per IP**, because somebody using us to post mail
+   > at a stranger picks the address and not the network. A resend *replaces* the outstanding
+   > link rather than adding one. Verification gates `POST /projects` and nothing else
+   > (`deps.VerifiedUser`); an unverified account can still sign in and look around. Migration
+   > `549ab806da4b` backfills every existing account as verified — see its docstring for why
+   > locking existing users out of their own projects is not a security improvement.
+   > Tested by: `tests/test_mail.py` (42), `tests/test_auth_verification.py` (31).
 
 6. **Rate limiting that survives deployment reality**: keyed on the *authenticated principal* where
    one exists, on the connecting IP otherwise, `X-Forwarded-For` honoured **only** from a declared
    trusted-proxy list, and backed by a shared store so multiple workers enforce one budget.
-   > NOT STARTED — the in-process limiter that trusts `X-Forwarded-For` is still there.
+   > DONE (2026-09-10), superseding NOT STARTED — **and that status line was two-thirds stale**:
+   > the shared Redis store and the trusted-proxy rule had both shipped, and the entry claiming
+   > "the in-process limiter that trusts `X-Forwarded-For` is still there" was describing code
+   > that no longer existed. What was genuinely missing is the *key*: every limit counted against
+   > the address, including on authenticated routes, and one office behind one NAT is a single IP
+   > and a whole engineering team. `limit_key` now answers `scope:user:<id>` where a principal
+   > exists and `scope:ip:<addr>` otherwise, decoding the token itself so it needs no
+   > `get_current_user` to have run first. Applied to the two expensive routes —
+   > `/ai/chat`(+`/stream`, sharing one budget) and `POST …/simulations`. `client_ip` moved into
+   > `api/rate_limit.py`: three modules had each grown their own copy of a security decision.
+   > Tested by: `tests/test_rate_limit.py` (16).
 
 7. **Second factor (TOTP)** — standard `pyotp`-class implementation, recovery codes, and the
    decision recorded that WebAuthn/passkeys are the follow-on, not the first ship.
-   > NOT STARTED.
+   > DONE (2026-09-10). Hand-written RFC 6238 rather than `pyotp` — fifteen lines of HMAC and a
+   > modulo, checked against **the RFC's own appendix-B vectors**, against a supply-chain edge on
+   > a security primitive. Three things that are not in the RFC and are the difference between a
+   > real second factor and a decorative one: **an accepted code is burned** (`last_step`, so a
+   > code read over a shoulder is not replayable for the remaining 90 s of its window),
+   > comparison is constant-time, and **the shared secret is AES-256-GCM sealed at rest** with a
+   > key HKDF'd from `SECRET_KEY` — which defends a stolen database and explicitly not a stolen
+   > host, and says so. Ten single-use recovery codes, hashed like refresh tokens. `/auth/login`
+   > now returns **a union**: a session, or `202` + `MfaChallenge` with no cookies set (see the
+   > API-shape note below). Turning the factor *off* requires a code, because a hijacked session
+   > must not be able to remove the defence that exists for hijacked sessions.
+   > **WebAuthn/passkeys are the follow-on and not this ship** — they need attestation handling,
+   > a credential table and a browser surface with no server-side fallback, which is a phase and
+   > not a task. Tested by: `tests/test_totp.py` (30), `tests/test_auth_verification.py`.
 
 8. **Token custody in both clients.** Web: httpOnly cookies as today, never storage. Tauri: the
    same cookie flow through its webview, with the OS keychain via Tauri's secure storage if a
    native token cache is ever needed — never a JSON file.
-   > NOT STARTED.
+   > DONE (2026-09-10) — **as a guard, because the rule already held and nothing kept it
+   > holding.** Measured: zero `localStorage`/`sessionStorage`/`indexedDB` in `src/`, and
+   > `src-tauri/` handles no credential at all — Tauri renders this same frontend in a webview
+   > and the cookie flow works there unchanged, so the "OS keychain if a native cache is ever
+   > needed" clause stays conditional and the way to keep it conditional is to not need one.
+   > `src/lib/token-custody.test.ts` scans every non-test source file for those three APIs and
+   > for a hand-written `Authorization:` header, **and asserts it found files at all** so an
+   > empty pass cannot be a vacuous one. Verified by writing `localStorage.setItem("kryova_token",
+   > …)` into `api-client.ts` — the exact bug this codebase shipped once — and watching it fail.
+   > Tested by: `../Kryova-frontend/src/lib/token-custody.test.ts`.
+
+**API shape changed here, plainly:** `POST /auth/login` used to answer `SessionRead` and now
+answers `SessionRead | MfaChallenge`, `202` for the second. `UserRead` gained `is_verified`.
+A client that assumes the old shape reads `user` as undefined rather than failing loudly, so the
+frontend narrows on the literal `mfa_required` — `isMfaChallenge` in `types/api.ts`, and
+`tsc` caught the one call site that had not.
 
 **Phase proof:** a stolen refresh token replayed after rotation kills the family and the attacker's
 session, the user sees it in the device list, and the audit log (P3) records it. A demo of this
@@ -2282,7 +2941,12 @@ exact sequence is part of the phase's acceptance.
 
 ##### Phase P2 — Organisations, teams, roles and sharing #####
 
-**~4 engineer-months. Gates: P3, P8, mission ladder beyond M2 in-product.**
+> ✅ PHASE COMPLETE (2026-09-10) — all six tasks done and tested, and the phase proof closed
+> with them. Two things this phase forced that were not in its task list: **`create_invitation`
+> could not actually invite anybody** until P1.5 gave the service a mail transport, so P2.1 had
+> shipped a declaration rather than a capability; and **`test_tenancy_rls.py` applied one
+> migration's policies to the test schema while production had three**, found because P2.5 made
+> it a third — see task 5.
 
 **The question it answers:** can a *team* — not a lone user — own a machine programme, with the
 right people able to do the right things and nobody able to see across a tenant boundary, even
@@ -2338,21 +3002,57 @@ through an application bug?
 5. **Sharing and hand-off.** Transfer a project between orgs (with provenance intact); read-only
    share links for a released design package, expiring, revocable — the artefact a supplier or
    customer sees, without an account requirement for viewing.
-   > NOT STARTED.
+   > DONE (2026-09-10). `GET /share/{token}` is **the only route in this service that answers
+   > with no principal**, and it is built to have the least possible reach rather than to be
+   > carefully guarded: it takes a token and *no id*, so there is nothing for a caller to
+   > substitute and no comparison for us to get wrong. **Every refusal is one refusal** —
+   > expired, revoked, never existed, project since transferred all give the same 404 with the
+   > same sentence, because telling a holder their token *was* valid is what makes guessing
+   > worth continuing. The token is stored hashed like every other credential here; the raw
+   > value exists in one response and nowhere else. CAD download is **off by default** and
+   > refused as a 404 rather than a 403, so a recipient sent a results package does not learn
+   > the geometry sits behind a flag. A transfer moves everything keyed to the project, leaves
+   > `owner_id` alone (provenance, not permission) and **revokes every live link**, because a
+   > link the previous tenant issued would otherwise be a window into the new one.
+   > **RLS:** `share_links` joins the tenant set and composes with the public route because the
+   > shipped predicate passes when no tenant context is set; `project_transfers` uses the
+   > existing via-project join. Adding a third `rls_statements()` exposed that
+   > `tests/test_tenancy_rls.py` applied only the *first* migration it found, so the test schema
+   > had one migration's policies while production had three — and which one depended on
+   > filename sort order. It now applies all of them.
+   > Tested by: `tests/test_sharing.py` (24). Code: `app/core/sharing.py`,
+   > `app/api/routes/sharing.py`, `app/models/sharing.py`, migration `40108d7a30d1`.
 
 6. **Frontend surfaces**: org switcher, member management, role assignment, invitation flows,
    pending-invite states — all in the existing dashboard design language.
-   > NOT STARTED.
+   > DONE (2026-09-10). `/dashboard/organisations` — team switcher, members with **two role
+   > columns** because the platform and domain ladders are two questions (collapsing them would
+   > mean promoting somebody to admin so they could approve a design, which is the conflation
+   > the two-layer model exists to prevent), invitations with pending state and withdrawal, and
+   > a create-team form. `/invitations/accept` handles the case that actually breaks this flow:
+   > a signed-out invitee must sign in **and come back with the token**, so the sign-in link
+   > carries `?next=` — which meant fixing `?next=` on `/register`, where it was dead. Sharing
+   > and transfer surfaces live on the project page. Tested by:
+   > `../Kryova-frontend/src/components/sharing/share-panel.test.tsx` (9).
 
 **Phase proof:** the cross-tenant test suite — two orgs, adversarial queries at every endpoint,
 zero leakage, all misses reading as 404. Run in CI forever.
-> PARTIAL (2026-09-08) — the suite exists, passes, and now proves **both** halves in CI: the
-> application scoping and the RLS net under it, since the suite connects as a `NOBYPASSRLS` role
-> (task 3). What keeps this `PARTIAL` rather than done is tasks 5 and 6, which are not started.
+> DONE (2026-09-10), superseding PARTIAL (2026-09-08) — the suite exists, passes, and proves
+> **both** halves in CI: the application scoping and the RLS net under it, since the suite
+> connects as a `NOBYPASSRLS` role (task 3). Tasks 5 and 6 closing is what moves this off
+> `PARTIAL`, and task 5 strengthened the proof rather than merely completing it: the isolation
+> fixture now applies *every* shipped RLS migration to the test schema instead of the first one
+> it happened to find.
 
 **Gate GP1 opens after P1 + P2.**
 
 ##### Phase P3 — The admin panel and operations console #####
+
+> ✅ PHASE COMPLETE (2026-09-10) — all seven tasks done and tested. One thing it forced that was
+> not in the task list: `components/ui/input.tsx` spread `{...props}` *after* `className`, so any
+> caller passing one silently replaced the whole style string — the field kept its label and lost
+> its border, height and focus ring. `Button` had always merged. Found by using the primitive as
+> documented; fixed and pinned in `input.test.tsx`.
 
 **~4 engineer-months. Needs P1, P2.**
 
@@ -2396,22 +3096,69 @@ investigate incidents — with power that is bounded, visible and recorded?
    session families — P1 machinery), storage/compute quota adjustment, manual verification, GDPR
    deletion with a grace window (soft-delete, then hard purge job through `MediaService` so blob
    refcounting holds).
-   > PARTIAL (2026-09-06) — **the read half shipped**; suspension and GDPR deletion are open.
-   > Tested by: `tests/test_admin.py`. Code: `app/api/routes/admin.py`.
+   > DONE (2026-09-10), superseding PARTIAL (2026-09-06). `app/core/lifecycle.py` is the **only**
+   > writer of `is_active`, `suspended_at` and the deletion columns — a second writer is a second
+   > chance to leave them disagreeing, and an account with `suspended_at` set and `is_active`
+   > still true is visibly suspended in the console and fully usable through the API.
+   > **Suspension revokes every session family**, which is what makes it immediate rather than
+   > merely recorded: setting the flag alone leaves live access tokens working for their fifteen
+   > minutes. **Deletion is scheduled, never done** — the grace window *is* the feature, `purge`
+   > is refused before the date with a message naming it, and an emergency uses `suspend`, which
+   > is immediate and reversible. The purge goes through `MediaService`, which refcounts, so a
+   > user whose STEP file is byte-identical to another tenant's does not take theirs with them;
+   > it returns a `PurgeReport` rather than saying "done", because the interesting failures here
+   > are partial ones. Both suspension and scheduled deletion email the person it happened to.
+   > Cancelling a deletion does **not** lift a suspension that predates it. Tested by:
+   > `tests/test_platform.py` (44 across this phase).
 
 5. **Feature flags**: per-tenant and per-user overrides, kill switches, percentage rollouts.
    Server-evaluated — the flag state rides to the frontend with the session, so the UI and the API
    always agree on what is on.
-   > NOT STARTED.
+   > DONE (2026-09-10). One evaluator, `app/core/flags.py`, and `GET /platform/state` is its
+   > answer; nothing re-decides in the browser, because a flag the UI reads differently from the
+   > API is a feature that is half on — a button whose endpoint refuses, or an endpoint nobody
+   > can reach. **The kill switch outranks every override**, and that asymmetry is the point: an
+   > operator whose feature is hurting people needs one action that turns it off for everybody,
+   > including the tenants somebody specially enabled it for. **The rollout is a hash, never a
+   > draw**: `sha256(key + subject)` bucketed into 100, so a subject gets the same answer forever
+   > and widening a percentage only ever *adds* people — the property that makes a staged rollout
+   > safe to run forwards. Bucketed on the organisation where there is one, because a team where
+   > three of five engineers have a feature cannot talk to itself about the product. Keying on
+   > flag *and* subject stops one unlucky tenant being in every early rollout. An unknown key is
+   > False, never an error, so removing a flag while code still checks it does not become an
+   > outage. Tested by: `tests/test_platform.py`.
 
 6. **The operations dashboard**: job queues, solver failure rates by taxonomy class, per-op success
    rates (E15 task 5's data), storage growth, active sessions — the panel where "is Kryova healthy"
    has one answer.
-   > PARTIAL (2026-09-06) — the read half shipped.
+   > DONE (2026-09-10), superseding PARTIAL (2026-09-06) — `GET /admin/health` is the one answer
+   > to "is Kryova healthy": queue depth by status, jobs and success rate in a window, the ten
+   > most common failures, storage and its growth, live sessions, account counts, whether this
+   > deployment can send email at all, and whether maintenance is on. Two honesty rules carried
+   > from `read_organisation_usage`: **`success_rate` is `None`, not 0.0, when nothing finished**
+   > — no runs to judge and every run failing are opposite states, and a dashboard showing 0% on
+   > a quiet night sends somebody hunting an outage that is not there — and **`failure_grouping`
+   > states how the failures were grouped**, which is by the runner's recorded message because
+   > that is what the schema holds. A taxonomy class on the job row is E15 task 5; that is a gap
+   > in the data, named here rather than papered over. Tested by: `tests/test_platform.py`.
 
 7. **Announcements and maintenance mode**: a banner the backend serves and both clients render;
    read-only mode that refuses mutations with an honest message instead of erroring.
-   > NOT STARTED.
+   > DONE (2026-09-10). **A maintenance mode that returns 500 is an outage with a nicer name**,
+   > so this refuses with `503`, a `Retry-After`, and the operator's user-facing sentence — on
+   > mutating methods only. Reads pass through untouched, which is the whole value: somebody who
+   > tries to start a simulation during a migration is *told what is happening*, on a working
+   > application, instead of staring at a broken one. The check lives in `get_current_user`
+   > rather than a middleware because the decision needs to know whether the caller is staff, and
+   > that row is one the dependency has already paid to be able to read. **Staff are let through
+   > by default** — the people who fix the incident are the ones holding grants, and a read-only
+   > mode that locks them out is one somebody works around by turning it off. `reason` (the
+   > operator's note) and `message` (what a user is told) are separate columns and `reason` is
+   > **not in the response model at all**, so it cannot leak by omission. `GET /platform/state`
+   > is readable signed out and *during* maintenance, deliberately: the endpoint that explains
+   > the window must not be one of the things the window refuses. Tested by:
+   > `tests/test_platform.py`; the banner by
+   > `../Kryova-frontend/src/components/platform-banner.test.tsx`.
 
 **Phase proof:** a support engineer resolves a real user issue via read-only impersonation; the
 user's org owner can see that it happened, when, and by whom, in their own audit view.
@@ -2494,37 +3241,157 @@ scroll?
    poll-schedule/api-client machinery; WebSockets only if bidirectionality is ever actually
    needed), reconnect-and-resume — `conversation-resume` exists and is tested, so extend, don't
    replace.
-   > PARTIAL — resume exists and is tested. Code: frontend `conversation-resume`.
+   > PARTIAL (2026-09-10) — step events stream over SSE and `conversation-resume` rehydrates a
+   > reopened conversation; both are tested. **Two halves are genuinely absent and neither is a
+   > frontend gap.** *Token* streaming: the wire carries whole `narration` and `message` events,
+   > because `app/ai/provider.py` returns a completed turn — streaming tokens means changing the
+   > provider contract, not the client. *Reconnect-and-resume mid-turn*: a dropped stream loses
+   > the live view, though nothing is lost from the record — every step is persisted as it
+   > happens, so reopening shows what really ran. Closing it needs an event cursor on the wire so
+   > a reconnect can say where it got to.
+   > Superseded 2026-09-10: "resume exists and is tested" was true and said nothing about what
+   > was missing.
 
 2. **The step surface**: `agent-step-list` grows into the run view — plan steps, live geometry
    operations, solver progress, per-step timing, failure taxonomy classes surfaced in plain
    language.
-   > PARTIAL — steps and transcript exist. Code: frontend `agent-step-list`.
+   > PARTIAL (2026-09-10) — four of the five named surfaces are there. Plan steps and live
+   > geometry operations render in `agent-step-list`; per-step timing is on every row
+   > (`durationMs`); and the **failure taxonomy already reaches the user in plain language** by a
+   > route that was easy to miss — `app/solve/calculix/diagnose.py` classifies a failed `ccx`
+   > run, `solver.py` raises `SolverError(_with_evidence(failure))`, the runner writes that into
+   > `job.error`, and the results page renders it. So a singular system arrives as the missing
+   > restraint rather than as `returncode 201`. The run view also gained this phase's task 4, 6
+   > and 7 surfaces.
+   > **Missing: live solver progress.** CalculiX offers no incremental progress channel that is
+   > plumbed, so a solve is a single opaque call — which is also why interruption (task 6) can
+   > only act at stage boundaries. A percentage here would have to be invented, and a made-up
+   > progress bar over a twenty-minute solve is worse than an honest spinner.
+   > Superseded 2026-09-10: "steps and transcript exist" undercounted what shipped and named no
+   > residual.
 
 3. **The design as an artefact, visibly.** The spec (the IR) rendered beside the chat: parameters
    editable with units checked, features with their rationale notes, references navigable; **spec
    diffs rendered like code review** (what changed, what it reaches — `diff.py` already computes
    both). The conversation is the *log*; the spec is the *truth*; the UI must make that hierarchy
    legible.
-   > NOT STARTED.
+   > PARTIAL (2026-09-10) — **the diff half is built; the editable panel is not, and cannot be
+   > from here.** `components/gates/spec-diff.tsx` renders `SpecDiff.to_dict()` as a code review
+   > and the gate page is its first caller. It computes nothing: `app/design/diff.py` already
+   > works out both halves, and a second implementation on the client would be a second answer to
+   > "does this change the part" — the two would disagree the first time somebody edited a
+   > feature's rationale note, which moves both digests while building a byte-identical part.
+   > `plan_changed: false` is therefore rendered as the useful answer it is ("this edit builds the
+   > same part"), not as an empty state.
+   > **`downstream` is kept visibly apart from `changed_calls`**, under different wording, because
+   > that is the column a reviewer misses: nobody edited those features, they stand on something
+   > that was edited, and they may come out a different shape. A review showing only what was
+   > typed is the one that approves a wall thickness and silently moves the bore pattern cut into
+   > it.
+   > **What is missing and why**: `DesignSpec` is an in-memory IR — `grep` finds it in
+   > `app/design/`, `app/optimise/`, `app/requirements/` and `app/manufacture/`, and in **no**
+   > model and **no** route. There is nothing persisted to render beside the chat and nothing to
+   > PATCH a parameter into. That is E13/E16 work (persist the spec, expose it), not a frontend
+   > gap, and building a panel over an IR the server does not store would be a panel over a
+   > fiction. Tested by: `src/components/gates/spec-diff.test.tsx` (6).
 
 4. **The verification surface**: assertion dashboard (pass / fail / **unmeasured** rendered as
    first-class — unmeasured is amber, never green), requirement coverage, provenance drill-down
    from any number to its evidence chain (E7 task 3), convergence badges on simulation results.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `components/verification/verification-panel.tsx`:
+   > `VerdictBadge`, `ConvergenceBadge`, `ProvenanceNote` and `VerificationSummary`, wired into
+   > the results page **above the numbers, not below them**. "Can this number be leaned on" is a
+   > question to answer before somebody reads a factor of safety, not a footnote under one they
+   > have already believed.
+   > **Unmeasured is amber and never green**, which is Decision 3 rendered and is what three of
+   > the tests assert from different directions. A single-grid solve earns `one mesh —
+   > unverified`, however fine the mesh was, because a single solve holds no evidence about its
+   > own discretisation error — measured at gate G1, where a factor of safety of 1303 was reported
+   > off one 411-element tet4 mesh. `converged` is the only state that earns green.
+   > The summary names what the result is *bound to* — solver, version (or "version not
+   > recorded", never a guess), geometry version, element size and order — because a result bound
+   > to nothing is a result nobody can reproduce, which Decision 3 treats as no result. Tested by:
+   > `src/components/verification/verification-panel.test.tsx` (14), each verified by breaking the
+   > thing it guards.
 
 5. **Approval gates as UI**: a gate is a page — the diff, the affected assertions, the cost/time
    estimate of what follows, an approve/reject with the actor recorded (P2 domain roles; P3 audit).
    Not a chat message that scrolls away.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `app/models/gates.py`, `app/core/gates.py`, `app/api/routes/gates.py`,
+   > migration `01f9a909fad0`, and `/dashboard/approvals` with `SpecDiff` as its evidence panel.
+   > **A gate is a row, and that is the whole design.** Asking in the conversation and reading the
+   > answer back out of it fails three ways a row does not: the transcript is trimmed (`ai/resume`
+   > exists because of exactly that), an LLM paraphrase of an approval is not an approval, and
+   > nobody can afterwards answer "who signed this off and what did they see" — which is the
+   > question actually asked, and only ever after something has gone wrong.
+   > Three rules, each pinned by a test that fails when the check is removed. **The subject is
+   > pinned, not referenced**: `subject_digest` is taken when the gate is raised and `decide`
+   > re-digests what the decider is looking at now, so an approval cannot land on a design that
+   > moved while it was pending — a gate approving "the current spec" is a signature on a blank
+   > page. **A rejection carries a reason**, because the agent's next move depends entirely on
+   > why. **`EXPIRED` is not a fourth way of saying no**: `decided_by_id` stays null, because
+   > filling it would put a name against a decision nobody made.
+   > **This is the first reader of `Membership.domain_role`**, whose own docstring has said
+   > "16.5/P5 read this column" since P2.2 while nothing did. `None` means *not stated* and does
+   > not qualify — the column was made nullable precisely so that could be said. `ALLOW_SELF_APPROVAL`
+   > defaults false so a team gets four-eyes unconfigured, and exists at all because most
+   > self-hosted installs have one engineer and a review process that cannot be completed is one
+   > people route around entirely, losing the record as well as the second opinion.
+   > Tested by: `tests/test_gates.py` (24).
 
 6. **Interruption and steering**: stop a run cleanly (the bounded loops make this safe), edit a
    parameter mid-mission, resume without loss.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `app/core/interruption.py`, `POST /ai/conversations/{id}/cancel`,
+   > `POST …/simulations/{id}/cancel`, and a two-press stop button in the composer.
+   > **The signal is a database column, not an in-process flag**, and that is the load-bearing
+   > decision: whoever presses stop is served by one worker and the turn is streaming from
+   > another, so an in-memory registry works perfectly under `--workers 1` and silently does
+   > nothing in production — the worst available failure shape for a button people press when
+   > something is already going wrong. Both readers go to the database rather than to an
+   > attribute their session loaded, and `tests/test_interruption.py` simulates the stale reader
+   > explicitly.
+   > **The frontend already had a stop and it did not stop anything.** It aborted the fetch, and
+   > its own comment admitted "stopping the stream does not stop the seat" — the agent carried on
+   > driving CATIA with nobody watching. Now the first press asks the loop to stop and the client
+   > *keeps listening*, so the loop ends at its next step boundary, writes what happened into the
+   > transcript and closes the stream itself. The old abort survives as the second press, for a
+   > stream that has gone quiet.
+   > **Two honest partials, both stated in the product rather than smoothed over.** A tool call
+   > already in flight finishes: half an applied CATIA operation is worse to own than four more
+   > seconds of waiting. And a simulation stops at a *stage* boundary — after meshing, between the
+   > grids of a study — because meshing and solving are each a single call into gmsh or CalculiX
+   > this process cannot reach into, so a solve already handed to CalculiX finishes **and is
+   > still billed**. The button says so. A cancel does not make machine time retroactively free,
+   > and implying it did is the kind of small lie a billing dispute is built out of.
+   > `JobStatus.CANCELLED` is terminal and is **not** a kind of `FAILED` — a failure is the
+   > product not working, a cancellation is it doing what it was told, and grouping them puts a
+   > user who changed their mind into the fleet's failure rate.
+   > **Not delivered: "edit a parameter mid-mission".** That needs a persisted, addressable
+   > `DesignSpec` — the same thing task 3 is missing, and for the same reason. Stopping and
+   > resuming without loss works; steering by editing does not exist to be wired to.
+   > Tested by: `tests/test_interruption.py` (16), `src/components/chat/chat-view.test.tsx` (3
+   > new), `src/types/api.contract.test.ts`.
 
 7. **Cost/time honesty**: before a long run, the estimate (E16 task 6 / P8); during, elapsed vs
    estimate; after, actuals — the trust habit that makes P8's billing uncontroversial.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `components/verification/cost-notice.tsx`: `CostNotice` above the run
+   > button on the simulate page, `ElapsedAgainstEstimate` for a run in flight.
+   > **The number comes from the meter that bills**, which is P8.4's one-meter rule reaching the
+   > screen. The component does no arithmetic at all: the backend projects from the tenant's own
+   > recorded runs and returns a finished `sentence`, and rendering that sentence is what stops
+   > the estimate and the bill from drifting apart. Assembling our own from `units` and `unit`
+   > would be a second place for the wording — and the honesty — to diverge.
+   > **Too little history is shown as such, never as zero and never hidden.** "We cannot estimate
+   > this yet, because you have run two simulations and we need three" is useful; a blank where a
+   > cost should be is not, and an invented figure is worse than either, because a cost estimate
+   > is the one number in a product nobody contradicts afterwards — which is exactly why a made-up
+   > one survives. Overrun is a fact rather than an alarm: the estimate is a median, so half of
+   > all runs exceed it by construction, and colouring that red would teach people the product is
+   > usually broken. It turns amber at twice the estimate, where the run genuinely is unusual.
+   > **`ProjectRead` gained `organisation_id`** for this: the estimate is per tenant and a page
+   > holding only a project id could not ask what a run would cost. `owner_id` is not a
+   > substitute — since P2 a project belongs to an organisation and can be transferred between
+   > them.
 
 ##### Phase P6 — The viewer at machine scale #####
 
@@ -2618,11 +3485,35 @@ scene in the Tauri app.
 
 ##### Phase P8 — Billing, quotas and metering #####
 
+> ✅ PHASE COMPLETE (2026-09-10) — all four tasks done and tested. **The price list is
+> deliberately still empty, and that is the completed state rather than a gap**: plan allowances
+> are now settings, because Decision 4 makes this product free and open and a self-hosted install
+> has no price list at all — its operator decides what its own users may do. Every default is
+> `0` (unset), so a fresh deployment behaves exactly as it did before allowances existed, and no
+> number in this repository is one Kryova is claiming.
+
 **~3 engineer-months. Needs P2 (orgs), P3 (flags/quotas); ships before general availability.**
 
 1. **Meter what costs**: solver-seconds by class (a CalculiX nonlinear minute ≠ a linear static
    second), geometry-operation batches, storage-bytes, seats. Usage accumulates locally and posts in
    aggregates — the high-volume pattern; never one event per action.
+   > **DONE (2026-09-10) — the last three meters are wired and `unwired_meters()` is now empty.**
+   > *AI tokens* go through `routes/ai._meter_tokens`, which is the single funnel every AI path
+   > already used; the daily budget in `app/ai/usage.py` is deliberately **not** merged with it,
+   > because one is a per-user ceiling read before the next call and the other is a per-tenant
+   > bill summed over a period, and neither is the shape the other needs. *CATIA seat time* goes
+   > through `dispatch._meter_seat_time`, at the one place every dispatch path — seat, open
+   > kernel, refusal, failure — already converges; a second timing site would give two numbers
+   > for one event, which task 4 forbids. It is `APPROXIMATED` and always will be: it sums the
+   > calls Kryova drove and a seat is also occupied between them. *Kernel operations* needed no
+   > new meter, only a usage scope around dispatch, which the seat-time work opened.
+   > A tenant that cannot be resolved is **skipped, never guessed at** — a wrong organisation on
+   > an invoice is worse than a missing line. Tested by: `tests/test_billing*.py`,
+   > `tests/test_metering.py`, `tests/test_payments.py` (28 across this phase). Code:
+   > `app/core/metering.py`, `app/models/billing.py`, `app/api/routes/billing.py`, migration
+   > `b3d7c1f4a920`.
+
+   <!-- superseded 2026-09-10 -->
    > PARTIAL (2026-09-06) — metering, the usage ledger, rollups and per-tenant quotas shipped.
    > **Metering is *always on*, independent of tracing**: `app.observe.collect.add_listener` lets a
    > listener see every span whether or not `collect()` is running, so a bill is never gated on an
@@ -2631,25 +3522,55 @@ scene in the Tauri app.
    > solve time to the ledger in a `finally`, so a solve that fails after nine minutes is still
    > billed for the nine minutes, and the metering write goes through its own session (`LedgerSink`)
    > rather than the job's transaction, so a metering fault can never roll back the result it was
-   > measuring. **Declared but not yet wired**: AI token usage, CATIA seat time, kernel operations —
-   > the meters exist in the schema and report a gap rather than a number until something calls
-   > them. Tested by: `tests/test_billing*.py`, `tests/test_metering.py`. Code:
-   > `app/core/metering.py`, `app/models/billing.py`, `app/api/routes/billing.py`, migration
-   > `b3d7c1f4a920`.
+   > measuring.
 
 2. **Plans**: free tier (real but bounded — M1-class work, community support), team, and enterprise
    (SSO later, audit-log export from P3 task 1, custom quotas). **Stripe** metered billing +
    prepaid credits for compute bursts — the hybrid the compute-heavy SaaS pattern converged on.
-   > NOT STARTED — **no Stripe integration.**
+   > DONE (2026-09-10) — `app/core/payments.py` is the seam: `none` (the default, and the only
+   > one a self-hosted install needs), `stripe`, and `fake` for tests. Stripe does metered
+   > billing in **aggregate meter events per sealed period**, never one per action, and prepaid
+   > credit through a payment intent; amounts are integer minor units end to end, which is
+   > Stripe's own representation, so the boundary is a transfer and not a conversion. The
+   > `stripe` package is imported **inside each method** and declared optional in
+   > `pyproject.toml` — a missing package is a `ProviderResult` naming what is absent, not an
+   > ImportError at startup, which is the `ezdxf` landmine not repeated.
+   > Three rules the routes keep: the payment is taken **before** the balance moves (the other
+   > order hands out credit whenever the provider is unreachable); a provider refusal leaves the
+   > plan alone (a plan recorded locally that the provider refused is a tenant nobody is charging
+   > for); and a build with no provider **refuses** a credit purchase rather than granting it,
+   > because a deployment that cannot take money must not be a way to mint credit.
+   > **Not exercised against a live Stripe account** — the adapter is written from the API and
+   > tested against a stub, and what it does with real keys is a measurement nobody on this
+   > machine can make. Tested by: `tests/test_payments.py`.
 
 3. **Enforcement with dignity**: quota exhaustion returns the honest envelope (what ran out, what it
    costs to continue, what remains free), never a bare 429; estimates before expensive runs (P5
    task 7) mean nobody is surprised.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `POST …/simulations` refuses an exhausted allowance with
+   > `QuotaDecision.detail()`: the meter, what was used, the allowance, what remains, the credit
+   > balance and the plan. **`402`, not `429`** — this is not "too fast", it is "there is none
+   > left", and a 429 invites a retry that can only fail. Checked against `SOLVER_SECONDS` alone,
+   > because one limit per action is what a person can act on. A deployment with no allowances is
+   > unaffected: `check_quota` answers *allowed* with a reason rather than denying what it has no
+   > policy for, which is what stops a quota system stopping the product the day it is switched
+   > on. Tested by: `tests/test_payments.py::TestARefusalIsAnEnvelope`.
 
 4. **The bridge between metering and trust**: the same meter that bills is the meter shown in cost
    estimates. One number, two uses; divergence is a bug class of its own.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `app/core/estimates.py`. An estimate is a **projection of the same
+   > `Meter` values the ledger holds**, from this tenant's own recorded rows, in the ledger's own
+   > scaled integer units so the two can be compared without a conversion between them. That
+   > identity is the task.
+   > **An estimate with too little history carries no number** — `basis` is `unavailable` with a
+   > reason, in the vocabulary `kernel/provenance.py` already uses. A cost estimate is the most
+   > tempting place in the product to invent a figure: it is advisory, shown before anything
+   > happens, and never contradicted afterwards, which is exactly why an invented one survives.
+   > The **median**, not the mean, so one 40-minute convergence study in a history of two-second
+   > solves does not produce an estimate higher than anything that has ever happened. This
+   > tenant's history only, never the fleet's. **An estimate is never a limit** — `check_quota`
+   > decides what may run; wiring a projection into an enforcement decision would make it
+   > binding. Tested by: `tests/test_payments.py::TestAnEstimateComesFromTheMeterThatBills`.
 
 ##### Phase P9 — Delivery: CI/CD, environments, and operational safety #####
 
@@ -2726,15 +3647,59 @@ scene in the Tauri app.
 
 ##### Phase P10 — Documentation, onboarding and the trust surface #####
 
+> ✅ PHASE COMPLETE (2026-09-10) — all four tasks done and tested, and the phase now has one
+> property worth naming: **every page it ships is derived from something that cannot drift.**
+> The trust register reads module constants, the mission gallery reads `LADDER`, the API
+> reference reads this deployment's own OpenAPI document, the guides' routes are checked against
+> the running router, and the onboarding checklist reads the account's real contents. Nothing on
+> any of them is a second copy of a claim made elsewhere, which matters more here than anywhere
+> else in the product: documentation is the part most likely to quietly stop being true, and
+> these are the pages an outsider reads *before* they can check anything for themselves.
+>
+> The other thread running through all four is **publishing what is not claimed alongside what
+> is** — `Mission.unproven` in the gallery, `not_covered` in the guides, the twelve commitments,
+> and a status page that will not infer an outage from a failure rate. A page that is convincing
+> and incomplete is worse than one that is neither.
+
 **~2 engineer-months, then continuous.**
 
 1. **In-product onboarding**: the existing setup wizard grows into first-run success — a guided M1
    in under ten minutes, on the free tier, no sales call.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `src/components/onboarding/first-run.tsx`, on the projects page, three
+   > steps: create a project, upload a CAD file, run a linear-static solve.
+   > **Every tick is derived from what the account actually contains** — a project row, a
+   > geometry version, a *succeeded* simulation — and never from a stored "seen the onboarding"
+   > flag. That is the whole design, and two failures follow from getting it wrong: a
+   > flag-driven checklist can be fully ticked by somebody who has done none of it, telling a
+   > stuck user they are finished; and it can be dismissed by somebody who is still stuck,
+   > leaving nothing on screen about it. So there is no dismiss button and no `localStorage`
+   > (which `token-custody.test.ts` would catch anyway, and the reasoning above is why it
+   > should). It disappears on its own when there is a run that really succeeded.
+   > A **queued or failed** run does not tick the last step: a job that fails after nine minutes
+   > is not a completed first run, and ticking it would congratulate somebody at the moment they
+   > need help most. Tested by: `src/components/onboarding/first-run.test.tsx` (6).
 
 2. **The docs site**: task-oriented docs, the mission gallery (every ladder mission as a worked,
    forkable example), API reference from the OpenAPI schema that already exists.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `app/handbook/` + `GET /handbook/*` + `/docs`, unauthenticated for the
+   > same reason `trust` is: documentation behind a login can only be read by people who already
+   > bought, and the reader it needs — an engineer working out whether this does what they need —
+   > is exactly the person without an account.
+   > **Nothing on it is written twice, and that is the only defence that does not rely on
+   > somebody remembering.** The mission gallery is derived from `app.design.missions.LADDER`,
+   > the suite that decides whether this product works; the API reference is built from this
+   > deployment's own OpenAPI document; and **every guide step that names a route is checked
+   > against the running router** by `tests/test_docs.py`. A guide telling somebody to POST to an
+   > endpoint this build does not serve is worse than no guide — they believe it, it fails, and
+   > they conclude the product is broken.
+   > **`not_covered` and `not_claimed` are required fields, not decoration.** `Mission.unproven`
+   > already models what a rung does not claim, and a gallery that printed the passes and dropped
+   > the caveats would be the most misleading page in the product because it would be the most
+   > convincing one. The same for the guides: the stop-a-run guide says stopping is not a refund,
+   > which is the thing a reader would otherwise get wrong about their own bill.
+   > Named `handbook`, not `docs`, because `app/documents/` already exists and parses customer
+   > drawings — two packages one letter apart doing unrelated things is a mis-import in every
+   > future session. Tested by: `tests/test_docs.py` (30), each guard verified by breaking it.
 
 3. **The trust pages, the differentiator**: the **validation register** (E7 task 4) published —
    which analyses are validated against what, to what accuracy; the **"what Kryova will not claim"**
@@ -2750,7 +3715,31 @@ scene in the Tauri app.
 
 4. **Status and comms**: status page, incident history, the P3 task 7 announcement machinery's
    public face.
-   > NOT STARTED.
+   > DONE (2026-09-10) — `app/core/status.py`, `GET /status`, and `/status` in the frontend.
+   > **It carries none of the fleet's numbers, and that is asserted by name.** `GET /admin/health`
+   > has queue depth, storage bytes, live sessions and user totals; on a public URL those are the
+   > size of the business and the hours nobody is watching, and not one of them answers "is it
+   > working". `tests/test_docs.py` names each forbidden field rather than reading the current
+   > output and agreeing with it.
+   > **Degraded is never inferred from a failure rate.** There is deliberately no threshold in
+   > the module, and a test parses its AST to keep it that way: a rule nobody agreed to would put
+   > this product on a public outage page for a quiet hour with two bad runs. A window is
+   > declared by a person, who also has to write the sentence explaining it. The one automatic
+   > transition is a **critical announcement with no maintenance window** — that is how an
+   > operator says "something is wrong and we have not gone read-only", and without it the page
+   > would read "operating normally" above a banner saying solves are failing.
+   > This publishes P3.7's records rather than introducing a second place to declare an incident;
+   > an incident declared twice is described two ways, and the version customers read is the one
+   > nobody updates. The customer-facing `message` is published and the operator's `reason` never
+   > is. **When the status page cannot reach the API it says so** instead of showing a spinner or
+   > a green panel from stale state — the one case a status page must get right.
+   > **Two latent defects found on the way, in code from earlier phases.** `Announcement.level`
+   > and `ShareLink.revocation` were enum-typed columns stored as bare `String`, so a row loaded
+   > from the database handed back a plain `str`: `announcement.level.value` raised
+   > `AttributeError` on any deployment that had actually published an announcement, while
+   > passing in every test that wrote and read one in a single session. Both now use the new
+   > `models/types.EnumText`, which is `MessageRoleType` generalised — this is the same bug class
+   > for the third and fourth time. No migration: the DDL is unchanged.
 ---
 
 ## Part 3 — Technology register
@@ -2803,7 +3792,7 @@ constrain architecture (Decision 4).
 
 ## Part 4 — Effort, honestly
 
-**Engineering track — ~123 engineer-months:**
+**Engineering track — ~151 engineer-months:**
 
 1. Era I, geometry engine (E1–E2) — 14. Hard, foundational, unavoidable.
 2. Era II, perception (E3–E5) — 11. Best value per effort.
@@ -2812,6 +3801,8 @@ constrain architecture (Decision 4).
 5. Era V, scale (E14–E15) — 15. Architecture.
 6. Era VI, agent (E16) — 10. Research-adjacent, least predictable.
 7. Era VII, output and missions (E17–E18) — 21. Integration plus discovery.
+8. Era VIII, the world outside (E19–E23) — 28. Regulation, credibility, licensed data, measured
+   ceilings, positioning. Cheap per unit of commercial consequence, and the easiest to postpone.
 
 **Product track — ~38 engineer-months:**
 
@@ -2826,7 +3817,9 @@ constrain architecture (Decision 4).
 9. P9 delivery — 3. Starts week one.
 10. P10 docs and trust — 2+. Continuous.
 
-**Programme total ≈ 161 engineer-months** — about 8–10 engineers × ~1.7 years, in ideal conditions.
+**Programme total ≈ 189 engineer-months** — about 8–10 engineers × ~2 years, in ideal conditions.
+(It was 161 until Era VIII was added on 2026-09-09; the 28 months that arrived with it are work
+that was always going to be required and was simply not written down.)
 
 **Ideal conditions do not exist.** With hiring, rework and discovery: **4–7 calendar years** to the
 full ambition — with sellable, honest intermediate products from the first year (M1–M3 class work

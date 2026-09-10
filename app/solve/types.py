@@ -371,6 +371,20 @@ class LoadCase(BaseModel):
     #: says so by name rather than assuming one. See `app/solve/thermal.py`.
     delta_t_k: float | None = Field(default=None, ge=-2000.0, le=5000.0)
 
+    #: Which named recipe produced these loads, and with what factors (E12.1).
+    #:
+    #: `app/solve/load_library.py` named this gap in its own docstring: a case
+    #: carried `name` and nothing that said which recipe and which factor made
+    #: it, so "this is the 1.5 ultimate case" was a claim in a string rather
+    #: than a record. `describe()` there returns exactly this dictionary.
+    #:
+    #: **Optional, and absent is honest.** A case an engineer typed by hand has
+    #: no recipe behind it, and a default naming one would be a citation for a
+    #: derivation nobody performed — which is the failure mode the whole
+    #: provenance apparatus in `app/verify/` exists to prevent, applied to the
+    #: input side. `None` means "hand-authored"; it never means "unknown".
+    provenance: dict[str, Any] | None = None
+
 
 class ModalCase(BaseModel):
     """What to solve for a natural-frequency run.

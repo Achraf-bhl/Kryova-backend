@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.rate_limit import auth_limiter
+from app.core import email_verification
 from app.main import app
 from app.models import Membership, Organisation, OrgRole, Project, User
 from tests.typing import AuthenticatedTestClient
@@ -25,8 +26,22 @@ from tests.typing import AuthenticatedTestClient
 SignIn = Callable[[str], AuthenticatedTestClient]
 
 
+def _confirm(db_session: Session, user_id: str) -> None:
+    """Mark an address verified without going through the emailed link (P1.5).
+
+    The link flow is proved end to end in `tests/test_auth_verification.py`.
+    Driving it from every fixture that needs a second account would make one
+    defect there present as failures all over the suite.
+    """
+    user = db_session.get(User, user_id)
+    assert user is not None
+    email_verification.mark_verified(user, now=email_verification.utcnow())
+    db_session.flush()
+
+
+
 @pytest.fixture
-def sign_in(client: AuthenticatedTestClient) -> SignIn:
+def sign_in(client: AuthenticatedTestClient, db_session: Session) -> SignIn:
     """Register and sign in another account against the same app and session.
 
     Depends on `client` for its dependency overrides, not for its cookies: each
@@ -37,8 +52,11 @@ def sign_in(client: AuthenticatedTestClient) -> SignIn:
     def _sign_in(email: str, password: str = "correct-horse-battery") -> AuthenticatedTestClient:
         auth_limiter.reset()
         peer = cast(AuthenticatedTestClient, TestClient(app))
+        # Verified as it is created: since P1.5 an unverified account cannot
+        # create a project, and every one of these peers goes on to make one.
         registered = peer.post("/api/v1/auth/register", json={"email": email, "password": password})
         assert registered.status_code == 201, registered.text
+        _confirm(db_session, registered.json()["id"])
         signed_in = peer.post(
             "/api/v1/auth/login", data={"username": email, "password": password}
         )

@@ -183,11 +183,29 @@ class TestTheMapIsHonestAboutWhatItCovers:
     def test_every_meter_declares_where_its_numbers_come_from(self) -> None:
         assert {site.meter for site in METER_SITES} == set(Meter)
 
-    def test_an_unwired_meter_names_what_wiring_it_would_take(self) -> None:
-        unwired = unwired_meters()
-        assert unwired, "if every meter is wired, delete this test rather than weaken it"
-        for site in unwired:
-            assert len(site.not_wired_because) > 60, site.meter
+    def test_every_meter_is_wired_and_says_how(self) -> None:
+        """Replaces `test_an_unwired_meter_names_what_wiring_it_would_take`.
+
+        That test asserted at least one meter was unwired and said in its own
+        body: "if every meter is wired, delete this test rather than weaken it".
+        P8.1 wired the last three on 2026-09-10 (AI tokens, CATIA seat time,
+        kernel operations), so it was deleted rather than loosened — and this
+        is the claim that outlives the state: every meter declares where its
+        numbers come from, and an unwired one still has to give a real reason.
+        """
+        assert unwired_meters() == ()
+        for site in METER_SITES:
+            assert site.how.strip(), site.meter
+
+    def test_an_unwired_meter_would_still_have_to_explain_itself(self) -> None:
+        # The guard that made the deleted test worth having, kept at the level
+        # it actually lives: a `MeterSite` refuses to be unwired silently.
+        from app.core.metering import MeterSite
+
+        with pytest.raises(ValueError, match="no reason given"):
+            MeterSite(meter=Meter.AI_TOKENS, how="x", wired=False)
+        with pytest.raises(ValueError, match="needs no excuse"):
+            MeterSite(meter=Meter.AI_TOKENS, how="x", not_wired_because="y")
 
     def test_a_span_meter_cannot_be_both_a_count_and_a_scaled_duration(self) -> None:
         from app.core.metering import SpanMeter

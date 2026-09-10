@@ -68,12 +68,19 @@ class InvitationRead(BaseModel):
 
 
 class InvitationIssued(InvitationRead):
-    """The one response that carries the raw token.
+    """The one response that may carry the raw token.
 
     Only the SHA-256 is stored, so this is the single moment the token exists
-    outside the invitee's mail. It is returned rather than only mailed because
-    there is no mail transport in this service yet -- the same honest gap the
-    password-reset flow has.
+    outside the invitee's mail.
+
+    **It is populated only when the email did not reach a mailbox** (P1.5 gave
+    this service a mail transport; before that it was always returned). If the
+    invitation is in an inbox, returning the token as well would put a live
+    credential in the inviter's browser history and in any log that records
+    response bodies, for no gain -- the recipient already has it. When delivery
+    fails, or on a development deployment whose transport reaches nobody, the
+    token comes back so the inviter can pass it on rather than believing an
+    invitation is in flight that is not.
     """
 
     token: str | None = None

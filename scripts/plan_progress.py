@@ -66,6 +66,18 @@ _STATUS_RE = re.compile(rf"^ *> \*{{0,2}}({'|'.join(WEIGHT)})")
 _COMPLETE_RE = re.compile(r"^ *> .*PHASE COMPLETE")
 _TASK_RE = re.compile(r"^(\d+)\. ")
 _QUOTED_RE = re.compile(r"^ *> ?")
+#: The plan's maintenance rules say "never delete a status — supersede it", and
+#: this comment is how the document has been marking the superseded one since
+#: 2026-09-08. Everything quoted after it, until the next task or phase, is
+#: history: it records what was true, not what is.
+#:
+#: **Counting it was a real defect.** E4 task 4 shipped on 2026-09-08 with its
+#: 2026-09-07 `PARTIAL` marked superseded directly beneath the `DONE` that
+#: replaced it — and this parser went on reporting the phase as carrying an open
+#: task, which in turn obliged the phase-complete marker to say task 4 "stays
+#: PARTIAL" months after it had not. So the file that exists to measure the plan
+#: was pushing a false sentence into it.
+_SUPERSEDED_RE = re.compile(r"^ *<!--\s*superseded")
 
 # Part 4, engineering track: "1. Era I, geometry engine (E1–E2) — 14. Hard, ..."
 # and the single-phase form "6. Era VI, agent (E16) — 10. ..."  The dash between
@@ -122,12 +134,13 @@ def read_phases(text: str) -> list[Phase]:
     current: Phase | None = None
     task: int | None = None
     in_marker = False
+    superseded = False
     for line in text.splitlines():
         heading = _PHASE_RE.match(line)
         if heading:
             current = Phase(key=heading.group(1), title=heading.group(2))
             phases.append(current)
-            task, in_marker = None, False
+            task, in_marker, superseded = None, False, False
             continue
         if current is None:
             continue
@@ -143,11 +156,18 @@ def read_phases(text: str) -> list[Phase]:
                 current.marker += " " + _QUOTED_RE.sub("", line)
                 continue
             in_marker = False
+        if _SUPERSEDED_RE.match(line):
+            superseded = True
+            continue
         numbered = _TASK_RE.match(line)
         if numbered:
             task = int(numbered.group(1))
+            # A new task ends the previous one's history.
+            superseded = False
         status = _STATUS_RE.match(line)
         if status:
+            if superseded:
+                continue
             current.counts[status.group(1)] += 1
             if status.group(1) != "DONE" and task is not None:
                 current.open_tasks.append(task)
@@ -201,9 +221,21 @@ def _roll_up(phases: list[Phase]) -> tuple[int, float, float, float, int]:
 
 def render(phases: list[Phase], date: str) -> str:
     """The generated block, as it appears in the plan."""
+    engineering = [p for p in phases if p.key.startswith("E")]
+    product = [p for p in phases if p.key.startswith("P")]
+
+    def _span(group: list[Phase]) -> str:
+        """`E1–E23`, read off the phases rather than typed.
+
+        This label was `E1–E18` as a literal until Era VIII was added, at which
+        point the generated block described a range it no longer covered — a
+        stale number inside the one block nobody is allowed to type by hand.
+        """
+        return f"{group[0].key}–{group[-1].key}"
+
     tracks = [
-        ("Engineering — E1–E18", [p for p in phases if p.key.startswith("E")]),
-        ("Product — P1–P10", [p for p in phases if p.key.startswith("P")]),
+        (f"Engineering — {_span(engineering)}", engineering),
+        (f"Product — {_span(product)}", product),
         ("**Programme**", phases),
     ]
     out = [

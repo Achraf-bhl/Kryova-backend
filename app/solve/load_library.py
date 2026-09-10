@@ -33,10 +33,12 @@ Reported rather than worked around, because the fix belongs in `types.py` and
 * **No contact.** Clamped members cannot separate, so a preloaded joint stays
   linear however hard the external load pulls. A separated joint is exactly the
   case a preload calculation exists to prevent, and this cannot see it.
-* **A `LoadCase` records no provenance.** It carries `name`, and nothing that
-  says which recipe and which factor produced its loads. `describe()` below
-  returns that dictionary so a caller can store it on the job row; a field on
-  `LoadCase` itself would be better and belongs in `types.py`.
+* ~~**A `LoadCase` records no provenance.**~~ **Closed 2026-09-10.**
+  `LoadCase.provenance` exists in `types.py` and `compose(..., recipes=(...),
+  factor=...)` fills it, so "this is the 1.5 ultimate case" is a record rather
+  than a claim in a string. A case built by hand leaves it `None`, which means
+  *hand-authored* and never *unknown* — stamping a recipe onto a case nobody
+  derived that way would be a citation for work that did not happen.
 """
 
 from __future__ import annotations
@@ -435,11 +437,23 @@ def compose(
     fixtures: Sequence[Fixture],
     *load_groups: Iterable[Load],
     delta_t_k: float | None = None,
+    recipes: Sequence[str] = (),
+    factor: float | None = None,
 ) -> LoadCase:
     """Build a `LoadCase` from a material, fixtures and one or more recipe outputs.
 
     Concatenates the groups in order, so a case is written the way it is
     described: `compose("Lift", steel, [clamp], self_weight(), pressure(...))`.
+
+    **`recipes` and `factor` become the case's provenance** (E12.1). This
+    module's docstring named the gap they close: a `LoadCase` carried `name` and
+    nothing that said which recipe and which factor produced its loads, so
+    "this is the 1.5 ultimate case" was a claim in a string. `LoadCase` has a
+    `provenance` field since 2026-09-10 and this fills it.
+
+    Passing no recipes leaves `provenance` **None**, and that is correct rather
+    than lazy: a case assembled by hand has no recipe behind it, and stamping
+    one would be a citation for a derivation nobody performed.
     """
     loads: list[Load] = [load for group in load_groups for load in group]
     if not loads:
@@ -447,12 +461,29 @@ def compose(
             f"Load case {name!r} has no loads. A static solve with none is a solve of "
             f"nothing; give it at least one recipe's output."
         )
+    unknown = [key for key in recipes if key not in RECIPES]
+    if unknown:
+        # Refused rather than recorded: a provenance naming a recipe that does
+        # not exist is worse than none, because it reads as checkable and is not.
+        raise ValueError(
+            f"Load case {name!r} claims recipes that are not in the library: "
+            f"{', '.join(sorted(unknown))}. Known recipes: {', '.join(sorted(RECIPES))}."
+        )
+    provenance: dict[str, object] | None = None
+    if recipes:
+        provenance = {
+            "recipes": [describe(key).describe() for key in recipes],
+            "library": "app.solve.load_library",
+        }
+        if factor is not None:
+            provenance["factor"] = factor
     return LoadCase(
         name=name,
         material=material,
         fixtures=list(fixtures),
         loads=loads,
         delta_t_k=delta_t_k,
+        provenance=provenance,
     )
 
 

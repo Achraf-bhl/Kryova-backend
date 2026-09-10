@@ -56,6 +56,7 @@ from app.ai.verification import (
     shortfall_note,
     unverified_footnote,
 )
+from app.core import interruption
 from app.core.config import settings
 from app.models import Conversation, ConversationMessage, MessageRole, User
 from app.retrieval import knowledge_service
@@ -438,6 +439,11 @@ def stream_agent(
     labels = toolbox.labels()
     usage = TokenUsage()
 
+    # Any stop left over from an earlier turn is spent. Without this one press
+    # of stop would end every turn after it, instantly, each looking to the user
+    # like the product refusing to work.
+    interruption.clear_turn_stop(db, conversation)
+
     _append(db, conversation, MessageRole.USER, content=user_message)
 
     # Fold before building the window, so the material being folded is still
@@ -493,6 +499,31 @@ def stream_agent(
     stop_reason = "step_budget"
 
     for step in range(budget):
+        # P5 task 6, checked here and nowhere else in the loop. Before the model
+        # call, so a stop is not followed by one more paid round trip; after the
+        # previous step's tools have finished, so nothing is left half-applied.
+        if interruption.turn_stop_requested(db, conversation):
+            logger.info("turn stopped on request at step %d/%d", step + 1, budget)
+            _append(
+                db, conversation, MessageRole.ASSISTANT, content=interruption.TURN_STOPPED_MESSAGE
+            )
+            db.commit()
+            yield {"type": "message", "content": interruption.TURN_STOPPED_MESSAGE}
+            yield {
+                "type": "done",
+                "conversation_id": conversation.id,
+                "project_id": toolbox.project_id,
+                # True: the turn did not reach an answer. The frontend uses this
+                # to decide whether to offer "continue", which is exactly what a
+                # stopped turn should offer.
+                "truncated": True,
+                "stop_reason": "cancelled",
+                "steps": len(steps),
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+            }
+            return
+
         yield {"type": "thinking", "step": step + 1, "max_steps": budget}
         # A turn is the model thinking plus the tools running, and the two are
         # optimised in completely different places -- one is GPU offload and

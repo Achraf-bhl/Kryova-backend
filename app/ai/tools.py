@@ -1020,8 +1020,8 @@ class ToolBox:
         if not rows:
             raise ToolError(
                 f"Project {project.name!r} has no geometry yet. Either the user uploads a "
-                "STEP, IGES or STL file, or you build the part in CATIA and export it "
-                "with catia_export_step."
+                "STEP, IGES or STL file, or you build the part and export it with "
+                "catia_export_step — which works on the open kernel as well as on a seat."
             )
         return {
             "project_id": project.id,
@@ -1117,7 +1117,7 @@ class ToolBox:
         if version is None:
             raise ToolError(
                 "This project has no geometry to resolve a load case against. Export "
-                "the part from CATIA first with catia_export_step, then call this again."
+                "the part first with catia_export_step, then call this again."
             )
 
         box = (version.stats or {}).get("bounding_box")

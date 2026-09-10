@@ -29,8 +29,118 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Secrets that have to be readable again (P1.7)
+# ---------------------------------------------------------------------------
+#
+# Almost every credential here is hashed, because nothing needs the original
+# back. A TOTP shared secret is the exception: validating a code requires the
+# secret itself, so it must be stored recoverably.
+#
+# **What this buys and what it does not.** The key is derived from
+# `SECRET_KEY`, which lives in the environment, so an attacker who has the host
+# has both the ciphertext and the key and this stops them cold for zero seconds.
+# What it does defend is the much more common shape: a database compromised on
+# its own — a leaked backup, a read-only replica, SQL injection, a misconfigured
+# managed instance. In that case every second factor stays a second factor. That
+# is a real distinction and it is why this is worth the twenty lines; it is not
+# a claim that the secrets are safe from a rooted machine, and nothing in the
+# product says otherwise.
+#
+# A KMS or an HSM-held key is the upgrade, and it changes only `_at_rest_key`.
+
+_AT_REST_INFO = b"kryova-secret-at-rest-v1"
+_AT_REST_VERSION = "v1"
+
+
+def _at_rest_key() -> bytes:
+    """A 256-bit key derived from `SECRET_KEY` for AES-GCM.
+
+    HKDF rather than a bare SHA-256 of the key: `SECRET_KEY` is also the JWT
+    signing key, and deriving with a distinct `info` string means the two uses
+    cannot be made to interact even if one of them is later attacked.
+    """
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    derived: bytes = HKDF(
+        algorithm=hashes.SHA256(), length=32, salt=None, info=_AT_REST_INFO
+    ).derive(settings.secret_key.encode("utf-8"))
+    return derived
+
+
+def encrypt_at_rest(plaintext: str) -> str:
+    """AES-256-GCM, returned as `v1:<nonce>:<ciphertext>` in base64url.
+
+    Versioned in the string so a future key rotation or algorithm change can
+    read old rows rather than orphaning every enrolled second factor — the
+    failure mode of an unversioned envelope is that the upgrade silently locks
+    everybody out of their own account.
+    """
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = secrets.token_bytes(12)
+    sealed = AESGCM(_at_rest_key()).encrypt(nonce, plaintext.encode("utf-8"), None)
+    encode = base64.urlsafe_b64encode
+    return f"{_AT_REST_VERSION}:{encode(nonce).decode()}:{encode(sealed).decode()}"
+
+
+def decrypt_at_rest(blob: str) -> str | None:
+    """The plaintext back, or None if this cannot be read.
+
+    None rather than an exception because the realistic cause is a rotated
+    `SECRET_KEY`, and the caller's honest response to that is "this second
+    factor can no longer be validated, ask the user to re-enrol" — not a 500.
+    """
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    try:
+        version, nonce_b64, sealed_b64 = blob.split(":", 2)
+    except ValueError:
+        return None
+    if version != _AT_REST_VERSION:
+        return None
+    try:
+        decode = base64.urlsafe_b64decode
+        opened = AESGCM(_at_rest_key()).decrypt(decode(nonce_b64), decode(sealed_b64), None)
+    except (InvalidTag, ValueError, TypeError):
+        return None
+    return opened.decode("utf-8")
+
+
 ACCESS_TOKEN_TYPE = "access"
 REFRESH_TOKEN_TYPE = "refresh"
+
+#: Short-lived token issued when a password was right and a second factor is
+#: still owed. It is *not* an access token and grants nothing: `_decode_typed`
+#: refuses it everywhere a session is expected, which is the only reason it is
+#: safe to hand to a browser mid-login.
+MFA_CHALLENGE_TOKEN_TYPE = "mfa_challenge"
+
+#: Five minutes to type six digits. Long enough to open an authenticator app and
+#: read a code that is about to roll over; short enough that a challenge left in
+#: a browser's memory is not a standing half-credential.
+MFA_CHALLENGE_MINUTES = 5
+
+
+def create_mfa_challenge_token(subject: str) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "sub": subject,
+            "exp": now + timedelta(minutes=MFA_CHALLENGE_MINUTES),
+            "iat": now,
+            "type": MFA_CHALLENGE_TOKEN_TYPE,
+        },
+        settings.secret_key,
+        algorithm=ALGORITHM,
+    )
+
+
+def decode_mfa_challenge_token(token: str) -> str | None:
+    """Whose half-finished login this is, or None."""
+    return _decode_typed(token, MFA_CHALLENGE_TOKEN_TYPE)
 
 
 def create_access_token(subject: str, expires_delta: timedelta | None = None) -> str:

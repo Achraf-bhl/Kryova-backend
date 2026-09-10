@@ -26,7 +26,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+import tempfile
 import time
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -71,9 +74,10 @@ from app.catia_kb.ui import (
     resolve_workbench,
 )
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.geometry import backends
 from app.media import MediaService, get_media_store
-from app.models import Conversation, MediaKind
+from app.models import Conversation, MediaKind, Project, User
 from app.models.base import utcnow
 from app.models.catia import (
     CatiaCheckpoint,
@@ -83,6 +87,7 @@ from app.models.catia import (
     CatiaOperation,
 )
 from app.models.geometry import GeometryVersion
+from app.models.organisation import organisation_ids_for_user
 from app.solve.materials import MATERIALS
 
 logger = logging.getLogger(__name__)
@@ -608,6 +613,33 @@ def call_catia(
         # the vocabulary is the contract, and a backend that accepted looser
         # arguments would make plans that only build on one of them.
         if backends.is_local():
+            # An operation the open kernel serves without being a geometry
+            # operation — see `backends.LOCALLY_SERVED`. It is handled here
+            # rather than in `HANDLERS` because it needs the session and the
+            # media store, neither of which a kernel handler is given, and
+            # because it changes nothing about the part.
+            if spec.name in backends.LOCALLY_SERVED:
+                data = _export_locally(
+                    db,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    arguments=arguments,
+                )
+                _log(
+                    db,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    device_id=None,
+                    tool=tool,
+                    tier=tier,
+                    arguments=arguments,
+                    result=data,
+                    ok=True,
+                    error=None,
+                    started=started,
+                )
+                return data
+
             data = _execute_locally(
                 spec=spec,
                 conversation_id=conversation_id,
@@ -2044,14 +2076,120 @@ def _store_capture(
     }
 
 
-def _store_export(
+def _export_locally(
     db: Session,
     *,
     user_id: str,
     conversation_id: str | None,
     arguments: dict[str, Any],
-    raw: dict[str, Any],
 ) -> dict[str, Any]:
+    """`catia_export_step` on the open kernel: write the shape, register it.
+
+    **The defect this closes.** On `GEOMETRY_BACKEND=occt` the agent could build
+    a part and then do nothing whatever to it. `catia_export_step` and
+    `sync_geometry_from_catia` were the only two geometry→solver routes in its
+    entire vocabulary and both were CATIA-only, so `run_simulation` had nothing
+    to mesh and ladder Levels 3, 4 and 5 — with them plane analyses, conduction
+    and convergence studies — were unreachable from a conversation. Found on the
+    Windows seat on 2026-09-10 driving the real chat endpoint; the offline suite
+    could not see it because the gap sat one layer above `dispatch`, in what the
+    agent was *offered* rather than in what any tool did.
+
+    **It was a seam, not a missing capability** — `manufacture.export.write_step`
+    already worked and the kernel document already held the shape. Nothing joined
+    them.
+
+    The result is deliberately the same shape as `_store_export`'s, down to
+    `next_step`, because the agent has one vocabulary and a reply that differed
+    per backend would teach it that the backend matters. What differs is
+    `source`, which is recorded on the blob and is what the refusals say.
+    """
+    from app.manufacture.errors import ExportError
+    from app.manufacture.export import write_step
+
+    _, project_id = _exportable_conversation(
+        db, user_id=user_id, conversation_id=conversation_id
+    )
+
+    if backends.was_evicted(conversation_id):
+        backends.clear_eviction(conversation_id)
+        raise CatiaError(
+            "The part this conversation was building is no longer in memory — too "
+            "many documents were open at once and this one was closed. Nothing was "
+            "saved, so there is nothing to export. Build it again with catia_new_part; "
+            "the design is still in the conversation."
+        )
+    runner = backends.peek_session(conversation_id)
+    document = getattr(runner, "document", None) if runner is not None else None
+    shape = getattr(document, "shape", None) if document is not None else None
+    if document is None or shape is None:
+        raise CatiaError(
+            "There is nothing built in this conversation to export. Create the part "
+            "first — catia_new_part, then a sketch and a pad — and export once it has "
+            "solid geometry in it."
+        )
+
+    # `document.shape` is the **active body**, which is what every other reader of
+    # this document uses (`app/api/routes/kernel.py`). A part with more than one
+    # body therefore exports one of them, and the agent is told which and what was
+    # left behind rather than being handed a file that silently is not the part.
+    # Refusing instead would be worse: single-body is the overwhelming case, and
+    # over-refusal is the failure mode `app/catia/` is written against.
+    bodies = list(document.body_names()) if hasattr(document, "body_names") else []
+    left_behind = [name for name in bodies if name != getattr(document, "active_body", None)]
+
+    name = str(getattr(document, "name", None) or arguments.get("filename") or "part")
+    filename = f"{name}.step" if not name.lower().endswith((".step", ".stp")) else name
+
+    with tempfile.TemporaryDirectory() as scratch:
+        target = Path(scratch) / filename
+        try:
+            write_step(shape, target)
+        except ExportError as exc:
+            raise CatiaError(str(exc)) from exc
+        try:
+            version = import_step_export(
+                db,
+                _media_service(db),
+                owner_id=user_id,
+                project_id=project_id,
+                path=target,
+                filename=filename,
+                note=arguments.get("note"),
+                source="occt",
+            )
+        except GeometryImportError as exc:
+            raise CatiaError(str(exc)) from exc
+
+    result: dict[str, Any] = {
+        "project_id": project_id,
+        "geometry_version_id": version.id,
+        "version_number": version.version_number,
+        "filename": version.filename,
+        "size_bytes": version.size_bytes,
+        "stats": version.stats,
+        "next_step": (
+            f"Geometry version {version.version_number} is ready. Build a load case "
+            "against it and run a simulation."
+        ),
+    }
+    if left_behind:
+        result["bodies_not_exported"] = left_behind
+        result["exported_body"] = document.active_body
+    return result
+
+
+def _exportable_conversation(
+    db: Session, *, user_id: str, conversation_id: str | None
+) -> tuple[Conversation, str]:
+    """The conversation an export may be written into, and the project it lands in.
+
+    Shared by both backends so the two cannot drift on who owns what — the
+    ownership check and the project requirement are the same question however the
+    STEP file was produced. The project id is returned beside the conversation
+    rather than read off it again by each caller, because it is `str | None` on
+    the row and non-optional here: proving that once is the point of the check.
+    """
     conversation = db.get(Conversation, conversation_id) if conversation_id else None
     if conversation is None or conversation.owner_id != user_id:
         raise CatiaError("This call is not attached to one of your conversations.")
@@ -2060,6 +2198,20 @@ def _store_export(
             "This conversation is not scoped to a project, so there is nowhere to put "
             "the geometry. Create a project first, then export again."
         )
+    return conversation, conversation.project_id
+
+
+def _store_export(
+    db: Session,
+    *,
+    user_id: str,
+    conversation_id: str | None,
+    arguments: dict[str, Any],
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    _, project_id = _exportable_conversation(
+        db, user_id=user_id, conversation_id=conversation_id
+    )
 
     received: ReceivedFile | None = None
     try:
@@ -2068,7 +2220,7 @@ def _store_export(
             db,
             _media_service(db),
             owner_id=user_id,
-            project_id=conversation.project_id,
+            project_id=project_id,
             path=received.path,
             filename=str(raw.get("filename") or "catia-export.step"),
             note=arguments.get("note"),
@@ -2082,7 +2234,7 @@ def _store_export(
             received.path.unlink(missing_ok=True)
 
     return {
-        "project_id": conversation.project_id,
+        "project_id": project_id,
         "geometry_version_id": version.id,
         "version_number": version.version_number,
         "filename": version.filename,
@@ -2171,3 +2323,111 @@ def _log(
     except Exception:  # noqa: BLE001 - logging must never mask the real failure
         logger.exception("Could not write the CATIA operation log for %s", tool)
         db.rollback()
+
+    _meter_seat_time(db, operation, conversation_id=conversation_id, user_id=user_id)
+
+
+def _meter_seat_time(
+    db: Session, operation: CatiaOperation, *, conversation_id: str | None, user_id: str
+) -> None:
+    """Post this call's duration to the usage ledger (P8.1).
+
+    The row above already holds `duration_ms`; what was missing was a tenant to
+    attribute it to and a scope to post it through. Wired here rather than
+    around the call itself because this is the one place every dispatch path —
+    seat, open kernel, refusal, failure — already converges, and a second timing
+    site would give two numbers for one event, which P8.4 exists to forbid.
+
+    **The quantity is `APPROXIMATED` and cannot be anything else.** It sums the
+    calls Kryova drove; a seat is also occupied between them, by the dialogs,
+    the rebuilds and the pauses. So this is a *lower bound* on occupancy and
+    `CATIA_SEAT_METHOD` says so on every row. Reporting it as measured would be
+    the fabrication Decision 3 exists to prevent.
+
+    Failures are swallowed with evidence: the operation happened, the log row is
+    committed, and a metering problem must not turn a successful CATIA call into
+    an error the agent then tries to recover from.
+    """
+    if conversation_id is None:
+        return
+    # Imported here rather than at module scope: `app.core.metering` reaches
+    # `app.simulation.runner`, which reaches back into this module, and the
+    # cycle only shows up as an ImportError at startup. Same reason
+    # `core/lifecycle.py` defers its `Media` import.
+    from app.core.metering import Cause, LedgerSink, record_seat_time, usage_scope
+
+    try:
+        conversation = db.get(Conversation, conversation_id)
+        if conversation is None:
+            return
+        organisation_id = _billing_tenant(db, conversation, user_id)
+        if organisation_id is None:
+            # No tenant to bill. Skipped rather than guessed at.
+            return
+        cause = Cause(
+            organisation_id=organisation_id,
+            source="catia.dispatch",
+            subject_type="conversation",
+            subject_id=conversation_id,
+            conversation_id=conversation_id,
+            project_id=conversation.project_id,
+            user_id=user_id,
+            detail={"tool": operation.tool},
+        )
+        scope_factory = _session_scope_factory()
+        with usage_scope(
+            cause, LedgerSink(scope_factory), fault_scope=scope_factory
+        ) as scope:
+            record_seat_time(
+                scope,
+                seconds=(operation.duration_ms or 0) / 1000.0,
+                calls=1,
+                tool=operation.tool,
+            )
+    except Exception:  # noqa: BLE001 - metering must never fail a CATIA call
+        logger.exception("Could not meter CATIA seat time for %s", operation.tool)
+
+
+def _billing_tenant(db: Session, conversation: Conversation, user_id: str) -> str | None:
+    """The organisation a conversation's spend belongs to.
+
+    Through the project where there is one, because that is the tenant that owns
+    the work; otherwise the user's own, since a conversation with no project is
+    still somebody's. Returns None rather than a default when neither answers —
+    a wrong organisation on an invoice is worse than a missing line.
+    """
+    if conversation.project_id:
+        project = db.get(Project, conversation.project_id)
+        if project is not None:
+            return project.organisation_id
+    user = db.get(User, user_id)
+    if user is None:
+        return None
+    tenants = organisation_ids_for_user(db, user)
+    return next(iter(sorted(tenants))) if tenants else None
+
+
+#: `app.simulation.runner.SessionScope` spelled out rather than imported:
+#: that module reaches back into this one, and the cycle is an ImportError
+#: at startup. It is a two-word structural alias, so a local copy costs
+#: nothing and cannot drift in a way `mypy` would not catch at the call site.
+_SessionScope = Callable[[], AbstractContextManager[Session]]
+
+
+def _session_scope_factory() -> _SessionScope:
+    """A fresh session for the metering write.
+
+    Not the dispatch session: a metering write inside it could roll back the
+    operation log this function has just committed, which is the one thing P8
+    says metering must never do.
+    """
+
+    @contextmanager
+    def scope() -> Iterator[Session]:
+        session = SessionLocal()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    return scope

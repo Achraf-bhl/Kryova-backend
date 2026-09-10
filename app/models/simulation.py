@@ -20,10 +20,16 @@ class JobStatus(str, enum.Enum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    #: Stopped on request (P5 task 6). **Not a kind of `FAILED`**, and every
+    #: surface that groups the two is wrong: a failure is the product not
+    #: working and belongs in the fleet's failure rate, while a cancellation is
+    #: the product doing exactly what it was told. Counting them together would
+    #: make a user who changes their mind twice look like an incident.
+    CANCELLED = "cancelled"
 
     @property
     def is_terminal(self) -> bool:
-        return self in (JobStatus.SUCCEEDED, JobStatus.FAILED)
+        return self in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED)
 
 
 class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
@@ -104,6 +110,19 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
 
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+
+    #: When somebody asked this run to stop, and who (P5 task 6). Kept on a
+    #: `CANCELLED` row rather than inferred from the status, because "stopped by
+    #: Achraf at 14:02" is the fact somebody wants three weeks later and the
+    #: status alone cannot supply it.
+    #:
+    #: Set on a **running** job too, where it is a request rather than an
+    #: outcome: the runner reads it at its next stage boundary. See
+    #: `app/core/interruption.py` for why that boundary is the honest one.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    cancel_requested_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     project: Mapped["Project"] = relationship(back_populates="simulations")
     geometry_version: Mapped["GeometryVersion"] = relationship()

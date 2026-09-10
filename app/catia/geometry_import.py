@@ -1,9 +1,18 @@
-"""Turning a STEP export from CATIA into a Kryova geometry version.
+"""Turning a STEP export into a Kryova geometry version.
 
 This is the seam that closes the loop:
 
-    chat -> CATIA geometry -> STEP -> geometry version -> mesh -> solve ->
-    interpret -> propose a change -> apply it in CATIA -> re-run.
+    chat -> geometry -> STEP -> geometry version -> mesh -> solve ->
+    interpret -> propose a change -> apply it -> re-run.
+
+**Both backends arrive here and the file is the only thing they have in
+common.** On a seat the bridge saves a STEP on the workstation and posts the
+bytes back; on the open kernel the shape is already in this process and the
+dispatcher writes the file itself. `source` is what each one calls itself, and
+it is a parameter rather than a constant because every sentence below reaches a
+user: telling somebody building on `occt` to "check the part in CATIA" sends
+them to an application they are not running. It was hardcoded to the seat until
+2026-09-10, when the open-kernel export was written.
 
 Everything here goes through the same machinery as a browser upload -- the same
 `MediaService`, the same content-addressed blob store, the same
@@ -56,18 +65,23 @@ def import_step_export(
     path: Path,
     filename: str,
     note: str | None,
+    source: str = "catia_bridge",
 ) -> GeometryVersion:
-    """Register a STEP file exported from CATIA as a new geometry version.
+    """Register an exported STEP file as a new geometry version.
 
     `path` is a temporary file the caller owns; the blob store copies out of it.
+    `source` names what produced it — it is recorded on the blob and it is what
+    the refusals below say went wrong, so it must be the thing the user is
+    actually running.
     """
+    origin = "The CATIA seat" if source == "catia_bridge" else "The open kernel"
     file_format = detect_format(filename)
     if file_format is None:
         # Only reachable if the daemon renamed the export. Named explicitly
         # because the alternative is a confusing failure three steps later in
         # the mesher.
         raise GeometryImportError(
-            f"CATIA exported {filename!r}, which is not a format the mesher reads. "
+            f"{origin} exported {filename!r}, which is not a format the mesher reads. "
             "The export must be STEP (.step or .stp)."
         )
 
@@ -78,7 +92,7 @@ def import_step_export(
             path=path,
             filename=filename,
             content_type="application/step",
-            meta={"source": "catia_bridge"},
+            meta={"source": source},
         )
     except MediaTooLarge as exc:
         raise GeometryImportError(f"The exported STEP file is too large to store: {exc}") from exc
@@ -91,7 +105,7 @@ def import_step_export(
         # record may legitimately share it.
         media.delete(stored)
         raise GeometryImportError(
-            f"CATIA produced a STEP file the geometry reader rejected: {exc}. "
+            f"{origin} produced a STEP file the geometry reader rejected: {exc}. "
             "Check that the part actually contains solid geometry, then export again."
         ) from exc
 

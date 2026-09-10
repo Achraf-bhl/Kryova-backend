@@ -311,3 +311,62 @@ class TestThePlanKnowsItsOwnProgress:
             "marked ✅ PHASE COMPLETE with tasks left open that the marker does not "
             f"mention (say which task and why it stays open): {wrong}"
         )
+
+    def test_a_superseded_status_is_history_and_is_not_counted(self) -> None:
+        """"Never delete a status -- supersede it" has to survive being measured.
+
+        The plan's maintenance rules say a status is superseded rather than
+        deleted, and since 2026-09-08 the document marks the old one with an
+        HTML comment. `plan_progress` counted it anyway, so E4 -- whose task 4
+        shipped the same day its `PARTIAL` was superseded -- was reported as
+        carrying an open task, and the test above then obliged its phase marker
+        to *say* task 4 stayed `PARTIAL`. A wrong measurement wrote a wrong
+        sentence into the thing it was measuring, and the sentence outlived the
+        fact by two days.
+
+        Pinned on a fixture rather than on the live plan, so that correcting a
+        real phase later cannot quietly make this test vacuous.
+        """
+        from scripts.plan_progress import read_phases
+
+        text = (
+            "##### Phase E99 — A phase #####\n"
+            "\n"
+            "> ✅ PHASE COMPLETE (2026-09-10) — done.\n"
+            "\n"
+            "1. **The task**\n"
+            "   > DONE (2026-09-10) — it shipped.\n"
+            "\n"
+            "   <!-- superseded 2026-09-10 -->\n"
+            "   > PARTIAL (2026-09-07) — half of it shipped.\n"
+        )
+        phase = read_phases(text)[0]
+
+        assert dict(phase.counts) == {"DONE": 1}, "the superseded PARTIAL was counted"
+        assert phase.open_tasks == []
+        assert phase.unnamed_residuals() == []
+        assert phase.fraction == 1.0
+
+    def test_an_unmarked_earlier_status_still_counts(self) -> None:
+        """The escape hatch has to be the comment, not merely being second.
+
+        A task genuinely standing at `PARTIAL` under a `DONE` for some *other*
+        reason must keep showing as open. Otherwise the fix above would turn
+        into a way of hiding residuals by ordering, which is precisely what
+        rule 5 exists to prevent.
+        """
+        from scripts.plan_progress import read_phases
+
+        text = (
+            "##### Phase E99 — A phase #####\n"
+            "\n"
+            "> ✅ PHASE COMPLETE (2026-09-10) — done.\n"
+            "\n"
+            "1. **The task**\n"
+            "   > DONE (2026-09-10) — it shipped.\n"
+            "   > PARTIAL (2026-09-07) — half of it shipped.\n"
+        )
+        phase = read_phases(text)[0]
+
+        assert phase.open_tasks == [1]
+        assert phase.unnamed_residuals() == [1]

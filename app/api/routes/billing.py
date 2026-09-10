@@ -33,7 +33,15 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
-from app.api.deps import AdminOrganisation, DbSession, OwnerOrganisation
+from app.api.deps import (
+    AdminOrganisation,
+    AuditDep,
+    DbSession,
+    OwnerOrganisation,
+    PrincipalDep,
+    ViewerOrganisation,
+)
+from app.core.estimates import estimate_run
 from app.core.metering import (
     METERING,
     billing_account,
@@ -43,6 +51,8 @@ from app.core.metering import (
     unwired_meters,
     usage_units,
 )
+from app.core.payments import PaymentError, get_provider, grant_credit
+from app.models.audit import AuditAction, AuditOutcome
 from app.models.billing import (
     BillingAccount,
     Meter,
@@ -54,11 +64,15 @@ from app.models.billing import (
 from app.schemas.billing import (
     BillingAccountRead,
     BillingAccountUpdate,
+    CreditPurchase,
+    EstimateRead,
     MeteringFaultRead,
     MeteringHealthRead,
     MeterTotalRead,
+    PlanChange,
     QuotaEnvelopeRead,
     QuotaLimitRead,
+    RunEstimateRead,
     StorageAttributionRead,
     UnmeteredMeterRead,
     UsageCauseRead,
@@ -436,3 +450,145 @@ def list_metering_faults(
         page_size=page_size,
         items=[MeteringFaultRead.model_validate(row) for row in rows],
     )
+
+
+# ---------------------------------------------------------------------------
+# Plans, credit and estimates (P8.2, P8.3, P8.4)
+# ---------------------------------------------------------------------------
+
+
+def _account(db: DbSession, organisation_id: str) -> BillingAccount:
+    """This tenant's billing row, created on first *write*.
+
+    Never on a read — `read_billing_account` is careful not to, because a GET
+    that writes a row puts a plan on record nobody chose.
+    """
+    account = billing_account(db, organisation_id)
+    if account is None:
+        account = BillingAccount(organisation_id=organisation_id)
+        db.add(account)
+        db.flush()
+    return account
+
+
+@router.get("/{organisation_id}/billing/estimate", response_model=RunEstimateRead)
+def read_run_estimate(
+    organisation: ViewerOrganisation, db: DbSession
+) -> RunEstimateRead:
+    """What a simulation is likely to cost this tenant (P8.4).
+
+    **The same meters the bill is made of**, projected from this organisation's
+    own recorded history — not a separate model of cost that could drift from
+    the ledger. That identity is the whole of P8.4: "one number, two uses;
+    divergence is a bug class of its own."
+
+    An estimate with too little history says so and carries no number, rather
+    than offering a figure nobody measured. A cost estimate is the most tempting
+    place in a product to invent one, because it is advisory and never
+    contradicted afterwards.
+    """
+    estimates = estimate_run(db, organisation.id, today=date.today())
+    return RunEstimateRead(
+        organisation_id=organisation.id,
+        estimates=[
+            EstimateRead(
+                meter=estimate.meter,
+                unit=estimate.meter.unit,
+                units=estimate.units,
+                basis=estimate.basis.value,
+                how=estimate.how,
+                samples=estimate.samples,
+                sentence=estimate.human(),
+            )
+            for estimate in estimates
+        ],
+    )
+
+
+@router.put("/{organisation_id}/billing/plan", response_model=BillingAccountRead)
+def change_plan(
+    payload: PlanChange,
+    organisation: OwnerOrganisation,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> BillingAccountRead:
+    """Move a tenant onto another plan.
+
+    `OwnerOrganisation`: billing is an owner's power in P2's ladder, not an
+    admin's. The provider is told *after* the local change is decided and
+    *before* it is committed — a plan recorded here that the provider refused is
+    a tenant on a plan nobody is charging for.
+    """
+    account = _account(db, organisation.id)
+    provider = get_provider()
+    result = provider.change_plan(account, payload.plan)
+    if not result.ok:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"The billing provider refused the change: {result.detail}",
+        )
+    previous = account.plan
+    account.plan = payload.plan
+    if result.reference:
+        account.external_provider = provider.name
+        account.external_customer_ref = result.reference
+    audit.record(
+        AuditAction.QUOTA_READ,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="billing_account",
+        target_id=account.id,
+        detail={"from": previous.value, "to": payload.plan.value, "provider": provider.name},
+    )
+    db.commit()
+    return read_billing_account(organisation, db)
+
+
+@router.post("/{organisation_id}/billing/credit", response_model=BillingAccountRead)
+def add_credit(
+    payload: CreditPurchase,
+    organisation: OwnerOrganisation,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> BillingAccountRead:
+    """Buy prepaid credit.
+
+    **The payment is taken before the balance moves**, and the balance only
+    moves if it succeeded. The other order — credit first, charge after —
+    hands out credit whenever the provider is unreachable, which is the failure
+    an attacker would go looking for.
+
+    A deployment with no provider refuses this rather than granting it: a build
+    that cannot take money must not be a way to mint credit.
+    """
+    account = _account(db, organisation.id)
+    provider = get_provider()
+    result = provider.purchase_credit(
+        account, amount_minor=payload.amount_minor, currency=account.currency
+    )
+    if not result.ok:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=result.detail
+        )
+    try:
+        grant_credit(db, account, amount_minor=payload.amount_minor)
+    except PaymentError as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(refused)
+        ) from refused
+    audit.record(
+        AuditAction.QUOTA_READ,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="billing_account",
+        target_id=account.id,
+        detail={
+            "credit_minor": payload.amount_minor,
+            "provider": provider.name,
+            "reference": result.reference,
+        },
+    )
+    db.commit()
+    return read_billing_account(organisation, db)

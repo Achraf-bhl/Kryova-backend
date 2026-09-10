@@ -221,6 +221,165 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-10 — P10 closed: onboarding, the docs site, and the public status page.** All four
+  tasks. The property that ties them together is that **every page derives from something that
+  cannot drift**: the mission gallery from `app.design.missions.LADDER`, the API reference from
+  this deployment's own OpenAPI document, the onboarding checklist from the account's real
+  contents, and every guide step that names a route is checked against the running router by
+  `tests/test_docs.py`. Documentation is the part of a product most likely to quietly stop being
+  true, and deriving it is the only defence that does not depend on somebody remembering.
+  The second thread is **publishing what is not claimed beside what is** — `Mission.unproven` in
+  the gallery, `not_covered` in the guides, and a status page that refuses to infer an outage
+  from a failure rate (no threshold in the module, and a test parses its AST to keep it that
+  way). The one automatic transition is a critical announcement with no maintenance window, which
+  is how an operator says "something is wrong and we have not gone read-only".
+  The onboarding checklist has **no dismiss button and no stored flag**, on purpose: a
+  flag-driven checklist can be fully ticked by somebody who has done none of it, and dismissed by
+  somebody who is still stuck. A queued or failed run does not tick the last step.
+  Named `app/handbook/`, not `app/docs/`, because `app/documents/` already parses customer
+  drawings. Found two latent defects in earlier phases on the way — see below.
+- **2026-09-10 — P5 advanced to 4/7: verification surface, approval gates, interruption, cost
+  honesty.** Not closed, and the marker is deliberately absent: tasks 1, 2 and 3 stay `PARTIAL`
+  with named reasons. Task 3's editable spec panel and task 6's "edit a parameter mid-mission"
+  both need a persisted, addressable `DesignSpec`, and `grep` finds that type in `app/design/`,
+  `app/optimise/` and `app/requirements/` but in **no model and no route**. A panel over an IR
+  the server does not store would be a panel over a fiction.
+  **Task 5, approval gates**, is the first reader of `Membership.domain_role`, whose docstring
+  has said "16.5/P5 read this column" since P2.2 while nothing did. A gate is a row: the
+  transcript is trimmed, an LLM paraphrase of an approval is not an approval, and "who signed
+  this off and what did they see" is the question actually asked. The subject is pinned by digest
+  so an approval cannot land on a design that moved while it was pending.
+  **Task 6, interruption**, replaced a stop button that did not stop anything — it aborted the
+  fetch, and its own comment admitted "stopping the stream does not stop the seat". The signal is
+  a database column, because whoever presses stop and whoever is streaming are different workers,
+  and an in-memory registry works perfectly under `--workers 1` and silently does nothing in
+  production. Two honest partials are stated in the product rather than smoothed over: a tool
+  call in flight finishes, and a solve already inside CalculiX finishes **and is still billed**.
+- **2026-09-10 — Four defects found in earlier phases while building the above.**
+  **(1)** The P3 maintenance check was a SELECT on every authenticated write, to read a table that
+  is empty in essentially every deployment at essentially every moment. `test_projects.py`'s
+  query-count tests caught it. Now a ten-second in-process cache of an immutable snapshot —
+  a snapshot rather than the ORM row, because caching the row would hand a `DetachedInstanceError`
+  to the next request during maintenance, on the path whose job is to explain the maintenance.
+  **(2)** `scripts/plan_progress.py` counted statuses the plan had marked `<!-- superseded -->`.
+  E4 task 4 shipped on 2026-09-08 with its `PARTIAL` superseded the same day, and the parser went
+  on reporting the phase as carrying an open task — which obliged the phase-complete marker to
+  *say* task 4 stayed `PARTIAL`, for two days after that stopped being true. A measurement tool
+  that is wrong pushes its error into the document it measures, and the wrong sentence is the one
+  a human then defends.
+  **(3, 4)** `Announcement.level` and `ShareLink.revocation` were enum-typed columns stored as
+  bare `String`, so a row loaded from the database gave a plain `str`:
+  `announcement.level.value` raised `AttributeError` on any deployment that had actually
+  published an announcement, while passing in every test that wrote and read one in one session.
+  This is the `MessageRoleType` bug for the third and fourth time, so it now has a general fix,
+  `models/types.EnumText`. No migration — the DDL is unchanged.
+- **2026-09-10 — P8 closed: metering, plans, enforcement and estimates.** All four tasks.
+  **(1) The last three meters are wired** and `unwired_meters()` is empty for the first time. AI
+  tokens go through the one funnel every AI path already used; CATIA seat time through the one
+  place every dispatch path converges, so there is no second timing site to disagree with the
+  first. Both circular-import their way in — `app.core.metering` reaches `app.simulation.runner`
+  which reaches back into `app.catia.dispatch` — so the import is deferred into the function, the
+  pattern `core/lifecycle.py` already uses. **(2) The price list stays empty on purpose.** Plan
+  allowances are now settings, all defaulting to 0/unset, because Decision 4 makes this product
+  free and open and a self-hosted install has no price list at all. Inventing "the free tier gets
+  3,600 solver-seconds" would have put a number where an engineer later reads it as settled — the
+  fabrication Decision 3 exists to prevent, in the one place it would be billed for. **(3) A
+  refusal is 402 with an envelope**, not 429 with a number: "there is none left" and "too fast"
+  need different responses, and a 429 invites a retry that can only fail. **(4) An estimate is
+  the same meter the bill is made of**, projected from this tenant's own rows, median not mean,
+  and it carries *no number at all* when there is too little history. A cost estimate is the most
+  tempting place in a product to invent a figure precisely because nobody ever checks it
+  afterwards.
+  Two tests had to be rewritten rather than weakened, and one of them said so in its own body:
+  `test_an_unwired_meter_names_what_wiring_it_would_take` asserted at least one meter was unwired
+  and instructed "if every meter is wired, delete this test rather than weaken it". It was
+  deleted, and replaced with the claim that outlives the state — every meter says where its
+  numbers come from, and a `MeterSite` still refuses to be unwired silently. A third test caught
+  something real: breaking the share-lifetime ceiling proved nothing because the route test was
+  measuring Pydantic, so the service-layer check got a test that drives it directly.
+  `stripe` declared optional in `pyproject.toml` for the same reason `ezdxf` is.
+- **2026-09-10 — P3 closed: the operations console.** Tasks 4, 5, 6 and 7. Four decisions worth
+  carrying. **(1) `core/lifecycle.py` is the only writer of the account-state columns**, because
+  a row with `suspended_at` set and `is_active` still true is visibly suspended in the console
+  and fully usable through the API — and suspension revokes every session family, which is the
+  difference between recording a suspension and applying one. **(2) The rollout is a hash, not a
+  draw.** A random percentage flickers a feature on and off under one user, which is
+  indistinguishable from a broken deployment; `sha256(key + subject)` also gives the property
+  that widening a rollout only ever adds people, which is what makes a staged rollout safe to run
+  forwards. The kill switch outranks every override, deliberately. **(3) Maintenance mode refuses
+  with 503 and a sentence on mutating methods only.** A read-only mode that 500s is an outage
+  with a nicer name; reads keep working so the application is not broken in front of the person
+  waiting. The check sits in `get_current_user` rather than a middleware because it needs to know
+  whether the caller is staff. `GET /platform/state` is readable during the window on purpose —
+  the endpoint that explains it must not be one of the things it refuses. **(4) `success_rate` is
+  `None`, not 0.0, when nothing ran**, and the dashboard says how it grouped failures, because
+  the schema has no taxonomy class yet (E15.5) and a coarse grouping presented as a
+  classification is how a console produces confident wrong decisions.
+  Found and fixed on the way: **`components/ui/input.tsx` replaced its whole `className` when a
+  caller passed one**, since `{...props}` was spread after it — the field kept its label and lost
+  its border, height and focus ring, silently. `Button` had always merged. Pinned in
+  `input.test.tsx` along with a test that the two primitives agree.
+  Guards verified by breaking them: the kill switch, suspension-revokes-sessions, and
+  maintenance-lets-reads-through. All files restored byte-identical.
+- **2026-09-10 — P2 closed: sharing, hand-off, and the team surfaces.** Tasks 5 and 6, and the
+  phase proof. Three findings. **(1) `create_invitation` had never invited anybody** — P2.1
+  shipped the row, the token and the accept route in September and there was no mail transport,
+  so the capability existed only as a declaration. It sends now, and the token is returned to
+  the inviter *only* when delivery failed. Writing that branch nearly removed an existing
+  security decision: the old rule withheld the token in production unconditionally, and
+  "return it whenever delivery failed" would have quietly loosened it. Both rules are kept and
+  the reasoning is in the code. **(2) A third `rls_statements()` exposed that the isolation test
+  applied only the first migration it found.** `_p2_migration()` globbed the versions directory
+  and returned on the first match, so the test schema had one migration's policies while
+  production had three — and which one depended on filename sort order. The day a new migration
+  sorted first, every assertion in that file would have run against tables with no policies on
+  them. The fixture now applies all of them. **(3) A mutation test found an unpinned guard.**
+  Breaking the share-lifetime ceiling in `core/sharing.py` did not fail anything: the route test
+  was measuring `ShareLinkCreate`'s Pydantic bound, which answers 422 first. The service-layer
+  check exists for callers that never see the schema, so it now has a test that drives `issue`
+  directly — and that one does fail when the check is removed. Guards verified by breaking them:
+  transfer-revokes-links, admin-at-the-destination, and the ceiling (after it was pinned).
+- **2026-09-10 — P1 closed: identity, sessions and tokens.** Five open tasks (3, 5, 6, 7, 8) and
+  the phase marker. Three findings worth carrying beyond the phase. **(1) There was no mail
+  transport in this service at all** — the password-reset route said so in a TODO and everything
+  else assumed one — so `app/mail/` was built here and P2's invitations, P3's impersonation
+  notice and P10's status comms now have somewhere to go. Production refuses to boot on a
+  transport that reaches nobody, which is the `SECRET_KEY=changeme` rule applied to the one other
+  place where every component reports success and the user is silently stuck. **(2) The password
+  reset was not revoking anything.** It cleared `refresh_token_hash` — the single-slot column
+  task 1 replaced in September and nothing has read since — so a password changed *because* it
+  was stolen left every device family alive. Found while wiring the theft notice; the reset now
+  calls `revoke_all`. **(3) Task 6's status line was two-thirds stale**, describing an
+  `X-Forwarded-For`-trusting limiter that had already been fixed; the real gap was that every
+  limit keyed on the address even where a principal existed. Second factor is hand-written RFC
+  6238 against the RFC's own vectors, with a replay guard and the secret sealed at rest. Three
+  backend guards and one frontend guard verified by breaking them (production mail refusal → 2
+  failures; verification gate → 1; TOTP burn → 2; `localStorage` custody → 1), all files restored
+  byte-identical from full-path-keyed backups. `cryptography` declared in `requirements.txt`
+  rather than left transitive, so it does not become the second `ezdxf`.
+- **2026-09-10 — the open kernel's part can reach the solver, which is the defect the ladder run
+  found the same day.** New E1 task 8, added because the phase was marked complete on every task
+  it had and still did not deliver its own promise. On `GEOMETRY_BACKEND=occt` the agent could
+  build a part and then do nothing to it: `catia_export_step` and `sync_geometry_from_catia` were
+  the only geometry→solver routes in its vocabulary and both were CATIA-only, so `run_simulation`
+  had nothing to mesh and ladder Levels 3–5 — plane analyses, conduction, convergence studies —
+  were unreachable on the open kernel.
+  **It was a seam, not a capability.** `manufacture.export.write_step` already worked and the
+  kernel document already held the shape; nothing joined them. `_export_locally` writes the STEP
+  and hands it to the same `import_step_export` the bridge path uses, so a version from the open
+  kernel is indistinguishable downstream from one CATIA produced — which is the whole point.
+  **The design call worth not undoing:** the export is served from the dispatcher via
+  `backends.LOCALLY_SERVED` and is deliberately **not** in `HANDLERS`, because that table
+  declares what OCCT implements of the geometry vocabulary and both `local_coverage()` and
+  `compare_backends` read it as exactly that. *What is offered* and *what the kernel implements*
+  are now different questions with a test pinning the difference.
+  Also fixed: `import_step_export` hardcoded `"catia_bridge"` as the blob source and told users
+  to "check the part in CATIA", which sends an open-kernel user to an application they are not
+  running; and a multi-body document now names the bodies its export left behind instead of
+  silently dropping them. Three guards verified by breaking them, 10 failures observed, all files
+  restored byte-for-byte. **The class to remember: every tool worked and the suite was green —
+  the gap was one layer above `dispatch`, in what the agent was *offered*.** Second time that
+  class has shipped invisibly, so the new tests go through `call_catia`, not a runner.
 - **2026-09-10 — ladder Levels 2 and 3 both pass for the first time, on DeepSeek.** Report:
   `docs/verification-2026-09-10/`; run log in the ladder. `AI_PROVIDER=openai_compatible`
   against `https://api.deepseek.com` with `deepseek-v4-pro` — **no provider code was needed**,
@@ -249,6 +408,36 @@ needs a different extraction stated up front rather than chosen after the sweep.
   agent caught and corrected it itself this time, which makes it less visible rather than less
   real. The 32,768-token context wall from 2026-09-09 is gone: 18+ operations across three
   meshes in one conversation without truncation.
+- **2026-09-10 — the STEP metadata half is measured, the lead left open was our own authoring,
+  and the trip turns out to carry a number that is wrong by a thousand.** E21 task 1's
+  remaining unit. The 2026-09-09 lead — "a flatness tolerance produced no `GEOMETRIC_TOLERANCE`
+  entity with the writer returning success" — was two mistakes stacked: the tolerance had been
+  bound to a label `XCAFDoc_ShapeTool` does not know, which OCCT drops silently, and **AP242
+  writes the concrete subtype `FLATNESS_TOLERANCE`, so the string being grepped for is absent
+  from a correct file**. Bound to the part label it writes. `app/manufacture/xde.py` is the XDE
+  path (names, colours, layers, validation properties, assembly occurrences, one geometric
+  tolerance) and `measure_metadata_round_trip` its matrix; **nothing in the product exports
+  through it**, which is stated rather than implied.
+  **Six classes moved from untried to measured and five carry**: part names, assembly
+  occurrences with their names, colours, layers, validation properties. Three accessor traps
+  found, each returning a wrong answer rather than an error — a colour written `ColorGen` comes
+  back `ColorSurf`+`ColorCurv`; `GetLayers(shapeLabel, seq)` returns **`True` with an empty
+  sequence** and the assignment lives on the layer's side; `SetPropsMode(True)` computes
+  nothing and is a permission to transfer attributes that must already be there.
+  **The sixth is neither carried nor lost.** A flatness tolerance authored at 0.05 mm reads
+  back as **50.0 mm**: the writer emits the magnitude under `SI_UNIT($,.METRE.)` while the
+  model is `.MILLI.`. A value written and read by one build through its own writer and reader
+  does not survive its own round trip, which is what makes it a defect and not a convention
+  misread. `Carriage.CORRUPTED` was added for it, because `LOST` is a lie in the safe
+  direction — an absent tolerance gets queried, a tolerance a thousand times too loose gets
+  manufactured to — and nothing compensates on the way out. `write_step_with_metadata` refuses
+  a tolerance under AP214, where OCCT accepts, returns `RetDone` and writes none.
+  Also found, and now in CLAUDE.md because it ends a process rather than raising:
+  **`TDF_Label.FindAttribute(id, attr)` segfaults when the attribute is absent** — `IsAttribute`
+  first, always. 53 tests across two files; five guards verified by breaking them, 17 failures
+  and one deliberate segfault observed, three files restored byte-for-byte. THE QUEUE gained
+  **B5**, the ten-minute seat measurement that decides whether the ×1000 is OCCT's writer or
+  its reader — opposite conclusions, and Linux cannot choose between them.
 - **2026-09-09 — a shell deck goes through ccx, and LE3 does not reach 185 mm.** Second seat
   session. Regression first and the engine checked before believing it: **7,374 passed / 2
   skipped / 1 xpassed / 0 failed** against real PostgreSQL (`TEST_DATABASE_URL` verified to
@@ -271,6 +460,22 @@ needs a different extraction stated up front rather than chosen after the sweep.
   the benchmark requires, so it is soft rather than right. One mesh returned 7.686 mm, a separate
   instability.
   Not reached this session: queue E3, tier 3 / section B, and Job 3.
+- **2026-09-09 — the master plan gained Era VIII (E19–E23) from a verified research pass, and
+  its first task found that this repo's AP242 claim is one OCCT cannot keep.** The era covers
+  conformity (Machinery Regulation, AI Act), simulation credibility as ASME and NAFEMS define
+  it, licensed data and interchange, the measured ceilings on surrogates and long-horizon
+  agents, and positioning; ~28 engineer-months, priced in Part 4, so the programme total moved
+  161 → 189 and the headline fell 52% → 46% — which is what writing down work that was always
+  required looks like. E21 task 1 then started: `app/manufacture/interop.py` measures a
+  Kryova→STEP→Kryova trip per entity class and **re-measures, rather than records**, that this
+  build's `write.step.schema` takes `AP242DIS` and **refuses `AP242IS`** while accepting
+  `AP214IS` — so the product may not claim a published AP242 edition, and the test says so by
+  failing on purpose if OCCT ever gains the spelling. `NOT_ATTEMPTED` is kept distinct from
+  `LOST` throughout: we never wrote colours, names, layers, validation properties or GD&T, and
+  calling that "lost" would file a bug against OCCT for work we have not done. One lead left
+  open rather than promoted to a finding: a flatness tolerance authored through XDE produced no
+  tolerance entity in the file **with the writer returning success**. 19 tests, two guards
+  verified by breaking them (14 failures observed, restore byte-for-byte).
 - **2026-09-09 — sketching on a face was never the missing capability; one operation had been
   left behind a shipped phase.** `elements.plane_frame` is the single resolver every "which
   plane" argument goes through, and `catia_sketch_create` was the last one still holding a

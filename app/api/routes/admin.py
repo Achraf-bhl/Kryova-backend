@@ -39,10 +39,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app import mail
 from app.api.deps import (
     AuditDep,
     DbSession,
     JobQueueDep,
+    MediaServiceDep,
     MediaStoreDep,
     OperatorStaff,
     OwnerOrganisation,
@@ -51,17 +53,21 @@ from app.api.deps import (
     SessionScopeDep,
     SupportStaff,
 )
+from app.core import flags, lifecycle, maintenance
 from app.core.audit import AuditService, Principal, audit_page
 from app.core.config import settings
 from app.core.security import create_impersonation_token
 from app.models import (
+    Announcement,
     AuditAction,
     AuditEvent,
     AuditOutcome,
+    FeatureFlag,
     GeometryVersion,
     ImpersonationMode,
     ImpersonationSession,
     JobStatus,
+    MaintenanceWindow,
     Media,
     Membership,
     Organisation,
@@ -69,6 +75,7 @@ from app.models import (
     SimulationJob,
     StaffRole,
     User,
+    UserSession,
     live_staff_grant,
 )
 from app.models.base import utcnow
@@ -76,15 +83,29 @@ from app.schemas.admin import (
     AdminJobRead,
     AdminOrganisationRead,
     AdminUserRead,
+    AnnouncementCreate,
+    AnnouncementRead,
     AuditEventRead,
     ChainVerificationRead,
+    DeletionCreate,
+    FailureClassRead,
+    FeatureFlagCreate,
+    FeatureFlagOverrideCreate,
+    FeatureFlagRead,
+    FeatureFlagUpdate,
+    FleetHealthRead,
     ImpersonationEscalate,
     ImpersonationIssued,
     ImpersonationRead,
     ImpersonationStart,
     JobFailRequest,
+    LifecycleRead,
+    MaintenanceCreate,
+    MaintenanceRead,
     OrganisationUsageRead,
+    PurgeRead,
     StaffRead,
+    SuspensionCreate,
 )
 from app.schemas.pagination import Page
 from app.simulation.runner import run_simulation
@@ -871,3 +892,575 @@ def _as_impersonating(
 
 
 __all__ = ["organisation_audit_router", "router"]
+
+
+# ---------------------------------------------------------------------------
+# Account lifecycle (P3.4)
+# ---------------------------------------------------------------------------
+#
+# The only *destructive* routes in the console. Every one of them writes an
+# audit entry, and every one of them tells the account holder by email — being
+# suspended without being told is how a customer's first contact with the
+# problem is a support ticket that starts "your product is broken".
+
+
+def _lifecycle_view(user: User) -> LifecycleRead:
+    return LifecycleRead(
+        user_id=user.id,
+        is_active=user.is_active,
+        suspended_at=user.suspended_at,
+        suspension_reason=user.suspension_reason,
+        deletion_scheduled_at=user.deletion_scheduled_at,
+    )
+
+
+def _user_or_404(db: Session, user_id: str) -> User:
+    user = db.get(User, user_id)
+    if user is None:
+        raise _not_found()
+    return user
+
+
+@router.post("/users/{user_id}/suspend", response_model=LifecycleRead)
+def suspend_user(
+    user_id: str,
+    payload: SuspensionCreate,
+    staff: PlatformAdminStaff,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> LifecycleRead:
+    """Withdraw access immediately and everywhere.
+
+    `PlatformAdminStaff`, not operator: suspension ends somebody's ability to
+    work, and the ladder in `deps.require_staff` puts the irreversible-feeling
+    actions at the top on purpose.
+    """
+    user = _user_or_404(db, user_id)
+    actor = db.get(User, principal.actor_user_id)
+    if actor is None:  # pragma: no cover - the actor authenticated a line ago
+        raise _not_found()
+    try:
+        lifecycle.suspend(db, user, reason=payload.reason, by=actor)
+    except lifecycle.LifecycleError as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(refused)
+        ) from refused
+    audit.record(
+        AuditAction.USER_SUSPENDED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="user",
+        target_id=user.id,
+        reason=payload.reason,
+    )
+    db.commit()
+    mail.send(
+        mail.templates.suspension_notice(
+            to=user.email, reason=payload.reason, by="a Kryova administrator"
+        )
+    )
+    return _lifecycle_view(user)
+
+
+@router.post("/users/{user_id}/reinstate", response_model=LifecycleRead)
+def reinstate_user(
+    user_id: str,
+    staff: PlatformAdminStaff,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> LifecycleRead:
+    user = _user_or_404(db, user_id)
+    try:
+        lifecycle.reinstate(db, user)
+    except lifecycle.LifecycleError as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(refused)
+        ) from refused
+    audit.record(
+        AuditAction.USER_REINSTATED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="user",
+        target_id=user.id,
+    )
+    db.commit()
+    return _lifecycle_view(user)
+
+
+@router.post("/users/{user_id}/deletion", response_model=LifecycleRead)
+def schedule_user_deletion(
+    user_id: str,
+    payload: DeletionCreate,
+    staff: PlatformAdminStaff,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> LifecycleRead:
+    """Schedule erasure after a grace window (GDPR, P3.4).
+
+    Scheduled, never immediate. The window is the feature: a deletion nobody can
+    stop for thirty days is a support ticket, and one nobody can stop at all is
+    a disaster. The email names the date, because a confirmation with no
+    deadline gives the one person who can undo it no reason to act today.
+    """
+    user = _user_or_404(db, user_id)
+    actor = db.get(User, principal.actor_user_id)
+    if actor is None:  # pragma: no cover
+        raise _not_found()
+    try:
+        purge_at = lifecycle.schedule_deletion(
+            db, user, by=actor, grace_days=payload.grace_days
+        )
+    except lifecycle.LifecycleError as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(refused)
+        ) from refused
+    audit.record(
+        AuditAction.USER_DELETION_SCHEDULED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="user",
+        target_id=user.id,
+        reason=payload.reason,
+        detail={"purge_at": purge_at.isoformat()},
+    )
+    db.commit()
+    mail.send(
+        mail.templates.deletion_scheduled(
+            to=user.email, purge_at=purge_at, by="a Kryova administrator"
+        )
+    )
+    return _lifecycle_view(user)
+
+
+@router.delete("/users/{user_id}/deletion", response_model=LifecycleRead)
+def cancel_user_deletion(
+    user_id: str,
+    staff: PlatformAdminStaff,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> LifecycleRead:
+    user = _user_or_404(db, user_id)
+    try:
+        lifecycle.cancel_deletion(db, user)
+    except lifecycle.LifecycleError as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(refused)
+        ) from refused
+    audit.record(
+        AuditAction.USER_DELETION_CANCELLED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="user",
+        target_id=user.id,
+    )
+    db.commit()
+    return _lifecycle_view(user)
+
+
+@router.post("/users/{user_id}/purge", response_model=PurgeRead)
+def purge_user(
+    user_id: str,
+    staff: PlatformAdminStaff,
+    db: DbSession,
+    media: MediaServiceDep,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> PurgeRead:
+    """Erase now. **Irreversible**, and refused before the grace window is up.
+
+    The refusal is the guard: an administrator who can purge on the same day
+    they schedule has a grace window in name only, and the whole point of the
+    window is that a mistake is recoverable for thirty days. A genuine
+    emergency ends the account with `suspend`, which is immediate and reversible.
+    """
+    user = _user_or_404(db, user_id)
+    scheduled = user.deletion_scheduled_at
+    if scheduled is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Schedule the deletion first. Purging is what happens when the window ends.",
+        )
+    if scheduled > lifecycle.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"The grace window runs until {scheduled:%d %B %Y}. "
+                "Suspend the account if it needs to stop being usable now."
+            ),
+        )
+    email = user.email
+    report = lifecycle.purge(db, user, media)
+    audit.record(
+        AuditAction.USER_PURGED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="user",
+        target_id=user_id,
+        detail={"email": email, "projects": report.projects, "blobs": report.blobs_removed},
+    )
+    db.commit()
+    return PurgeRead(**vars(report))
+
+
+# ---------------------------------------------------------------------------
+# Feature flags (P3.5)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/flags", response_model=list[FeatureFlagRead])
+def list_flags(staff: SupportStaff, db: DbSession) -> list[FeatureFlagRead]:
+    rows = db.scalars(select(FeatureFlag).order_by(FeatureFlag.key)).all()
+    return [FeatureFlagRead.model_validate(row) for row in rows]
+
+
+@router.post("/flags", response_model=FeatureFlagRead, status_code=status.HTTP_201_CREATED)
+def create_flag(
+    payload: FeatureFlagCreate,
+    staff: OperatorStaff,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> FeatureFlagRead:
+    if db.scalar(select(FeatureFlag).where(FeatureFlag.key == payload.key)) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=f"The flag '{payload.key}' exists."
+        )
+    flag = FeatureFlag(**payload.model_dump())
+    db.add(flag)
+    db.flush()
+    audit.record(
+        AuditAction.FLAG_CHANGED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="feature_flag",
+        target_id=flag.key,
+        detail={"created": payload.model_dump()},
+    )
+    db.commit()
+    return FeatureFlagRead.model_validate(flag)
+
+
+@router.patch("/flags/{key}", response_model=FeatureFlagRead)
+def update_flag(
+    key: str,
+    payload: FeatureFlagUpdate,
+    staff: OperatorStaff,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> FeatureFlagRead:
+    """Change a flag, including pulling its kill switch.
+
+    `OperatorStaff` rather than platform admin, deliberately: killing a flag is
+    the action somebody takes at 03:00 when a feature is hurting people, and
+    putting it behind the highest role means waiting for whoever holds it.
+    """
+    flag = db.scalar(select(FeatureFlag).where(FeatureFlag.key == key))
+    if flag is None:
+        raise _not_found()
+    changes = payload.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        setattr(flag, field, value)
+    audit.record(
+        AuditAction.FLAG_CHANGED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="feature_flag",
+        target_id=flag.key,
+        detail=changes,
+    )
+    db.commit()
+    return FeatureFlagRead.model_validate(flag)
+
+
+@router.post("/flags/{key}/overrides", response_model=FeatureFlagRead)
+def override_flag(
+    key: str,
+    payload: FeatureFlagOverrideCreate,
+    staff: OperatorStaff,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> FeatureFlagRead:
+    flag = db.scalar(select(FeatureFlag).where(FeatureFlag.key == key))
+    if flag is None:
+        raise _not_found()
+    try:
+        flags.set_override(
+            db,
+            flag,
+            enabled=payload.enabled,
+            organisation_id=payload.organisation_id,
+            user_id=payload.user_id,
+        )
+    except ValueError as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(refused)
+        ) from refused
+    audit.record(
+        AuditAction.FLAG_CHANGED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="feature_flag",
+        target_id=flag.key,
+        detail={"override": payload.model_dump()},
+    )
+    db.commit()
+    db.refresh(flag)
+    return FeatureFlagRead.model_validate(flag)
+
+
+# ---------------------------------------------------------------------------
+# Announcements and maintenance mode (P3.7)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/announcements", response_model=list[AnnouncementRead])
+def list_announcements(staff: SupportStaff, db: DbSession) -> list[AnnouncementRead]:
+    rows = db.scalars(
+        select(Announcement).order_by(Announcement.starts_at.desc()).limit(50)
+    ).all()
+    return [AnnouncementRead.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/announcements", response_model=AnnouncementRead, status_code=status.HTTP_201_CREATED
+)
+def publish_announcement(
+    payload: AnnouncementCreate,
+    staff: OperatorStaff,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> AnnouncementRead:
+    announcement = Announcement(
+        message=payload.message,
+        level=payload.level,
+        starts_at=payload.starts_at or lifecycle.utcnow(),
+        ends_at=payload.ends_at,
+        published_by_id=principal.actor_user_id,
+    )
+    db.add(announcement)
+    db.flush()
+    audit.record(
+        AuditAction.ANNOUNCEMENT_PUBLISHED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="announcement",
+        target_id=announcement.id,
+        detail={"level": payload.level.value},
+    )
+    db.commit()
+    return AnnouncementRead.model_validate(announcement)
+
+
+@router.delete("/announcements/{announcement_id}", response_model=AnnouncementRead)
+def withdraw_announcement(
+    announcement_id: str, staff: OperatorStaff, db: DbSession
+) -> AnnouncementRead:
+    announcement = db.get(Announcement, announcement_id)
+    if announcement is None:
+        raise _not_found()
+    announcement.withdrawn_at = lifecycle.utcnow()
+    db.commit()
+    return AnnouncementRead.model_validate(announcement)
+
+
+@router.get("/maintenance", response_model=MaintenanceRead | None)
+def read_maintenance(staff: SupportStaff, db: DbSession) -> MaintenanceRead | None:
+    window = maintenance.active_window(db)
+    return MaintenanceRead.model_validate(window) if window else None
+
+
+@router.post("/maintenance", response_model=MaintenanceRead, status_code=status.HTTP_201_CREATED)
+def start_maintenance(
+    payload: MaintenanceCreate,
+    staff: OperatorStaff,
+    db: DbSession,
+    audit: AuditDep,
+    principal: PrincipalDep,
+) -> MaintenanceRead:
+    """Put the service into read-only mode.
+
+    Reads keep working. Mutations are refused with a `503` and the message in
+    this payload — never with a 500, because the whole value of a maintenance
+    mode is that somebody who tries to start a simulation is *told what is
+    happening*, rather than seeing a broken application.
+    """
+    existing = maintenance.active_window(db)
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Maintenance is already on. End it before starting another window.",
+        )
+    window = MaintenanceWindow(
+        reason=payload.reason,
+        message=payload.message,
+        started_at=lifecycle.utcnow(),
+        expected_end_at=payload.expected_end_at,
+        allow_staff=payload.allow_staff,
+        started_by_id=principal.actor_user_id,
+    )
+    db.add(window)
+    db.flush()
+    audit.record(
+        AuditAction.MAINTENANCE_CHANGED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="maintenance",
+        target_id=window.id,
+        reason=payload.reason,
+        detail={"state": "started"},
+    )
+    db.commit()
+    # After the commit, so no worker can cache a window that then rolls back.
+    # Only this process; the rest expire within `maintenance.CACHE_SECONDS`.
+    maintenance.invalidate()
+    return MaintenanceRead.model_validate(window)
+
+
+@router.delete("/maintenance", response_model=MaintenanceRead)
+def end_maintenance(
+    staff: OperatorStaff, db: DbSession, audit: AuditDep, principal: PrincipalDep
+) -> MaintenanceRead:
+    window = maintenance.active_window(db)
+    if window is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Maintenance is not on."
+        )
+    window.ended_at = lifecycle.utcnow()
+    audit.record(
+        AuditAction.MAINTENANCE_CHANGED,
+        AuditOutcome.SUCCEEDED,
+        principal=principal,
+        target_type="maintenance",
+        target_id=window.id,
+        detail={"state": "ended"},
+    )
+    db.commit()
+    # Ending matters more urgently than starting: until this clears, writes are
+    # still being refused by a window that is over.
+    maintenance.invalidate()
+    return MaintenanceRead.model_validate(window)
+
+
+# ---------------------------------------------------------------------------
+# The operations dashboard (P3.6)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/health", response_model=FleetHealthRead)
+def read_fleet_health(
+    staff: SupportStaff,
+    db: DbSession,
+    hours: Annotated[int, Query(ge=1, le=720)] = 24,
+) -> FleetHealthRead:
+    """"Is Kryova healthy" with one answer (P3.6).
+
+    Every number is counted from rows, and the two that cannot be are named
+    rather than estimated — the same rule `read_organisation_usage` follows and
+    for the same reason: a console where a guess looks like a measurement is a
+    console that produces confident wrong decisions during an incident.
+
+    **Solver failures are grouped by their recorded message**, not by an
+    exception taxonomy, because that is what the schema actually holds:
+    `SimulationJob.error` is the human-readable sentence the runner wrote. The
+    grouping is therefore coarse and says so in `failure_grouping`. A real
+    taxonomy class on the job row is E15 task 5's deliverable and this endpoint
+    will read it the day it exists — that is a gap in the data, not in the
+    dashboard, and it is recorded here rather than papered over.
+    """
+    since = utcnow() - timedelta(hours=hours)
+
+    queue_depth = {member.value: 0 for member in JobStatus}
+    for job_status, count in db.execute(
+        select(SimulationJob.status, func.count()).group_by(SimulationJob.status)
+    ).all():
+        queue_depth[JobStatus(job_status).value] = count
+
+    recent = {member.value: 0 for member in JobStatus}
+    for job_status, count in db.execute(
+        select(SimulationJob.status, func.count())
+        .where(SimulationJob.created_at >= since)
+        .group_by(SimulationJob.status)
+    ).all():
+        recent[JobStatus(job_status).value] = count
+
+    finished = recent[JobStatus.SUCCEEDED.value] + recent[JobStatus.FAILED.value]
+    # `None`, not 0.0, when nothing finished. A success rate of zero and "no
+    # runs to judge" are opposite states and a dashboard that shows 0% during a
+    # quiet night sends somebody to look for an outage that is not there.
+    success_rate = (
+        recent[JobStatus.SUCCEEDED.value] / finished if finished else None
+    )
+
+    failures = [
+        FailureClassRead(reason=(reason or "unrecorded")[:160], count=count)
+        for reason, count in db.execute(
+            select(SimulationJob.error, func.count())
+            .where(
+                SimulationJob.status == JobStatus.FAILED,
+                SimulationJob.created_at >= since,
+            )
+            .group_by(SimulationJob.error)
+            .order_by(func.count().desc())
+            .limit(10)
+        ).all()
+    ]
+
+    storage_bytes = int(db.scalar(select(func.coalesce(func.sum(Media.size_bytes), 0))) or 0)
+    storage_added = int(
+        db.scalar(
+            select(func.coalesce(func.sum(Media.size_bytes), 0)).where(
+                Media.created_at >= since
+            )
+        )
+        or 0
+    )
+
+    live_sessions = (
+        db.scalar(
+            select(func.count())
+            .select_from(UserSession)
+            .where(
+                UserSession.revoked_at.is_(None),
+                UserSession.absolute_expires_at > utcnow(),
+            )
+        )
+        or 0
+    )
+
+    return FleetHealthRead(
+        window_hours=hours,
+        queue_depth=queue_depth,
+        jobs_in_window=recent,
+        success_rate=success_rate,
+        failures=failures,
+        failure_grouping=(
+            "by the runner's recorded message; a taxonomy class on the job row is E15.5"
+        ),
+        storage_bytes=storage_bytes,
+        storage_bytes_added_in_window=storage_added,
+        live_sessions=int(live_sessions),
+        users_total=int(db.scalar(select(func.count()).select_from(User)) or 0),
+        users_suspended=int(
+            db.scalar(
+                select(func.count()).select_from(User).where(User.suspended_at.is_not(None))
+            )
+            or 0
+        ),
+        users_awaiting_deletion=int(
+            db.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(User.deletion_scheduled_at.is_not(None))
+            )
+            or 0
+        ),
+        mail_delivers=mail.can_reach_real_mailboxes(),
+        maintenance_active=maintenance.active_window(db) is not None,
+    )

@@ -129,8 +129,27 @@ class TestCoverageIsReadNotDeclared:
         assert names
         assert "catia_pad" in names
         coverage = backends.local_coverage()
-        assert coverage["implemented"] == len(names)
+        assert coverage["implemented"] == len(names) - len(backends.LOCALLY_SERVED)
         assert coverage["declared"] > coverage["implemented"]
+
+    def test_what_is_offered_and_what_the_kernel_implements_are_different_questions(
+        self,
+    ) -> None:
+        """`catia_export_step` is offered on `occt` and is not a geometry operation.
+
+        The seat does it by asking the bridge to save a file; this process does
+        it by writing one. Either way OCCT implements nothing for it, so it must
+        not reach the coverage number — that number is read by `catia_status` and
+        by the cross-backend conformance harness, and a harness that saw an
+        export in the handler table would try to build a part with it.
+        """
+        assert "catia_export_step" in backends.LOCALLY_SERVED
+        assert "catia_export_step" in backends.local_tool_names()
+
+        from app.kernel.occt.operations import HANDLERS
+
+        assert "catia_export_step" not in HANDLERS
+        assert not (backends.LOCALLY_SERVED & set(HANDLERS))
 
     @needs_kernel
     def test_the_kernel_version_is_reported_for_provenance(self) -> None:
@@ -433,3 +452,202 @@ class TestABareFaceWordMeansTheSameOnBothBackends:
         runner("catia_new_part", {"name": "Nothing"})
         with pytest.raises(GeometryError):
             runner("catia_sketch_create", {"support": "top", "name": "s"})
+
+
+class TestThePartCanReachTheSolver:
+    """The defect the 2026-09-10 ladder run found, and the seam that closes it.
+
+    On `GEOMETRY_BACKEND=occt` the agent could build a part and then do nothing
+    whatever to it. `catia_export_step` and `sync_geometry_from_catia` were the
+    only two geometry→solver routes in its whole vocabulary and both were
+    CATIA-only, so `run_simulation` had nothing to mesh and ladder Levels 3, 4
+    and 5 — plane analyses, conduction, convergence studies — were unreachable
+    from a conversation on the open kernel.
+
+    **The offline suite could not see it, and that is the part worth keeping in
+    mind.** Every tool worked. `write_step` worked. The kernel document held the
+    shape. What was missing lived one layer above `dispatch`, in what the agent
+    was *offered* — which is why these tests go through `call_catia` rather than
+    through a runner.
+    """
+
+    @pytest.fixture
+    def project_conversation(self, db_session, current_user_id, media_store, monkeypatch):
+        from app.catia import dispatch
+        from app.models import Conversation, Project
+
+        monkeypatch.setattr(dispatch, "get_media_store", lambda: media_store)
+        project = Project(name="Bracket", owner_id=current_user_id)
+        db_session.add(project)
+        db_session.flush()
+        conversation = Conversation(
+            owner_id=current_user_id, title="Bracket", project_id=project.id
+        )
+        db_session.add(conversation)
+        db_session.commit()
+        return {"db": db_session, "user_id": current_user_id, "conversation": conversation,
+                "project": project}
+
+    def _build_a_plate(self, conversation_id: str) -> None:
+        runner = backends.session_for(conversation_id)
+        runner("catia_new_part", {"name": "Plate"})
+        runner("catia_sketch_create", {"support": "XY", "name": "base"})
+        runner("catia_sketch_rectangle", {"sketch": "base", "width_mm": 60.0, "height_mm": 40.0})
+        runner("catia_pad", {"sketch": "base", "length_mm": 20.0})
+
+    @needs_kernel
+    def test_a_part_built_on_the_open_kernel_becomes_a_geometry_version(
+        self, occt: None, project_conversation
+    ) -> None:
+        """The whole defect, in one call.
+
+        A geometry version is what `run_simulation` meshes, so this passing is
+        the difference between the open kernel being a modelling toy and being
+        the product.
+        """
+        from app.catia.dispatch import call_catia
+
+        wired = project_conversation
+        self._build_a_plate(wired["conversation"].id)
+
+        result = call_catia(
+            wired["db"],
+            user_id=wired["user_id"],
+            tool="catia_export_step",
+            arguments={},
+            conversation_id=wired["conversation"].id,
+        )
+
+        assert result["project_id"] == wired["project"].id
+        assert result["version_number"] == 1
+        assert result["geometry_version_id"]
+        assert result["filename"].endswith(".step")
+        assert result["size_bytes"] > 0
+        # The stats are what the mesher and the load-case drafter read; a version
+        # with no bounding box is a row the next step cannot use.
+        assert result["stats"]["bounding_box"]
+
+    @needs_kernel
+    def test_the_geometry_that_arrives_is_the_part_that_was_built(
+        self, occt: None, project_conversation
+    ) -> None:
+        """A file appearing is not evidence. 60 × 40 × 20 went in.
+
+        Without this the test above passes on an export of an empty document, a
+        stale document, or the wrong conversation's part.
+        """
+        from app.catia.dispatch import call_catia
+
+        wired = project_conversation
+        self._build_a_plate(wired["conversation"].id)
+        result = call_catia(
+            wired["db"],
+            user_id=wired["user_id"],
+            tool="catia_export_step",
+            arguments={},
+            conversation_id=wired["conversation"].id,
+        )
+
+        box = result["stats"]["bounding_box"]
+        size = sorted(
+            [
+                abs(box["max"][index] - box["min"][index])
+                for index in range(3)
+            ]
+        )
+        assert size == pytest.approx([20.0, 40.0, 60.0], abs=1e-6)
+
+    @needs_kernel
+    def test_the_version_number_climbs_so_a_re_export_is_a_new_version(
+        self, occt: None, project_conversation
+    ) -> None:
+        """"Export again after any change you want analysed" is what the system
+        prompt tells the agent; a second export that overwrote the first would
+        make a re-run answer the old question."""
+        from app.catia.dispatch import call_catia
+
+        wired = project_conversation
+        self._build_a_plate(wired["conversation"].id)
+        first = call_catia(
+            wired["db"], user_id=wired["user_id"], tool="catia_export_step",
+            arguments={}, conversation_id=wired["conversation"].id,
+        )
+        # Through `catia_set_parameter`, which is the route the kernel names when
+        # a second identical pad is refused — and the one the system prompt tells
+        # the agent to prefer for a dimension change.
+        backends.session_for(wired["conversation"].id)(
+            "catia_set_parameter",
+            {"name": r"Pad.1\length_mm", "value": 25.0, "unit": "mm"},
+        )
+        second = call_catia(
+            wired["db"], user_id=wired["user_id"], tool="catia_export_step",
+            arguments={}, conversation_id=wired["conversation"].id,
+        )
+
+        assert (first["version_number"], second["version_number"]) == (1, 2)
+        assert first["geometry_version_id"] != second["geometry_version_id"]
+
+    @needs_kernel
+    def test_exporting_nothing_is_refused_in_words_the_agent_can_act_on(
+        self, occt: None, project_conversation
+    ) -> None:
+        """Two refusals cover this and they are not equally useful.
+
+        `write_step` already declines a null shape, so an empty STEP cannot be
+        written either way — verified by removing the check here and watching
+        `manufacture.export`'s own message come through instead. What that
+        message cannot say is *which* conversation is empty or what to call
+        next, because it is a file-writing function and knows about neither. The
+        agent's recovery from a bare failure is to retry the export, which fails
+        identically; naming `catia_new_part` is what turns the refusal into a
+        next move.
+        """
+        from app.catia.dispatch import CatiaError, call_catia
+
+        wired = project_conversation
+        backends.session_for(wired["conversation"].id)("catia_new_part", {"name": "Empty"})
+
+        with pytest.raises(CatiaError, match="nothing built in this conversation"):
+            call_catia(
+                wired["db"], user_id=wired["user_id"], tool="catia_export_step",
+                arguments={}, conversation_id=wired["conversation"].id,
+            )
+
+    @needs_kernel
+    def test_a_conversation_with_no_project_is_told_what_to_do_about_it(
+        self, occt: None, db_session, current_user_id, media_store, monkeypatch
+    ) -> None:
+        """There is nowhere to put a geometry version without a project, and the
+        refusal has to name the fix — the agent's recovery from a bare failure is
+        to try the export again, which will fail identically."""
+        from app.catia import dispatch
+        from app.catia.dispatch import CatiaError, call_catia
+        from app.models import Conversation
+
+        monkeypatch.setattr(dispatch, "get_media_store", lambda: media_store)
+        conversation = Conversation(owner_id=current_user_id, title="No project")
+        db_session.add(conversation)
+        db_session.commit()
+        self._build_a_plate(conversation.id)
+
+        with pytest.raises(CatiaError, match="Create a project first"):
+            call_catia(
+                db_session, user_id=current_user_id, tool="catia_export_step",
+                arguments={}, conversation_id=conversation.id,
+            )
+
+    @needs_kernel
+    def test_another_users_conversation_is_refused(
+        self, occt: None, project_conversation
+    ) -> None:
+        from app.catia.dispatch import CatiaError, call_catia
+
+        wired = project_conversation
+        self._build_a_plate(wired["conversation"].id)
+
+        with pytest.raises(CatiaError, match="not attached to one of your conversations"):
+            call_catia(
+                wired["db"], user_id="00000000-0000-0000-0000-000000000000",
+                tool="catia_export_step", arguments={},
+                conversation_id=wired["conversation"].id,
+            )

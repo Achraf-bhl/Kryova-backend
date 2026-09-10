@@ -100,24 +100,52 @@ def is_local() -> bool:
     return selected_backend() == "occt"
 
 
+#: Operations the open kernel can serve that are **not geometry**, and so are not
+#: in `HANDLERS`. On a seat these are done by the bridge — it saves a STEP file
+#: and posts the bytes back — and the dispatcher registers what arrives. In this
+#: process the shape is already here, so the dispatcher writes the file itself;
+#: either way the operation changes nothing about the part.
+#:
+#: **They are deliberately kept out of the handler table.** `HANDLERS` declares
+#: what OCCT can do about the *geometry vocabulary*, and `local_coverage()` and
+#: the cross-backend conformance harness both read it as exactly that. An export
+#: added there would inflate the coverage number with something the kernel does
+#: not implement and would make `compare_backends` try to build a part with it.
+#:
+#: Master plan E1 task 7 / the 2026-09-10 ladder run: without this the agent
+#: could build a part on `occt` and then do nothing to it — `catia_export_step`
+#: was the only route from geometry to the solver and it was CATIA-only, so
+#: Levels 3–5 could not run on the open kernel at all.
+LOCALLY_SERVED: Final[frozenset[str]] = frozenset({"catia_export_step"})
+
+
 def local_tool_names() -> frozenset[str]:
-    """What the OCCT backend actually implements, honestly.
+    """What the agent is offered on this backend, honestly.
 
     Read from the handler table rather than declared, so the number cannot drift
     from the code. Offering the agent all 201 when 108 work costs it a turn per
     miss and teaches it nothing.
+
+    `LOCALLY_SERVED` is added because *offered* and *implemented in the kernel*
+    are different questions, and this function answers the first. `local_coverage`
+    answers the second and does not include them.
     """
     try:
         from app.kernel.occt.runner import OcctRunner
 
-        return frozenset(OcctRunner.supported_tools())
+        return frozenset(OcctRunner.supported_tools()) | LOCALLY_SERVED
     except Exception as exc:  # noqa: BLE001 - a missing kernel is a state, not a crash
         logger.warning("The OCCT kernel is not usable: %s", exc)
         return frozenset()
 
 
 def local_coverage() -> dict[str, int]:
-    """Implemented vs declared, as data. Surfaced by `catia_status`."""
+    """Implemented vs declared, as data. Surfaced by `catia_status`.
+
+    Geometry only: `LOCALLY_SERVED` is not counted here, because a coverage
+    number that includes operations the kernel does not implement is the thing
+    this number exists to prevent.
+    """
     try:
         from app.kernel.occt.runner import OcctRunner
 

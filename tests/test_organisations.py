@@ -11,7 +11,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import mail
 from app.core.security import hash_token
+from app.mail.message import MailKind, Outbox
 from app.models import Membership, Organisation, OrganisationInvitation, OrgRole
 from tests.test_tenancy import SignIn, sign_in  # noqa: F401  -- a fixture, used by name
 from tests.typing import AuthenticatedTestClient
@@ -390,3 +392,76 @@ class TestPersonalOrganisations:
         membership = db_session.scalar(select(Membership))
         assert membership is not None
         assert membership.role is OrgRole.OWNER
+
+
+class TestAnInvitationIsActuallySent:
+    """P2.1 declared invitations by email; until P1.5 nothing could send one.
+
+    The route now posts the message and hands the raw token back **only when
+    delivery failed**, so the two branches are worth pinning separately: one is
+    the production path and one is the development-and-outage path.
+    """
+
+    def test_the_invitation_email_goes_to_the_invitee(
+        self, auth_client: AuthenticatedTestClient, outbox: Outbox
+    ) -> None:
+        organisation = auth_client.post(
+            "/api/v1/organisations", json={"name": "Acme Machines"}
+        ).json()
+        outbox.clear()
+
+        response = auth_client.post(
+            f"/api/v1/organisations/{organisation['id']}/invitations",
+            json={"email": "new@supplier.dev", "role": "member"},
+        )
+
+        assert response.status_code == 201, response.text
+        sent = outbox.of_kind(MailKind.ORG_INVITATION)
+        assert len(sent) == 1
+        assert sent[0].to == "new@supplier.dev"
+        assert "Acme Machines" in sent[0].body
+        assert "eng@kryova.dev" in sent[0].subject
+
+    def test_the_token_comes_back_when_nothing_could_be_delivered(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
+        # The suite runs on the memory transport, which reaches nobody. The
+        # inviter must be able to pass the link on themselves rather than
+        # believing an invitation is in flight that is not.
+        organisation = auth_client.post(
+            "/api/v1/organisations", json={"name": "Acme Machines"}
+        ).json()
+
+        issued = auth_client.post(
+            f"/api/v1/organisations/{organisation['id']}/invitations",
+            json={"email": "new@supplier.dev", "role": "member"},
+        ).json()
+
+        assert issued["token"]
+
+    def test_the_token_is_withheld_once_the_email_really_arrives(
+        self, auth_client: AuthenticatedTestClient
+    ) -> None:
+        # Returning it as well would put a live credential in the inviter's
+        # browser history and in any log that records response bodies, for no
+        # gain -- the recipient already has it.
+        class Delivering(mail.MemoryTransport):
+            @property
+            def reaches_real_mailboxes(self) -> bool:
+                return True
+
+            def send(self, message: mail.Mail) -> mail.Delivery:
+                super().send(message)
+                return mail.Delivery(mail=message, state=mail.DeliveryState.SENT)
+
+        organisation = auth_client.post(
+            "/api/v1/organisations", json={"name": "Acme Machines"}
+        ).json()
+        mail.use_transport(Delivering())
+
+        issued = auth_client.post(
+            f"/api/v1/organisations/{organisation['id']}/invitations",
+            json={"email": "new@supplier.dev", "role": "member"},
+        ).json()
+
+        assert issued["token"] is None

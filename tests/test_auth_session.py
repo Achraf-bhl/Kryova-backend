@@ -101,6 +101,12 @@ class TestProductionHardening:
             "secret_key": "x" * 48,
             "cookie_secure": True,
             "cors_origins": ["https://app.kryova.dev"],
+            # Added with P1.5: a production deployment that cannot send email
+            # is now refused at startup, so "properly configured" includes a
+            # transport that reaches a real person. The refusal itself is
+            # tested in `tests/test_mail.py`.
+            "mail_transport": "smtp",
+            "smtp_host": "mail.example.com",
         }
         return Settings(**{**base, **overrides})  # type: ignore[arg-type]
 

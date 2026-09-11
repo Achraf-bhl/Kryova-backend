@@ -396,6 +396,131 @@ def unverified_footnote(plan: Plan) -> str:
     return "\n".join(lines)
 
 
+#: Keys under which a solved result reports what it knows about its own
+#: discretisation error. `app/simulation/runner.py` writes the first; the
+#: others are what a study fills in when one was actually run.
+_CONVERGENCE_KEY = "mesh_convergence"
+
+
+def _unconverged_runs(results: Iterable[Any]) -> list[dict[str, Any]]:
+    """Simulation results this turn read that hold no evidence about themselves.
+
+    Takes raw tool results rather than `AgentStep`s, both because `agent.py`
+    imports this module and not the other way round, and for the same reason
+    `measurements_in` does: this is *what the answer was written from*, and a
+    second source could disagree with it. Keyed on the shape of the payload —
+    any result carrying a `mesh_convergence` block that does not say
+    `converged: true` — so a tool added tomorrow that returns a solved result is
+    read with no change here.
+    """
+    found: list[dict[str, Any]] = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        inner = result.get("result")
+        payload = inner if isinstance(inner, dict) else result
+        block = payload.get(_CONVERGENCE_KEY)
+        if not isinstance(block, dict) or block.get("converged") is True:
+            continue
+        # `mesh_stats` is a sibling of `result` in what `get_simulation`
+        # returns, not part of it.
+        stats = result.get("mesh_stats")
+        stats = stats if isinstance(stats, dict) else {}
+        found.append(
+            {
+                "id": str(result.get("id") or payload.get("id") or "this run"),
+                "basis": str(block.get("basis") or "single-grid"),
+                "grids": block.get("grids"),
+                "stress": payload.get("max_von_mises_mpa"),
+                "displacement": payload.get("max_displacement_mm"),
+                "slivers": stats.get("sliver_count"),
+                "min_quality": stats.get("min_quality"),
+                "elements": stats.get("element_count") or payload.get("element_count"),
+            }
+        )
+    # One line per distinct run, in the order the turn met them.
+    seen: set[str] = set()
+    unique = []
+    for row in found:
+        if row["id"] in seen:
+            continue
+        seen.add(row["id"])
+        unique.append(row)
+    return unique
+
+
+def unconverged_footnote(results: Iterable[Any]) -> str:
+    """What the user is told when a turn answers from a solve with no evidence
+    about its own discretisation error.
+
+    **Measured on the seat, 2026-09-10** (`docs/verification-2026-09-10-night/`),
+    and it is the reason this exists. Asked for a cantilever that "has to stay
+    under 150 MPa", the product replied *"PASSES. The peak stress of 140.6 MPa
+    is below your limit of 150 MPa. The bracket has approximately 9 MPa of
+    margin."* The result it had just read carried
+    `mesh_convergence: {converged: false, basis: "single-grid"}` and the
+    sentence "treat the numbers as indicative". Neither reached the answer. The
+    mesh was 808 linear tets — one element through a 10 mm thickness — and the
+    peak stress was overstated by about 90%: challenged in the same
+    conversation, the agent ran tet10 at 5 mm and 3.5 mm and got ~74 MPa.
+
+    **The model already had the block and ignored it**, which is why this is a
+    footnote and not a prompt rule. It appends rather than rewrites, exactly as
+    `unverified_footnote` does: the model's own words stand, and what they rest
+    on is stated beside them. A caveat the answer cannot omit is the only kind
+    that survives a model having a bad day.
+
+    Deliberately silent when the study *was* run and converged — then the
+    evidence exists and repeating it is noise. Decision 3's rule is that an
+    unconverged number is worse than no number, not that every number needs a
+    disclaimer.
+    """
+    runs = _unconverged_runs(results)
+    if not runs:
+        return ""
+
+    lines = ["", "---", "**What these numbers rest on.**"]
+    slivered = False
+    for run in runs:
+        grids = run["grids"]
+        how = f"{run['basis']}" + (f", {grids} grid" if grids == 1 else "")
+        lines.append(
+            f"- Run `{run['id']}` is **not converged** ({how}). Nothing here measures how "
+            "much the answer would move on a finer mesh."
+        )
+        # A sliver is not a detail of the mesh, it is where the reported peak
+        # stress comes from. Measured 2026-09-10: two runs of the same
+        # cantilever, same load case, 808 and 809 elements, gave 140.6 MPa and
+        # 50.4 MPa — a factor of 2.8 — and the only thing that separated them
+        # was `min_quality` 0.06 against 0.49. Both were reported as a verdict
+        # against the user's 150 MPa limit. The mesher has counted this since
+        # it was written (`sliver_count`, shape < 0.1, "little stiffness and a
+        # lot of noise to a stress recovery") and nothing had ever shown it to
+        # anyone.
+        if run["slivers"]:
+            slivered = True
+            quality = run["min_quality"]
+            quality_text = f", worst {quality:.3f}" if isinstance(quality, (int, float)) else ""
+            lines.append(
+                f"  - and it contains **{run['slivers']} sliver element(s)**{quality_text} "
+                "(a well-shaped tetrahedron scores 1.0). A peak stress read off a sliver is "
+                "noise, not a stress."
+            )
+    lines.append(
+        "A single mesh holds no evidence about its own discretisation error, however fine "
+        "it looks — so any pass, fail or margin quoted above is indicative, not a verdict. "
+        "Ask for a convergence study (`grids: 3`) to find out what the number really is."
+    )
+    if slivered:
+        lines.append(
+            "The sliver matters more than the grid count here: the same case re-meshed can "
+            "move the peak stress by a factor of two or more while the deflection barely "
+            "changes. Set `element_size_mm` so the part has several elements through its "
+            "thinnest section, or ask for second-order elements."
+        )
+    return "\n".join(lines)
+
+
 __all__ = [
     "DEFAULT_ABSOLUTE_TOLERANCE_MM",
     "DEFAULT_RELATIVE_TOLERANCE",
@@ -403,6 +528,7 @@ __all__ = [
     "assess",
     "measurements_in",
     "shortfall_note",
+    "unconverged_footnote",
     "unverified",
     "unverified_footnote",
 ]

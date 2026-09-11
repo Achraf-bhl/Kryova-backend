@@ -56,6 +56,7 @@ from app.ai.verification import (
     assess,
     measurements_in,
     shortfall_note,
+    unconverged_footnote,
     unverified_footnote,
 )
 from app.core import interruption
@@ -683,6 +684,14 @@ def stream_agent(
                 # written; what it left out is stated beside it, because the
                 # user cannot see the difference between measured and assumed.
                 text += unverified_footnote(plan)
+            # E7 task 7. The model is handed `mesh_convergence` inside every
+            # simulation result and is perfectly capable of ignoring it -- on
+            # 2026-09-10 it read `converged: false` and answered "PASSES ...
+            # approximately 9 MPa of margin" off an 808-element linear-tet
+            # mesh that overstated peak stress by ~90%. So this is appended by
+            # the server rather than asked for in the prompt: a caveat the
+            # answer cannot omit is the only kind that survives a bad turn.
+            text += unconverged_footnote(step.result for step in steps)
             if turn.truncated:
                 # A cut-off answer presented as a finished one is the worst
                 # outcome here: the user reads a confident half-sentence about
@@ -956,6 +965,10 @@ def stream_agent(
         )
     if shortfall:
         text += unverified_footnote(plan)
+    # The same caveat on the truncated exits, for the same reason: a turn that
+    # ran out of rounds after reading an unconverged solve still put numbers on
+    # the screen, and "it was cut off" is not a reason to drop what they rest on.
+    text += unconverged_footnote(step.result for step in steps)
     escalation = recovery.escalation()
     if escalation:
         # Appended rather than substituted: the model's summary says what *was*

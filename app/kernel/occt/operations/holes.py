@@ -31,10 +31,12 @@ from app.kernel.occt import elements
 from app.kernel.occt.binding import symbol
 from app.kernel.occt.naming import contribution_of, evolution_of, record_derived
 from app.kernel.occt.operations.context import (
+    DRILL_REMEDY,
     BuildContext,
     as_positive_length,
     build_or_raise,
     given_name,
+    refuse_a_feature_that_changed_nothing,
 )
 from app.kernel.occt.topology import has_solid
 
@@ -185,6 +187,25 @@ def _drill(
             f"{tool} Ø{diameter} {described} removed the whole part. The hole is wider "
             "than the material around it."
         )
+    # **A hole that removes nothing is not a hole.** `features.py` has refused a
+    # pad or a pocket that changed no volume since it was written — "an operation
+    # that reports success while achieving nothing ... there is no reading under
+    # which a caller meant it" — and holes, the operation most likely to land off
+    # the part, were the one family that never called it.
+    #
+    # Measured 2026-09-11 on a 180x90x10 plate: drilling the same hole twice gave
+    # `HoleAt.2`, and drilling at [500, 500] — entirely in mid-air beside the
+    # part — gave `HoleAt.3`. Both `ok`, both 0 mm3 removed, both with a feature
+    # name and full measured provenance. `BRepAlgoAPI_Cut` succeeds when the tool
+    # and target do not overlap: the answer is the target, unchanged, and
+    # `IsDone()` is true.
+    #
+    # Found at ladder Level 4 the same day, where the agent placed its second
+    # bolt hole on top of its first, was told it had succeeded, and had to notice
+    # from the volume that it had not.
+    refuse_a_feature_that_changed_nothing(
+        part, result, tool, adds_material=False, remedy=DRILL_REMEDY
+    )
 
     feature = document.add_feature(given_name(arguments), tool)
     modified, generated = evolution_of(maker, part)

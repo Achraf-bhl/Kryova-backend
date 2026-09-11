@@ -598,7 +598,17 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    and `tests/test_kernel_unsupported_arguments.py` are the shape to copy — and note that the
    `harmless` value is per-argument, because `catia_bill_of_materials.recursive` defaults to
    **true**, so a table assuming every flag defaults to false has that one backwards.
-11. **Two small defects that each look survivable can be conclusive together.** The same L2 run
+11. **On a local model, prompt *re-processing* is the cost, not generation — and it grows with
+   the transcript.** Measured 2026-09-11 with `qwen3.6:27b` at 60/40 CPU/GPU: generation 8.38
+   tok/s, but **prompt processing 3.7–7.9 tok/s**, and Ollama logged
+   `KV cache shifting is not supported for this context, disabling KV cache shifting` with
+   `cached n_tokens = 16384` against `task.n_tokens = 25933`. So ~9,500 tokens were re-read
+   **every step** — about 20 minutes before a single new token — and ladder L4 never reached the
+   solver. A turn that is fine at step 3 is unusable at step 17. Before blaming the agent for
+   stalling, read the ollama server log's `prompt processing` line: a slow *gate* is usually the
+   model, and a gate that dies in the middle is usually this. An MoE with few active parameters
+   (`qwen3.6:35b-a3b`) does not have this problem the way a dense 27b does.
+12. **Two small defects that each look survivable can be conclusive together.** The same L2 run
    hit the `_refused_before` guard blocking a correct retry *and* the listing above. Defect one
    induced a false belief; defect two corroborated it. The model is a competent recoverer — it
    recovers cleanly from three other refusals in the same transcript — and it had no way back

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from app.kernel.errors import GeometryError
 from app.kernel.measurement import Detail
@@ -250,3 +250,89 @@ __all__ = [
     "frame",
     "point",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Shared guards. Moved here from `features.py` on 2026-09-11 because the
+# no-op check is needed by `holes.py` too, and every operation module imports
+# `context` and none imports a sibling.
+
+_NO_CHANGE_MM3 = 1e-2
+
+
+#: What to do about a cut that missed. Split from the message because the advice
+#: differs by operation and the wrong advice is worse than none: a hole has no
+#: sketch and no `reversed`, so telling a caller to pass one sends them looking
+#: for an argument that does not exist.
+_PROFILE_REMEDY: Final[str] = (
+    "Two things cause this. The profile is beside the part: a hole on a bolt circle "
+    "bigger than the part lands off the edge. Or the cut is going the wrong way — a "
+    "sketch on a **face of the part** extrudes along that face's outward normal, "
+    "which points away from the material, so pass reversed: true to cut into it."
+)
+
+#: The same fact for a drilled hole, which is positioned rather than sketched.
+DRILL_REMEDY: Final[str] = (
+    "The hole is not in the material. Either it is off the part — check `at` against "
+    "the face's own extent, since a bolt circle wider than the part lands beside it — "
+    "or it is exactly where an existing hole already is, in which case there is "
+    "nothing left to drill. catia_list_features shows what is already there."
+)
+
+
+def refuse_a_feature_that_changed_nothing(
+    existing: Any,
+    result: Any,
+    tool: str,
+    adds_material: bool,
+    *,
+    remedy: str = _PROFILE_REMEDY,
+) -> None:
+    """A cut that removes nothing, or a boss that adds nothing, is a mistake.
+
+    **Measured at gate G1 on 2026-09-06.** Asked for four 12 mm clearance holes
+    on a 200 mm bolt circle in a 200x150 plate, the agent drew four circles at a
+    100 mm radius and pocketed them. On a plate spanning x +/- 100 and y +/- 75,
+    two of those circles sit centred on the left and right edges — half in the
+    material, half in the air — and the other two, at y = +/- 100, are **entirely
+    off the part**. They cut nothing. The call returned `ok`. The finished plate
+    has two small notches in its edges and no clearance holes at all, and the
+    volume confirms it to the last digit:
+
+        200*150*11.24 - pi*30^2*11.24 - 2*(half a 12 mm circle, 5 mm deep)
+          = 304854.16 mm^3, exactly what was measured.
+
+    Nothing anywhere said the holes had missed. `BRepAlgoAPI_Cut` succeeds
+    perfectly well when the tool and the target do not overlap: the answer is
+    the target, unchanged, and `IsDone()` is true.
+
+    This is the same family as the two guards above it — an operation that
+    reports success while achieving nothing — and it is refused rather than
+    noted, because unlike an unused sketch there is no reading under which a
+    caller meant it. A feature that changes no material is not a feature.
+
+    **What this does NOT catch, and it is the honest limit:** the case above is
+    only caught when *every* profile misses. Two of those four circles did
+    overlap the plate, so the pocket as a whole removed 565 mm^3 and this guard
+    stays silent. Catching a partial miss needs a per-profile check against the
+    material, which is a larger piece of work and is not pretended here.
+    """
+    from app.kernel.occt.metrology import volume_mm3
+
+    before = volume_mm3(existing)
+    after = volume_mm3(result)
+    if abs(after - before) > _NO_CHANGE_MM3:
+        return
+
+    if adds_material:
+        raise GeometryError(
+            f"{tool} added no material: the part is exactly the volume it was "
+            f"({before:.3f} mm3). The new shape is entirely inside the part already, "
+            "so there is nothing for it to add. Check its position and size."
+        )
+    raise GeometryError(
+        f"{tool} removed no material: the part is exactly the volume it was "
+        f"({before:.3f} mm3). The cutter does not overlap the part at all, so the cut "
+        "fell in the air beside it — a boolean cut with no overlap succeeds and returns "
+        f"the part unchanged, which is why nothing else reported this. {remedy}"
+    )

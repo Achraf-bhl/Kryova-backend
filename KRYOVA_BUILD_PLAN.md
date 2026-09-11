@@ -221,6 +221,35 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-11 (night) — ladder L3 passed, L4 hit the model rather than the product, and found two
+  more of the same class.** Report: `docs/verification-2026-09-11/`.
+  **L3 PASS** — the target-iteration behaviour, which no recorded run had tested. Asked for a plate
+  at 300 g or under, it solved the relation instead of flailing (*"the mass is 0.0405t kg … gives
+  t ≈ 7.41 mm"*), built once at 7 mm, and measured **0.28350000000000003 kg** against hand
+  arithmetic of 0.2835. Both honesty footnotes correctly stayed *silent*, which is worth recording:
+  the guards are quiet when they should be, not only loud when they should be.
+  **L4 BLOCKED on the model, not the product.** It built the bar, added bolt holes, set the
+  material — 17 steps — and never reached the solver, so E7 task 7's convergence fix is still
+  unproven end to end. From Ollama's server log at step 17: `task.n_tokens = 25933`,
+  `cached n_tokens = 16384`, `prompt processing … 3.66 tokens per second`, and earlier
+  `KV cache shifting is not supported for this context, disabling KV cache shifting`.
+  **Generation at 8.38 tok/s was never the binding constraint** — prompt *re-processing* is, at
+  3.7–7.9 tok/s over ~9,500 uncached tokens every step, so ~20 minutes per step before a new token
+  appears. A 27B dense model on an 8 GB card can do L1–L3 and cannot finish L4. The fix is a
+  smaller or MoE model (`qwen3.6:35b-a3b` has 3B active parameters) or a hosted one.
+  **E1 task 11 — the last private accept-list.** `elements.plane_frame` calls itself "the one
+  resolver every operation that takes 'which plane' goes through", and the bare face words
+  (`top`, `left`, …) were added to `sketcher.resolve_support` on 2026-09-09 and never to it. So
+  `catia_sketch_create(support="top")` worked and `catia_hole_at(face="top")` said *"There is
+  nothing called 'top' in this part"*. The agent spent **seven steps** routing around it. Table
+  moved to `elements`; 16 tests; verified by breaking it — **11 failures**, across every operation
+  sharing the resolver.
+  **E1 task 12 — a hole that removes nothing succeeded.** The no-op guard has existed in
+  `features.py` since gate G1 and holes never called it. The same hole drilled twice, and a hole at
+  `[500, 500]` beside a 180×90 plate, both returned a feature name and 0 mm³ removed. Guard moved
+  to `operations/context.py` and called from `_drill`; the remedy half of the message is now
+  per-operation, because the pocket's advice names a sketch and `reversed: true` and a hole has
+  neither. 7 tests; verified by breaking it — 4 failures.
 - **2026-09-11 (later) — E1 task 10: eighteen advertised arguments the open kernel read on
   nobody's behalf.** Task 9 closed `catia_list_features` because that is where the ladder landed;
   this asked the same question of all 116 operations the open kernel implements, and the answer

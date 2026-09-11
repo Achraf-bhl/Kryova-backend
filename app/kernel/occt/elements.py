@@ -253,12 +253,31 @@ def resolve_elements(document: Any, references: Any, *, tool: str) -> list[Eleme
 
 
 def plane_frame(document: Any, reference: Any, *, tool: str) -> Any:
-    """A named plane, as a frame — an origin plane, a constructed one, or a planar face.
+    """A named plane, as a frame — an origin plane, a bare face word, a constructed
+    plane, or a planar face of the part.
 
     The one resolver every operation that takes "which plane" goes through: mirror,
     symmetry, scale, pattern direction, plane-offset. Before it, each had its own
     accept-list, and the plane-offset one still refused a planar face while blaming a
     phase that had already shipped.
+
+    **The bare face words were the last accept-list still outside it**, and they were
+    outside it for two days. `sketcher.resolve_support` gained `top`/`bottom`/`front`/
+    `back`/`left`/`right` on 2026-09-09, after ladder Level 2 measured that
+    `support="top"` is *the first thing the model reaches for*; `plane_frame` did not,
+    so `catia_sketch_create(support="top")` worked and `catia_hole_at(face="top")`
+    answered *"There is nothing called 'top' in this part"*.
+
+    Measured at ladder Level 4 on 2026-09-11: asked for a bolt hole on the fixed end,
+    the agent tried `face="left"`, was refused, called `catia_list_faces`, tried
+    `face="normal [-1, 0, 0]"` from what that returned, was refused again, and spent
+    seven further steps routing around it. Every one of those refusals was correct
+    about its own accept-list and wrong about the product.
+
+    So the words live here now and `sketcher` reads them from here. The seat's own limit
+    still applies and is worth restating: this is the **plane of** the face, not the
+    face itself — right for sketching on or drilling into, wrong for anything needing
+    the face's real boundary, for which `feature#top` resolves the actual face.
     """
     require()
 
@@ -269,7 +288,42 @@ def plane_frame(document: Any, reference: Any, *, tool: str) -> Any:
     if text.upper() in vocabulary.ORIGIN_PLANES:
         return frame_of(text.upper())
 
+    if text.lower() in BOUNDING_BOX_FACES and getattr(document, "shape", None) is not None:
+        return bounding_box_face_frame(document, text.lower())
+
     return resolve_element(document, text, tool=tool).as_frame()
+
+
+#: A bare face word -> the origin plane it is parallel to, and which end of the
+#: bounding box along that plane's normal it sits at. **Copied from the CATIA
+#: bridge's own `FACE_PLANES`/`FACE_AXES`** (`scripts/catia_bridge/com/_context.py`)
+#: rather than invented, because the seat has accepted `support="top"` for some
+#: time and the open kernel refused it — the same call building a part on one
+#: backend and refusing on the other is precisely what Decision 1's conformance
+#: rests on not happening.
+#:
+#: Lived in `sketcher.py` until 2026-09-11, which is why only the sketch operations
+#: honoured it. See `plane_frame` for what that cost.
+BOUNDING_BOX_FACES: Final[dict[str, tuple[str, int, int]]] = {
+    # word: (origin plane, index into the bounding box, which end)
+    "top": ("XY", 2, +1),
+    "bottom": ("XY", 2, -1),
+    "front": ("ZX", 1, -1),
+    "back": ("ZX", 1, +1),
+    "left": ("YZ", 0, -1),
+    "right": ("YZ", 0, +1),
+}
+
+
+def bounding_box_face_frame(document: Any, word: str) -> Any:
+    """The plane of a named bounding-box face."""
+    from app.kernel.occt.metrology import bounding_box_mm
+    from app.kernel.occt.reference import offset_frame
+
+    plane, index, end = BOUNDING_BOX_FACES[word]
+    box = bounding_box_mm(document.shape)
+    distance = box["max"][index] if end > 0 else box["min"][index]
+    return offset_frame(frame_of(plane), float(distance))
 
 
 def axis_for(document: Any, reference: Any, *, tool: str) -> Any:

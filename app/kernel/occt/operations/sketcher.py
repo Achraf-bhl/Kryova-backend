@@ -18,6 +18,7 @@ from typing import Any
 
 from app.catia.ops import vocabulary
 from app.kernel.errors import GeometryError, OperationNotSupported
+from app.kernel.occt import elements
 from app.kernel.occt.operations.context import (
     BuildContext,
     as_point,
@@ -86,43 +87,12 @@ def _open_sketch(context: BuildContext, support: str, arguments: Mapping[str, An
     return sketch
 
 
-#: A bare face word -> the origin plane it is parallel to, and which end of the
-#: bounding box along that plane's normal it sits at. **Copied from the CATIA
-#: bridge's own `FACE_PLANES`/`FACE_AXES`** (`scripts/catia_bridge/com/_context.py`)
-#: rather than invented, because the seat has accepted `support="top"` for some
-#: time and the open kernel refused it — the same call building a part on one
-#: backend and refusing on the other is precisely what Decision 1's conformance
-#: rests on not happening.
-#:
-#: Measured at ladder Level 2 on 2026-09-09: `support="top"` is the first thing
-#: the model reaches for, it succeeded on the seat and was refused here, and no
-#: message on either side hinted that the backends disagreed.
-_BOUNDING_BOX_FACES: dict[str, tuple[str, int, int]] = {
-    # word: (origin plane, index into the bounding box, which end)
-    "top": ("XY", 2, +1),
-    "bottom": ("XY", 2, -1),
-    "front": ("ZX", 1, -1),
-    "back": ("ZX", 1, +1),
-    "left": ("YZ", 0, -1),
-    "right": ("YZ", 0, +1),
-}
-
-
-def _bounding_box_face_frame(document: Any, word: str) -> Any:
-    """The plane of a named bounding-box face.
-
-    The seat's own limit applies here and is worth restating: this is the *plane
-    of* the face, not the face itself, so it is right for sketching on and wrong
-    for anything needing the face's real boundary. `feature#top` resolves the
-    actual face and is what an operation in that second category should take.
-    """
-    from app.kernel.occt.metrology import bounding_box_mm
-    from app.kernel.occt.reference import offset_frame
-
-    plane, index, end = _BOUNDING_BOX_FACES[word]
-    box = bounding_box_mm(document.shape)
-    distance = box["max"][index] if end > 0 else box["min"][index]
-    return offset_frame(frame_of(plane), float(distance))
+#: The bare face words now live in `app.kernel.occt.elements`, so that **every**
+#: operation taking a plane honours them and not just the sketch ones. Keeping a
+#: second copy here is what let `catia_sketch_create(support="top")` work while
+#: `catia_hole_at(face="top")` refused the same word — see `elements.plane_frame`.
+_BOUNDING_BOX_FACES = elements.BOUNDING_BOX_FACES
+_bounding_box_face_frame = elements.bounding_box_face_frame
 
 
 def resolve_support(

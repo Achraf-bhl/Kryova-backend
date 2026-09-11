@@ -70,9 +70,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 12/24 | 78/129 = 61% | 91/151 eng-months = 60% |
+| Engineering — E1–E23 | 12/24 | 80/131 = 61% | 91/151 eng-months = 60% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 18/34 | 126/190 = 66% | 119/189 eng-months = 63% |
+| **Programme** | 18/34 | 128/192 = 66% | 119/189 eng-months = 63% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -758,6 +758,55 @@ deterministically, in CI, at machine scale?
     > key, which fixes the measured defect without moving a contract.
     > Code: `app/kernel/occt/unsupported.py`, `app/kernel/occt/runner.py`,
     > `app/kernel/occt/operations/{transforms,sketcher,booleans,document_ops}.py`.
+
+11. **One vocabulary, every operation that takes a plane.** *Added 2026-09-11.* Task 10 asked
+    whether every declared *argument* is honoured. This is its sibling for *values*: a word the
+    product accepts in one operation must mean the same thing in all of them.
+    > DONE (2026-09-11) — **the last private accept-list, found by the agent losing seven steps to
+    > it at ladder Level 4.** `elements.plane_frame`'s own docstring calls it *"the one resolver
+    > every operation that takes 'which plane' goes through … Before it, each had its own
+    > accept-list."* The bare face words — `top`, `bottom`, `front`, `back`, `left`, `right` — were
+    > added to **`sketcher.resolve_support`** on 2026-09-09, after ladder L2 measured that
+    > `support="top"` is *the first thing the model reaches for*. They were never added to
+    > `plane_frame`. So for two days `catia_sketch_create(support="top")` worked and
+    > `catia_hole_at(face="top")` answered *"There is nothing called 'top' in this part"*.
+    >
+    > Measured 2026-09-11: asked for a bolt hole on the fixed end of a bracket, the agent tried
+    > `face="left"`, was refused, called `catia_list_faces`, tried `face="normal [-1, 0, 0]"` from
+    > what that returned, was refused again, abandoned `hole_at` for a sketch-and-pocket that also
+    > failed, and finally got there with `catia_hole`. Every refusal was correct about its own
+    > accept-list and wrong about the product.
+    >
+    > The table now lives in `elements` and `sketcher` reads it from there, so there is one of it.
+    > Tested by: `tests/test_kernel_face_words.py` (16, offline) — including that `top`/`bottom`
+    > and `left`/`right` resolve to *opposite ends* of their axis, because a word resolving to the
+    > wrong end builds a part inside out with every count and area still correct. Verified by
+    > breaking it: **11 failures**, across every operation sharing the resolver, which is the scope
+    > of the defect. Code: `app/kernel/occt/elements.py`,
+    > `app/kernel/occt/operations/sketcher.py`.
+
+12. **A feature that changes no material is refused, in every family that makes one.** *Added
+    2026-09-11.*
+    > DONE (2026-09-11) — `features.py` has refused a pad that adds nothing and a pocket that
+    > removes nothing since gate G1 on 2026-09-06, on the stated grounds that *"there is no reading
+    > under which a caller meant it"*. **Holes never called that guard**, and holes are the family
+    > most likely to miss, because they are *positioned* rather than sketched: `BRepAlgoAPI_Cut`
+    > succeeds when tool and target do not overlap, returns the target unchanged, and `IsDone()` is
+    > true.
+    >
+    > Measured on a 180 × 90 × 10 plate: the same hole drilled twice gave `HoleAt.2`, and a hole at
+    > `[500, 500]` — entirely beside the part — gave `HoleAt.3`. Both `ok`, both **0 mm³ removed**,
+    > both with a feature name and full `measured` provenance. Found at ladder Level 4 the same
+    > day, where the agent put its second bolt hole on top of its first and had to notice from the
+    > volume that nothing had been cut.
+    >
+    > The guard moved to `operations/context.py` — every operation module imports `context` and
+    > none imports a sibling — and `_drill` calls it, covering both `catia_hole` and
+    > `catia_hole_at`. **The remedy half of the message is now per-operation**: the pocket's advice
+    > names a sketch and `reversed: true`, and a hole has neither, so one shared message would send
+    > a caller looking for an argument that does not exist — worse than no advice.
+    > Tested by: `tests/test_kernel_hole_removes_material.py` (7, offline), verified by breaking it
+    > — 4 failures. Code: `app/kernel/occt/operations/{context,holes,features}.py`.
 
 **Phase proof:** M1 — a machined bracket — compiles, builds on OCCT in CI, builds on CATIA on a
 real seat, and the two agree on every interrogated quantity to declared tolerance. Ten times,

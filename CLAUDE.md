@@ -1396,22 +1396,42 @@ Server specs in `app/catia/tool_specs.py`, resolution in `app/catia_kb/ui.py`, d
    `dispatch._NO_AUTO_CHECKPOINT`. A checkpoint is a COM save, and a failed checkpoint refuses the
    call — gate these on COM and the tools that dismiss a stuck dialog can only run when no dialog
    is stuck. `catia_run_command` is the deliberate exception.
-3. **`StartCommand` fails silently.** Hand it a name CATIA does not know and it does nothing,
-   raises nothing, returns nothing. So the daemon tries the **live menu first** and falls back to
-   `StartCommand` with `verified: false`. Never report an unverified `StartCommand` as success.
+3. **`StartCommand` does NOT fail silently — it wedges the seat.** *Corrected 2026-09-12,
+   measured; this entry said the opposite for weeks.* Hand it a name CATIA does not know and it
+   raises a **modal dialog** — `Entrée clavier` / *"Commande inconnue : <name>"* — and **blocks
+   COM until that dialog is dismissed**. A probing script hung inside `StartCommand` and never
+   returned. So the danger is not a quiet no-op, it is a stuck workstation, which is exactly
+   what the Win32 dialog tools and `OUT_OF_BAND_TOOLS` are for and the strongest argument that
+   the bridge is right to be Win32 rather than COM. The daemon still tries the **live menu
+   first** and falls back to `StartCommand` with `verified: false`; never report an unverified
+   `StartCommand` as success, and never send one without a way to dismiss what it may put up.
 4. **Command labels are localised; internal command ids are not, and are undocumented.**
    `COMMAND_IDS` holds only ids with a published source. Do not add one from memory.
 5. **Buttons are pressed by role, never by label.** `ButtonRole` + `BUTTON_LABELS` resolve
    OK/Cancel/Apply per language; `STANDARD_CONTROL_IDS` (IDOK=1, IDCANCEL=2) is the language-proof
    fallback. A Spanish seat's accept button reads `Aceptar`.
-6. **Refusals are exact-label or leading-phrase, never substring.** A leading-word rule refused
+   **But the id fallback is not trustworthy on CATIA's own dialogs.** Measured 2026-09-12 on the
+   `Commande inconnue` message box: the button **labelled OK carries control id 2**, which is
+   `IDCANCEL`, so a press of `IDOK=1` hits nothing. What worked was `BM_CLICK` (0x00F5) posted to
+   the button's own hwnd, located by reading its label — and reading labels is sound, because
+   **`WM_GETTEXT` works on CATIA dialogs** and agrees with `GetWindowText` (same measurement).
+   So: resolve by label, press by hwnd, and treat the id table as a last resort rather than the
+   language-proof answer.
+6. **A CATIA widget's class name is not what `GetClassName` returns.** Its own controls report
+   as **`N/A [ l_CATDlgFloatingFrame ]`** and **`CATDlgDocument [ l_CATDlgMfcDocumentMDI ]`** —
+   the real name is *inside the brackets*, so `cls == "CATDlgFloatingFrame"` never matches and
+   even `cls.startswith("CATDlg")` fails for every floating frame. Message boxes are the
+   exception: a stock `#32770` with stock `Button` and `Static` children. Measured 2026-09-12.
+7. **Refusals are exact-label or leading-phrase, never substring.** A leading-word rule refused
    `Exit Sketcher Workbench`; a substring rule refuses `Copy Options`. **An over-refusal is not
    safe** — the agent's recovery from a refusal is to try something else, so it becomes a wrongly
    built part.
-7. **Mock mode simulates the interface** (`mock_ui.py`) and runs in a language:
+8. **Mock mode simulates the interface** (`mock_ui.py`) and runs in a language:
    `--mock-language de`. Pressing OK on the mock Pad dialog builds a real mock Pad, so tests assert
    the outcome. Every interactive test runs against `en` and `de`.
-8. **What Linux cannot verify** is listed in the protocol doc: whether CATIA's dialogs answer
+9. **What Linux cannot verify** — three of the four are now answered on the seat
+   (THE QUEUE B3); `EN_CHANGE` is the one still open, because the dialog that came up had no
+   edit control. The list is in the protocol doc: whether CATIA's dialogs answer
    `WM_GETTEXT`, whether `EN_CHANGE` is needed, what its window classes are. `describe_dialog`
    reports unrecognised controls with their class name so the first Windows session produces the
    answer instead of a shrug.

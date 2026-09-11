@@ -221,6 +221,28 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-12 — THE QUEUE B3: three of the four Win32 questions answered, and two standing
+  claims in CLAUDE.md corrected.** Win32 only, against a live modal dialog on the seat.
+  **`StartCommand` does NOT fail silently — it wedges the seat.** CLAUDE.md said "hand it a name
+  CATIA does not know and it does nothing, raises nothing, returns nothing". Measured:
+  `StartCommand("About CATIA V5")` raises a modal `Entrée clavier` / *"Commande inconnue"*
+  dialog and **blocks COM until it is dismissed** — the probing script hung inside the call and
+  never returned. The danger is a stuck workstation, not a quiet no-op, which is the strongest
+  argument yet that the bridge is right to be Win32.
+  **`WM_GETTEXT` works on CATIA's dialogs** and agrees with `GetWindowText`, so label-based
+  resolution is sound: the live dialog read back `id=2 class='Button' WM_GETTEXT='OK'` and
+  `id=65535 class='Static' WM_GETTEXT='Commande inconnue : About CATIA V5'`.
+  **Window classes are two families.** A CATIA message box is a stock `#32770` with stock
+  `Button`/`Static` children; CATIA's own widgets report as **`N/A [ l_CATDlgFloatingFrame ]`**
+  and **`CATDlgDocument [ l_CATDlgMfcDocumentMDI ]`** — the real name is *inside the brackets*,
+  so `cls == "CATDlgFloatingFrame"` never matches and `startswith("CATDlg")` fails for every
+  floating frame.
+  **The id fallback is not language-proof after all.** The button *labelled* OK carries control
+  id **2** (`IDCANCEL`), so `STANDARD_CONTROL_IDS`' `IDOK=1` would have pressed nothing. What
+  dismissed it was `BM_CLICK` (0x00F5) posted to the button's own hwnd, found by reading its
+  label. So: resolve by label, press by hwnd, treat the id table as a last resort.
+  **`EN_CHANGE` is still open** and recorded as open rather than guessed: the dialog that came
+  up has no edit control. It needs a Pad or fillet dialog — ten minutes next seat session.
 - **2026-09-12 (later) — B2's topology gap closed: the bridge now counts faces and edges.**
   The B1/B2 run left three quantities uncomparable because `catia_measure` reported no
   `face_count`/`edge_count`/`solid_count`. `catia_com._topology_counts` adds the first two

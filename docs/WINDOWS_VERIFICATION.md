@@ -438,11 +438,56 @@ server inherits and the Git Bash one.
       worked.
       Evidence: `docs/verification-2026-09-11/B1-conformance.json`.
 
-- [ ] **B3 — The four questions `docs/CATIA_BRIDGE_PROTOCOL.md` says Linux cannot answer.**
+- [x] **B3 — The four questions `docs/CATIA_BRIDGE_PROTOCOL.md` says Linux cannot answer.**
       Do CATIA's dialogs answer `WM_GETTEXT`? Is `EN_CHANGE` needed after setting an edit
       field? What are the real window classes? Does `StartCommand` ever report a failure?
       `describe_dialog` prints unrecognised controls with their class name specifically so
       this session produces answers rather than a shrug — paste its output into the report.
+
+      **ANSWERED 2026-09-12, three of four, by Win32 against a live modal dialog.** Raised
+      by accident and then on purpose: `StartCommand("About CATIA V5")` — a name CATIA does
+      not know — put a modal dialog up, which is itself one of the answers.
+
+      **1. Do CATIA's dialogs answer `WM_GETTEXT`? YES**, and it agrees with
+      `GetWindowText` exactly. Read off the live dialog:
+
+          DIALOG hwnd=2101022 class='#32770' title='Entrée clavier'
+            child id=2     class='Button'  WM_GETTEXT='OK'
+            child id=20    class='Static'  WM_GETTEXT=''
+            child id=65535 class='Static'  WM_GETTEXT='Commande inconnue : About CATIA V5'
+
+      So the bridge's `SendMessageTimeoutW(WM_GETTEXT)` route is sound on real CATIA, and
+      label-based resolution is available.
+
+      **2. What window classes? Two families, and one of them will surprise a `==`.** A
+      CATIA *message box* is a stock Win32 `#32770` with stock `Button`/`Static` children.
+      CATIA's own widgets report their class as **`N/A [ l_CATDlgFloatingFrame ]`** and
+      **`CATDlgDocument [ l_CATDlgMfcDocumentMDI ]`** — the real name is inside the
+      brackets, so a naive comparison against `CATDlgFloatingFrame` never matches and a
+      prefix test against `CATDlg` fails for every floating frame.
+
+      **3. Does `StartCommand` ever report a failure? YES — and this CORRECTS the standing
+      claim.** `CLAUDE.md` says "*`StartCommand` fails silently. Hand it a name CATIA does
+      not know and it does nothing, raises nothing, returns nothing.*" On this seat it
+      raises a **modal dialog** — *"Entrée clavier / Commande inconnue : <name>"* — and
+      **blocks COM until the dialog is dismissed**. The probing script hung inside
+      `StartCommand` and did not return. So an unknown command does not vanish quietly; it
+      **wedges the seat**, which is precisely the failure the Win32 dialog tools and
+      `OUT_OF_BAND_TOOLS` exist for, and the strongest possible argument that the bridge
+      is right to be Win32 rather than COM.
+
+      **4. Is `EN_CHANGE` needed? STILL OPEN.** The dialog that came up has no edit
+      control, so nothing here settles it. It needs a dialog with a field — a Pad, a
+      fillet — and is worth ten minutes next seat session. Recorded as open rather than
+      guessed.
+
+      **A fourth thing, not asked for and worth more than one that was:** the button
+      labelled **OK carries control id 2**, which is `IDCANCEL`. `CLAUDE.md` offers
+      `STANDARD_CONTROL_IDS` (IDOK=1, IDCANCEL=2) as "the language-proof fallback"; on this
+      dialog a press of IDOK=1 would have hit nothing. Dismissal that *did* work was
+      `BM_CLICK` (0x00F5) posted to the button's own hwnd — found by reading its label,
+      which answer 1 says is reliable. **So on CATIA's own dialogs the label is the sound
+      route and the id fallback is not.**
 - [ ] **B4 — Gate G1, re-run.** Ran 2026-09-06 and **did not pass**: rung 3 failed. It is
       carried forward. G1 is now also the only thing that can verify E6 — see section A.
       Drive it from `docs/GUI_PROMPT_LADDER.md`, through the chatbot, never through

@@ -221,6 +221,39 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-12 — THE QUEUE B1 + B2: OCCT and CATIA build the same geometry, measured.**
+  `compare_backends` has been backend-neutral since 2026-09-05 and **both sides of every run
+  had been an `OcctRunner`**, so Decision 1's central claim was unverified rather than wrong.
+  Two new pieces close it: `app/catia/runner.py::CatiaSeatRunner` (the `CallRunner` adapter that
+  was missing — the reason the item had never run) and `scripts/catia_conformance.py`.
+  **The result.** Both plans built on both backends. A 30x20x5 plate agrees **exactly** —
+  volume 3000.0 and area 1700.0 on each — and a bored 60x40x10 agrees to **0.000%**:
+  22869.026644707676 against CATIA's 22869.0266, 6950.79644737231 against 6950.7964, the
+  difference being that CATIA prints four decimal places. Mass differs by **0.127%**, and that
+  is deliberate rather than drift: CATIA applies catalogue *Acier* at 7860 kg/m3 where the
+  kernel holds 7870 for `steel-1018`, and the bridge prefers CATIA's density once a material is
+  attached so Kryova's mass is the CATPart's own (`scripts/catia_bridge/catia_com.py`).
+  **Why it is a script and not a test.** `catia.connection.registry` is documented as "which
+  devices are online, *in this process*" — the daemon holds a socket to one worker — and
+  `local_bridge`'s process globals are the same. So a plain script importing `call_catia` can
+  never see a running server's bridge: it spawns a second daemon, which dies on `bridge.lock`,
+  and reports "the bridge exited immediately after starting". Measured while writing this. The
+  harness therefore *runs the application in its own process*; there is no HTTP route that runs
+  an arbitrary CATIA tool and there should not be one.
+  **What the first real run found is that the harness could never have passed**, for three
+  reasons invisible while both sides were OCCT, none of them a geometry bug:
+  the kernel reports `centre_of_mass_mm` and the bridge `center_of_gravity_mm`, so the centre of
+  mass — the check that moves when a feature lands in the wrong place while the volume stays
+  right — was **silently never compared**; `CONFORMANCE_TOLERANCE_MM3` (1e-6) is finer than
+  CATIA *prints*; and one tolerance covers mm3, mm2 **and kg**, harmless at 1e-6 and enough to
+  hide the 0.127% at 1e-3. Fixed with `measurement.centre_of_mass`, a `SEAT_TOLERANCE_MM3` for
+  cross-implementation runs (the two-kernel default untouched), and a harness that prints
+  **deltas** rather than a verdict — a pass that hides a known difference is worse than a fail.
+  **One gap left, and it is E3's proof:** the bridge's `catia_measure` reports no
+  `face_count`/`edge_count`/`solid_count`, so topology cannot be compared. Those three are the
+  only remaining divergences and they are "absent on one side", not "different".
+  `tests/test_seat_conformance.py` (15, offline), verified by breaking the alias. Evidence:
+  `docs/verification-2026-09-11/B1-conformance.json`.
 - **2026-09-11 (late) — THE QUEUE B5 answered on the seat: the ×1000 is OCCT's WRITER.**
   Raised because the session had spent its whole length on `occt` while a licensed CATIA V5-R33
   sat running and idle — a fair criticism of how a *Windows* session was being used, since the

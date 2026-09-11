@@ -47,6 +47,41 @@ MM3_KG_PER_M3_TO_KG: Final = 1e-9
 #: is tight enough that a real modelling divergence cannot hide under it.
 CONFORMANCE_TOLERANCE_MM3: Final = 1e-6
 
+#: Slack for a comparison against a **real CATIA seat**, which is a different question
+#: from two kernels disagreeing. Measured 2026-09-11, the first time the conformance
+#: harness's right-hand side was a seat (THE QUEUE B1): CATIA reports its measurements
+#: rounded to four decimal places, so a bored plate whose true volume is
+#: 22869.026644707676 mm3 comes back as 22869.0266 — a 4.5e-5 difference that is
+#: **the report's precision, not a modelling divergence**, and that 1e-6 can never pass.
+#: Loose enough to absorb CATIA's own printing, tight enough that a wrong feature cannot
+#: hide: the smallest thing either backend builds moves a volume by far more than this.
+SEAT_TOLERANCE_MM3: Final = 1e-3
+
+#: The bridge's spelling of `CENTRE_OF_MASS_MM`. The same physical quantity under a
+#: second name, and it is the reason a cross-backend comparison silently could not
+#: compare the centre of mass at all — one of the most sensitive checks there is, since
+#: it moves when a feature lands in the wrong place while the volume stays right.
+#:
+#: Read rather than renamed. `app/ai/tools.py` already carries both spellings, and
+#: `app/design/assertions.py` documents `center_of_gravity_mm[0]` as a legal assertion
+#: path, so the bridge's name is part of a contract users write against; renaming it is
+#: a migration, not a tidy-up. What is fixed here is that the comparator knows they are
+#: one quantity.
+CENTRE_OF_MASS_ALIASES: Final[tuple[str, ...]] = (
+    CENTRE_OF_MASS_MM,
+    "center_of_mass_mm",
+    "centre_of_gravity_mm",
+    "center_of_gravity_mm",
+)
+
+
+def centre_of_mass(payload: Mapping[str, Any]) -> Any:
+    """The centre of mass under whichever name this backend used."""
+    for key in CENTRE_OF_MASS_ALIASES:
+        if key in payload:
+            return payload[key]
+    return None
+
 
 class Detail(StrEnum):
     """How much of the payload to compute.
@@ -101,7 +136,10 @@ def compare(
             if left.get(key) != right.get(key):
                 disagreements.append(key)
 
-    if _vector_differs(left.get(CENTRE_OF_MASS_MM), right.get(CENTRE_OF_MASS_MM), tolerance):
+    # Through the alias, because the kernel says `centre_of_mass_mm` and the bridge
+    # says `center_of_gravity_mm`. Keyed on the canonical name in the report so a
+    # reader is not told about a spelling when they asked about a part.
+    if _vector_differs(centre_of_mass(left), centre_of_mass(right), tolerance):
         disagreements.append(CENTRE_OF_MASS_MM)
 
     left_size = (left.get(BOUNDING_BOX_MM) or {}).get("size")
@@ -140,8 +178,11 @@ def mass_kg(volume_mm3: float, density_kg_m3: float) -> float:
 
 __all__ = [
     "BOUNDING_BOX_MM",
+    "CENTRE_OF_MASS_ALIASES",
     "CENTRE_OF_MASS_MM",
     "CONFORMANCE_TOLERANCE_MM3",
+    "SEAT_TOLERANCE_MM3",
+    "centre_of_mass",
     "HAS_SOLID",
     "INERTIA_TENSOR_MM5",
     "MASS_KG",

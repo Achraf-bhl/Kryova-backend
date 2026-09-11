@@ -1,0 +1,369 @@
+[
+  {
+    "design": "Plate",
+    "plan_digest": "b6c2ac2bfd6e0347d39b92134564a64278678dc19f764cc980fd5fa4e2d16728",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": true,
+    "divergences": [
+      "volume_mm3",
+      "surface_area_mm2",
+      "mass_kg",
+      "face_count",
+      "edge_count",
+      "solid_count",
+      "has_solid",
+      "centre_of_mass_mm",
+      "bounding_box_mm.size"
+    ],
+    "unsupported": {},
+    "failures": {},
+    "measured": {
+      "occt": {
+        "has_solid": true,
+        "face_count": 6,
+        "edge_count": 12,
+        "solid_count": 1,
+        "provenance": {
+          "face_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "edge_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "solid_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "bounding_box_mm": {
+            "basis": "measured",
+            "method": "Bnd_Box over the B-rep"
+          },
+          "surface_area_mm2": {
+            "basis": "measured",
+            "method": "BRepGProp surface integration"
+          },
+          "volume_mm3": {
+            "basis": "measured",
+            "method": "BRepGProp volume integration"
+          },
+          "centre_of_mass_mm": {
+            "basis": "measured",
+            "method": "BRepGProp volume integration"
+          },
+          "mass_kg": {
+            "basis": "measured",
+            "method": "volume integration times the assigned density, 7870 kg/m^3"
+          },
+          "oriented_bounding_box_mm": {
+            "basis": "approximated",
+            "method": "Bnd_OBB orientation search (AddOBB, optimal)"
+          }
+        },
+        "bounding_box_mm": {
+          "min": [
+            -15.0000001,
+            -10.0000001,
+            -1e-07
+          ],
+          "max": [
+            15.0000001,
+            10.0000001,
+            5.0000001
+          ],
+          "size": [
+            30.0000002,
+            20.0000002,
+            5.000000200000001
+          ]
+        },
+        "surface_area_mm2": 1700.0,
+        "volume_mm3": 3000.0,
+        "centre_of_mass_mm": [
+          6.106226635438363e-17,
+          1.1102230246251565e-16,
+          2.5
+        ],
+        "oriented_bounding_box_mm": {
+          "size": [
+            30.0000002,
+            20.0000002,
+            5.000000200000001
+          ],
+          "volume_mm3": 3000.000170000002
+        },
+        "density_kg_m3": 7870.0,
+        "mass_kg": 0.023610000000000003,
+        "features": [
+          "p_body"
+        ],
+        "material": "steel-1018"
+      },
+      "catia": {
+        "has_solid": true,
+        "mass_kg": 0.02358,
+        "density_kg_m3": 7860.0,
+        "volume_mm3": 3000.0,
+        "surface_area_mm2": 1700.0,
+        "center_of_gravity_mm": [
+          0.0,
+          0.0,
+          2.5
+        ],
+        "bounding_box_mm": {
+          "min": [
+            -15.0,
+            -10.0,
+            0.0
+          ],
+          "max": [
+            15.0,
+            10.0,
+            5.0
+          ],
+          "size": [
+            30.0,
+            20.0,
+            5.0
+          ]
+        },
+        "material_applied": true,
+        "mass_is_provisional": false,
+        "features": [
+          {
+            "name": "p_body",
+            "type": "Shape"
+          }
+        ],
+        "approximate": false
+      },
+      "divergences": [
+        "face_count",
+        "edge_count",
+        "solid_count"
+      ],
+      "deltas": {
+        "volume_mm3": {
+          "occt": 3000.0,
+          "catia": 3000.0,
+          "abs": 0.0,
+          "rel": 0.0
+        },
+        "surface_area_mm2": {
+          "occt": 1700.0,
+          "catia": 1700.0,
+          "abs": 0.0,
+          "rel": 0.0
+        },
+        "mass_kg": {
+          "occt": 0.023610000000000003,
+          "catia": 0.02358,
+          "abs": 3.0000000000002247e-05,
+          "rel": 0.0012706480304956478
+        }
+      },
+      "absent": {
+        "not reported by catia": [
+          "centre_of_mass_mm",
+          "edge_count",
+          "face_count",
+          "solid_count"
+        ],
+        "not reported by occt": [
+          "center_of_gravity_mm"
+        ]
+      }
+    }
+  },
+  {
+    "design": "BoredPlate",
+    "plan_digest": "98387e6798165f30b5b77c1f8102a1380bedda7e74bb7fd84c85078d3fcae26e",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": true,
+    "divergences": [
+      "volume_mm3",
+      "surface_area_mm2",
+      "mass_kg",
+      "face_count",
+      "edge_count",
+      "solid_count",
+      "has_solid",
+      "centre_of_mass_mm",
+      "bounding_box_mm.size"
+    ],
+    "unsupported": {},
+    "failures": {},
+    "measured": {
+      "occt": {
+        "has_solid": true,
+        "face_count": 7,
+        "edge_count": 15,
+        "solid_count": 1,
+        "provenance": {
+          "face_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "edge_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "solid_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "bounding_box_mm": {
+            "basis": "measured",
+            "method": "Bnd_Box over the B-rep"
+          },
+          "surface_area_mm2": {
+            "basis": "measured",
+            "method": "BRepGProp surface integration"
+          },
+          "volume_mm3": {
+            "basis": "measured",
+            "method": "BRepGProp volume integration"
+          },
+          "centre_of_mass_mm": {
+            "basis": "measured",
+            "method": "BRepGProp volume integration"
+          },
+          "mass_kg": {
+            "basis": "measured",
+            "method": "volume integration times the assigned density, 7870 kg/m^3"
+          },
+          "oriented_bounding_box_mm": {
+            "basis": "approximated",
+            "method": "Bnd_OBB orientation search (AddOBB, optimal)"
+          }
+        },
+        "bounding_box_mm": {
+          "min": [
+            -30.0000001,
+            -20.0000001,
+            -1e-07
+          ],
+          "max": [
+            30.0000001,
+            20.0000001,
+            10.0000001
+          ],
+          "size": [
+            60.0000002,
+            40.0000002,
+            10.000000199999999
+          ]
+        },
+        "surface_area_mm2": 6950.79644737231,
+        "volume_mm3": 22869.026644707676,
+        "centre_of_mass_mm": [
+          -2.752810050309406e-16,
+          3.908195641643307e-19,
+          4.999999999999998
+        ],
+        "oriented_bounding_box_mm": {
+          "size": [
+            60.0000002,
+            40.0000002,
+            10.000000199999999
+          ],
+          "volume_mm3": 24000.000680000005
+        },
+        "density_kg_m3": 7870.0,
+        "mass_kg": 0.17997923969384944,
+        "features": [
+          "p_body",
+          "p_cut"
+        ],
+        "material": "steel-1018"
+      },
+      "catia": {
+        "has_solid": true,
+        "mass_kg": 0.179751,
+        "density_kg_m3": 7860.0,
+        "volume_mm3": 22869.0266,
+        "surface_area_mm2": 6950.7964,
+        "center_of_gravity_mm": [
+          -0.0,
+          0.0,
+          5.0
+        ],
+        "bounding_box_mm": {
+          "min": [
+            -30.0,
+            -20.0,
+            0.0
+          ],
+          "max": [
+            30.0,
+            20.0,
+            10.0
+          ],
+          "size": [
+            60.0,
+            40.0,
+            10.0
+          ]
+        },
+        "material_applied": true,
+        "mass_is_provisional": false,
+        "features": [
+          {
+            "name": "p_body",
+            "type": "Shape"
+          },
+          {
+            "name": "p_cut",
+            "type": "Shape"
+          }
+        ],
+        "approximate": false
+      },
+      "divergences": [
+        "face_count",
+        "edge_count",
+        "solid_count"
+      ],
+      "deltas": {
+        "volume_mm3": {
+          "occt": 22869.026644707676,
+          "catia": 22869.0266,
+          "abs": 4.470767453312874e-05,
+          "rel": 1.954944354550172e-09
+        },
+        "surface_area_mm2": {
+          "occt": 6950.79644737231,
+          "catia": 6950.7964,
+          "abs": 4.737230938189896e-05,
+          "rel": 6.815378603096292e-09
+        },
+        "mass_kg": {
+          "occt": 0.17997923969384944,
+          "catia": 0.179751,
+          "abs": 0.00022823969384944132,
+          "rel": 0.0012681445606597989
+        }
+      },
+      "absent": {
+        "not reported by catia": [
+          "centre_of_mass_mm",
+          "edge_count",
+          "face_count",
+          "solid_count"
+        ],
+        "not reported by occt": [
+          "center_of_gravity_mm"
+        ]
+      }
+    }
+  }
+]

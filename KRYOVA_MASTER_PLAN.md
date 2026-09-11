@@ -590,10 +590,29 @@ deterministically, in CI, at machine scale?
    containerised. Same spec + same version ⇒ same geometry, byte for byte, asserted in CI.
    > DONE (2026-09-05) — the same spec built twice produces the same geometry digest; a changed
    > dimension changes it. Tested by: `tests/test_kernel.py`.
-   > **RESIDUAL, and it needs hardware this machine does not have:** the CATIA half — the same
-   > plan built on a real V5 seat, compared. Pointing `compare_backends`' right-hand side at
-   > `app.catia.dispatch` on a Windows seat is the remaining step. Until that has run the
-   > *cross-backend* claim is untested and is written as untested.
+   > **RESIDUAL CLOSED 2026-09-12 on the seat (THE QUEUE B1/B2).** The same plan built on a
+   > real V5-R33 and compared: a 30x20x5 plate agrees **exactly** on volume (3000.0) and
+   > surface area (1700.0), and a bored 60x40x10 agrees to **0.000%** (22869.026644707676
+   > against CATIA's 22869.0266, and 6950.79644737231 against 6950.7964 — CATIA prints four
+   > decimal places). Both plans built on both backends. **Decision 1's central claim is now
+   > measured rather than assumed.**
+   > Mass differs by **0.127%** and that is deliberate: CATIA applies its catalogue *Acier* at
+   > 7860 kg/m3 where the kernel holds 7870 for `steel-1018`, and the bridge prefers CATIA's
+   > density once a material is attached so the mass Kryova quotes is the mass the CATPart
+   > reports (`scripts/catia_bridge/catia_com.py`).
+   > **What running it for the first time found is that the harness could never have passed**,
+   > for three reasons that were all invisible while both sides were `OcctRunner`: the kernel
+   > says `centre_of_mass_mm` and the bridge says `center_of_gravity_mm`, so the centre of
+   > mass was silently never compared; `CONFORMANCE_TOLERANCE_MM3` (1e-6) is finer than CATIA
+   > *prints*; and one tolerance covers mm3, mm2 and kg, which is harmless at 1e-6 and would
+   > have hidden the 0.127% at 1e-3. Fixed by `measurement.centre_of_mass`,
+   > `SEAT_TOLERANCE_MM3`, and a harness that reports **deltas** rather than a verdict.
+   > **One gap remains and it is E3's:** the bridge's `catia_measure` reports no
+   > `face_count`/`edge_count`/`solid_count`, so topology cannot be compared — the only
+   > remaining divergences, and "absent on one side" rather than "different".
+   > Tested by: `tests/test_seat_conformance.py` (15, offline), verified by breaking the
+   > alias. Code: `app/catia/runner.py`, `scripts/catia_conformance.py`,
+   > `app/kernel/measurement.py`. Evidence: `docs/verification-2026-09-11/B1-conformance.json`.
 
 8. **The open kernel's part reaches the solver.** *Added 2026-09-10, after the phase was already
    marked complete.* A part built on `occt` must become a `GeometryVersion` the mesher can read,

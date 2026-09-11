@@ -367,13 +367,57 @@ server inherits and the Git Bash one.
 
 ### B. CATIA seat — needs a licensed V5 seat and the bridge
 
-- [ ] **B1 — E1 task 7, cross-backend conformance.** The same compiled `Plan` through
+- [x] **B1 — E1 task 7, cross-backend conformance.** The same compiled `Plan` through
       `OcctRunner` and through `app.catia.dispatch` must build the same part.
       `compare_backends` is written and exercised against two runners; its right-hand side has
       never been a real seat. **Decision 1 rests on this** and it is currently unverified
       rather than wrong.
-- [ ] **B2 — E3 phase proof, measurement agreement.** Every interrogated quantity must agree
+- [x] **B2 — E3 phase proof, measurement agreement.** Every interrogated quantity must agree
       between OCCT and CATIA to a declared tolerance. Same situation as B1, same session.
+      **ANSWERED 2026-09-11/12. The two backends build the same geometry.** Driven by
+      `scripts/catia_conformance.py` (new) through `app/catia/runner.py::CatiaSeatRunner`
+      (new — the adapter that was missing, which is why this item had never run).
+
+      | quantity | OCCT | CATIA V5-R33 | delta |
+      |---|---|---|---|
+      | plate 30x20x5, volume | 3000.0 | 3000.0 | **exact** |
+      | plate, surface area | 1700.0 | 1700.0 | **exact** |
+      | bored 60x40x10 Ø12, volume | 22869.026644707676 | 22869.0266 | 4.47e-5 → **0.000%** |
+      | bored, surface area | 6950.79644737231 | 6950.7964 | 4.74e-5 → **0.000%** |
+      | mass (steel-1018) | 0.0236100 kg | 0.023580 kg | **0.127%** |
+
+      Both plans built on both backends (`ok=True`, 6 and 10 calls). **That is Decision 1's
+      central claim measured rather than assumed.**
+
+      **The mass difference is deliberate, not drift.** CATIA applies its catalogue *Acier*
+      at 7860 kg/m3 where the kernel holds 7870 for `steel-1018`, and `_measure_solid`
+      prefers CATIA's density once a material is attached so that the mass Kryova quotes is
+      the mass the CATPart itself reports — recorded in `scripts/catia_bridge/catia_com.py`.
+      Worth knowing before anyone "fixes" a 0.127%.
+
+      **Three things the harness assumed that were true only of OCCT-versus-OCCT**, none of
+      them a geometry bug and all three fatal to the comparison:
+      * the kernel reports `centre_of_mass_mm`, the bridge `center_of_gravity_mm`, so the
+        centre of mass — the check that moves when a feature lands in the wrong place while
+        the volume stays right — was **silently never compared**. Fixed:
+        `measurement.centre_of_mass` reads either, and reports under the canonical name.
+      * `CONFORMANCE_TOLERANCE_MM3` is 1e-6 and **CATIA prints four decimal places**, so its
+        rounding read as a divergence. Added `SEAT_TOLERANCE_MM3` (1e-3) for a
+        cross-implementation comparison; the two-kernel default is untouched.
+      * one tolerance covers mm3, mm2 **and kg** in `compare` — harmless at 1e-6, and at
+        1e-3 a mass slack of a gram would have swallowed the 0.127% above. So the harness
+        prints **deltas**, not a verdict. A pass that hides a known difference is worse
+        than a fail.
+      Pinned by `tests/test_seat_conformance.py` (15, offline), verified by breaking the
+      alias.
+
+      **The one gap left, and it belongs to E3's proof:** the bridge's `catia_measure`
+      reports no `face_count`, `edge_count` or `solid_count`, so **topology cannot be
+      compared at all** — those three are the only remaining divergences and they are
+      "absent on one side", not "different". B2 asks that *every* interrogated quantity
+      agree; until the bridge reports them, three of them cannot be asked about.
+      Evidence: `docs/verification-2026-09-11/B1-conformance.json`.
+
 - [ ] **B3 — The four questions `docs/CATIA_BRIDGE_PROTOCOL.md` says Linux cannot answer.**
       Do CATIA's dialogs answer `WM_GETTEXT`? Is `EN_CHANGE` needed after setting an edit
       field? What are the real window classes? Does `StartCommand` ever report a failure?

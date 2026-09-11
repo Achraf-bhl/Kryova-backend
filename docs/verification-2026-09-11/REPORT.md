@@ -1,9 +1,12 @@
 # Verification run — 2026-09-11
 
-**Backend:** `occt` (the open kernel, in-process — no CATIA seat involved).
+**Backend:** `occt` for the ladder (the open kernel, in-process, no seat); **CATIA V5-R33 on the
+seat for THE QUEUE B5**, at the end — see the last section, and the note there about why the
+ladder half should not have had the whole session.
 **Model:** `qwen3.6:27b`, local Ollama, 60%/40% CPU/GPU, `num_ctx=32768`.
 **Method:** `docs/GUI_PROMPT_LADDER.md` — one prompt per level, written on the day, driven
-through the real web GUI in Edge on `localhost:3000`, a picture every time.
+through the real web GUI in Edge on `localhost:3000`, a picture every time. B5 is a direct
+seat measurement and deliberately involves no model at all.
 
 ---
 
@@ -385,3 +388,61 @@ Both defects were invisible from below and neither is *in* a tool.
   elsewhere in the same run. Together they were conclusive, and the model did the rational thing
   with the evidence it was given.
 
+---
+
+## THE QUEUE B5 — settled on the seat (and the file settled most of it)
+
+**Raised because the session had spent its whole length on `occt` and never touched the CATIA
+seat that is the reason this machine is in the workflow at all.** That was a fair criticism:
+CATIA V5-R33 was running throughout and idle. B5 was chosen because it needs the seat, does
+**not** need the slow model, and settles a ×1000 that currently forbids a product capability.
+
+### The question
+
+`app/manufacture/xde.py` writes a flatness tolerance authored at 0.05 mm and reads it back as
+**50.0 mm**. A round trip through one implementation cannot say whose defect that is — both ends
+share it. The item asked for CATIA's reading as the tie-breaker.
+
+### The answer: it is the **writer**, and the file says so without needing a vote
+
+`docs/verification-2026-09-11/B5-tolerance-probe.step`, written by `write_step_with_metadata`:
+
+```
+#346 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );   <- the model's unit
+#352 = LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(5.E-02),#353);      <- the tolerance value
+#353 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );         <- tagged METRES
+#356 = FLATNESS_TOLERANCE('','',#352,#354);
+```
+
+**0.05 metres is 50 mm.** The file genuinely states 50 mm, so every conforming reader is right to
+read 50 and OCCT's *reader* was never wrong. The item anticipated needing a second implementation
+to choose between two conclusions; the artefact turned out to be self-describing, and the seat
+was needed only to check that reading rather than to make it.
+
+Consequence: the standing ban on claiming semantic PMI stands on firmer ground, and the fix is
+upstream in OCCT (or a hand-written unit reference) — **never** a ×1/1000 on the way out, which
+would put a number in the file that nothing in this codebase believes.
+
+### The seat half, reported as the item asks
+
+CATIA opened the file and converted it to a CATPart (`B5-catia-step-import.png`):
+
+| | authored | CATIA |
+|---|---|---|
+| name | `Bracket` | **`Bracket`** — the tree root ✓ |
+| geometry | a 10×20×30 solid | one solid, `MANIFOLD_SOLID_BREP #15` ✓ |
+| tolerance | flatness 0.05 mm | **nothing — `AnnotationSets.Count == 0`** |
+| colour | (51, 102, 229) | (210, 210, 255), CATIA's default |
+| layer | `KRYOVA-PART` | numeric layers only, no such name |
+
+**Caveat, stated rather than buried.** The last three are *"on this seat's default STEP import
+settings"*. CATIA's import options were not inspected and FTA licensing was not established — an
+`AnnotationSets.Add()` probe failed on its **signature** (*"Nombre de paramètres non valide"*),
+not on a licence, so it proved nothing either way. Ten minutes next seat session closes that.
+
+**What it already shows is enough to matter**: `interop.measure_metadata_round_trip`'s *"names,
+colours, layers, validation properties and assembly occurrences all carry"* is a statement about
+**OCCT talking to itself**. Against a real CATIA, on default settings, the name carried and the
+colour, the layer and the tolerance did not. That is exactly the limit B5 was written to expose,
+and it is the argument for measuring interop against a second implementation rather than a round
+trip.

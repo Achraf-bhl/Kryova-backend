@@ -383,7 +383,7 @@ server inherits and the Git Bash one.
       carried forward. G1 is now also the only thing that can verify E6 — see section A.
       Drive it from `docs/GUI_PROMPT_LADDER.md`, through the chatbot, never through
       `dispatch`, two pictures per prompt.
-- [ ] **B5 — E21 task 1, the cross-implementation half of the STEP matrix, and the one
+- [x] **B5 — E21 task 1, the cross-implementation half of the STEP matrix, and the one
       measurement that settles a ×1000.** Kryova→STEP→Kryova is measured
       (`app/manufacture/interop.py::measure_metadata_round_trip`): names, colours, layers,
       validation properties and assembly occurrences all carry, and a **flatness tolerance
@@ -400,6 +400,36 @@ server inherits and the Git Bash one.
       reads 0.05, OCCT's *reader* is wrong, the file is right, and the product may claim
       semantic PMI export while its own re-import stays untrustworthy. Those are opposite
       conclusions and nothing on Linux can choose between them.
+
+      **ANSWERED 2026-09-11. It is the WRITER — and the file settles it without a vote.**
+      The AP242 file Kryova writes contains, for the model:
+      `#346 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )`, and for the
+      tolerance: `#352 = LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(5.E-02),#353)` with
+      `#353 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) )`. **0.05 metres is 50 mm**,
+      so the file genuinely states 50 mm and every conforming reader is right to read 50.
+      OCCT's *reader* was never wrong. The item expected to need a second implementation to
+      choose between two conclusions; in fact the artefact is self-describing and the second
+      implementation was only ever needed to check that reading — which it did.
+      **The seat half, reported as asked.** CATIA V5-R33 opened the file
+      (`docs/verification-2026-09-11/B5-tolerance-probe.step`, written by
+      `xde.write_step_with_metadata`) and converted it to a CATPart:
+      * **name — CARRIED.** `Bracket` is the tree root. Screenshot:
+        `docs/verification-2026-09-11/B5-catia-step-import.png`.
+      * **geometry — CARRIED.** One solid, listed as `MANIFOLD_SOLID_BREP #15` (the raw STEP
+        entity label, not the part name).
+      * **tolerance — ABSENT.** `part.AnnotationSets.Count == 0`. Nothing in the tree.
+      * **colour — NOT as authored.** Reads (210, 210, 255), CATIA's default, against the
+        authored (51, 102, 229) from `colour_rgb=(0.2, 0.4, 0.9)`.
+      * **layer — NOT as authored.** `PRESENTATION_LAYER_ASSIGNMENT('KRYOVA-PART','visible',…)`
+        is in the file; CATIA reports numeric layers (0 / 1023) and no such name.
+      **Caveat, stated rather than buried:** the last three are "on this seat's *default* STEP
+      import settings". CATIA's import options were not inspected and its FTA licensing was not
+      established — an `AnnotationSets.Add()` probe failed on its **signature**
+      (*"Nombre de paramètres non valide"*), not on a licence, so it settled nothing. Ten
+      minutes next seat session would close that. **What it already shows is enough to matter:**
+      `interop.measure_metadata_round_trip`'s "names, colours, layers, validation properties and
+      assembly occurrences all carry" is a statement about **OCCT talking to itself**, and that
+      is precisely the limit this item was written to expose.
 
 - [x] **B6 — Can Kryova drive CATIA's Analysis & Simulation instead of solving it itself?**
       **Measured 2026-09-11 on this seat. Answer: the licence is there, the automation is

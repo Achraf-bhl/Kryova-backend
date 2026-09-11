@@ -221,6 +221,30 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-11 (late) — THE QUEUE B5 answered on the seat: the ×1000 is OCCT's WRITER.**
+  Raised because the session had spent its whole length on `occt` while a licensed CATIA V5-R33
+  sat running and idle — a fair criticism of how a *Windows* session was being used, since the
+  seat is the reason this machine is in the workflow. B5 was the right item: it needs the seat,
+  needs no model, and settles a ×1000 that currently forbids a product capability.
+  **The file settles it without a second opinion.** `write_step_with_metadata` emits
+  `SI_UNIT(.MILLI.,.METRE.)` as the model's unit and
+  `LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(5.E-02), SI_UNIT($,.METRE.))` for the tolerance.
+  **0.05 metres is 50 mm**, so the file genuinely states 50 mm and every conforming reader is
+  right to read 50 — OCCT's *reader* was never wrong. The item expected to need CATIA to choose
+  between two opposite conclusions; the artefact turned out to be self-describing and the seat
+  only checked the reading. The ban on claiming semantic PMI stands on firmer ground, and the fix
+  is upstream — never a ×1/1000 on the way out.
+  **The seat half, as the item asks** (`docs/verification-2026-09-11/B5-catia-step-import.png`):
+  CATIA converted the file to a CATPart, the part **name carried** (`Bracket` is the tree root)
+  and the solid carried; the **tolerance is absent entirely** (`AnnotationSets.Count == 0`), the
+  colour read back as CATIA's default (210,210,255) not the authored (51,102,229), and
+  `PRESENTATION_LAYER_ASSIGNMENT('KRYOVA-PART',…)` is in the file with no such layer in CATIA.
+  **Those last three are on this seat's *default* import settings and are not proofs** — the
+  import options were not inspected and FTA licensing was not established (an
+  `AnnotationSets.Add()` probe failed on its *signature*, not on a licence). Recorded with the
+  caveat rather than as a finding. What it does show: `interop.measure_metadata_round_trip`'s
+  "names, colours, layers … all carry" is a statement about **OCCT talking to itself**, which is
+  exactly the limit B5 exists to expose.
 - **2026-09-11 (night) — ladder L3 passed, L4 hit the model rather than the product, and found two
   more of the same class.** Report: `docs/verification-2026-09-11/`.
   **L3 PASS** — the target-iteration behaviour, which no recorded run had tested. Asked for a plate

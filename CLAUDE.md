@@ -827,8 +827,27 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
    the results page already shipped a `/1000` once. The product therefore **may not claim
    semantic PMI**, the drawing stays the carrier of tolerance, and
    `xde.write_step_with_metadata` refuses a tolerance under AP214 — where OCCT accepts the
-   request, returns `RetDone` and writes no tolerance at all. Whether the defect is the writer
-   or the reader is THE QUEUE **B5**, a ten-minute measurement that needs the seat.
+   request, returns `RetDone` and writes no tolerance at all.
+   **SETTLED 2026-09-11 (THE QUEUE B5): it is the WRITER, and the file itself says so.** No
+   second implementation was needed in the end — the AP242 file Kryova writes contains
+   `#346 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )` as the model's unit and
+   `#352 = LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(5.E-02),#353)` with
+   `#353 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) )` for the tolerance. 0.05 **metres**
+   is 50 mm, so the file genuinely states 50 mm and *every* conforming reader is right to read
+   50. OCCT's reader was never wrong. The ban on claiming semantic PMI therefore stands on
+   firmer ground than before, and the fix is upstream in OCCT or a hand-written unit reference —
+   still **never** a ×1/1000 on the way out.
+   **Also measured on the seat that day, and weaker evidence:** CATIA V5-R33 opened the same
+   file, carried the part name (`Bracket` is the tree root) and the solid, and imported
+   **no annotation set at all** — so the tolerance does not reach a CATIA user by this path even
+   before the units are argued about. Colour read back as CATIA's default (210, 210, 255) rather
+   than the authored (51, 102, 229), and `PRESENTATION_LAYER_ASSIGNMENT('KRYOVA-PART', …)` is in
+   the file but no such layer appears in CATIA. **Those three are "on this seat's default import
+   settings", not proofs**: CATIA's STEP import options and its FTA licensing were not inspected,
+   and an `AnnotationSets.Add()` probe failed on its *signature* rather than on a licence, so it
+   settled nothing. Worth ten minutes next seat session. What it does already show is that
+   `interop.measure_metadata_round_trip`'s "names, colours, layers … all carry" is a statement
+   about **OCCT talking to itself**, which is exactly the limit B5 was written to expose.
 
 ## Sheet metal reaches geometry (`app/sheetmetal/fold.py`, `app/kernel/occt/sheetmetal.py`)
 

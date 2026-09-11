@@ -60,6 +60,25 @@ def boolean(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str,
             f"{word!r} is not a boolean operation. Use one of: {known}."
         )
 
+    # `target_body` is declared — "The body to combine into. Defaults to the main
+    # body." — and is read by nothing in `app/`. Measured 2026-09-11: varying it
+    # alone, including to a body that does not exist, changed nothing; the
+    # boolean always combined into the *active* body. So a caller who activated
+    # one body and named another got the wrong one silently.
+    #
+    # Checked here rather than in `unsupported.IGNORED` because the value that is
+    # harmless is not a constant — it is whatever body happens to be active — and
+    # only the document knows that. Naming the active body is honoured because it
+    # asks for exactly what it will get; naming any other is refused rather than
+    # ignored.
+    wanted = arguments.get("target_body")
+    if wanted is not None and str(wanted) != document.active_body:
+        raise GeometryError(
+            f"{BOOLEAN} was told to combine into body {str(wanted)!r}, but it always "
+            f"combines into the active body, which is {document.active_body!r}. Call "
+            f"catia_body_activate with {str(wanted)!r} first, or drop target_body."
+        )
+
     tool_name = arguments.get("tool_body")
     if not tool_name:
         raise GeometryError(f"{BOOLEAN} needs tool_body — the body to combine with.")

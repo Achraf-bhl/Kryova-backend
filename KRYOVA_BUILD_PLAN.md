@@ -221,6 +221,49 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-11 (later) — E1 task 10: eighteen advertised arguments the open kernel read on
+  nobody's behalf.** Task 9 closed `catia_list_features` because that is where the ladder landed;
+  this asked the same question of all 116 operations the open kernel implements, and the answer
+  was eighteen.
+  **Found by measurement, and the first attempt was wrong.** A static scan for the argument name
+  in the handler's module reported **74** holes; the real answer is **18**. It was wrong both
+  ways: `name` (24 false positives) is read by `context.feature_name` in another module, and
+  `at_radius_mm` is read by `app.catia.ops.placement.resolve_polar` through a **function-local
+  import** no import-graph closure can see. The trustworthy form is differential — build the part
+  without the argument, build it again with a meaningfully different value, compare the geometry.
+  **Four produced a confidently wrong part rather than a missing one**, each returning `ok` with a
+  feature name and full `measured` provenance: `catia_translate(direction=[1,0,0],
+  distance_mm=50)` moved the part **1 mm** (`distance_mm` is *required* and the raw direction
+  vector was the whole displacement); `catia_pad(thin=True, thickness_mm=3)` returned a **solid**
+  120,000 mm³ pad where a 3 mm wall is ~18,480; `catia_hole_at(thread='M6x1')` drilled a plain
+  clearance hole; `catia_pad(second_length_mm=30)` extruded one side, 120,000 against 300,000.
+  **A method error the suite caught, worth more than the fix.** `target_body` was first recorded
+  as ignored on a differential against `"PartBody"` — which was already the active body, so the
+  measurement was of the *harmless* value and proved nothing. The full suite found it through a
+  pre-existing kernel test that legitimately passes `target_body="lower"`. *A differential is only
+  as good as the difference.* It is now checked in `booleans.boolean` rather than in the table,
+  because its harmless value is whatever body is active and only the document knows that — which
+  is exactly where a static table of arguments stops working.
+  **A correction to task 9 landed with it**, also from the suite: task 9 had put sketches into
+  `catia_list_features`' `features` list to match the CATIA mock, and that list is
+  `document.feature_names()` — what every *mutating* operation returns too — so reshaping it left
+  the listing and the build results disagreeing about the part. The two backends' `features`
+  already differ in shape (dicts there, names here), so matching the mock was never the
+  consistency it looked like. Sketches now arrive under their own `sketches` key.
+  **Four implemented or handled, fourteen refused.** `distance_mm` on `catia_translate` (direction now
+  normalised, negative reverses) and `plane` on the three sketch primitives (its documented
+  meaning — it opens a sketch when none is open, and a `plane` contradicting a named sketch is
+  refused rather than resolved). The rest are refused by name in `app/kernel/occt/unsupported.py`,
+  each saying what the argument would have done and what to do instead, with the **argument** as
+  the refusal's subject rather than the operation — `catia_pad` works fine and saying otherwise
+  would send the agent looking for another way to extrude. A per-entry `harmless` value keeps
+  `thin: false` and `recursive: true` building; `recursive` defaults to *true*, so a table
+  assuming every flag defaults to false would have had it backwards.
+  The guard sits in `OcctRunner.__call__` in front of all 116 operations and fires **before** the
+  handler. `tests/test_kernel_unsupported_arguments.py` (36, offline) checks the table against the
+  registry so it cannot drift, asserts every refusal is legible, and pins the count at **14, may
+  only shrink**. Verified by breaking all three guards separately — 1, 5 and 5 named failures —
+  each file restored and confirmed by `diff`.
 - **2026-09-11 (Windows seat) — a new model exposed a misconfiguration, and the ladder found two
   defects that compound.** Report: `docs/verification-2026-09-11/`.
   **The model.** `qwen3.6:27b` pulled and probed the way the technology-register rule demands —

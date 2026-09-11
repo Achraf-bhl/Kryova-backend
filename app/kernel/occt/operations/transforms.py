@@ -51,15 +51,52 @@ COPY_ON_TRANSFORM = True
 
 
 def translate(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Move the current shape by a vector, in millimetres."""
+    """Move the current shape by a distance along a direction, in millimetres.
+
+    **`distance_mm` was declared required and never read until 2026-09-11.** The
+    registry's contract is *"Move the body by a distance along a direction"* —
+    `direction` says which way, `distance_mm` says how far, both required. This
+    used the raw `direction` vector as the whole displacement, so
+    `catia_translate(direction=[1,0,0], distance_mm=50)` moved the part **1 mm**,
+    returned `ok` with a feature name, and reported a full set of *measured*
+    provenance about a part in the wrong place. Measured on this exact call: the
+    bounding box went from [-50, 50] to [-49, 51].
+
+    That is the worst shape a defect can take here — a required argument
+    silently ignored, no refusal, no warning, and every number afterwards
+    honestly describing the wrong geometry.
+
+    `direction` is normalised, so its magnitude carries no meaning and only
+    `distance_mm` decides how far; a negative distance reverses it, as declared.
+
+    **`vector` is kept and is deliberately not in the registry.** It is a whole
+    displacement, used by callers inside this repo that drive the runner
+    directly. When it is given it wins, and `distance_mm` does not apply. A
+    `direction` with no `distance_mm` also falls back to being the displacement,
+    which is the pre-2026-09-11 behaviour — unreachable through the product,
+    because `app/catia/validation.py` enforces the required argument at dispatch,
+    and kept so a direct runner call written against the old shape still builds.
+    """
     document = context.require_document()
     source = context.require_shape(TRANSLATE)
 
-    vector = as_point(
-        arguments.get("vector") if arguments.get("vector") is not None
-        else arguments.get("direction"),
-        argument="vector",
-    )
+    explicit = arguments.get("vector")
+    distance = arguments.get("distance_mm")
+    if explicit is None and distance is not None:
+        direction = as_point(arguments.get("direction"), argument="direction")
+        length = math.sqrt(sum(component * component for component in direction))
+        if length == 0.0:
+            raise GeometryError(
+                f"{TRANSLATE} was given a direction of zero length, so there is no way "
+                "to move along it. Give a direction such as [1, 0, 0]."
+            )
+        step = float(distance) / length
+        vector = tuple(component * step for component in direction)
+    else:
+        vector = as_point(
+            explicit if explicit is not None else arguments.get("direction"),
+            argument="vector",
+        )
 
     transformation = symbol("gp_Trsf")()
     transformation.SetTranslation(symbol("gp_Vec")(*vector))

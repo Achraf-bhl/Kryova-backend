@@ -587,7 +587,18 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    `tests/test_catia_list_features_options.py` so the two are held to one contract. The
    conformance harness (E1 task 6) compares *geometry*, not vocabulary, so nothing else catches
    this. Same class, opposite direction, as the `support="top"` accept-list of 2026-09-09.
-10. **Two small defects that each look survivable can be conclusive together.** The same L2 run
+10. **"Is this argument read?" is a differential measurement, never a grep.** Asked of the open
+   kernel on 2026-09-11, a static scan for the parameter name in the handler's module reported
+   **74** unread arguments; the real answer was **18**. It was wrong in both directions.
+   `name` (24 of the false positives) is read by `context.feature_name` in a *different* module,
+   and `at_radius_mm` is read by `app.catia.ops.placement.resolve_polar` through a
+   **function-local import**, which no import-graph closure can see. The only trustworthy form is
+   empirical: **build the part without the argument, build it again with a meaningfully different
+   value, compare the geometry.** Identical geometry is the proof. `app/kernel/occt/unsupported.py`
+   and `tests/test_kernel_unsupported_arguments.py` are the shape to copy — and note that the
+   `harmless` value is per-argument, because `catia_bill_of_materials.recursive` defaults to
+   **true**, so a table assuming every flag defaults to false has that one backwards.
+11. **Two small defects that each look survivable can be conclusive together.** The same L2 run
    hit the `_refused_before` guard blocking a correct retry *and* the listing above. Defect one
    induced a false belief; defect two corroborated it. The model is a competent recoverer — it
    recovers cleanly from three other refusals in the same transcript — and it had no way back

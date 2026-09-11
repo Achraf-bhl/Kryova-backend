@@ -70,9 +70,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 12/24 | 78/128 = 61% | 91/151 eng-months = 60% |
+| Engineering — E1–E23 | 12/24 | 78/129 = 61% | 91/151 eng-months = 60% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 18/34 | 124/189 = 66% | 119/189 eng-months = 63% |
+| **Programme** | 18/34 | 126/190 = 66% | 119/189 eng-months = 63% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -679,6 +679,85 @@ deterministically, in CI, at machine scale?
    > read by *every* backend that claims the operation — the conformance harness (task 6) compares
    > geometry, not vocabulary. Until something does, this class can recur on any of the other
    > ~117 operations the open kernel implements.
+   >
+   > <!-- residual closed by task 10, same day -->
+
+10. **No advertised argument is silently ignored.** *Added 2026-09-11, closing task 9's residual
+    the same day it was written.* Task 9 fixed one operation because that is where the ladder
+    happened to land. This asks the question of all of them: for every argument the registry
+    declares on an operation the open kernel implements, is it **honoured, or refused** — never
+    dropped?
+    > DONE (2026-09-11) — **and the answer was eighteen.**
+    >
+    > **Found by measurement, not by reading code.** A static scan for the argument name in the
+    > handler's module was written first and was wrong in both directions: it reported 74 holes,
+    > of which `name` (×24) is read by `context.feature_name` in another module, and
+    > `at_radius_mm`/`at_angle_deg` are read by `app.catia.ops.placement.resolve_polar` through a
+    > **function-local import** that no import-graph closure can see. The trustworthy question is
+    > the differential one — build the part without the argument, build it again with a
+    > meaningfully different value, compare the geometry — and that is what the harness now asks.
+    > Eighteen survived it.
+    >
+    > **Four produced a confidently wrong part rather than a missing one**, each returning `ok`
+    > with a feature name and a full set of `measured` provenance:
+    > * `catia_translate(direction=[1,0,0], distance_mm=50)` moved the part **1 mm**. The raw
+    >   direction vector was being used as the whole displacement and `distance_mm` — a
+    >   **required** argument — was never read. Bounding box [-50, 50] → [-49, 51].
+    > * `catia_pad(thin=True, thickness_mm=3)` on a 100×60 profile returned a **solid** pad of
+    >   120,000 mm³ where a 3 mm wall is about 18,480 — 6.5× the material.
+    > * `catia_hole_at(thread='M6x1')` drilled a plain clearance hole. A tapped hole and a
+    >   clearance hole are different parts to make, and nothing recorded the difference.
+    > * `catia_pad(second_length_mm=30)` extruded one side: 120,000 mm³ where two-sided is 300,000.
+    >
+    > **Four were implemented or handled rather than tabled**, because their contracts were small
+    > and their absence produced wrong geometry rather than a missing capability: `distance_mm` on
+    > `catia_translate` (the direction is now normalised, so its magnitude carries no meaning and a
+    > negative distance reverses it); `plane` on `catia_sketch_rectangle` / `_circle` / `_polygon`
+    > (its documented meaning — *"Support to sketch on when no sketch is open"* — so it now opens
+    > one, and a `plane` that contradicts a named sketch is refused rather than resolved, since
+    > picking either is a profile on a plane nobody asked for); and `target_body` on
+    > `catia_boolean`, which always combined into the *active* body and accepted a body name that
+    > did not exist in silence.
+    >
+    > **`target_body` is checked in its own handler, and that is where this approach's boundary
+    > is.** The value that is harmless for it is not a constant — it is whatever body happens to be
+    > active — and only the document knows that, so a static table of arguments cannot express it.
+    > **It also caught an error of method**: it was first recorded as ignored on a differential
+    > against `"PartBody"`, which was already the active body, so the measurement was of the
+    > harmless value and proved nothing. The full suite found it, through a pre-existing test that
+    > legitimately passes `target_body="lower"`. *A differential is only as good as the difference.*
+    >
+    > **The remaining fourteen are refused by name**, in `app/kernel/occt/unsupported.py`, each with
+    > what the argument would have done and what to do instead. `app/catia/` warns at length that
+    > over-refusal is its own failure mode — but that argument does not apply to an argument
+    > already being ignored: the part is wrong either way and the only question is whether anybody
+    > is told. The refusal names the *argument* as its subject, not the operation, because
+    > `catia_pad` works perfectly well and "catia_pad is not supported yet" would send the agent
+    > looking for another way to extrude. A `harmless` value per entry keeps `thin: false` and
+    > `recursive: true` building — a model that spells out a default has asked for nothing it will
+    > not get, and `recursive` defaults to *true*, so a table assuming every flag defaults to false
+    > would have had that one backwards.
+    >
+    > The guard sits in `OcctRunner.__call__`, in front of all 116 operations, and fires **before**
+    > the handler: a half-applied operation would be worse than the silence it replaces.
+    > Tested by: `tests/test_kernel_unsupported_arguments.py` (36, offline) — the table is checked
+    > against the registry so it cannot drift, every entry's refusal is asserted legible, and the
+    > count is pinned at **14 and may only shrink**, the same shape as `tests/test_delivery.py`'s
+    > grandfathered names: a list of known gaps is only honest while it is closing. Verified by
+    > breaking all three guards separately — 1, 5 and 5 named failures — with each file restored
+    > and confirmed by `diff`.
+    >
+    > **A correction to task 9 landed with it.** That task had put sketches into
+    > `catia_list_features`' `features` list to match the CATIA mock, and the full suite refused
+    > it: on this backend `features` is `document.feature_names()`, which is also what every
+    > *mutating* operation returns, so reshaping it left the listing and the build results
+    > disagreeing about what the part contains — the failure
+    > `tests/test_catia_list_features_options.py` guards against from the other side. The two
+    > backends' `features` already differ in shape (dicts there, names here), so matching the mock
+    > was never the consistency it looked like. Sketches now arrive under their own `sketches`
+    > key, which fixes the measured defect without moving a contract.
+    > Code: `app/kernel/occt/unsupported.py`, `app/kernel/occt/runner.py`,
+    > `app/kernel/occt/operations/{transforms,sketcher,booleans,document_ops}.py`.
 
 **Phase proof:** M1 — a machined bracket — compiles, builds on OCCT in CI, builds on CATIA on a
 real seat, and the two agree on every interrogated quantity to declared tolerance. Ten times,

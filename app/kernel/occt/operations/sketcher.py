@@ -58,19 +58,32 @@ AXIS = "catia_sketch_axis"
 
 def sketch_create(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
     """Open a sketch on an origin plane or a plane the design constructed."""
-    document = context.require_document()
-    support = str(arguments["support"])
-    name = feature_name(arguments, "sketch")
-    origin = as_point(arguments.get("origin"), argument="origin")
+    sketch = _open_sketch(context, str(arguments["support"]), arguments)
+    return {"feature": sketch.name, "sketch": sketch.name, **sketch.to_dict()}
 
+
+def sketch_create_for(
+    context: BuildContext, support: str, arguments: Mapping[str, Any]
+) -> Sketch:
+    """Open a sketch on `support` for a primitive that named a `plane` and no sketch.
+
+    The sketch is named from the primitive's own `name` if it carried one, so the
+    profile and the sketch that holds it do not end up with unrelated names.
+    """
+    return _open_sketch(context, support, arguments)
+
+
+def _open_sketch(context: BuildContext, support: str, arguments: Mapping[str, Any]) -> Sketch:
+    document = context.require_document()
     sketch = Sketch(
-        name=name,
+        name=feature_name(arguments, "sketch"),
         support=support,
-        origin=origin,
-        frame_ax3=resolve_support(document, support, origin, tool=CREATE),
+        origin=as_point(arguments.get("origin"), argument="origin"),
+        frame_ax3=resolve_support(document, support, arguments.get("origin") or (0.0, 0.0, 0.0),
+                                  tool=CREATE),
     )
     document.add_sketch(sketch)
-    return {"feature": sketch.name, "sketch": sketch.name, **sketch.to_dict()}
+    return sketch
 
 
 #: A bare face word -> the origin plane it is parallel to, and which end of the
@@ -386,13 +399,36 @@ def _target_sketch(context: BuildContext, arguments: Mapping[str, Any], tool: st
     """
     document = context.require_document()
     named = arguments.get("sketch")
+    plane = arguments.get("plane")
     if named:
-        return document.sketch(str(named))
+        sketch = document.sketch(str(named))
+        # `plane` names the support to draw on. Naming a sketch that sits on a
+        # *different* support is a contradiction, and until 2026-09-11 the
+        # `plane` was silently dropped and the profile went onto the sketch's
+        # own support. Refused rather than resolved: picking either one is a
+        # profile on a plane the caller did not ask for, and both spellings are
+        # right there in the same call to be compared.
+        if plane is not None and str(plane) != sketch.support:
+            raise GeometryError(
+                f"{tool} was told to draw on plane {str(plane)!r} and into sketch "
+                f"{sketch.name!r}, which is on {sketch.support!r}. Those disagree. Drop "
+                f"`plane`, or open a sketch on {str(plane)!r} with catia_sketch_create "
+                "and name that one."
+            )
+        return sketch
+
+    if plane is not None:
+        # The documented meaning: "Support to sketch on when no sketch is open."
+        # Honoured rather than ignored — before 2026-09-11 this argument did
+        # nothing on the open kernel, so a caller relying on it got the refusal
+        # below instead of a sketch, or drew onto whatever single sketch happened
+        # to be open.
+        return sketch_create_for(context, str(plane), arguments)
 
     if not document.sketches:
         raise GeometryError(
             f"{tool} needs a sketch to draw into, and none is open. Call "
-            "catia_sketch_create first."
+            "catia_sketch_create first, or pass `plane`."
         )
     if len(document.sketches) > 1:
         known = ", ".join(document.sketch_names())

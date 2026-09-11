@@ -73,25 +73,34 @@ class TestIncludeSketches:
     def test_sketches_are_listed_by_default(self, runner) -> None:  # type: ignore[no-untyped-def]
         """The default the schema states, and the thing L2 needed.
 
-        Before the fix this list held `Pad.1` and `Pocket.1` and nothing else.
+        Before the fix there was no `sketches` key at all and nothing anywhere in
+        the answer mentioned a sketch.
         """
-        names = runner("catia_list_features", {})["features"]
-        assert "Outline" in names
-        assert "Bore" in names
-        assert "Spare" in names
+        names = [one["name"] for one in runner("catia_list_features", {})["sketches"]]
+        assert names == ["Bore", "Outline", "Spare"]
+
+    def test_they_arrive_beside_the_features_and_not_among_them(self, runner) -> None:  # type: ignore[no-untyped-def]
+        """`features` is `document.feature_names()` and is what every *mutating*
+        operation returns too. Folding sketches into it would leave the listing
+        and the build results disagreeing about what the part contains — the
+        failure `test_closing_the_gap_changed_nothing_a_mutation_reports` guards
+        against on the CATIA side. A sketch is a drawing, not a feature."""
+        answer = runner("catia_list_features", {})
+        assert answer["features"] == ["Pad.1", "Pocket.1"]
+        assert answer["sketches"]
 
     def test_asking_for_them_explicitly_is_the_same_answer(self, runner) -> None:  # type: ignore[no-untyped-def]
         """L2 sent `include_sketches: true` and the argument was not read at all,
         so the explicit form is worth its own assertion."""
         assert (
-            runner("catia_list_features", {"include_sketches": True})["features"]
-            == runner("catia_list_features", {})["features"]
+            runner("catia_list_features", {"include_sketches": True})["sketches"]
+            == runner("catia_list_features", {})["sketches"]
         )
 
     def test_they_can_be_left_out(self, runner) -> None:  # type: ignore[no-untyped-def]
-        rows = runner("catia_list_features", {"include_sketches": False})["detail"]
-        assert [one["name"] for one in rows]
-        assert all(one["type"] != "Sketch" for one in rows)
+        answer = runner("catia_list_features", {"include_sketches": False})
+        assert "sketches" not in answer
+        assert answer["features"] == ["Pad.1", "Pocket.1"]
 
     def test_a_sketch_row_says_whether_anything_can_be_built_from_it(self, runner) -> None:  # type: ignore[no-untyped-def]
         """The field that answers L2's actual question.
@@ -101,8 +110,7 @@ class TestIncludeSketches:
         `profiles: 0` tells it why the pad was refused -- before it is refused
         a second time and concludes the document is empty.
         """
-        rows = runner("catia_list_features", {})["detail"]
-        sketches = [one for one in rows if one["type"] == "Sketch"]
+        sketches = runner("catia_list_features", {})["sketches"]
         assert sketches
         assert all("elements" in one and "profiles" in one for one in sketches)
         spare = next(one for one in sketches if one["name"] == "Spare")
@@ -112,8 +120,8 @@ class TestIncludeSketches:
     def test_an_empty_sketch_says_it_cannot_be_built_from(self, runner) -> None:  # type: ignore[no-untyped-def]
         """The exact state L2's pad was refused against."""
         runner("catia_sketch_create", {"name": "Empty", "support": "XY"})
-        rows = runner("catia_list_features", {})["detail"]
-        empty = next(one for one in rows if one["name"] == "Empty")
+        sketches = runner("catia_list_features", {})["sketches"]
+        empty = next(one for one in sketches if one["name"] == "Empty")
         assert empty["profiles"] == 0
         assert empty["can_be_built_from"] is False
 
@@ -135,11 +143,14 @@ class TestKind:
         assert result["features"] == []
         assert "Pad" in result["note"] and "Pocket" in result["note"]
 
-    def test_the_filter_still_respects_include_sketches(self, runner) -> None:  # type: ignore[no-untyped-def]
-        assert (
-            runner("catia_list_features", {"kind": "Sketch", "include_sketches": False})["features"]
-            == []
-        )
+    def test_a_sketch_has_no_feature_type_to_filter_on(self, runner) -> None:  # type: ignore[no-untyped-def]
+        """`kind` filters features, and a sketch is not one. Asking for kind
+        'Sketch' therefore names what types *are* present rather than returning
+        the sketches under a heading that would make them look like material."""
+        answer = runner("catia_list_features", {"kind": "Sketch"})
+        assert answer["features"] == []
+        assert "Pad" in answer["note"]
+        assert answer["sketches"], "they are still reported, just not as features"
 
 
 class TestBody:

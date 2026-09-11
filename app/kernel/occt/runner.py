@@ -26,6 +26,7 @@ from app.kernel.measurement import Detail
 from app.kernel.occt.binding import occt_version, require
 from app.kernel.occt.document import PartDocument
 from app.kernel.occt.operations import HANDLERS, RECORDED, BuildContext, coverage
+from app.kernel.occt.unsupported import refuse_unhonoured
 
 
 class OcctRunner:
@@ -50,6 +51,12 @@ class OcctRunner:
         handler = HANDLERS.get(tool)
         if handler is None:
             raise OperationNotSupported(tool)
+        # An advertised argument this backend cannot act on is refused here rather
+        # than dropped in the handler. Before 2026-09-11 eighteen of them were
+        # silently ignored, and every one produced a confident `ok` describing
+        # geometry nobody asked for — `catia_pad(thin=True)` returning a solid,
+        # `catia_translate(distance_mm=50)` moving 1 mm. See `unsupported`.
+        refuse_unhonoured(tool, arguments)
         result = handler(self._context, arguments)
         if tool in RECORDED:
             # After the handler, deliberately: a call that raised changed nothing,

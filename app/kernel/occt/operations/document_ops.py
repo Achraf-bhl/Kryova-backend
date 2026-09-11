@@ -98,11 +98,24 @@ def list_features(context: BuildContext, arguments: Mapping[str, Any]) -> Mappin
     as many words and rebuilt from scratch. An empty answer to a question about a
     document that is not empty is worse than a refusal, because it is believed.
 
-    A sketch is reported as what it is — a drawing, with the number of closed
-    profiles on it — rather than as a feature, so nothing downstream can mistake
-    one for material. `document.feature` already refuses that confusion by name
-    ("... is a sketch, not a feature. A sketch is a drawing until ...") and this
-    keeps the same line.
+    **Sketches arrive under `sketches`, and `features` keeps its old meaning.**
+    They were put into `features` first, to match the CATIA mock, and that broke
+    `TestTheFlangeReportsEveryFeatureItHas::test_the_count_matches_the_operations_that_ran`
+    — rightly. On this backend `features` is `document.feature_names()`, which is
+    what every *mutating* operation also returns; reshaping it here would leave
+    the listing and the build results disagreeing about what the part contains,
+    which is the failure `tests/test_catia_list_features_options.py` guards
+    against from the other side ("a silently reshaped mutation result is a bad
+    failure: nothing errors, every tool still says ok, and the agent's picture of
+    the part quietly stops matching"). The two backends' `features` already
+    differ in shape anyway — dicts on the mock, names here — so matching it was
+    never the consistency it looked like.
+
+    A sketch is therefore reported as what it is — a drawing, with the number of
+    closed profiles on it — and never as a feature. `document.feature` already
+    refuses that confusion by name ("... is a sketch, not a feature. A sketch is
+    a drawing until ...") and this keeps the same line. `kind` filters features
+    for the same reason: a sketch has no feature type to match.
     """
     document = context.require_document()
 
@@ -122,40 +135,11 @@ def list_features(context: BuildContext, arguments: Mapping[str, Any]) -> Mappin
     for feature in document:
         row = feature.to_dict()
         # The type is the stem of the name CATIA would have given it -- `Pad.1`
-        # is a Pad -- which is the same thing the mock reports and the same word
-        # the user says.
+        # is a Pad -- which is the same word the user says.
         row["type"] = str(row.get("catia_name") or "").split(".")[0]
         rows.append(row)
 
-    include = arguments.get("include_sketches")
-    if include is None or bool(include):
-        for name in document.sketch_names():
-            sketch = document.sketches[name]
-            rows.append(
-                {
-                    "name": sketch.name,
-                    "catia_name": sketch.name,
-                    "type": "Sketch",
-                    "tool": "catia_sketch_create",
-                    "body": None,
-                    "support": sketch.support,
-                    # The field that answers the question a listing is asked
-                    # after a pad has just been refused. A pad needs one closed
-                    # profile; `Sketch.1` alone says nothing about whether it has
-                    # one, and this says it before the pad fails again.
-                    "elements": (
-                        len(sketch.profiles)
-                        + len(sketch.curves)
-                        + len(sketch.points)
-                        + len(sketch.construction)
-                    ),
-                    "profiles": len(sketch.profiles),
-                    "can_be_built_from": bool(sketch.profiles),
-                }
-            )
-
     if body is not None:
-        # A sketch belongs to no body, so restricting to one drops them.
         rows = [one for one in rows if one.get("body") == str(body)]
 
     kind = arguments.get("kind")
@@ -179,6 +163,32 @@ def list_features(context: BuildContext, arguments: Mapping[str, Any]) -> Mappin
         "bodies": document.body_names(),
         "active_body": document.active_body,
     }
+
+    # Default true, as the parameter is documented. `is None` rather than a
+    # truthiness test: a caller that did not mention it gets the documented
+    # default, and one that said `false` is honoured.
+    include = arguments.get("include_sketches")
+    if include is None or bool(include):
+        out["sketches"] = [
+            {
+                "name": sketch.name,
+                "type": "Sketch",
+                "support": sketch.support,
+                # The field that answers the question a listing is asked after a
+                # pad has just been refused. A pad needs one closed profile;
+                # `Sketch.1` alone says nothing about whether it has one, and
+                # this says it before the pad is refused a second time.
+                "profiles": len(sketch.profiles),
+                "can_be_built_from": bool(sketch.profiles),
+                "elements": (
+                    len(sketch.profiles)
+                    + len(sketch.curves)
+                    + len(sketch.points)
+                    + len(sketch.construction)
+                ),
+            }
+            for sketch in (document.sketches[name] for name in document.sketch_names())
+        ]
     if note:
         out["note"] = note
     return out

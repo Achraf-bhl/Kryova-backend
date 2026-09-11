@@ -221,6 +221,29 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-12 (later) — B2's topology gap closed: the bridge now counts faces and edges.**
+  The B1/B2 run left three quantities uncomparable because `catia_measure` reported no
+  `face_count`/`edge_count`/`solid_count`. `catia_com._topology_counts` adds the first two
+  through `Selection.Search`, reusing the localisation machinery `_edge_search` already had —
+  the query keywords are localized (`Topologie.Face,tout` answers, `Topology.Face,all` is
+  refused on this French seat) and the item *types* are not, so the grammar is detected per
+  language and the filtering is by type. Sketch geometry is excluded: a bored plate searches
+  as 19 edges of which 5 are the rectangle and circle it was built from.
+  **The result.** Plate: faces **6 = 6**, edges **12 = 12**. Bored plate: faces **7 = 7**,
+  edges **15 vs 14**.
+  **Two differences remain, both understood rather than outstanding.** The one-edge gap is
+  OCCT's **seam edge** on a closed cylindrical face, which CATIA does not carry — it will
+  differ by exactly one per bore on every part, and it is reported rather than reconciled,
+  because a count adjusted to agree would hide a real divergence the day one happened. And
+  `solid_count` is deliberately absent: no search grammar for solids is accepted on this seat
+  (`Topologie.Solide`, `Topology.Solid`, `CATPrtSearch.Solid` all refused), and a 1 inferred
+  from `has_solid` would be a guess wearing a measurement's clothes.
+  Bounded by `_EDGE_CLASSIFY_LIMIT` for the reason it already existed — reading `.Type` is a
+  COM round trip per item and a padded gear has over a thousand edges — and it never raises,
+  because a topology count must not turn a successful measurement into a failure.
+  **Trap for the next session:** the bridge daemon is a separate process and does not pick up
+  an edit to `scripts/catia_bridge/` until it is restarted. The first run after this change
+  reported the old payload and looked like the change had not worked.
 - **2026-09-12 — THE QUEUE B1 + B2: OCCT and CATIA build the same geometry, measured.**
   `compare_backends` has been backend-neutral since 2026-09-05 and **both sides of every run
   had been an `OcctRunner`**, so Decision 1's central claim was unverified rather than wrong.

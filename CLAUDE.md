@@ -775,6 +775,15 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
 
 1. **`topology.explore` de-duplicates and `explore_oriented` does not**, deliberately.
    `TopExp_Explorer` visits a sub-shape once *per owning parent*, so a box explores as 24 edges.
+   **And an OCCT edge count is not a CATIA edge count.** A closed cylindrical face carries a
+   **seam edge** in OCCT and none in CATIA, so the same bored plate is 15 edges on the open
+   kernel and 14 on a V5 seat — measured 2026-09-12 on a 60×40×10 plate with one Ø12 bore,
+   where the *faces* agree exactly (7 = 7). It differs by one per closed cylindrical face, on
+   every part. Do not reconcile the two counts: a number quietly adjusted to agree would hide
+   a real divergence the day one happened. `solid_count` has no CATIA equivalent at all —
+   `Topologie.Solide`, `Topology.Solid` and `CATPrtSearch.Solid` are all refused — so the
+   bridge reports faces and edges and stays silent about solids rather than inferring 1 from
+   `has_solid`.
 2. **A face's outward normal is not its surface normal.** OCCT stores orientation separately, so a
    REVERSED face's normal points into the material. `face_normal_at` is the one place that
    correction lives.

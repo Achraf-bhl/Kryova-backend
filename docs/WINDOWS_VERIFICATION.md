@@ -411,11 +411,31 @@ server inherits and the Git Bash one.
       Pinned by `tests/test_seat_conformance.py` (15, offline), verified by breaking the
       alias.
 
-      **The one gap left, and it belongs to E3's proof:** the bridge's `catia_measure`
-      reports no `face_count`, `edge_count` or `solid_count`, so **topology cannot be
-      compared at all** — those three are the only remaining divergences and they are
-      "absent on one side", not "different". B2 asks that *every* interrogated quantity
-      agree; until the bridge reports them, three of them cannot be asked about.
+      **That gap was closed the same session.** The bridge's `catia_measure` now counts
+      faces and solid edges through `Selection.Search`, using the localisation machinery
+      `_edge_search` already had (the query keywords are localized, the item *types* are
+      not). Measured on this seat: `Topologie.Face,tout` answers and `Topology.Face,all`
+      is refused, exactly as for edges. The final comparison:
+
+      | part | faces | edges | solids |
+      |---|---|---|---|
+      | plate 30x20x5 | **6 = 6** | **12 = 12** | 1 vs *not reported* |
+      | bored 60x40x10 Ø12 | **7 = 7** | 15 vs **14** | 1 vs *not reported* |
+
+      **Two differences remain and both are understood rather than outstanding.**
+      * **The seam edge.** OCCT's closed cylindrical face carries one, CATIA's does not,
+        so a part with one bore is 15 edges there and 14 here. It will differ by exactly
+        one per closed cylindrical face on every part. Reported rather than reconciled: a
+        count quietly adjusted to agree would hide a real divergence the day one happened.
+      * **`solid_count` is not reported by CATIA, deliberately.** No search grammar for
+        solids is accepted on this seat — `Topologie.Solide`, `Topology.Solid` and
+        `CATPrtSearch.Solid` are all refused the way a malformed query is — and a 1
+        inferred from `has_solid` would be a guess wearing a measurement's clothes.
+
+      Note for the next session: **the bridge daemon is a separate process and does not
+      pick up an edit to `scripts/catia_bridge/` until it is restarted.** The first run
+      after this change reported the old payload and looked like the change had not
+      worked.
       Evidence: `docs/verification-2026-09-11/B1-conformance.json`.
 
 - [ ] **B3 — The four questions `docs/CATIA_BRIDGE_PROTOCOL.md` says Linux cannot answer.**

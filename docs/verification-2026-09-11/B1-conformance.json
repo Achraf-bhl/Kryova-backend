@@ -134,6 +134,9 @@
         },
         "material_applied": true,
         "mass_is_provisional": false,
+        "face_count": 6,
+        "edge_count": 12,
+        "topology_note": "face_count and edge_count are searched on the solid; edge_count excludes sketch geometry. solid_count is not reported: CATIA accepts no Selection.Search grammar for solids on this seat.",
         "features": [
           {
             "name": "p_body",
@@ -143,8 +146,6 @@
         "approximate": false
       },
       "divergences": [
-        "face_count",
-        "edge_count",
         "solid_count"
       ],
       "deltas": {
@@ -170,8 +171,6 @@
       "absent": {
         "not reported by catia": [
           "centre_of_mass_mm",
-          "edge_count",
-          "face_count",
           "solid_count"
         ],
         "not reported by occt": [
@@ -316,6 +315,9 @@
         },
         "material_applied": true,
         "mass_is_provisional": false,
+        "face_count": 7,
+        "edge_count": 14,
+        "topology_note": "face_count and edge_count are searched on the solid; edge_count excludes sketch geometry. solid_count is not reported: CATIA accepts no Selection.Search grammar for solids on this seat.",
         "features": [
           {
             "name": "p_body",
@@ -329,7 +331,6 @@
         "approximate": false
       },
       "divergences": [
-        "face_count",
         "edge_count",
         "solid_count"
       ],
@@ -356,8 +357,6 @@
       "absent": {
         "not reported by catia": [
           "centre_of_mass_mm",
-          "edge_count",
-          "face_count",
           "solid_count"
         ],
         "not reported by occt": [

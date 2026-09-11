@@ -2769,7 +2769,111 @@ class CatiaCom(
             raise CatiaOperationError(
                 "The part has no solid geometry to measure yet. Sketch a profile and pad it first."
             )
-        return {**summary, "features": self._feature_list(), "approximate": False}
+        return {
+            **summary,
+            **self._topology_counts(),
+            "features": self._feature_list(),
+            "approximate": False,
+        }
+
+    #: Item types `Selection.Search` returns for real **solid** edges. The types
+    #: come back language-independent even though the query does not, which is
+    #: what makes this a table of two strings rather than a third grammar.
+    #: `MonoDim*` is sketch geometry and must not be counted: a bored plate
+    #: searches as 19 edges, of which 5 are the rectangle and circle it was built
+    #: from. Measured on this seat 2026-09-12.
+    _SOLID_EDGE_TYPES = ("RectilinearTriDimFeatEdge", "TriDimFeatEdge")
+
+    def _topology_counts(self) -> dict[str, Any]:  # pragma: no cover - Windows only
+        """How many faces and solid edges the part has, for cross-backend work.
+
+        **Added 2026-09-12, because THE QUEUE B2 could not be answered without
+        it**: `compare_backends` compares `face_count`, `edge_count` and
+        `solid_count`, OCCT reported all three and this bridge reported none, so
+        three of the interrogated quantities were "absent on one side" and
+        topology could not be compared at all.
+
+        Counted through `Selection.Search`, whose query keywords are localized --
+        see `_SEARCH_GRAMMARS` -- while the item *types* it returns are not.
+        So the grammar is detected per language and the filtering is by type.
+
+        **Faces agree with OCCT exactly** (a bored 60x40x10 plate: 6 PlanarFace +
+        1 CylindricalFace = 7, and OCCT says 7). **Edges differ by one and will
+        on any part with a closed cylindrical face**: OCCT's carries a seam edge
+        and CATIA's does not, so the same plate is 15 edges there and 14 here.
+        That is a representational difference between two kernels, not a
+        modelling error, and it is reported rather than reconciled -- a count
+        quietly adjusted to agree would hide a real divergence the day one
+        happened.
+
+        **`solid_count` is deliberately absent.** No search grammar for solids is
+        accepted on this seat (`Topologie.Solide`, `Topology.Solid` and
+        `CATPrtSearch.Solid` are all refused the way a malformed query is), and a
+        count of 1 inferred from `has_solid` would be a guess wearing a
+        measurement's clothes.
+
+        Never raises: a topology count must not turn a successful measurement
+        into a failure.
+        """
+        try:
+            selection = self._document().Selection
+            counts: dict[str, Any] = {}
+
+            for key, grammars in (
+                ("face_count", ("Topologie.Face,tout", "Topology.Face,all")),
+                ("edge_count", tuple(q for q, _ in _SEARCH_GRAMMARS)),
+            ):
+                total = self._count_by_search(selection, grammars, key == "edge_count")
+                if total is not None:
+                    counts[key] = total
+
+            if counts:
+                counts["topology_note"] = (
+                    "face_count and edge_count are searched on the solid; edge_count "
+                    "excludes sketch geometry. solid_count is not reported: CATIA "
+                    "accepts no Selection.Search grammar for solids on this seat."
+                )
+            return counts
+        except Exception:  # noqa: BLE001 - a count must not fail a measurement
+            logger.warning("Could not count the part's topology", exc_info=True)
+            return {}
+
+    def _count_by_search(  # pragma: no cover - Windows only
+        self, selection: Any, grammars: tuple[str, ...], solid_only: bool
+    ) -> int | None:
+        """Run whichever grammar this CATIA speaks, and count what comes back."""
+        body = self._body()
+        for query in grammars:
+            scoped = query.rsplit(",", 1)[0] + ",sel"
+            selection.Clear()
+            try:
+                selection.Add(body)
+                selection.Search(scoped)
+            except Exception:  # noqa: BLE001 - wrong language, try the next
+                selection.Clear()
+                continue
+            found = selection.Count
+            if not solid_only:
+                selection.Clear()
+                return int(found)
+            # Reading `.Type` is one COM round trip per item, and a padded gear
+            # has over a thousand edges -- the reason `_EDGE_CLASSIFY_LIMIT`
+            # exists. Above the limit the honest answer is no answer rather than
+            # a slow one or a wrong one.
+            if found > _EDGE_CLASSIFY_LIMIT:
+                selection.Clear()
+                return None
+            solid = 0
+            for index in range(found):
+                try:
+                    if selection.Item2(index + 1).Type in self._SOLID_EDGE_TYPES:
+                        solid += 1
+                except Exception:  # noqa: BLE001
+                    continue
+            selection.Clear()
+            return solid
+        selection.Clear()
+        return None
 
     def capture_view(  # pragma: no cover - Windows only
         self, *, view: str = "iso", label: str = "", max_inline_bytes: int | None = None

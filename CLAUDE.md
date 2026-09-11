@@ -199,6 +199,22 @@ session.**
    and would end a long run.
 6. **Confirm Ollama is actually on the GPU before a gate**: `ollama ps` for the CPU/GPU split,
    `nvidia-smi` for resident bytes. A gate run on the CPU measures patience, not the product.
+   **But `ollama ps` saying `100% GPU` is not evidence of anything on Windows, and on a model
+   bigger than the card it is the signature of the *slowest* configuration there is.** WDDM lets
+   a process over-commit VRAM and pages it over PCIe instead of refusing, so `AI_GPU_LAYERS=all`
+   on a model that does not fit reports a perfect split while running at a crawl. Measured
+   2026-09-11, `qwen3.6:27b` (15.7 GB of weights) on the 7.9 GiB card at `num_ctx=32768`:
+   `num_gpu=26` gives `60%/40% CPU/GPU` and **8.38 tok/s**; `num_gpu=999` (what `all` sends)
+   gives `100% GPU` and **0.53 tok/s** — **15.8× slower**, with llama.cpp logging
+   `CUDA0 model buffer size = 15364.44 MiB` on an 8 GB card and the run never appearing in
+   `ollama ps` at all while it thrashed. So **read the server log's `CUDA0 model buffer size`
+   against `nvidia-smi`'s total**, and treat the two numbers, not the percentage, as the answer.
+7. **`AI_GPU_LAYERS` is a per-model value and nothing checks that the model fits.** `all` in
+   `.env.local` was measured on `qwen3.5:9b`, which does fit; it is actively harmful on anything
+   larger, for the reason above. Re-decide it whenever `AI_MODEL` changes. And note that an
+   **empty** environment variable does *not* override `.env.local` — `$env:AI_GPU_LAYERS=""`
+   still resolves to `'all'`, while `"26"` resolves to `'26'`. The env-var override trick works
+   for setting a knob, never for unsetting one.
 
 **Why it is batched.** Driving a real conversation through the local model against a real seat is
 the only test that has ever found the defects that matter — every one of the seven found on
@@ -558,6 +574,25 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    capability, ask separately whether the agent is offered it, and write at least one test that
    goes through `call_catia` — `tests/test_geometry_backends.py::TestThePartCanReachTheSolver` is
    the shape to copy. The ladder exists because this class is only visible from the outside.
+9. **A parameter the schema advertises is a promise, and honouring it on one backend is half a
+   fix.** `catia_list_features` declares `body`, `kind` and `include_sketches`. The gap was found
+   on the **CATIA** side on 2026-09-06 (ladder H2) and closed there; **the open kernel was never
+   given the same treatment**, and the identical failure was still sitting there on 2026-09-11
+   when `include_sketches: true` answered `{"features": [], "detail": []}` about a document
+   holding a sketch with a closed profile. The model read that, correctly, as *"the part is
+   empty"* and rebuilt from scratch. **An empty answer to a question about a document that is not
+   empty is worse than a refusal, because it is believed.** So: when you close a vocabulary gap,
+   close it on **both** backends in the same commit, and mirror the test file rather than writing
+   a different one — `tests/test_kernel_list_features_options.py` deliberately copies
+   `tests/test_catia_list_features_options.py` so the two are held to one contract. The
+   conformance harness (E1 task 6) compares *geometry*, not vocabulary, so nothing else catches
+   this. Same class, opposite direction, as the `support="top"` accept-list of 2026-09-09.
+10. **Two small defects that each look survivable can be conclusive together.** The same L2 run
+   hit the `_refused_before` guard blocking a correct retry *and* the listing above. Defect one
+   induced a false belief; defect two corroborated it. The model is a competent recoverer — it
+   recovers cleanly from three other refusals in the same transcript — and it had no way back
+   from two independent confirmations. When triaging a ladder failure, do not stop at the first
+   defect: ask what *confirmed* it.
 
 ## Subagents — never more than one at a time
 

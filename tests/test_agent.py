@@ -1523,6 +1523,125 @@ class TestARefusedWriteIsNotRepeated:
         original = first.split("\n")[0][:40]
         assert original[:20] in second
 
+    def test_the_clock_moves_through_the_real_loop(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        geometry: GeometryVersion,
+    ) -> None:
+        """The helper is only right if `stream_agent` actually advances the clock.
+
+        Asserted through the loop rather than on the helper, because the whole
+        defect was that the two halves disagreed: the guard reasoned correctly
+        about what it was told, and was told the wrong thing. A refused write,
+        then a *successful* one, then the same refused write again -- the third
+        call must reach the tool and earn its own refusal rather than being
+        turned back unsent as a repeat.
+
+        One tool throughout, because the clock counts `toolbox.is_mutating`, and
+        that flag is the *permission* gate rather than a did-it-change-anything
+        flag: `update_project` really does change state and is deliberately
+        ungated, so it cannot move this clock. Using the loop's own partition
+        keeps the guard and the clock reading the same tool list.
+        """
+        done = SimulationJob(
+            project_id=project.id,
+            geometry_version_id=geometry.id,
+            status=JobStatus.SUCCEEDED,
+            solver="linear-static",
+            load_case=LOAD_CASE,
+        )
+        db_session.add(done)
+        db_session.flush()
+
+        provider = ScriptedProvider(
+            [
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(id="1", name="delete_simulation", arguments={"simulation_id": "x"})
+                    ]
+                ),
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(
+                            id="2",
+                            name="delete_simulation",
+                            arguments={"simulation_id": done.id},
+                        )
+                    ]
+                ),
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(id="3", name="delete_simulation", arguments={"simulation_id": "x"})
+                    ]
+                ),
+                AssistantTurn(text="done"),
+            ]
+        )
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="delete x, delete the finished one, delete x again",
+            allow_mutations=True,
+        )
+        assert [s.ok for s in reply.steps] == [False, True, False]
+        # The successful delete moved the clock, so the third call was
+        # dispatched and refused on its own grounds -- not turned back unsent.
+        assert "second time delete_simulation" not in str(reply.steps[2].result)
+
+    def test_a_refusal_the_model_has_since_acted_on_is_let_through(self) -> None:
+        """The defect this guard shipped with, measured on ladder L2, 2026-09-11.
+
+        `catia_pad(sketch='sketch')` was refused -- *"Sketch 'sketch' has no
+        closed profile ... Draw a rectangle, circle or polygon on it first"*. The
+        model did exactly that and `catia_sketch_rectangle` came back `ok` with
+        `profiles: 1`. The identical pad that followed would have built the
+        block, and the guard turned it back unsent, in 0 ms, with no
+        `CatiaOperation` row, because "the call did not run, so nothing has
+        changed". The model concluded the part was empty and rebuilt it.
+
+        The clock is what separates the two cases: a refusal stands while no
+        write has landed since, and stops standing the moment one has.
+        """
+        from app.ai.agent import _read_fingerprint, _refused_before
+
+        key = _read_fingerprint("catia_pad", {"sketch": "sketch", "length_mm": 20})
+        refusals = {key: ("Sketch 'sketch' has no closed profile.", 3)}
+
+        # Nothing has landed since: the refusal still stands.
+        blocked = _refused_before(
+            "catia_pad", {"sketch": "sketch", "length_mm": 20}, refusals, 3
+        )
+        assert blocked is not None
+        assert "no closed profile" in blocked
+
+        # A write landed in between -- the rectangle -- so it is worth sending.
+        assert (
+            _refused_before("catia_pad", {"sketch": "sketch", "length_mm": 20}, refusals, 4)
+            is None
+        )
+
+    def test_a_read_between_the_two_does_not_re_arm_the_call(self) -> None:
+        """Only a *write* can make a refused write worth re-sending.
+
+        Otherwise the model escapes the guard by looking at something, which is
+        precisely the loop S1 spent two of its twenty rounds in.
+        """
+        from app.ai.agent import _read_fingerprint, _refused_before
+
+        key = _read_fingerprint("catia_new_part", {"name": "Steel counterweight"})
+        refusals = {key: ("This conversation already owns a document.", 7)}
+        # The clock counts successful mutating calls only, so a turn full of
+        # reads leaves it where it was and the refusal still stands.
+        assert (
+            _refused_before("catia_new_part", {"name": "Steel counterweight"}, refusals, 7)
+            is not None
+        )
+
     def test_a_write_that_succeeded_is_never_blocked(self) -> None:
         """Two identical holes is a legitimate request, so only *refusals* are
         remembered. Asserted on the helper because every mutating tool in the
@@ -1531,7 +1650,7 @@ class TestARefusedWriteIsNotRepeated:
         re-earned."""
         from app.ai.agent import _refused_before
 
-        assert _refused_before("catia_hole", {"diameter_mm": 9}, {}) is None
+        assert _refused_before("catia_hole", {"diameter_mm": 9}, {}, 0) is None
 
     def test_only_a_refusal_is_remembered(
         self, db_session: Session, user: User, project: Project, conversation: Conversation
@@ -1547,7 +1666,7 @@ class TestARefusedWriteIsNotRepeated:
                  allow_mutations=True)
         key = _read_fingerprint("update_project", {"project_id": project.id, "name": "Block"})
         assert key not in recorded
-        assert _refused_before("update_project", {"project_id": project.id}, recorded) is None
+        assert _refused_before("update_project", {"project_id": project.id}, recorded, 0) is None
 
     def test_different_arguments_are_a_different_call(
         self, db_session: Session, user: User, project: Project, conversation: Conversation

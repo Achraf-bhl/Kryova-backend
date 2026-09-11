@@ -389,6 +389,66 @@ Defects filed, NOT fixed: the L4 verdict-without-convergence above; the tet4 def
 Plan updated: E7.4, E16.4, P5.1.
 ```
 
+### Run 2026-09-11 — backend: occt — model: qwen3.6:27b (60%/40% CPU/GPU, num_ctx 32768)
+
+First run on a 27B local model. Full write-up in `docs/verification-2026-09-11/`.
+
+**Before a prompt was typed, changing the model exposed a live misconfiguration.**
+`.env.local` carried `AI_GPU_LAYERS=all`, measured and correct for `qwen3.5:9b`, which fits the
+8 GB card. The 27b has 15.7 GB of weights and does not, and Windows WDDM pages the overflow over
+PCIe rather than refusing. Swept at `num_ctx=32768`: `num_gpu=26` → `60%/40% CPU/GPU`,
+**8.38 tok/s**; `num_gpu=999` (what `all` sends) → **`100% GPU`, 0.53 tok/s** — **15.8× slower,
+in the configuration that reports a perfect split.** `CLAUDE.md` told every session to confirm
+GPU residency with `ollama ps`; that check returns a **false pass** here and is now corrected to
+read the server log's `CUDA0 model buffer size` against `nvidia-smi`'s total.
+
+```
+L1  PASS  "Make an aluminium truncated cone 60 mm tall, 80 mm diameter at the base and
+          40 mm diameter at the top. Tell me its volume and its mass."
+    picture: verification-2026-09-11/L1-answer.png, L1-front.png, L1-section.png
+    note: 175,929 mm3 against my 175,929.1886 and 0.4750088092227767 kg against my
+          0.4750088 -- exact. A REVOLVED shape on purpose: every previous L1 has been a
+          pad, a tube or a hex prism. Built by revolving a trapezoid with catia_shaft,
+          density NAMED (Al 6061-T6, 2700) rather than assumed. 12 steps, 848 s. Two clean
+          refusals recovered from in one step each: catia_sketch_axis named the missing
+          argument and listed what it accepts; check_part refused a malformed claim
+          ("Claim 4 is not usable: 'bound'") rather than guessing a bound.
+
+L2  FAIL -- Kryova, then PASS on the re-run after both defects were fixed.
+          "Make a mild steel spacer block 90 x 60 x 20 mm. Cut a circular pocket into the
+          centre of its top face, diameter HALF THE BLOCK'S WIDTH, depth HALF ITS
+          THICKNESS. Then drill four 9 mm holes right through, one near each corner, each
+          set in from both nearest edges by THE POCKET'S DEPTH. Tell me the finished mass."
+    picture: verification-2026-09-11/L2-fail-{answer,top,section}.png,
+             L2-pass-{answer,top,section}.png
+    note: BOTH runs produced the right part -- 95,842 mm3 against my 95,842.0364 and
+          0.754277 kg -- and the first is still a FAIL, because two Kryova defects fired
+          during the level and the second corroborated the false belief the first created.
+          16 steps and ZERO pad refusals after the fixes, against 25+ steps and a full
+          rebuild before.
+
+L3-L6  NOT ATTEMPTED this session. Rule 2: the level is re-run until it passes properly,
+       and it did -- but the session's remaining budget went on closing the defects and
+       the phase work they opened.
+```
+
+Wall reached: **not a capability wall — a guard reasoning from an assumption.** The product can
+build the part; what stopped it was its own repeat guard blocking the *correct recovery*, and its
+own listing then confirming the resulting false belief. Nothing here needed a new phase.
+
+Defects filed and FIXED, both pinned by tests verified by breaking them:
+  1. **`_refused_before` punished the correct recovery.** `catia_pad` was refused for an empty
+     sketch; the model drew the rectangle the refusal asked for (`ok`, `profiles: 1`); the
+     identical pad was then turned back **unsent**, 0 ms, no `CatiaOperation` row, because "the
+     call did not run, so nothing has changed". A refusal is now remembered with the **mutation
+     clock** it was refused at and only stands while that clock has not moved.
+  2. **`catia_list_features` ignored all three of its advertised options on the open kernel.**
+     `include_sketches: true` answered `{"features": [], "detail": []}` about a document holding
+     a sketch with a closed profile, and the model read that, correctly, as "the part is empty".
+     **The identical defect was found and closed on the CATIA side on 2026-09-06 (prompt H2) and
+     the open kernel was never given the same treatment** — the cross-backend divergence class.
+Plan updated: E1 task 9 (new), E16 task 4.
+
 ---
 
 ## Retired: the named prompts (E1–E10, H1–H10, S1–S10, PRO1–PRO9, PG*, FR*)

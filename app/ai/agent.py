@@ -476,10 +476,15 @@ def stream_agent(
     #: Per turn rather than per conversation: re-reading the part on a later
     #: turn is exactly right, because by then something may have changed it.
     reads: dict[str, int] = {}
-    #: Writes that were refused this turn, by fingerprint, with the reason. A
-    #: refused write ran nothing, so repeating it verbatim is the same dead end
-    #: as repeating a read -- see `_refused_before`.
-    refusals: dict[str, str] = {}
+    #: Writes that were refused this turn, by fingerprint, with the reason *and
+    #: the mutation clock at the moment of refusal*. A refused write ran nothing,
+    #: so repeating it verbatim is usually the same dead end as repeating a read
+    #: -- but only while nothing else has changed the part. See `_refused_before`.
+    refusals: dict[str, tuple[str, int]] = {}
+    #: Successful mutating calls this turn. The clock `refusals` is measured
+    #: against: it is the only thing that can make a refused write worth
+    #: re-sending, and a read can never move it.
+    mutations = 0
     #: How many calls this turn were turned back for being repeats. See
     #: MAX_BLOCKED_REPEATS: past a few, the budget is better spent ending the
     #: turn than on more of them.
@@ -758,7 +763,7 @@ def stream_agent(
                 # not told the first time, and a model that does it three times
                 # is looping rather than working. See MAX_IDENTICAL_READS.
                 looping = (
-                    _refused_before(call.name, call.arguments, refusals)
+                    _refused_before(call.name, call.arguments, refusals, mutations)
                     if toolbox.is_mutating(call.name)
                     else _looping_on(call.name, call.arguments, reads)
                 )
@@ -772,9 +777,12 @@ def stream_agent(
             except ToolError as exc:
                 result, ok = {"error": str(exc)}, False
                 if toolbox.is_mutating(call.name):
-                    refusals.setdefault(
-                        _read_fingerprint(call.name, call.arguments), str(exc)
-                    )
+                    key = _read_fingerprint(call.name, call.arguments)
+                    # Keep the *first* refusal's words -- they are the useful
+                    # half -- but always re-arm the clock, so a call refused
+                    # again after a change is blocked again until the next one.
+                    kept = refusals[key][0] if key in refusals else str(exc)
+                    refusals[key] = (kept, mutations)
             except Exception as exc:  # noqa: BLE001 - must not kill the turn
                 logger.exception("Tool %s raised", call.name)
                 result, ok = {"error": f"{type(exc).__name__}: {exc}"}, False
@@ -794,6 +802,10 @@ def stream_agent(
                 elif call.name in _DOCUMENT_TOOLS:
                     documents_created += 1
             if ok and toolbox.is_mutating(call.name):
+                # The clock `_refused_before` measures against. Moved by any
+                # write that actually landed -- drawing a profile counts, and it
+                # is precisely the case that made the old guard wrong.
+                mutations += 1
                 made = result.get("feature") or result.get("doc_name") if isinstance(result, dict) else None
                 if made and str(made) not in built:
                     built.append(str(made))
@@ -1206,13 +1218,16 @@ def _looping_on(name: str, arguments: Any, seen: dict[str, int]) -> str | None:
     )
 
 
-def _refused_before(name: str, arguments: Any, refusals: dict[str, str]) -> str | None:
-    """The refusal for a *write* that was already refused with these arguments.
+def _refused_before(
+    name: str, arguments: Any, refusals: dict[str, tuple[str, int]], mutations: int
+) -> str | None:
+    """The refusal for a *write* that was already refused with these arguments,
+    **and only while nothing has actually changed since.**
 
     The read guard above exempts mutating tools, because a repeated write can be
-    a deliberate second hole. A repeated *refused* write cannot: the call did
-    not run, so nothing about the part is different, and sending it again gets
-    the same answer for the same reason.
+    a deliberate second hole. A repeated *refused* write is usually the same
+    dead end: the call did not run, so nothing about the part is different, and
+    sending it again gets the same answer for the same reason.
 
     Measured on ladder prompt S1, 2026-09-06, on the seat. `catia_new_part` was
     refused at step 10 -- "this conversation already owns the CATIA document
@@ -1221,6 +1236,27 @@ def _refused_before(name: str, arguments: Any, refusals: dict[str, str]) -> str 
     on a turn that ended out of rounds with a 62.88 kg block against a 2.4 kg
     target.
 
+    **"Nothing has changed" was assumed, and on 2026-09-11 it was measured to be
+    false.** Ladder L2, `qwen3.6:27b`, on the open kernel: `catia_pad(sketch=
+    'sketch', length_mm=20)` was refused -- *"Sketch 'sketch' has no closed
+    profile ... Draw a rectangle, circle or polygon on it first"*. The model then
+    did **exactly that**: `catia_sketch_rectangle(sketch='sketch', ...)` came
+    back `ok` with `profiles: 1`. The identical pad that followed would have
+    built the block -- and this guard turned it back unsent, in 0 ms, with no
+    `CatiaOperation` row, on the grounds that nothing had changed. The model
+    concluded *"the part is empty - the sketch and rectangle weren't saved"* and
+    spent six further steps rebuilding what it already had. The guard punished
+    the correct recovery, which is the one behaviour it must never punish.
+
+    So the refusal is remembered **with the mutation clock it was refused at**,
+    and it only stands while that clock has not moved. A successful mutating
+    call is the one thing that can make a refused write worth re-sending; a read
+    cannot, which is why the clock counts writes. The S1 case is still caught --
+    the second send is let through once, dispatched, refused again by the real
+    tool for the real reason, and re-armed at the new clock, so a third verbatim
+    send is blocked. The price of not blocking a legitimate retry is one
+    dispatched call, and that is the right way round.
+
     The original refusal is repeated first, because it is the useful half and
     the model plainly did not act on it the first time.
     """
@@ -1228,12 +1264,17 @@ def _refused_before(name: str, arguments: Any, refusals: dict[str, str]) -> str 
     previous = refusals.get(key)
     if previous is None:
         return None
+    message, refused_at = previous
+    if refused_at != mutations:
+        # Something landed in between. The refusal may no longer be true, and
+        # finding out costs one call; assuming costs a rebuild.
+        return None
     return (
-        f"{previous}\n\nThis is the second time {name} has been called with "
+        f"{message}\n\nThis is the second time {name} has been called with "
         "these exact arguments and it was refused for this reason the first "
-        "time. The call did not run, so nothing has changed and it will not "
-        "run now. Do what the refusal above says, or tell the user what is "
-        "blocking you."
+        "time. Nothing has successfully changed the part since, so it will not "
+        "run now either. Do what the refusal above says -- and then it is worth "
+        "sending again -- or tell the user what is blocking you."
     )
 
 

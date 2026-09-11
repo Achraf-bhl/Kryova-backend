@@ -221,6 +221,45 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-11 (Windows seat) — a new model exposed a misconfiguration, and the ladder found two
+  defects that compound.** Report: `docs/verification-2026-09-11/`.
+  **The model.** `qwen3.6:27b` pulled and probed the way the technology-register rule demands —
+  correct structured `tool_calls` at 2 tools (13.4 s) and at 38 (31.7 s), reasoning in
+  `message.thinking`, which `app/ai/providers/ollama.py` already handles. It is multimodal (a
+  0.87 GB vision projector), so it is the first local model here that could serve
+  `AI_VISION_MODEL` without a second resident copy.
+  **The misconfiguration.** `.env.local` carried `AI_GPU_LAYERS=all`, measured and correct for
+  `qwen3.5:9b`, which fits the 8 GB card. The 27b has 15.7 GB of weights and does not; Windows
+  WDDM pages the overflow over PCIe rather than refusing. Swept at `num_ctx=32768`: `num_gpu=26`
+  → `60%/40% CPU/GPU`, **8.38 tok/s**; `num_gpu=999` (what `all` sends) → **`100% GPU`,
+  0.53 tok/s** — **15.8× slower in the configuration that reports a perfect split**. `CLAUDE.md`
+  told every session to confirm GPU residency with `ollama ps`; that check returns a false pass
+  here and now reads the server log's `CUDA0 model buffer size` against `nvidia-smi`'s total.
+  Also recorded: an **empty** env var does not override `.env.local` (`AI_GPU_LAYERS=""` still
+  resolved to `'all'`), so the env-var override trick sets a knob and never unsets one.
+  **Ladder: L1 PASS, L2 FAIL — Kryova, then PASS on the re-run.** L1 was a revolved frustum
+  (175,929 mm³ and 0.4750088092227767 kg against my 175,929.1886 and 0.4750088 — exact), chosen
+  because every previous L1 has been a pad, a tube or a hex prism. L2 produced the right part in
+  **both** runs (95,842 mm³, 0.754277 kg, all three relationships resolved) and the first is
+  still a fail, because two of our defects fired during the level.
+  **Defect 1 — the repeat guard punished the correct recovery** (E16 task 4). `catia_pad` was
+  refused for an empty sketch; the model drew the rectangle the refusal asked for (`ok`,
+  `profiles: 1`); the identical pad was then turned back **unsent**, 0 ms, no `CatiaOperation`
+  row, because "the call did not run, so nothing has changed" — a premise that was assumed and
+  is false whenever another call has landed in between. A refusal is now remembered with the
+  **mutation clock** it was refused at and stands only while that clock has not moved.
+  **Defect 2 — the same gap, one backend over** (E1 task 9, new). `catia_list_features` ignored
+  all three of its advertised options on the open kernel, so `include_sketches: true` answered
+  `{"features": [], "detail": []}` about a document holding a sketch with a closed profile. The
+  model read that, correctly, as "the part is empty" and rebuilt from scratch. **The identical
+  defect was found and closed on the CATIA side on 2026-09-06 (prompt H2) and the open kernel was
+  never given the same treatment.**
+  **The compounding is the lesson**: defect 1 induced a false belief, defect 2 corroborated it.
+  Either alone the model recovers — it visibly does so elsewhere in the same run.
+  Re-run after both fixes: **16 steps against 25+, zero pad refusals, no rebuild.**
+  Both pinned by tests verified by breaking them (2 failures and 3 failures respectively), files
+  restored and confirmed by `diff`. Suite **8075 passed / 0 failed**, ruff + mypy + recorded +
+  plan all clean.
 - **2026-09-10 (night, Windows seat) — the tree arrived red, and the GUI found two defects the
   suite structurally cannot see.** Verified the push, fixed everything red, drove the ladder to
   L4. Report: `docs/verification-2026-09-10-night/`.

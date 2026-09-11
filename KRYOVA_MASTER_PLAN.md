@@ -70,9 +70,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 12/24 | 76/127 = 60% | 91/151 eng-months = 60% |
+| Engineering — E1–E23 | 12/24 | 78/128 = 61% | 91/151 eng-months = 60% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 18/34 | 124/188 = 66% | 119/189 eng-months = 63% |
+| **Programme** | 18/34 | 124/189 = 66% | 119/189 eng-months = 63% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -635,6 +635,50 @@ deterministically, in CI, at machine scale?
    > them (the offering, the empty-shape refusal, the coverage separation), 10 failures observed,
    > all files restored byte-for-byte. Code: `app/catia/dispatch.py::_export_locally`,
    > `app/geometry/backends.py::LOCALLY_SERVED`, `app/catia/geometry_import.py`.
+
+9. **An option the schema advertises works on *both* backends.** *Added 2026-09-11, after the
+   phase was already marked complete.* Tasks 6 and 8 are about geometry agreeing across the two
+   backends; this is about the *vocabulary* agreeing. An argument declared in `app/catia/ops/`
+   is a promise the agent reads and acts on, and honouring it on one backend and ignoring it on
+   the other is a product that behaves differently depending on a setting nobody in the
+   conversation can see.
+   > DONE (2026-09-11) — **the defect ladder L2 found, and it had already been fixed once, on the
+   > other side.** `catia_list_features` declares `body`, `kind` and `include_sketches`, and its
+   > own summary calls it *"the first call to make on any document you did not just build
+   > yourself"* and promises "the features, **sketches** and bodies". The gap was found on the
+   > **CATIA** side on 2026-09-06 after ladder prompt H2 and closed there
+   > (`tests/test_catia_list_features_options.py`). **The open kernel was never given the same
+   > treatment**: its handler read none of the three and returned solid features only.
+   >
+   > Measured on 2026-09-11, `qwen3.6:27b`, `GEOMETRY_BACKEND=occt`. A rectangle had been drawn
+   > on a sketch (`profiles: 1`, `ok`), a pad on it had just been turned back by the E16.4 guard
+   > above, and the model called this tool to find out what was really in the document. It
+   > answered `{"features": [], "detail": []}` — true of solid features, and read, correctly, as
+   > *"the part is empty - the sketch and rectangle weren't saved"*. The model threw the sketch
+   > away and rebuilt from scratch. **An empty answer to a question about a document that is not
+   > empty is worse than a refusal, because it is believed.**
+   >
+   > The two defects compound and that is the finding worth carrying: E16.4's guard induced a
+   > false belief and this listing corroborated it. Either alone the model recovers — it visibly
+   > does so elsewhere in the same run. Together they were conclusive.
+   >
+   > All three options now work on the open kernel, in the shape the CATIA mock already uses so
+   > the two agree: sketches in the listing with `type: "Sketch"`, an `elements` count, and
+   > `profiles` / `can_be_built_from` — the field that answers *"why will this not pad?"* before
+   > the pad is refused a second time. `kind` filters case-insensitively (the model types what
+   > the user said, not what CATIA capitalises) and names what types *are* present when it
+   > matches nothing, because an empty list is a second round trip. An unknown `body` is refused
+   > naming the bodies that exist rather than silently answering about a different one.
+   > Tested by: `tests/test_kernel_list_features_options.py` (12, offline, deliberately mirroring
+   > the CATIA-side file so both backends are held to one contract) — verified by breaking it,
+   > three failures observed, file restored and confirmed by `diff`.
+   > Code: `app/kernel/occt/operations/document_ops.py::list_features`.
+   >
+   > **The residual is the general case, and it is a real one.** This closed `catia_list_features`
+   > because that is where it was measured. Nothing yet asserts that *every* declared parameter is
+   > read by *every* backend that claims the operation — the conformance harness (task 6) compares
+   > geometry, not vocabulary. Until something does, this class can recur on any of the other
+   > ~117 operations the open kernel implements.
 
 **Phase proof:** M1 — a machined bracket — compiles, builds on OCCT in CI, builds on CATIA on a
 real seat, and the two agree on every interrogated quantity to declared tolerance. Ten times,
@@ -2442,7 +2486,25 @@ answerable meaning.
    > everything would destroy the evidence the next pattern is written from.
    > The loop gained a fifth exit, `needs_input`, which ends the turn on the third repeat rather
    > than spending fifty more rounds on the same refusal first.
+   > **Corrected 2026-09-11 — one of the three guards was punishing the correct recovery.**
+   > `_refused_before` remembered a refused write and turned back any verbatim repeat, on the
+   > stated grounds that *"the call did not run, so nothing about the part is different"*. That
+   > premise was **assumed, never measured**, and it is false whenever another call has landed in
+   > between. Measured on ladder L2, `qwen3.6:27b`, on the open kernel: `catia_pad` was refused —
+   > *"Sketch 'sketch' has no closed profile ... Draw a rectangle, circle or polygon on it
+   > first"* — the model did **exactly that** (`catia_sketch_rectangle` → `ok`, `profiles: 1`),
+   > and the identical pad that would have built the block was turned back **unsent**, in 0 ms,
+   > with no `CatiaOperation` row. The model concluded *"the part is empty"* and spent six steps
+   > rebuilding. A guard may bound a loop; it may never punish a model for doing what a refusal
+   > told it to do. The refusal is now remembered **with the mutation clock it was refused at**
+   > and stands only while that clock has not moved — a successful mutating call moves it, a read
+   > cannot. The S1 case this guard was written for is still caught: the repeat is dispatched
+   > once, refused again by the real tool for the real reason, and re-armed at the new clock, so
+   > a third verbatim send is blocked. One dispatched call is the right price for not blocking a
+   > legitimate retry.
    > Tested by: `tests/test_recovery.py` (21),
+   > `tests/test_agent.py::TestARefusedWriteIsNotRepeated` (8, three of them added 2026-09-11 and
+   > verified by breaking the clock comparison — two fail, the six pre-existing stay green),
    > `tests/test_agent.py::TestOpeningDocumentsIsNotBuildingParts`. Code: `app/ai/recovery.py`,
    > `app/ai/agent.py`.
 

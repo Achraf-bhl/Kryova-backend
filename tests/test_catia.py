@@ -262,32 +262,43 @@ class TestCatiaRoutes:
 @requires_catia
 class TestLiveCatia:
     @staticmethod
-    def _skip_without_an_open_document() -> None:
-        """A seat with CATIA up and nothing open is not a broken bridge.
+    def _skip_without_an_exportable_document() -> None:
+        """A seat with nothing exportable in front is not a broken bridge.
 
-        Extends the reasoning already written into
-        `test_exported_geometry_meshes_in_the_kryova_pipeline` by one case. That
-        test skips when the active document holds no *solid*, because reading
-        whatever the engineer has in front means the verdict otherwise follows
-        ambient state nobody set. The case it does not cover is **no document at
-        all**, and both live export tests hit `export_active_document` before
-        any guard can run — so CATIA idling at its start screen failed them with
-        "CATIA has no document open", which reads like a broken export and is
-        nothing of the kind.
+        These tests read **whatever the engineer happens to have open**, so
+        their verdict otherwise follows ambient state nobody set for them. The
+        reasoning was already written into
+        `test_exported_geometry_meshes_in_the_kryova_pipeline`, which skips when
+        the active document holds no solid; the problem was that both export
+        tests call `export_active_document` *before* any guard can run.
 
-        Measured on the seat 2026-09-10: the first full run of the night skipped
-        these (COM was not answering yet while CATIA finished starting) and the
-        second ran them against an open, empty CATIA and went red. Same tree,
-        same commit, two answers — which is the whole reason this is a skip.
+        **Two ambient states have now failed them here, on the same tree.**
+        2026-09-10: CATIA up with nothing open at all, failing with "CATIA has
+        no document open". 2026-09-11: CATIA up with `Product1.CATProduct` and
+        `Analysis1.CATAnalysis` open and the **CATAnalysis active** — a document
+        that has no geometry to export and never will. A count of open documents
+        does not distinguish either case from a working seat, which is why the
+        first version of this guard (`document_count == 0`) was not enough.
 
-        Opening a document here instead would be the suite mutating the
-        engineer's live seat to make its own assertion true.
+        `active_document_has_solid()` is the right question and already exists:
+        it asks `Product.Analyze.Volume` and returns False on any COM failure,
+        so a CATAnalysis, a drawing and an empty part all answer honestly.
+
+        Opening a part here instead would be the suite mutating the engineer's
+        live seat to make its own assertion true.
         """
         status = bridge.get_status()
         if status.document_count == 0:
             pytest.skip(
                 "CATIA is running with no document open, so there is nothing to "
                 "export. Open a part with geometry in it to exercise this path."
+            )
+        if not bridge.active_document_has_solid():
+            active = status.active_document or "the active document"
+            pytest.skip(
+                f"CATIA's active document ({active}) holds no solid to export — it is "
+                "an analysis, a drawing, a product with nothing in it, or an empty "
+                "part. Open a part with geometry in it to exercise this path."
             )
 
     def test_status_reports_a_real_version(self):
@@ -296,7 +307,7 @@ class TestLiveCatia:
         assert status.version and status.version.startswith("V")
 
     def test_export_active_document_writes_a_real_step_file(self, tmp_path):
-        self._skip_without_an_open_document()
+        self._skip_without_an_exportable_document()
         exported = bridge.export_active_document(tmp_path, ExportFormat.STEP, stem="live_test")
         assert exported.exists()
         assert exported.suffix == ".stp"
@@ -318,7 +329,7 @@ class TestLiveCatia:
         from app.geometry.inspect import inspect
         from app.mesh.gmsh_mesher import generate_tet_mesh
 
-        self._skip_without_an_open_document()
+        self._skip_without_an_exportable_document()
         exported = bridge.export_active_document(tmp_path, ExportFormat.STEP, stem="mesh_test")
         if not bridge.active_document_has_solid():
             pytest.skip(

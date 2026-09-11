@@ -82,7 +82,8 @@ class TestRunningASimulation:
     ) -> None:
         job = run(auth_client, project_with_geometry)
         stats = job["mesh_stats"]
-        assert stats["element_type"] == "tet4"
+        # The default is tet10 since 2026-09-11 -- see `TestElementOrder`.
+        assert stats["element_type"] == "tet10"
         assert stats["element_count"] > 0
         assert stats["inverted_count"] == 0
         assert stats["volume_mm3"] == pytest.approx(BOX[0] * BOX[1] * BOX[2], rel=1e-6)
@@ -418,10 +419,31 @@ class TestConcurrencyQuota:
 
 
 class TestElementOrder:
-    def test_the_default_is_linear(
+    def test_the_default_is_quadratic(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
+        """Inverted on 2026-09-11. This asserted `element_order == 1` and the
+        default it was pinning is a defect, measured through the GUI on the
+        seat: a 200 x 40 x 10 mm cantilever, 300 N on the free end, solved three
+        times from the identical request on linear tets, gave 140.6 / 50.4 /
+        68.8 MPa -- a 2.8x scatter -- and a tip deflection of 0.31-0.33 mm
+        against beam theory's 1.171, wrong by 3.6x every time. Quadratic lands
+        within 2-4% and is stable.
+
+        The argument that settles it: every NAFEMS case in `app/verify/nafems.py`
+        already passes `element_order=2` explicitly. The product validated itself
+        with quadratic elements and served customers linear ones.
+        """
         job = run(auth_client, project_with_geometry)
+        assert job["element_order"] == 2
+        assert job["mesh_stats"]["element_type"] == "tet10"
+
+    def test_linear_is_still_available_when_it_is_asked_for(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """Changing the default must not remove the cheap answer -- a chunky
+        part being shape-checked does not need tet10, and the cost is 2.5x."""
+        job = run(auth_client, project_with_geometry, element_order=1)
         assert job["element_order"] == 1
         assert job["mesh_stats"]["element_type"] == "tet4"
 
@@ -437,8 +459,11 @@ class TestElementOrder:
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:
         # Pure tension has a closed form that does not depend on the element
-        # order, so the two must land on the same number.
-        linear = run(auth_client, project_with_geometry)
+        # order, so the two must land on the same number. Both orders are named
+        # explicitly: relying on the default to supply the linear side is what
+        # made this test start comparing tet10 with itself when the default
+        # changed on 2026-09-11.
+        linear = run(auth_client, project_with_geometry, element_order=1)
         quadratic = run(auth_client, project_with_geometry, element_order=2)
         expected = FORCE / (BOX[0] * BOX[1])
 

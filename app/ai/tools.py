@@ -1012,11 +1012,13 @@ class ToolBox:
                             "type": "integer",
                             "enum": [1, 2],
                             "description": (
-                                "1 for linear tets (the default), 2 for quadratic. "
+                                "2 for quadratic tets (the default), 1 for linear. "
                                 "Quadratic elements are far more accurate in bending at "
                                 "the same element count, at roughly 2.5x the degrees of "
-                                "freedom and solve time. Use 2 when the part is loaded in "
-                                "bending and the user cares about accuracy over turnaround."
+                                "freedom and solve time. Drop to 1 only for a quick shape "
+                                "check on a chunky part: on anything slender or loaded in "
+                                "bending, linear tets are far too stiff and their peak "
+                                "stress is not reproducible between runs."
                             ),
                         },
                         "load_case": {
@@ -1862,9 +1864,16 @@ class ToolBox:
         project_id: str | None = None,
         geometry_version: int | None = None,
         element_size_mm: float | None = None,
-        element_order: int = 1,
+        element_order: int = 2,
     ) -> dict[str, Any]:
-        """Queue a real mesh-and-solve run, exactly as the HTTP route does."""
+        """Queue a real mesh-and-solve run, exactly as the HTTP route does.
+
+        **The default is quadratic, changed from linear on 2026-09-11.** See
+        `app/schemas/simulation.py` for the measurement; the short version is
+        that linear tets got a cantilever's tip deflection wrong by 3.6x and
+        scattered its peak stress by 2.8x across three identical runs, and this
+        is the entry point the agent actually uses.
+        """
         project = self._project(project_id)
 
         if element_order not in (1, 2):
@@ -2413,14 +2422,42 @@ class ToolBox:
                 # document is.
                 live = backends.peek_session(conversation.id if conversation else None)
                 if live is not None and getattr(live, "document", None) is not None:
+                    # The third sentence was added on 2026-09-11 and it is the
+                    # one this message was missing. Measured through the GUI:
+                    # the model padded 200 mm instead of 10, diagnosed its own
+                    # error correctly ("the current part has wrong thickness"),
+                    # and then called `catia_new_part` three times looking for a
+                    # way to start again. This refusal named two routes --
+                    # continue building, or start a second part *for an
+                    # assembly* -- and neither is "start over", so the model
+                    # never recognised the escape hatch that was sitting in the
+                    # second one. It did eventually try the assembly-component
+                    # tool and was refused for an unrelated argument error, and
+                    # the turn ended on an E16.4 escalation.
+                    #
+                    # (The tool is named once below and nowhere else in this
+                    # file on purpose: `TestTheSecondPartRefusalIsBackendAccurate`
+                    # counts the occurrences to prove the only mention sits
+                    # inside this `backends.is_local()` guard, which is what
+                    # makes naming it truthful. Do not add a second one, here or
+                    # in a comment.)
+                    #
+                    # Naming the recovery costs nothing and is the difference
+                    # between a wrong part the user has to notice and a wrong
+                    # part the agent fixes. There is no `catia_delete_feature`
+                    # on the open kernel (117 of 205 operations), so this really
+                    # is the only route, which is exactly why it has to be said.
                     raise ToolError(
                         f"This conversation already owns the part {bound!r}, and it is "
                         "still open in memory -- there is nothing to reopen. Continue "
                         "building on it directly; call catia_list_features first if "
-                        "you need to see what already exists. To start a SECOND part "
-                        "for an assembly on this backend, call catia_assembly_component "
-                        "first: it records the open part as a component and closes "
-                        "it, and then catia_new_part starts the next one."
+                        "you need to see what already exists. **If this part is wrong "
+                        "and you want to start it again from nothing**, call "
+                        "catia_assembly_component to close the one you have, then "
+                        "catia_new_part for a fresh one -- that is also how you start a "
+                        "SECOND part for an assembly: it records the open part as a "
+                        "component and closes it, and then catia_new_part starts the "
+                        "next one."
                     )
                 # No live document: the row names something that is gone, so
                 # building it again is the recovery, not a mistake to refuse.

@@ -34,13 +34,49 @@ class SimulationCreate(BaseModel):
         default=None, gt=0, description="Target element size. Defaults to an automatic size."
     )
     element_order: Literal[1, 2] = Field(
-        default=1,
+        default=2,
         description=(
-            "1 for linear tets, 2 for quadratic (tet10). Quadratic elements are "
-            "far more accurate in bending at the same element count, at roughly "
-            "2.5x the degrees of freedom and solve time."
+            "2 for quadratic tets (tet10, the default), 1 for linear (tet4). "
+            "Quadratic elements are far more accurate in bending at the same "
+            "element count, at roughly 2.5x the degrees of freedom and solve "
+            "time. Drop to 1 only for a quick shape check on a chunky part."
         ),
     )
+    """
+    **Defaulted to 2 on 2026-09-11, changed from 1, and it is a defect fix rather
+    than a preference.**
+
+    Measured through the GUI on the Windows seat: a 200 x 40 x 10 mm mild steel
+    cantilever, 300 N on the free end, solved three times from the identical
+    request on the default mesh. Beam theory gives 90.0 MPa and 1.171 mm.
+
+        order   elements   min quality   peak stress        tip deflection
+        tet4         808         0.062   140.6 MPa 1.56x    0.314 mm  0.27x
+        tet4         809         0.490    50.4 MPa 0.56x    0.321 mm  0.27x
+        tet4         829         0.419    68.8 MPa 0.76x    0.331 mm  0.28x
+        tet10       3686         0.416    77.8 MPa 0.86x    1.145 mm  0.98x
+        tet10      10824         0.387    73.6 MPa 0.82x    1.129 mm  0.96x
+
+    Linear tets got the **deflection wrong by a factor of 3.6, systematically**,
+    and scattered the peak stress by **2.8x across three identical runs** — 50
+    to 141 MPa, all three reported to the user as a verdict against a stated 150
+    MPa limit. Quadratic lands within 2-4% of beam theory on the quantity that
+    converges and is stable on the one that does not.
+
+    Slivers are not the explanation: the 50.4 MPa run had none and a minimum
+    quality of 0.49. Linear tetrahedra are simply too stiff in bending, which
+    the mesher's own docstring has said all along.
+
+    **The argument that settles it is that this product already knew.** Every
+    NAFEMS benchmark in `app/verify/nafems.py` passes `element_order=2`
+    explicitly — so Kryova validated itself with quadratic elements and served
+    customers linear ones. A verification product cannot ship a default whose
+    answers it would not accept from itself.
+
+    The cost is real and is stated rather than hidden: roughly 2.5x the degrees
+    of freedom and solve time. `MAX_ELEMENTS` still bounds the mesh, and a
+    caller who wants the cheap answer can still ask for it.
+    """
     analysis: Literal["solid", "plane-stress", "plane-strain", "thermal-conduction"] = Field(
         default="solid",
         description=(

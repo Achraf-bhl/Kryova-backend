@@ -70,17 +70,17 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 11/24 | 76/127 = 59% | 90/151 eng-months = 60% |
+| Engineering — E1–E23 | 12/24 | 76/127 = 60% | 91/151 eng-months = 60% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 17/34 | 122/188 = 65% | 118/189 eng-months = 62% |
+| **Programme** | 18/34 | 124/188 = 66% | 119/189 eng-months = 63% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E11, E12, E14, E16, E17.3, P1, P2, P3, P5, P8, P10 |
-| in flight | E7 79%, E15 70%, E18 50%, P4 75%, P9 57% |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, P1, P2, P3, P5, P8, P10 |
+| in flight | E15 70%, E18 50%, P4 75%, P9 57% |
 | nothing finished yet | E8, E9, E10, E13, E17, E19, E20, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -539,9 +539,24 @@ deterministically, in CI, at machine scale?
    sketch resolution plus support resolution plus naming bookkeeping. Sequence by mission — M1's
    vocabulary first, then M2's weldment needs. Per Decision 1 an operation is added only when a
    test, a sweep or an optimisation needs it, never for coverage.
-   > PARTIAL — 22/201 at the close of E1, **108/201 after E2**. This figure is scaffolding depth,
-   > not product progress, and reading it as progress is how it got to 108. Tested by:
-   > `tests/test_kernel.py`.
+   > PARTIAL — 22/201 at the close of E1, **108/201 after E2**, 117/205 as of 2026-09-11. This
+   > figure is scaffolding depth, not product progress, and reading it as progress is how it got
+   > to 108. Tested by: `tests/test_kernel.py`.
+   > **One operation now has the measured need this task's rule asks for: `catia_delete_feature`.**
+   > Driving the GUI on 2026-09-11, the agent padded 200 mm instead of 10, **diagnosed its own
+   > error correctly** ("the current part has wrong thickness") — and then could not act on it.
+   > There is no way to remove a feature on the open kernel, so a botched part is unrecoverable
+   > inside a conversation: the agent must keep building on wrong geometry or the user must
+   > abandon the conversation. It spent three calls on `catia_new_part` hunting for a way back
+   > and the turn ended on an E16.4 escalation.
+   > The refusal message has been widened in the meantime to name the one escape that does exist
+   > (`catia_assembly_component` closes the open part, then `catia_new_part` starts a fresh one),
+   > because it was described only as the route to a *second part for an assembly* and no model
+   > reading it would recognise it as "start over". **That is a mitigation, not the fix**: it
+   > discards the whole part, so a single wrong pad costs every correct feature built after it.
+   > This is exactly the trigger Decision 1 names — not coverage, a real conversation that could
+   > not finish — so `catia_delete_feature` is the next operation to add, and the first one whose
+   > justification came from the ladder rather than from a sweep.
 
 4. **The sketch layer.**
    > PARTIAL (2026-09-05) — parametric half done, solver deferred with cause. The finding that
@@ -1295,26 +1310,53 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 > **Two of the three items G1 named are fixed (2026-09-09)** — the part-relative face vocabulary
 > and the sense check on a drafted load case; see the G1 entry in *Stop gates*. The third, a
 > convergence check in the request path, is E7's.
+>
+> **"Why not just drive CATIA's Analysis & Simulation?" — asked 2026-09-11, and measured
+> rather than argued.** It is a fair question: CATIA ships GPS, GAS, ELFINI and Advanced
+> Meshing Tools, `app/catia_kb/commands/analysis.py` already carries their vocabulary and
+> failure modes, and Decision 1 says the customer works in CATIA. Probed on the seat
+> (THE QUEUE **B6**): **the licence is present** — `Documents.Add("Analysis")` returns a real
+> `CATAnalysis` — and **the automation surface is not**. The `AnalysisManager` object offers
+> `AnalysisSets`, `AnalysisModels`, `Parameters` and `GetItem`, and **no `Compute`, no `Solve`,
+> no factory**; `AnalysisFactory`, `CreateAnalysisCase` and `AnalysisEntities` are all
+> `AttributeError`. V5 automation can navigate an existing `.CATAnalysis`; it cannot author a
+> restraint, a load or a mesh, and it cannot start a solve. Driving GSA therefore means driving
+> its **GUI**, one dialog at a time, on one seat — for a convergence study that is 3–5 solves
+> and for an optimisation sweep hundreds.
+> That is the same argument Decision 1 already makes about geometry, arriving at the same
+> answer: **CATIA is the delivery target, not the engine.** Three things would break if it were
+> the engine, and they are the three the product is for — a fingerprinted provenance chain
+> (`app/verify/`) cannot bind a black box; CI has no CATIA, so every physics test would need a
+> seat; and a customer or reviewer without GPS/EST could not re-run the study, which is what
+> Decision 4 exists to prevent.
+> **What is worth building, when someone wants it:** the mirror of the geometry story — Kryova
+> solves, and the model *and its load case* land in CATIA for the customer to re-run there; and
+> a GSA result as an **independent oracle** beside CalculiX in `app/solve/oracle.py`, which is
+> the strongest form of a validation claim this product can make. Neither is scheduled, and
+> neither is blocked by anything except somebody deciding it is worth a seat's time.
 
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
 
-> ⚠️ **PHASE-COMPLETE MARKER WITHDRAWN (2026-09-11)** — a seventh task was added below after
-> the GUI run of 2026-09-10 (night), and one open task means no marker however much has shipped.
-> Nothing that was done has been undone; what changed is that driving the product through a
-> browser showed this phase's central claim being broken on the surface the user actually reads.
-> **The agent stated a pass/fail verdict against the engineer's own stress limit, with a
-> quantified margin, from a single-grid solve whose own record said `converged: false`.** Every
-> layer underneath was honest — the result carried the flag and the words "treat the numbers as
-> indicative", and the frontend already refuses to paint an unconverged number green. The chat
-> did not read either, and **the chat is the product**. That is exactly the failure Decision 3
-> exists to prevent, so it belongs in this phase rather than in a UI backlog. See task 7 and
-> `docs/verification-2026-09-10-night/`.
+> ✅ PHASE COMPLETE (2026-09-11) — **task 1 stays `PARTIAL` on one case, LE3, and that is the
+> only thing open.** Tasks 2 through 7 are done and tested.
 >
-> The 2026-09-09 marker read as follows, and the rest of it still stands. Its heading is
-> hyphenated on purpose: `scripts/plan_progress.py` recognises the unhyphenated spelling, so a
-> withdrawn marker reproduced verbatim would still be read as a live one — which is the "two
-> statements, one of them stale" failure that parser exists to catch. (This sentence may not
-> spell it either, for the same reason.)
+> **Task 7 was added and closed on the same day, and the reason is worth keeping.** The GUI run
+> of 2026-09-10 (night) showed this phase's central claim being broken on the surface the user
+> actually reads: the agent stated a pass/fail verdict against the engineer's own stress limit,
+> with a quantified margin, from a single-grid solve whose own record said `converged: false`.
+> Every layer underneath was honest — the result carried the flag, and the frontend already
+> refuses to paint an unconverged number green. The chat read neither, and **the chat is the
+> product.** Re-running it three times then found the larger half: the default linear-tet mesh
+> was scattering peak stress by 2.8× across identical inputs and getting deflection wrong by
+> 3.6× every time, while every NAFEMS case in this phase was validating itself with quadratic
+> elements. Both are fixed; the marker is taken back because both are fixed, not because the
+> deadline arrived.
+>
+> The 2026-09-09 marker read as follows and the rest of it still stands. Its heading is
+> hyphenated on purpose: `scripts/plan_progress.py` recognises the unhyphenated spelling, so an
+> archived marker reproduced verbatim would be read as a second live one — the "two statements,
+> one of them stale" failure that parser exists to catch. (This sentence may not spell it
+> either, for the same reason.)
 >
 > ✅ *PHASE-COMPLETE (2026-09-09)* — **on this machine.** Tasks 2, 3, 4, 5 and 6 are done and
 > tested; task 1 stays `PARTIAL` on one case, **LE3**. The marker is taken here rather than
@@ -1636,6 +1678,51 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 7. **A verdict may not be stated from a solve that holds no evidence about itself.** The answer
    the agent writes must carry the result's own convergence basis whenever it states a pass, a
    fail, or a margin against a number the user gave — or say plainly that it cannot.
+   > DONE (2026-09-11) — **both halves: the caveat that cannot be omitted, and the default mesh
+   > that made it necessary.** Driven through the GUI on the seat before and after.
+   > **The footnote.** `verification.unconverged_footnote` walks the tool results the turn
+   > actually read and appends what the numbers rest on, on both the normal and the truncated
+   > exits. It is a *server-appended footnote and not a prompt rule* for a measured reason: the
+   > model already had `mesh_convergence` in front of it — `get_simulation` returns the whole
+   > result — and wrote the verdict anyway. A caveat the answer cannot omit is the only kind
+   > that survives a model having a bad day, which is exactly why `unverified_footnote` is
+   > built the same way. It is silent when a study ran and converged: Decision 3 says an
+   > unconverged number is worse than no number, not that every number needs a disclaimer.
+   > It also names **slivers**, because that is where a bad peak stress comes from and the
+   > mesher has counted them since it was written (`sliver_count`, shape < 0.1) with nothing
+   > ever showing anyone.
+   > **The default mesh, which turned out to be the bigger half.** Re-running the same request
+   > three times exposed something worse than a missing caveat:
+   >
+   > | order | elements | min quality | peak stress | tip deflection |
+   > |---|---|---|---|---|
+   > | tet4 | 808 | 0.062 | 140.6 MPa (1.56×) | 0.314 mm (**0.27×**) |
+   > | tet4 | 809 | 0.490 | 50.4 MPa (0.56×) | 0.321 mm (**0.27×**) |
+   > | tet4 | 829 | 0.419 | 68.8 MPa (0.76×) | 0.331 mm (**0.28×**) |
+   > | tet10 | 3,686 | 0.416 | 77.8 MPa (0.86×) | 1.145 mm (0.98×) |
+   > | tet10 | 10,824 | 0.387 | 73.6 MPa (0.82×) | 1.129 mm (0.96×) |
+   >
+   > against beam theory's 90.0 MPa and 1.171 mm. Linear tets got the deflection wrong by
+   > **3.6× systematically** and scattered the peak stress **2.8× across identical inputs** —
+   > 50 to 141 MPa, every one of them reported as a verdict against a stated 150 MPa limit.
+   > Slivers are not the explanation; the 50.4 MPa run had none. Linear tetrahedra are simply
+   > too stiff in bending.
+   > **What settles it is that the product already knew.** Every NAFEMS case in
+   > `app/verify/nafems.py` passes `element_order=2` explicitly — so Kryova validated itself
+   > with quadratic elements and served customers linear ones. A verification product cannot
+   > ship a default whose answers it would not accept from itself. Defaulted to 2 in **both**
+   > entry points, because the route and the agent tool default independently and the tool is
+   > the one the agent calls. The cost (~2.5× DOFs and solve time) is stated rather than
+   > hidden, and `element_order=1` is still there for a quick shape check.
+   > **Not fixed, and named rather than left implicit:** the element *size* is still automatic
+   > and takes no account of the part's thinnest section, so a slender part still gets very few
+   > elements through it. tet10 makes that survivable rather than correct. That is the residual.
+   > Tested by: `tests/test_unconverged_verdict.py` (16), `tests/test_simulations.py`
+   > (`TestElementOrder`, inverted with the reason on it). Guard verified by breaking it — the
+   > inverted convergence check fails nine tests including the converged-run case in the
+   > opposite direction. Run: `docs/verification-2026-09-10-night/`.
+
+   <!-- superseded 2026-09-11 -->
    > NOT STARTED — added 2026-09-11, measured through the GUI, `docs/verification-2026-09-10-night/`.
    > **What happened.** Asked for a cantilever that "has to stay under 150 MPa", the product
    > built it, solved it, and replied: *"PASSES. The peak stress of 140.6 MPa is below your limit

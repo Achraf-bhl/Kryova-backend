@@ -525,21 +525,94 @@ missing branch.
 
 ---
 
+---
+
+## Addendum, 2026-09-11 — E7 task 7 built, and the bigger defect underneath it
+
+Two questions came back from the run. Both were settled by measuring.
+
+### "Why not just drive CATIA's Analysis & Simulation?"
+
+A fair question — CATIA ships GPS, GAS, ELFINI and Advanced Meshing Tools, and
+`app/catia_kb/commands/analysis.py` already carries their vocabulary. Probed on the seat rather
+than argued (THE QUEUE **B6**):
+
+* **The licence is here.** `Documents.Add("Analysis")` succeeds and returns a real
+  `CATAnalysis`. The August COM probe of this machine never tested it, so this was genuinely
+  unknown.
+* **The automation is not.** `AnalysisManager` exposes `AnalysisSets`, `AnalysisModels`,
+  `Parameters`, `GetItem` — and **no `Compute`, no `Solve`, no `Update`, no factory**.
+  `AnalysisFactory`, `CreateAnalysisCase`, `AnalysisCases`, `AnalysisEntities` are all
+  `AttributeError`. Compare `part.ShapeFactory.AddNewPad(...)`. V5 automation can navigate an
+  existing `.CATAnalysis`; it cannot author a restraint, a load or a mesh, and cannot start a
+  solve.
+
+So driving GSA means driving its **GUI**, one dialog at a time, on one seat — for a convergence
+study that is 3–5 solves and a sweep that is hundreds. And three things the product is *for*
+would break: `app/verify/` cannot fingerprint a black box, CI has no CATIA, and a customer
+without a GPS/EST licence could not re-run the study.
+
+**Kept as a target, not an engine** — the mirror of Decision 1 for geometry, plus a GSA run as an
+independent oracle beside CalculiX in `app/solve/oracle.py`, which would be the strongest
+validation claim this product could make. Recorded in E6 and as QUEUE B6.
+
+### E7 task 7 — the caveat that cannot be omitted
+
+`verification.unconverged_footnote`, appended by the server on both exits. **Deliberately not a
+prompt rule**: the model already had `mesh_convergence` — `get_simulation` returns the whole
+result — and wrote the verdict anyway. Confirmed live; the re-run printed:
+
+> **What these numbers rest on.**
+> Run `1932e37f…` is **not converged** (single-grid, 1 grid)…
+> A single mesh holds no evidence about its own discretisation error, however fine it looks — so
+> any pass, fail or margin quoted above is indicative, not a verdict.
+
+### DEFECT — the default mesh, which was the larger half
+
+Re-running the identical prompt three times found something worse than a missing caveat. Beam
+theory for the case: **90.0 MPa, 1.171 mm**.
+
+| order | elements | min quality | slivers | peak stress | tip deflection |
+|---|---|---|---|---|---|
+| tet4 | 808 | 0.062 | 1 | 140.6 MPa (1.56×) | 0.314 mm (**0.27×**) |
+| tet4 | 809 | 0.490 | 0 | 50.4 MPa (0.56×) | 0.321 mm (**0.27×**) |
+| tet4 | 829 | 0.419 | 0 | 68.8 MPa (0.76×) | 0.331 mm (**0.28×**) |
+| tet10 | 3,686 | 0.416 | 0 | 77.8 MPa (0.86×) | 1.145 mm (0.98×) |
+| tet10 | 10,824 | 0.387 | 0 | 73.6 MPa (0.82×) | 1.129 mm (0.96×) |
+
+Linear tets got the deflection wrong by **3.6× systematically** and scattered peak stress
+**2.8× across identical inputs** — 50 to 141 MPa, every one reported as a verdict against a
+stated 150 MPa limit. Slivers are not the explanation: the 50.4 MPa run had none and a minimum
+quality of 0.49. Linear tetrahedra are simply too stiff in bending.
+
+**What settles it: the product already knew.** Every NAFEMS case in `app/verify/nafems.py`
+passes `element_order=2` explicitly. Kryova validated itself with quadratic elements and served
+customers linear ones.
+
+**Fixed** — defaulted to 2 in *both* entry points, because the route and the agent tool default
+independently and the tool is the one the agent calls. Cost stated rather than hidden (~2.5×
+DOFs and solve time); `element_order=1` remains for a quick shape check. The footnote also names
+slivers now, since the mesher has counted them since it was written and nothing ever showed
+anyone.
+
+**Residual, named rather than left implicit:** element *size* is still automatic and takes no
+account of the part's thinnest section, so a slender part still gets very few elements through
+it. tet10 makes that survivable rather than correct.
+
+---
+
 ## Filed, not fixed — three for the plan
 
-1. **A verdict against a user's limit may not be stated from a single-grid solve.** The L4
-   failure above. The result carries `converged: false` and the words "treat the numbers as
-   indicative"; `app/ai/`'s result interpretation printed a pass and a 9 MPa margin without
-   either. The frontend already gets this right (`unmeasured is amber and never green`), so the
-   two surfaces of one product disagree. **The chat is the product**, so the chat is the one that
-   matters. Belongs with E7/P5 as a task.
-2. **The default mesh for a slender part is one linear tet through the thickness.**
-   `element_order=1` and no size control gave 808 elements / 306 nodes on a 200 × 40 × 10 bar,
-   3.7× too stiff. The same class was already measured at gate G1 ("a factor of safety of 1303
-   off one 411-element tet4 mesh"). Whether the default should be tet10, or size-controlled from
-   the part's smallest dimension, is a real decision — not a patch to make blind at 01:00.
+1. ~~**A verdict against a user's limit may not be stated from a single-grid solve.**~~
+   **FIXED 2026-09-11** — `verification.unconverged_footnote`, master plan E7 task 7. See the
+   addendum above.
+2. ~~**The default mesh for a slender part is one linear tet through the thickness.**~~
+   **FIXED 2026-09-11** — defaulted to tet10 in both entry points, on the evidence in the
+   addendum. **The residual is real and stays open:** element *size* is still automatic and
+   ignores the part's thinnest section, so a slender part still gets very few elements through
+   it. tet10 makes that survivable rather than correct.
 3. **The agent's prose can claim "verified" while the honesty panel says "nothing measured
-   this"** (L2). Both on screen at once.
+   this"** (L2). Both on screen at once. Still open.
 
 Also observed, not filed as a defect: `AI_TOOL_LIMIT=25` does not bound the offer — the log reads
 `'offered': 37, 'limit': 25`, because core and prompt-taught tools are always shown. That is by

@@ -449,6 +449,19 @@ to *materialise* the id before you read it.
 **Two concurrent full-suite runs drop each other's tables.** The `kryova_test` schema is created
 and dropped per run. Run the suite once at a time.
 
+**And it is not only *full* runs — it is any second `pytest` that touches the database.** The
+teardown drops the schema whatever selected it, so a one-file run started "just to check
+something" while a full run is going kills the full run from underneath. Measured 2026-09-11:
+`pytest tests/test_catia.py` alongside a full run turned it into **27 failed / 438 errors**,
+1,269 of them `UndefinedTable` and 28 saying `schema "kryova_test" does not exist` — a red that
+looks exactly like a catastrophic regression and is nothing but the two runs colliding. Item 10
+under *Subagents* says "only DB-touching runs must be serialised", and the trap is that it is
+not obvious which those are: `tests/test_catia.py` reads as a COM test and still requests the
+schema fixture through a shared `conftest`. **So: while a full run is going, run no other
+`pytest` at all.** Edit files, read code, drive the GUI — but do not start a second collector.
+If a full run comes back with hundreds of errors, `grep` it for `does not exist` **before**
+believing a word of it.
+
 **A conversation acts on the document it owns, not on CATIA's `ActiveDocument`.** Every
 document-scoped call frame carries `document: {doc_name, remote_path}` from the conversation's
 `CatiaDocument` row, and `backend.ensure_document` activates it — reopening it from disk if CATIA

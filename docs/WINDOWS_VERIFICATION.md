@@ -401,6 +401,35 @@ server inherits and the Git Bash one.
       semantic PMI export while its own re-import stays untrustworthy. Those are opposite
       conclusions and nothing on Linux can choose between them.
 
+- [x] **B6 — Can Kryova drive CATIA's Analysis & Simulation instead of solving it itself?**
+      **Measured 2026-09-11 on this seat. Answer: the licence is there, the automation is
+      not.** Asked because the question is a fair one — CATIA has GPS, GAS, ELFINI and
+      Advanced Meshing Tools, and `app/catia_kb/commands/analysis.py` already knows all of
+      them — so it was settled by probing rather than by argument.
+      **What is licensed here:** `Documents.Add("Analysis")` **succeeds** and returns a real
+      `CATAnalysis` document. So this seat is not the constraint, and the August COM probe
+      (which listed Part Design, GSD, Knowledgeware, Product, Drawing and SheetMetal) simply
+      never tested it.
+      **What is drivable:** almost nothing. The document's `Analysis` object is
+      `AnalysisManager` and exposes `AnalysisSets`, `AnalysisModels`, `Parameters` and
+      `GetItem`. It exposes **no `Compute`, no `Solve`, no `Update`**, and **no factory** —
+      `AnalysisFactory`, `CreateAnalysisCase`, `AnalysisCases` and `AnalysisEntities` are all
+      `AttributeError`. Compare Part Design, where `part.ShapeFactory.AddNewPad(...)` builds
+      geometry and `part.Update()` rebuilds it. There is no equivalent for analysis: V5
+      automation can *navigate* an existing `.CATAnalysis`, not author restraints, loads or a
+      mesh, and **cannot start a solve at all**.
+      **So driving GSA would mean driving its GUI**, which the Win32 bridge can technically do
+      — and which would put a mesh spec, a restraint, a load and a solve behind
+      one-dialog-at-a-time puppetry on a single seat, with results readable only by driving
+      more GUI. A convergence study is 3–5 solves and an optimisation sweep is hundreds.
+      **Kept as a target, not as an engine.** The valuable version of this is the same shape
+      as Decision 1's for geometry: Kryova solves (headless, in CI, fingerprinted,
+      NAFEMS-validated), and where the customer wants the study *in* CATIA it lands there.
+      A GSA run would also make a genuinely independent oracle beside CalculiX for
+      `app/solve/oracle.py`, which is the strongest form of the claim. Neither is scheduled;
+      see the note added to E6 for what would have to be true first.
+      Probe scripts are throwaway; the numbers above are the record.
+
 ### C. Not hardware — an input this machine does not have
 
 Recorded here because the effect is the same: a Linux session cannot finish it.
@@ -415,6 +444,28 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       register republishes the `source` string, and a remembered number carrying a citation is
       indistinguishable in it from a real one. That is not hypothetical — a figure recalled for
       FV52 was 4% wrong, and only reading the reference row caught it.
+- [ ] **C1c — LE3's geometry: a citable source found, and a variant question that must be
+      settled before any number reaches code.** Searched 2026-09-11 using the technique that
+      closed C1b. Altair's **OptiStruct 2021 Verification Problems** manual, *OS-V: 0030 Radial
+      Point Load on a Hemisphere*
+      (`https://2021.help.altair.com/2021/hwsolvers/os/topics/solvers/os/nafems_test_problem_le3_r.htm`,
+      read 2026-09-11) prints a complete definition: **radius 10 m, radial thickness 0.04 m,
+      E = 68.25 GPa, ν = 0.3**, two pairs of **4000 N** point loads at the free edge at right
+      angles, one pair inward and one outward, a quarter model with symmetry on edges AE and CE,
+      z fixed at E, edge AC free, and the target **x-translation at A = 0.185 m** on CQUAD4.
+      **Do not copy those into `nafems.py` yet.** That page describes a **closed** hemisphere and
+      states no pole hole, while `CLAUDE.md` records LE3's missing geometry as "the radius,
+      thickness and **hole angle**". There are two benchmarks in circulation with this shape —
+      NAFEMS LE3's hemispherical shell, and the MacNeal–Harder *pinched hemisphere with an 18°
+      hole* — and **they are different problems with different reference values**. Taking one
+      page's numbers for the other is exactly the FV52 error (a recalled figure, 4% out, caught
+      only by reading the reference row).
+      **What settles it:** the NAFEMS publication itself, or a second independent vendor manual
+      that names the hole explicitly one way or the other. `SOURCES["abaqus-le3"]` is already
+      cited for the 185 mm target — read *that* figure and see whether it shows a hole.
+      Note this is **not** LE3's blocker: that is `Blocker.NO_SHELL_SOLVER`. This row exists so
+      the geometry half is not rediscovered from scratch.
+
 - [x] ~~**C1a — LE10's ellipse semi-axes.**~~ Resolved 2026-09-08 on Linux: the Abaqus
       verification manual's LE10 entry states the four semi-axes and the thickness in full, so
       no unavailable document was needed after all. LE10 now **runs and validates**

@@ -616,6 +616,12 @@ SPAN_METERS: Final[tuple[SpanMeter, ...]] = (
         method="wall clock around the ccx subprocess (app.observe span solve.calculix.run)",
     ),
     SpanMeter(
+        span="solve.openfoam.run",
+        meter=Meter.SOLVER_SECONDS,
+        method="wall clock around the OpenFOAM process, meshing and solving together "
+        "(app.observe span solve.openfoam.run)",
+    ),
+    SpanMeter(
         span="mesh.gmsh.session",
         meter=Meter.MESH_ELEMENT_SECONDS,
         method="seconds holding the gmsh lock, multiplied by the elements produced",

@@ -15,13 +15,15 @@ happened.
 
 ## Now
 
-> **Handoff, 2026-09-14 — where the next session starts.** E19 closed and committed this day
-> (`*E19`); the plan's progress block reads **20 of 34 phases, 139.0 of 192 tasks**. The work
-> is going phase by phase, and a phase is closed to 100% before the next one opens.
-> Still open: E8, E9, E10, E13, E15, E17, E18, E21, E22, E23, P4, P6, P7, P9. Read each open
-> task's status line in the master plan and take the ones Linux can close first. P4 (3 partial)
-> and E15 (3 partial) were the next to be surveyed. Say plainly when hardware or a mechanical
-> engineer blocks a task, rather than marking it.
+> **Handoff, 2026-09-14 (evening) — where the next session starts.** E10 closed and committed
+> this day (`*E10`, laminar flow through OpenFOAM). The work is going phase by phase, and a phase
+> is closed to 100% before the next one opens. Read the plan's generated progress block for
+> today's counts; do not trust a number typed here.
+> Still open: E8, E9, E13, E15, E17, E18, E21, E22, E23, P4, P6, P7, P9. Read each open task's
+> status line in the master plan and take the ones Linux can close first.
+> **Next unit of work: E15.2's cache key.** It never includes a measured solver version, which
+> its own status line claims it does; fix that before surveying P4.
+> Say plainly when hardware or a mechanical engineer blocks a task, rather than marking it.
 > Standing flags carried forward, none fixed yet:
 > - E19's phase proof (review by someone outside CE) is still owed.
 > - `eu_ai_act.REVIEW_BY` (2027-03-14) fails the suite on purpose once that date passes.
@@ -236,6 +238,44 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-14 — E10 task 2, and `*E10`: laminar flow and the heat it carries, through a real
+  OpenFOAM, held to four closed forms and wired through the job.** New package
+  `app/solve/openfoam/` (case, surface, dictionaries, run, results, solver). OpenFOAM is a separate
+  process, `opencfd/openfoam-default:2412` under Docker. On 2412 it agrees with:
+  - Hagen–Poiseuille in a snapped pipe: +0.42% gradient, −0.96% centreline;
+  - the rectangular-duct series from a tet mesh: −0.001%;
+  - Graetz on an isothermal wall: +0.30%;
+  - Graetz under a uniform flux: +1.4% to +2.4%;
+  - the flux energy balance: 0.085%.
+
+  **Schema, API and enum changes, plainly:**
+  - **migration `9947d5ff2340`** adds the nullable JSONB column `simulation_jobs.flow_case`;
+  - the `analysis` enum gains **`flow-laminar`**;
+  - `SimulationCreate.flow_case` and `SimulationRead.flow_case` are new;
+  - `element_order` is refused unless 1 on a flow run;
+  - the surface and temperature routes answer **409** for a flow run;
+  - `_WHY_REFUSED["thermal_case"]` is reworded;
+  - new agent tool **`run_flow_simulation`**;
+  - three new settings: `OPENFOAM_LAUNCHER`, `OPENFOAM_IMAGE` and `OPENFOAM_TIMEOUT_S`;
+  - cache **`KEY_VERSION` 3**, with `flow_case` and `engine` (the image's content id) keyed;
+  - new `SpanMeter` `solve.openfoam.run`;
+  - the verification register's denominator goes **11 → 14** (laminar-flow, plus steady and
+    transient conduction, which were missing).
+
+  V&V re-recorded; outcomes unchanged to round-off.
+  33 guards broken: 32 caught by named tests, and 1 equivalent mutant (energy transport moved
+  after tables that never read T). Every restore was sha256-checked.
+  **Flagged, not fixed:**
+  - `cache.inputs_for` runs before `job.solver_version` is set, so **every cache key hashes
+    `UNKNOWN_VERSION`**. A CalculiX upgrade would be served the old build's results, which
+    contradicts E15.2's own status line.
+  - The `solve.conduction` and `solve.plane` spans are not in `SPAN_METERS`.
+
+  Not claimed: turbulence, buoyancy, T-dependent properties, conjugate heat transfer, a GUI, and
+  anything on Windows (THE QUEUE F1 added). Full suite **8709 passed / 0 failed / 12 skipped /
+  1 xpassed** (14 min 16 s). Tested by `tests/test_solver_openfoam.py`,
+  `tests/test_simulations.py`, `tests/test_simulation_cache.py`, `tests/test_agent.py`,
+  `tests/test_metering.py`, `tests/test_observe_report.py`.
 - **2026-09-14 — E10 tasks 3 and 4 closed: DOE, response surfaces, Pareto fronts, SIMP and
   level-set topology optimisation, and the surrogate flywheel under "may rank, never decide".**
   New modules `app/optimise/{doe,surface,pareto,topology,levelset,screening,flywheel}.py` and

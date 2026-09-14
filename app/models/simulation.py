@@ -84,13 +84,18 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
     #: queued, so a stress is bound to the exact temperatures that produced it
     #: — an id alone would name a row whose blob could since have been deleted.
     temperature_source: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    #: The case for a `flow-laminar` run: a fluid, an inlet and an outlet by
+    #: selector, a cell size, and optionally the heat the flow carries. A fourth
+    #: sibling column, because none of the other three shapes has a fluid in it and
+    #: this one has no fixture, no conductivity field and no material.
+    flow_case: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     element_size_mm: Mapped[float | None] = mapped_column(Float, default=None)
     # 1 = tet4, 2 = tet10. Stored rather than derived because the mesh it
     # produced is not kept, and a result is only reproducible alongside the
     # element order that computed it.
     element_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     #: Which idealisation was solved: `solid`, `plane-stress`, `plane-strain`,
-    #: `thermal-conduction` or `thermal-transient`.
+    #: `thermal-conduction`, `thermal-transient` or `flow-laminar`.
     #: Stored for the same reason `element_order` is — the mesh is not kept, and
     #: plane stress and plane strain give *different answers on the same mesh and
     #: the same load*, so a result whose row does not say which one ran cannot be

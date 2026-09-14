@@ -974,6 +974,107 @@ class TestRunThermalSimulation:
         assert read["load_case"] is None
 
 
+class TestRunFlowSimulation:
+    """E10 task 2: the agent can ask for the flow analysis the route has.
+
+    The "never offered" class again — a route that solves a duct and a model with
+    no word for asking it to.
+    """
+
+    CASE: dict[str, Any] = {
+        "fluid": {"kinematic_viscosity_mm2_s": 1.0, "density_kg_m3": 1000.0},
+        "inlet": {"where": {"type": "face", "axis": "z", "side": "min"}, "mean_velocity_mm_s": 2.0},
+        "outlet": {"where": {"type": "face", "axis": "z", "side": "max"}},
+        "cell_size_mm": 1.25,
+    }
+
+    @pytest.fixture(autouse=True)
+    def _openfoam_is_there(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("app.solve.openfoam.run.availability", lambda launcher, image: None)
+
+    def _box(self, db_session: Session, user: User, project: Project) -> ToolBox:
+        return _toolbox(
+            db_session,
+            user,
+            project,
+            job_queue=_NoopQueue(),
+            session_scope=lambda: None,
+            media_store=object(),
+        )
+
+    def test_the_agent_is_offered_it_and_it_is_mutating(
+        self, db_session: Session, user: User, project: Project
+    ) -> None:
+        box = _toolbox(db_session, user, project)
+        full = [t["function"]["name"] for t in box.schemas(include_mutating=True)]
+        readonly = [t["function"]["name"] for t in box.schemas(include_mutating=False)]
+        assert "run_flow_simulation" in full
+        assert "run_flow_simulation" not in readonly
+
+    def test_it_writes_the_flow_column_at_order_one_for_openfoam(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        result = self._box(db_session, user, project).call(
+            "run_flow_simulation", {"flow_case": self.CASE}, allow_mutations=True
+        )
+        job = db_session.get(SimulationJob, result["id"])
+        assert job is not None
+        assert job.analysis == "flow-laminar"
+        assert job.flow_case is not None and job.flow_case["cell_size_mm"] == 1.25
+        assert job.load_case is None and job.thermal_case is None and job.transient_case is None
+        assert job.element_order == 1
+        assert job.solver == "openfoam"
+        assert result["carries_heat"] is False
+        assert "Do not report a pressure drop yet" in result["note"]
+
+    def test_a_broken_case_is_refused_with_a_whole_example(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        with pytest.raises(ToolError) as caught:
+            self._box(db_session, user, project).call(
+                "run_flow_simulation",
+                {"flow_case": {**self.CASE, "inlet": {"mean_velocity_mm_s": 2.0}}},
+                allow_mutations=True,
+            )
+        message = str(caught.value)
+        assert "inlet.where" in message
+        assert '"wall_temperature"' in message and "kelvin" in message
+        assert db_session.scalar(select(func.count()).select_from(SimulationJob)) == 0
+
+    def test_no_openfoam_is_refused_before_anything_queues(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        geometry: GeometryVersion,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "app.solve.openfoam.run.availability",
+            lambda launcher, image: "Pull it once with `docker pull x`.",
+        )
+        with pytest.raises(ToolError, match="docker pull.*do not claim a run was started"):
+            self._box(db_session, user, project).call(
+                "run_flow_simulation", {"flow_case": self.CASE}, allow_mutations=True
+            )
+        assert db_session.scalar(select(func.count()).select_from(SimulationJob)) == 0
+
+    def test_the_example_the_refusal_shows_is_itself_valid(self) -> None:
+        from app.ai.tools import _FLOW_EXAMPLE
+        from app.solve.openfoam.case import FlowCase
+
+        assert FlowCase.model_validate(_FLOW_EXAMPLE).heat is not None
+
+    def test_get_simulation_returns_the_flow_case(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        box = self._box(db_session, user, project)
+        queued = box.call("run_flow_simulation", {"flow_case": self.CASE}, allow_mutations=True)
+        read = box.call("get_simulation", {"simulation_id": queued["id"]}, allow_mutations=False)
+        assert read["analysis"] == "flow-laminar"
+        assert read["flow_case"]["inlet"]["mean_velocity_mm_s"] == 2.0
+
+
 class TestDeleteSimulation:
     def test_an_unfinished_run_cannot_be_deleted(
         self,
@@ -1281,6 +1382,18 @@ class TestEveryScopedToolChecksOwnership:
                     "analysis": "steady",
                     "thermal_case": TestRunThermalSimulation.STEADY,
                 },
+                allow_mutations=True,
+            )
+
+    def test_run_flow_simulation_refuses_another_users_project(
+        self, db_session: Session, user: User, stranger: tuple[User, Project, str]
+    ) -> None:
+        _, theirs, _ = stranger
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError, match="belongs to you"):
+            box.call(
+                "run_flow_simulation",
+                {"project_id": theirs.id, "flow_case": TestRunFlowSimulation.CASE},
                 allow_mutations=True,
             )
 

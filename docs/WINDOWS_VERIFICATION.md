@@ -692,6 +692,24 @@ master plan's status line in the same commit.
       mathematics* into *cross-checked against another implementation*, which is the stronger
       claim and the one `CONDUCTION_BACKEND` was given its own setting to make possible.
 
+### F. Needs Docker Desktop on the Windows machine — OpenFOAM
+
+- [ ] **F1 — The OpenFOAM flow run through Docker Desktop (E10.2, added 2026-09-14).** On Linux,
+      `tests/test_solver_openfoam.py` runs the whole path against `opencfd/openfoam-default:2412`
+      and agrees with Hagen–Poiseuille, the rectangular-duct series and both Graetz limits;
+      `tests/test_simulations.py::TestAFlowRunThroughTheRealEngine` runs it through the job.
+      **None of that has run on Windows, where the product ships and OpenFOAM has no native
+      release**, and three things in `app/solve/openfoam/run.py` differ there by construction:
+      the volume mount is a Windows path (`C:\...:/case`), there is no `os.getuid` so the
+      container runs as its own user and writes files the server may not be able to delete,
+      and `Allrun` must reach the container with LF endings (it is written with `newline="\n"`,
+      which is the claim to check). Install Docker Desktop, `docker pull
+      opencfd/openfoam-default:2412`, run `pytest tests/test_solver_openfoam.py
+      tests/test_simulations.py -k Flow` — **the Docker-backed classes skip, and say so, when the
+      image is absent; a skip is not a pass**. Then ask for a flow run through the GUI on a
+      duct. Settles: whether the docker launcher works on the machine the product ships on, and
+      whether a finished case directory is deletable by the server afterwards.
+
 ---
 
 ## Expect failures on the first run, and that is the point

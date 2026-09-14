@@ -136,6 +136,7 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     "draft_load_case": "Working out the loads",
     "run_simulation": "Submitting the analysis",
     "run_thermal_simulation": "Submitting the thermal analysis",
+    "run_flow_simulation": "Submitting the flow analysis",
     "delete_simulation": "Deleting the run",
     # The direct-COM tools. They carry no `catia_` prefix, so `catia_label`
     # never sees them and an unlisted name would render as "open in catia".
@@ -297,6 +298,38 @@ def _thermal_case_problem(analysis: str, error: ValidationError) -> str:
         f"That {analysis} thermal case is not valid ({'; '.join(problems)}). "
         "Temperatures are absolute kelvin, never celsius. A valid case looks like "
         f"this: {example}. Fix it and call run_thermal_simulation again."
+    )
+
+
+#: A complete, valid flow case the refusal quotes: water through a duct along z,
+#: cooling a wall held at 60 °C. `tests/test_agent.py` validates it.
+_FLOW_EXAMPLE: Final[dict[str, Any]] = {
+    "name": "Cooling channel",
+    "fluid": {"name": "water", "kinematic_viscosity_mm2_s": 1.0, "density_kg_m3": 998.0},
+    "inlet": {"where": {"type": "face", "axis": "z", "side": "min"}, "mean_velocity_mm_s": 50.0},
+    "outlet": {"where": {"type": "face", "axis": "z", "side": "max"}},
+    "cell_size_mm": 0.5,
+    "heat": {
+        "inlet_temperature_k": 293.15,
+        "wall": {"type": "wall_temperature", "temperature_k": 333.15},
+        "conductivity_w_mk": 0.6,
+        "specific_heat_j_kgk": 4182.0,
+    },
+}
+
+
+def _flow_case_problem(error: ValidationError) -> str:
+    """What is wrong with a flow case, in words, with a working example."""
+    problems = []
+    for item in error.errors()[:4]:
+        where = ".".join(str(part) for part in item.get("loc", ())) or "the case"
+        problems.append(f"{where}: {item.get('msg', 'invalid')}")
+    example = json.dumps(_FLOW_EXAMPLE, separators=(",", ":"))
+    return (
+        f"That flow case is not valid ({'; '.join(problems)}). Velocities are mm/s, "
+        "kinematic viscosity mm²/s (water about 1, air about 15), temperatures absolute "
+        f"kelvin; heat is optional. A valid case looks like this: {example}. Fix it and "
+        "call run_flow_simulation again."
     )
 
 
@@ -1162,6 +1195,50 @@ class ToolBox:
                 mutating=True,
             ),
             Tool(
+                name="run_flow_simulation",
+                description=(
+                    "Submit a laminar flow analysis in OpenFOAM, taking the part as the "
+                    "inside of a duct or cooling channel: the pressure drop to push a fluid "
+                    "through it, and optionally the heat the flow carries away from walls "
+                    "held at one temperature or under one heat flux. Not a stress or "
+                    "conduction analysis. Laminar only -- a Reynolds number above 2000 is "
+                    "refused. Consumes real compute and takes minutes, so only call it once "
+                    "the user has asked for the run and the case is complete. Returns a job "
+                    "id and a status of 'queued' -- poll get_simulation for the outcome."
+                ),
+                parameters=_object(
+                    {
+                        "project_id": {"type": "string"},
+                        "flow_case": {
+                            "type": "object",
+                            "description": (
+                                "fluid {kinematic_viscosity_mm2_s, density_kg_m3}; inlet "
+                                "{where: face selector, mean_velocity_mm_s}; outlet {where}; "
+                                "cell_size_mm, at least an eighth of the passage width; and "
+                                "optionally heat {inlet_temperature_k, conductivity_w_mk, "
+                                "specific_heat_j_kgk, wall: {type: wall_temperature, "
+                                "temperature_k} or {type: wall_heat_flux, flux_w_m2}}. Every "
+                                "face the inlet and outlet do not select is a wall."
+                            ),
+                        },
+                        "geometry_version": {
+                            "type": "integer",
+                            "description": "Omit for the project's latest version.",
+                        },
+                        "element_size_mm": {
+                            "type": "number",
+                            "description": (
+                                "How finely the part's own surface is faceted before the "
+                                "flow is meshed. Omit unless the walls are strongly curved."
+                            ),
+                        },
+                    },
+                    required=["flow_case"],
+                ),
+                handler=self._run_flow_simulation,
+                mutating=True,
+            ),
+            Tool(
                 name="delete_simulation",
                 description=(
                     "Permanently delete one finished simulation and its stored result "
@@ -1931,6 +2008,7 @@ class ToolBox:
             "load_case": job.load_case,
             "thermal_case": job.thermal_case,
             "transient_case": job.transient_case,
+            "flow_case": job.flow_case,
             "element_size_mm": job.element_size_mm,
             "mesh_stats": job.mesh_stats,
             "result": job.result,
@@ -2188,6 +2266,63 @@ class ToolBox:
             "note": (
                 "Queued. Meshing and solving take minutes; call get_simulation with "
                 "this id to find out how it went. Do not report a temperature yet."
+            ),
+        }
+
+    def _run_flow_simulation(
+        self,
+        flow_case: dict[str, Any],
+        project_id: str | None = None,
+        geometry_version: int | None = None,
+        element_size_mm: float | None = None,
+    ) -> dict[str, Any]:
+        """Queue a laminar flow run, as the HTTP route does (E10 task 2).
+
+        Its own tool for `run_thermal_simulation`'s reason: a third case shape
+        folded into an existing tool is a union the local model has to get right
+        on every structural run. Two checks run here as well as in the worker,
+        because a refusal from the worker arrives as a failed job the agent finds
+        only by polling: the case's shape, and whether OpenFOAM can run at all —
+        a deployment without the image answers in this round with the fix, not in
+        three rounds with a failed run.
+        """
+        from app.simulation.runner import FLOW
+        from app.solve.openfoam.case import FlowCase
+        from app.solve.openfoam.run import availability
+
+        project = self._project(project_id)
+        try:
+            validated = FlowCase.model_validate(flow_case)
+        except ValidationError as exc:
+            raise ToolError(_flow_case_problem(exc)) from exc
+        missing = availability(settings.openfoam_launcher, settings.openfoam_image)
+        if missing is not None:
+            raise ToolError(
+                f"{missing} Tell the user a flow analysis cannot run on this deployment until "
+                "that is fixed, and do not claim a run was started."
+            )
+        job, version = self._submit_simulation(
+            project,
+            geometry_version,
+            element_size_mm,
+            # The part's surface is read at its corners; see the schema's validator.
+            element_order=1,
+            analysis=FLOW,
+            flow_case=validated.model_dump(),
+            solver="openfoam",
+        )
+        return {
+            "id": job.id,
+            "status": job.status.value,
+            "project_id": project.id,
+            "analysis": job.analysis,
+            "geometry_version_number": version.version_number,
+            "flow_case_name": validated.name,
+            "carries_heat": validated.heat is not None,
+            "element_size_mm": element_size_mm,
+            "note": (
+                "Queued. Meshing the fluid and solving take minutes; call get_simulation "
+                "with this id to find out how it went. Do not report a pressure drop yet."
             ),
         }
 

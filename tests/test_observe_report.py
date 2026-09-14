@@ -277,6 +277,7 @@ class TestTheCatalogueContract:
             "jobs.wait",
             "jobs.run",
             "solve.calculix.run",
+            "solve.openfoam.run",
             "solve.linear_static",
             "solve.plane",
             "solve.conduction",

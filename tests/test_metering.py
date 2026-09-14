@@ -257,6 +257,17 @@ class TestASpanBecomesAMeteredQuantity:
             "solve.calculix.run",
         }
 
+    def test_an_openfoam_run_is_billed_as_solver_time(self) -> None:
+        """E10.2: a flow run holds a worker for minutes in a subprocess, the way ccx
+        does, and a meter that did not see it would bill a flow job for its mesh alone."""
+        sink = CollectingSink()
+        with usage_scope(a_cause(), sink):
+            with span("solve.openfoam.run", launcher="docker"):
+                pass
+
+        (event,) = [e for e in sink.events if e.meter is Meter.SOLVER_SECONDS]
+        assert set(event.cause.detail["spans"]) == {"solve.openfoam.run"}
+
     def test_element_seconds_multiply_the_duration_by_the_annotated_count(self) -> None:
         sink = CollectingSink()
         with usage_scope(a_cause(), sink) as usage:

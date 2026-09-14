@@ -1006,6 +1006,12 @@ All verified against closed-form solutions, not recorded output.
    succeeds and hands back a closed shell. `thickness_mm` is refused rather than defaulted on a
    plane run and refused rather than ignored on a solid: every plane stress scales with it, and
    silently dropping one leaves the engineer believing it was used.
+7. **Laminar internal flow and forced convection** — `solve/openfoam/`, `FlowCase`, asked for by
+   `analysis: "flow-laminar"` with a `flow_case` (migration `9947d5ff2340`). Checked **on the
+   real engine** against Hagen–Poiseuille, the rectangular duct's series solution and both
+   Graetz limits (Nu = 3.657 isothermal, 48/11 uniform flux), plus the flux wall's energy
+   balance. Steady, laminar, incompressible; the temperature is passive. No turbulence,
+   buoyancy, T-dependent properties or solid conduction — see the OpenFOAM section below.
 
 **A run states its own mesh dependence, and can be asked to measure it.** Every `StaticResult`
 carries `mesh_convergence`, always present and defaulting to `single-grid` — `converged` is never
@@ -1181,6 +1187,51 @@ exactly the way the load vocabulary exists to prevent.
 A bar in tension still returns a finite positive buckling factor (~68,000×), because a 3D bar has
 small compressive pockets at the load introduction. That is correct; the meaningful statement is
 the ratio to the compressive case.
+
+## OpenFOAM: laminar flow in a container (`app/solve/openfoam/`) — added 2026-09-14 with E10.2
+
+GPL, so a separate process (Decision 4): `opencfd/openfoam-default:2412` under Docker by default
+(`OPENFOAM_LAUNCHER=docker|local`, `OPENFOAM_IMAGE`, `OPENFOAM_TIMEOUT_S`). Reading order is in
+the package docstring. **`LaminarFlowSolver` is not a `Solver` subclass**, for `ShellSolver`'s
+reason: it returns cell fields, not nodal ones, and has no load case.
+
+1. **Units inside the case are mm, mm/s and mm²/s**, so OpenFOAM's kinematic pressure is
+   mm²/s² and becomes MPa by ρ·1e-12 (`results.kinematic_to_mpa`). A diffusivity is k/(ρc)·1e6
+   and a wall flux is a gradient q/k·1e-3 K/mm. Each converts **once**, in `case.py`.
+2. **The image's login shell changes directory.** `bash -l` leaves the shell elsewhere, so a
+   log written by relative path fails with "Permission denied" in a directory nobody named.
+   `Allrun` `cd`s to its own directory first, and a test pins that.
+3. **2412's `caseDicts/meshQualityDict` carries neither `nSmoothScale` nor `errorReduction`**,
+   and snappyHexMesh stops without them — they are written into `snappyHexMeshDict` beside the
+   `#includeEtc`. Checked by reading the file inside the image.
+4. **The version is the banner's version *and* build** (`"2412 (build _45e7c4a0-20241224)"`),
+   read from the solver log, so it exists only after the run. That is why the **job cache keys
+   a flow run on the image's content id** (`docker image inspect`) instead, and why a `local`
+   launcher's runs are never cached — an engine that cannot be named before it runs matching a
+   known one is the claim Decision 3 forbids.
+5. **Temperature is a `scalarTransport` function object, and its position in `functions` is
+   load-bearing.** Function objects run in the order written, so it comes before every table
+   that reads `T`. Its linear solver has `relTol 0` and an absolute tolerance, and OpenFOAM runs
+   one more solve after "SIMPLE solution converged", so the written `T` belongs to the written
+   `U`. `T` is deliberately **not** in `residualControl`: a passive scalar must not hold the
+   flow open. A `T` residual above `ENERGY_RESIDUAL_TARGET` refuses the run.
+6. **The outlet temperature is `weightedAverage` by `phi`** — the bulk (mixed-mean) value an
+   energy balance uses. The area average over-weights the slow fluid by the wall.
+7. **Areas come from the snapped mesh, not the drawing.** `surfaceFieldValue` writes
+   `# Area : X` in its `.dat` header, and `results.patch_area` reads that. On the 10 mm pipe it
+   is 4706 mm² against 4712 drawn — snapping chords the curve.
+8. **`element_order` is forced to 1 on a flow run** and refused if given as anything else. The
+   tet mesh is only the geometry snappyHexMesh snaps to; quadratic nodes would buy nothing.
+9. **CI has no image**, so every Docker-backed class skips there, and a skip is not a pass.
+   Nothing has run on Windows (THE QUEUE F1): the mount is a Windows path, there is no
+   `os.getuid`, and `Allrun` must arrive with LF endings.
+
+**Flagged, not fixed (2026-09-14):** `cache.inputs_for` runs before `job.solver_version` is set,
+so **every cache key hashes `UNKNOWN_VERSION`**. A CalculiX upgrade behind the same
+`solver` name would be served the old build's results. The flow run avoids this only because
+its engine id is a separate key field. This belongs to E15.2. Separately, the `solve.conduction`
+span (steady and transient) and `solve.plane` are not in `metering.SPAN_METERS`, so those runs
+are billed for meshing only.
 
 ## Sending email (`app/mail/`) — added 2026-09-10 with P1.5
 

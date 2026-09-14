@@ -241,6 +241,49 @@ ANALYSES: Final[tuple[Analysis, ...]] = (
         ),
     ),
     Analysis(
+        id="steady-conduction",
+        title="Steady heat conduction",
+        module="app.solve.conduction",
+        answers="How hot does it get, held, heated and cooled the way it is?",
+        closed_form_checks=(
+            "bar held at both ends, a linear profile (tests/test_conduction.py::TestABarHeldAtBothEnds)",
+            "hollow cylinder, the logarithmic wall profile "
+            "(tests/test_conduction.py::TestAHollowCylinder)",
+            "convecting bar, the Biot tip temperature T_tip = (T_b + Bi T_inf)/(1 + Bi) "
+            "(tests/test_conduction.py::TestAConvectionBoundary)",
+        ),
+    ),
+    Analysis(
+        id="transient-conduction",
+        title="Transient heat conduction",
+        module="app.solve.conduction",
+        answers="How long until it reaches a temperature, and what path does it take?",
+        closed_form_checks=(
+            "lumped-capacitance cooling, T(t) = T_inf + (T0 - T_inf) exp(-t/tau) "
+            "(tests/test_conduction.py::TestALumpedCapacitanceCooldown)",
+        ),
+    ),
+    Analysis(
+        id="laminar-flow",
+        title="Laminar duct flow and forced convection (OpenFOAM)",
+        module="app.solve.openfoam",
+        answers=(
+            "What pressure does it take to push a fluid through this passage, and how much "
+            "heat does the flow carry away?"
+        ),
+        closed_form_checks=(
+            "round pipe, Hagen-Poiseuille dp/dz = 8 nu U / R^2 and u_max = 2U "
+            "(tests/test_solver_openfoam.py::TestAPipeIsHagenPoiseuille)",
+            "square duct from a tet mesh, the rectangular-duct series solution "
+            "(tests/test_solver_openfoam.py::TestASquareDuctFromATetMesh)",
+            "developed Nusselt number 3.657 on an isothermal wall and 48/11 under a "
+            "uniform flux, with the heat balance "
+            "(tests/test_solver_openfoam.py::TestAPipeIsHagenPoiseuille, "
+            "TestAPipeUnderAUniformHeatFlux)",
+            "all of these run only where the pinned OpenFOAM image is present, and CI has none",
+        ),
+    ),
+    Analysis(
         id="fatigue",
         title="Fatigue damage and life",
         module="app.fatigue.assessment",

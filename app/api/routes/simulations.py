@@ -32,7 +32,14 @@ from app.schemas import (
     SurfaceTemperature,
 )
 from app.simulation import coupling
-from app.simulation.runner import CONDUCTION, THERMAL_ANALYSES, TRANSIENT, run_simulation
+from app.simulation.runner import (
+    CONDUCTION,
+    FLOW,
+    NOT_STRUCTURAL,
+    THERMAL_ANALYSES,
+    TRANSIENT,
+    run_simulation,
+)
 
 router = APIRouter(prefix="/projects/{project_id}/simulations", tags=["simulations"])
 
@@ -137,6 +144,10 @@ def _requested_solver(analysis: str) -> str:
         return settings.conduction_backend
     if analysis == TRANSIENT:
         return settings.transient_conduction_backend
+    if analysis == FLOW:
+        # One federated engine and no setting to choose it; the launcher and the
+        # image are how it is reached, not which solver answers.
+        return "openfoam"
     return settings.solver_backend
 
 
@@ -168,9 +179,20 @@ def _refuse_a_thermal_run(job: SimulationJob) -> None:
     Before 2026-09-14 both surface routes read `displacements` straight out of
     the archive, and a conduction run's archive holds temperatures — so asking
     for the surface of any thermal run was a `KeyError` and a 500. A 409 that
-    names the route that does serve it is the answer the caller can act on.
+    names the route that does serve it is the answer the caller can act on. A
+    flow run is refused the same way: its archive holds cell velocities and
+    pressures, and its summary is on the run itself.
     """
-    if job.analysis in THERMAL_ANALYSES:
+    if job.analysis == FLOW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This is a flow-laminar run: it has a velocity and a pressure in the fluid "
+                "and no displacement or stress in the part. Its pressure drop and any heat "
+                "carried are in the run's result."
+            ),
+        )
+    if job.analysis in NOT_STRUCTURAL:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -229,6 +251,7 @@ def create_simulation(
         transient_case=(
             payload.transient_case.model_dump() if payload.transient_case else None
         ),
+        flow_case=payload.flow_case.model_dump() if payload.flow_case else None,
         temperature_source=temperature_source,
         element_size_mm=payload.element_size_mm,
         element_order=payload.element_order,
@@ -405,6 +428,15 @@ def read_surface_temperature(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Simulation is {job.status.value}; results are not available",
+        )
+    if job.analysis == FLOW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This is a flow-laminar run. Any temperature it carries is the fluid's, on "
+                "OpenFOAM's cells rather than on the part's surface, so this route does not "
+                "serve it; the outlet and wall temperatures are in the run's result."
+            ),
         )
     if job.analysis not in THERMAL_ANALYSES:
         raise HTTPException(

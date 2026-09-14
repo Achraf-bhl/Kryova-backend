@@ -150,6 +150,7 @@ TOOL_LABELS: dict[str, str] = {
     "get_simulation": "Reading the simulation result",
     "run_simulation": "Preparing the analysis",
     "run_thermal_simulation": "Preparing the thermal analysis",
+    "run_flow_simulation": "Preparing the flow analysis",
     "catia_status": "Checking CATIA",
     "open_in_catia": "Opening CATIA",
     "sync_geometry_from_catia": "Importing geometry from CATIA",
@@ -267,13 +268,18 @@ def summarise_step(tool: str, result: Any, ok: bool) -> str:
         summary = result.get("result") or {}
         fos = summary.get("factor_of_safety")
         hottest = summary.get("max_temperature_k")
+        drop = summary.get("pressure_drop_mpa")
         if fos:
             return f"Status {status}, factor of safety {fos:.2f}"
         if hottest is not None:
             return f"Status {status}, hottest {hottest:.1f} K"
+        if drop is not None:
+            return f"Status {status}, pressure drop {drop:.4g} MPa"
         return f"Status {status}"
     if tool == "run_thermal_simulation":
         return f"Queued {result.get('analysis', 'thermal')} run {result.get('id', '')}".strip()
+    if tool == "run_flow_simulation":
+        return f"Queued flow run {result.get('id', '')}".strip()
     if tool == "run_simulation":
         return (
             f"Queued run {result.get('id', '')}".strip() or "Load case validated, ready to submit"

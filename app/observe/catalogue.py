@@ -111,6 +111,13 @@ SITES: Final[tuple[Site, ...]] = (
         wired=True,
     ),
     Site(
+        name="solve.openfoam.run",
+        module="app.solve.openfoam.run",
+        what="one OpenFOAM case: blockMesh, snappyHexMesh, checkMesh and simpleFoam",
+        fields=("launcher", "returncode"),
+        wired=True,
+    ),
+    Site(
         name="solve.linear_static",
         module="app.solve.linear_static",
         what="in-house assembly, factorisation and stress recovery",

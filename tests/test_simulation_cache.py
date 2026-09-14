@@ -36,6 +36,7 @@ def _inputs(**overrides: object) -> cache.Inputs:
         load_case=LOAD,
         thermal_case=None,
         transient_case=None,
+        flow_case=None,
         temperature_source=None,
         element_size_mm=4.0,
         element_order=1,
@@ -44,6 +45,7 @@ def _inputs(**overrides: object) -> cache.Inputs:
         thickness_mm=None,
         solver="calculix",
         solver_version="2.22",
+        engine=None,
     )
     base.update(overrides)
     return cache.Inputs(**base)  # type: ignore[arg-type]
@@ -104,7 +106,9 @@ class TestTheKey:
             # a non-default.
             "thermal_case",
             "transient_case",
+            "flow_case",
             "temperature_source",
+            "engine",
         }
         assert {field.name for field in fields(cache.Inputs)} == covered
 
@@ -113,6 +117,19 @@ class TestTheKey:
 
     def test_a_transient_case_changes_the_key(self) -> None:
         assert _inputs(transient_case={"duration_s": 60}).digest() != _inputs().digest()
+
+    def test_a_flow_case_changes_the_key(self) -> None:
+        assert _inputs(flow_case={"cell_size_mm": 0.5}).digest() != _inputs().digest()
+        assert (
+            _inputs(flow_case={"cell_size_mm": 0.5}).digest()
+            != _inputs(flow_case={"cell_size_mm": 0.4}).digest()
+        )
+
+    def test_a_different_engine_behind_the_same_solver_name_is_a_different_run(self) -> None:
+        """A flow run's `solver` is always "openfoam"; the image id is what pins it."""
+        one = _inputs(engine="docker opencfd/openfoam-default:2412 sha256:" + "1" * 64)
+        two = _inputs(engine="docker opencfd/openfoam-default:2412 sha256:" + "2" * 64)
+        assert one.digest() != two.digest() != _inputs().digest()
 
     def test_a_borrowed_field_with_a_different_digest_is_a_different_run(self) -> None:
         """The source's archive digest is in the key, so two runs coupled to the
@@ -292,6 +309,36 @@ class TestBuildingTheInputs:
         assert inputs is not None
         assert inputs.geometry_sha256 == job.geometry_version.media.sha256
         assert inputs.element_size_mm == job.element_size_mm
+        assert inputs.engine is None
+
+    def test_a_flow_run_is_keyed_on_the_image_it_will_run(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        world = _world(db_session)
+        job = _job(db_session, world)
+        job.analysis, job.flow_case, job.load_case = "flow-laminar", {"cell_size_mm": 0.5}, None
+        db_session.flush()
+        engine = "docker opencfd/openfoam-default:2412 sha256:" + "3" * 64
+        monkeypatch.setattr("app.solve.openfoam.run.engine_identity", lambda launcher, image: engine)
+
+        inputs = cache.inputs_for(db_session, job)
+
+        assert inputs is not None and inputs.engine == engine
+        assert inputs.flow_case == {"cell_size_mm": 0.5}
+
+    def test_a_flow_run_whose_engine_cannot_be_named_is_never_cached(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The `local` launcher prints its version only once it has run, so there is
+        nothing to bind a key to beforehand — and a key with a hole where the solver
+        belongs would match runs it should not."""
+        world = _world(db_session)
+        job = _job(db_session, world)
+        job.analysis, job.flow_case, job.load_case = "flow-laminar", {"cell_size_mm": 0.5}, None
+        db_session.flush()
+        monkeypatch.setattr("app.solve.openfoam.run.engine_identity", lambda launcher, image: None)
+
+        assert cache.inputs_for(db_session, job) is None
 
 
 # -- fixtures ---------------------------------------------------------------

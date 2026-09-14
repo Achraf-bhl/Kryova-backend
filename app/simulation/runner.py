@@ -135,7 +135,12 @@ def run_simulation(
             # The version is `None` when it could not be read, and stored as None:
             # an unmeasured version must not be guessed at.
             job.solver = ran
-            version = solver_version(ran, settings.calculix_path or None)
+            # A federated engine that reports its own version in its output (OpenFOAM's
+            # banner) is believed over the registry, which can only ask a binary it
+            # knows how to find; the version in the log is the one that ran.
+            version = getattr(output.result, "solver_version", None) or solver_version(
+                ran, settings.calculix_path or None
+            )
             if version:
                 job.solver_version = version
             usage.annotate(solver=ran, solver_version=version or "unavailable")
@@ -224,14 +229,23 @@ CONDUCTION: str = "thermal-conduction"
 #: so it is its own branch rather than a flag on `CONDUCTION`.
 TRANSIENT: str = "thermal-transient"
 
+#: Steady laminar flow through the part taken as a duct (E10 task 2), in OpenFOAM.
+#: Its own branch for the reason each thermal analysis has one: a fluid case, a
+#: federated engine behind a process boundary, and a result with no nodal field.
+FLOW: str = "flow-laminar"
+
 #: Every value `SimulationJob.analysis` may hold.
-ANALYSES: tuple[str, ...] = ("solid", *PLANE_STATES, CONDUCTION, TRANSIENT)
+ANALYSES: tuple[str, ...] = ("solid", *PLANE_STATES, CONDUCTION, TRANSIENT, FLOW)
 
 #: The analyses whose answer is a temperature and never a stress. Duplicated as
 #: `coupling._THERMAL`, which a test holds equal to this. Read by the
 #: routes that serve a structural field, so they refuse these by name instead of
 #: reaching for a displacement array the archive does not hold.
 THERMAL_ANALYSES: tuple[str, ...] = (CONDUCTION, TRANSIENT)
+
+#: The analyses whose archive holds no displacement and no stress, so a structural
+#: field route must refuse them by name.
+NOT_STRUCTURAL: tuple[str, ...] = (*THERMAL_ANALYSES, FLOW)
 
 
 def _execute(
@@ -258,10 +272,13 @@ def _execute(
     if job.analysis == TRANSIENT:
         return _execute_transient(job, path, version.file_format, usage, session_scope)
 
+    if job.analysis == FLOW:
+        return _execute_flow(job, path, version.file_format, usage, session_scope)
+
     if job.load_case is None:
         raise ValueError(
             f"This {job.analysis} job has no load case, so there is nothing to solve. "
-            "Only the two thermal analyses are written without one."
+            "Only the two thermal analyses and the flow are written without one."
         )
     case = LoadCase.model_validate(job.load_case)
 
@@ -632,6 +649,83 @@ def _execute_transient(
     return mesh, mesh_stats, transient.solve(mesh, case), transient.name
 
 
+def _execute_flow(
+    job: SimulationJob,
+    path: Path,
+    file_format: str,
+    usage: UsageScope,
+    session_scope: SessionScope,
+) -> tuple[TetMesh, dict, object, str]:
+    """Laminar flow, and any heat it carries, through the part taken as a duct.
+
+    **E10 task 2's delivery half.** The part is meshed with gmsh only to find
+    its closed boundary; OpenFOAM meshes the fluid itself with snappyHexMesh, so
+    `element_size_mm` sets how faithfully a curved wall is faceted and
+    `flow_case.cell_size_mm` sets the flow's resolution. The schema holds the
+    element order at 1 for the same reason.
+
+    Three refusals before anything expensive:
+
+    1. **No convergence study**, for the conduction runs' reason and one more:
+       the study refines `element_size_mm`, which is not the flow's resolution,
+       so its verdict would be about the wrong grid.
+    2. **No OpenFOAM, no mesh.** Whether the launcher can run a case is asked
+       before gmsh is, so a deployment without the image refuses in a second
+       with the `docker pull` that fixes it, rather than after paying for a mesh.
+    3. **A stop request is honoured between the mesh and the flow**, the same
+       boundary every other single-grid run has — and here the half not started
+       is the long one.
+
+    The solver is `LaminarFlowSolver` with the `OPENFOAM_*` settings, never
+    anything `SOLVER_BACKEND` names.
+    """
+    from app.solve.openfoam.case import FlowCase
+    from app.solve.openfoam.run import OpenFoamUnavailable, availability
+    from app.solve.openfoam.solver import LaminarFlowSolver
+
+    if job.flow_case is None:
+        raise ValueError(
+            "A flow-laminar job needs a flow case — a fluid, an inlet, an outlet and a "
+            "cell size. This one has none, so there is nothing to solve."
+        )
+    if job.grids > 1:
+        raise ValueError(
+            "A convergence study is not available for a flow-laminar run: the study "
+            "assesses the peak von Mises stress, which a flow does not have, and it "
+            "refines element_size_mm, which is not the flow's resolution — "
+            "flow_case.cell_size_mm is. Ask for one grid."
+        )
+    case = FlowCase.model_validate(job.flow_case)
+    missing = availability(settings.openfoam_launcher, settings.openfoam_image)
+    if missing is not None:
+        raise OpenFoamUnavailable(missing)
+
+    progress.report(session_scope, job.id, progress.Stage.MESHING)
+    mesh, mesh_stats = generate_tet_mesh(
+        path, file_format, job.element_size_mm, element_order=job.element_order
+    )
+    usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
+    if mesh.tet_count > settings.max_elements:
+        raise MeshError(
+            f"The mesh has {mesh.tet_count:,} elements, over the {settings.max_elements:,} "
+            "limit. Increase element_size_mm to coarsen it."
+        )
+
+    _stop_here_if_asked(job, session_scope)
+    progress.report(
+        session_scope,
+        job.id,
+        progress.Stage.SOLVING,
+        detail=f"OpenFOAM, {case.cell_size_mm:g} mm cells",
+    )
+    flow = LaminarFlowSolver(
+        launcher=settings.openfoam_launcher,
+        image=settings.openfoam_image,
+        timeout_s=settings.openfoam_timeout_s,
+    )
+    return mesh, mesh_stats, flow.solve(mesh, case), flow.name
+
+
 def _automatic_size(job: SimulationJob) -> float:
     """The size a study starts from when the caller named none.
 
@@ -746,13 +840,34 @@ def _store_fields(
     # differ because the physics differs; a reader that finds `temperatures_k`
     # knows it is not looking at a structural result, where one that found
     # `von_mises_nodal` full of zeros would not.
-    if hasattr(output, "times_s"):
+    if hasattr(output, "kinematic_pressure"):
+        # A flow's fields live on OpenFOAM's cells, not on this mesh's nodes: the
+        # tet mesh is only where the duct's surface came from. So every flow key
+        # says `cell` or `wall_face`, and none of them shares a name with a nodal
+        # field a reader of a solid or thermal archive already knows.
+        from app.solve.openfoam.case import FlowCase
+        from app.solve.openfoam.results import kinematic_to_mpa
+
+        density = FlowCase.model_validate(job.flow_case).fluid.density_kg_m3
+        arrays: dict[str, Any] = {
+            "cell_centres": output.cell_centres,
+            "cell_volumes_mm3": output.cell_volumes,
+            "cell_velocity_mm_s": output.velocity,
+            "cell_pressure_mpa": kinematic_to_mpa(output.kinematic_pressure, density),
+        }
+        if output.temperature_k is not None:
+            arrays |= {
+                "cell_temperatures_k": output.temperature_k,
+                "wall_face_centres": output.wall_face_centres,
+                "wall_temperatures_k": output.wall_temperatures_k,
+            }
+    elif hasattr(output, "times_s"):
         # A transient run keeps its whole history, and the final field again
         # under the steady name, so a reader asking "what temperature did it
         # reach" reads one (n_nodes,) array whichever thermal analysis ran —
         # and only a reader that wants the path opens the (steps + 1, n_nodes)
         # one, whose name says it is a history.
-        arrays: dict[str, Any] = {
+        arrays = {
             "times_s": output.times_s,
             "temperature_history_k": output.temperatures_k,
             "temperatures_k": output.temperatures_k[-1],

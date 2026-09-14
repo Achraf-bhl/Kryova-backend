@@ -268,8 +268,8 @@ def interpret_simulation(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 f"This is a {job.analysis} run and has no load case, so the structural "
-                "interpretation has nothing to read. Its result carries the temperature "
-                "field directly."
+                "interpretation has nothing to read. Its result carries its answer "
+                "directly — a temperature field, or a flow's pressure drop and heat."
             ),
         )
 

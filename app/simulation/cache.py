@@ -61,7 +61,13 @@ logger = logging.getLogger(__name__)
 #: analysis, and `temperature_source` — which carries the digest of the borrowed
 #: field's archive, so two runs coupled to different temperatures never match. Every version-1 key misses once, and a steady or structural run
 #: re-solves the first time it is asked for again.
-KEY_VERSION = 2
+#:
+#: 3 (2026-09-14): `flow_case` joined with the `flow-laminar` analysis, and
+#: `engine` — the OpenFOAM image's content id, read before the run — because a
+#: flow run's `solver` is always "openfoam" and the tag in `OPENFOAM_IMAGE` can be
+#: pointed at a different build. A flow run whose engine cannot be identified
+#: first (the `local` launcher) is never cached at all.
+KEY_VERSION = 3
 
 #: What an unmeasured solver version hashes as. A distinct string rather than
 #: `None` or `""`, so it can never collide with a version that happens to be
@@ -83,6 +89,7 @@ class Inputs:
     load_case: dict[str, Any] | None
     thermal_case: dict[str, Any] | None
     transient_case: dict[str, Any] | None
+    flow_case: dict[str, Any] | None
     temperature_source: dict[str, Any] | None
     element_size_mm: float | None
     element_order: int
@@ -91,6 +98,10 @@ class Inputs:
     thickness_mm: float | None
     solver: str
     solver_version: str | None
+    #: The exact engine behind a federated process boundary, where the job's
+    #: `solver` name alone does not pin it — today only a flow run's image id.
+    #: None for everything else.
+    engine: str | None
 
     def digest(self) -> str:
         """A stable hash of the binding. Same inputs, same key, on any machine.
@@ -107,6 +118,7 @@ class Inputs:
             "load_case": self.load_case,
             "thermal_case": self.thermal_case,
             "transient_case": self.transient_case,
+            "flow_case": self.flow_case,
             "temperature_source": self.temperature_source,
             "element_size_mm": self.element_size_mm,
             "element_order": self.element_order,
@@ -115,6 +127,7 @@ class Inputs:
             "thickness_mm": self.thickness_mm,
             "solver": self.solver,
             "solver_version": self.solver_version or UNKNOWN_VERSION,
+            "engine": self.engine,
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -130,11 +143,23 @@ def inputs_for(db: Session, job: SimulationJob) -> Inputs | None:
     version = db.get(GeometryVersion, job.geometry_version_id)
     if version is None or not version.media or not version.media.sha256:
         return None
+    engine: str | None = None
+    # The literal rather than `runner.FLOW`: the runner imports this module.
+    if job.analysis == "flow-laminar":
+        from app.core.config import settings
+        from app.solve.openfoam.run import engine_identity
+
+        engine = engine_identity(settings.openfoam_launcher, settings.openfoam_image)
+        if engine is None:
+            # The engine that would answer cannot be named before it runs, and a
+            # key with a hole where the solver belongs matches runs it should not.
+            return None
     return Inputs(
         geometry_sha256=version.media.sha256,
         load_case=job.load_case,
         thermal_case=job.thermal_case,
         transient_case=job.transient_case,
+        flow_case=job.flow_case,
         temperature_source=job.temperature_source,
         element_size_mm=job.element_size_mm,
         element_order=job.element_order,
@@ -143,6 +168,7 @@ def inputs_for(db: Session, job: SimulationJob) -> Inputs | None:
         thickness_mm=job.thickness_mm,
         solver=job.solver,
         solver_version=job.solver_version,
+        engine=engine,
     )
 
 

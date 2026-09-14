@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validat
 
 from app.models.simulation import JobStatus
 from app.solve.conduction import ThermalCase, TransientThermalCase
+from app.solve.openfoam.case import FlowCase
 from app.solve.types import LoadCase, Material
 from app.verify.standards import NOT_VALIDATED
 
@@ -12,6 +13,7 @@ from app.verify.standards import NOT_VALIDATED
 CASE_FOR_ANALYSIS: dict[str, str] = {
     "thermal-conduction": "thermal_case",
     "thermal-transient": "transient_case",
+    "flow-laminar": "flow_case",
 }
 
 _WHAT_IT_READS: dict[str, str] = {
@@ -21,6 +23,10 @@ _WHAT_IT_READS: dict[str, str] = {
         "the conductivity, the heat capacity, the boundary conditions, the starting "
         "temperature and the time span are the whole of what it solves."
     ),
+    "flow_case": (
+        "the fluid, the inlet and outlet faces, the cell size and any wall heat are the "
+        "whole of what it solves."
+    ),
 }
 
 _WHY_REFUSED: dict[str, str] = {
@@ -29,12 +35,17 @@ _WHY_REFUSED: dict[str, str] = {
         "ignored while looking like part of the model."
     ),
     "thermal_case": (
-        "It solves for displacement and stress, or for a temperature history, not for "
-        "a steady temperature field."
+        "It does not solve for a steady temperature field in the part, so a conductivity "
+        "and boundary conditions supplied here would be ignored while looking like part "
+        "of the model."
     ),
     "transient_case": (
         "It has no time axis, so a duration, a time step and a starting temperature "
         "supplied here would be ignored while looking like part of the model."
+    ),
+    "flow_case": (
+        "It solves nothing about a fluid, so an inlet, an outlet and a fluid supplied "
+        "here would be ignored while looking like part of the model."
     ),
 }
 
@@ -45,6 +56,7 @@ _WHERE_IT_BELONGS: dict[str, str] = {
         "temperature change applied to a structural run."
     ),
     "transient_case": "Set analysis to 'thermal-transient' to solve how the field evolves.",
+    "flow_case": "Set analysis to 'flow-laminar' to solve the flow through the part.",
 }
 
 
@@ -77,8 +89,9 @@ class SimulationCreate(BaseModel):
         default=None,
         description=(
             "Fixtures, loads and material. Required for every analysis except the "
-            "two thermal ones, which have none of the three — 'thermal-conduction' "
-            "takes a thermal_case and 'thermal-transient' a transient_case instead."
+            "two thermal ones and the flow, which have none of the three — "
+            "'thermal-conduction' takes a thermal_case, 'thermal-transient' a "
+            "transient_case and 'flow-laminar' a flow_case instead."
         ),
     )
     thermal_case: ThermalCase | None = Field(
@@ -98,6 +111,15 @@ class SimulationCreate(BaseModel):
             "'thermal-transient' run. Its own field rather than a looser "
             "thermal_case: a steady case handed a density and a duration would "
             "silently drop both, and the run would answer a question nobody asked."
+        ),
+    )
+    flow_case: FlowCase | None = Field(
+        default=None,
+        description=(
+            "A fluid, an inlet and an outlet named by face selector, a cell_size_mm and "
+            "optionally the heat the flow carries, for a 'flow-laminar' run. The part's "
+            "geometry is taken as the fluid region — a duct drawn as a solid — and every "
+            "boundary face the inlet and outlet do not select is a no-slip wall."
         ),
     )
     temperature_from: TemperatureSource | None = Field(
@@ -159,7 +181,12 @@ class SimulationCreate(BaseModel):
     caller who wants the cheap answer can still ask for it.
     """
     analysis: Literal[
-        "solid", "plane-stress", "plane-strain", "thermal-conduction", "thermal-transient"
+        "solid",
+        "plane-stress",
+        "plane-strain",
+        "thermal-conduction",
+        "thermal-transient",
+        "flow-laminar",
     ] = Field(
         default="solid",
         description=(
@@ -174,7 +201,11 @@ class SimulationCreate(BaseModel):
             "and it answers 'how hot does it get', never 'how long until' — there "
             "is no time integration behind it. 'thermal-transient' is the one that "
             "answers 'how long until': it takes a transient_case and steps the "
-            "temperature field forward in time with backward Euler."
+            "temperature field forward in time with backward Euler. 'flow-laminar' "
+            "takes the part as the inside of a duct and solves steady laminar flow "
+            "through it in OpenFOAM — a pressure drop, and with heat the outlet "
+            "temperature and the heat carried: it takes a flow_case, and refuses a "
+            "Reynolds number above 2000 because there is no turbulence model."
         ),
     )
     thickness_mm: float | None = Field(
@@ -236,7 +267,7 @@ class SimulationCreate(BaseModel):
         wanted = CASE_FOR_ANALYSIS.get(self.analysis, "load_case")
         supplied = {
             name
-            for name in ("load_case", "thermal_case", "transient_case")
+            for name in ("load_case", "thermal_case", "transient_case", "flow_case")
             if getattr(self, name) is not None
         }
         if wanted not in supplied:
@@ -281,6 +312,28 @@ class SimulationCreate(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _a_flow_mesh_has_no_element_order(self) -> "SimulationCreate":
+        """A flow run reads the part's boundary at its corners, so the order is moot.
+
+        The tet mesh is only where the duct's closed surface comes from; OpenFOAM
+        meshes the fluid itself, and a quadratic tet's midside nodes never reach
+        it. So the order defaults to 1 on a flow run — the mesh that is actually
+        used — and an explicit 2 is refused rather than recorded against a result
+        it did not influence.
+        """
+        if self.analysis != "flow-laminar":
+            return self
+        if "element_order" in self.model_fields_set and self.element_order != 1:
+            raise ValueError(
+                "element_order does not apply to a flow-laminar run: OpenFOAM meshes the "
+                "fluid itself and reads the part's surface at its corners, so a quadratic "
+                "mesh would change nothing. Drop element_order, and set flow_case.cell_size_mm "
+                "for the flow's resolution."
+            )
+        self.element_order = 1
+        return self
+
+    @model_validator(mode="after")
     def _thickness_matches_the_analysis(self) -> "SimulationCreate":
         """Refused at the boundary rather than defaulted deeper in.
 
@@ -289,7 +342,7 @@ class SimulationCreate(BaseModel):
         alongside `solid` is a misunderstanding worth naming: it would be
         silently ignored, and the engineer would believe it had been used.
         """
-        if self.analysis in ("solid", "thermal-conduction", "thermal-transient"):
+        if self.analysis in ("solid", "thermal-conduction", "thermal-transient", "flow-laminar"):
             if self.thickness_mm is not None:
                 raise ValueError(
                     "thickness_mm applies only to a plane analysis; a solid takes its "
@@ -316,6 +369,7 @@ class SimulationRead(BaseModel):
     load_case: dict[str, Any] | None
     thermal_case: dict[str, Any] | None
     transient_case: dict[str, Any] | None = None
+    flow_case: dict[str, Any] | None = None
     temperature_source: dict[str, Any] | None = None
     element_size_mm: float | None
     element_order: int

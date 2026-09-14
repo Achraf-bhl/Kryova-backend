@@ -1644,3 +1644,291 @@ class TestAStructuralRunCanCarryAThermalRunsTemperatures:
         job.temperature_source = {**job.temperature_source, "fields_sha256": "0" * 64}
         with pytest.raises(SolverError, match="not the one this analysis was queued"):
             _borrowed_temperature_change(job, media, other_mesh, LinearStaticSolver())
+
+
+def _flow_case(**overrides: object) -> dict:
+    """Water along the 20 × 20 × 60 mm box, in at z-min and out at z-max."""
+    case: dict = {
+        "name": "Channel",
+        "fluid": {"name": "water", "kinematic_viscosity_mm2_s": 1.0, "density_kg_m3": 1000.0},
+        "inlet": {"where": {"type": "face", "axis": "z", "side": "min"}, "mean_velocity_mm_s": 2.0},
+        "outlet": {"where": {"type": "face", "axis": "z", "side": "max"}},
+        "cell_size_mm": 1.25,
+    }
+    case.update(overrides)
+    return case
+
+
+_HEAT = {
+    "inlet_temperature_k": 300.0,
+    "wall": {"type": "wall_temperature", "temperature_k": 310.0},
+    "conductivity_w_mk": 0.6,
+    "specific_heat_j_kgk": 4180.0,
+}
+
+
+class TestAFlowRunCanBeAskedFor:
+    """E10 task 2's delivery half: laminar flow, and the heat it carries, reach a request.
+
+    Offline, OpenFOAM is replaced at `LaminarFlowSolver.solve` by an answer these
+    tests wrote, so what is checked is the wiring — the route, the row, the
+    archive, the refusals and the cache — and not the physics, which
+    `tests/test_solver_openfoam.py` checks against closed forms. One test at the
+    end runs the real engine through the job, and skips where there is none.
+    """
+
+    ENGINE = "docker opencfd/openfoam-default:2412 sha256:" + "4" * 64
+
+    @pytest.fixture
+    def fake_openfoam(self, monkeypatch):
+        import numpy as np
+
+        from app.solve.openfoam import solver as flow_solver
+
+        calls: list[object] = []
+
+        def solve(self, mesh, case):  # noqa: ANN001 - stands in for the real method
+            calls.append(case)
+            heat = None
+            temperature = wall_centres = wall_temperatures = None
+            if case.heat is not None:
+                heat = flow_solver.ConvectionResult(
+                    inlet_temperature_k=300.0,
+                    outlet_bulk_temperature_k=304.0,
+                    wall_mean_temperature_k=310.0,
+                    wall_max_temperature_k=310.0,
+                    heat_to_fluid_w=13.376,
+                    wall_area_mm2=4800.0,
+                    prandtl_number=6.97,
+                    peclet_number=278.7,
+                    mean_heat_transfer_coefficient_w_m2k=412.0,
+                )
+                temperature = np.array([301.0, 305.0])
+                wall_centres = np.array([[0.0, 5.0, 30.0]])
+                wall_temperatures = np.array([310.0])
+            result = flow_solver.FlowResult(
+                name=case.name,
+                pressure_drop_mpa=2.5e-9,
+                inlet_flow_rate_mm3_s=800.0,
+                outlet_flow_rate_mm3_s=800.0,
+                continuity_error=1e-12,
+                max_velocity_mm_s=4.2,
+                mean_inlet_velocity_mm_s=case.inlet.mean_velocity_mm_s,
+                reynolds_number=40.0,
+                hydraulic_diameter_mm=20.0,
+                inlet_area_mm2=400.0,
+                cells=2,
+                iterations=90,
+                residuals={"p": 9e-6},
+                solver_version="2412 (build fake)",
+                heat=heat,
+            )
+            return flow_solver.FlowOutput(
+                result=result,
+                cell_centres=np.array([[5.0, 5.0, 10.0], [5.0, 5.0, 50.0]]),
+                velocity=np.array([[0.0, 0.0, 3.0], [0.0, 0.0, 3.0]]),
+                kinematic_pressure=np.array([2.5e3, 0.5e3]),
+                cell_volumes=np.array([1.0, 1.0]),
+                temperature_k=temperature,
+                wall_face_centres=wall_centres,
+                wall_temperatures_k=wall_temperatures,
+            )
+
+        monkeypatch.setattr(flow_solver.LaminarFlowSolver, "solve", solve)
+        monkeypatch.setattr("app.solve.openfoam.run.availability", lambda launcher, image: None)
+        monkeypatch.setattr("app.solve.openfoam.run.engine_identity", lambda launcher, image: self.ENGINE)
+        return calls
+
+    def _post(self, client: AuthenticatedTestClient, project_id: str, **overrides):
+        payload = {"analysis": "flow-laminar", "flow_case": _flow_case(), "element_size_mm": 10.0, **overrides}
+        return client.post(f"/api/v1/projects/{project_id}/simulations", json=payload)
+
+    def _run(self, client: AuthenticatedTestClient, project_id: str, **overrides) -> dict:
+        response = self._post(client, project_id, **overrides)
+        assert response.status_code == 202, response.text
+        return response.json()
+
+    def test_the_row_records_the_flow_case_and_what_ran(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, fake_openfoam
+    ) -> None:
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["status"] == "succeeded", job["error"]
+        assert job["analysis"] == "flow-laminar"
+        assert job["flow_case"]["cell_size_mm"] == 1.25
+        assert job["load_case"] is None and job["thermal_case"] is None and job["transient_case"] is None
+        assert job["solver"] == "openfoam"
+        assert job["element_order"] == 1
+        assert job["result"]["pressure_drop_mpa"] == 2.5e-9
+        assert job["result"]["heat"] is None
+        assert len(fake_openfoam) == 1 and fake_openfoam[0].cell_size_mm == 1.25
+
+    def test_the_version_is_the_one_the_engine_printed(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, fake_openfoam, db_session
+    ) -> None:
+        """The registry cannot ask OpenFOAM its version; the banner in the log is the
+        version that ran, and a row with None there would be provenance lost."""
+        from app.models import SimulationJob
+
+        job = self._run(auth_client, project_with_geometry)
+        assert db_session.get(SimulationJob, job["id"]).solver_version == "2412 (build fake)"
+
+    def test_the_archive_holds_cell_fields_and_no_nodal_answer(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, fake_openfoam
+    ) -> None:
+        job = self._run(auth_client, project_with_geometry, flow_case=_flow_case(heat=_HEAT))
+        archive = TestATransientConductionRunCanBeAskedFor()._archive(auth_client, job)
+
+        assert job["result"]["heat"]["outlet_bulk_temperature_k"] == 304.0
+        # Kinematic pressure becomes MPa once, with the case's density: 2500 mm²/s² of water.
+        assert archive["cell_pressure_mpa"].tolist() == pytest.approx([2.5e-6, 0.5e-6])
+        assert archive["cell_velocity_mm_s"].shape == (2, 3)
+        assert archive["cell_temperatures_k"].tolist() == [301.0, 305.0]
+        assert archive["wall_temperatures_k"].tolist() == [310.0]
+        for absent in ("displacements", "von_mises_nodal", "temperatures_k"):
+            assert absent not in archive.files
+
+    def test_no_openfoam_fails_the_run_before_meshing(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, fake_openfoam, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            "app.solve.openfoam.run.availability",
+            lambda launcher, image: f"The OpenFOAM image {image} is not present. Pull it once with `docker pull {image}`.",
+        )
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["status"] == "failed"
+        assert "docker pull" in job["error"]
+        assert job["mesh_stats"] is None
+        assert fake_openfoam == []
+
+    def test_a_convergence_study_is_refused_by_name(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, fake_openfoam
+    ) -> None:
+        job = self._run(auth_client, project_with_geometry, grids=3)
+
+        assert job["status"] == "failed"
+        assert "flow_case.cell_size_mm" in job["error"]
+        assert fake_openfoam == []
+
+    @pytest.mark.parametrize(
+        "overrides, fragment",
+        [
+            ({"flow_case": None}, "needs a flow_case"),
+            ({"load_case": load_case()}, "takes no load_case"),
+            (
+                {"thermal_case": TestAConductionAnalysisCanBeAskedFor()._bar_case()},
+                "takes no thermal_case",
+            ),
+            ({"thickness_mm": 5.0}, "thickness_mm"),
+            ({"element_order": 2}, "element_order does not apply"),
+            (
+                {"temperature_from": {"simulation_id": "x", "reference_temperature_k": 293.0}},
+                "applies only to a solid",
+            ),
+            ({"flow_case": _flow_case(cell_size_mm=0)}, "cell_size_mm"),
+        ],
+    )
+    def test_a_request_that_does_not_fit_the_analysis_is_refused(
+        self,
+        auth_client: AuthenticatedTestClient,
+        project_with_geometry: str,
+        overrides: dict,
+        fragment: str,
+    ) -> None:
+        response = self._post(auth_client, project_with_geometry, **overrides)
+
+        assert response.status_code == 422
+        assert fragment in response.text
+
+    def test_a_flow_case_on_a_structural_run_is_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={"load_case": load_case(), "flow_case": _flow_case(), "element_size_mm": 10.0},
+        )
+        assert response.status_code == 422
+        assert "takes no flow_case" in response.text
+
+    @pytest.mark.parametrize("route", ["surface", "surface/binary", "temperature"])
+    def test_the_field_routes_refuse_a_flow_run_by_name(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, fake_openfoam, route: str
+    ) -> None:
+        job = self._run(auth_client, project_with_geometry, flow_case=_flow_case(heat=_HEAT))
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/{route}"
+        )
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert "flow-laminar run" in detail and "in the run's result" in detail
+        assert "temperature route" not in detail
+
+    def test_the_queued_row_names_openfoam(self) -> None:
+        from app.api.routes import simulations as routes
+
+        assert routes._requested_solver("flow-laminar") == "openfoam"
+
+    def test_an_identical_second_run_is_a_cache_hit_and_a_finer_one_is_not(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, fake_openfoam, db_session
+    ) -> None:
+        from app.models import SimulationJob
+
+        first = self._run(auth_client, project_with_geometry)
+        second = self._run(auth_client, project_with_geometry)
+        finer = self._run(auth_client, project_with_geometry, flow_case=_flow_case(cell_size_mm=1.0))
+
+        assert db_session.get(SimulationJob, second["id"]).cache_source_id == first["id"]
+        assert db_session.get(SimulationJob, finer["id"]).cache_hit is False
+        assert len(fake_openfoam) == 2
+
+    def test_a_different_openfoam_image_is_not_a_cache_hit(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, fake_openfoam, monkeypatch, db_session
+    ) -> None:
+        from app.models import SimulationJob
+
+        self._run(auth_client, project_with_geometry)
+        monkeypatch.setattr(
+            "app.solve.openfoam.run.engine_identity", lambda launcher, image: self.ENGINE.replace("4", "5")
+        )
+        other = self._run(auth_client, project_with_geometry)
+
+        assert db_session.get(SimulationJob, other["id"]).cache_hit is False
+        assert len(fake_openfoam) == 2
+
+
+def _openfoam_missing() -> str | None:
+    from app.solve.openfoam.run import availability
+
+    return availability("docker")
+
+
+@pytest.mark.skipif(_openfoam_missing() is not None, reason="No OpenFOAM image to run the job against")
+class TestAFlowRunThroughTheRealEngine:
+    def test_the_job_solves_a_square_channel_and_carries_its_heat(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The whole job path — upload, gmsh, the surface split, snappyHexMesh,
+        simpleFoam, the archive — on the 20 mm square box. The fully developed
+        gradient of a square duct (the rectangular series) over the whole length
+        is a lower bound on the drop, because the flow enters flat."""
+        from app.solve.openfoam.results import kinematic_to_mpa
+        from tests.test_solver_openfoam import _rectangular_gradient
+
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={"analysis": "flow-laminar", "flow_case": _flow_case(heat=_HEAT), "element_size_mm": 10.0},
+        )
+        assert response.status_code == 202, response.text
+        job = response.json()
+
+        assert job["status"] == "succeeded", job["error"]
+        result = job["result"]
+        developed = kinematic_to_mpa(_rectangular_gradient(10.0, 10.0, 1.0, 2.0) * 60.0, 1000.0)
+        assert result["pressure_drop_mpa"] > developed
+        assert result["continuity_error"] < 1e-6
+        assert result["reynolds_number"] == pytest.approx(40.0)
+        assert result["solver_version"].startswith("2412")
+        heat = result["heat"]
+        assert 300.0 < heat["outlet_bulk_temperature_k"] < 310.0
+        assert heat["heat_to_fluid_w"] > 0.0 and heat["mean_heat_transfer_coefficient_w_m2k"] > 0.0

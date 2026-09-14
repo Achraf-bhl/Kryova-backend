@@ -70,17 +70,17 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 14/24 | 94/131 = 72% | 106/151 eng-months = 70% |
+| Engineering — E1–E23 | 15/24 | 95/131 = 73% | 108/151 eng-months = 71% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 20/34 | 141/192 = 73% | 134/189 eng-months = 71% |
+| **Programme** | 21/34 | 142/192 = 74% | 135/189 eng-months = 72% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E10 75%, E15 70%, E18 50%, P4 75%, P9 57% |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
+| in flight | E15 70%, E18 50%, P4 75%, P9 57% |
 | nothing finished yet | E8, E9, E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2030,6 +2030,8 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 
 ##### Phase E10 — Thermal, flow, and optimisation #####
 
+> ✅ PHASE COMPLETE (2026-09-14) — all tasks done and tested.
+
 **~9 engineer-months.**
 
 1. **Steady/transient conduction, convection BCs, thermal-stress coupling.**
@@ -2134,6 +2136,62 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 
 2. **CFD via OpenFOAM**, deliberately late — *the meshing is the hard part* — scoped first to
    cooling flow and ducting.
+   > DONE (2026-09-14) — **laminar internal flow, and the heat it carries, through a real
+   > OpenFOAM, held to four closed forms and wired through the job.** Scope is exactly the two
+   > words the task names. *Ducting* is an incompressible laminar steady flow (`simpleFoam`,
+   > SIMPLEC); *cooling flow* is passive forced convection on top of it — a `scalarTransport`
+   > temperature with the wall at one temperature or through one heat flux.
+   > **Federated, not linked** (Decision 4): OpenFOAM is GPL and runs as a separate process —
+   > `opencfd/openfoam-default:2412` in Docker by default (`OPENFOAM_LAUNCHER=docker|local`,
+   > `OPENFOAM_IMAGE`, `OPENFOAM_TIMEOUT_S`). The pipeline is blockMesh → snappyHexMesh →
+   > checkMesh → simpleFoam → writeCellCentres → writeCellVolumes. The geometry is the job's own
+   > tet mesh; its boundary is split into inlet, outlet and wall by the **existing `Selector`
+   > vocabulary**, so a flow case names its openings the way a load case names a fixture.
+   > **Held to closed forms on the real engine** (`tests/test_solver_openfoam.py`, measured on
+   > 2412). Hagen–Poiseuille in a snapped round pipe (16 cells across, 49,920 cells, 125
+   > iterations, ~31 s): developed gradient +0.42%, centreline −0.96%. The rectangular duct's
+   > series solution from a tet mesh and `FaceSelector`s: −0.001%. Graetz, isothermal wall
+   > (Nu = 3.657): +0.30%. Graetz, uniform flux (48/11): +1.4% to +2.4% by section, because a
+   > wall face's temperature under a fixed gradient is first order on a snapped cell. The flux
+   > energy balance: 0.085%.
+   > **What a run reports and refuses.** A run that did not converge returns no pressure drop.
+   > A temperature whose residual did not settle on the converged flow is refused outright;
+   > the transport has `relTol 0` and a final solve after SIMPLE converges, so the written T
+   > belongs to the written U. A laminar case above Re 2000 is refused before meshing, naming
+   > the velocity that would fit. The mean coefficient is a log-mean h on an isothermal wall
+   > only. It is withheld, with a warning, when the outlet has saturated to the wall
+   > temperature or no heat moves. A flux wall reports its energy balance and warns above 2%.
+   > Patch area is the snapped mesh's own (`# Area :` in the function object's header), not
+   > the drawn one: 4706 vs 4712 mm² on the pipe.
+   > **Asked for** by `analysis: "flow-laminar"` with a `flow_case` (migration
+   > `9947d5ff2340`, a sibling JSONB column). `element_order` is refused if given as anything
+   > but 1, and forced to 1 otherwise. A study (`grids > 1`) is refused, naming
+   > `flow_case.cell_size_mm` as the discretisation that matters. A missing engine fails the
+   > run **before meshing** with the install sentence. The version is the one the OpenFOAM
+   > banner printed. The archive holds `cell_centres`, `cell_volumes_mm3`,
+   > `cell_velocity_mm_s`, `cell_pressure_mpa` and, heated, `cell_temperatures_k`,
+   > `wall_face_centres` and `wall_temperatures_k`. There are no nodal fields, and the
+   > surface and temperature routes refuse a flow run by name. **The job cache keys a flow
+   > run on the Docker image's content id** (`KEY_VERSION` 3); a local install cannot be
+   > named before it runs, so its runs are never cached. `solve.openfoam.run` is metered as
+   > solver seconds. The agent is offered `run_flow_simulation`, refused before anything
+   > queues when the engine is absent. The verification register gains `laminar-flow`,
+   > with steady and transient conduction beside it (denominator 11 → 14).
+   > **Guards broken on purpose:** 33 mutations across case, dictionaries, readers, solver,
+   > runner, schema, route, cache, tool, metering and launcher. 32 were caught by named tests;
+   > one is equivalent (moving the energy transport after the pressure and flux tables, which
+   > never read T — the ordering that matters, T before its readers, is pinned). Every restore
+   > was sha256-checked.
+   > **Not claimed:** turbulence, buoyancy, temperature-dependent properties, conjugate heat
+   > transfer (no solid conduction), free surfaces, external flow, and any GUI surface. **Nothing
+   > has run on Windows**, where OpenFOAM has no native release. That is THE QUEUE F1. CI
+   > has no image, so the Docker-backed classes **skip there, and a skip is not a pass**.
+   > Tested by: `tests/test_solver_openfoam.py`, `tests/test_simulations.py`
+   > (`TestAFlowRunCanBeAskedFor`, `TestAFlowRunThroughTheRealEngine`),
+   > `tests/test_simulation_cache.py`, `tests/test_agent.py` (`TestRunFlowSimulation`),
+   > `tests/test_metering.py`, `tests/test_observe_report.py`.
+
+   <!-- superseded 2026-09-14 -->
    > NOT STARTED.
 
 3. **Optimisation: [OpenMDAO](https://openmdao.org/)** (NASA Glenn, Apache-2.0) as the MDO

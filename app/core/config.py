@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -357,6 +358,19 @@ class Settings(BaseSettings):
     # path that does not exist, so a wrong setting is reported rather than
     # silently working with a solver the operator did not choose.
     calculix_path: str = ""
+    # How a `flow-laminar` job reaches OpenFOAM (E10.2). OpenFOAM is GPL and runs
+    # only as a separate process: `docker` runs the pinned image below, `local`
+    # runs a machine's own install sourced onto PATH before the server started.
+    # There is no flow backend setting beside these, for the reason
+    # `registry.build_conduction_solver` gives: one engine needs no knob to choose it.
+    openfoam_launcher: Literal["docker", "local"] = "docker"
+    # The image is the version pin. It is never pulled during a run -- a run that
+    # downloads a solver has a version nobody chose -- so a missing image is
+    # refused by name with the `docker pull` that fixes it.
+    openfoam_image: str = "opencfd/openfoam-default:2412"
+    # A run that has not finished by then is stopped and refused, naming the cell
+    # size as the lever, so a runaway mesh cannot hold a worker for ever.
+    openfoam_timeout_s: float = 3600.0
 
     # CATIA desktop bridge. The daemon dials out to this service over a
     # WebSocket; see docs/CATIA_BRIDGE_PROTOCOL.md for the wire format.

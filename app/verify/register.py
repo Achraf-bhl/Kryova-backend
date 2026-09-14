@@ -1,5 +1,26 @@
-"""The validation register: which analyses are validated, against what, to what
-accuracy — and, the number that earns the module, **which are not**.
+"""The verification register: which analyses agree with a published benchmark,
+against what, to what accuracy — and, the number that earns the module, **which
+do not**. Nothing in it is validated, and it says so.
+
+## What this register used to call itself, and why it stopped (master plan 20.3)
+
+Until 2026-09-14 this was "the validation register", its best standing was
+`VALIDATED`, and its first published note said validation "is answered only by a
+published benchmark with a published result". ASME's definitions say otherwise
+(`app.verify.standards.DEFINITIONS`): a NAFEMS target is the answer to a stated
+mathematical problem, so agreeing with it is **code verification**, and
+validation needs experimental data — measurements of a physical part — which
+this product has never had. So the register's name was a claim it could not make
+on its own behalf, published on the one page whose value is that every word on
+it can be checked. The standings are now `AGREES` / `DISPUTED` / `UNCONFIRMED`
+against a published benchmark, every piece of evidence is labelled as the kind
+of verification it is, and the payload carries `standards.validation_block()` —
+the statement that nothing is validated, with the terms quoted and sourced.
+
+Why not simply `VERIFIED`: the closed-form checks are verification too. An
+analysis with Euler's column formula behind it and no NAFEMS case would then read
+"unverified", which is false in the other direction. What the standing measures
+is agreement with a *published benchmark*, so that is what it is called.
 
 Master plan **7.4**, published through **P10.3**. `benchmarks.py` decided what a
 benchmark may claim; this decides what a *roll-up of benchmarks* may claim, which
@@ -13,20 +34,20 @@ denominator left out.
 **1. The denominator is declared, not discovered.** `ANALYSES` below lists every
 analysis this product will report a number from, and the register is built by
 walking *that* list and attaching whatever benchmark outcomes exist for each. An
-analysis nobody has benchmarked therefore appears, as `UNVALIDATED`, with a
-reason. This is `app.observe.catalogue` applied to validation and it is here for
+analysis nobody has benchmarked therefore appears, as `UNCONFIRMED`, with a
+reason. This is `app.observe.catalogue` applied to benchmarks and it is here for
 the identical reason: a report assembled from what happened to run cannot
 distinguish "there is no benchmark for buckling" from "buckling was never
 benchmarked" from "somebody deleted the buckling suite". Assembled from a
 declared list, all three read as the same visible hole, which is the honest
 answer to all three.
 
-**2. Only `Outcome.VALIDATED` counts, and the four honest non-results are
+**2. Only `Outcome.AGREED` counts, and the four honest non-results are
 counted separately rather than dropped.** `MEASURED` — it ran, there was nothing
 to compare against — is the one that would do the damage, because it is a real
-result and it is *not* validation. `UNCONVERGED` is worse to conflate: the case
+result and it is *not* agreement. `UNCONVERGED` is worse to conflate: the case
 ran, produced a number, and 7.2 refused to let the number out. Both appear in
-`Summary`, in their own fields, and neither moves an analysis to `VALIDATED`.
+`Summary`, in their own fields, and neither moves an analysis to `AGREES`.
 `benchmarks.BenchmarkOutcome.passed` already encodes this; the register calls it
 rather than re-deriving it, so there is one definition of a pass in the package.
 
@@ -47,13 +68,13 @@ level up with more force, since this report is public: a register that 500s
 because one target was malformed publishes nothing at all, which is a strictly
 worse outcome than publishing nineteen good rows and one loud refusal. So
 refusals are data (`AnalysisRow.refusals`, `Summary.refused_targets`) and they
-force the row's standing to `UNVALIDATED` regardless of the outcome recorded
+force the row's standing to `DISPUTED` regardless of the outcome recorded
 against it.
 
 ## What the register does *not* do: run anything
 
 `published_register()` reports on `PUBLISHED_SUITE`, and `assert_publishable`
-refuses that suite at import if it contains a runnable case. A validation
+refuses that suite at import if it contains a runnable case. A published
 benchmark is a mesh convergence study — minutes of CPU, several solves — and
 running one inside an HTTP request thread on a public, unauthenticated route is
 a denial-of-service tool with a nice name. So `PUBLISHED_SUITE` is the *blocked*
@@ -61,20 +82,20 @@ half of `app.verify.nafems`, and a case that executes reaches this register only
 as a recorded outcome passed to `Register.build` — which is why that function
 takes outcomes as an argument rather than a suite.
 
-## What it says today
+## What it says
 
-Nothing is validated, and that is still the correct answer with a catalogue in
-place. `app.verify.nafems` holds five standard NAFEMS cases; four are blocked
-and appear here with their published targets and their named blockers, and the
-fifth — FV52 — runs and validates, but nothing has yet recorded that run into
-this page. So the four rows a reader sees are the honest published state: the
-numbers we must eventually reproduce, and why we cannot yet.
+The recorded run decides how many analyses agree; `tests/test_verify_register.py`
+names them rather than this docstring, because a count typed into prose is the
+one that goes stale. The blocked cases always appear, with their published
+targets and their named blockers: the numbers the product must eventually
+reproduce, and why it cannot yet.
 
-The closed-form checks listed against several analyses are real and are pinned
-by tests, but they are **verification** (are we solving the equations right) and
-not **validation** (are they the right equations), the ASME V&V 20 split
-`benchmarks.py` refuses to collapse. They are carried in a field of their own,
-named as verification, and they do not move a standing.
+The closed-form checks listed against several analyses are real, pinned by
+tests, and code verification exactly as a NAFEMS agreement is — but they are
+checked in the suite rather than recorded for publication, so they are carried
+in a field of their own and do not move a standing. None of either kind is
+validation. The terms are ASME VVUQ 1's split (`standards.TERMINOLOGY_SOURCE`),
+quoted as V&V 10 and V&V 20 define them.
 """
 
 from __future__ import annotations
@@ -86,30 +107,34 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Final
 
-from app.verify import recorded
+from app.verify import recorded, standards
 from app.verify.benchmarks import BenchmarkOutcome, Outcome, Suite, Target
 from app.verify.nafems import NAFEMS_SUITE
 
 
 class Standing(StrEnum):
-    """Where one analysis stands against published evidence.
+    """Where one analysis stands against published benchmark solutions.
 
     Three, not six: an `Outcome` is a verdict on one *case*, and a reader of a
     trust page is asking about an *analysis*. The mapping is deliberately
     pessimistic in both directions — one deviated case makes the analysis
-    `DISPUTED` even if nine others validated, because "nine of ten agreed" is
-    the sentence a reader must be given rather than a green tick.
+    `DISPUTED` even if nine others agreed, because "nine of ten agreed" is the
+    sentence a reader must be given rather than a green tick.
+
+    **None of the three is a validation standing**, including the best one:
+    agreeing with a published reference solution is code verification. See the
+    module docstring for the name this enum used to carry.
     """
 
-    #: At least one case validated against a known target, and no case
-    #: deviated, errored, or carried a target the register would not republish.
-    VALIDATED = "validated"
+    #: At least one case agreed with a known target, and no case deviated,
+    #: errored, or carried a target the register would not republish.
+    AGREES = "agrees"
     #: At least one case ran against a known target and landed outside its band,
-    #: or errored. Not a pass, and louder than merely unvalidated.
+    #: or errored. Not a pass, and louder than merely unconfirmed.
     DISPUTED = "disputed"
     #: Everything else, including — and mostly — "nobody has benchmarked this".
     #: `AnalysisRow.because` always says which.
-    UNVALIDATED = "unvalidated"
+    UNCONFIRMED = "unconfirmed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +155,7 @@ class Analysis:
     #: What question the analysis answers, in the words an engineer would use.
     answers: str
     #: Closed-form solutions the suite already checks this against.
-    #: **Verification evidence, not validation** — see the module docstring.
+    #: **Code verification, not validation** — see the module docstring.
     #: Each entry names the identity and the test that pins it.
     closed_form_checks: tuple[str, ...] = ()
     #: False when the analysis is declared but a user cannot reach it yet.
@@ -157,8 +182,8 @@ class Analysis:
             "available": self.available,
             # Always present, always labelled. A field named
             # `closed_form_checks` that vanished when empty would let a reader
-            # assume the ones they *do* see are the same kind of evidence as a
-            # validated row.
+            # assume the ones they *do* see are the same kind of evidence as an
+            # agreeing row.
             "verification_closed_form_checks": list(self.closed_form_checks),
         }
         if not self.available:
@@ -170,7 +195,7 @@ class Analysis:
 #:
 #: Wider than "the FEA solvers" on purpose. A clash distance, an unfolded blank
 #: length and a fatigue damage sum are all numbers a user acts on, and an
-#: engineer reading a validation register wants to know which of them anybody
+#: engineer reading a verification register wants to know which of them anybody
 #: has checked against an outside answer. Restricting the list to the three
 #: solvers would make the register look nearly complete the day three benchmarks
 #: land, while most of what the product actually reports went unmentioned.
@@ -265,11 +290,11 @@ if len(BY_ID) != len(ANALYSES):  # pragma: no cover - a duplicate is a typo, cau
     raise ValueError("two analyses share an id")
 
 
-#: Reasons an analysis is not validated, spelled once so the register cannot
-#: report the same hole in three different words.
+#: Reasons an analysis agrees with no benchmark, spelled once so the register
+#: cannot report the same hole in three different words.
 NO_BENCHMARK: Final = (
     "No benchmark is encoded for this analysis. Nothing has been compared against "
-    "a published answer, so nothing here is validated."
+    "a published answer, so no benchmark agreement is claimed."
 )
 
 
@@ -411,7 +436,8 @@ def _public_outcome(outcome: BenchmarkOutcome, target: dict[str, Any]) -> dict[s
         "id": scrub(outcome.benchmark_id),
         "title": scrub(outcome.title),
         "outcome": str(outcome.outcome),
-        "counts_as_validated": outcome.passed,
+        "evidence": str(standards.EvidenceKind.CODE_VERIFICATION),
+        "counts_as_agreement": outcome.passed,
         "target": target,
         "measured_value": outcome.measured_value,
         "relative_deviation": outcome.relative_deviation,
@@ -423,7 +449,10 @@ def _public_outcome(outcome: BenchmarkOutcome, target: dict[str, Any]) -> dict[s
     if provenance is not None:
         payload["provenance"] = provenance
     if outcome.convergence is not None:
-        payload["convergence"] = outcome.convergence
+        payload["convergence"] = {
+            "evidence": str(standards.EvidenceKind.SOLUTION_VERIFICATION),
+            **outcome.convergence,
+        }
     return payload
 
 
@@ -434,7 +463,7 @@ def _public_outcome(outcome: BenchmarkOutcome, target: dict[str, Any]) -> dict[s
 
 @dataclass(frozen=True, slots=True)
 class Accuracy:
-    """How close the validated cases came — the "to what accuracy" of 7.4.
+    """How close the agreeing cases came — the "to what accuracy" of 7.4.
 
     The *worst* deviation, not the mean. A register quoting an average is
     quoting a number no individual result ever had, and the question an engineer
@@ -472,15 +501,15 @@ class AnalysisRow:
     published_targets: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
-        if self.standing is not Standing.VALIDATED and not self.because.strip():
+        if self.standing is not Standing.AGREES and not self.because.strip():
             raise ValueError(
-                f"{self.analysis.id!r} is not validated and gives no reason. The "
-                "reason is the register's most useful output; it is not optional."
+                f"{self.analysis.id!r} agrees with no benchmark and gives no reason. "
+                "The reason is the register's most useful output; it is not optional."
             )
 
     @property
-    def validated(self) -> bool:
-        return self.standing is Standing.VALIDATED
+    def agrees(self) -> bool:
+        return self.standing is Standing.AGREES
 
     def count(self, outcome: Outcome) -> int:
         return sum(1 for item in self.outcomes if item.outcome is outcome)
@@ -489,16 +518,16 @@ class AnalysisRow:
         payload: dict[str, Any] = {
             "analysis": self.analysis.to_dict(),
             "standing": str(self.standing),
-            "validated": self.validated,
+            "agrees_with_a_benchmark": self.agrees,
             "benchmarks": [
                 _public_outcome(outcome, target)
                 for outcome, target in zip(self.outcomes, self.published_targets, strict=True)
             ],
             "benchmark_count": len(self.outcomes),
-            # Printed even when empty and even when the row is validated, the
+            # Printed even when empty and even when the row agrees, the
             # rule `app.observe.report` states: a section that disappears when
             # it has nothing to say trains a reader not to look for it.
-            "not_validated_because": self.because,
+            "not_confirmed_because": self.because,
             "refused_targets": [scrub(reason) for reason in self.refusals],
         }
         if self.accuracy is not None:
@@ -511,9 +540,9 @@ class Summary:
     """The counts, with the non-results kept apart from the results."""
 
     analyses_declared: int
-    validated: int
+    agreeing: int
     disputed: int
-    unvalidated: int
+    unconfirmed: int
     benchmarks: int
     #: Ran, produced a number, nothing to compare it against. Never a pass.
     measured_only: int
@@ -527,11 +556,11 @@ class Summary:
     def to_dict(self) -> dict[str, Any]:
         return {
             "analyses_declared": self.analyses_declared,
-            "analyses_validated": self.validated,
+            "analyses_agreeing": self.agreeing,
             "analyses_disputed": self.disputed,
-            "analyses_unvalidated": self.unvalidated,
+            "analyses_unconfirmed": self.unconfirmed,
             "benchmarks_reported": self.benchmarks,
-            "not_validation": {
+            "not_agreement": {
                 "measured_only": self.measured_only,
                 "unconverged": self.unconverged,
                 "blocked": self.blocked,
@@ -544,7 +573,8 @@ class Summary:
 
 @dataclass(frozen=True, slots=True)
 class Register:
-    """Which analyses are validated, against what, to what accuracy, and when."""
+    """Which analyses agree with a published benchmark, against what, to what
+    accuracy, and when."""
 
     generated_at: str
     rows: tuple[AnalysisRow, ...]
@@ -558,31 +588,38 @@ class Register:
 
     @property
     def complete(self) -> bool:
-        """True only when every declared analysis is validated. False today, and
-        expected to be false for a long time — `ok` and `complete` are separate
-        questions, the split `app.design.missions` makes for the same reason."""
-        return all(row.validated for row in self.rows) and not self.uncatalogued
+        """True only when every declared analysis agrees with a benchmark. False
+        today, and expected to be false for a long time — `ok` and `complete` are
+        separate questions, the split `app.design.missions` makes for the same
+        reason."""
+        return all(row.agrees for row in self.rows) and not self.uncatalogued
 
     @property
-    def unvalidated(self) -> tuple[AnalysisRow, ...]:
-        return tuple(row for row in self.rows if not row.validated)
+    def unconfirmed(self) -> tuple[AnalysisRow, ...]:
+        return tuple(row for row in self.rows if not row.agrees)
 
     def headline(self) -> str:
         """The sentence a human reads, with the denominator in it.
 
         Written as one sentence containing both numbers because that is the
-        thing a summary loses first: "3 analyses validated" is true of a product
-        with three and of a product with thirty.
+        thing a summary loses first: "3 analyses agree" is true of a product with
+        three and of a product with thirty. The last clause is 20.3's, and it is
+        in the headline rather than a note because the headline is what gets
+        quoted.
         """
         total = len(self.rows)
-        validated = sum(1 for row in self.rows if row.validated)
+        agreeing = sum(1 for row in self.rows if row.agrees)
         disputed = sum(1 for row in self.rows if row.standing is Standing.DISPUTED)
         sentence = (
-            f"{validated} of {total} analyses are validated against a published "
-            f"benchmark; {total - validated} are not."
+            f"{agreeing} of {total} analyses agree with a published benchmark "
+            f"solution; {total - agreeing} do not yet."
         )
         if disputed:
             sentence += f" {disputed} ran against a target and missed it."
+        sentence += (
+            " That is verification evidence; none of it is validation, because no "
+            "result has been compared against measurements of a physical part."
+        )
         return sentence
 
     def superseded_by(self, changes: Iterable[Any]) -> tuple[Any, ...]:
@@ -609,19 +646,20 @@ class Register:
             "complete": self.complete,
             "summary": self.summary.to_dict(),
             "analyses": [row.to_dict() for row in self.rows],
-            # Duplicated deliberately. The point of 7.4 is that what is *not*
-            # validated is as easy to find as what is, and "filter the analyses
+            # Duplicated deliberately. The point of 7.4 is that what does *not*
+            # agree is as easy to find as what does, and "filter the analyses
             # array yourself" is not as easy to find.
-            "not_validated": [
+            "unconfirmed": [
                 {
                     "id": row.analysis.id,
                     "title": row.analysis.title,
                     "standing": str(row.standing),
                     "because": row.because,
                 }
-                for row in self.unvalidated
+                for row in self.unconfirmed
             ],
             "uncatalogued_benchmark_groups": list(self.uncatalogued),
+            "validation": standards.validation_block(),
             "notes": list(self.notes),
         }
 
@@ -671,7 +709,7 @@ def _row(analysis: Analysis, outcomes: tuple[BenchmarkOutcome, ...]) -> Analysis
             refused_ids.add(outcome.benchmark_id)
             refusals.append(f"{outcome.benchmark_id}: {refusal}")
 
-    # A case whose target could not be republished cannot validate anything,
+    # A case whose target could not be republished cannot agree with anything,
     # whatever verdict was recorded against it: the verdict was computed from a
     # target the register has just refused to print.
     passes = tuple(o for o in outcomes if o.passed and o.benchmark_id not in refused_ids)
@@ -684,7 +722,7 @@ def _row(analysis: Analysis, outcomes: tuple[BenchmarkOutcome, ...]) -> Analysis
     if not outcomes:
         return AnalysisRow(
             analysis=analysis,
-            standing=Standing.UNVALIDATED,
+            standing=Standing.UNCONFIRMED,
             because=NO_BENCHMARK,
             published_targets=(),
         )
@@ -723,9 +761,9 @@ def _row(analysis: Analysis, outcomes: tuple[BenchmarkOutcome, ...]) -> Analysis
         detail = ", ".join(f"{count} {what}" for what, count in counts.items() if count)
         return AnalysisRow(
             analysis=analysis,
-            standing=Standing.UNVALIDATED,
+            standing=Standing.UNCONFIRMED,
             because=(
-                f"{len(outcomes)} benchmark(s) exist and none validated: {detail}. "
+                f"{len(outcomes)} benchmark(s) exist and none agreed: {detail}. "
                 "None of these is a pass."
             ),
             outcomes=outcomes,
@@ -735,7 +773,7 @@ def _row(analysis: Analysis, outcomes: tuple[BenchmarkOutcome, ...]) -> Analysis
 
     return AnalysisRow(
         analysis=analysis,
-        standing=Standing.VALIDATED,
+        standing=Standing.AGREES,
         because="",
         outcomes=outcomes,
         refusals=(),
@@ -764,9 +802,9 @@ def _summarise(rows: tuple[AnalysisRow, ...]) -> Summary:
 
     return Summary(
         analyses_declared=len(rows),
-        validated=sum(1 for row in rows if row.standing is Standing.VALIDATED),
+        agreeing=sum(1 for row in rows if row.standing is Standing.AGREES),
         disputed=sum(1 for row in rows if row.standing is Standing.DISPUTED),
-        unvalidated=sum(1 for row in rows if row.standing is Standing.UNVALIDATED),
+        unconfirmed=sum(1 for row in rows if row.standing is Standing.UNCONFIRMED),
         benchmarks=sum(len(row.outcomes) for row in rows),
         measured_only=total(Outcome.MEASURED),
         unconverged=total(Outcome.UNCONVERGED),
@@ -794,25 +832,31 @@ def _summarise(rows: tuple[AnalysisRow, ...]) -> Summary:
 #:
 #: Publishing the blocked ones is the point rather than a consolation. Each
 #: carries the number we must eventually produce and the named reason we cannot
-#: yet, which is exactly what 7.4 asks a register to say about what is *not*
-#: validated.
+#: yet, which is exactly what 7.4 asks a register to say about what does *not*
+#: agree.
 PUBLISHED_SUITE: Final = Suite(
-    name="kryova-published-validation",
+    name="kryova-published-verification",
     benchmarks=tuple(b for b in NAFEMS_SUITE.benchmarks if not b.runnable),
 )
 
 #: Notes printed with the register. Not decoration: without the first line a
-#: reader sees eleven `UNVALIDATED` rows and no explanation of the closed-form
-#: checks sitting in the same payload, and the obvious reading — "these tests
-#: are the validation" — is the exact conflation ASME V&V 20 separates.
+#: reader sees rows of closed-form checks and benchmark agreements and reads
+#: them as validation — the conflation ASME VVUQ 1 separates
+#: (`app.verify.standards.DEFINITIONS`). **The first note said exactly that
+#: until 2026-09-14**, telling readers validation "is answered only by a
+#: published benchmark with a published result"; see the module docstring.
 PUBLISHED_NOTES: Final[tuple[str, ...]] = (
-    "Verification and validation are different questions. Every analysis listed "
-    "with closed-form checks is *verified* — the equations are being solved "
-    "correctly, checked against an identity with a known answer. None of that is "
-    "*validation*, which asks whether they are the right equations and is "
-    "answered only by a published benchmark with a published result.",
-    "This page never runs a benchmark. A validation case is several solves and "
-    "this route is unauthenticated, so a validated row is a *recording* — the "
+    "Verification and validation are different questions, and everything on this "
+    "page answers the first. In ASME's terms, verification asks whether the "
+    "computational model fits its mathematical description: agreeing with a "
+    "closed-form identity or with a published NAFEMS reference solution is code "
+    "verification, and a mesh convergence study is solution verification. "
+    "Validation asks whether the model represents the real world, and is answered "
+    "only by comparing against measurements of a physical part. Kryova has none, "
+    "so nothing here is validated. The definitions, quoted with their sources, are "
+    "in this payload's validation block.",
+    "This page never runs a benchmark. A benchmark case is several solves and "
+    "this route is unauthenticated, so an agreeing row is a *recording* — the "
     "outcome of a run made elsewhere, carried in with a fingerprint of every "
     "source file that decides an answer. If that fingerprint stops matching the "
     "code, the recording is discarded and the page reverts to publishing only "

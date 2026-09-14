@@ -4,9 +4,10 @@ Master plan 7.1, **the machinery only**. This module defines what a benchmark
 is, what a target may claim, and how a run is classified. It holds **no
 benchmark instances** — the catalogue is `app.verify.nafems`, and the split is
 deliberate: the rules below have to be readable without the cases beside them,
-because they are what stops a case being invented. Nothing here should be read
-as evidence that any analysis has been validated; that is the register's
-question (`app.verify.register`) and its answer is still no.
+because they are what stops a case being invented. Nothing here is evidence
+that any analysis has been *validated*, and nothing ever will be: agreeing with
+a published answer to a mathematical problem is verification, and validation
+needs measurements of a physical part (`app.verify.standards.NOT_VALIDATED`).
 
 A benchmark is a published problem with a published answer. The
 value of running one comes entirely from the answer having been arrived at by
@@ -21,7 +22,7 @@ impossible rather than merely discouraged:
 * **"I am not sure" is a first-class state.** `TargetBasis.UNKNOWN` carries a
   reason and *forbids* a value. This is what a case with a target the author
   could not verify looks like: fully encoded, runnable where possible, measured,
-  and honestly not validated. A fabricated target is worse than no benchmark,
+  and honestly not agreed with anything. A fabricated target is worse than no benchmark,
   and an `UNKNOWN` target is how the codebase says so out loud.
 * **A benchmark that cannot run says why, in words that name the missing
   capability.** `blocked_reason` is not an apology; it is the phase's most
@@ -31,18 +32,24 @@ impossible rather than merely discouraged:
 **Outcomes are six, and only one of them is a pass.** `MEASURED` — ran fine,
 nothing to compare against — is never a pass, for the same reason
 `app.design.assertions` treats an unmeasured assertion as never a pass. A suite
-that counted `MEASURED` as green would report a validated solver on a catalogue
+that counted `MEASURED` as green would report an agreeing solver on a catalogue
 where no target had been entered at all. Nor is `UNCONVERGED`, where the case
 ran and 7.2 refused to let the number out.
 
-**Verification and validation are two axes and this module is one of them.**
-ASME V&V 20 separates *verification* — are the equations being solved correctly,
-which is what `app.verify.convergence` measures — from *validation* — are they
-the right equations, which is what comparing against a published benchmark
-measures. An `Outcome` is a validation verdict; the convergence verdict rides
-alongside it and a catalogue must report both. Collapsing them would let a case
-that happened to land on the target from a grid nobody checked read as fully
-evidenced.
+**Two kinds of verification ride together here, and neither is validation.**
+Until 2026-09-14 this docstring said comparing against a published benchmark
+answers *validation* — "are they the right equations" — which is the reading
+ASME's own definitions rule out — the terms are ASME VVUQ 1's split
+(`app.verify.standards.TERMINOLOGY_SOURCE`), quoted as V&V 10 and V&V 20 word
+them in `app.verify.standards.DEFINITIONS`. A NAFEMS
+target is the answer to a stated mathematical problem, so agreeing with it is
+**code verification**; the convergence study beside it estimates the numerical
+error of that one calculation, which is **solution verification**. Validation
+compares against experimental data, and there is none. So an `Outcome` is a
+code-verification verdict against a published reference solution; the
+convergence verdict rides alongside it and a catalogue must report both.
+Collapsing them would let a case that happened to land on the target from a
+grid nobody checked read as fully evidenced.
 """
 
 from __future__ import annotations
@@ -111,7 +118,7 @@ class Target:
                 "plane that must not move, a rigid-body mode — is an absolute "
                 "comparison against a floor, not a percentage band, and encoding it "
                 "here would compare an absolute deviation against a fractional band "
-                "and call any small number validated."
+                "and call any small number an agreement."
             )
         if self.tolerance is None or not 0.0 < self.tolerance < 1.0:
             raise ValueError(
@@ -209,14 +216,15 @@ class Benchmark:
 
 
 class Outcome(StrEnum):
-    """The *validation* verdict for one benchmark. Exactly one of these is a pass.
+    """The code-verification verdict for one benchmark. Exactly one is a pass.
 
-    The verification verdict — whether the discretisation error was bounded — is
-    the convergence study's, and is carried separately. See the module docstring.
+    The solution-verification verdict — whether the discretisation error was
+    bounded — is the convergence study's, and is carried separately. Neither is a
+    validation verdict; see the module docstring.
     """
 
     #: Ran, a known target existed, and the measured value is inside the band.
-    VALIDATED = "validated"
+    AGREED = "agreed"
     #: Ran, a known target existed, and the measured value is outside the band.
     DEVIATED = "deviated"
     #: Ran and produced a number, but there is no target to compare it against.
@@ -251,10 +259,10 @@ class BenchmarkOutcome:
 
     @property
     def passed(self) -> bool:
-        """True only for `VALIDATED`. Written as a property so no caller has to
+        """True only for `AGREED`. Written as a property so no caller has to
         remember which of the six outcomes count — and so `MEASURED` cannot be
         mistaken for one that does."""
-        return self.outcome is Outcome.VALIDATED
+        return self.outcome is Outcome.AGREED
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -340,7 +348,7 @@ def run_benchmark(benchmark: Benchmark) -> BenchmarkOutcome:
             measured_value=run.value,
             detail=(
                 "The case ran and produced a value, but no published target is "
-                "encoded, so nothing has been validated. " + benchmark.target.reason
+                "encoded, so it has agreed with nothing. " + benchmark.target.reason
             ),
             seconds=seconds,
             provenance=provenance,
@@ -360,7 +368,7 @@ def run_benchmark(benchmark: Benchmark) -> BenchmarkOutcome:
         benchmark_id=benchmark.id,
         title=benchmark.title,
         analysis=benchmark.analysis,
-        outcome=Outcome.VALIDATED if inside else Outcome.DEVIATED,
+        outcome=Outcome.AGREED if inside else Outcome.DEVIATED,
         target=benchmark.target,
         measured_value=run.value,
         relative_deviation=deviation,

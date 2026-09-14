@@ -19,7 +19,7 @@ shells" is expressible; a case with no blocker is invisible in the one report
 this catalogue exists to produce, and a `Blocker` no case uses is a claim about
 the product that no case backs.
 
-**Two cases actually validate.** Three grids each, a Grid Convergence Index, and
+**Two cases actually agree.** Three grids each, a Grid Convergence Index, and
 the answer compared against a published reference. The model is checked
 separately from the answer in both, because every way of getting these wrong
 produces a *plausible* number rather than an error: a plate accidentally clamped
@@ -145,6 +145,62 @@ class TestEveryNumberInTheCatalogueIsTraceableToADocument:
 
         for key, source in nafems.SOURCES.items():
             assert source in cited, f"SOURCES[{key!r}] is not used by any case"
+
+
+class TestEveryTargetNamesWhichP18RevisionItReproduces:
+    """E20 task 2. P18 — *The Standard NAFEMS Benchmarks* — has been corrected
+    at least twice, with LE10's own target moving in both magnitude and
+    location between revisions, so a target reproduced from a manual that does
+    not say which revision it credits cannot be fully placed.
+
+    Scoped to `Target.source` — the citation a published number is actually
+    compared against — and not to every string in `SOURCES`: several entries
+    there (`feenox-le1-geometry`, `esrd-le11-geometry`, ...) are geometry
+    cross-checks that mention NAFEMS by name without reproducing the TNSB
+    publication's own revision, and are not what a reader compares a number
+    to.
+    """
+
+    def _target_sources(self) -> dict[str, str]:
+        return {
+            case.benchmark.id: case.benchmark.target.source
+            for case in CASES
+            if case.benchmark.target.known
+        }
+
+    def test_every_target_source_names_a_revision(self) -> None:
+        """A target source that credits NAFEMS without saying which P18
+        revision is the case `p18_revision` returns `None` for — recorded
+        here as a requirement rather than left to be discovered the day two
+        vendor manuals disagree about a target for a reason nobody could
+        trace."""
+        for case_id, source in self._target_sources().items():
+            assert "NAFEMS" in source, f"{case_id}'s target does not name NAFEMS"
+            revision = nafems.p18_revision(source)
+            assert revision is not None, (
+                f"{case_id}'s target names NAFEMS but not which P18 revision "
+                "it reproduces"
+            )
+
+    def test_every_target_source_names_revision_3(self) -> None:
+        """Not merely present — checked against the value, because Revision 2
+        and Revision 3 corrected different cases (LE8/LE10/LE11/T3 vs.
+        LE4/LE7/LE9/LE10) and a target crediting Revision 2 where this
+        catalogue assumes Revision 3 would be citing the wrong number's
+        pedigree. Every target source here happens to credit the same
+        revision; a future one citing a different revision is a deliberate
+        change, not a typo, and this test is what would ask which."""
+        for case_id, source in self._target_sources().items():
+            assert nafems.p18_revision(source) == "3", (
+                f"{case_id}'s target reproduces a P18 revision other than 3 — "
+                "confirm this is deliberate"
+            )
+
+    def test_p18_revision_of_reads_from_the_table_by_key(self) -> None:
+        assert nafems.p18_revision_of("abaqus-le10") == "3"
+
+    def test_a_citation_with_no_revision_returns_none_rather_than_guessing(self) -> None:
+        assert nafems.p18_revision("Some manual with no revision stated.") is None
 
 
 class TestACaseThatCannotRunSaysWhatWouldMakeItRun:
@@ -305,7 +361,7 @@ class TestTheFV52ModelIsTheOneNAFEMSPosed:
             fv52_mesh(3)
 
 
-class TestFV52ValidatesAgainstThePublishedReference:
+class TestFV52AgreesWithThePublishedReference:
     def test_the_case_converges_over_three_grids(self) -> None:
         run = run_fv52()
 
@@ -324,7 +380,7 @@ class TestFV52ValidatesAgainstThePublishedReference:
     def test_it_lands_inside_the_published_band(self) -> None:
         outcome = run_benchmark(BY_ID["nafems-fv52"].benchmark)
 
-        assert outcome.outcome is Outcome.VALIDATED
+        assert outcome.outcome is Outcome.AGREED
         assert outcome.relative_deviation is not None
         assert abs(outcome.relative_deviation) < 0.05
 
@@ -365,7 +421,7 @@ class TestFV52ValidatesAgainstThePublishedReference:
         """The shape an unsourced FV52 must take, pinned so it stays available.
 
         If a future case cannot be traced to a document, this is what it looks
-        like: fully encoded, run, measured, and honestly not validated.
+        like: fully encoded, run, measured, and honestly agreeing with nothing.
         """
         outcome = run_benchmark(
             Benchmark(
@@ -500,9 +556,9 @@ class TestTheLE10ModelIsTheOneNAFEMSPosed:
         assert all(ratio >= 1.35 for ratio in ratios), ratios
 
 
-class TestLE10ValidatesAgainstThePublishedReference:
+class TestLE10AgreesWithThePublishedReference:
     def test_it_lands_inside_the_published_band(self, le10_outcome) -> None:
-        assert le10_outcome.outcome is Outcome.VALIDATED, le10_outcome.detail
+        assert le10_outcome.outcome is Outcome.AGREED, le10_outcome.detail
         assert le10_outcome.relative_deviation is not None
         assert abs(le10_outcome.relative_deviation) < 0.02
 
@@ -652,9 +708,9 @@ class TestTheLE1ModelIsTheOneNAFEMSPosed:
         assert all(a / b > 1.25 for a, b in zip(sizes, sizes[1:], strict=False))
 
 
-class TestLE1ValidatesAgainstThePublishedReference:
+class TestLE1AgreesWithThePublishedReference:
     def test_it_lands_inside_the_published_band(self, le1_outcome) -> None:
-        assert le1_outcome.outcome is Outcome.VALIDATED, le1_outcome.detail
+        assert le1_outcome.outcome is Outcome.AGREED, le1_outcome.detail
         assert le1_outcome.relative_deviation is not None
         assert abs(le1_outcome.relative_deviation) < 0.02
 
@@ -711,7 +767,7 @@ class TestLE1ValidatesAgainstThePublishedReference:
         assert le1_outcome.seconds < 30.0
 
 
-class TestLE11RunsAndHonestlyDoesNotValidate:
+class TestLE11RunsAndHonestlyDoesNotAgree:
     """The case that is worth having *because* it does not pass.
 
     LE11's geometry was blocked on a document nobody had and its load was
@@ -739,7 +795,7 @@ class TestLE11RunsAndHonestlyDoesNotValidate:
         self, le11_outcome
     ) -> None:
         assert le11_outcome.outcome is Outcome.UNCONVERGED
-        assert le11_outcome.outcome is not Outcome.VALIDATED
+        assert le11_outcome.outcome is not Outcome.AGREED
         assert le11_outcome.measured_value is None
 
     def test_the_study_says_why_in_words(self, le11_outcome) -> None:

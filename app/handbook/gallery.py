@@ -101,7 +101,7 @@ def headline() -> str:
 
     The denominator is not decoration. "Four missions build" invites the reader
     to supply their own idea of how many there are; "four of nine" tells them
-    what they are looking at, and is the same discipline the validation
+    what they are looking at, and is the same discipline the verification
     register's headline follows.
     """
     entries = gallery()

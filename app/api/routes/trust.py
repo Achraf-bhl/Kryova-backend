@@ -22,7 +22,7 @@ by the payload containing nothing that came from a database:
   benchmark outcomes, which come from a recorded suite and not from a tenant's
   work. No session, no `DbSession`, no `CurrentUser`, and no dependency in this
   file can reach one. The recording is one committed file read from the
-  repository (`data/verify/validation-outcomes.json`), never a path a request can
+  repository (`data/verify/benchmark-outcomes.json`), never a path a request can
   influence, and `app.verify.recorded.load` returns *nothing* rather than raising
   for every way of failing to read it — a trust page that 500s over a malformed
   artefact publishes less than one that says the evidence could not be read.
@@ -54,7 +54,7 @@ from typing import Any, Final
 
 from fastapi import APIRouter, Response
 
-from app.verify import changelog, commitments
+from app.verify import changelog, commitments, standards
 from app.verify.register import published_register
 
 router = APIRouter(prefix="/trust", tags=["trust"])
@@ -73,27 +73,34 @@ def trust_index(response: Response) -> dict[str, Any]:
     """What is here, and the one sentence that summarises the register.
 
     The headline is repeated on the index deliberately: a reader who follows a
-    link to /trust and no further should still leave knowing how much is *not*
-    validated, which is the number the register exists to publish.
+    link to /trust and no further should still leave knowing how much does *not*
+    agree with a benchmark, which is the number the register exists to publish —
+    and that none of it is validation, which is why the statement rides here too
+    rather than only on the register page.
     """
     _cache(response)
     register = published_register()
     return {
         "scope": commitments.SCOPE,
-        "validation_headline": register.headline(),
-        "everything_validated": register.complete,
+        "verification_headline": register.headline(),
+        "every_analysis_agrees_with_a_benchmark": register.complete,
+        "validation": standards.NOT_VALIDATED,
         "pages": {
-            "validation_register": "/trust/validation-register",
+            "verification_register": "/trust/verification-register",
             "commitments": "/trust/commitments",
             "accuracy_changelog": "/trust/changelog",
         },
     }
 
 
-@router.get("/validation-register")
-def validation_register(response: Response) -> dict[str, Any]:
-    """Which analyses are validated, against what, to what accuracy — and which
-    are not, which is the larger half of this payload today.
+@router.get("/verification-register")
+def verification_register(response: Response) -> dict[str, Any]:
+    """Which analyses agree with a published benchmark, against what, to what
+    accuracy — and which do not, which is the larger half of this payload today.
+
+    Served at `/trust/validation-register` until 2026-09-14 (master plan 20.3).
+    The old path is gone rather than redirected: a redirect would keep a URL
+    that says "validation" resolving on the one page that must not say it.
 
     `accuracy_changes_since_generated` is not an afterthought: a register is a
     claim about a build, and an accuracy-affecting change published after the

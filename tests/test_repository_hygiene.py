@@ -260,7 +260,7 @@ class TestThePlanKnowsItsOwnProgress:
     lines under its tasks (`scripts/plan_progress.py`), and this is what stops it
     from becoming a number that was true once.
 
-    The precedent is `data/verify/validation-outcomes.json`: a recorded artefact
+    The precedent is `data/verify/benchmark-outcomes.json`: a recorded artefact
     is only trustworthy if forgetting to re-record it fails the suite. The same
     argument applies with more force here, because a stale percentage is not
     obviously stale to a reader -- it looks exactly like a fresh one.

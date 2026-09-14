@@ -19,30 +19,39 @@ import pytest
 from app.mesh.primitives import box_mesh, promote_to_tet10
 from app.mesh.types import TetMesh
 from app.observe import collect
-from app.solve.base import ConductionSolver, ModalSolver, Solver
+from app.solve.base import ConductionSolver, ModalSolver, Solver, TransientConductionSolver
 from app.solve.conduction import (
     _T3_LOAD_UNIT,
     _T3_MASS_UNIT,
     _T6_LOAD_UNIT,
     _T6_MASS_UNIT,
     CONDUCTIVITY_W_MK_TO_W_MMK,
+    VOLUMETRIC_CAPACITY_J_M3K_TO_J_MM3K,
+    BackwardEulerConductionSolver,
     Convection,
     FixedTemperature,
     HeatFlux,
     SteadyConductionSolver,
     ThermalCase,
+    TransientThermalCase,
     _barycentric_integral,
     _facet_integrals,
+    assemble_capacitance,
     convecting_bar_tip_temperature_k,
     element_temperature_change,
     hollow_cylinder_temperature_k,
+    lumped_capacitance_temperature_k,
     thermal_load_from_field,
     thermal_stress_correction_field,
     volumetric_source_load,
 )
 from app.solve.linear_static import constitutive_matrix
 from app.solve.materials import MATERIALS
-from app.solve.registry import INTERNAL, build_conduction_solver
+from app.solve.registry import (
+    INTERNAL,
+    build_conduction_solver,
+    build_transient_conduction_solver,
+)
 from app.solve.selection import distribute_force, select_nodes
 from app.solve.thermal import thermal_load, thermal_stress_correction
 from app.solve.types import (
@@ -1126,3 +1135,319 @@ class TestTheRegistryCanSelectIt:
         # identity check here passes or fails on which file pytest ran first.
         assert type(built).__name__ == SteadyConductionSolver.__name__
         assert built.name == SteadyConductionSolver.name
+
+
+# -- transient conduction -------------------------------------------------------
+#
+# Master plan E10 task 1's residual: no time integration, no heat capacity, no
+# initial condition. `WHOLE_SURFACE` and the material constants below are a
+# fixture shared by every test that needs a near-uniform-Biot cube -- they are
+# inputs to a closed form, not a transcribed material, the same disclaimer the
+# module docstring makes for `CONDUCTIVITY_W_MK` above.
+
+CUBE_MM = (20.0, 20.0, 20.0)
+CUBE_VOLUME_MM3 = CUBE_MM[0] * CUBE_MM[1] * CUBE_MM[2]
+CUBE_AREA_MM2 = 2.0 * (
+    CUBE_MM[0] * CUBE_MM[1] + CUBE_MM[1] * CUBE_MM[2] + CUBE_MM[0] * CUBE_MM[2]
+)
+LUMPED_DENSITY_KG_M3 = 7850.0
+LUMPED_SPECIFIC_HEAT_J_KGK = 470.0
+LUMPED_FILM_W_M2K = 10.0
+#: Deliberately far above any real material, to hold the Biot number
+#: (`h L / k`, `L = V/A` here) to ~7e-6 -- the limit the lumped-capacitance
+#: closed form assumes and this cube's actual conduction is nowhere near on
+#: its own. A field this uniform is what lets the test compare the *whole
+#: field*, not just its average, against a single lumped number.
+LUMPED_CONDUCTIVITY_W_MK = 5000.0
+
+#: A box generous enough to catch every boundary facet of any mesh built in
+#: this section, so "convection on the whole surface" needs no per-face union.
+WHOLE_SURFACE = BoxSelector(min=(-1e6, -1e6, -1e6), max=(1e6, 1e6, 1e6))
+
+
+def cube(quadratic: bool = False) -> TetMesh:
+    mesh = box_mesh(CUBE_MM, divisions=(2, 2, 2))
+    return promote_to_tet10(mesh) if quadratic else mesh
+
+
+class TestTheCapacitanceMatrixIsPartitionOfUnity:
+    """The transient sibling of `TestAVolumetricSource`'s check on
+    `volumetric_source_load`: the sum over every entry of `int rho*cp N_i N_j
+    dV` must equal `rho*cp*volume` to machine precision, whatever the element
+    order, because `sum_i sum_j N_i N_j = (sum_i N_i)^2 = 1` at every point --
+    the shape functions partition unity and their product still integrates to
+    the same total. A scaling error in the barycentric integral would move
+    this by more than round-off; a wrong exponent in `_unit_mass_matrix` would
+    move it by a few percent on tet10 only, which is exactly the tet10-quartic
+    mistake that function's own docstring warns a naive quadrature rule makes.
+    """
+
+    @pytest.mark.parametrize("quadratic", [False, True])
+    def test_the_total_capacitance_is_rho_cp_volume(self, quadratic: bool) -> None:
+        mesh = cube(quadratic)
+        volumetric_heat_capacity = (
+            LUMPED_DENSITY_KG_M3 * LUMPED_SPECIFIC_HEAT_J_KGK * VOLUMETRIC_CAPACITY_J_M3K_TO_J_MM3K
+        )
+        capacitance = assemble_capacitance(mesh, volumetric_heat_capacity)
+
+        expected = volumetric_heat_capacity * mesh.volume
+        assert float(capacitance.sum()) == pytest.approx(expected, rel=1e-12)
+
+    def test_zero_capacity_is_a_zero_matrix(self) -> None:
+        capacitance = assemble_capacitance(cube(), 0.0)
+        assert capacitance.nnz == 0 or float(capacitance.sum()) == 0.0
+
+
+class TestALumpedCapacitanceCooldown:
+    """The closed-form check the whole solver rests on: a cube convecting on
+    every face into an ambient temperature, conductivity chosen so high that
+    the Biot number is negligible and the field should be uniform at every
+    instant -- see `LUMPED_CONDUCTIVITY_W_MK`'s comment. Checked against
+    `lumped_capacitance_temperature_k` at several times, on tet4 and tet10,
+    and against **both** the minimum and the maximum of the field -- not an
+    average -- because a field that is uniform on average and wrong in its
+    spread would pass an average check and fail this one.
+
+    The time step is small relative to the thermal time constant (`tau`,
+    computed inside the closed form) so backward Euler's first-order
+    truncation error stays under the tolerance below; `time_step_s=8.0` at
+    the same duration was measured to disagree by ~0.08 K at the far end
+    (tau here is ~1230 s, so dt/tau ~0.0065), which is still a correct answer
+    -- backward Euler decays a pure exponential slightly slower than the
+    continuous solution, `1/(1+x) > exp(-x)` for the `x = dt/tau > 0` here --
+    just not inside a tolerance this tight. `time_step_s=1.0` cuts that error
+    by roughly the same factor dt was cut by, which is the first-order
+    scaling the docstring on `BackwardEulerConductionSolver` claims.
+    """
+
+    def case(self) -> TransientThermalCase:
+        return TransientThermalCase(
+            conductivity_w_mk=LUMPED_CONDUCTIVITY_W_MK,
+            density_kg_m3=LUMPED_DENSITY_KG_M3,
+            specific_heat_j_kgk=LUMPED_SPECIFIC_HEAT_J_KGK,
+            boundaries=[
+                Convection(
+                    where=WHOLE_SURFACE,
+                    film_coefficient_w_m2k=LUMPED_FILM_W_M2K,
+                    ambient_temperature_k=300.0,
+                )
+            ],
+            initial_temperature_k=400.0,
+            duration_s=400.0,
+            time_step_s=1.0,
+        )
+
+    @pytest.mark.parametrize("quadratic", [False, True])
+    def test_the_whole_field_tracks_the_lumped_exponential(self, quadratic: bool) -> None:
+        mesh = cube(quadratic)
+        field = BackwardEulerConductionSolver().solve(mesh, self.case())
+
+        for step in (0, 80, 200, 400):
+            expected = lumped_capacitance_temperature_k(
+                initial_temperature_k=400.0,
+                ambient_temperature_k=300.0,
+                film_coefficient_w_m2k=LUMPED_FILM_W_M2K,
+                surface_area_mm2=CUBE_AREA_MM2,
+                volume_mm3=CUBE_VOLUME_MM3,
+                density_kg_m3=LUMPED_DENSITY_KG_M3,
+                specific_heat_j_kgk=LUMPED_SPECIFIC_HEAT_J_KGK,
+                time_s=field.times_s[step],
+            )
+            snapshot = field.temperatures_k[step]
+            assert snapshot.min() == pytest.approx(expected, abs=0.05)
+            assert snapshot.max() == pytest.approx(expected, abs=0.05)
+
+    def test_it_actually_cools_and_ends_below_the_start(self) -> None:
+        """Cheap enough to be worth stating on its own: a solver that returned
+        the initial condition unchanged would pass no closed-form comparison
+        that only checks the *shape* of decay, so assert the direction too."""
+        field = BackwardEulerConductionSolver().solve(cube(), self.case())
+
+        assert field.result.max_temperature_k < 400.0
+        assert field.result.max_temperature_k > 300.0
+
+    def test_the_result_summary_matches_the_final_row_of_the_history(self) -> None:
+        mesh = cube()
+        field = BackwardEulerConductionSolver().solve(mesh, self.case())
+
+        final = field.temperatures_k[-1]
+        assert field.result.max_temperature_k == pytest.approx(float(final.max()))
+        assert field.result.min_temperature_k == pytest.approx(float(final.min()))
+        assert field.result.final_time_s == pytest.approx(400.0)
+        assert field.temperatures_k.shape == (field.result.step_count + 1, mesh.node_count)
+
+
+class TestATransientDirichletBoundaryStaysHeld:
+    """A `FixedTemperature` node is held at its prescribed value at *every*
+    step, including the initial one -- the class docstring's claim that the
+    initial condition is made consistent with the boundary conditions rather
+    than jumping to match them on the first step."""
+
+    def test_the_fixed_face_never_moves(self) -> None:
+        mesh = cube()
+        fixed_nodes = select_nodes(mesh, FaceSelector(axis="z", side="min"))
+        case = TransientThermalCase(
+            conductivity_w_mk=50.0,
+            density_kg_m3=LUMPED_DENSITY_KG_M3,
+            specific_heat_j_kgk=LUMPED_SPECIFIC_HEAT_J_KGK,
+            boundaries=[FixedTemperature(where=FaceSelector(axis="z", side="min"), temperature_k=500.0)],
+            initial_temperature_k=300.0,
+            duration_s=10.0,
+            time_step_s=1.0,
+        )
+
+        field = BackwardEulerConductionSolver().solve(mesh, case)
+
+        for step in range(field.temperatures_k.shape[0]):
+            assert np.allclose(field.temperatures_k[step][fixed_nodes], 500.0)
+
+    def test_a_case_prescribing_everything_is_refused(self) -> None:
+        """The transient sibling of the steady solver's identical refusal --
+        there is nothing to step forward if every node's value is already
+        known at every instant."""
+        mesh = box_mesh((10.0, 10.0, 10.0), divisions=(1, 1, 1))
+        case = TransientThermalCase(
+            conductivity_w_mk=50.0,
+            density_kg_m3=LUMPED_DENSITY_KG_M3,
+            specific_heat_j_kgk=LUMPED_SPECIFIC_HEAT_J_KGK,
+            boundaries=[FixedTemperature(where=WHOLE_SURFACE, temperature_k=400.0)],
+            initial_temperature_k=300.0,
+            duration_s=10.0,
+            time_step_s=1.0,
+        )
+
+        with pytest.raises(SolverError, match="nothing to evolve"):
+            BackwardEulerConductionSolver().solve(mesh, case)
+
+
+class TestDurationIsDividedIntoWholeSteps:
+    """`duration_s` is not always an exact multiple of `time_step_s`; the
+    solver adjusts `dt` down so the run still ends exactly at `duration_s`,
+    and says so, rather than either stopping short of it or overshooting it."""
+
+    def test_an_exact_multiple_needs_no_adjustment_and_warns_nothing(self) -> None:
+        case = TransientThermalCase(
+            conductivity_w_mk=LUMPED_CONDUCTIVITY_W_MK,
+            density_kg_m3=LUMPED_DENSITY_KG_M3,
+            specific_heat_j_kgk=LUMPED_SPECIFIC_HEAT_J_KGK,
+            boundaries=[
+                Convection(where=WHOLE_SURFACE, film_coefficient_w_m2k=10.0, ambient_temperature_k=300.0)
+            ],
+            initial_temperature_k=400.0,
+            duration_s=10.0,
+            time_step_s=2.0,
+        )
+
+        field = BackwardEulerConductionSolver().solve(cube(), case)
+
+        assert field.result.step_count == 5
+        assert field.result.time_step_s == pytest.approx(2.0)
+        assert field.result.warnings == []
+
+    def test_an_inexact_multiple_is_adjusted_down_and_named(self) -> None:
+        case = TransientThermalCase(
+            conductivity_w_mk=LUMPED_CONDUCTIVITY_W_MK,
+            density_kg_m3=LUMPED_DENSITY_KG_M3,
+            specific_heat_j_kgk=LUMPED_SPECIFIC_HEAT_J_KGK,
+            boundaries=[
+                Convection(where=WHOLE_SURFACE, film_coefficient_w_m2k=10.0, ambient_temperature_k=300.0)
+            ],
+            initial_temperature_k=400.0,
+            duration_s=10.0,
+            time_step_s=3.0,
+        )
+
+        field = BackwardEulerConductionSolver().solve(cube(), case)
+
+        # round(10/3) = 3 steps of 10/3 s each, not 4 of 3 s (which would
+        # overshoot to 12 s) and not 3 of 3 s (which would stop short at 9 s).
+        assert field.result.step_count == 3
+        assert field.result.time_step_s == pytest.approx(10.0 / 3.0)
+        assert field.result.final_time_s == pytest.approx(10.0)
+        assert len(field.result.warnings) == 1
+        assert "duration_s" in field.result.warnings[0]
+
+
+class TestTheTransientSeamItSitsBehind:
+    """The transient sibling of `TestTheSeamItSitsBehind`, for the fifth ABC."""
+
+    def test_the_solver_implements_the_transient_conduction_abc(self) -> None:
+        assert issubclass(BackwardEulerConductionSolver, TransientConductionSolver)
+        assert isinstance(BackwardEulerConductionSolver(), TransientConductionSolver)
+
+    def test_the_abc_cannot_be_instantiated_on_its_own(self) -> None:
+        with pytest.raises(TypeError):
+            TransientConductionSolver()  # type: ignore[abstract]
+
+    def test_it_is_not_the_steady_solver_and_not_a_stress_or_modal_solver(self) -> None:
+        assert not issubclass(BackwardEulerConductionSolver, ConductionSolver)
+        assert not issubclass(BackwardEulerConductionSolver, Solver)
+        assert not issubclass(BackwardEulerConductionSolver, ModalSolver)
+        assert not issubclass(SteadyConductionSolver, TransientConductionSolver)
+
+    def test_the_recorded_name_is_the_implementation_not_the_analysis(self) -> None:
+        assert BackwardEulerConductionSolver().name == "transient-conduction"
+
+
+class TestTheTransientRunIsMetered:
+    """Reuses the `solve.conduction` span the steady solver already declares
+    in `app/observe/catalogue.py` -- see that class's module comment; a
+    transient solve is still a conduction solve, and a second catalogue entry
+    for the same shape of work would be a distinction with no difference."""
+
+    def solved(self, mesh: TetMesh):
+        case = TransientThermalCase(
+            conductivity_w_mk=LUMPED_CONDUCTIVITY_W_MK,
+            density_kg_m3=LUMPED_DENSITY_KG_M3,
+            specific_heat_j_kgk=LUMPED_SPECIFIC_HEAT_J_KGK,
+            boundaries=[
+                Convection(where=WHOLE_SURFACE, film_coefficient_w_m2k=10.0, ambient_temperature_k=300.0)
+            ],
+            initial_temperature_k=400.0,
+            duration_s=10.0,
+            time_step_s=2.0,
+        )
+        with collect() as recorder:
+            BackwardEulerConductionSolver().solve(mesh, case)
+        return recorder
+
+    def test_a_solve_emits_the_conduction_span(self) -> None:
+        recorder = self.solved(cube())
+
+        assert [s.name for s in recorder.spans] == ["solve.conduction"]
+
+    def test_the_span_carries_the_step_count(self) -> None:
+        (span_record,) = self.solved(cube()).spans
+
+        assert span_record.fields["steps"] == 5
+        assert span_record.fields["stage"] == "step"
+
+    def test_collecting_nothing_costs_the_solve_nothing(self) -> None:
+        case = TransientThermalCase(
+            conductivity_w_mk=LUMPED_CONDUCTIVITY_W_MK,
+            density_kg_m3=LUMPED_DENSITY_KG_M3,
+            specific_heat_j_kgk=LUMPED_SPECIFIC_HEAT_J_KGK,
+            boundaries=[
+                Convection(where=WHOLE_SURFACE, film_coefficient_w_m2k=10.0, ambient_temperature_k=300.0)
+            ],
+            initial_temperature_k=400.0,
+            duration_s=10.0,
+            time_step_s=2.0,
+        )
+        field = BackwardEulerConductionSolver().solve(cube(), case)
+
+        assert field.result.max_temperature_k < 400.0
+
+
+class TestTheTransientRegistryCanSelectIt:
+    """The transient sibling of `TestTheRegistryCanSelectIt`."""
+
+    def test_the_internal_name_builds_this_solver(self) -> None:
+        built = build_transient_conduction_solver(INTERNAL)
+
+        assert type(built).__name__ == BackwardEulerConductionSolver.__name__
+        assert built.name == BackwardEulerConductionSolver.name
+
+    def test_an_unknown_name_is_refused_and_names_what_exists(self) -> None:
+        with pytest.raises(SolverError, match="internal"):
+            build_transient_conduction_solver("condution")

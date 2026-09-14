@@ -9,10 +9,11 @@ from app.mesh.types import TetMesh
 from app.solve.types import LoadCase, ModalCase, ModalResult, StaticResult
 
 if TYPE_CHECKING:
-    # `ThermalCase` and `ThermalField` are defined in `app.solve.conduction`,
-    # which imports `app.solve.linear_static`, which imports this module — so a
-    # runtime import here would be a cycle. Under `TYPE_CHECKING` it is not, and
-    # the two annotations below are quoted accordingly.
+    # `ThermalCase`/`ThermalField` and their transient counterparts are defined
+    # in `app.solve.conduction`, which imports `app.solve.linear_static`, which
+    # imports this module — so a runtime import here would be a cycle. Under
+    # `TYPE_CHECKING` it is not, and the four annotations below are quoted
+    # accordingly.
     #
     # **The alternative was to put the ABC beside its concrete class**, which is
     # what `app.solve.plane.PlanarSolver` does and is why that one is not here.
@@ -20,9 +21,14 @@ if TYPE_CHECKING:
     # analyses this codebase treats as separable, and a reader asking "what can
     # be swapped out independently?" should find the answer in one place instead
     # of grepping for `ABC` across the package. One `TYPE_CHECKING` import is
-    # the price of that, and it buys the fourth sibling being visible next to
-    # the three it is a sibling of.
-    from app.solve.conduction import ThermalCase, ThermalField
+    # the price of that, and it buys the fourth and fifth siblings being visible
+    # next to the three they are siblings of.
+    from app.solve.conduction import (
+        ThermalCase,
+        ThermalField,
+        TransientThermalCase,
+        TransientThermalField,
+    )
 
 
 @dataclass
@@ -135,3 +141,37 @@ class ConductionSolver(ABC):
 
     @abstractmethod
     def solve(self, mesh: TetMesh, case: "ThermalCase") -> "ThermalField": ...
+
+
+class TransientConductionSolver(ABC):
+    """Interface every time-stepped heat-conduction solver implements.
+
+    Mesh in, `TransientThermalCase` in, `TransientThermalField` out.
+
+    **The fifth sibling, not a mode switch on `ConductionSolver`.** A steady
+    case has no heat capacity and no initial condition because a steady state
+    has nothing to store energy in or evolve from; a transient case needs both,
+    and a `ThermalCase` carrying an optional `density_kg_m3` and an optional
+    `duration_s` would leave every caller checking which fields were live for
+    the analysis it was actually holding — the same branch the other four
+    siblings exist to keep out of callers. It is a sibling of `ConductionSolver`
+    specifically, not a fifth sibling of `Solver`, because it shares the
+    boundary vocabulary (`ThermalBoundary`: fixed temperature, convection,
+    flux) and the conductivity assembly with the steady case and shares nothing
+    with a structural load case.
+
+    **The output type is its own** for the reason `ThermalField` is its own and
+    not `SolveOutput`: `TransientThermalField` carries a temperature history —
+    one row per time step, not one row total — and no other result in this
+    codebase has that shape. Forcing it into `ThermalField` would mean either a
+    `temperatures_k` that is sometimes (n_nodes,) and sometimes
+    (n_steps, n_nodes) under one name, or padding a steady result with fields a
+    transient one needs and a steady one must always leave empty.
+    """
+
+    name: str
+
+    @abstractmethod
+    def solve(
+        self, mesh: TetMesh, case: "TransientThermalCase"
+    ) -> "TransientThermalField": ...

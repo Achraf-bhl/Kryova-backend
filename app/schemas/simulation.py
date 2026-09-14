@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from app.models.simulation import JobStatus
 from app.solve.conduction import ThermalCase
 from app.solve.types import LoadCase, Material
+from app.verify.standards import NOT_VALIDATED
 
 
 class SimulationCreate(BaseModel):
@@ -228,6 +229,18 @@ class SimulationRead(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def validation(self) -> str:
+        """That no number in `result` has been validated (master plan 20.3).
+
+        Returned by the API rather than written by each client, the argument
+        `attachments.UNVERIFIED_NOTE` makes: a statement with two wordings has
+        two standards. Computed rather than a field so nothing can pass a
+        different one in.
+        """
+        return NOT_VALIDATED
 
 
 class SurfaceField(BaseModel):

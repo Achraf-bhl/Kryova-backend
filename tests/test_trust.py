@@ -44,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PAGES = (
     "/trust",
-    "/trust/validation-register",
+    "/trust/verification-register",
     "/trust/commitments",
     "/trust/changelog",
 )
@@ -135,7 +135,7 @@ _TENANT_WORDS = re.compile(
 )
 
 # A drive letter is one character: the lookbehind stops this matching the `s:/`
-# inside `https://`. The validation register publishes a citation URL per
+# inside `https://`. The verification register publishes a citation URL per
 # benchmark source, and without it every one of those read as a leaked path.
 _PATHISH = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]|\\\\[^\s\\]+\\|/home/|/Users/|/var/lib/")
 
@@ -222,32 +222,62 @@ class TestThePayloadCarriesNothingTenantSpecific:
 
 
 # ---------------------------------------------------------------------------
-# 3. The register page says what is not validated
+# 3. The register page says what does not agree, and that nothing is validated
 # ---------------------------------------------------------------------------
 
 
 class TestTheRegisterPage:
-    def test_it_publishes_the_unvalidated_analyses(self, anonymous: TestClient) -> None:
-        payload = anonymous.get("/trust/validation-register").json()
+    def test_it_publishes_the_unconfirmed_analyses(self, anonymous: TestClient) -> None:
+        payload = anonymous.get("/trust/verification-register").json()
 
-        assert {row["id"] for row in payload["not_validated"]} == {
+        assert {row["id"] for row in payload["unconfirmed"]} == {
             a.id for a in ANALYSES if a.id not in {"modal", "linear-static"}
         }
         assert payload["complete"] is False
-        assert payload["summary"]["analyses_validated"] == 2
+        assert payload["summary"]["analyses_agreeing"] == 2
 
     def test_the_index_repeats_the_headline(self, anonymous: TestClient) -> None:
         """A reader who follows one link and no further still leaves knowing how
-        much is not validated."""
+        much does not agree — and that none of it is validation."""
+        from app.verify.standards import NOT_VALIDATED
+
         index = anonymous.get("/trust").json()
 
-        assert f"2 of {len(ANALYSES)}" in index["validation_headline"]
-        assert index["everything_validated"] is False
+        assert f"2 of {len(ANALYSES)}" in index["verification_headline"]
+        assert index["every_analysis_agrees_with_a_benchmark"] is False
+        assert index["validation"] == NOT_VALIDATED
+        assert index["pages"]["verification_register"] == "/trust/verification-register"
+
+    def test_the_old_validation_register_path_is_gone(self, anonymous: TestClient) -> None:
+        """Master plan 20.3. Not redirected: a URL reading "validation" that
+        still resolved would keep the claim alive on the page that withdrew it."""
+        assert anonymous.get("/trust/validation-register").status_code == 404
+
+    def test_the_word_validated_appears_only_in_the_statement_that_denies_it(
+        self, anonymous: TestClient
+    ) -> None:
+        """Every trust page, as served, with the sanctioned places the word may
+        stand removed: the not-validated statement, the quoted definitions (each
+        carries its own source) and the notes that explain the difference. What
+        is left must not say "validated" — no key, no standing, no outcome."""
+        import json
+
+        from app.verify.standards import DEFINITIONS, NOT_VALIDATED
+
+        for page in PAGES:
+            payload = anonymous.get(page).json()
+            payload.pop("notes", None)
+            payload.pop("validation", None)
+            text = json.dumps(payload)
+            text = text.replace(json.dumps(NOT_VALIDATED)[1:-1], "")
+            for definition in DEFINITIONS.values():
+                text = text.replace(json.dumps(definition.text)[1:-1], "")
+            assert "validated" not in text.lower(), page
 
     def test_it_serves_the_accuracy_changes_that_supersede_it(
         self, anonymous: TestClient
     ) -> None:
-        payload = anonymous.get("/trust/validation-register").json()
+        payload = anonymous.get("/trust/verification-register").json()
 
         assert "accuracy_changes_since_generated" in payload
 

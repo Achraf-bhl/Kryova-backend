@@ -213,3 +213,70 @@ class TestAnUnconvergedRunSaysSo:
         note = unconverged_footnote([_run({"basis": "single-grid", "grids": 1})])
 
         assert "not converged" in note
+
+
+class TestEveryAnswerFromASolveSaysItIsNotValidated:
+    """Master plan 20.3. The unconverged footnote states missing *solution
+    verification*; this states missing *validation*, which no run can supply, so
+    unlike that one it is not silent for a converged study."""
+
+    def test_a_converged_run_still_gets_the_statement(self) -> None:
+        """The strongest numbers are the ones most likely to be read as a
+        prediction of the real part, so they are exactly where it must stand."""
+        from app.ai.verification import not_validated_footnote
+        from app.verify.standards import NOT_VALIDATED
+
+        assert not_validated_footnote([_run(CONVERGED)]) == "\n\n" + NOT_VALIDATED
+        assert unconverged_footnote([_run(CONVERGED)]) == ""
+
+    def test_a_single_grid_run_gets_both_footnotes(self) -> None:
+        from app.ai.verification import not_validated_footnote
+        from app.verify.standards import NOT_VALIDATED
+
+        assert NOT_VALIDATED in not_validated_footnote([_run(SINGLE_GRID)])
+        assert "not converged" in unconverged_footnote([_run(SINGLE_GRID)])
+
+    def test_a_turn_that_read_no_solve_is_not_told_about_validation(self) -> None:
+        """A turn that built a part, or answered a question, has no number to
+        qualify; the statement under it would be noise, and noise is what gets
+        skimmed on the turn where it matters."""
+        from app.ai.verification import not_validated_footnote
+
+        assert not_validated_footnote([]) == ""
+        assert not_validated_footnote([{"features": ["Pad.1"]}, {"id": "x"}]) == ""
+        assert not_validated_footnote([{"result": {"max_von_mises_mpa": 1.0}}]) == ""
+
+    def test_a_flat_result_counts_as_a_solve(self) -> None:
+        from app.ai.verification import not_validated_footnote
+        from app.verify.standards import NOT_VALIDATED
+
+        flat = {"id": "flat-1", "mesh_convergence": CONVERGED}
+
+        assert NOT_VALIDATED in not_validated_footnote([flat])
+
+    def test_results_that_are_not_dicts_do_not_break_it(self) -> None:
+        from app.ai.verification import not_validated_footnote
+        from app.verify.standards import NOT_VALIDATED
+
+        mixed = [None, "text", 3, ["list"], {"result": "not a dict"}, _run(CONVERGED)]
+
+        assert NOT_VALIDATED in not_validated_footnote(mixed)
+
+    def test_it_is_said_once_however_many_runs_were_read(self) -> None:
+        """It is about the product, not about a run, so repeating it per run
+        would only teach the reader to scroll past it."""
+        from app.ai.verification import not_validated_footnote
+        from app.verify.standards import NOT_VALIDATED
+
+        note = not_validated_footnote(
+            [_run(CONVERGED, "a"), _run(SINGLE_GRID, "b"), _run(CONVERGED, "c")]
+        )
+
+        assert note.count(NOT_VALIDATED) == 1
+
+    def test_it_accepts_a_generator(self) -> None:
+        """The agent passes `step.result for step in steps`, which can be read
+        exactly once."""
+        from app.ai.verification import not_validated_footnote
+
+        assert not_validated_footnote(r for r in [_run(CONVERGED)])

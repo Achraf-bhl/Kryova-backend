@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Iterable, Sequence
 
 from app.ai.planning import Objective, Plan, Quantity
+from app.verify.standards import NOT_VALIDATED
 
 #: How a stated unit converts to the unit measurements are reported in. Length
 #: is reported in mm and mass in kg, everywhere -- that is the codebase's own
@@ -521,12 +522,48 @@ def unconverged_footnote(results: Iterable[Any]) -> str:
     return "\n".join(lines)
 
 
+def _read_a_solve(results: Iterable[Any]) -> bool:
+    """Whether any result this turn read is a solved simulation.
+
+    The same shape test `_unconverged_runs` uses — a `mesh_convergence` block,
+    nested or flat — so the two footnotes can never disagree about what a solve
+    is. Unlike that one, converged runs count.
+    """
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        inner = result.get("result")
+        payload = inner if isinstance(inner, dict) else result
+        if isinstance(payload.get(_CONVERGENCE_KEY), dict):
+            return True
+    return False
+
+
+def not_validated_footnote(results: Iterable[Any]) -> str:
+    """What the user is told whenever a turn answers from a solve: that the
+    numbers are not validated. Master plan 20.3.
+
+    **Not silent for a converged run, and that is not a contradiction of
+    `unconverged_footnote`'s silence.** That footnote states missing *solution
+    verification*, which a converged study supplies; this one states missing
+    *validation*, which nothing in the product can supply. Leaving it off a
+    converged answer would put it only under the weakest numbers and let the
+    strongest read as predictions of the real part, which is the reading the
+    statement exists to stop. One statement per turn however many runs were
+    read: it is about the product, not about a run.
+    """
+    if not _read_a_solve(results):
+        return ""
+    return "\n\n" + NOT_VALIDATED
+
+
 __all__ = [
     "DEFAULT_ABSOLUTE_TOLERANCE_MM",
     "DEFAULT_RELATIVE_TOLERANCE",
     "Measurement",
     "assess",
     "measurements_in",
+    "not_validated_footnote",
     "shortfall_note",
     "unconverged_footnote",
     "unverified",

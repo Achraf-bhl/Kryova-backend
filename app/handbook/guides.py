@@ -207,19 +207,19 @@ GUIDES: Final[tuple[Guide, ...]] = (
         ),
     ),
     Guide(
-        slug="check-what-is-validated",
-        title="Check what Kryova has actually validated",
+        slug="check-what-is-verified",
+        title="Check what Kryova has actually verified",
         outcome=(
-            "You know which analyses are validated against which benchmarks, and "
-            "which are not — before you rely on one."
+            "You know which analyses agree with which published benchmarks, which do "
+            "not, and that none of it is validation — before you rely on one."
         ),
         steps=(
             Step(
-                "Read the validation register. It needs no account, on purpose: a "
+                "Read the verification register. It needs no account, on purpose: a "
                 "page claiming verification is the product, behind a login, can only "
                 "be read by people who already bought.",
                 "GET",
-                "/trust/validation-register",
+                "/trust/verification-register",
             ),
             Step(
                 "Read what this product will not claim. Twelve commitments, each "
@@ -234,6 +234,12 @@ GUIDES: Final[tuple[Guide, ...]] = (
                 "GET",
                 "/trust/changelog",
             ),
+        ),
+        not_covered=(
+            "Validation. Every entry in the register is verification — agreement with "
+            "a closed-form or published reference solution, or a convergence study — "
+            "and none of it compares a result against measurements of a physical "
+            "part. Physical testing is still yours to arrange.",
         ),
     ),
 )

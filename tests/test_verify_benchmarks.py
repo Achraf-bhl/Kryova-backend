@@ -8,13 +8,13 @@ The failure it exists to prevent is specific and would be catastrophic here, in
 the one part of the codebase whose whole purpose is to be trusted: **a target
 that looks published and is not.** A NAFEMS number recalled from memory, or
 reverse-engineered from what our own solver happened to return, is worse than no
-benchmark at all — it converts "we have not validated this" into "we validated
-this and it passed", and nobody downstream can tell the difference.
+benchmark at all — it converts "we have not checked this" into "we checked this
+and it agreed", and nobody downstream can tell the difference.
 
 So the rules are structural rather than editorial. `PUBLISHED` requires a
 citation. `UNKNOWN` **forbids a value** and requires a reason saying what would
 make it known. And a run that landed on its target from a mesh nobody checked is
-`UNCONVERGED`, not `VALIDATED` — because an unconverged number that happens to
+`UNCONVERGED`, not `AGREED` — because an unconverged number that happens to
 be right is right by accident, and the plan says an unconverged number is worse
 than no number.
 
@@ -61,7 +61,7 @@ class TestAPublishedTargetMustBeCitable:
 
 class TestAnUnknownTargetForbidsANumber:
     """The state that makes the whole scheme honest: a case can be *encoded*
-    without being *validated*, and say which it is."""
+    without agreeing with anything, and say which it is."""
 
     def test_it_refuses_to_carry_a_value(self) -> None:
         with pytest.raises(ValueError) as refused:
@@ -127,11 +127,14 @@ class TestTheArithmeticOfATolerance:
 
 
 class TestExactlyOneOutcomeIsAPass:
-    def test_validated_is_the_only_pass(self) -> None:
+    def test_agreed_is_the_only_pass(self) -> None:
         """Stated as a test because it is the thing a caller gets wrong: a
         reader who treats anything-but-errored as success has converted every
-        honest non-result into a green tick."""
-        assert Outcome.VALIDATED == "validated"
+        honest non-result into a green tick.
+
+        Named `agreed` since 2026-09-14 (master plan 20.3): it was `validated`,
+        and agreeing with a published reference solution is code verification."""
+        assert Outcome.AGREED == "agreed"
 
         not_passes = {
             Outcome.DEVIATED,
@@ -140,24 +143,24 @@ class TestExactlyOneOutcomeIsAPass:
             Outcome.BLOCKED,
             Outcome.ERRORED,
         }
-        assert Outcome.VALIDATED not in not_passes
+        assert Outcome.AGREED not in not_passes
 
     def test_measured_is_not_a_pass(self) -> None:
         """"We ran it and there was nothing to compare against" is the outcome
         of a case whose target is UNKNOWN. It is a real result and it is not
-        validation, and conflating the two is exactly the failure this module
+        agreement, and conflating the two is exactly the failure this module
         exists to prevent."""
-        assert Outcome.MEASURED != Outcome.VALIDATED
+        assert Outcome.MEASURED != Outcome.AGREED
 
     def test_unconverged_is_not_a_pass_even_when_the_number_is_right(self) -> None:
         """An unconverged number that lands on its target is right by accident.
         The plan's own words: an unconverged number is worse than no number."""
-        assert Outcome.UNCONVERGED != Outcome.VALIDATED
+        assert Outcome.UNCONVERGED != Outcome.AGREED
 
     def test_blocked_is_not_a_pass(self) -> None:
         """A case that could not run at all — no solver, no mesher — must not
         disappear from the register. It is counted, as blocked."""
-        assert Outcome.BLOCKED != Outcome.VALIDATED
+        assert Outcome.BLOCKED != Outcome.AGREED
 
 
 class TestATolerancveMustBeJustified:

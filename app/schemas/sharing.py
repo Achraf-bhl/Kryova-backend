@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.core.sharing import DEFAULT_SHARE_DAYS, MAX_SHARE_DAYS
+from app.verify.standards import NOT_VALIDATED
 
 
 class ShareLinkCreate(BaseModel):
@@ -95,6 +96,17 @@ class SharedPackage(BaseModel):
     allow_geometry_download: bool
     geometry: list[SharedGeometry]
     simulations: list[SharedSimulation]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def validation(self) -> str:
+        """That none of the results above has been validated (master plan 20.3).
+
+        Once per package rather than per run: the statement is about the product,
+        not about a run, and a reader handed a package is the reader most likely
+        to take a peak stress as a prediction of the part.
+        """
+        return NOT_VALIDATED
 
 
 # ---------------------------------------------------------------------------

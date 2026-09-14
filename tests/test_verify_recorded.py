@@ -1,4 +1,4 @@
-"""A recorded validation result, and the day it stops being true — 7.1/7.4.
+"""A recorded benchmark result, and the day it stops being true — 7.1/7.4.
 
 The register refuses to run a benchmark, so a case that *can* run reaches the
 published page only as a recording. That buys a new failure mode the live path
@@ -93,7 +93,7 @@ class TestTheFingerprintIsStableAcrossCheckouts:
     """The claim in `code_fingerprint`'s own docstring, which was false.
 
     Measured on the Windows seat 2026-09-09: a run recorded on Linux was
-    discarded and the trust page published *nothing is validated*, because the
+    discarded and the trust page published *nothing agrees*, because the
     digest folded in two things that are properties of the checkout rather than
     of the source. Each is pinned separately here — normalising only one of them
     still does not reproduce a Linux recording, so a single combined test could
@@ -255,12 +255,12 @@ class TestTheCommittedArtefactIsTheOneThisCodeWouldProduce:
 
         `python -m app.verify.recorded --check` is the same comparison. Having it
         here means a solver change that orphans the published evidence fails the
-        suite rather than quietly reverting the trust page to "nothing is
-        validated" — which is honest, but is not something anybody should
-        discover from the website.
+        suite rather than quietly reverting the trust page to "nothing agrees"
+        — which is honest, but is not something anybody should discover from the
+        website.
         """
         assert ARTEFACT_PATH.exists(), (
-            "No recorded validation run is committed. Run "
+            "No recorded benchmark run is committed. Run "
             "`venv/bin/python -m app.verify.recorded`."
         )
 
@@ -271,11 +271,11 @@ class TestTheCommittedArtefactIsTheOneThisCodeWouldProduce:
             b.id for b in NAFEMS_SUITE.benchmarks
         }
 
-    def test_it_records_fv52_as_validated(self) -> None:
+    def test_it_records_fv52_as_agreed(self) -> None:
         outcomes, _ = load()
         fv52 = next(o for o in outcomes if o.benchmark_id == "nafems-fv52")
 
-        assert fv52.outcome is Outcome.VALIDATED
+        assert fv52.outcome is Outcome.AGREED
         assert fv52.relative_deviation is not None
         assert abs(fv52.relative_deviation) < 0.05
 
@@ -285,11 +285,11 @@ class TestTheRegisterPublishesOnlyEvidenceThatStillHolds:
         register = published_register()
         modal = next(row for row in register.rows if row.analysis.id == "modal")
 
-        assert register.summary.validated == 2
+        assert register.summary.agreeing == 2
         assert modal.accuracy is not None
         assert modal.accuracy.cases == 1
 
-    def test_a_stale_recording_takes_the_page_back_to_nothing_validated(
+    def test_a_stale_recording_takes_the_page_back_to_nothing_agreeing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The fallback is the blocked-only view, not a cached green tick."""
@@ -301,7 +301,7 @@ class TestTheRegisterPublishesOnlyEvidenceThatStillHolds:
         )
         register = published_register()
 
-        assert register.summary.validated == 0
+        assert register.summary.agreeing == 0
         assert register.summary.blocked == expected_blocked
         assert "the code has changed" in register.notes
 

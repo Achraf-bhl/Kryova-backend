@@ -55,6 +55,7 @@ from app.ai.tools import ToolBox, ToolError
 from app.ai.verification import (
     assess,
     measurements_in,
+    not_validated_footnote,
     shortfall_note,
     unconverged_footnote,
     unverified_footnote,
@@ -697,6 +698,9 @@ def stream_agent(
             # the server rather than asked for in the prompt: a caveat the
             # answer cannot omit is the only kind that survives a bad turn.
             text += unconverged_footnote(step.result for step in steps)
+            # E20 task 3: every answer written from a solve says it is not
+            # validated, converged or not -- see `not_validated_footnote`.
+            text += not_validated_footnote(step.result for step in steps)
             if turn.truncated:
                 # A cut-off answer presented as a finished one is the worst
                 # outcome here: the user reads a confident half-sentence about
@@ -981,6 +985,7 @@ def stream_agent(
     # ran out of rounds after reading an unconverged solve still put numbers on
     # the screen, and "it was cut off" is not a reason to drop what they rest on.
     text += unconverged_footnote(step.result for step in steps)
+    text += not_validated_footnote(step.result for step in steps)
     escalation = recovery.escalation()
     if escalation:
         # Appended rather than substituted: the model's summary says what *was*

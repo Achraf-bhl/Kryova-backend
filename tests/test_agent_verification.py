@@ -39,6 +39,7 @@ _toolbox = _agent._toolbox
 user = _agent.user
 project = _agent.project
 conversation = _agent.conversation
+geometry = _agent.geometry
 
 
 def _run(
@@ -285,3 +286,155 @@ class TestReadingInCirclesIsALoop:
             AgentStep(tool="catia_pad", arguments={}, ok=True, result={}),
         ]
         assert _made_progress(mixed, lambda name: name == "catia_pad") is True
+
+
+class TestAnAnswerFromASolveSaysItIsNotValidated:
+    """Master plan 20.3, through the loop rather than the function: the answer
+    the user reads carries the server's statement whenever the turn read a
+    solve, on both exits that put numbers on the screen."""
+
+    @staticmethod
+    def _solved_job(db_session: Session, project: Project, geometry: Any) -> str:
+        from app.models import JobStatus, SimulationJob
+
+        job = SimulationJob(
+            project_id=project.id,
+            geometry_version_id=geometry.id,
+            status=JobStatus.SUCCEEDED,
+            solver="linear-static",
+            load_case=_agent.LOAD_CASE,
+            result={
+                "max_von_mises_mpa": 74.2,
+                "factor_of_safety": 3.7,
+                "mesh_convergence": {
+                    "basis": "grid-convergence-index",
+                    "grids": 3,
+                    "converged": True,
+                    "gci_percent": 1.8,
+                },
+            },
+        )
+        db_session.add(job)
+        db_session.flush()
+        return job.id
+
+    def test_a_converged_answer_carries_the_statement(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        geometry: Any,
+    ) -> None:
+        from app.verify.standards import NOT_VALIDATED
+
+        job_id = self._solved_job(db_session, project, geometry)
+        reply, _ = _run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [
+                AssistantTurn(
+                    text="",
+                    tool_calls=[
+                        ToolCall(id="c1", name="get_simulation", arguments={"simulation_id": job_id})
+                    ],
+                ),
+                AssistantTurn(text="Peak stress is 74.2 MPa; the bracket passes."),
+            ],
+            "What did the run find?",
+        )
+
+        assert reply.text.startswith("Peak stress is 74.2 MPa; the bracket passes.")
+        assert reply.text.count(NOT_VALIDATED) == 1
+        # Converged, so the solution-verification footnote stays silent: the
+        # two statements answer different questions.
+        assert "not converged" not in reply.text
+
+    def test_it_reaches_the_stored_transcript_not_only_the_response(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        geometry: Any,
+    ) -> None:
+        """A reload renders the stored message, so a footnote only on the wire
+        would vanish the first time the page is refreshed."""
+        from sqlalchemy import select
+
+        from app.models import ConversationMessage, MessageRole
+        from app.verify.standards import NOT_VALIDATED
+
+        job_id = self._solved_job(db_session, project, geometry)
+        _run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [
+                AssistantTurn(
+                    text="",
+                    tool_calls=[
+                        ToolCall(id="c1", name="get_simulation", arguments={"simulation_id": job_id})
+                    ],
+                ),
+                AssistantTurn(text="Passes."),
+            ],
+            "What did the run find?",
+        )
+
+        stored = db_session.scalars(
+            select(ConversationMessage.content).where(
+                ConversationMessage.conversation_id == conversation.id,
+                ConversationMessage.role == MessageRole.ASSISTANT,
+            )
+        ).all()
+        assert any(NOT_VALIDATED in (content or "") for content in stored)
+
+    def test_the_round_cap_summary_carries_it_too(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        geometry: Any,
+    ) -> None:
+        from app.verify.standards import NOT_VALIDATED
+
+        job_id = self._solved_job(db_session, project, geometry)
+        read_the_run = AssistantTurn(
+            text="",
+            tool_calls=[ToolCall(id="c1", name="get_simulation", arguments={"simulation_id": job_id})],
+        )
+        wants_tools = AssistantTurn(
+            text="", tool_calls=[ToolCall(id="1", name="list_projects", arguments={})]
+        )
+        reply, _ = _run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [read_the_run] + [wants_tools] * (DEFAULT_MAX_STEPS + 1),
+            "What did the run find?",
+        )
+
+        assert reply.truncated is True
+        assert reply.text.count(NOT_VALIDATED) == 1
+
+    def test_a_turn_that_read_no_solve_does_not_carry_it(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        from app.verify.standards import NOT_VALIDATED
+
+        reply, _ = _run(
+            db_session,
+            user,
+            project,
+            conversation,
+            [AssistantTurn(text="Aluminium 6061-T6 yields at 276 MPa.")],
+            "What does 6061 yield at?",
+        )
+
+        assert NOT_VALIDATED not in reply.text

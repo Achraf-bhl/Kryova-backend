@@ -39,7 +39,7 @@ import subprocess
 from collections.abc import Callable, Mapping
 from typing import Final
 
-from app.solve.base import ConductionSolver, Solver
+from app.solve.base import ConductionSolver, Solver, TransientConductionSolver
 from app.solve.types import SolverError
 
 #: The in-house linear-static solver. The default, so an existing deployment is
@@ -135,6 +135,51 @@ _CONDUCTION_FACTORIES: Final[Mapping[str, Callable[..., ConductionSolver]]] = {
 def conduction_available() -> tuple[str, ...]:
     """Every conduction solver name this build knows, in a stable order."""
     return tuple(sorted(_CONDUCTION_FACTORIES))
+
+
+def _internal_transient_conduction(
+    executable: str | os.PathLike[str] | None = None,
+) -> TransientConductionSolver:
+    # Lazy for the same reason `_internal_conduction` is.
+    from app.solve.conduction import BackwardEulerConductionSolver
+
+    return BackwardEulerConductionSolver()
+
+
+#: Transient conduction backends, a third table for the third `Conduction*`
+#: ABC — the same reasoning `_CONDUCTION_FACTORIES`'s own comment gives for why
+#: it is not folded into `_FACTORIES`: `TransientConductionSolver.solve` takes
+#: a `TransientThermalCase` and returns a `TransientThermalField`, neither of
+#: which a caller holding `Solver` or `ConductionSolver` back has, so merging
+#: the tables would push a three-way union into `build_solver`'s return type
+#: and into every caller that has to narrow it back out again.
+_TRANSIENT_CONDUCTION_FACTORIES: Final[Mapping[str, Callable[..., TransientConductionSolver]]] = {
+    INTERNAL: _internal_transient_conduction,
+}
+
+
+def transient_conduction_available() -> tuple[str, ...]:
+    """Every transient conduction solver name this build knows, in a stable order."""
+    return tuple(sorted(_TRANSIENT_CONDUCTION_FACTORIES))
+
+
+def build_transient_conduction_solver(
+    name: str, *, executable: str | os.PathLike[str] | None = None
+) -> TransientConductionSolver:
+    """The transient conduction solver called `name`, or a `SolverError` naming
+    what exists. Same contract as `build_conduction_solver`: never automatic,
+    never a `KeyError`, never a silent substitution.
+    """
+    key = (name or "").strip().lower()
+    factory = _TRANSIENT_CONDUCTION_FACTORIES.get(key)
+    if factory is None:
+        known = ", ".join(transient_conduction_available())
+        raise SolverError(
+            f"No transient conduction solver called {name!r}. This build has: {known}. "
+            "It is never chosen automatically, because a result computed by a solver "
+            "nobody selected cannot be relied on."
+        )
+    return factory(executable)
 
 
 def build_conduction_solver(

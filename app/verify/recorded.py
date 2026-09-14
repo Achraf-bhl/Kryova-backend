@@ -1,7 +1,7 @@
-"""Validation results recorded from a run, and the rule that stops one rotting.
+"""Benchmark results recorded from a run, and the rule that stops one rotting.
 
 Master plan 7.1/7.4, the join between them. `register.py` refuses to execute a
-benchmark — a validation case is a mesh convergence study on an unauthenticated
+benchmark — a benchmark case is a mesh convergence study on an unauthenticated
 public route, which is a denial-of-service tool with a nice name — so a case that
 *runs* can only reach the published register as a **recorded** outcome. This
 module is the recording.
@@ -10,7 +10,7 @@ module is the recording.
 
 A number recorded on Tuesday is a claim about the code as it was on Tuesday.
 Nothing stops the solver changing on Wednesday, and a register that kept
-publishing "validated" would then be making a claim nobody has checked against
+publishing "agrees" would then be making a claim nobody has checked against
 the code that would actually run — the exact failure Decision 3 exists to
 prevent, arriving through the back door of a cache.
 
@@ -18,8 +18,7 @@ So the artefact carries a **fingerprint** of the code that produced it, and a
 recorded outcome whose fingerprint no longer matches the working tree is not
 published. It is not quietly refreshed and not silently dropped either: the
 register says the results were discarded and why, so the visible state goes back
-to "nothing is validated", which is the honest answer when the evidence is
-stale.
+to "nothing agrees", which is the honest answer when the evidence is stale.
 
 **The fingerprint is deliberately coarse.** It covers every `.py` under
 `app/solve/`, `app/mesh/` and `app/verify/` rather than the one solver a case
@@ -67,14 +66,15 @@ from app.verify.benchmarks import (
 )
 
 #: Bumped when the artefact's shape changes. An artefact written by an older
-#: version is discarded rather than read with today's assumptions — a validation
-#: record read wrongly is worse than one not read at all.
-SCHEMA_VERSION: Final = 1
+#: version is discarded rather than read with today's assumptions — a benchmark
+#: record read wrongly is worse than one not read at all. Version 2 (2026-09-14)
+#: renamed the passing outcome from `validated` to `agreed`, master plan 20.3.
+SCHEMA_VERSION: Final = 2
 
 #: Where the committed artefact lives. Under `data/` with the other things that
 #: are produced by a run and read by the product, not under `app/`.
 ARTEFACT_PATH: Final = Path(__file__).resolve().parents[2] / "data" / "verify" / (
-    "validation-outcomes.json"
+    "benchmark-outcomes.json"
 )
 
 #: What the source of a recorded answer is: the solvers, the mesher, and the
@@ -116,8 +116,8 @@ def code_fingerprint(root: Path | None = None) -> str:
 
     **Both normalisations below exist to make that first claim true, and it was
     false until 2026-09-09.** Measured on the Windows seat, where a recorded run
-    made on Linux was discarded and the trust page published *nothing is
-    validated* — the honest response to a fingerprint mismatch, and here a
+    made on Linux was discarded and the trust page published *nothing
+    agrees* — the honest response to a fingerprint mismatch, and here a
     mismatch that meant nothing at all:
 
     * **The key is `as_posix()`, not `str()`.** `str(PurePath)` is
@@ -253,7 +253,7 @@ def _main(argv: list[str]) -> int:
         if reason:
             print(reason)
             return 1
-        print(f"Recorded validation run is current: {ARTEFACT_PATH}")
+        print(f"Recorded benchmark run is current: {ARTEFACT_PATH}")
         return 0
 
     artefact = record(NAFEMS_SUITE, recorded_at=datetime.now(UTC).isoformat())
@@ -261,8 +261,8 @@ def _main(argv: list[str]) -> int:
     ARTEFACT_PATH.write_text(
         json.dumps(artefact, indent=1, sort_keys=True) + "\n", encoding="utf-8"
     )
-    passed = sum(1 for o in artefact["outcomes"] if o["outcome"] == "validated")
-    print(f"{passed}/{len(artefact['outcomes'])} validated -> {ARTEFACT_PATH}")
+    passed = sum(1 for o in artefact["outcomes"] if o["outcome"] == str(Outcome.AGREED))
+    print(f"{passed}/{len(artefact['outcomes'])} agreed -> {ARTEFACT_PATH}")
     return 0
 
 

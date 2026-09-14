@@ -128,7 +128,7 @@ class TestTheGalleryIsDerived:
 
     def test_the_headline_carries_the_denominator(self) -> None:
         # "Four missions build" invites the reader to supply their own idea of
-        # how many there are. The same discipline as the validation register's
+        # how many there are. The same discipline as the verification register's
         # headline.
         line = headline()
         assert f"of the {len(LADDER)}" in line

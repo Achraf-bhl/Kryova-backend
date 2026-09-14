@@ -1,4 +1,12 @@
-"""Steady-state heat conduction on 4-node and 10-node tetrahedra.
+"""Steady-state and transient heat conduction on 4-node and 10-node tetrahedra.
+
+**Transient conduction landed 2026-09-14, closing master plan E10 task 1's
+residual** — "no time integration, no heat capacity and no initial condition".
+`SteadyConductionSolver` below is unchanged; `TransientThermalCase` and
+`BackwardEulerConductionSolver`, at the end of this file, add exactly those
+three things on top of the same conductivity assembly and the same
+`ThermalBoundary` vocabulary, so a case that happens to be steady and a case
+that evolves in time describe a wall or a film the same way.
 
 `app/solve/thermal.py` solves the *restrained* thermal problem: one uniform
 `delta_t_k` over the whole part, applied as an equivalent load. Its own docstring
@@ -60,7 +68,7 @@ from __future__ import annotations
 
 import time
 import warnings as warnings_module
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from math import factorial
 from typing import Annotated, Any, Final, Literal
@@ -73,7 +81,7 @@ from pydantic import BaseModel, Field
 
 from app import observe
 from app.mesh.types import TET10_EDGES, TetMesh
-from app.solve.base import ConductionSolver
+from app.solve.base import ConductionSolver, TransientConductionSolver
 from app.solve.linear_static import (
     _CENTROID,
     _TET_GAUSS_POINTS,
@@ -85,6 +93,7 @@ from app.solve.linear_static import (
     _tet10_shape_gradients,
     constitutive_matrix,
 )
+from app.solve.modal import _unit_mass_matrix
 from app.solve.selection import _boundary_faces_within, select_nodes
 from app.solve.thermal import thermal_strain, thermal_stress_correction
 from app.solve.types import Material, MeshConvergence, Selector, SolverError
@@ -109,6 +118,14 @@ FLUX_W_M2_TO_W_MM2: Final = 1e-6
 
 #: W/m³ -> W/mm³. Ohmic heating quoted per cubic metre becomes per cubic mm.
 SOURCE_W_M3_TO_W_MM3: Final = 1e-9
+
+#: J/(m³·K) -> J/(mm³·K). The same factor as `SOURCE_W_M3_TO_W_MM3` — both are
+#: a quantity per cubic metre becoming the same quantity per cubic millimetre —
+#: kept as its own name because this one multiplies a heat *capacity* (density
+#: times specific heat) and not a heat *rate*, and conflating the two names
+#: would make a reader check which physical quantity is actually being
+#: converted rather than being told.
+VOLUMETRIC_CAPACITY_J_M3K_TO_J_MM3K: Final = 1e-9
 
 # Above this many nodes, use preconditioned CG rather than a direct factorisation
 # — the same crossover and the same reasoning as `linear_static`, one degree of
@@ -577,7 +594,7 @@ class SteadyConductionSolver(ConductionSolver):
             conductance = assemble_conductivity(mesh, conductivity)
             heat = volumetric_source_load(mesh, source)
 
-            heat += self._flux_load(mesh, case, warnings)
+            heat += self._flux_load(mesh, case.boundaries, warnings)
             film_matrix, film_heat = self._convection_terms(mesh, films, warnings)
             conductance = (conductance + film_matrix).tocsr()
             heat += film_heat
@@ -680,10 +697,17 @@ class SteadyConductionSolver(ConductionSolver):
         return nodes, np.array([values[int(n)][0] for n in nodes], dtype=np.float64)
 
     @staticmethod
-    def _flux_load(mesh: TetMesh, case: ThermalCase, warnings: list[str]) -> NDArray[np.float64]:
-        """Nodal heat from every `HeatFlux` boundary, W, shape (n_nodes,)."""
+    def _flux_load(
+        mesh: TetMesh, boundaries: Sequence[ThermalBoundary], warnings: list[str]
+    ) -> NDArray[np.float64]:
+        """Nodal heat from every `HeatFlux` boundary, W, shape (n_nodes,).
+
+        Takes the boundary list directly rather than a `ThermalCase` so
+        `TransientConductionSolver` can call this on `TransientThermalCase.
+        boundaries` without building a throwaway steady case just to hold them.
+        """
         heat = np.zeros(mesh.node_count, dtype=np.float64)
-        for index, boundary in enumerate(case.boundaries):
+        for index, boundary in enumerate(boundaries):
             if not isinstance(boundary, HeatFlux):
                 continue
             label = boundary.name or f"heat_flux[{index}]"
@@ -967,3 +991,381 @@ def hollow_cylinder_temperature_k(
     r = np.asarray(radius_mm, dtype=np.float64)
     ratio = np.log(r / inner_radius_mm) / np.log(outer_radius_mm / inner_radius_mm)
     return np.asarray(inner_temperature_k + (outer_temperature_k - inner_temperature_k) * ratio)
+
+
+# -- transient conduction ------------------------------------------------------
+#
+# Master plan E10 task 1: steady conduction is `SteadyConductionSolver` above;
+# this is the residual its own status line named — "no time integration, no
+# heat capacity and no initial condition, so 'how long until it reaches that
+# temperature' is a question this cannot answer". It answers
+#
+#     rho cp dT/dt = div(k grad T) + q_v
+#
+# reusing the steady solver's conductivity assembly and boundary handling
+# unchanged (`ThermalBoundary` is one vocabulary for both), and adding exactly
+# the two things a steady state has none of: a capacitance matrix and a state
+# to step forward from.
+
+
+class TransientThermalCase(BaseModel):
+    """What to solve for a time-stepped conduction run.
+
+    Extends the steady vocabulary with the two things a steady state has none
+    of: a heat capacity (so the part can store energy) and an initial condition
+    (so there is a state to evolve from). `conductivity_w_mk`, `boundaries` and
+    `volumetric_source_w_m3` mean exactly what they mean on `ThermalCase` — this
+    is not a second boundary vocabulary, it is the same one with time added.
+
+    `density_kg_m3` and `specific_heat_j_kgk` sit here for the reason
+    `conductivity_w_mk` sits on `ThermalCase` rather than on `Material`: adding
+    them to `Material` means every material in `app/solve/materials.py` either
+    gains a transcribed value with a citation or gains a `None` the first run
+    refuses by name, and that is a change to make deliberately, not as a side
+    effect of this one. `density_kg_m3` is not read from a `Material` — this
+    case takes it explicitly so a transient run never depends on whether a
+    `Material` happens to be attached somewhere upstream.
+
+    The initial condition is **one number, not a field.** A spatially-varying
+    start is a real thing (a part just pulled from a furnace, carrying a
+    measured gradient already) and it needs an input shape this case does not
+    have — the same "smallest honest shape" question `thermal_load_from_field`'s
+    module comment raises for the coupling seam. Until a caller needs one, a
+    uniform start is the whole of what "initial condition" was missing. A node
+    named by a `FixedTemperature` boundary starts at its prescribed value, not
+    at `initial_temperature_k`, so the field is consistent with its own
+    boundary conditions from the first sample rather than jumping to match them
+    on the first step.
+    """
+
+    name: str = "Transient conduction"
+    conductivity_w_mk: float = Field(gt=0)
+    #: kg/m^3. See the class docstring for why this is not read off a `Material`.
+    density_kg_m3: float = Field(gt=0)
+    #: J/(kg*K). Steel is ~470, aluminium ~900, water ~4180.
+    specific_heat_j_kgk: float = Field(gt=0)
+    boundaries: list[ThermalBoundary] = Field(min_length=1)
+    volumetric_source_w_m3: float = 0.0
+    #: Absolute kelvin, uniform. See the class docstring.
+    initial_temperature_k: float = Field(gt=0)
+    #: Total simulated time, seconds.
+    duration_s: float = Field(gt=0)
+    #: The time increment, seconds — fixed rather than adaptive. An adaptive
+    #: step is future work, not silently assumed here: `duration_s` is divided
+    #: into the nearest whole number of steps of *approximately* this size (see
+    #: `TransientConductionSolver.solve`) so a run always ends exactly at
+    #: `duration_s` rather than stopping short or overshooting it.
+    time_step_s: float = Field(gt=0)
+
+
+class TransientConductionResult(BaseModel):
+    """Summary of a transient run. The temperature history is large and stays
+    out of the DB, the same split `ConductionResult` makes for a single field.
+
+    **Carries no `mesh_convergence`, and the absence is deliberate rather than
+    an oversight.** A transient answer has *two* discretisations — the mesh and
+    the time step — and a single run says nothing about either one's error.
+    Claiming convergence from one field of one solve, the way `ConductionResult`
+    already refuses to, would be worse here: a caller could believe a mesh study
+    had covered the time axis too, or the reverse. Until both are actually swept
+    and assessed, the honest statement is silence, not a field that reads as a
+    check that was never made.
+    """
+
+    name: str
+    time_step_s: float
+    step_count: int
+    final_time_s: float
+    #: Over the final time step only — the field at every step is on
+    #: `TransientThermalField.temperatures_k` for a caller that needs the path,
+    #: not just the destination.
+    min_temperature_k: float
+    max_temperature_k: float
+    min_temperature_node: int
+    max_temperature_node: int
+    node_count: int
+    element_count: int
+    solve_seconds: float
+    warnings: list[str] = Field(default_factory=list)
+
+    def summary(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
+@dataclass
+class TransientThermalField:
+    """Full transient output. `result` is the summary that gets persisted.
+
+    Unlike `ThermalField`, the array here has a time axis — one row per step,
+    not one field total — which is the whole reason this is not `ThermalField`
+    (see `TransientConductionSolver`'s docstring in `app/solve/base.py`).
+    """
+
+    result: TransientConductionResult
+    #: (n_steps + 1,) seconds, starting at 0.
+    times_s: NDArray[np.float64] = field(repr=False)
+    #: (n_steps + 1, n_nodes) absolute kelvin. Row 0 is the initial condition.
+    temperatures_k: NDArray[np.float64] = field(repr=False)
+
+
+def assemble_capacitance(mesh: TetMesh, volumetric_heat_capacity_j_mm3k: float) -> sp.csr_matrix:
+    """Global heat-capacity matrix `integral rho cp N_i N_j dV`, J/K.
+
+    Consistent, not lumped, for the reason `solve.modal.assemble_mass` stays
+    consistent: a lumped (diagonal) capacitance is what an explicit scheme
+    wants and this solver is implicit, so there is no speed to buy by smearing
+    it onto the diagonal, and a real accuracy cost in doing so on tet10, whose
+    quadratic shape functions a lumping scheme cannot integrate exactly.
+    `_unit_mass_matrix` is imported from `solve.modal` rather than re-derived
+    here — it is a scalar `int N_i N_j dV over a unit-volume tet`, the same
+    closed-form barycentric integral this matrix needs, and a second
+    implementation is a second place for the tet10-quartic mistake that
+    function's own docstring warns a naive quadrature rule makes.
+
+    `volumetric_heat_capacity_j_mm3k` is already in the mm system: this
+    function is downstream of the unit boundary and does not convert.
+    """
+    volumes = np.abs(mesh.signed_volumes())
+    unit = _unit_mass_matrix(mesh.element_order)
+    blocks = volumetric_heat_capacity_j_mm3k * volumes[:, None, None] * unit[None, :, :]
+    return _scatter_nodal(mesh.node_count, mesh.connectivity, blocks)
+
+
+class BackwardEulerConductionSolver(TransientConductionSolver):
+    """Time-stepped heat conduction, backward Euler, tet4 and tet10.
+
+    Solves `C dT/dt + K T = F` with `K` exactly `SteadyConductionSolver`'s
+    conductance matrix — the same assembly, the same boundary handling, the
+    same unit boundary — and `C` the heat-capacity matrix above.
+
+    **Backward Euler, not Crank-Nicolson, and that is the choice rather than
+    the easy default.** The trapezoidal rule is second order and backward Euler
+    is only first, but backward Euler is unconditionally free of the
+    oscillation Crank-Nicolson produces on a stiff parabolic system started
+    from a sharp initial condition — a `FixedTemperature` boundary suddenly
+    imposed on a uniform field is exactly that shape, and the ringing does not
+    announce itself as wrong: it is a field that over- and undershoots its own
+    physical bounds for the first few steps and then damps out, which reads as
+    numerical noise rather than as a solver defect. This codebase's
+    verification standard cannot accept a scheme whose correctness depends on
+    the caller choosing a small-enough time step against a criterion it is
+    never told. Backward Euler has no such criterion: it is unconditionally
+    stable **and monotone** — the discrete maximum principle holds, so a field
+    that starts inside the range spanned by the initial condition and the
+    boundary values never leaves it, whatever `time_step_s` is. That is the
+    same reasoning `SteadyConductionSolver._solve_iterative`'s docstring gives
+    for a Jacobi preconditioner over an asymmetric ILU: pick the scheme whose
+    stability is a theorem, not the one that is usually fine.
+
+    **The system matrix is factorised once, not once per step.** Every
+    boundary here is time-invariant for this first version — the case carries
+    one set of boundaries, not one per step — so `C/dt + K` is the same matrix
+    at every step and only the right-hand side changes. Refactorising it at
+    every step would be solving the same linear system thousands of times to
+    get a different answer only because the *forcing* changed, which is real
+    waste at any node count large enough for `degrees_of_freedom` to matter.
+
+    **What this does not do.** Every boundary condition is constant over the
+    run — there is no time-varying `ThermalBoundary` yet, so a duty cycle or a
+    startup transient in the *loads* is out of scope, not silently
+    approximated. And there is no mesh or time-step convergence study, named on
+    `TransientConductionResult` rather than implied by its absence.
+    """
+
+    name = "transient-conduction"
+
+    def solve(self, mesh: TetMesh, case: TransientThermalCase) -> TransientThermalField:
+        started = time.perf_counter()
+        warnings: list[str] = []
+
+        # The unit boundary. Everything below this point is mm-W-K-s.
+        conductivity = case.conductivity_w_mk * CONDUCTIVITY_W_MK_TO_W_MMK
+        source = case.volumetric_source_w_m3 * SOURCE_W_M3_TO_W_MM3
+        capacity = (
+            case.density_kg_m3
+            * case.specific_heat_j_kgk
+            * VOLUMETRIC_CAPACITY_J_M3K_TO_J_MM3K
+        )
+
+        fixed_boundaries = [b for b in case.boundaries if isinstance(b, FixedTemperature)]
+        films = [b for b in case.boundaries if isinstance(b, Convection)]
+
+        step_count = max(1, round(case.duration_s / case.time_step_s))
+        dt = case.duration_s / step_count
+        if abs(dt - case.time_step_s) > 1e-9 * case.time_step_s:
+            warnings.append(
+                f"duration_s ({case.duration_s}) is not an exact multiple of time_step_s "
+                f"({case.time_step_s}); solving {step_count} step(s) of {dt:.6g} s each so "
+                "the run ends exactly at duration_s rather than overshooting it."
+            )
+
+        with observe.span(
+            "solve.conduction",
+            nodes=mesh.node_count,
+            elements=mesh.tet_count,
+            degrees_of_freedom=int(mesh.node_count),
+        ) as timing:
+            timing.set("stage", "assemble")
+            conductance = assemble_conductivity(mesh, conductivity)
+            capacitance = assemble_capacitance(mesh, capacity)
+
+            heat = volumetric_source_load(mesh, source)
+            heat += SteadyConductionSolver._flux_load(mesh, case.boundaries, warnings)
+            film_matrix, film_heat = SteadyConductionSolver._convection_terms(mesh, films, warnings)
+            conductance = (conductance + film_matrix).tocsr()
+            heat += film_heat
+
+            fixed, prescribed = SteadyConductionSolver._prescribed(mesh, fixed_boundaries)
+            free = np.setdiff1d(np.arange(mesh.node_count), fixed)
+            if len(free) == 0:
+                raise SolverError(
+                    "Every node's temperature is prescribed, so there is nothing to evolve "
+                    "forward in time. Leave at least one region free, or read the boundary "
+                    "values directly."
+                )
+
+            temperatures = np.full(mesh.node_count, case.initial_temperature_k, dtype=np.float64)
+            if len(fixed) > 0:
+                temperatures[fixed] = prescribed
+
+            c_ff = capacitance[free][:, free].tocsc()
+            k_ff = conductance[free][:, free].tocsc()
+            applied = heat[free]
+            if len(fixed) > 0:
+                applied = applied - conductance[free][:, fixed] @ prescribed
+
+            timing.set("stage", "factorise")
+            # C/dt + K is symmetric positive definite whatever K alone is — C is
+            # SPD (a capacitance matrix with a positive capacity is, the same
+            # argument `assemble_mass` relies on) and K is at worst positive
+            # semi-definite, so the sum can never be singular the way a purely
+            # steady, thermally-floating K can be. Unlike `SteadyConductionSolver`,
+            # there is no `_thermally_floating` refusal here: a fully insulated
+            # part with an internal source genuinely has no steady state, and an
+            # ever-rising temperature is the correct transient answer to that,
+            # not a defect to catch.
+            system = (c_ff / dt + k_ff).tocsc()
+            step = self._stepper(system)
+
+            timing.set("stage", "step")
+            timing.set("steps", step_count)
+            history = np.empty((step_count + 1, mesh.node_count), dtype=np.float64)
+            history[0] = temperatures
+            free_temperature = temperatures[free]
+            for index in range(1, step_count + 1):
+                rhs = (c_ff / dt) @ free_temperature + applied
+                free_temperature = step(rhs)
+                if not np.all(np.isfinite(free_temperature)):
+                    raise SolverError(
+                        "The temperature field stopped being finite while stepping from "
+                        f"t={(index - 1) * dt:.6g} s to t={index * dt:.6g} s. Backward Euler is "
+                        "unconditionally stable for this system, so a non-finite value here "
+                        "means the assembled matrix is degenerate, not that the step was too "
+                        "large."
+                    )
+                snapshot = temperatures.copy()
+                snapshot[free] = free_temperature
+                if len(fixed) > 0:
+                    snapshot[fixed] = prescribed
+                history[index] = snapshot
+                temperatures = snapshot
+
+        final = history[-1]
+        result = TransientConductionResult(
+            name=case.name,
+            time_step_s=dt,
+            step_count=step_count,
+            final_time_s=step_count * dt,
+            min_temperature_k=float(final.min()),
+            max_temperature_k=float(final.max()),
+            min_temperature_node=int(np.argmin(final)),
+            max_temperature_node=int(np.argmax(final)),
+            node_count=mesh.node_count,
+            element_count=mesh.tet_count,
+            solve_seconds=time.perf_counter() - started,
+            warnings=warnings,
+        )
+        return TransientThermalField(
+            result=result,
+            times_s=np.arange(step_count + 1, dtype=np.float64) * dt,
+            temperatures_k=history,
+        )
+
+    @staticmethod
+    def _stepper(
+        system: sp.csc_matrix,
+    ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
+        """A reusable step for the constant system matrix, direct or iterative.
+
+        Same crossover `SteadyConductionSolver` uses, and the direct branch is
+        where the "factorised once" claim above actually pays for itself:
+        `splu` amortises its factorisation over every step, where computing a
+        fresh CG Krylov subspace each call would not, so the iterative branch
+        below is still worth having only past the node count where a direct
+        factorisation itself becomes the bottleneck — the same reasoning, not
+        a new one.
+        """
+        if system.shape[0] > _ITERATIVE_THRESHOLD_NODES:
+            inverse_diagonal = 1.0 / system.diagonal()
+            precond = spla.LinearOperator(
+                system.shape, matvec=lambda x: inverse_diagonal * x, dtype=np.float64
+            )
+
+            def solve_iterative(rhs: NDArray[np.float64]) -> NDArray[np.float64]:
+                solution, info = spla.cg(
+                    system, rhs, rtol=_RESIDUAL_TOLERANCE, maxiter=5000, M=precond
+                )
+                if info != 0:
+                    raise SolverError(
+                        f"Conjugate gradient failed to converge on a transient step (info={info})."
+                    )
+                return np.asarray(solution, dtype=np.float64)
+
+            return solve_iterative
+
+        lu = spla.splu(system, permc_spec="COLAMD")
+
+        def solve_direct(rhs: NDArray[np.float64]) -> NDArray[np.float64]:
+            return np.asarray(lu.solve(rhs), dtype=np.float64)
+
+        return solve_direct
+
+
+def lumped_capacitance_temperature_k(
+    initial_temperature_k: float,
+    ambient_temperature_k: float,
+    film_coefficient_w_m2k: float,
+    surface_area_mm2: float,
+    volume_mm3: float,
+    density_kg_m3: float,
+    specific_heat_j_kgk: float,
+    time_s: float,
+) -> float:
+    """Closed form for a body whose internal conduction is fast enough that its
+    temperature is uniform at every instant — the Biot-number-to-zero limit:
+
+        T(t) = T_inf + (T0 - T_inf) exp(-t / tau),   tau = rho cp V / (h A)
+
+    This is the transient counterpart of `convecting_bar_tip_temperature_k`:
+    both are the one closed form available once a convection film is in the
+    problem, and both need a small Biot number to hold, here made small by
+    choosing a high conductivity relative to `h` and the part's own size in the
+    test that checks a finite-element field against it rather than a single
+    lumped number — so the whole field should track this everywhere, not only
+    on average.
+
+    Here rather than in the tests, for the reason
+    `thermal.restrained_bar_stress_mpa` is: the expected physics belongs next
+    to the implementation it checks.
+    """
+    surface_area_m2 = surface_area_mm2 * 1e-6
+    volume_m3 = volume_mm3 * 1e-9
+    tau = (
+        density_kg_m3
+        * specific_heat_j_kgk
+        * volume_m3
+        / (film_coefficient_w_m2k * surface_area_m2)
+    )
+    return ambient_temperature_k + (initial_temperature_k - ambient_temperature_k) * np.exp(
+        -time_s / tau
+    )

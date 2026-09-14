@@ -13,10 +13,11 @@ written for the model, not for a docs page.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 from app.solve.materials import MATERIALS
 from app.solve.types import LoadCase
+from app.verify.standards import NOT_VALIDATED
 
 Verdict = Literal["safe", "marginal", "yields"]
 Confidence = Literal["high", "medium", "low"]
@@ -77,6 +78,18 @@ class ResultInterpretation(BaseModel):
             "Linear static assumes small deflection, static loading and no contact."
         )
     )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def validation(self) -> str:
+        """That the verdict above is not validated (master plan 20.3).
+
+        Written by the server, never by the model: a computed field is left out of
+        the validation-mode schema the providers constrain decoding with, so the
+        model is not asked to produce it and cannot soften it. It sits beside the
+        one word in the product most likely to be read as a prediction -- `safe`.
+        """
+        return NOT_VALIDATED
 
 
 class Discrepancy(BaseModel):

@@ -19,8 +19,8 @@ that string to an audience outside this repository — so a remembered figure
 carrying a plausible citation is indistinguishable, in the published register,
 from one somebody checked. That is the single worst thing this module could
 contain, and it is worth more than the case: a benchmark with an `UNKNOWN`
-target is fully encoded, runs where it can, reports `MEASURED`, and is honestly
-not validated. `MEASURED` is never a pass.
+target is fully encoded, runs where it can, reports `MEASURED`, and honestly
+agrees with nothing. `MEASURED` is never a pass.
 
 **One case is a reminder that this rule earns its keep.** Two vendor manuals
 disagree about FV52's fundamental flexural frequency — one reproduces 44.092 Hz
@@ -32,7 +32,7 @@ reproduces every mode in it to 0.00%. Our own answer converges through 44.10 to
 
 ## What the catalogue reports today
 
-Three cases of five run, and all three validate — FV52 for free vibration, LE10
+Three cases of five run, and all three agree — FV52 for free vibration, LE10
 for linear static on a solid, and LE1 for linear static in plane stress. The
 ratio is the useful output, not an embarrassment: `blockers()` rolls the other
 two up by what is missing, and the answer is now only two things — a shape
@@ -82,6 +82,7 @@ has the publications.
 from __future__ import annotations
 
 import math
+import re
 import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
@@ -241,6 +242,41 @@ SOURCES: Final[dict[str, str]] = {
         "on 2026-09-08."
     ),
 }
+
+
+# -- which P18 revision each source reproduces --------------------------------
+#
+# E20 task 2. P18 — *The Standard NAFEMS Benchmarks* — has been corrected at
+# least twice: Revision 2 corrected LE8, LE10, LE11 and T3, with LE10's target
+# changing in **both magnitude and location**, and Revision 3 corrected LE4,
+# LE7, LE9 and LE10. A target reproduced from a vendor manual is only as good
+# as the P18 revision that manual itself reproduces, so a manual that does not
+# say which revision it credits is a target this catalogue cannot fully place.
+#
+# **Extracted from `SOURCES`, not typed a second time.** Every citation above
+# already states its revision in prose ("reproducing NAFEMS publication TNSB
+# Rev. 3, ..."), because that is where a reviewer reads it from. A second,
+# hand-typed `revision="3"` field next to it would be a second place for the
+# two to disagree the day a citation is edited and the field is not — the same
+# argument `E15 task 3` makes against typing a value a source already carries.
+# `p18_revision` derives the answer instead; `p18_revision_of` walks every
+# `SOURCES` entry and is what `tests/test_verify_nafems.py` checks, so a
+# citation added without a revision fails a test rather than silently leaving
+# a case that "cannot establish the third" implying one instead of saying so.
+
+_P18_REVISION_RE: Final = re.compile(r"TNSB Rev\.\s*(\d+)")
+
+
+def p18_revision(source: str) -> str | None:
+    """Which P18 (TNSB) revision a `SOURCES` citation credits, or `None` when
+    the citation does not say — never guessed, only read."""
+    match = _P18_REVISION_RE.search(source)
+    return match.group(1) if match else None
+
+
+def p18_revision_of(source_key: str) -> str | None:
+    """The P18 revision the named `SOURCES` entry reproduces."""
+    return p18_revision(SOURCES[source_key])
 
 
 # -- what stops a case running -----------------------------------------------
@@ -779,7 +815,7 @@ LE1_ELEMENT_SIZES_MM: Final[tuple[float, ...]] = (74.0, 55.0, 40.0)
 #: not yet strictly in the asymptotic range, so the GCI understates the true
 #: discretisation error. It does: Richardson extrapolates these three grids to
 #: about 92.46 MPa where the reference is 92.7, a gap five times the 0.05% GCI.
-#: The case still validates on the measured value against the published one,
+#: The case still agrees on the measured value against the published one,
 #: which is what the target is for; the caution rides along so nobody reads a
 #: 0.05% GCI as a claim that the answer is good to 0.05%.
 LE1_FORMAL_ORDER: Final = 2.0
@@ -1249,7 +1285,7 @@ CASES: Final[tuple[Case, ...]] = (
                 "2 for a quadratic triangle, so these grids are not strictly in the "
                 "asymptotic range and the 0.05% GCI understates the discretisation "
                 "error — Richardson extrapolates them to ~92.46 MPa where the reference "
-                "is 92.7. The case validates on the measured value against the "
+                "is 92.7. The case agrees on the measured value against the "
                 "published one, which is what the target is for; the discrepancy is "
                 "published rather than smoothed away.",
             ),
@@ -1365,7 +1401,7 @@ CASES: Final[tuple[Case, ...]] = (
                 "ten dimensions agree exactly and the tenth was settled by arithmetic "
                 "on the figure's own annotations. The full record, including what is "
                 "inferred and from what, is docs/nafems-le11-geometry.md.",
-                "Expect UNCONVERGED rather than VALIDATED, and that is the finding. "
+                "Expect UNCONVERGED rather than AGREED, and that is the finding. "
                 "Point A is a corner — the inner sphere meeting the base plane — so the "
                 "quantity is a point stress in a steep gradient, and over a seven-size "
                 "sweep the answer scattered between -105.3 and -107.1 MPa: every level "
@@ -1475,6 +1511,8 @@ __all__ = [
     "fv52_case",
     "fv52_fixtures",
     "fv52_mesh",
+    "p18_revision",
+    "p18_revision_of",
     "report",
     "run_fv52",
 ]

@@ -163,24 +163,24 @@ COMMITMENTS: Final[tuple[Commitment, ...]] = (
     Commitment(
         id="a-benchmark-target-must-be-citable",
         we_will_not=(
-            "We will not publish a validation target we cannot cite. A target whose "
+            "We will not publish a benchmark target we cannot cite. A target whose "
             "published value we could not verify is recorded as UNKNOWN and is "
             "forbidden from carrying a number at all."
         ),
         why=(
             "A recalled or reverse-engineered reference value converts 'we have not "
-            "validated this' into 'we validated this and it passed', and nobody "
+            "checked this' into 'we checked this and it agreed', and nobody "
             "downstream can tell the difference."
         ),
         enforcement=Enforcement.MECHANICAL,
         enforced_by=("app/verify/benchmarks.py", "tests/test_verify_benchmarks.py"),
     ),
     Commitment(
-        id="what-is-not-validated-is-published",
+        id="what-does-not-agree-is-published",
         we_will_not=(
-            "We will not publish a validation register that lists only what passed. "
-            "Every analysis the product reports a number from appears, validated or "
-            "not, with the reason."
+            "We will not publish a verification register that lists only what agreed. "
+            "Every analysis the product reports a number from appears, agreeing with "
+            "a benchmark or not, with the reason."
         ),
         why=(
             "A register of three green rows on a product with eleven analyses is a "

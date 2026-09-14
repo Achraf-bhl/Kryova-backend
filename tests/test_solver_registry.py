@@ -21,15 +21,17 @@ import sys
 
 import pytest
 
-from app.solve.base import ConductionSolver, Solver
+from app.solve.base import ConductionSolver, Solver, TransientConductionSolver
 from app.solve.registry import (
     CALCULIX,
     INTERNAL,
     available,
     build_conduction_solver,
     build_solver,
+    build_transient_conduction_solver,
     conduction_available,
     solver_version,
+    transient_conduction_available,
 )
 from app.solve.types import SolverError
 from tests.test_simulations import project_with_geometry  # noqa: F401 - fixture
@@ -150,6 +152,35 @@ class TestTheConductionRegistry:
 
         version = solver_version(INTERNAL)
         assert version is not None and version.startswith(APP_VERSION)
+
+
+class TestTheTransientConductionRegistry:
+    """The transient sibling of `TestTheConductionRegistry` — a third table for
+    the third `Conduction*` ABC, for the same reason the first two are kept
+    apart rather than merged; see `_TRANSIENT_CONDUCTION_FACTORIES`'s comment
+    in `app/solve/registry.py`."""
+
+    def test_the_internal_name_builds_a_transient_conduction_solver(self) -> None:
+        assert isinstance(build_transient_conduction_solver(INTERNAL), TransientConductionSolver)
+
+    def test_the_transient_conduction_table_is_stable_and_sorted(self) -> None:
+        assert transient_conduction_available() == (INTERNAL,)
+
+    def test_none_of_the_three_tables_answer_for_each_other(self) -> None:
+        built = build_transient_conduction_solver(INTERNAL)
+        assert not isinstance(built, Solver)
+        assert not isinstance(built, ConductionSolver)
+        assert not isinstance(build_conduction_solver(INTERNAL), TransientConductionSolver)
+
+    def test_an_unknown_name_names_what_there_is(self) -> None:
+        with pytest.raises(SolverError) as refused:
+            build_transient_conduction_solver("condution")
+
+        assert "internal" in str(refused.value)
+
+    def test_the_recorded_name_is_the_solvers_own_not_the_setting(self) -> None:
+        assert build_transient_conduction_solver(INTERNAL).name == "transient-conduction"
+        assert build_transient_conduction_solver(INTERNAL).name != INTERNAL
 
 
 class TestTheImportStaysLazy:

@@ -11,7 +11,7 @@ appear. A case that ran and had nothing to compare against must not be counted.
 A target the benchmark layer would refuse must not be reprinted here through the
 side door. And each of those is checked twice — once that the honest thing
 happens, once that the dishonest thing *would* have happened without the guard —
-because a test asserting `validated == 0` on a register that is empty for
+because a test asserting `agreeing == 0` on a register that is empty for
 unrelated reasons proves nothing at all.
 
 Offline: no database, no solver, no kernel. Every outcome here is constructed
@@ -44,10 +44,10 @@ from app.verify.register import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-#: The analyses the shipped register reports as validated right now. Named
+#: The analyses the shipped register reports as agreeing right now. Named
 #: rather than counted, so a new benchmark has to be declared here instead of
 #: nudging a number nobody reads.
-VALIDATED_TODAY = {"modal", "linear-static"}
+AGREEING_TODAY = {"modal", "linear-static"}
 
 
 def _target(*, value: float = 100.0, tolerance: float = 0.02) -> Target:
@@ -90,9 +90,9 @@ def _outcome(
 # ---------------------------------------------------------------------------
 
 
-class TestAnUnvalidatedAnalysisAppears:
-    """The register's central claim: what is *not* validated is as visible as
-    what is. Everything else in this file is a defence of that one."""
+class TestAnUnconfirmedAnalysisAppears:
+    """The register's central claim: what does *not* agree is as visible as what
+    does. Everything else in this file is a defence of that one."""
 
     def test_every_declared_analysis_gets_a_row_whether_or_not_a_case_touches_it(
         self,
@@ -114,30 +114,30 @@ class TestAnUnvalidatedAnalysisAppears:
         touched = {"linear-static", "thermal-stress", "modal"}
         assert all(by_id[name].because != NO_BENCHMARK for name in touched)
         assert all(
-            row.because == NO_BENCHMARK and row.standing is Standing.UNVALIDATED
+            row.because == NO_BENCHMARK and row.standing is Standing.UNCONFIRMED
             for row in register.rows
             if row.analysis.id not in touched
         )
 
-    def test_the_shipped_register_says_which_two_analyses_are_validated(self) -> None:
+    def test_the_shipped_register_says_which_two_analyses_agree(self) -> None:
         """The honest state of this codebase today, asserted rather than
         described, so the day it changes somebody has to come here and say so.
 
-        It changed twice on 2026-09-08 and somebody did, both times. Modal is
-        validated against NAFEMS FV52 and linear static against LE10; the other
+        It changed twice on 2026-09-08 and somebody did, both times. Modal agrees
+        with NAFEMS FV52 and linear static with LE10; the other
         nine are not, and `complete` stays false — which is the number this
         register exists to publish. Asserted as the *set of names* rather than as
         a count, so a third case still has to be declared here rather than
         quietly moving a number.
         """
         register = published_register()
-        validated = {
-            row.analysis.id for row in register.rows if row.standing is Standing.VALIDATED
+        agreeing = {
+            row.analysis.id for row in register.rows if row.standing is Standing.AGREES
         }
 
-        assert validated == VALIDATED_TODAY
+        assert agreeing == AGREEING_TODAY
         assert register.complete is False
-        assert len(register.unvalidated) == len(ANALYSES) - len(VALIDATED_TODAY)
+        assert len(register.unconfirmed) == len(ANALYSES) - len(AGREEING_TODAY)
 
     def test_a_case_this_product_cannot_run_is_published_with_the_reason(self) -> None:
         """A benchmark that executes must not be reachable from a public route.
@@ -163,21 +163,29 @@ class TestAnUnvalidatedAnalysisAppears:
         assert register.summary.measured_only == 0
 
     def test_the_headline_carries_the_denominator(self) -> None:
-        """'3 analyses validated' is true of a product with three and of a
-        product with thirty. The sentence must contain both numbers."""
+        """'3 analyses agree' is true of a product with three and of a product
+        with thirty. The sentence must contain both numbers."""
         register = published_register()
         headline = register.headline()
 
-        assert f"{len(VALIDATED_TODAY)} of {len(ANALYSES)}" in headline
-        assert f"{len(ANALYSES) - len(VALIDATED_TODAY)} are not" in headline
+        assert f"{len(AGREEING_TODAY)} of {len(ANALYSES)}" in headline
+        assert f"{len(ANALYSES) - len(AGREEING_TODAY)} do not yet" in headline
+
+    def test_the_headline_says_none_of_it_is_validation(self) -> None:
+        """Master plan 20.3. The headline is the sentence that gets quoted, so
+        the one fact a quotation must not lose is in it rather than in a note."""
+        headline = published_register().headline().lower()
+
+        assert "none of it is validation" in headline
+        assert "physical part" in headline
 
     def test_one_benchmarked_analysis_does_not_hide_the_rest(self) -> None:
-        register = Register.build([_outcome(Outcome.VALIDATED, deviation=0.001)])
+        register = Register.build([_outcome(Outcome.AGREED, deviation=0.001)])
 
-        validated = [row for row in register.rows if row.validated]
-        assert [row.analysis.id for row in validated] == ["linear-static"]
+        agreeing = [row for row in register.rows if row.agrees]
+        assert [row.analysis.id for row in agreeing] == ["linear-static"]
         # The point: ten other analyses are still on the page.
-        assert len(register.unvalidated) == len(ANALYSES) - 1
+        assert len(register.unconfirmed) == len(ANALYSES) - 1
         assert register.complete is False
 
     def test_breaking_it_the_register_would_read_green_if_it_only_listed_what_ran(
@@ -191,35 +199,35 @@ class TestAnUnvalidatedAnalysisAppears:
         produces `complete=True` and a headline reading '1 of 1'. Nothing about
         the evidence changed; only the denominator did.
         """
-        outcomes = [_outcome(Outcome.VALIDATED, deviation=0.001)]
+        outcomes = [_outcome(Outcome.AGREED, deviation=0.001)]
         only_the_benchmarked_one = [a for a in ANALYSES if a.id == "linear-static"]
 
         flattering = Register.build(outcomes, analyses=only_the_benchmarked_one)
 
         assert flattering.complete is True
         assert "1 of 1" in flattering.headline()
-        assert flattering.unvalidated == ()
+        assert flattering.unconfirmed == ()
 
-    def test_the_not_validated_section_is_its_own_key_in_the_payload(self) -> None:
+    def test_the_unconfirmed_section_is_its_own_key_in_the_payload(self) -> None:
         """'Filter the analyses array yourself' is not as easy to find as what
-        passed, so the unvalidated rows are published twice on purpose."""
+        passed, so the unconfirmed rows are published twice on purpose."""
         payload = published_register().to_dict()
 
-        assert {row["id"] for row in payload["not_validated"]} == {
-            a.id for a in ANALYSES if a.id not in VALIDATED_TODAY
+        assert {row["id"] for row in payload["unconfirmed"]} == {
+            a.id for a in ANALYSES if a.id not in AGREEING_TODAY
         }
-        assert all(row["because"] for row in payload["not_validated"])
+        assert all(row["because"] for row in payload["unconfirmed"])
 
-    def test_a_row_that_is_not_validated_must_give_a_reason(self) -> None:
+    def test_a_row_that_does_not_agree_must_give_a_reason(self) -> None:
         with pytest.raises(ValueError) as refused:
-            AnalysisRow(analysis=ANALYSES[0], standing=Standing.UNVALIDATED, because="   ")
+            AnalysisRow(analysis=ANALYSES[0], standing=Standing.UNCONFIRMED, because="   ")
 
         assert "reason" in str(refused.value).lower()
 
 
 class TestABenchmarkForAnUndeclaredAnalysisIsNotSwallowed:
     def test_it_is_named_rather_than_filed_under_other(self) -> None:
-        register = Register.build([_outcome(Outcome.VALIDATED, analysis="fluid-dynamics")])
+        register = Register.build([_outcome(Outcome.AGREED, analysis="fluid-dynamics")])
 
         assert register.uncatalogued == ("fluid-dynamics",)
         assert register.complete is False
@@ -231,12 +239,12 @@ class TestABenchmarkForAnUndeclaredAnalysisIsNotSwallowed:
         """A typo in a benchmark's `analysis` string would otherwise hide a whole
         family of cases while the register looked finished."""
         outcomes = [
-            _outcome(Outcome.VALIDATED, analysis=a.id, benchmark_id=a.id, deviation=0.001)
+            _outcome(Outcome.AGREED, analysis=a.id, benchmark_id=a.id, deviation=0.001)
             for a in ANALYSES
         ]
         assert Register.build(outcomes).complete is True
 
-        with_a_typo = [*outcomes, _outcome(Outcome.VALIDATED, analysis="lienar-static")]
+        with_a_typo = [*outcomes, _outcome(Outcome.AGREED, analysis="lienar-static")]
         assert Register.build(with_a_typo).complete is False
 
 
@@ -245,16 +253,16 @@ class TestABenchmarkForAnUndeclaredAnalysisIsNotSwallowed:
 # ---------------------------------------------------------------------------
 
 
-class TestARanButUncomparedCaseIsNotValidation:
-    def test_a_measured_only_case_leaves_the_analysis_unvalidated(self) -> None:
+class TestARanButUncomparedCaseIsNotAgreement:
+    def test_a_measured_only_case_leaves_the_analysis_unconfirmed(self) -> None:
         register = Register.build(
             [_outcome(Outcome.MEASURED, target=_unknown_target(), measured=101.0)]
         )
         row = next(r for r in register.rows if r.analysis.id == "linear-static")
 
-        assert row.standing is Standing.UNVALIDATED
+        assert row.standing is Standing.UNCONFIRMED
         assert row.accuracy is None
-        assert register.summary.validated == 0
+        assert register.summary.agreeing == 0
         assert register.summary.measured_only == 1
         assert "None of these is a pass" in row.because
 
@@ -268,24 +276,24 @@ class TestARanButUncomparedCaseIsNotValidation:
             r for r in register.to_dict()["analyses"] if r["analysis"]["id"] == "linear-static"
         )
 
-        assert row["benchmarks"][0]["counts_as_validated"] is False
-        assert row["validated"] is False
+        assert row["benchmarks"][0]["counts_as_agreement"] is False
+        assert row["agrees_with_a_benchmark"] is False
 
-    def test_an_unconverged_case_leaves_the_analysis_unvalidated(self) -> None:
+    def test_an_unconverged_case_leaves_the_analysis_unconfirmed(self) -> None:
         register = Register.build([_outcome(Outcome.UNCONVERGED)])
         row = next(r for r in register.rows if r.analysis.id == "linear-static")
 
-        assert row.standing is Standing.UNVALIDATED
+        assert row.standing is Standing.UNCONFIRMED
         assert register.summary.unconverged == 1
-        assert register.summary.validated == 0
+        assert register.summary.agreeing == 0
 
-    def test_a_blocked_case_leaves_the_analysis_unvalidated(self) -> None:
+    def test_a_blocked_case_leaves_the_analysis_unconfirmed(self) -> None:
         register = Register.build([_outcome(Outcome.BLOCKED)])
 
         assert register.summary.blocked == 1
-        assert register.summary.validated == 0
+        assert register.summary.agreeing == 0
 
-    def test_a_deviated_case_is_disputed_rather_than_merely_unvalidated(self) -> None:
+    def test_a_deviated_case_is_disputed_rather_than_merely_unconfirmed(self) -> None:
         """Louder than 'nobody checked': somebody checked and it missed."""
         register = Register.build([_outcome(Outcome.DEVIATED, deviation=0.31)])
         row = next(r for r in register.rows if r.analysis.id == "linear-static")
@@ -296,30 +304,30 @@ class TestARanButUncomparedCaseIsNotValidation:
 
     def test_one_deviated_case_beside_nine_passes_still_disputes_the_analysis(self) -> None:
         outcomes = [
-            _outcome(Outcome.VALIDATED, benchmark_id=f"ok-{i}", deviation=0.001) for i in range(9)
+            _outcome(Outcome.AGREED, benchmark_id=f"ok-{i}", deviation=0.001) for i in range(9)
         ]
         outcomes.append(_outcome(Outcome.DEVIATED, benchmark_id="miss", deviation=0.4))
 
         row = next(r for r in Register.build(outcomes).rows if r.analysis.id == "linear-static")
         assert row.standing is Standing.DISPUTED
 
-    def test_breaking_it_only_a_validated_case_moves_the_standing(self) -> None:
+    def test_breaking_it_only_an_agreed_case_moves_the_standing(self) -> None:
         """The positive control. Without it every assertion above would also
-        pass on a register that could never say `validated` at all."""
+        pass on a register that could never say `agrees` at all."""
         for outcome in (Outcome.MEASURED, Outcome.UNCONVERGED, Outcome.BLOCKED, Outcome.ERRORED):
             target = _unknown_target() if outcome is Outcome.MEASURED else _target()
             built = Register.build([_outcome(outcome, target=target)])
-            assert built.summary.validated == 0, outcome
+            assert built.summary.agreeing == 0, outcome
 
-        passing = Register.build([_outcome(Outcome.VALIDATED, deviation=0.004)])
-        assert passing.summary.validated == 1
+        passing = Register.build([_outcome(Outcome.AGREED, deviation=0.004)])
+        assert passing.summary.agreeing == 1
 
 
 class TestAccuracyIsTheWorstCase:
     def test_it_reports_the_worst_deviation_not_the_average(self) -> None:
         outcomes = [
-            _outcome(Outcome.VALIDATED, benchmark_id="a", deviation=0.001),
-            _outcome(Outcome.VALIDATED, benchmark_id="b", deviation=-0.018),
+            _outcome(Outcome.AGREED, benchmark_id="a", deviation=0.001),
+            _outcome(Outcome.AGREED, benchmark_id="b", deviation=-0.018),
         ]
         row = next(r for r in Register.build(outcomes).rows if r.analysis.id == "linear-static")
 
@@ -349,7 +357,7 @@ class TestATargetTheBenchmarkLayerWouldRefuseIsNotReprinted:
     def test_an_unknown_target_carrying_a_number_has_the_number_withheld(self) -> None:
         smuggled = self._smuggled(basis=TargetBasis.UNKNOWN, reason="never checked")
         register = Register.build(
-            [_outcome(Outcome.VALIDATED, target=smuggled, measured=1234.5, deviation=0.0001)]
+            [_outcome(Outcome.AGREED, target=smuggled, measured=1234.5, deviation=0.0001)]
         )
 
         payload = register.to_dict()
@@ -358,23 +366,23 @@ class TestATargetTheBenchmarkLayerWouldRefuseIsNotReprinted:
         assert row["benchmarks"][0]["target"]["source"] == WITHHELD
         assert "1234.5678" not in json.dumps(payload)
 
-    def test_a_refused_target_cannot_validate_its_analysis(self) -> None:
+    def test_a_refused_target_cannot_make_its_analysis_agree(self) -> None:
         """The verdict was computed against a target the register has just
         refused to print, so the verdict cannot stand either."""
         smuggled = self._smuggled(source="   ")
         register = Register.build(
-            [_outcome(Outcome.VALIDATED, target=smuggled, deviation=0.0001)]
+            [_outcome(Outcome.AGREED, target=smuggled, deviation=0.0001)]
         )
         row = next(r for r in register.rows if r.analysis.id == "linear-static")
 
-        assert row.validated is False
+        assert row.agrees is False
         assert row.standing is Standing.DISPUTED
-        assert register.summary.validated == 0
+        assert register.summary.agreeing == 0
         assert register.summary.refused_targets == 1
 
     def test_the_refusal_itself_is_published(self) -> None:
         register = Register.build(
-            [_outcome(Outcome.VALIDATED, target=self._smuggled(source=""), deviation=0.0)]
+            [_outcome(Outcome.AGREED, target=self._smuggled(source=""), deviation=0.0)]
         )
         row = next(r for r in register.rows if r.analysis.id == "linear-static")
 
@@ -384,15 +392,15 @@ class TestATargetTheBenchmarkLayerWouldRefuseIsNotReprinted:
 
     def test_breaking_it_an_intact_target_is_published_in_full(self) -> None:
         """The guard watched from the other side. The same case with a target
-        that was never tampered with validates and prints its citation, so the
+        that was never tampered with agrees and prints its citation, so the
         assertions above are about the tampering and not about the plumbing."""
         register = Register.build(
-            [_outcome(Outcome.VALIDATED, target=_target(value=1234.5678), deviation=0.0001)]
+            [_outcome(Outcome.AGREED, target=_target(value=1234.5678), deviation=0.0001)]
         )
         row = next(r for r in register.rows if r.analysis.id == "linear-static")
         published = row.to_dict()["benchmarks"][0]["target"]
 
-        assert row.standing is Standing.VALIDATED
+        assert row.standing is Standing.AGREES
         assert row.refusals == ()
         assert published["value"] == pytest.approx(1234.5678)
         assert published["source"] == "NAFEMS LE1, elliptic membrane"
@@ -448,7 +456,7 @@ class TestThePublishedSuiteCannotRunAnything:
         )
 
         assert_publishable(blocked)
-        assert Register.build(_blocked_outcomes()).summary.validated == 0
+        assert Register.build(_blocked_outcomes()).summary.agreeing == 0
 
 
 # ---------------------------------------------------------------------------
@@ -492,8 +500,8 @@ class TestTheDeclaredAnalyses:
             )
 
     def test_closed_form_checks_are_labelled_as_verification_in_the_payload(self) -> None:
-        """The ASME V&V 20 split, defended at the one place it would be lost: a
-        reader seeing a list of closed-form checks under a key called
+        """The verification/validation split, defended at the one place it would
+        be lost: a reader seeing a list of closed-form checks under a key called
         `closed_form_checks` would reasonably read them as the validation."""
         payload = published_register().to_dict()
         rows = {row["analysis"]["id"]: row for row in payload["analyses"]}
@@ -501,12 +509,12 @@ class TestTheDeclaredAnalyses:
         assert rows["linear-static"]["analysis"]["verification_closed_form_checks"]
 
         # The split is only visible on an analysis that has closed-form checks
-        # and is *not* validated. Until 2026-09-08 linear static was the example;
-        # LE10 validated it, so the example moved to buckling, which is checked
-        # against the Euler column and has no published benchmark behind it.
+        # and agrees with no benchmark. Until 2026-09-08 linear static was the
+        # example; LE10 agreed with it, so the example moved to buckling, which is
+        # checked against the Euler column and has no published benchmark.
         buckling = rows["buckling"]
         assert buckling["analysis"]["verification_closed_form_checks"]
-        assert buckling["validated"] is False
+        assert buckling["agrees_with_a_benchmark"] is False
         assert any("Verification and validation are different" in n for n in payload["notes"])
 
 
@@ -652,9 +660,9 @@ class TestTheNotesDoNotContradictTheNumbers:
     """The page's prose is published alongside its counts, and nothing was
     checking that the two agreed.
 
-    They stopped agreeing the day a third case validated: a note still read
-    "Nothing in this register is validated today" while the summary beside it
-    said two analyses were. That is worse on a trust page than either statement
+    They stopped agreeing the day a third case agreed with its benchmark: a note
+    still read "Nothing in this register is validated today" while the summary
+    beside it said two analyses were. That is worse on a trust page than either statement
     alone — a reader cannot tell which half is stale, so neither is usable, and
     the whole value of the page is that a reader does not have to decide that.
 
@@ -662,26 +670,26 @@ class TestTheNotesDoNotContradictTheNumbers:
     can be kept honest is a test that reads both.
     """
 
-    def test_no_note_claims_nothing_is_validated_when_something_is(self) -> None:
+    def test_no_note_claims_nothing_agrees_when_something_does(self) -> None:
         register = published_register()
         prose = " ".join(register.notes).lower()
 
-        if register.summary.validated > 0:
-            for claim in ("nothing in this register is validated", "none is validated"):
+        if register.summary.agreeing > 0:
+            for claim in ("nothing in this register agrees", "none agrees"):
                 assert claim not in prose, (
                     f"a note says {claim!r} while the summary reports "
-                    f"{register.summary.validated} validated analyses"
+                    f"{register.summary.agreeing} agreeing analyses"
                 )
 
     def test_the_notes_say_the_page_never_runs_a_benchmark(self) -> None:
         """`assert_publishable` enforces it in code; a reader of the page needs
-        to be told, because a validated row otherwise reads as something this
+        to be told, because an agreeing row otherwise reads as something this
         route computed on request."""
         prose = " ".join(published_register().notes).lower()
 
         assert "never runs a benchmark" in prose
 
-    def test_the_notes_explain_that_a_validated_row_can_expire(self) -> None:
+    def test_the_notes_explain_that_an_agreeing_row_can_expire(self) -> None:
         """The fingerprint is what separates this page from a cached green tick,
         and it is invisible unless the page says so."""
         prose = " ".join(published_register().notes).lower()
@@ -690,10 +698,79 @@ class TestTheNotesDoNotContradictTheNumbers:
         assert "discarded" in prose
 
     def test_the_verification_and_validation_split_is_still_stated_first(self) -> None:
-        """ASME V&V 20's distinction is the one thing a reader must have before
-        reading anything else on the page: the closed-form checks in the same
-        payload are verification, and reading them as validation is the exact
-        conflation this register exists to prevent."""
+        """ASME's distinction is the one thing a reader must have before reading
+        anything else on the page: the closed-form checks and the benchmark
+        agreements in the same payload are verification, and reading them as
+        validation is the exact conflation this register exists to prevent."""
         first = published_register().notes[0].lower()
 
         assert "verification and validation are different questions" in first
+
+    def test_the_first_note_no_longer_calls_a_benchmark_validation(self) -> None:
+        """Master plan 20.3, and the defect it found. Until 2026-09-14 this note
+        told readers validation "is answered only by a published benchmark with a
+        published result". A NAFEMS target answers a mathematical problem, so
+        agreeing with one is code verification; the note must now say that, and
+        say that validation needs measurements of a physical part."""
+        first = published_register().notes[0].lower()
+
+        assert "answered only by a published benchmark" not in first
+        assert "code verification" in first
+        assert "measurements of a physical part" in first
+
+
+# ---------------------------------------------------------------------------
+# 8. Nothing on the page is validation (master plan 20.3)
+# ---------------------------------------------------------------------------
+
+
+class TestTheRegisterSaysNothingIsValidated:
+    """The register was "the validation register" until 2026-09-14, with a
+    best standing of `VALIDATED`. Agreeing with a published reference solution
+    is code verification (`app.verify.standards.DEFINITIONS`), so these pin the
+    corrected vocabulary where a reader of the JSON actually meets it."""
+
+    def test_the_payload_carries_the_not_validated_statement(self) -> None:
+        from app.verify.standards import NOT_VALIDATED
+
+        block = published_register().to_dict()["validation"]
+
+        assert block["validated"] is False
+        assert block["statement"] == NOT_VALIDATED
+        assert block["evidence"]["validation"] == []
+        assert {term["term"] for term in block["terms"]} >= {"verification", "validation"}
+
+    def test_every_published_benchmark_is_labelled_as_code_verification(self) -> None:
+        register = Register.build([_outcome(Outcome.AGREED, deviation=0.001)])
+        row = next(
+            r for r in register.to_dict()["analyses"] if r["analysis"]["id"] == "linear-static"
+        )
+
+        assert row["benchmarks"][0]["evidence"] == "code-verification"
+
+    def test_a_convergence_study_is_labelled_as_solution_verification(self) -> None:
+        outcome = BenchmarkOutcome(
+            benchmark_id="case-1",
+            title="a case",
+            analysis="linear-static",
+            outcome=Outcome.AGREED,
+            target=_target(),
+            relative_deviation=0.001,
+            convergence={"converged": True, "gci_percent": 0.4},
+        )
+        row = next(
+            r
+            for r in Register.build([outcome]).to_dict()["analyses"]
+            if r["analysis"]["id"] == "linear-static"
+        )
+        convergence = row["benchmarks"][0]["convergence"]
+
+        assert convergence["evidence"] == "solution-verification"
+        assert convergence["gci_percent"] == 0.4
+
+    def test_no_standing_or_outcome_is_named_validated(self) -> None:
+        names = {member.name for member in Standing} | {member.name for member in Outcome}
+        values = {str(member) for member in Standing} | {str(member) for member in Outcome}
+
+        assert not any("VALID" in name for name in names)
+        assert not any("valid" in value for value in values)

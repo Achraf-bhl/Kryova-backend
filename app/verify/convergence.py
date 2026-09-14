@@ -171,7 +171,7 @@ class GridLevel:
     caller that asks a plane level for mm^3 is told so instead of answered.
 
     `dimension` defaults to 3 because every study that existed before plane
-    models did was a solid one, including the recorded validation artefact.
+    models did was a solid one, including the recorded benchmark artefact.
     """
 
     element_size_mm: float

@@ -1036,3 +1036,611 @@ class TestAConductionAnalysisCanBeAskedFor:
 
         assert job["status"] == "failed"
         assert "HEAT TRANSFER" in job["error"]
+
+
+class TestATransientConductionRunCanBeAskedFor:
+    """E10 task 1's delivery half: a temperature *history* reaches a request.
+
+    `BackwardEulerConductionSolver` landed on 2026-09-14 verified against the
+    lumped-capacitance cooling curve and reachable from nothing but its tests.
+    These check the route, the row, the archive and the arithmetic through the
+    real path.
+
+    The oracle is an insulated bar with one end held: the 60 mm box starts at
+    300 K, its z-min face is held at 400 K, and every other face says nothing,
+    which is insulated. There is nowhere for heat to leave, so the steady state
+    is the held temperature everywhere. The bar's diffusion time L²/α is about
+    257 s for mild steel, and its slowest mode decays by roughly 0.51 per 100 s
+    backward-Euler step, so thirty steps leave a residual near 2e-9 of the
+    initial 100 K difference. The field must arrive at 400 K.
+    """
+
+    STEPS = 30
+
+    def _case(self, **overrides: object) -> dict:
+        case: dict = {
+            "name": "Bar warming from one end",
+            "conductivity_w_mk": 51.9,  # mild steel
+            "density_kg_m3": 7850.0,
+            "specific_heat_j_kgk": 470.0,
+            "initial_temperature_k": 300.0,
+            "duration_s": 3000.0,
+            "time_step_s": 3000.0 / self.STEPS,
+            "boundaries": [
+                {
+                    "type": "fixed_temperature",
+                    "where": {"type": "face", "axis": "z", "side": "min"},
+                    "temperature_k": 400.0,
+                }
+            ],
+        }
+        case.update(overrides)
+        return case
+
+    def _post(self, client: AuthenticatedTestClient, project_id: str, **overrides):
+        payload = {
+            "analysis": "thermal-transient",
+            "transient_case": self._case(),
+            "element_size_mm": 10.0,
+            **overrides,
+        }
+        return client.post(f"/api/v1/projects/{project_id}/simulations", json=payload)
+
+    def _run(self, client: AuthenticatedTestClient, project_id: str, **overrides) -> dict:
+        response = self._post(client, project_id, **overrides)
+        assert response.status_code == 202, response.text
+        return response.json()
+
+    def _archive(self, client: AuthenticatedTestClient, job: dict):
+        import io
+
+        import numpy as np
+
+        media = client.get(f"/api/v1/media/{job['fields_media_id']}/content")
+        assert media.status_code == 200
+        return np.load(io.BytesIO(media.content))
+
+    def test_an_insulated_bar_held_at_one_end_arrives_at_the_held_temperature(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["status"] == "succeeded", job["error"]
+        assert job["result"]["min_temperature_k"] == pytest.approx(400.0, abs=1e-3)
+        assert job["result"]["max_temperature_k"] == pytest.approx(400.0, abs=1e-6)
+        assert job["result"]["step_count"] == self.STEPS
+        assert job["result"]["final_time_s"] == pytest.approx(3000.0)
+
+    def test_the_far_end_is_still_cold_early_on(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The history is a history, not the steady answer copied into every row.
+
+        One 5 s step into a 257 s diffusion time, heat has barely left the held
+        face: the far end has moved by a small fraction of the 100 K difference.
+        A run that stored the final field under every time index would read
+        400 K here.
+        """
+        job = self._run(
+            auth_client,
+            project_with_geometry,
+            transient_case=self._case(duration_s=5.0, time_step_s=5.0),
+        )
+        assert job["status"] == "succeeded", job["error"]
+
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/temperature"
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        far_end = [
+            t for (_, _, z), t in zip(body["node_positions"], body["temperatures_k"]) if z > 59.0
+        ]
+        assert far_end
+        assert max(far_end) < 310.0
+
+    def test_the_row_records_the_transient_case_and_nothing_else(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["analysis"] == "thermal-transient"
+        assert job["load_case"] is None
+        assert job["thermal_case"] is None
+        assert job["transient_case"]["duration_s"] == pytest.approx(3000.0)
+        assert job["solver"] == "transient-conduction"
+
+    def test_the_archive_keeps_every_step_and_the_final_field_under_the_steady_name(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        import numpy as np
+
+        job = self._run(auth_client, project_with_geometry)
+        archive = self._archive(auth_client, job)
+
+        history = archive["temperature_history_k"]
+        assert history.shape == (self.STEPS + 1, archive["nodes"].shape[0])
+        assert archive["times_s"].shape == (self.STEPS + 1,)
+        assert archive["times_s"][0] == 0.0
+        np.testing.assert_array_equal(archive["temperatures_k"], history[-1])
+        assert "von_mises_nodal" not in archive
+        assert "displacements" not in archive
+
+    def test_step_zero_is_the_starting_field(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """Every node starts at 300 K except those the held face names, which
+        start at their prescribed value rather than jumping to it on step one."""
+        job = self._run(auth_client, project_with_geometry)
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/temperature",
+            params={"step": 0},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        assert body["time_s"] == 0.0
+        assert body["step"] == 0
+        assert body["step_count"] == self.STEPS
+        assert body["min_temperature_k"] == pytest.approx(300.0)
+        assert body["max_temperature_k"] == pytest.approx(400.0)
+        for (_, _, z), temperature in zip(body["node_positions"], body["temperatures_k"]):
+            if z < 0.5:
+                assert temperature == pytest.approx(400.0)
+            elif z > 1.0:
+                assert temperature == pytest.approx(300.0)
+
+    def test_a_step_past_the_end_is_refused_with_the_range(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = self._run(auth_client, project_with_geometry)
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/temperature",
+            params={"step": self.STEPS + 1},
+        )
+        assert response.status_code == 422
+        assert f"0 to {self.STEPS}" in response.json()["detail"]
+
+    def test_a_history_too_large_to_keep_is_refused_not_thinned(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
+    ) -> None:
+        """Thinning the history to fit would be a sampled answer where the
+        provenance says solved, so the run is refused before stepping and the
+        message names both ways out."""
+        from app.simulation import runner as simulation_runner
+
+        monkeypatch.setattr(simulation_runner.settings, "max_transient_values", 1_000)
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["status"] == "failed"
+        assert "time_step_s" in job["error"]
+        assert "element_size_mm" in job["error"]
+        assert "thinned" in job["error"]
+
+    def test_a_convergence_study_is_refused_by_name(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = self._run(auth_client, project_with_geometry, grids=3)
+
+        assert job["status"] == "failed"
+        assert "time step" in job["error"]
+
+    def test_the_transient_backend_setting_is_what_selects_the_solver(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
+    ) -> None:
+        from app.simulation import runner as simulation_runner
+
+        monkeypatch.setattr(
+            simulation_runner.settings, "transient_conduction_backend", "no-such-solver"
+        )
+        job = self._run(auth_client, project_with_geometry)
+
+        assert job["status"] == "failed"
+        assert "No transient conduction solver called 'no-such-solver'" in job["error"]
+
+    @pytest.mark.parametrize(
+        "analysis, expected",
+        [
+            ("thermal-transient", "transient-only"),
+            ("thermal-conduction", "steady-only"),
+            ("solid", "structural-only"),
+        ],
+    )
+    def test_a_queued_row_names_the_setting_for_its_own_analysis(
+        self, monkeypatch, analysis: str, expected: str
+    ) -> None:
+        """What the row says before the runner overwrites it with what ran. The
+        three settings default to one value, so they are moved apart here."""
+        from app.api.routes import simulations as routes
+
+        monkeypatch.setattr(routes.settings, "solver_backend", "structural-only")
+        monkeypatch.setattr(routes.settings, "conduction_backend", "steady-only")
+        monkeypatch.setattr(routes.settings, "transient_conduction_backend", "transient-only")
+        assert routes._requested_solver(analysis) == expected
+
+    def test_an_identical_second_run_is_a_cache_hit_and_a_longer_one_is_not(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, db_session
+    ) -> None:
+        from app.models import SimulationJob
+
+        first = self._run(auth_client, project_with_geometry)
+        second = self._run(auth_client, project_with_geometry)
+        longer = self._run(
+            auth_client,
+            project_with_geometry,
+            transient_case=self._case(duration_s=6000.0, time_step_s=200.0),
+        )
+
+        db = db_session
+        assert db.get(SimulationJob, second["id"]).cache_source_id == first["id"]
+        assert db.get(SimulationJob, longer["id"]).cache_hit is False
+
+    @pytest.mark.parametrize(
+        "overrides, fragment",
+        [
+            ({"transient_case": None}, "needs a transient_case"),
+            (
+                {"thermal_case": TestAConductionAnalysisCanBeAskedFor()._bar_case()},
+                "takes no thermal_case",
+            ),
+            ({"load_case": load_case()}, "takes no load_case"),
+            ({"thickness_mm": 5.0}, "thickness_mm"),
+        ],
+    )
+    def test_a_case_that_does_not_match_the_analysis_is_refused(
+        self,
+        auth_client: AuthenticatedTestClient,
+        project_with_geometry: str,
+        overrides: dict,
+        fragment: str,
+    ) -> None:
+        response = self._post(auth_client, project_with_geometry, **overrides)
+
+        assert response.status_code == 422
+        assert fragment in response.text
+
+    def test_a_transient_case_on_a_steady_run_is_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """A steady solve has no time axis; the duration would be ignored while
+        looking like part of the model."""
+        response = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={
+                "analysis": "thermal-conduction",
+                "thermal_case": TestAConductionAnalysisCanBeAskedFor()._bar_case(),
+                "transient_case": self._case(),
+                "element_size_mm": 10.0,
+            },
+        )
+        assert response.status_code == 422
+        assert "takes no transient_case" in response.text
+
+
+class TestTheTemperatureAndSurfaceRoutesServeTheRightRuns:
+    """Before 2026-09-14 both surface routes read `displacements` out of the
+    archive without asking which analysis wrote it, so the surface of any
+    conduction run was a `KeyError` and a 500. Each route now serves the runs
+    whose field it knows how to read and refuses the others by name."""
+
+    def _steady(self, client: AuthenticatedTestClient, project_id: str) -> dict:
+        return TestAConductionAnalysisCanBeAskedFor()._run(client, project_id)
+
+    @pytest.mark.parametrize("route", ["surface", "surface/binary"])
+    def test_a_structural_surface_of_a_steady_thermal_run_is_a_409_not_a_500(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, route: str
+    ) -> None:
+        job = self._steady(auth_client, project_with_geometry)
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/{route}"
+        )
+        assert response.status_code == 409
+        assert "temperature route" in response.json()["detail"]
+
+    def test_a_structural_surface_of_a_transient_run_is_a_409(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = TestATransientConductionRunCanBeAskedFor()._run(auth_client, project_with_geometry)
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/surface"
+        )
+        assert response.status_code == 409
+
+    def test_the_steady_temperature_surface_is_the_bar_profile(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The 60 mm bar held at 400 K and 300 K: every surface node sits on the
+        straight line between them."""
+        job = self._steady(auth_client, project_with_geometry)
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/temperature"
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        assert body["time_s"] is None and body["step"] is None and body["step_count"] is None
+        assert body["max_temperature_k"] == pytest.approx(400.0, abs=1e-6)
+        assert body["min_temperature_k"] == pytest.approx(300.0, abs=1e-6)
+        for (_, _, z), temperature in zip(body["node_positions"], body["temperatures_k"]):
+            assert temperature == pytest.approx(400.0 - 100.0 * z / 60.0, abs=1e-6)
+
+    def test_a_step_on_a_steady_run_is_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = self._steady(auth_client, project_with_geometry)
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/temperature",
+            params={"step": 0},
+        )
+        assert response.status_code == 422
+        assert "no time axis" in response.json()["detail"]
+
+    def test_the_temperature_of_a_structural_run_is_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        job = run(auth_client, project_with_geometry)
+        response = auth_client.get(
+            f"/api/v1/projects/{project_with_geometry}/simulations/{job['id']}/temperature"
+        )
+        assert response.status_code == 409
+        assert "no temperature field" in response.json()["detail"]
+
+
+class TestAStructuralRunCanCarryAThermalRunsTemperatures:
+    """E10 task 1's coupling, reached from a request.
+
+    The oracle is the axially restrained bar. Both z faces are held in z, and x
+    and y are each held only on their min face, so the bar expands freely
+    sideways and not at all along its length: a uniform change `dT` gives a
+    uniaxial `sigma_zz = -E alpha dT` everywhere, and a von Mises stress of
+    `E alpha |dT|`. For 6061-T6 at `dT = 80 K` that is 130.08 MPa.
+
+    The field comes from a real conduction run whose two z faces are both held
+    at 380 K, which is uniform to round-off, so the same answer must come out of
+    the coupled run as out of the case's own uniform `delta_t_k` — two paths,
+    one number.
+    """
+
+    ALPHA = 23.6e-6
+    E = 68_900.0
+    RESTRAINED = [
+        {"where": {"type": "face", "axis": "z", "side": "min"}, "dofs": ["z"]},
+        {"where": {"type": "face", "axis": "z", "side": "max"}, "dofs": ["z"]},
+        {"where": {"type": "face", "axis": "x", "side": "min"}, "dofs": ["x"]},
+        {"where": {"type": "face", "axis": "y", "side": "min"}, "dofs": ["y"]},
+    ]
+
+    def _case(self, **overrides: object) -> dict:
+        case = load_case(force=1e-9)
+        case["name"] = "Restrained bar"
+        case["material"] = {**case["material"], "thermal_expansion_per_k": self.ALPHA}
+        case["fixtures"] = self.RESTRAINED
+        case.update(overrides)
+        return case
+
+    def _uniform_thermal_run(self, client, project_id: str, kelvin: float = 380.0) -> dict:
+        return TestAConductionAnalysisCanBeAskedFor()._run(
+            client,
+            project_id,
+            thermal_case=TestAConductionAnalysisCanBeAskedFor()._bar_case(kelvin, kelvin),
+        )
+
+    def _coupled(self, client, project_id: str, source: dict, **overrides):
+        payload = {
+            "load_case": self._case(),
+            "element_size_mm": 10.0,
+            "temperature_from": {
+                "simulation_id": source["id"],
+                "reference_temperature_k": 300.0,
+            },
+            **overrides,
+        }
+        return client.post(f"/api/v1/projects/{project_id}/simulations", json=payload)
+
+    def test_a_uniform_field_gives_the_restrained_bar_closed_form(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        assert source["status"] == "succeeded", source["error"]
+
+        response = self._coupled(auth_client, project_with_geometry, source)
+        assert response.status_code == 202, response.text
+        job = response.json()
+
+        assert job["status"] == "succeeded", job["error"]
+        assert job["result"]["max_von_mises_mpa"] == pytest.approx(
+            self.E * self.ALPHA * 80.0, rel=1e-6
+        )
+
+    def test_the_coupled_run_and_the_uniform_delta_t_agree(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        coupled = self._coupled(auth_client, project_with_geometry, source).json()
+        uniform = run(auth_client, project_with_geometry, load_case=self._case(delta_t_k=80.0))
+
+        assert uniform["status"] == "succeeded", uniform["error"]
+        assert coupled["result"]["max_von_mises_mpa"] == pytest.approx(
+            uniform["result"]["max_von_mises_mpa"], rel=1e-9
+        )
+
+    def test_the_row_pins_the_source_by_the_digest_of_its_archive(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        job = self._coupled(auth_client, project_with_geometry, source).json()
+        archive = auth_client.get(f"/api/v1/media/{source['fields_media_id']}").json()
+
+        assert job["temperature_source"] == {
+            "simulation_id": source["id"],
+            "step": None,
+            "reference_temperature_k": 300.0,
+            "fields_sha256": archive["sha256"],
+        }
+
+    def test_a_field_at_the_reference_temperature_carries_no_thermal_stress(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The reference is read, not assumed: the same 380 K field against a
+        380 K reference is a part that has not changed temperature."""
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        job = self._coupled(
+            auth_client,
+            project_with_geometry,
+            source,
+            temperature_from={"simulation_id": source["id"], "reference_temperature_k": 380.0},
+        ).json()
+
+        assert job["status"] == "succeeded", job["error"]
+        assert job["result"]["max_von_mises_mpa"] < 1e-6
+
+    def test_a_transient_source_is_read_at_the_step_asked_for(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The insulated bar arrives at a uniform 400 K by its last step and
+        starts at 300 K with one face at 400. The final sample gives the closed
+        form at dT = 100 K; the first gives something else entirely."""
+        transient = TestATransientConductionRunCanBeAskedFor()
+        source = transient._run(auth_client, project_with_geometry)
+        final = self._coupled(auth_client, project_with_geometry, source).json()
+        first = self._coupled(
+            auth_client,
+            project_with_geometry,
+            source,
+            temperature_from={
+                "simulation_id": source["id"],
+                "step": 0,
+                "reference_temperature_k": 300.0,
+            },
+        ).json()
+
+        assert final["status"] == "succeeded", final["error"]
+        assert final["result"]["max_von_mises_mpa"] == pytest.approx(
+            self.E * self.ALPHA * 100.0, rel=1e-4
+        )
+        assert first["status"] == "succeeded", first["error"]
+        assert first["temperature_source"]["step"] == 0
+        assert abs(first["result"]["max_von_mises_mpa"] - final["result"]["max_von_mises_mpa"]) > 1.0
+
+    @pytest.mark.parametrize(
+        "overrides, fragment",
+        [
+            ({"element_size_mm": 8.0}, "element_size_mm=10.0"),
+            ({"element_order": 1}, "element_order=2"),
+            ({"grids": 3}, "convergence study"),
+        ],
+    )
+    def test_a_run_meshed_differently_from_its_source_is_refused_before_it_queues(
+        self,
+        auth_client: AuthenticatedTestClient,
+        project_with_geometry: str,
+        overrides: dict,
+        fragment: str,
+    ) -> None:
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        response = self._coupled(auth_client, project_with_geometry, source, **overrides)
+
+        assert response.status_code == 422
+        assert fragment in response.text
+
+    def test_a_uniform_delta_t_and_a_field_together_are_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        response = self._coupled(
+            auth_client, project_with_geometry, source, load_case=self._case(delta_t_k=10.0)
+        )
+        assert response.status_code == 422
+        assert "count the expansion twice" in response.text
+
+    def test_a_structural_source_is_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        structural = run(auth_client, project_with_geometry)
+        response = self._coupled(auth_client, project_with_geometry, structural)
+        assert response.status_code == 422
+        assert "no temperature field" in response.text
+
+    def test_a_step_on_a_steady_source_is_refused(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        response = self._coupled(
+            auth_client,
+            project_with_geometry,
+            source,
+            temperature_from={
+                "simulation_id": source["id"],
+                "step": 1,
+                "reference_temperature_k": 300.0,
+            },
+        )
+        assert response.status_code == 422
+        assert "no time axis" in response.text
+
+    def test_a_source_in_another_project_is_not_found(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """Another project's run is a 404 whoever owns it, like every other id."""
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        other = auth_client.post("/api/v1/projects", json={"name": "Other"}).json()["id"]
+        uploaded = auth_client.post(
+            f"/api/v1/projects/{other}/geometry",
+            files={"file": ("box.stl", box_stl(BOX), "application/octet-stream")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+
+        response = self._coupled(auth_client, other, source)
+        assert response.status_code == 404
+
+    def test_a_solver_that_cannot_read_a_field_is_refused_by_name(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
+    ) -> None:
+        """Otherwise the part is solved as though it were at the reference
+        temperature, and the stress is reported without the expansion."""
+        from app.solve.linear_static import LinearStaticSolver
+
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        monkeypatch.setattr(LinearStaticSolver, "accepts_temperature_field", False)
+        job = self._coupled(auth_client, project_with_geometry, source).json()
+
+        assert job["status"] == "failed"
+        assert "does not read a temperature field" in job["error"]
+
+    def test_a_field_on_another_mesh_or_under_another_digest_is_refused(
+        self,
+        auth_client: AuthenticatedTestClient,
+        project_with_geometry: str,
+        db_session,
+        media_store,
+    ) -> None:
+        """The two checks the runner makes after the route has passed the run:
+        that gmsh meshed identically, and that the archive is still the pinned
+        one. Neither can be staged through the route, so they are asked of the
+        function directly with the row a real run wrote."""
+        from app.media import MediaService
+        from app.mesh.gmsh_mesher import generate_tet_mesh
+        from app.models import SimulationJob
+        from app.simulation.runner import _borrowed_temperature_change
+        from app.solve.linear_static import LinearStaticSolver
+        from app.solve.types import SolverError
+
+        source = self._uniform_thermal_run(auth_client, project_with_geometry)
+        job = db_session.get(SimulationJob, self._coupled(
+            auth_client, project_with_geometry, source
+        ).json()["id"])
+        media = MediaService(db_session, media_store)
+
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "short.stl"
+            path.write_bytes(box_stl((20.0, 20.0, 40.0)))
+            other_mesh, _ = generate_tet_mesh(path, "stl", 10.0, element_order=2)
+        with pytest.raises(SolverError, match="bound to the mesh it was solved on"):
+            _borrowed_temperature_change(job, media, other_mesh, LinearStaticSolver())
+
+        job.temperature_source = {**job.temperature_source, "fields_sha256": "0" * 64}
+        with pytest.raises(SolverError, match="not the one this analysis was queued"):
+            _borrowed_temperature_change(job, media, other_mesh, LinearStaticSolver())

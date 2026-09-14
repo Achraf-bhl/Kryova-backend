@@ -219,8 +219,19 @@ PLANE_STATES: dict[str, PlaneState] = {
 #: different result type.
 CONDUCTION: str = "thermal-conduction"
 
+#: The analysis that steps a temperature field forward in time. A different
+#: case (`TransientThermalCase`), a different ABC and a result with a time axis,
+#: so it is its own branch rather than a flag on `CONDUCTION`.
+TRANSIENT: str = "thermal-transient"
+
 #: Every value `SimulationJob.analysis` may hold.
-ANALYSES: tuple[str, ...] = ("solid", *PLANE_STATES, CONDUCTION)
+ANALYSES: tuple[str, ...] = ("solid", *PLANE_STATES, CONDUCTION, TRANSIENT)
+
+#: The analyses whose answer is a temperature and never a stress. Duplicated as
+#: `coupling._THERMAL`, which a test holds equal to this. Read by the
+#: routes that serve a structural field, so they refuse these by name instead of
+#: reaching for a displacement array the archive does not hold.
+THERMAL_ANALYSES: tuple[str, ...] = (CONDUCTION, TRANSIENT)
 
 
 def _execute(
@@ -244,10 +255,13 @@ def _execute(
     if job.analysis == CONDUCTION:
         return _execute_conduction(job, path, version.file_format, usage)
 
+    if job.analysis == TRANSIENT:
+        return _execute_transient(job, path, version.file_format, usage, session_scope)
+
     if job.load_case is None:
         raise ValueError(
             f"This {job.analysis} job has no load case, so there is nothing to solve. "
-            "Only a thermal-conduction run is written without one."
+            "Only the two thermal analyses are written without one."
         )
     case = LoadCase.model_validate(job.load_case)
 
@@ -288,7 +302,81 @@ def _execute(
         progress.Stage.SOLVING,
         detail=f"{mesh.tet_count:,} elements",
     )
+    if job.temperature_source is not None:
+        field = _borrowed_temperature_change(job, media, mesh, solver)
+        return mesh, mesh_stats, solver.solve(mesh, case, temperatures=field), solver.name  # type: ignore[call-arg]
     return mesh, mesh_stats, solver.solve(mesh, case), solver.name
+
+
+def _borrowed_temperature_change(
+    job: SimulationJob, media: MediaService, mesh: TetMesh, solver: Solver
+) -> np.ndarray:
+    """The temperature change a coupled solid run carries, one value per node.
+
+    **E10 task 1's coupling, reached from a request.** `LinearStaticSolver`
+    has taken a field since 2026-09-09 and nothing in the job layer handed it
+    one. This reads the named thermal run's stored archive and returns
+    `T - T_ref` on this run's own mesh.
+
+    Four refusals, each of a plausible wrong answer rather than an error:
+
+    1. **A solver that cannot read a field is refused by name.** Handing
+       CalculiX's adapter a keyword it never reads would solve the part as
+       though it were at the reference temperature and report the stress
+       without the expansion.
+    2. **An archive that is not the one pinned at queue time is refused.** The
+       row names the digest it was bound to; a result computed from different
+       temperatures under that digest would be provenance in name only.
+    3. **A mesh that is not the one the field was solved on is refused**, even
+       though the route already checked the size and order: gmsh is expected to
+       mesh identically from the same inputs, and this is the check that the
+       expectation held rather than an assumption that it did. Interpolating
+       across meshes would be a sampled field where the provenance says solved.
+    4. **A sample that is not in the history is refused**, for a source whose
+       archive was written by a different build than the one that checked it.
+    """
+    source_ref = job.temperature_source or {}
+    if not solver.accepts_temperature_field:
+        raise SolverError(
+            f"The {solver.name} solver does not read a temperature field, so it would solve "
+            "this part as though it were at the reference temperature. Run the coupled "
+            "analysis with SOLVER_BACKEND=internal, or drop temperature_from."
+        )
+    source = media.db.get(SimulationJob, source_ref.get("simulation_id"))
+    stored = source.fields_media if source is not None else None
+    if stored is None:
+        raise SolverError(
+            "The thermal run this analysis borrows its temperatures from, or its stored "
+            "field, no longer exists. Run the thermal analysis again and name the new run."
+        )
+    if stored.sha256 != source_ref.get("fields_sha256"):
+        raise SolverError(
+            "The thermal run's stored field is not the one this analysis was queued "
+            "against, so its temperatures cannot be trusted to be the ones named. Submit "
+            "the analysis again."
+        )
+    with media.open(stored) as handle, np.load(handle) as archive:
+        nodes = archive["nodes"]
+        step = source_ref.get("step")
+        if step is None:
+            temperatures = np.array(archive["temperatures_k"], dtype=np.float64)
+        else:
+            history = archive["temperature_history_k"]
+            if step >= len(history):
+                raise SolverError(
+                    f"The thermal run stored {len(history)} time samples and this analysis "
+                    f"asks for sample {step}."
+                )
+            temperatures = np.array(history[step], dtype=np.float64)
+    if nodes.shape != mesh.nodes.shape or not np.array_equal(nodes, mesh.nodes):
+        raise SolverError(
+            f"This part meshed to {mesh.node_count:,} nodes and the thermal run's field sits "
+            f"on {len(nodes):,}, or on nodes in different places. A temperature field is "
+            "bound to the mesh it was solved on, and interpolating it onto another would be "
+            "a sampled field reported as solved. Run the thermal analysis again alongside "
+            "this one."
+        )
+    return temperatures - float(source_ref["reference_temperature_k"])
 
 
 #: Each successive grid's target element size, as a fraction of the one before.
@@ -454,6 +542,96 @@ def _execute_conduction(
     return mesh, mesh_stats, conduction.solve(mesh, case), conduction.name
 
 
+def _execute_transient(
+    job: SimulationJob,
+    path: Path,
+    file_format: str,
+    usage: UsageScope,
+    session_scope: SessionScope,
+) -> tuple[TetMesh, dict, object, str]:
+    """A time-stepped conduction run: a temperature history out.
+
+    **Master plan E10 task 1's delivery half.** `BackwardEulerConductionSolver`
+    landed on 2026-09-14 as a capability with no caller — the fourth time this
+    codebase has built a solver and not connected it. This is the call.
+
+    Three refusals, each before the expensive part:
+
+    1. **No convergence study**, for `_execute_conduction`'s reason and one more:
+       a transient answer has two discretisations, the mesh and the time step,
+       and a study over grids alone would be read as covering both.
+    2. **A history too large to keep is refused, not thinned.** Every step's
+       field is stored, because a history sampled down to fit would be a
+       sampled answer where the provenance says solved — one of the three
+       speedups `docs/MAKING_IT_FASTER.md` forbids. The count is known after
+       meshing and before stepping, so the refusal names the time step and the
+       mesh size that would bring the run under the limit, and costs only the
+       mesh.
+    3. **A stop request is honoured between the mesh and the stepping**, the
+       same boundary a single-grid structural run has.
+
+    The solver comes from `TRANSIENT_CONDUCTION_BACKEND`, never from
+    `SOLVER_BACKEND` or `CONDUCTION_BACKEND`: each names a solver for a
+    different analysis.
+    """
+    from app.solve.conduction import TransientThermalCase, time_steps
+    from app.solve.registry import build_transient_conduction_solver
+
+    if job.transient_case is None:
+        raise ValueError(
+            "A thermal-transient job needs a transient case — a conductivity, a heat "
+            "capacity, a starting temperature, a duration and a time step. This one "
+            "has none, so there is nothing to solve."
+        )
+    if job.grids > 1:
+        raise ValueError(
+            "A convergence study is not available for a thermal-transient run: the "
+            "study assesses the peak von Mises stress, which a temperature history "
+            "does not have, and a transient answer depends on the time step as well "
+            "as the mesh. Ask for one grid."
+        )
+
+    case = TransientThermalCase.model_validate(job.transient_case)
+    step_count, dt = time_steps(case)
+
+    progress.report(session_scope, job.id, progress.Stage.MESHING)
+    mesh, mesh_stats = generate_tet_mesh(
+        path, file_format, job.element_size_mm, element_order=job.element_order
+    )
+    usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
+    if mesh.tet_count > settings.max_elements:
+        raise MeshError(
+            f"The mesh has {mesh.tet_count:,} elements, over the {settings.max_elements:,} "
+            "limit. Increase element_size_mm to coarsen it."
+        )
+
+    values = (step_count + 1) * mesh.node_count
+    if values > settings.max_transient_values:
+        # The smallest whole step that fits, and the node count that would fit
+        # at the step asked for: two independent ways out, both stated.
+        samples_that_fit = max(2, settings.max_transient_values // mesh.node_count)
+        step_that_fits = case.duration_s / (samples_that_fit - 1)
+        nodes_that_fit = settings.max_transient_values // (step_count + 1)
+        raise SolverError(
+            f"This run would keep {step_count + 1:,} temperature fields of "
+            f"{mesh.node_count:,} nodes — {values:,} values, over the "
+            f"{settings.max_transient_values:,} limit. Every step is stored rather than "
+            f"thinned, so either raise time_step_s to at least {step_that_fits:.6g} s, or "
+            f"coarsen the mesh to under {nodes_that_fit:,} nodes with a larger "
+            "element_size_mm."
+        )
+
+    _stop_here_if_asked(job, session_scope)
+    progress.report(
+        session_scope,
+        job.id,
+        progress.Stage.SOLVING,
+        detail=f"{mesh.tet_count:,} elements, {step_count:,} steps of {dt:.6g} s",
+    )
+    transient = build_transient_conduction_solver(settings.transient_conduction_backend)
+    return mesh, mesh_stats, transient.solve(mesh, case), transient.name
+
+
 def _automatic_size(job: SimulationJob) -> float:
     """The size a study starts from when the caller named none.
 
@@ -568,8 +746,19 @@ def _store_fields(
     # differ because the physics differs; a reader that finds `temperatures_k`
     # knows it is not looking at a structural result, where one that found
     # `von_mises_nodal` full of zeros would not.
-    if hasattr(output, "temperatures_k"):
+    if hasattr(output, "times_s"):
+        # A transient run keeps its whole history, and the final field again
+        # under the steady name, so a reader asking "what temperature did it
+        # reach" reads one (n_nodes,) array whichever thermal analysis ran —
+        # and only a reader that wants the path opens the (steps + 1, n_nodes)
+        # one, whose name says it is a history.
         arrays: dict[str, Any] = {
+            "times_s": output.times_s,
+            "temperature_history_k": output.temperatures_k,
+            "temperatures_k": output.temperatures_k[-1],
+        }
+    elif hasattr(output, "temperatures_k"):
+        arrays = {
             "temperatures_k": output.temperatures_k,
             "heat_flux_w_m2": output.heat_flux_w_m2,
         }

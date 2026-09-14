@@ -42,6 +42,8 @@ from app.schemas.simulation import (
     SimulationCreate,
     SimulationRead,
     SurfaceField,
+    SurfaceTemperature,
+    TemperatureSource,
 )
 
 __all__ = [
@@ -81,6 +83,8 @@ __all__ = [
     "SimulationPage",
     "SimulationRead",
     "SurfaceField",
+    "SurfaceTemperature",
+    "TemperatureSource",
     "UploadSessionCreate",
     "UploadSessionRead",
     "UserCreate",

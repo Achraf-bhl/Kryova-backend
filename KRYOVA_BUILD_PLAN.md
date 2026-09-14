@@ -236,6 +236,24 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-14 — E10 task 1 closed: transient conduction reaches the product, and a structural
+  run can carry a thermal run's temperatures.** `analysis: "thermal-transient"` with a
+  `transient_case` (**migration `5f1bc5c58c49`**, two nullable JSONB columns `transient_case` and
+  `temperature_source`); `TRANSIENT_CONDUCTION_BACKEND` and `MAX_TRANSIENT_VALUES` settings; the
+  whole history is stored or the run is refused naming a time step that would fit. **New route**
+  `GET /simulations/{id}/temperature?step=N` (`SurfaceTemperature`). **Live defect fixed:** both
+  surface-field routes returned **500** on every conduction run (`KeyError: 'displacements'`); they
+  now answer 409. **Coupling**: `temperature_from` on a solid run, used only on the identical mesh
+  (no interpolation), pinned by the archive's sha256, reference temperature required, CalculiX
+  refusing by name via `Solver.accepts_temperature_field`. Cache `KEY_VERSION` 2. Agent: new
+  `run_thermal_simulation` tool, `temperature_from` on `run_simulation`. `SimulationRead` gains
+  `transient_case` and `temperature_source`. Restrained bar from a computed field equals the
+  `delta_t_k` path to 1e-9. 23 guards broken and watched to fail. The first full run found the two
+  settings missing from `.env.example` (the hygiene test did its job). **Flagged, not fixed:**
+  `solve/registry.py::solver_version` matches only `"internal"` while in-house solvers name
+  themselves `linear-static`/`steady-conduction`, so in-house runs store `solver_version=None`.
+  Full suite **8478 passed / 0 failed / 12 skipped / 1 xpassed** (12 min 25 s, local PostgreSQL).
+  Tested by `tests/test_simulations.py`, `tests/test_simulation_cache.py`, `tests/test_agent.py`.
 - **2026-09-14 — E19 tasks 1–6, and `*E19`: every legal date and clause read from the Official
   Journal, and the reading corrected the plan four times.** The disputed application date is
   settled precisely — both dates are OJ text: 14 January 2027 as published, **20 January 2027**

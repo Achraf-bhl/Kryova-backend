@@ -56,7 +56,12 @@ logger = logging.getLogger(__name__)
 #: result, or an existing one stops. Every old key then misses, which is the
 #: correct and safe outcome: recomputing is expensive, serving a result computed
 #: under different rules is wrong.
-KEY_VERSION = 1
+#:
+#: 2 (2026-09-14): `transient_case` joined the key with the `thermal-transient`
+#: analysis, and `temperature_source` — which carries the digest of the borrowed
+#: field's archive, so two runs coupled to different temperatures never match. Every version-1 key misses once, and a steady or structural run
+#: re-solves the first time it is asked for again.
+KEY_VERSION = 2
 
 #: What an unmeasured solver version hashes as. A distinct string rather than
 #: `None` or `""`, so it can never collide with a version that happens to be
@@ -77,6 +82,8 @@ class Inputs:
     geometry_sha256: str
     load_case: dict[str, Any] | None
     thermal_case: dict[str, Any] | None
+    transient_case: dict[str, Any] | None
+    temperature_source: dict[str, Any] | None
     element_size_mm: float | None
     element_order: int
     analysis: str
@@ -99,6 +106,8 @@ class Inputs:
             "geometry": self.geometry_sha256,
             "load_case": self.load_case,
             "thermal_case": self.thermal_case,
+            "transient_case": self.transient_case,
+            "temperature_source": self.temperature_source,
             "element_size_mm": self.element_size_mm,
             "element_order": self.element_order,
             "analysis": self.analysis,
@@ -125,6 +134,8 @@ def inputs_for(db: Session, job: SimulationJob) -> Inputs | None:
         geometry_sha256=version.media.sha256,
         load_case=job.load_case,
         thermal_case=job.thermal_case,
+        transient_case=job.transient_case,
+        temperature_source=job.temperature_source,
         element_size_mm=job.element_size_mm,
         element_order=job.element_order,
         analysis=job.analysis,

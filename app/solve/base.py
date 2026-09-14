@@ -69,6 +69,12 @@ class Solver(ABC):
     """
 
     name: str
+    #: Whether `solve` takes a per-node temperature change as `temperatures=`.
+    #: Declared rather than discovered with `inspect`, and **false by default**,
+    #: so a solver that has never been taught to read a field is refused by name
+    #: when a job hands it one — rather than accepting the keyword into
+    #: `**kwargs` and solving the part as though it were at room temperature.
+    accepts_temperature_field: bool = False
 
     @abstractmethod
     def solve(self, mesh: TetMesh, case: LoadCase) -> SolveOutput: ...

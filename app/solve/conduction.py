@@ -1108,6 +1108,20 @@ class TransientThermalField:
     temperatures_k: NDArray[np.float64] = field(repr=False)
 
 
+def time_steps(case: TransientThermalCase) -> tuple[int, float]:
+    """How many steps a case is solved in, and the exact size of each.
+
+    `duration_s` is divided into the nearest whole number of steps of roughly
+    `time_step_s`, so a run always ends exactly at `duration_s`. One function
+    rather than the arithmetic written twice, because the job runner has to know
+    the count *before* the solve — to refuse a history too large to keep — and a
+    runner that predicted one count while the solver took another would refuse
+    the wrong runs.
+    """
+    count = max(1, round(case.duration_s / case.time_step_s))
+    return count, case.duration_s / count
+
+
 def assemble_capacitance(mesh: TetMesh, volumetric_heat_capacity_j_mm3k: float) -> sp.csr_matrix:
     """Global heat-capacity matrix `integral rho cp N_i N_j dV`, J/K.
 
@@ -1190,8 +1204,7 @@ class BackwardEulerConductionSolver(TransientConductionSolver):
         fixed_boundaries = [b for b in case.boundaries if isinstance(b, FixedTemperature)]
         films = [b for b in case.boundaries if isinstance(b, Convection)]
 
-        step_count = max(1, round(case.duration_s / case.time_step_s))
-        dt = case.duration_s / step_count
+        step_count, dt = time_steps(case)
         if abs(dt - case.time_step_s) > 1e-9 * case.time_step_s:
             warnings.append(
                 f"duration_s ({case.duration_s}) is not an exact multiple of time_step_s "

@@ -807,6 +807,173 @@ class TestRunSimulation:
             box.call("run_simulation", {"load_case": LOAD_CASE}, allow_mutations=True)
 
 
+class _NoopQueue(InlineJobQueue):
+    def submit(self, job: Any) -> None:
+        return None
+
+
+class TestRunThermalSimulation:
+    """E10 task 1: the agent can ask for both thermal analyses the route has.
+
+    Before this the route served three analyses and the agent's only run tool
+    could ask for one — the "never offered" class, where every tool works and
+    the product still cannot do the thing because the vocabulary it hands the
+    model has no word for it.
+    """
+
+    STEADY: dict[str, Any] = {
+        "conductivity_w_mk": 51.9,
+        "boundaries": [
+            {
+                "type": "fixed_temperature",
+                "where": {"type": "face", "axis": "z", "side": "min"},
+                "temperature_k": 400.0,
+            }
+        ],
+    }
+    TRANSIENT: dict[str, Any] = {
+        **STEADY,
+        "density_kg_m3": 7850.0,
+        "specific_heat_j_kgk": 470.0,
+        "initial_temperature_k": 300.0,
+        "duration_s": 600.0,
+        "time_step_s": 10.0,
+    }
+
+    def _box(self, db_session: Session, user: User, project: Project) -> ToolBox:
+        return _toolbox(
+            db_session,
+            user,
+            project,
+            job_queue=_NoopQueue(),
+            session_scope=lambda: None,
+            media_store=object(),
+        )
+
+    def test_the_agent_is_offered_it_and_it_is_mutating(
+        self, db_session: Session, user: User, project: Project
+    ) -> None:
+        box = _toolbox(db_session, user, project)
+        full = [t["function"]["name"] for t in box.schemas(include_mutating=True)]
+        readonly = [t["function"]["name"] for t in box.schemas(include_mutating=False)]
+        assert "run_thermal_simulation" in full
+        assert "run_thermal_simulation" not in readonly
+
+    def test_a_steady_run_writes_the_steady_column_and_the_steady_backend(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        geometry: GeometryVersion,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(settings, "conduction_backend", "steady-only")
+        monkeypatch.setattr(settings, "transient_conduction_backend", "transient-only")
+        result = self._box(db_session, user, project).call(
+            "run_thermal_simulation",
+            {"analysis": "steady", "thermal_case": self.STEADY},
+            allow_mutations=True,
+        )
+        job = db_session.get(SimulationJob, result["id"])
+        assert job is not None
+        assert job.analysis == "thermal-conduction"
+        assert job.thermal_case is not None and job.thermal_case["conductivity_w_mk"] == 51.9
+        assert job.transient_case is None
+        assert job.load_case is None
+        assert job.solver == "steady-only"
+        assert result["status"] == JobStatus.QUEUED.value
+        assert "Do not report a temperature yet" in result["note"]
+
+    def test_a_transient_run_writes_the_transient_column_and_its_own_backend(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        geometry: GeometryVersion,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The two thermal settings both default to `internal`, so they are moved
+        apart here — otherwise reading the wrong one is invisible."""
+        monkeypatch.setattr(settings, "conduction_backend", "steady-only")
+        monkeypatch.setattr(settings, "transient_conduction_backend", "transient-only")
+        result = self._box(db_session, user, project).call(
+            "run_thermal_simulation",
+            {"analysis": "transient", "thermal_case": self.TRANSIENT},
+            allow_mutations=True,
+        )
+        job = db_session.get(SimulationJob, result["id"])
+        assert job is not None
+        assert job.analysis == "thermal-transient"
+        assert job.transient_case is not None and job.transient_case["duration_s"] == 600.0
+        assert job.thermal_case is None
+        assert job.solver == "transient-only"
+
+    def test_a_steady_case_sent_as_transient_is_refused_with_a_whole_example(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        """Validated as the shape the analysis reads and nothing looser: the
+        missing time axis is named, and an example of the right shape is given,
+        because that is what fixes it in one round."""
+        with pytest.raises(ToolError) as caught:
+            self._box(db_session, user, project).call(
+                "run_thermal_simulation",
+                {"analysis": "transient", "thermal_case": self.STEADY},
+                allow_mutations=True,
+            )
+        message = str(caught.value)
+        assert "duration_s" in message
+        assert '"time_step_s"' in message
+        assert "kelvin" in message
+        assert db_session.scalar(select(func.count()).select_from(SimulationJob)) == 0
+
+    def test_an_unknown_analysis_is_refused_in_words(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        with pytest.raises(ToolError, match="'steady'.*'transient'"):
+            self._box(db_session, user, project).call(
+                "run_thermal_simulation",
+                {"analysis": "cfd", "thermal_case": self.STEADY},
+                allow_mutations=True,
+            )
+
+    def test_it_shares_the_in_flight_refusal_with_run_simulation(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        """One submission path, so a structural run in flight blocks a thermal one."""
+        box = self._box(db_session, user, project)
+        box.call("run_simulation", {"load_case": LOAD_CASE}, allow_mutations=True)
+        with pytest.raises(ToolError, match="already queued or running"):
+            box.call(
+                "run_thermal_simulation",
+                {"analysis": "steady", "thermal_case": self.STEADY},
+                allow_mutations=True,
+            )
+
+    @pytest.mark.parametrize("analysis", ["steady", "transient"])
+    def test_the_example_the_refusal_shows_is_itself_valid(self, analysis: str) -> None:
+        """An example that fails validation would teach the model a broken shape
+        with the authority of the error message."""
+        from app.ai.tools import _THERMAL_EXAMPLES
+        from app.solve.conduction import ThermalCase, TransientThermalCase
+
+        shape = ThermalCase if analysis == "steady" else TransientThermalCase
+        shape.model_validate(_THERMAL_EXAMPLES[analysis])
+
+    def test_get_simulation_says_which_analysis_and_case_it_read(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        box = self._box(db_session, user, project)
+        queued = box.call(
+            "run_thermal_simulation",
+            {"analysis": "transient", "thermal_case": self.TRANSIENT},
+            allow_mutations=True,
+        )
+        read = box.call("get_simulation", {"simulation_id": queued["id"]}, allow_mutations=False)
+        assert read["analysis"] == "thermal-transient"
+        assert read["transient_case"]["time_step_s"] == 10.0
+        assert read["load_case"] is None
+
+
 class TestDeleteSimulation:
     def test_an_unfinished_run_cannot_be_deleted(
         self,
@@ -1097,6 +1264,23 @@ class TestEveryScopedToolChecksOwnership:
             box.call(
                 "run_simulation",
                 {"project_id": theirs.id, "load_case": {"name": "x"}},
+                allow_mutations=True,
+            )
+
+
+    def test_run_thermal_simulation_refuses_another_users_project(
+        self, db_session: Session, user: User, stranger: tuple[User, Project, str]
+    ) -> None:
+        _, theirs, _ = stranger
+        box = ToolBox(db=db_session, user=user, project_id=None)
+        with pytest.raises(ToolError, match="belongs to you"):
+            box.call(
+                "run_thermal_simulation",
+                {
+                    "project_id": theirs.id,
+                    "analysis": "steady",
+                    "thermal_case": TestRunThermalSimulation.STEADY,
+                },
                 allow_mutations=True,
             )
 
@@ -2143,3 +2327,121 @@ class TestOpeningDocumentsIsNotBuildingParts:
         )
 
         assert self._notes(db_session, conversation) == []
+
+
+class TestRunSimulationCanCarryATemperatureField:
+    """The agent reaches E10 task 1's coupling through the same checks as the
+    route (`app.simulation.coupling`), spoken as tool errors."""
+
+    def _thermal_source(
+        self, db_session: Session, project: Project, geometry: GeometryVersion, **overrides: Any
+    ) -> SimulationJob:
+        fields = Media(
+            owner_id=project.owner_id,
+            kind=MediaKind.RESULT_FIELDS,
+            filename="fields.npz",
+            content_type="application/x-npz",
+            size_bytes=64,
+            sha256="f" * 64,
+        )
+        db_session.add(fields)
+        db_session.flush()
+        columns: dict[str, Any] = dict(
+            project_id=project.id,
+            geometry_version_id=geometry.id,
+            status=JobStatus.SUCCEEDED,
+            solver="steady-conduction",
+            analysis="thermal-conduction",
+            thermal_case=TestRunThermalSimulation.STEADY,
+            element_order=2,
+            fields_media_id=fields.id,
+            result={"max_temperature_k": 380.0},
+        )
+        columns.update(overrides)
+        job = SimulationJob(**columns)
+        db_session.add(job)
+        db_session.flush()
+        return job
+
+    def _box(self, db_session: Session, user: User, project: Project) -> ToolBox:
+        return TestRunThermalSimulation()._box(db_session, user, project)
+
+    def test_a_bound_run_records_the_source_and_its_digest(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        source = self._thermal_source(db_session, project, geometry)
+        result = self._box(db_session, user, project).call(
+            "run_simulation",
+            {
+                "load_case": LOAD_CASE,
+                "temperature_from": {
+                    "simulation_id": source.id,
+                    "reference_temperature_k": 293.15,
+                },
+            },
+            allow_mutations=True,
+        )
+        job = db_session.get(SimulationJob, result["id"])
+        assert job is not None
+        assert job.temperature_source == {
+            "simulation_id": source.id,
+            "step": None,
+            "reference_temperature_k": 293.15,
+            "fields_sha256": "f" * 64,
+        }
+
+    def test_a_missing_reference_temperature_is_asked_for_rather_than_assumed(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        source = self._thermal_source(db_session, project, geometry)
+        with pytest.raises(ToolError, match="reference_temperature_k"):
+            self._box(db_session, user, project).call(
+                "run_simulation",
+                {"load_case": LOAD_CASE, "temperature_from": {"simulation_id": source.id}},
+                allow_mutations=True,
+            )
+
+    def test_a_source_meshed_differently_is_refused_naming_the_mesh_to_use(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        source = self._thermal_source(db_session, project, geometry, element_size_mm=4.0)
+        with pytest.raises(ToolError, match="element_size_mm=4.0"):
+            self._box(db_session, user, project).call(
+                "run_simulation",
+                {
+                    "load_case": LOAD_CASE,
+                    "temperature_from": {
+                        "simulation_id": source.id,
+                        "reference_temperature_k": 293.15,
+                    },
+                },
+                allow_mutations=True,
+            )
+
+    def test_a_structural_source_is_refused(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        source = self._thermal_source(
+            db_session, project, geometry, analysis="solid", load_case=LOAD_CASE
+        )
+        with pytest.raises(ToolError, match="no temperature field"):
+            self._box(db_session, user, project).call(
+                "run_simulation",
+                {
+                    "load_case": LOAD_CASE,
+                    "temperature_from": {
+                        "simulation_id": source.id,
+                        "reference_temperature_k": 293.15,
+                    },
+                },
+                allow_mutations=True,
+            )
+        assert db_session.scalar(
+            select(func.count()).select_from(SimulationJob).where(SimulationJob.analysis == "solid")
+        ) == 1
+
+    def test_the_coupling_and_the_runner_agree_on_what_is_thermal(self) -> None:
+        from app.simulation import coupling, runner
+
+        assert coupling._THERMAL == runner.THERMAL_ANALYSES
+        assert coupling._TRANSIENT == runner.TRANSIENT

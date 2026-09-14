@@ -340,6 +340,18 @@ class Settings(BaseSettings):
     # ccx's `*HEAT TRANSFER` step is federated behind the seam, this is the knob
     # that selects it -- separately, because the two choices are independent.
     conduction_backend: str = "internal"
+    # Which solver steps a *transient* conduction job forward in time. Its own
+    # setting for the reason `conduction_backend` is: a steady solver and a
+    # time-stepping one are chosen independently, and a deployment that pointed
+    # one of them at a federated engine must not thereby move the other.
+    transient_conduction_backend: str = "internal"
+    # The most temperature values a transient run may hold: time samples (steps
+    # + 1) times nodes. The whole history is kept -- in memory while stepping and
+    # in the stored fields afterwards -- because a history thinned to fit would be
+    # sampling where the provenance says solved. So a run that would exceed it is
+    # refused before the solve, naming the time step and the mesh size that would
+    # bring it under. 50 million doubles is 400 MB.
+    max_transient_values: int = 50_000_000
     # Where `ccx` is, when it is not on PATH. Empty means "look on PATH" --
     # `app/solve/calculix/run.py` refuses to fall back to PATH when this names a
     # path that does not exist, so a wrong setting is reported rather than

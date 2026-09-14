@@ -951,7 +951,15 @@ All verified against closed-form solutions, not recorded output.
    takes an optional `temperatures=` array. A *prescribed* field (a formula of position, as
    NAFEMS LE11 gives) and a *solved* one (from conduction) are different sources for the same
    thing — the field is a solver argument and deliberately not on `LoadCase`, which is JSONB on
-   the job row and would then hold data the size of the mesh.
+   the job row and would then hold data the size of the mesh. **A job carries a solved field by
+   reference**: `temperature_from: {simulation_id, step?, reference_temperature_k}` on a solid
+   run (`simulation/coupling.py`). Three rules pinned by tests: the field is used **only on the
+   mesh it was solved on** (same geometry version, size and order at the route; node arrays
+   compared exactly in the runner) — there is no interpolation, and a nearest-node transfer is a
+   plausible wrong field; the source is **pinned by its archive's sha256**, which the cache key
+   covers; and **`reference_temperature_k` has no default**, because the stress is
+   `−Eα(T − T_ref)`. A solver whose `accepts_temperature_field` is false (CalculiX) refuses by
+   name rather than solving at room temperature.
 5. **Steady conduction** — asked for by `analysis: "thermal-conduction"` with a `thermal_case`
    (migration `b941a651831a`, which also makes `load_case` nullable — a conduction run has no
    fixture, no force and no modulus, and an empty `LoadCase` on that row would put a material
@@ -966,8 +974,17 @@ All verified against closed-form solutions, not recorded output.
    `T_tip=(T_b+Bi·T_inf)/(1+Bi)`. Dirichlet, convection (Robin) and heat-flux boundaries over the
    existing `Selector` vocabulary. **Conductivity is on the case, not on `Material`** — so
    nothing inherits an unchecked default — and **watts enter the unit system here**, converting
-   exactly once, the way density does in the CalculiX deck writer. Steady state only: there is no
-   time integration, so "how long until" is not a question it answers.
+   exactly once, the way density does in the CalculiX deck writer.
+   **Transient conduction** is `analysis: "thermal-transient"` with a `transient_case`
+   (migration `5f1bc5c58c49`) — a *sibling* column, because a steady `ThermalCase` validates a
+   transient payload and silently drops the time axis. Backward Euler, checked against the
+   lumped-capacitance cooling curve; `TRANSIENT_CONDUCTION_BACKEND` is its own setting. **The
+   whole history is stored or the run is refused** against `MAX_TRANSIENT_VALUES`
+   (`(steps+1) × nodes`), naming a time step and element size that would fit — thinning it is
+   sampling where the archive says measured. Read either kind through
+   `GET /simulations/{id}/temperature?step=N`; the two surface-field routes answer **409** for a
+   thermal run (they returned 500 until 2026-09-14 — the archive holds no displacements).
+   Agent tool: `run_thermal_simulation`, deliberately separate from `run_simulation`.
 6. **Plane stress and plane strain** — `solve/plane.py`, `PlaneCase` on a `mesh/planar.TriMesh`
    (tri3/tri6), checked against σ = F/A, δ = FL/AE, `G = E/(2(1+ν))` from pure shear, and Lame's
    thick-walled cylinder. `PlanarSolver` is a **sibling** of `Solver`, for `ModalSolver`'s

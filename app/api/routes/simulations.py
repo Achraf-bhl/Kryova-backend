@@ -24,8 +24,15 @@ from app.core.metering import check_quota
 from app.media import MediaNotFound
 from app.models import GeometryVersion, JobStatus, Meter, Project, SimulationJob
 from app.models.audit import AuditAction, AuditOutcome
-from app.schemas import SimulationCreate, SimulationPage, SimulationRead, SurfaceField
-from app.simulation.runner import run_simulation
+from app.schemas import (
+    SimulationCreate,
+    SimulationPage,
+    SimulationRead,
+    SurfaceField,
+    SurfaceTemperature,
+)
+from app.simulation import coupling
+from app.simulation.runner import CONDUCTION, THERMAL_ANALYSES, TRANSIENT, run_simulation
 
 router = APIRouter(prefix="/projects/{project_id}/simulations", tags=["simulations"])
 
@@ -118,6 +125,61 @@ def _assert_within_allowance(db: DbSession, organisation_id: str) -> None:
     )
 
 
+def _requested_solver(analysis: str) -> str:
+    """The setting that names the solver for this analysis, as written at queue time.
+
+    Each thermal analysis has its own setting because each names a solver for a
+    different equation; reading `SOLVER_BACKEND` for a temperature field is how a
+    deployment configured for CalculiX structural work would come to ask the
+    wrong name to answer it.
+    """
+    if analysis == CONDUCTION:
+        return settings.conduction_backend
+    if analysis == TRANSIENT:
+        return settings.transient_conduction_backend
+    return settings.solver_backend
+
+
+def _bind_temperature_source(
+    db: DbSession, project_id: str, geometry: GeometryVersion, payload: SimulationCreate
+) -> dict[str, object]:
+    """`coupling.bind`, with its refusals spoken as HTTP."""
+    assert payload.temperature_from is not None
+    try:
+        return coupling.bind(
+            db,
+            project_id,
+            geometry,
+            payload.temperature_from,
+            element_size_mm=payload.element_size_mm,
+            element_order=payload.element_order,
+        )
+    except coupling.SourceNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except coupling.CouplingRefused as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
+def _refuse_a_thermal_run(job: SimulationJob) -> None:
+    """A structural field route asked about a run that has no structural field.
+
+    Before 2026-09-14 both surface routes read `displacements` straight out of
+    the archive, and a conduction run's archive holds temperatures — so asking
+    for the surface of any thermal run was a `KeyError` and a 500. A 409 that
+    names the route that does serve it is the answer the caller can act on.
+    """
+    if job.analysis in THERMAL_ANALYSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This is a {job.analysis} run: it has a temperature field and no "
+                "displacement or stress. Read it from the temperature route instead."
+            ),
+        )
+
+
 #: Per-principal, like the chat limit (P1.6). Distinct from
 #: `max_concurrent_simulations_per_user`, which caps how many run at once: this
 #: caps how fast they can be *asked for*, which is what a client stuck in a
@@ -145,6 +207,11 @@ def create_simulation(
     _assert_within_quota(db, project.owner_id)
     _assert_within_allowance(db, project.organisation_id)
     geometry = _resolve_geometry(db, project.id, payload.geometry_version)
+    temperature_source = (
+        _bind_temperature_source(db, project.id, geometry, payload)
+        if payload.temperature_from is not None
+        else None
+    )
 
     job = SimulationJob(
         project_id=project.id,
@@ -154,15 +221,15 @@ def create_simulation(
         # actually ran, which is the one a result can be attributed to — and for
         # a conduction run that is a different solver entirely, chosen by
         # `CONDUCTION_BACKEND` rather than by `SOLVER_BACKEND`.
-        solver=(
-            settings.conduction_backend
-            if payload.analysis == "thermal-conduction"
-            else settings.solver_backend
-        ),
+        solver=_requested_solver(payload.analysis),
         load_case=payload.load_case.model_dump() if payload.load_case else None,
         thermal_case=(
             payload.thermal_case.model_dump() if payload.thermal_case else None
         ),
+        transient_case=(
+            payload.transient_case.model_dump() if payload.transient_case else None
+        ),
+        temperature_source=temperature_source,
         element_size_mm=payload.element_size_mm,
         element_order=payload.element_order,
         grids=payload.grids,
@@ -226,6 +293,7 @@ def read_surface_field(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Simulation is {job.status.value}; results are not available",
         )
+    _refuse_a_thermal_run(job)
     try:
         handle = media.open(job.fields_media)
     except MediaNotFound as exc:
@@ -258,6 +326,7 @@ def read_surface_field_binary(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Simulation is {job.status.value}; results are not available",
         )
+    _refuse_a_thermal_run(job)
     try:
         handle = media.open(job.fields_media)
     except MediaNotFound as exc:
@@ -302,6 +371,95 @@ def read_surface_field_binary(
             content=body,
             media_type="application/octet-stream",
             headers={"Content-Disposition": f'attachment; filename="surface_{simulation_id}.bin"'},
+        )
+
+
+@router.get("/{simulation_id}/temperature", response_model=SurfaceTemperature)
+def read_surface_temperature(
+    project: OwnedProject,
+    db: DbSession,
+    media: MediaServiceDep,
+    simulation_id: str,
+    step: Annotated[
+        int | None,
+        Query(
+            ge=0,
+            description=(
+                "For a transient run, which stored time sample to read, 0 being the "
+                "starting field. Omit for the final one. Refused on a steady run, "
+                "which has one field and no time axis."
+            ),
+        ),
+    ] = None,
+) -> SurfaceTemperature:
+    """The temperature on the part's surface, for either thermal analysis.
+
+    The steady and transient archives both carry the final field as
+    `temperatures_k`, so this reads one array whichever ran; `step` reaches into
+    a transient run's stored history. The range reported beside the surface is
+    over **every node** of that sample, interior included — a part hotter inside
+    than on its skin is exactly the case a surface-only maximum would hide.
+    """
+    job = _get_job(db, project.id, simulation_id)
+    if job.status is not JobStatus.SUCCEEDED or job.fields_media is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Simulation is {job.status.value}; results are not available",
+        )
+    if job.analysis not in THERMAL_ANALYSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This is a {job.analysis} run and has no temperature field. Read its "
+                "displacement and stress from the surface route."
+            ),
+        )
+    if step is not None and job.analysis != TRANSIENT:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "step applies only to a thermal-transient run. A steady conduction run "
+                "has one temperature field and no time axis; omit step."
+            ),
+        )
+    try:
+        handle = media.open(job.fields_media)
+    except MediaNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="Result fields are no longer available"
+        ) from exc
+
+    with handle as fh, np.load(fh) as data:
+        time_s: float | None = None
+        step_count: int | None = None
+        if job.analysis == TRANSIENT:
+            history = data["temperature_history_k"]
+            times = data["times_s"]
+            step_count = len(times) - 1
+            index = step_count if step is None else step
+            if index > step_count:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=(
+                        f"This run stored {step_count + 1} time samples, numbered 0 to "
+                        f"{step_count}; there is no sample {index}."
+                    ),
+                )
+            field = history[index]
+            time_s = float(times[index])
+        else:
+            field = data["temperatures_k"]
+        triangles = data["surface_triangles"]
+        used, renumbered = np.unique(triangles, return_inverse=True)
+        return SurfaceTemperature(
+            node_positions=data["nodes"][used].tolist(),
+            triangles=renumbered.reshape(triangles.shape).tolist(),
+            temperatures_k=field[used].tolist(),
+            min_temperature_k=float(field.min()),
+            max_temperature_k=float(field.max()),
+            time_s=time_s,
+            step=None if time_s is None else index,
+            step_count=step_count,
         )
 
 

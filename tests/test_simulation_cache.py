@@ -35,6 +35,8 @@ def _inputs(**overrides: object) -> cache.Inputs:
         geometry_sha256="a" * 64,
         load_case=LOAD,
         thermal_case=None,
+        transient_case=None,
+        temperature_source=None,
         element_size_mm=4.0,
         element_order=1,
         analysis="solid",
@@ -101,11 +103,30 @@ class TestTheKey:
             # `None` is the interesting value and the parametrisation supplies
             # a non-default.
             "thermal_case",
+            "transient_case",
+            "temperature_source",
         }
         assert {field.name for field in fields(cache.Inputs)} == covered
 
     def test_a_thermal_case_changes_the_key(self) -> None:
         assert _inputs(thermal_case={"ambient_c": 20}).digest() != _inputs().digest()
+
+    def test_a_transient_case_changes_the_key(self) -> None:
+        assert _inputs(transient_case={"duration_s": 60}).digest() != _inputs().digest()
+
+    def test_a_borrowed_field_with_a_different_digest_is_a_different_run(self) -> None:
+        """The source's archive digest is in the key, so two runs coupled to the
+        same thermal job id but different temperatures never share a result."""
+        one = _inputs(temperature_source={"simulation_id": "s", "fields_sha256": "a" * 64})
+        two = _inputs(temperature_source={"simulation_id": "s", "fields_sha256": "b" * 64})
+        assert one.digest() != two.digest() != _inputs().digest()
+
+    def test_the_same_dict_as_a_steady_or_a_transient_case_gives_different_keys(self) -> None:
+        """One dict in the wrong column is a different run, not the same one."""
+        case = {"conductivity_w_mk": 51.9}
+        assert (
+            _inputs(thermal_case=case).digest() != _inputs(transient_case=case).digest()
+        )
 
     def test_an_unmeasured_solver_version_does_not_match_a_known_one(self) -> None:
         """"We do not know which CalculiX" must never be served as though it

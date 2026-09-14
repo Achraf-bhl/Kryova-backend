@@ -72,13 +72,25 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
     #: folding them together invites a reader to believe the mechanical loads
     #: influenced the temperature.
     thermal_case: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    #: The case for a `thermal-transient` run: the steady vocabulary plus a heat
+    #: capacity, a starting temperature, a duration and a time step. A third
+    #: sibling column rather than a wider `thermal_case`, because the two shapes
+    #: overlap in every field a steady case has — a steady reader handed a
+    #: transient dict would validate it and silently drop the time axis.
+    transient_case: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    #: The thermal run whose temperature field a solid run carries (E10 task 1's
+    #: coupling): `{simulation_id, step, reference_temperature_k, fields_sha256}`.
+    #: The digest of the source's stored archive is written when the run is
+    #: queued, so a stress is bound to the exact temperatures that produced it
+    #: — an id alone would name a row whose blob could since have been deleted.
+    temperature_source: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     element_size_mm: Mapped[float | None] = mapped_column(Float, default=None)
     # 1 = tet4, 2 = tet10. Stored rather than derived because the mesh it
     # produced is not kept, and a result is only reproducible alongside the
     # element order that computed it.
     element_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
-    #: Which idealisation was solved: `solid`, `plane-stress`, `plane-strain` or
-    #: `thermal-conduction`.
+    #: Which idealisation was solved: `solid`, `plane-stress`, `plane-strain`,
+    #: `thermal-conduction` or `thermal-transient`.
     #: Stored for the same reason `element_order` is — the mesh is not kept, and
     #: plane stress and plane strain give *different answers on the same mesh and
     #: the same load*, so a result whose row does not say which one ran cannot be

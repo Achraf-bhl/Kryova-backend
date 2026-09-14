@@ -70,9 +70,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 14/24 | 92/131 = 70% | 103/151 eng-months = 68% |
+| Engineering — E1–E23 | 14/24 | 92/131 = 71% | 104/151 eng-months = 69% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 20/34 | 139/192 = 72% | 131/189 eng-months = 69% |
+| **Programme** | 20/34 | 140/192 = 73% | 131/189 eng-months = 70% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -80,8 +80,8 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E15 70%, E18 50%, P4 75%, P9 57% |
-| nothing finished yet | E8, E9, E10, E13, E17, E21, E22, E23, P6, P7 |
+| in flight | E10 38%, E15 70%, E18 50%, P4 75%, P9 57% |
+| nothing finished yet | E8, E9, E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -2033,6 +2033,52 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 **~9 engineer-months.**
 
 1. **Steady/transient conduction, convection BCs, thermal-stress coupling.**
+   > DONE (2026-09-14) — **transient conduction reaches the product, and a structural run can
+   > carry a thermal run's temperatures.** The earlier status below shipped the solver and said
+   > in words that it was wired to nothing; this closes that.
+   > **Asked for** by `analysis: "thermal-transient"` with a `transient_case` (migration
+   > `5f1bc5c58c49`, which also adds `temperature_source`). A **sibling column, not a reuse of
+   > `thermal_case`**: a steady `ThermalCase` validates a transient payload and drops the time
+   > axis without a word. `TRANSIENT_CONDUCTION_BACKEND` is its own setting for the reason
+   > `CONDUCTION_BACKEND` is. A study (`grids > 1`) is refused naming the time step as the second
+   > discretisation one run cannot assess.
+   > **The whole history is stored or the run is refused** — `(steps+1) × nodes` against
+   > `MAX_TRANSIENT_VALUES`, with a `time_step_s` and `element_size_mm` that would fit named in
+   > the message. Thinning the history to fit is sampling where the archive says measured, one of
+   > the three forbidden speedups. The archive holds `times_s`, `temperature_history_k` and
+   > `temperatures_k` = the final row, so every steady reader keeps working.
+   > **Read** through `GET /simulations/{id}/temperature?step=N` (`SurfaceTemperature`); a step on
+   > a steady run is refused ("no time axis"), a step past the end names the range.
+   > **A live defect fixed on the way: both surface-field routes returned 500** on every
+   > conduction run (`KeyError: 'displacements'` — the archive holds no displacements). They now
+   > answer 409 pointing at the temperature route.
+   > **Coupling** is `temperature_from: {simulation_id, step?, reference_temperature_k}` on a
+   > solid structural run (`app/simulation/coupling.py`). **The field is used only on the mesh it
+   > was solved on** — same geometry version, element size and order, checked at the route, and
+   > the node array compared exactly at run time — because there is no interpolation, and a
+   > nearest-node transfer between two gmsh meshes is a plausible wrong field. The source is
+   > pinned by its archive's sha256, the cache key covers it (`KEY_VERSION` 2), and the reference
+   > temperature is required with no default: `σ = −Eα(T − T_ref)` for a T_ref nobody stated is
+   > a stress nobody chose. A solver that cannot read a field (CalculiX today) refuses by name via
+   > `Solver.accepts_temperature_field`, rather than solving at room temperature. Refused with a
+   > field: a convergence study, and `delta_t_k` beside one (the expansion counted twice).
+   > **Agent**: `run_thermal_simulation` (steady or transient — its own tool rather than a mode
+   > on `run_simulation`, whose one `LoadCase` is already the hardest argument the local model
+   > writes) and `temperature_from` on `run_simulation`; both refuse with a valid example case.
+   > Verified against closed forms: an insulated bar driven to 400 K, the restrained bar
+   > `σ = −EαΔT` from a *computed* field equal to the `delta_t_k` path to 1e-9, a zero stress at
+   > `T_ref = T`, and a transient's final step within 1e-4 of the steady answer. 23 guards
+   > verified by breaking each and watching a named test fail, restores checked by sha256.
+   > **Not claimed**: a field transferred between two meshes; CalculiX thermal-stress or
+   > transient decks (E3 in THE QUEUE owns the conduction oracle against ccx); any GUI surface —
+   > the frontend has the types and no panel. Written on Linux; no seat claim.
+   > Tested by: `tests/test_simulations.py` (`TestATransientConductionRunCanBeAskedFor`,
+   > `TestTheTemperatureAndSurfaceRoutesServeTheRightRuns`,
+   > `TestAStructuralRunCanCarryAThermalRunsTemperatures`), `tests/test_simulation_cache.py`,
+   > `tests/test_agent.py` (`TestRunThermalSimulation`, `TestRunSimulationCanCarryATemperatureField`),
+   > `tests/test_conduction.py`.
+
+   <!-- superseded 2026-09-14 -->
    > PARTIAL (2026-09-14) — **transient conduction is no longer missing.** `app/solve/
    > conduction.py` adds `TransientThermalCase`/`TransientThermalField` and
    > `BackwardEulerConductionSolver`, solving `rho cp dT/dt = div(k grad T) + q_v` with backward

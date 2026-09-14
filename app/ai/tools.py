@@ -25,6 +25,7 @@ so they say *when* to use a tool, not just what it does.
 """
 
 import difflib
+import json
 import logging
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
@@ -134,6 +135,7 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     # implementation detail.
     "draft_load_case": "Working out the loads",
     "run_simulation": "Submitting the analysis",
+    "run_thermal_simulation": "Submitting the thermal analysis",
     "delete_simulation": "Deleting the run",
     # The direct-COM tools. They carry no `catia_` prefix, so `catia_label`
     # never sees them and an unlisted name would render as "open in catia".
@@ -241,6 +243,61 @@ _LOAD_CASE_EXAMPLE: Final[str] = (
     '"loads": [{"type": "force", "where": {"type": "face", "axis": "x", "side": "max"}, '
     '"force_n": [0, 0, -500]}]}'
 )
+
+
+#: One valid case per thermal analysis, shown whole when the model sends a
+#: broken one — `_load_case_problem`'s finding, that an example of the right
+#: shape fixes in one round what a list of pydantic paths does not fix in four.
+_THERMAL_EXAMPLES: dict[str, dict[str, Any]] = {
+    "steady": {
+        "name": "Heater block",
+        "conductivity_w_mk": 51.9,
+        "boundaries": [
+            {
+                "type": "fixed_temperature",
+                "where": {"type": "face", "axis": "z", "side": "min"},
+                "temperature_k": 373.15,
+            },
+            {
+                "type": "convection",
+                "where": {"type": "face", "axis": "z", "side": "max"},
+                "film_coefficient_w_m2k": 25.0,
+                "ambient_temperature_k": 293.15,
+            },
+        ],
+    },
+    "transient": {
+        "name": "Cooling from the oven",
+        "conductivity_w_mk": 51.9,
+        "density_kg_m3": 7850.0,
+        "specific_heat_j_kgk": 470.0,
+        "initial_temperature_k": 473.15,
+        "duration_s": 600.0,
+        "time_step_s": 10.0,
+        "boundaries": [
+            {
+                "type": "convection",
+                "where": {"type": "face", "axis": "z", "side": "max"},
+                "film_coefficient_w_m2k": 25.0,
+                "ambient_temperature_k": 293.15,
+            },
+        ],
+    },
+}
+
+
+def _thermal_case_problem(analysis: str, error: ValidationError) -> str:
+    """What is wrong with a thermal case, in words, with a working example."""
+    problems = []
+    for item in error.errors()[:4]:
+        where = ".".join(str(part) for part in item.get("loc", ())) or "the case"
+        problems.append(f"{where}: {item.get('msg', 'invalid')}")
+    example = json.dumps(_THERMAL_EXAMPLES[analysis], separators=(",", ":"))
+    return (
+        f"That {analysis} thermal case is not valid ({'; '.join(problems)}). "
+        "Temperatures are absolute kelvin, never celsius. A valid case looks like "
+        f"this: {example}. Fix it and call run_thermal_simulation again."
+    )
 
 
 def _load_case_problem(error: ValidationError) -> str:
@@ -1029,10 +1086,79 @@ class ToolBox:
                                 "Forces are total newtons; a downward 500 N is [0,0,-500]."
                             ),
                         },
+                        "temperature_from": {
+                            "type": "object",
+                            "description": (
+                                "Only when the user wants the stress a temperature field "
+                                "causes: {simulation_id, reference_temperature_k, step?} "
+                                "naming a finished run_thermal_simulation run on the same "
+                                "geometry. reference_temperature_k is the absolute "
+                                "temperature the part is unstrained at -- ask the user "
+                                "rather than assume it. The material needs "
+                                "thermal_expansion_per_k, and element_size_mm and "
+                                "element_order must match the thermal run's."
+                            ),
+                        },
                     },
                     required=["load_case"],
                 ),
                 handler=self._run_simulation,
+                mutating=True,
+            ),
+            Tool(
+                name="run_thermal_simulation",
+                description=(
+                    "Submit a heat conduction analysis: how hot a part gets ('steady'), "
+                    "or how its temperature changes over time as it heats up or cools "
+                    "down ('transient'). Not a stress analysis -- use run_simulation for "
+                    "loads. Consumes real compute and takes minutes, so only call it once "
+                    "the user has asked for the run and the case is complete. Every "
+                    "temperature is absolute kelvin, never celsius. Returns a job id and "
+                    "a status of 'queued' -- poll get_simulation for the outcome."
+                ),
+                parameters=_object(
+                    {
+                        "project_id": {"type": "string"},
+                        "analysis": {
+                            "type": "string",
+                            "enum": ["steady", "transient"],
+                            "description": (
+                                "'steady' for the temperature the part settles at; "
+                                "'transient' for the temperature over a span of time."
+                            ),
+                        },
+                        "thermal_case": {
+                            "type": "object",
+                            "description": (
+                                "conductivity_w_mk and at least one boundary: "
+                                "fixed_temperature (temperature_k), convection "
+                                "(film_coefficient_w_m2k, ambient_temperature_k) or "
+                                "heat_flux (flux_w_m2), each with a 'where' face "
+                                "selector. A transient case also needs density_kg_m3, "
+                                "specific_heat_j_kgk, initial_temperature_k, duration_s "
+                                "and time_step_s."
+                            ),
+                        },
+                        "geometry_version": {
+                            "type": "integer",
+                            "description": "Omit for the project's latest version.",
+                        },
+                        "element_size_mm": {
+                            "type": "number",
+                            "description": (
+                                "Target mesh size. Omit unless the user asked for a "
+                                "specific mesh."
+                            ),
+                        },
+                        "element_order": {
+                            "type": "integer",
+                            "enum": [1, 2],
+                            "description": "2 for quadratic tets (the default), 1 for linear.",
+                        },
+                    },
+                    required=["analysis", "thermal_case"],
+                ),
+                handler=self._run_thermal_simulation,
                 mutating=True,
             ),
             Tool(
@@ -1801,7 +1927,10 @@ class ToolBox:
         return {
             "id": job.id,
             "status": job.status.value,
+            "analysis": job.analysis,
             "load_case": job.load_case,
+            "thermal_case": job.thermal_case,
+            "transient_case": job.transient_case,
             "element_size_mm": job.element_size_mm,
             "mesh_stats": job.mesh_stats,
             "result": job.result,
@@ -1878,6 +2007,7 @@ class ToolBox:
         geometry_version: int | None = None,
         element_size_mm: float | None = None,
         element_order: int = 2,
+        temperature_from: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Queue a real mesh-and-solve run, exactly as the HTTP route does.
 
@@ -1894,15 +2024,6 @@ class ToolBox:
                 f"element_order must be 1 (linear tets) or 2 (quadratic); got {element_order!r}."
             )
 
-        if self.job_queue is None or self.session_scope is None or self.media_store is None:
-            # A configuration fault, not a model mistake -- but it still reaches
-            # the model as a tool error, because the alternative is a 500 that
-            # loses the turn and the transcript with it.
-            raise ToolError(
-                "Simulations cannot be submitted from this context. Tell the user to "
-                "start the run from the project page, and do not claim it is running."
-            )
-
         # Validate before touching the queue: a Pydantic failure here becomes a
         # tool error the model can read and correct, rather than a 500 later.
         try:
@@ -1914,14 +2035,197 @@ class ToolBox:
                 f"That load case is not valid: {exc}. Fix it and call run_simulation again."
             ) from exc
 
+        temperature_source = None
+        if temperature_from is not None:
+            temperature_source = self._bind_temperature_source(
+                project,
+                geometry_version,
+                element_size_mm,
+                element_order,
+                validated,
+                temperature_from,
+            )
+
+        job, version = self._submit_simulation(
+            project,
+            geometry_version,
+            element_size_mm,
+            solver=LinearStaticSolver.name,
+            load_case=validated.model_dump(),
+            element_order=element_order,
+            temperature_source=temperature_source,
+        )
+        return {
+            "id": job.id,
+            "status": job.status.value,
+            "project_id": project.id,
+            "geometry_version_number": version.version_number,
+            "load_case_name": validated.name,
+            "element_size_mm": element_size_mm,
+            "element_order": element_order,
+            "note": (
+                "Queued. Meshing and solving take minutes; call get_simulation with "
+                "this id to find out how it went. Do not report a result yet."
+            ),
+        }
+
+    def _bind_temperature_source(
+        self,
+        project: Project,
+        geometry_version: int | None,
+        element_size_mm: float | None,
+        element_order: int,
+        case: LoadCase,
+        temperature_from: dict[str, Any],
+    ) -> dict[str, Any]:
+        """The route's coupling checks (`app.simulation.coupling`), as tool errors."""
+        from app.schemas.simulation import TemperatureSource
+        from app.simulation import coupling
+
+        try:
+            source_ref = TemperatureSource.model_validate(temperature_from)
+        except ValidationError as exc:
+            raise ToolError(
+                "temperature_from needs simulation_id and reference_temperature_k (absolute "
+                "kelvin, the temperature the part is unstrained at), and optionally step for "
+                f"a transient run. {exc.errors()[0].get('msg', '')}"
+            ) from exc
+        if case.delta_t_k:
+            raise ToolError(
+                "This load case carries a uniform delta_t_k and temperature_from names a "
+                "temperature field; adding them would count the expansion twice. Drop "
+                "delta_t_k."
+            )
+        version = self._geometry_version(project, geometry_version)
+        try:
+            return coupling.bind(
+                self.db,
+                project.id,
+                version,
+                source_ref,
+                element_size_mm=element_size_mm,
+                element_order=element_order,
+            )
+        except (coupling.SourceNotFound, coupling.CouplingRefused) as exc:
+            raise ToolError(str(exc)) from exc
+
+    def _run_thermal_simulation(
+        self,
+        analysis: str,
+        thermal_case: dict[str, Any],
+        project_id: str | None = None,
+        geometry_version: int | None = None,
+        element_size_mm: float | None = None,
+        element_order: int = 2,
+    ) -> dict[str, Any]:
+        """Queue a steady or transient conduction run, as the HTTP route does.
+
+        **A separate tool from `run_simulation`, and that is the E10.1 decision.**
+        Folding a thermal case into `run_simulation` would put two case shapes
+        and an analysis switch into the one tool every structural run goes
+        through, and the local model that drives this product got a single
+        `LoadCase` wrong four times running on ladder prompt H4 — a union of
+        three shapes is the wrong direction. The route already has the three
+        analyses; before this, the agent could reach only one of them, which is
+        the "never offered" class `CLAUDE.md` testing item 8 names.
+
+        `analysis` decides which case is read, and the case is validated as that
+        shape and nothing looser: a steady case silently ignoring a duration is
+        the plausible wrong answer the route's own validator refuses.
+        """
+        from app.simulation.runner import CONDUCTION, TRANSIENT
+        from app.solve.conduction import ThermalCase, TransientThermalCase
+
+        project = self._project(project_id)
+        if element_order not in (1, 2):
+            raise ToolError(
+                f"element_order must be 1 (linear tets) or 2 (quadratic); got {element_order!r}."
+            )
+        shapes: dict[str, type[ThermalCase] | type[TransientThermalCase]] = {
+            "steady": ThermalCase,
+            "transient": TransientThermalCase,
+        }
+        shape = shapes.get(analysis)
+        if shape is None:
+            raise ToolError(
+                f"analysis must be 'steady' (how hot does it get) or 'transient' (how "
+                f"the temperature changes over time); got {analysis!r}."
+            )
+        try:
+            validated = shape.model_validate(thermal_case)
+        except ValidationError as exc:
+            raise ToolError(_thermal_case_problem(analysis, exc)) from exc
+
+        columns: dict[str, Any]
+        if analysis == "steady":
+            columns = {
+                "analysis": CONDUCTION,
+                "thermal_case": validated.model_dump(),
+                "solver": settings.conduction_backend,
+            }
+        else:
+            columns = {
+                "analysis": TRANSIENT,
+                "transient_case": validated.model_dump(),
+                "solver": settings.transient_conduction_backend,
+            }
+        job, version = self._submit_simulation(
+            project,
+            geometry_version,
+            element_size_mm,
+            element_order=element_order,
+            **columns,
+        )
+        return {
+            "id": job.id,
+            "status": job.status.value,
+            "project_id": project.id,
+            "analysis": job.analysis,
+            "geometry_version_number": version.version_number,
+            "thermal_case_name": validated.name,
+            "element_size_mm": element_size_mm,
+            "element_order": element_order,
+            "note": (
+                "Queued. Meshing and solving take minutes; call get_simulation with "
+                "this id to find out how it went. Do not report a temperature yet."
+            ),
+        }
+
+    def _geometry_version(self, project: Project, number: int | None) -> GeometryVersion:
+        """The numbered version of this project's geometry, or its latest."""
         stmt = select(GeometryVersion).where(GeometryVersion.project_id == project.id)
-        if geometry_version is None:
+        if number is None:
             stmt = stmt.order_by(GeometryVersion.version_number.desc())
         else:
-            stmt = stmt.where(GeometryVersion.version_number == geometry_version)
+            stmt = stmt.where(GeometryVersion.version_number == number)
         version = self.db.scalars(stmt).first()
         if version is None:
             raise ToolError("No matching geometry version. Call list_geometry to see what exists.")
+        return version
+
+    def _submit_simulation(
+        self,
+        project: Project,
+        geometry_version: int | None,
+        element_size_mm: float | None,
+        **columns: Any,
+    ) -> tuple[SimulationJob, GeometryVersion]:
+        """The checks every agent-submitted run shares, then the job and the queue.
+
+        One implementation for both run tools, because each check here was added
+        after a run went wrong, and a second copy is where the next one would be
+        forgotten.
+        """
+        if self.job_queue is None or self.session_scope is None or self.media_store is None:
+            # A configuration fault, not a model mistake -- but it still reaches
+            # the model as a tool error, because the alternative is a 500 that
+            # loses the turn and the transcript with it.
+            raise ToolError(
+                "Simulations cannot be submitted from this context. Tell the user to "
+                "start the run from the project page, and do not claim it is running."
+            )
+
+        version = self._geometry_version(project, geometry_version)
 
         # Before the queue, not in the worker. The runner makes the same check,
         # but a refusal from there arrives as a *failed job* -- which the agent
@@ -1955,10 +2259,8 @@ class ToolBox:
             project_id=project.id,
             geometry_version_id=version.id,
             status=JobStatus.QUEUED,
-            solver=LinearStaticSolver.name,
-            load_case=validated.model_dump(),
             element_size_mm=element_size_mm,
-            element_order=element_order,
+            **columns,
         )
         self.db.add(job)
         # Commit before submitting: the worker looks the job up by id in its own
@@ -1970,20 +2272,7 @@ class ToolBox:
         store = self.media_store
         self.job_queue.submit(lambda: run_simulation(job_id, scope, store))
         self.db.refresh(job)
-
-        return {
-            "id": job.id,
-            "status": job.status.value,
-            "project_id": project.id,
-            "geometry_version_number": version.version_number,
-            "load_case_name": validated.name,
-            "element_size_mm": element_size_mm,
-            "element_order": element_order,
-            "note": (
-                "Queued. Meshing and solving take minutes; call get_simulation with "
-                "this id to find out how it went. Do not report a result yet."
-            ),
-        }
+        return job, version
 
     def _assert_within_quota(self) -> None:
         """Refuse a run when the user already holds their share of the workers.

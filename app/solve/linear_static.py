@@ -326,6 +326,7 @@ def _temperature_change(
 
 class LinearStaticSolver(Solver):
     name = "linear-static"
+    accepts_temperature_field = True
 
     def solve(
         self,

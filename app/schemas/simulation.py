@@ -4,9 +4,68 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from app.models.simulation import JobStatus
-from app.solve.conduction import ThermalCase
+from app.solve.conduction import ThermalCase, TransientThermalCase
 from app.solve.types import LoadCase, Material
 from app.verify.standards import NOT_VALIDATED
+
+#: Which case each analysis reads. Everything absent reads a `load_case`.
+CASE_FOR_ANALYSIS: dict[str, str] = {
+    "thermal-conduction": "thermal_case",
+    "thermal-transient": "transient_case",
+}
+
+_WHAT_IT_READS: dict[str, str] = {
+    "load_case": "the fixtures, the loads and the material are what it solves.",
+    "thermal_case": "the conductivity and the boundary conditions are the whole of what it solves.",
+    "transient_case": (
+        "the conductivity, the heat capacity, the boundary conditions, the starting "
+        "temperature and the time span are the whole of what it solves."
+    ),
+}
+
+_WHY_REFUSED: dict[str, str] = {
+    "load_case": (
+        "It reads no fixture, no force and no modulus, so one supplied here would be "
+        "ignored while looking like part of the model."
+    ),
+    "thermal_case": (
+        "It solves for displacement and stress, or for a temperature history, not for "
+        "a steady temperature field."
+    ),
+    "transient_case": (
+        "It has no time axis, so a duration, a time step and a starting temperature "
+        "supplied here would be ignored while looking like part of the model."
+    ),
+}
+
+_WHERE_IT_BELONGS: dict[str, str] = {
+    "load_case": "Ask for a structural analysis if the loads are what you want solved.",
+    "thermal_case": (
+        "Set analysis to 'thermal-conduction', or use load_case.delta_t_k for a uniform "
+        "temperature change applied to a structural run."
+    ),
+    "transient_case": "Set analysis to 'thermal-transient' to solve how the field evolves.",
+}
+
+
+class TemperatureSource(BaseModel):
+    """A finished thermal run whose temperature field a structural run is to carry.
+
+    The coupling seam `LinearStaticSolver.solve(temperatures=)` has had since
+    2026-09-09, made reachable from a request. The field is not copied onto this
+    run: it is read from the thermal run's stored archive, and the digest of that
+    archive is recorded on the row when the run is queued, so the provenance of
+    every stress names the exact temperatures that produced it.
+    """
+
+    simulation_id: str
+    #: For a transient source, which stored time sample; omitted means the final
+    #: one. Refused on a steady source, which has no time axis.
+    step: int | None = Field(default=None, ge=0)
+    #: Absolute kelvin at which the part is unstrained. **Required, with no
+    #: default**: every thermal stress is proportional to `T - T_ref`, so a
+    #: reference nobody chose is a whole answer nobody chose.
+    reference_temperature_k: float = Field(gt=0)
 
 
 class SimulationCreate(BaseModel):
@@ -17,9 +76,9 @@ class SimulationCreate(BaseModel):
     load_case: LoadCase | None = Field(
         default=None,
         description=(
-            "Fixtures, loads and material. Required for every analysis except "
-            "'thermal-conduction', which has none of the three — it takes a "
-            "thermal_case instead."
+            "Fixtures, loads and material. Required for every analysis except the "
+            "two thermal ones, which have none of the three — 'thermal-conduction' "
+            "takes a thermal_case and 'thermal-transient' a transient_case instead."
         ),
     )
     thermal_case: ThermalCase | None = Field(
@@ -29,6 +88,27 @@ class SimulationCreate(BaseModel):
             "'thermal-conduction' run. It is a sibling of load_case rather than part "
             "of it: a steady conduction solve reads no fixture, no force and no "
             "modulus, and the answer is a temperature field rather than a stress."
+        ),
+    )
+    transient_case: TransientThermalCase | None = Field(
+        default=None,
+        description=(
+            "Conductivity, density, specific heat, boundary conditions, a uniform "
+            "starting temperature, a duration and a time step, for a "
+            "'thermal-transient' run. Its own field rather than a looser "
+            "thermal_case: a steady case handed a density and a duration would "
+            "silently drop both, and the run would answer a question nobody asked."
+        ),
+    )
+    temperature_from: TemperatureSource | None = Field(
+        default=None,
+        description=(
+            "A finished thermal-conduction or thermal-transient run in this project "
+            "whose temperature field this solid run carries as thermal expansion. "
+            "It must have analysed the same geometry version with the same "
+            "element_size_mm and element_order, because a field is bound to the mesh "
+            "it was solved on; and the load_case must carry no uniform delta_t_k, "
+            "which would count the expansion twice."
         ),
     )
     element_size_mm: float | None = Field(
@@ -78,7 +158,9 @@ class SimulationCreate(BaseModel):
     of freedom and solve time. `MAX_ELEMENTS` still bounds the mesh, and a
     caller who wants the cheap answer can still ask for it.
     """
-    analysis: Literal["solid", "plane-stress", "plane-strain", "thermal-conduction"] = Field(
+    analysis: Literal[
+        "solid", "plane-stress", "plane-strain", "thermal-conduction", "thermal-transient"
+    ] = Field(
         default="solid",
         description=(
             "Which idealisation to solve. 'solid' meshes the body with tetrahedra. "
@@ -90,7 +172,9 @@ class SimulationCreate(BaseModel):
             "long). 'thermal-conduction' solves for a steady temperature field "
             "instead of a displacement: it takes a thermal_case and no load_case, "
             "and it answers 'how hot does it get', never 'how long until' — there "
-            "is no time integration behind it."
+            "is no time integration behind it. 'thermal-transient' is the one that "
+            "answers 'how long until': it takes a transient_case and steps the "
+            "temperature field forward in time with backward Euler."
         ),
     )
     thickness_mm: float | None = Field(
@@ -145,35 +229,54 @@ class SimulationCreate(BaseModel):
         `thickness_mm`'s reason one line down. A conduction run handed a
         `load_case` would silently ignore a material and a set of fixtures the
         engineer chose; a structural run handed a `thermal_case` would ignore a
-        conductivity and every boundary condition in it. Both are the shape of
-        mistake that produces a plausible answer to a question nobody asked.
+        conductivity and every boundary condition in it; a steady run handed a
+        `transient_case` would ignore a duration. Each is the shape of mistake
+        that produces a plausible answer to a question nobody asked.
         """
-        if self.analysis == "thermal-conduction":
-            if self.thermal_case is None:
-                raise ValueError(
-                    "A thermal-conduction analysis needs a thermal_case: the "
-                    "conductivity and the boundary conditions are the whole of what "
-                    "it solves."
-                )
-            if self.load_case is not None:
-                raise ValueError(
-                    "A thermal-conduction analysis takes no load_case. It reads no "
-                    "fixture, no force and no modulus, so one supplied here would be "
-                    "ignored while looking like part of the model. Ask for a "
-                    "structural analysis if the loads are what you want solved."
-                )
-            return self
-        if self.thermal_case is not None:
+        wanted = CASE_FOR_ANALYSIS.get(self.analysis, "load_case")
+        supplied = {
+            name
+            for name in ("load_case", "thermal_case", "transient_case")
+            if getattr(self, name) is not None
+        }
+        if wanted not in supplied:
             raise ValueError(
-                f"A {self.analysis} analysis takes no thermal_case; it solves for "
-                "displacement and stress, not temperature. Set analysis to "
-                "'thermal-conduction', or use load_case.delta_t_k for a uniform "
-                "temperature change applied to a structural run."
+                f"A {self.analysis} analysis needs a {wanted}: {_WHAT_IT_READS[wanted]}"
             )
-        if self.load_case is None:
+        for extra in sorted(supplied - {wanted}):
             raise ValueError(
-                f"A {self.analysis} analysis needs a load_case: the fixtures, the "
-                "loads and the material are what it solves."
+                f"A {self.analysis} analysis takes no {extra}. {_WHY_REFUSED[extra]} "
+                f"{_WHERE_IT_BELONGS[extra]}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _a_temperature_field_goes_to_one_solid_grid(self) -> "SimulationCreate":
+        """Where a borrowed temperature field can be honoured, and only there.
+
+        A plane model is a cross-section and the field was solved on a solid; a
+        convergence study remeshes at every grid and the field is bound to one
+        mesh; a thermal run has no expansion to apply it to; and a case with its
+        own `delta_t_k` would add a uniform change on top of the field.
+        """
+        if self.temperature_from is None:
+            return self
+        if self.analysis != "solid":
+            raise ValueError(
+                f"temperature_from applies only to a solid analysis; a {self.analysis} "
+                "run cannot carry a temperature field solved on a tetrahedral mesh."
+            )
+        if self.grids != 1:
+            raise ValueError(
+                "temperature_from cannot be combined with a convergence study: every "
+                "grid is a different mesh and the field is bound to the one it was "
+                "solved on. Ask for one grid."
+            )
+        if self.load_case is not None and self.load_case.delta_t_k:
+            raise ValueError(
+                "This load_case carries a uniform delta_t_k and temperature_from names a "
+                "temperature field. Adding them would count the expansion twice; drop "
+                "delta_t_k and fold any uniform offset into the thermal run."
             )
         return self
 
@@ -186,7 +289,7 @@ class SimulationCreate(BaseModel):
         alongside `solid` is a misunderstanding worth naming: it would be
         silently ignored, and the engineer would believe it had been used.
         """
-        if self.analysis in ("solid", "thermal-conduction"):
+        if self.analysis in ("solid", "thermal-conduction", "thermal-transient"):
             if self.thickness_mm is not None:
                 raise ValueError(
                     "thickness_mm applies only to a plane analysis; a solid takes its "
@@ -212,6 +315,8 @@ class SimulationRead(BaseModel):
     solver: str
     load_case: dict[str, Any] | None
     thermal_case: dict[str, Any] | None
+    transient_case: dict[str, Any] | None = None
+    temperature_source: dict[str, Any] | None = None
     element_size_mm: float | None
     element_order: int
     grids: int
@@ -256,6 +361,26 @@ class SurfaceField(BaseModel):
     von_mises_mpa: list[float]
     max_von_mises_mpa: float
     max_displacement_mm: float
+
+
+class SurfaceTemperature(BaseModel):
+    """The temperature on a thermal run's surface, sized for a 3D viewer.
+
+    A sibling of `SurfaceField` rather than a mode of it: a structural surface has
+    displacements to deform by and a stress to colour by, and a temperature
+    surface has neither. `time_s`, `step` and `step_count` are present on a
+    transient run and `None` on a steady one, which has no time axis to index.
+    """
+
+    node_positions: list[list[float]]
+    triangles: list[list[int]]
+    temperatures_k: list[float]
+    #: Over every node of the sample, interior included — see the route.
+    min_temperature_k: float
+    max_temperature_k: float
+    time_s: float | None = None
+    step: int | None = None
+    step_count: int | None = None
 
 
 class MaterialList(BaseModel):

@@ -50,6 +50,23 @@ def sslmode_for(url: str) -> str:
     return value
 
 
+def connect_args_for(url: str, connect_timeout_seconds: int) -> dict[str, Any]:
+    """What every new connection is opened with.
+
+    `connect_timeout` is here because its absence hangs the server rather than
+    failing it. Measured on Windows 2026-09-14 with psycopg 3.3 and nothing
+    listening on 5432: a plain socket is refused in 2 s, but `psycopg.connect`
+    without a timeout never returned at all, so uvicorn's lifespan waited
+    forever on its first query and the desktop launcher reported "the API
+    server is not reachable" with nothing in the log to say why. With the
+    timeout it raises `ConnectionTimeout` naming each address it tried.
+    """
+    return {
+        "sslmode": sslmode_for(url),
+        "connect_timeout": connect_timeout_seconds,
+    }
+
+
 #: How long a pooled connection may have been sitting idle before it is pinged
 #: on checkout. See `install_idle_pre_ping` -- this is the whole trade-off.
 PRE_PING_IDLE_SECONDS = 5.0
@@ -59,7 +76,7 @@ IDLE_SINCE_KEY = "kryova_idle_since"
 
 engine = create_engine(
     settings.database_url,
-    connect_args={"sslmode": sslmode_for(settings.database_url)},
+    connect_args=connect_args_for(settings.database_url, settings.db_connect_timeout_seconds),
     # Neon drops idle connections and the pooled endpoint hands the dead socket
     # back out; recycling before it does turns a user-visible error into a
     # reconnect. `pool_pre_ping=False` here does NOT mean the ping is gone --

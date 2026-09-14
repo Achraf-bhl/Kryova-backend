@@ -469,6 +469,23 @@ needs a different extraction stated up front rather than chosen after the sweep.
   an AI tool schema — that is its own unit of work. No CATIA or GUI claim rides with this; it
   was written and tested on Linux only. Tested by: `tests/test_conduction.py` (+23),
   `tests/test_solver_registry.py` (+5). `ruff`/`mypy` clean on every touched file.
+- **2026-09-14 — "The API server is not reachable" on every launch after a reboot: two defects,
+  both fixed, measured on the installed desktop app.** The zip-archive Postgres does not survive
+  a reboot, and **psycopg 3.3 on Windows never notices a refused port** — a raw socket is refused
+  in 2 s, `psycopg.connect` with no `connect_timeout` never returned — so uvicorn's lifespan hung
+  on its first query, never bound 8000, and the launcher showed the setup page's advice to start
+  a uvicorn that was already running. Three stuck `kryova.exe` instances had each spawned one.
+  Fixed: `connect_timeout` on every connection (`DB_CONNECT_TIMEOUT_SECONDS`, default 10), and
+  `app/core/local_postgres.py`, which runs `pg_ctl start -w` from lifespan when
+  `LOCAL_POSTGRES_BIN_DIR`/`DATA_DIR` are set, `DATABASE_URL` is loopback and `pg_ctl status`
+  says it is down; a failed start stops the server quoting the log. A third finding on the way:
+  the documented `-l pgdata\server.log` put the log inside the data directory, where crash
+  recovery's fsync hits a sharing violation and retries 30 s. Measured, launch to `/health`
+  `database: ok` from a force-killed Postgres: **39 s before the log move, 5 s after.** Guard
+  broken: removing `connect_timeout` fails both timeout tests, the real connect hanging past
+  30 s. Not addressed: the installed MSI predates `lib.rs` dropping the CATIA bridge spawn, and
+  a second launch still starts a second shell. Tested by: `tests/test_local_postgres.py`,
+  `tests/test_database_sslmode.py`.
 - **2026-09-12 — THE QUEUE B3: three of the four Win32 questions answered, and two standing
   claims in CLAUDE.md corrected.** Win32 only, against a live modal dialog on the seat.
   **`StartCommand` does NOT fail silently — it wedges the seat.** CLAUDE.md said "hand it a name

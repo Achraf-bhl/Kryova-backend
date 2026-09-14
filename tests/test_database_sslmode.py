@@ -21,7 +21,7 @@ the question at all.
 
 import pytest
 
-from app.core.database import sslmode_for
+from app.core.database import connect_args_for, sslmode_for
 
 NEON = "postgresql+psycopg://u:p@ep-x-pooler.eu-central-1.aws.neon.tech/db?sslmode=require"
 
@@ -82,6 +82,11 @@ def test_a_repeated_key_reads_the_way_libpq_reads_it() -> None:
     """
     url = "postgresql+psycopg://u:p@h/db?sslmode=require&sslmode=disable"
     assert sslmode_for(url) == "disable"
+
+
+def test_the_connect_arguments_carry_the_url_s_sslmode() -> None:
+    """`connect_args_for` wraps this function; the TLS decision must survive it."""
+    assert connect_args_for(NEON, 10)["sslmode"] == "require"
 
 
 def test_a_key_with_no_value_is_the_same_as_no_key() -> None:

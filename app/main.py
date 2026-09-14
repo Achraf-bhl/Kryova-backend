@@ -162,6 +162,7 @@ _configure_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _warn_about_insecure_defaults()
+    _start_local_postgres()
     _fail_orphaned_jobs()
     yield
     get_job_queue().shutdown()
@@ -179,6 +180,24 @@ def _warn_about_insecure_defaults() -> None:
     """
     for problem in settings.insecure_defaults():
         logger.warning("Insecure setting: %s", problem)
+
+
+def _start_local_postgres() -> None:
+    """Start this machine's Postgres if it is configured and down.
+
+    Before the first query, because that query is what used to wait forever on
+    a database a reboot had stopped. A failure raises and the server does not
+    boot -- see `app/core/local_postgres.py`.
+    """
+    from app.core.local_postgres import Action, ensure_running
+
+    outcome = ensure_running(
+        settings.database_url,
+        settings.local_postgres_bin_dir,
+        settings.local_postgres_data_dir,
+    )
+    if outcome.action is Action.STARTED:
+        logger.warning("%s -- it was not running", outcome.detail)
 
 
 def _stop_local_catia_bridge() -> None:

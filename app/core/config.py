@@ -76,6 +76,19 @@ class Settings(BaseSettings):
     db_max_overflow: int = 5
     # Neon closes idle connections; recycle before it does rather than after.
     db_pool_recycle_seconds: int = 280
+    # How long one connection attempt may take before it is abandoned. Not a
+    # tuning knob: without it psycopg on Windows never notices a refused port,
+    # so a server started while Postgres was down sat at "Waiting for
+    # application startup" forever instead of failing (measured 2026-09-14).
+    db_connect_timeout_seconds: int = 10
+
+    # A Postgres run from its zip archive -- no installer, no Windows service --
+    # does not survive a reboot. Name its binaries and data directory and the
+    # server starts it at startup when DATABASE_URL points at this machine and
+    # nothing is answering. Unset, nothing is ever started. See
+    # app/core/local_postgres.py.
+    local_postgres_bin_dir: str | None = None
+    local_postgres_data_dir: str | None = None
 
     # The schema the application's tables live in. Every statement is compiled
     # schema-qualified against this rather than relying on search_path -- see

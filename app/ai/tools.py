@@ -2881,14 +2881,20 @@ class ToolBox:
                     #
                     # Naming the recovery costs nothing and is the difference
                     # between a wrong part the user has to notice and a wrong
-                    # part the agent fixes. There is no `catia_delete_feature`
-                    # on the open kernel (117 of 205 operations), so this really
-                    # is the only route, which is exactly why it has to be said.
+                    # part the agent fixes. Starting over was the only route
+                    # until 2026-09-14, when `catia_delete_feature` reached the
+                    # open kernel (master plan E1.3). The 200 mm pad above is one
+                    # wrong feature, and discarding the part for it throws away
+                    # every correct feature built after it, so the delete is
+                    # named first and starting over second.
                     raise ToolError(
                         f"This conversation already owns the part {bound!r}, and it is "
                         "still open in memory -- there is nothing to reopen. Continue "
                         "building on it directly; call catia_list_features first if "
-                        "you need to see what already exists. **If this part is wrong "
+                        "you need to see what already exists. **If one feature is "
+                        "wrong**, call catia_delete_feature on it and build it again; "
+                        "the rest of the part stays, and catia_feature_parents shows "
+                        "what depends on it first. **If the whole part is wrong "
                         "and you want to start it again from nothing**, call "
                         "catia_assembly_component to close the one you have, then "
                         "catia_new_part for a fresh one -- that is also how you start a "

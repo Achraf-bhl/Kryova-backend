@@ -55,6 +55,22 @@ _WORD_PREDICATES: Final[dict[str, dict[str, Any]]] = {
     "concave": {"convex": False},
 }
 
+#: The other four bounding-box face words, for picking **faces** only. Added
+#: 2026-09-14. Every face reference in the registry documents all six ("a
+#: bounding-box face name (top, bottom, front, back, left, right)") and
+#: `elements.BOUNDING_BOX_FACES` resolves all six as planes, but faces were picked
+#: with `top` and `bottom` alone. So `catia_shell_faces` could thicken the top wall
+#: and refused "right". Kept apart from `_WORD_PREDICATES` because that table is
+#: also the edge vocabulary (`supported_words`), which has no left or right.
+#: `elements` imports this module, so the plane table cannot be read from here;
+#: `tests/test_kernel_face_words.py` holds the two to one meaning.
+_FACE_WORDS: Final[dict[str, dict[str, Any]]] = {
+    "front": {"axis": "y", "side": "min"},
+    "back": {"axis": "y", "side": "max"},
+    "left": {"axis": "x", "side": "min"},
+    "right": {"axis": "x", "side": "max"},
+}
+
 #: Words this backend answers by direction rather than by predicate.
 _DIRECTIONAL_WORDS: Final[tuple[str, ...]] = ("vertical", "horizontal")
 
@@ -159,11 +175,15 @@ def _select(
         )
 
     template = _WORD_PREDICATES.get(word)
+    if template is None and kind == "face":
+        template = _FACE_WORDS.get(word)
     if template is not None:
         predicate = parse(template, kind=kind)
         return require_matches(resolve(shape, predicate), predicate, tool)
 
-    known = ", ".join(vocabulary.EDGE_SELECTORS)
+    known = ", ".join(
+        (*vocabulary.EDGE_SELECTORS, *_FACE_WORDS) if kind == "face" else vocabulary.EDGE_SELECTORS
+    )
     raise GeometryError(
         f"{word!r} is not a selector word. The vocabulary is: {known} — or give a "
         'predicate such as {"longer_than_mm": 10}.'

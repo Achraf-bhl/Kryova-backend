@@ -790,14 +790,19 @@ def _execute_locally(
             # kept it on the rails: it says to extrude past and cut, or to use
             # `limit='up_to_plane'`.
             raise CatiaError(str(exc)) from exc
+        # The whole operation is absent. Its reason is kept (`kernel/occt/refusals`),
+        # because "not implemented yet" alone does not tell the agent whether to
+        # look for another route on this backend or to stop asking: a CATIA dialog
+        # tool will never exist here, and a delete is served under another name.
         coverage = backends.local_coverage()
         implemented = coverage.get("implemented", 0)
         declared = coverage.get("declared", 0)
+        reason = f" {exc.reason.rstrip('.')}." if exc.reason else ""
         raise CatiaError(
-            f"{spec.name} is not implemented in the open kernel yet "
-            f"({implemented} of {declared} operations are). This is a gap in the "
-            "backend, not a problem with the part. Use another operation, or switch "
-            "GEOMETRY_BACKEND to catia and connect a seat."
+            f"{spec.name} is not available on the open kernel ({implemented} of "
+            f"{declared} operations are).{reason} This is a limit of the backend, not a "
+            "problem with the part. Use another operation, or switch GEOMETRY_BACKEND "
+            "to catia and connect a seat."
         ) from exc
     except KernelError as exc:
         raise CatiaError(f"{spec.name}: {exc}") from exc

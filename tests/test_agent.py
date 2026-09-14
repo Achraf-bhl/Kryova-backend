@@ -2220,6 +2220,20 @@ class TestTheSecondPartRefusalIsBackendAccurate:
         assert "\n            else:" not in between
         assert source.count("catia_assembly_component") == 1
 
+    def test_the_kernel_refusal_offers_the_delete_before_starting_over(self) -> None:
+        """One wrong pad is one feature. Starting over discards every correct
+        feature after it, so the refusal names catia_delete_feature first (E1.3)."""
+        from pathlib import Path
+
+        from app.ai import tools as tools_module
+
+        source = Path(tools_module.__file__).read_text(encoding="utf-8")
+        start_over = source.index("catia_assembly_component")
+        guard = source.rfind("if backends.is_local():", 0, start_over)
+        refusal = source[guard:start_over]
+
+        assert '"wrong**, call catia_delete_feature on it' in refusal
+
     def test_a_seat_is_not_refused_a_second_part(self) -> None:
         """The refusal that cost seven rounds is gone: no ToolError in the
         seat's path says one conversation holds one part."""

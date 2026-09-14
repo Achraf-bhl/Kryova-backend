@@ -866,6 +866,26 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
    `interop.measure_metadata_round_trip`'s "names, colours, layers … all carry" is a statement
    about **OCCT talking to itself**, which is exactly the limit B5 was written to expose.
 
+14. **OCCT reports `IsDone()` for a shell whose walls meet, and the answer is wrong both ways**
+   (measured 2026-09-14, a 40x30x20 box open at the top). At 15 mm, where two walls meet, the
+   result is a 20,888.9 mm3 shape `BRepCheck_Analyzer` calls invalid. At 16 mm it is **the
+   original box**, 24,000 mm3 and six faces, presented as a shell. `booleans.
+   _refuse_a_shell_that_did_not_hollow` checks validity and "volume unchanged". It does not check
+   "volume went down", because an **outward** shell removes the core too and can come out lighter
+   (8,707.9 mm3 at 2 mm).
+15. **`catia_shell`'s dispatcher schema takes `thickness_mm` and `outward`, and nothing else.** The
+   kernel handler reads `faces`, but no call through `call_catia` can reach it. An open shell
+   from the agent is `catia_shell_faces`. A runner test that passes `faces` proves a path the
+   product does not have.
+16. **A delete is a replay, and names must not move in it** (`operations/history.py`). Replaying
+   `Pad.3` into a document that never saw `Pad.2` allocates `Pad.2`, and every `"Pad.3#top"`
+   then means another feature. `PartDocument.continue_numbering` runs before each replayed call,
+   and a rebuild that reports a different name is refused. Dependence is read from argument
+   names; what a later cut does to material it does not name is caught only by the rebuild failing.
+17. **Every declared operation must be in `HANDLERS`, `LOCALLY_SERVED` or `refusals.REASONS`**, and
+   a reason may only name a served tool (`tests/test_kernel_refusals.py`). When you implement
+   one, delete its reason in the same change, or the partition test fails.
+
 ## Sheet metal reaches geometry (`app/sheetmetal/fold.py`, `app/kernel/occt/sheetmetal.py`)
 
 A `SheetMetalPart` builds as a real solid, and the blank and the solid are **one calculation**.

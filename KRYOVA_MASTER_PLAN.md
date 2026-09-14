@@ -70,7 +70,7 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 97/132 = 73% | 110/151 eng-months = 73% |
+| Engineering — E1–E23 | 15/24 | 98/132 = 74% | 110/151 eng-months = 73% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
 | **Programme** | 21/34 | 144/193 = 75% | 137/189 eng-months = 73% |
 
@@ -494,12 +494,14 @@ so the agent can consult them the same way it consults the CATIA manuals.
 > its own promise**: the kernel built parts that could not reach the solver, because the route
 > from geometry to a `GeometryVersion` was a seam no task owned. Found by driving the product,
 > not by reading the plan — which is the argument for the ladder. **task 7** needs hardware this
-> machine does not have. **task 3** and **task 4** stay `PARTIAL` *by design, permanently*: task 3 is the
-> operation mapping, which Decision 1 says grows only when a test, a sweep or an optimisation
-> needs an operation — so it reaching 201/201 would be a symptom, not a goal — and task 4 is the
-> sketch layer, narrowed to the dimension-driven profiles the registry actually uses, with
-> PlaneGCS owed to exactly one operation that refuses by name. Both are scope decisions with
-> their reasoning in the status line; neither is work waiting to be done.
+> machine does not have. **Task 3 closed on 2026-09-14** (corrected that day): this marker said it
+> stayed `PARTIAL` *by design, permanently*, because it read the task as 201 implementations,
+> which Decision 1 forbids. The task also allows a reasoned refusal, and every unimplemented
+> operation now has one, so task 3 is `DONE` without the operation count being a goal. **The
+> open one is task 4**, which stays `PARTIAL`: it is the sketch layer, narrowed to the
+> dimension-driven profiles the registry actually uses, with PlaneGCS owed to exactly one
+> operation that refuses by name. That is a scope decision with its reasoning in the status
+> line, not work waiting to be done.
 
 **~8 engineer-months. The keystone. Nothing downstream is affordable until it lands.**
 
@@ -539,6 +541,59 @@ deterministically, in CI, at machine scale?
    sketch resolution plus support resolution plus naming bookkeeping. Sequence by mission — M1's
    vocabulary first, then M2's weldment needs. Per Decision 1 an operation is added only when a
    test, a sweep or an optimisation needs it, never for coverage.
+   > DONE (2026-09-14) — **every one of the 205 declared operations is now in exactly one of
+   > three places, and a test fails the day one is in none**: 119 implemented in `HANDLERS`, 1
+   > served by the dispatcher (`catia_export_step`, `backends.LOCALLY_SERVED`), and 85 refused
+   > with a reason in `app/kernel/occt/refusals.py`. The task always said "an implementation *or*
+   > an explicit, reasoned refusal". The PARTIAL below read it as 201 implementations, which
+   > Decision 1 forbids, so it could never close. The second half had simply never been written:
+   > all 85 raised `OperationNotSupported` with no reason, and the dispatcher told the agent
+   > "not implemented in the open kernel yet" for a CATIA dialog tool and a missing loft alike.
+   > **Three kinds of reason, because they send the agent different ways**: it drives CATIA's own
+   > interface, so it will never exist here (dialogs, menus, selection, files); another part of
+   > the product does the job (drawings from `app/manufacture`, relations from the design IR,
+   > taking a feature back from `catia_delete_feature`); or no test, sweep or optimisation has
+   > needed it yet, naming a served tool that gets the same part where one exists. **A reason may
+   > only name a tool this backend serves**, checked by reading every `catia_` name out of every
+   > reason. The dispatcher now carries the reason beside the coverage count.
+   > **Three operations were implemented, each for a measured gap, not coverage:**
+   > `catia_delete_feature` for the 2026-09-11 conversation below (the agent padded 200 mm, knew
+   > it, and could not take it back). A delete is a rebuild from the build log without the calls
+   > that made the feature, into a fresh document swapped in only on success. Dependents are
+   > found by name (`sketch="outline"`, `"Pad.1#top"`) and refused unless `with_children`, with
+   > every name that would go listed. Dependence on material a later cut does not name is caught
+   > by the rebuild, which refuses and changes nothing. Every feature keeps its number, and a
+   > deleted number is not handed out again. A body cannot be deleted, because the build log
+   > does not record which body a feature went into (refused by name).
+   > `catia_feature_parents`, because the delete's own summary sends the agent there first.
+   > `catia_shell_faces`, because **the dispatcher's schema for `catia_shell` has nothing to
+   > open**, so an agent on the open kernel could hollow a part only sealed. It takes a wall
+   > thickness per face (`BRepOffset_MakeOffset.SetOffsetOnFace`).
+   > **Two defects found on the way, both fixed.** (1) OCCT reports `IsDone()` for a shell whose
+   > walls meet: on a 40x30x20 box open at the top, 15 mm walls came back as an invalid 20,888.9
+   > mm3 shape, and 16 mm walls came back as the original box, 24,000 mm3 and six faces, reported
+   > as a finished shell. It affected `catia_shell` with faces as well; both now refuse. (2) The
+   > face-picking selector knew `top` and `bottom` only, while every face reference in the
+   > registry documents six words and `elements` resolved all six as planes. So "thicken the
+   > right wall" was refused. `front`, `back`, `left` and `right` now pick faces too, held to
+   > the plane table by a test.
+   > **Interface changes:** `catia_delete_feature`, `catia_feature_parents` and
+   > `catia_shell_faces` are offered on `GEOMETRY_BACKEND=occt` (`local_tool_names`). The open
+   > kernel's refusal text changes from "is not implemented in the open kernel yet" to "is not
+   > available on the open kernel … <reason>". No schema, migration or response-shape change.
+   > Every volume is checked against a hand calculation, and the outward shell against the
+   > closed form of a box grown by a ball. 30 guards broken one at a time: 28 caught by a named
+   > test, one removed as redundant (a rename having no names of its own), and one labelled
+   > unpinned: `Thickening=False`, which measured identical to `True` on a solid. Restores
+   > sha256-checked. **Not claimed:** anything on a seat (the CATIA side of these three
+   > operations was already in the registry and is untouched), or deleting a feature inside a
+   > multi-body part by its body.
+   > Tested by: `tests/test_kernel_history.py`, `tests/test_kernel_refusals.py`,
+   > `tests/test_kernel_shell_faces.py`, `tests/test_kernel_face_words.py`,
+   > `tests/test_geometry_backends.py::TestAWrongFeatureCanBeTakenBack` (through `call_catia`),
+   > `tests/test_agent.py::TestTheSecondPartRefusalIsBackendAccurate`.
+
+   <!-- superseded 2026-09-14 -->
    > PARTIAL — 22/201 at the close of E1, **108/201 after E2**, 117/205 as of 2026-09-11. This
    > figure is scaffolding depth, not product progress, and reading it as progress is how it got
    > to 108. Tested by: `tests/test_kernel.py`.

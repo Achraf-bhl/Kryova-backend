@@ -69,6 +69,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.BRepIntCurveSurface import BRepIntCurveSurface_Inter
     from OCP.BRepLib import BRepLib
     from OCP.BRepLProp import BRepLProp_SLProps
+    from OCP.BRepOffset import BRepOffset_MakeOffset, BRepOffset_Mode
     from OCP.BRepOffsetAPI import (
         BRepOffsetAPI_DraftAngle,
         BRepOffsetAPI_MakeFilling,
@@ -181,6 +182,8 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepIntCurveSurface_Inter": BRepIntCurveSurface_Inter,
         "BRepLProp_SLProps": BRepLProp_SLProps,
         "BRepLib": BRepLib,
+        "BRepOffset_MakeOffset": BRepOffset_MakeOffset,
+        "BRepOffset_Mode": BRepOffset_Mode,
         "BRepOffsetAPI_DraftAngle": BRepOffsetAPI_DraftAngle,
         "BRepOffsetAPI_MakeFilling": BRepOffsetAPI_MakeFilling,
         "BRepOffsetAPI_MakeOffset": BRepOffsetAPI_MakeOffset,

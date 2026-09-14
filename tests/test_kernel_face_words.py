@@ -123,3 +123,36 @@ class TestTheWordsStillMeanWhatTheySay:
                                      "depth_mm": 5})
         assert "sideways" in str(caught.value)
         assert "Pad.1" in str(caught.value), "it names what the part does hold"
+
+
+class TestPickingAFaceTakesTheSameSixWords:
+    """Found 2026-09-14 adding `catia_shell_faces`. The words above resolved as
+    planes, but the table that picks a part's *faces* knew only `top` and
+    `bottom`, so "thicken the right wall" was refused while every face reference
+    in the registry documents all six."""
+
+    @pytest.mark.parametrize("word", FACE_WORDS)
+    def test_each_word_picks_the_one_face_its_plane_passes_through(self, word: str) -> None:
+        from app.kernel.occt.metrology import bounding_box_mm
+        from app.kernel.occt.selectors import select_faces
+        from app.kernel.occt.topology import compound
+
+        runner = _bar()
+        plane = elements.plane_frame(runner.document, word, tool="t")
+        _, index, _ = elements.BOUNDING_BOX_FACES[word]
+
+        picked = select_faces(runner.document.shape, word, tool="t")
+
+        assert len(picked) == 1
+        box = bounding_box_mm(compound(picked))
+        where = (plane.Location().X(), plane.Location().Y(), plane.Location().Z())[index]
+        assert box["min"][index] == pytest.approx(where, abs=1e-6)
+        assert box["max"][index] == pytest.approx(where, abs=1e-6)
+
+    def test_an_edge_still_has_no_left_or_right(self) -> None:
+        """The edge vocabulary is its own (`vocabulary.EDGE_SELECTORS`), and a
+        face word must not leak into it."""
+        from app.kernel.occt.selectors import select_edges
+
+        with pytest.raises(GeometryError):
+            select_edges(_bar().document.shape, "left", tool="t")

@@ -647,6 +647,26 @@ class PartDocument:
         self._tool_counters[stem] = self._tool_counters.get(stem, 0) + 1
         return f"{stem}.{self._tool_counters[stem]}"
 
+    def continue_numbering(self, stem: str, last: int) -> None:
+        """Make the next `stem` feature at least number `last + 1`.
+
+        For a rebuild that leaves a feature out (`operations/history.py`). Replaying
+        `Pad.3` into a document that never saw `Pad.2` would otherwise allocate it
+        `Pad.2`, and every `"Pad.3#top"` recorded after it would point at nothing, or
+        at a different pad. Never moves a counter backwards.
+        """
+        self._tool_counters[stem] = max(self._tool_counters.get(stem, 0), last)
+
+    def adopt_numbering(self, other: PartDocument) -> None:
+        """Carry another document's counters, so a deleted number is not reused.
+
+        CATIA does not hand `Pad.3` out again once it is deleted, and a conversation
+        that deleted it may still mention it. Reusing it would make that mention
+        mean a different feature.
+        """
+        for stem, last in other._tool_counters.items():
+            self.continue_numbering(stem, last)
+
     # -- reading -------------------------------------------------------------
 
     def _weighed(self, payload: dict[str, Any]) -> dict[str, Any]:

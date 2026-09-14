@@ -7,9 +7,9 @@ why this module contains no design logic and no geometry: it dispatches, and the
 handlers in `operations/` do the work.
 
 **Unimplemented operations raise `OperationNotSupported`, never a generic failure.**
-Mapping 201 operations takes months, so at any moment most are missing. A missing
-operation is a *known gap* the conformance harness counts as coverage; conflating it
-with a real geometry failure would make that number meaningless.
+Most of the registry is not implemented here, and a missing operation is a *known gap*
+the conformance harness counts as coverage; conflating it with a real geometry failure
+would make that number meaningless. Each one carries its reason from `refusals`.
 
 **One runner per part.** The document lives in the context because a plan is a sequence
 of calls that build one thing, and the OCAF labels that make naming work must persist
@@ -26,6 +26,7 @@ from app.kernel.measurement import Detail
 from app.kernel.occt.binding import occt_version, require
 from app.kernel.occt.document import PartDocument
 from app.kernel.occt.operations import HANDLERS, RECORDED, BuildContext, coverage
+from app.kernel.occt.refusals import reason_for
 from app.kernel.occt.unsupported import refuse_unhonoured
 
 
@@ -50,7 +51,9 @@ class OcctRunner:
     def __call__(self, tool: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         handler = HANDLERS.get(tool)
         if handler is None:
-            raise OperationNotSupported(tool)
+            # With its reason: an interface-only operation, one another part of the
+            # product does, or one nobody has needed yet. See `refusals`.
+            raise OperationNotSupported(tool, reason_for(tool))
         # An advertised argument this backend cannot act on is refused here rather
         # than dropped in the handler. Before 2026-09-11 eighteen of them were
         # silently ignored, and every one produced a confident `ok` describing

@@ -25,6 +25,7 @@ from app.kernel.occt.operations import (
     document_ops,
     dressup,
     features,
+    history,
     holes,
     inspection,
     parameters,
@@ -145,6 +146,7 @@ HANDLERS: Final[dict[str, Handler]] = {
     # whole-body operations
     booleans.BOOLEAN: booleans.boolean,
     booleans.SHELL: booleans.shell,
+    booleans.SHELL_FACES: booleans.shell_faces,
     transforms.TRANSLATE: transforms.translate,
     transforms.ROTATE: transforms.rotate,
     transforms.MIRROR: transforms.mirror,
@@ -156,6 +158,9 @@ HANDLERS: Final[dict[str, Handler]] = {
     patterns.PATTERN_USER: patterns.pattern_user,
     # parameters — the build log read and rewritten as a parameter set
     parameters.SET: parameters.set_parameter,
+    # history — the build log replayed without a feature
+    history.DELETE: history.delete_feature,
+    history.PARENTS: history.feature_parents,
     # reading
     parameters.LIST: parameters.list_parameters,
     inspection.MEASURE: inspection.measure,
@@ -189,7 +194,14 @@ HANDLERS: Final[dict[str, Handler]] = {
 #: one would empty the rebuild half way through and every entry after it would fail
 #: with "no document is open". They change the assembly, not the part, and the part
 #: is what a replay rebuilds.
-_NOT_RECORDED: Final[frozenset[str]] = frozenset({parameters.SET}) | assembly_ops.MUTATING
+#:
+#: `catia_delete_feature` is excluded for `catia_set_parameter`'s reason. It
+#: rewrites the journal itself, leaving out the calls that made the feature, so
+#: the rewritten journal already is the record of what it did. Recording it too
+#: would put a delete of a feature that no longer exists into every later replay.
+_NOT_RECORDED: Final[frozenset[str]] = (
+    frozenset({parameters.SET, history.DELETE}) | assembly_ops.MUTATING
+)
 
 
 def _recorded() -> frozenset[str]:

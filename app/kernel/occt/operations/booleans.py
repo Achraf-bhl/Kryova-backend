@@ -1,6 +1,6 @@
-"""Boolean operations and the thin-wall feature.
+"""Boolean operations and the thin-wall features.
 
-`catia_boolean` combines two bodies; `catia_shell` hollows one. They share a module
+`catia_boolean` combines two bodies; `catia_shell` and `catia_shell_faces` hollow one. They share a module
 because both are whole-body operations whose failure modes are the same shape — an
 operation that succeeds and leaves nothing, or one that succeeds and leaves the part in
 pieces. Both are checked for, because OCCT reports neither as an error.
@@ -22,6 +22,7 @@ from app.kernel.occt.naming import (
     record_derived,
 )
 from app.kernel.occt.operations.context import (
+    _NO_CHANGE_MM3,
     BuildContext,
     as_positive_length,
     build_or_raise,
@@ -32,6 +33,7 @@ from app.kernel.occt.topology import has_solid
 
 BOOLEAN = "catia_boolean"
 SHELL = "catia_shell"
+SHELL_FACES = "catia_shell_faces"
 
 #: Join tolerance for a shell that removes faces. OCCT's own default for this operation;
 #: tightening it makes the offset fail on ordinary parts rather than making it stricter.
@@ -195,6 +197,7 @@ def shell(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
             f"{SHELL} at {thickness} mm consumed the whole part. The wall is thicker "
             "than the material available; reduce it."
         )
+    _refuse_a_shell_that_did_not_hollow(source, result, tool=f"{SHELL} at {thickness} mm")
     feature = document.add_feature(given_name(arguments), SHELL)
     modified, generated = evolution_of(maker, source)
     document.set_result(
@@ -209,4 +212,168 @@ def shell(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, A
     return context.result_for(feature)
 
 
-__all__ = ["BOOLEAN", "SHELL", "SHELL_TOLERANCE_MM", "boolean", "shell"]
+def shell_faces(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Hollow the part open at the named faces, each wall at its own thickness if asked.
+
+    **Why the open kernel has it.** `catia_shell`'s own summary says a shell with no
+    face removed is sealed, and sends the agent here "to leave it open — which is
+    nearly always what is wanted". On the open kernel this tool did not exist, so
+    that summary pointed at an operation the agent was never offered: the
+    vocabulary gap `CLAUDE.md` *Testing* item 8 describes. The per-face thickness
+    is the one thing it adds over `catia_shell`.
+
+    Built on `BRepOffset_MakeOffset`, not `BRepOffsetAPI_MakeThickSolid`, because
+    only the lower-level class takes a thickness per face (`SetOffsetOnFace`). The
+    API class initialises and builds in one call, which leaves no moment to set
+    one. Everything else is passed as `MakeThickSolidByJoin` passes it, so a call
+    with no overrides builds exactly what `catia_shell` builds (pinned by a test).
+    Measured on 2026-09-14: a 40x30x20 box open at the top, with 2 mm walls and
+    5 mm on the +x side, is 8,556 mm3. By hand, 24,000 less a 33x26x18 cavity.
+
+    `open_faces` is required here although the schema marks it optional. With no
+    face removed this is `catia_shell`, and the refusal says so rather than
+    building a sealed hollow under a name whose whole point is the opening.
+    """
+    document = context.require_document()
+    source = context.require_shape(SHELL_FACES)
+
+    thickness = as_positive_length(
+        arguments.get("thickness_mm"), argument="thickness_mm", tool=SHELL_FACES
+    )
+    sign = 1.0 if arguments.get("outward") else -1.0
+
+    opening = arguments.get("open_faces")
+    if not opening:
+        raise GeometryError(
+            f"{SHELL_FACES} needs open_faces, the faces to remove. With none removed the "
+            "part is hollowed sealed, and that is catia_shell."
+        )
+    removed = _faces_named(source, opening, tool=SHELL_FACES, document=document)
+
+    overrides: list[tuple[Any, float]] = []
+    for override in arguments.get("face_thicknesses") or []:
+        wall = as_positive_length(
+            override.get("thickness_mm"),
+            argument="face_thicknesses[].thickness_mm",
+            tool=SHELL_FACES,
+        )
+        for face in select_faces(
+            source, override.get("face"), tool=SHELL_FACES, document=document
+        ):
+            if any(face.IsSame(gone) for gone in removed):
+                raise GeometryError(
+                    f"{SHELL_FACES} was asked to remove a face and also to give it a "
+                    f"{wall} mm wall. A removed face has no wall; drop it from "
+                    "open_faces or from face_thicknesses."
+                )
+            overrides.append((face, wall))
+
+    maker = symbol("BRepOffset_MakeOffset")()
+    maker.Initialize(
+        source,
+        sign * thickness,
+        SHELL_TOLERANCE_MM,
+        symbol("BRepOffset_Mode").BRepOffset_Skin,
+        False,  # Intersection
+        False,  # SelfInter
+        symbol("GeomAbs_JoinType").GeomAbs_Arc,
+        False,  # Thickening, as MakeThickSolidByJoin passes it; on a solid, True measured the same
+    )
+    for face in removed:
+        maker.AddFace(face)
+    for face, wall in overrides:
+        maker.SetOffsetOnFace(face, sign * wall)
+
+    walls = f"{SHELL_FACES} at {thickness} mm"
+    try:
+        maker.MakeThickSolid()
+        done = maker.IsDone()
+    except Exception as exc:  # noqa: BLE001 - OCCT's Standard_Failure hierarchy
+        raise GeometryError(
+            f"{walls} could not run: {exc}. A wall thicker than the narrowest part of the "
+            "solid cannot be offset inwards; reduce it."
+        ) from exc
+    if not done:
+        raise GeometryError(
+            f"{walls} did not produce a shape (OCCT reports {maker.Error()}). A wall "
+            "thicker than the narrowest part of the solid cannot be offset inwards; "
+            "reduce it, or remove fewer faces."
+        )
+    result = maker.Shape()
+    if result.IsNull() or not has_solid(result):
+        raise GeometryError(
+            f"{walls} consumed the whole part. A wall is thicker than the material "
+            "available; reduce it."
+        )
+    _refuse_a_shell_that_did_not_hollow(source, result, tool=walls)
+
+    contributed = faces_generated_by(maker, source) + faces_modified_by(maker, source)
+    feature = document.add_feature(given_name(arguments), SHELL_FACES)
+    modified, generated = evolution_of(maker, source)
+    document.set_result(
+        feature,
+        result,
+        contributed=(contributed, edges_bounding(contributed)),
+        evolved_by=maker,
+    )
+    record_derived(
+        feature.labels, result=result, source=source, modified=modified, generated=generated
+    )
+    return context.result_for(feature)
+
+
+def _refuse_a_shell_that_did_not_hollow(source: Any, result: Any, *, tool: str) -> None:
+    """Refuse a shell whose walls met, which OCCT reports as a success.
+
+    **Measured 2026-09-14** on a 40x30x20 box open at the top, both through
+    `catia_shell` with faces and through `catia_shell_faces`. Up to 14.99 mm the
+    wall volume matches the hand calculation to the last digit. At 15 mm, where
+    the two long walls meet in the middle, `IsDone()` is true and the answer is
+    20,888.9 mm3, a shape `BRepCheck_Analyzer` calls invalid. From 15.01 mm on,
+    `IsDone()` is still true and the "shell" is the original box, 24,000 mm3 and
+    six faces, reported as a finished hollow.
+
+    So two checks, each catching one of the two: an invalid shape, and the part
+    handed back unchanged. "Unchanged", not "no material removed", because an
+    outward shell removes the core too and can come out lighter or heavier than
+    the part (2 mm outward on that box is 8,707.9 mm3); only an unchanged volume
+    is never a shell.
+    """
+    from app.kernel.occt.metrology import volume_mm3
+
+    if not symbol("BRepCheck_Analyzer")(result).IsValid():
+        raise GeometryError(
+            f"{tool} produced a shape the kernel's own check calls invalid. The walls "
+            "meet: the thickness is at least half the part's width somewhere, so there "
+            "is no cavity left between them. Reduce the thickness."
+        )
+    before, after = volume_mm3(source), volume_mm3(result)
+    if abs(after - before) <= _NO_CHANGE_MM3:
+        raise GeometryError(
+            f"{tool} returned the part unchanged ({before:.3f} mm3 before and "
+            f"{after:.3f} after): the walls are too thick to leave any cavity, and the "
+            "kernel reports that as a success. Reduce the thickness to under half the "
+            "part's narrowest width."
+        )
+
+
+def _faces_named(source: Any, named: Any, *, tool: str, document: Any) -> list[Any]:
+    """Faces from a list of selectors, which is what the schema declares, or from one."""
+    selectors = named if isinstance(named, (list, tuple)) else [named]
+    found: list[Any] = []
+    for selector in selectors:
+        for face in select_faces(source, selector, tool=tool, document=document):
+            if not any(face.IsSame(seen) for seen in found):
+                found.append(face)
+    return found
+
+
+__all__ = [
+    "BOOLEAN",
+    "SHELL",
+    "SHELL_FACES",
+    "SHELL_TOLERANCE_MM",
+    "boolean",
+    "shell",
+    "shell_faces",
+]

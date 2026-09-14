@@ -260,7 +260,7 @@ class TestARefusalMustNotDenyATheToolExists:
             {"sketch": "profile", "length_mm": 30.0, "limit": "up_to_surface"}
         )
 
-        assert "is not implemented in the open kernel yet" not in message
+        assert "is not available on the open kernel" not in message
 
     def test_it_names_the_option_that_was_refused(self, occt: None) -> None:
         message = self._refusal(
@@ -284,6 +284,7 @@ class TestARefusalMustNotDenyATheToolExists:
         shrug."""
         from app.catia.dispatch import CatiaError, _execute_locally
         from app.catia.ops.registry import OPERATIONS_BY_NAME
+        from app.kernel.occt.refusals import REASONS
 
         runner = backends.session_for("missing")
         runner("catia_new_part", {"name": "Plate"})
@@ -295,8 +296,9 @@ class TestARefusalMustNotDenyATheToolExists:
             )
 
         message = str(raised.value)
-        assert "is not implemented in the open kernel yet" in message
+        assert "is not available on the open kernel" in message
         assert "operations are" in message
+        assert REASONS[_missing_tool()].rstrip(".") in message, "and it says why"
 
 
 class TestSketchingOnAFaceOfThePart:
@@ -651,3 +653,90 @@ class TestThePartCanReachTheSolver:
                 tool="catia_export_step", arguments={},
                 conversation_id=wired["conversation"].id,
             )
+
+
+class TestAWrongFeatureCanBeTakenBack:
+    """Master plan E1.3, through `call_catia` rather than a runner, for the reason
+    `TestThePartCanReachTheSolver` gives: a tool that works and is not offered, or
+    whose arguments the schema refuses, is invisible to a runner test.
+
+    The conversation this replays was measured on 2026-09-11. The agent padded
+    200 mm where 10 was asked, said so, and had no way to take the pad back.
+    """
+
+    @pytest.fixture
+    def conversation(self, db_session, current_user_id):
+        from app.models import Conversation
+
+        row = Conversation(owner_id=current_user_id, title="Plate")
+        db_session.add(row)
+        db_session.commit()
+        return {"db": db_session, "user_id": current_user_id, "id": row.id}
+
+    @staticmethod
+    def _call(wired, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        from app.catia.dispatch import call_catia
+
+        return call_catia(
+            wired["db"],
+            user_id=wired["user_id"],
+            tool=tool,
+            arguments=arguments,
+            conversation_id=wired["id"],
+        )
+
+    def test_the_agent_is_offered_the_delete_its_parents_and_the_open_shell(
+        self, occt: None
+    ) -> None:
+        offered = backends.local_tool_names()
+
+        assert {"catia_delete_feature", "catia_feature_parents", "catia_shell_faces"} <= offered
+
+    @needs_kernel
+    def test_the_two_hundred_millimetre_pad_is_deleted_and_padded_again(
+        self, occt: None, conversation
+    ) -> None:
+        self._call(conversation, "catia_new_part", {"name": "Plate"})
+        self._call(conversation, "catia_sketch_create", {"support": "XY", "name": "outline"})
+        self._call(
+            conversation,
+            "catia_sketch_rectangle",
+            {"sketch": "outline", "width_mm": 100.0, "height_mm": 60.0},
+        )
+        self._call(conversation, "catia_pad", {"sketch": "outline", "length_mm": 200.0})
+
+        parents = self._call(conversation, "catia_feature_parents", {"feature": "Pad.1"})
+        deleted = self._call(conversation, "catia_delete_feature", {"feature": "Pad.1"})
+        redone = self._call(conversation, "catia_pad", {"sketch": "outline", "length_mm": 10.0})
+
+        assert parents["parents"] == ["outline"] and parents["children"] == []
+        assert deleted["deleted"] == ["Pad.1"]
+        assert redone["volume_mm3"] == pytest.approx(100.0 * 60.0 * 10.0)
+        assert redone["feature"] == "Pad.2", "the deleted number is not handed out again"
+
+    @needs_kernel
+    def test_an_open_shell_is_built_from_arguments_the_schema_accepts(
+        self, occt: None, conversation
+    ) -> None:
+        """`catia_shell`'s schema has nothing to open, so this is the only open
+        shell the agent can ask for, and its arguments must get through."""
+        self._call(conversation, "catia_new_part", {"name": "Tray"})
+        self._call(conversation, "catia_sketch_create", {"support": "XY", "name": "outline"})
+        self._call(
+            conversation,
+            "catia_sketch_rectangle",
+            {"sketch": "outline", "width_mm": 40.0, "height_mm": 30.0},
+        )
+        self._call(conversation, "catia_pad", {"sketch": "outline", "length_mm": 20.0})
+
+        shelled = self._call(
+            conversation,
+            "catia_shell_faces",
+            {
+                "thickness_mm": 2.0,
+                "open_faces": ["top"],
+                "face_thicknesses": [{"face": "right", "thickness_mm": 5.0}],
+            },
+        )
+
+        assert shelled["volume_mm3"] == pytest.approx(40.0 * 30.0 * 20.0 - 33.0 * 26.0 * 18.0)

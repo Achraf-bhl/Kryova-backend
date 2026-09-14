@@ -62,9 +62,10 @@ happened.
 > **P4.2's structured readers are in and verified (2026-09-14, late).** The next units, in the
 > order the user asked for, are the nearly complete phases E7, E1, E3, P4 and E15. In P4.2 that
 > means a STEP attachment becoming a `GeometryVersion` and images going to the vision provider.
-> In E1.3 it means `catia_delete_feature` on the open kernel (the need is measured) and a
-> reasoned refusal for every other unimplemented operation. E3's only open item is its phase
-> proof, which needs the seat.
+> **E1.3 closed the same night** (`catia_delete_feature`, `catia_feature_parents`,
+> `catia_shell_faces`, and a reason for each of the other 85). E1's one open task is task 4, a
+> constraint solver for `catia_sketch_constrain`. E3's only open item is its phase proof, which
+> needs the seat.
 > Say plainly when hardware or a mechanical engineer blocks a task, rather than marking it.
 > Standing flags carried forward, none fixed yet:
 > - E19's phase proof (review by someone outside CE) is still owed.
@@ -280,6 +281,25 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-14 — E1 task 3 closed: every declared operation is implemented, served, or refused
+  with a reason, and a wrong feature can be taken back on the open kernel.** 205 declared = 119
+  in `HANDLERS` + 1 served by the dispatcher + 85 in `app/kernel/occt/refusals.py`, and a test
+  fails the day an operation is in none of the three. Each reason is one of three kinds (drives
+  CATIA's interface; another part of the product does it; nobody has needed it yet), names only
+  tools this backend serves, and reaches the agent through the dispatcher beside the coverage count.
+  Three operations were added for measured gaps. `catia_delete_feature` rebuilds the part from
+  the build log without the feature, refuses dependents unless `with_children`, and keeps every
+  number. `catia_feature_parents` is the call its summary sends the agent to first.
+  `catia_shell_faces` exists because `catia_shell`'s schema has nothing to open, so the open kernel
+  could only build a sealed hollow.
+  **Found and fixed:** OCCT reports success for a shell whose walls meet. It returned an invalid
+  shape at 15 mm on a 40x30x20 box and the unchanged box at 16 mm, through `catia_shell` too. The
+  face selector also refused `front`/`back`/`left`/`right`.
+  **Interface changes:** three tools newly offered on `occt`, and the refusal wording is now "is
+  not available on the open kernel … <reason>". No migration or response shape change.
+  30 guards broken: 28 caught, 1 removed as redundant, 1 unpinned (`Thickening`, measured
+  identical). E1 is now 11 of 12. Task 4, the constraint solver for `catia_sketch_constrain`,
+  is the one left.
 - **2026-09-14 — E8 tasks 1, 2 and 4: fatigue reads the solver's own stress, counts a whole
   duty cycle, and refuses what it cannot assess. E8 goes from 20% to 50%; tasks 3, 5 and the new
   6 stay open.**

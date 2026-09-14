@@ -49,6 +49,52 @@ export that gets trusted, and each needs its own tolerance and its own honest
 account of what it loses. STL in particular is a mesh — it throws the analytic
 surfaces away — so writing one silently from a function called `export` would
 hand a shop a faceted cylinder.
+
+**Tessellated STEP is measured, not assumed, the same way the schema spellings
+above are — master plan 21.3. The measurement came back partial, and it is
+recorded as partial rather than rounded up.** `write.step.tessellated` and its
+reader counterpart are real OCCT parameters: on this build (OCP 7.9.3.1)
+`SetCVal_s`/`SetIVal_s` both take all three values (`0`/`Off`, `1`/`On`,
+`2`/`OnNoBRep`) and the readback agrees, so the parameter name and spelling in
+`TessellatedWrite` are not guessed.
+
+**`On` attaches a tessellated representation beside the BRep — on an OCCT
+primitive.** A bare `BRepPrimAPI_MakeBox`, a cylinder, a box with one filleted
+edge and a box with a boolean-cut hole all wrote a `TESSELLATED_SOLID` entity
+alongside `ADVANCED_FACE` when meshed with `BRepMesh_IncrementalMesh` first and
+written with `On`. **The same setting, on this codebase's own multi-feature
+`bracket()` design fixture (six bolt holes on a pattern, four corner fillets,
+an edge break) — the shape every other test in this module and
+`tests/test_manufacture_export_tessellated.py` actually exercises — writes no
+`TESSELLATED_SOLID` at all**, with an identical entity count to `Off`, even
+though `BRepMesh_IncrementalMesh` reports `IsDone()` and every one of its 34
+faces carries a `Poly_Triangulation` on inspection. Curvature, a fillet, a
+boolean cut and a finer deflection were each tried in isolation against a
+primitive and none of them broke it alone, so the cause is not one of those
+features by itself — it was not isolated further this session, and guessing
+at one would be exactly the kind of assumption this note exists to replace.
+**The consequence: `tessellated=ON` is proven only on a primitive shape.** A
+caller exporting a real Kryova part gets a valid, unchanged BRep-only file —
+`write_step`'s existing guarantees are untouched — but cannot yet rely on the
+tessellated payload actually being there, and nothing here claims it is.
+`TestTheTessellatedRepresentationIsAdditional` therefore pins **both**
+findings: presence on a primitive, absence on the bracket fixture — so a
+future OCCT release that starts attaching one on the bracket fails the test
+that assumed it wouldn't, which is how the day this closes gets noticed
+instead of assumed away.
+
+`OnNoBRep` measured as a no-op on every shape tried, primitive or not: a file
+written at `OnNoBRep` was byte-identical in entity shape to `Off`. The reading
+that fits the evidence: `OnNoBRep` only suppresses BRep on a shape that
+carries *none* — a face built from a bare `Poly_Triangulation` with no
+underlying `Geom_Surface`, which is what a customer's mesh-only upload looks
+like and is not a shape this codebase's own kernel ever produces or that this
+session constructed to check.
+
+**Wiring is a second, separate residual.** Even the primitive case is not
+wired to P6's viewer or P4's attachment path — see master plan 21.3 — and
+would not be worth wiring until the bracket-shaped gap above is closed, since
+a real Kryova part is exactly what both callers would hand it.
 """
 
 from __future__ import annotations
@@ -88,6 +134,26 @@ class StepSchema(StrEnum):
 #: converting anything — and a STEP file whose length unit is inches while its
 #: numbers are millimetres is the export equivalent of a DXF with no `$INSUNITS`.
 STEP_UNIT: Final = "MM"
+
+class TessellatedWrite(StrEnum):
+    """`write.step.tessellated` / `read.step.tessellated`, OCCT's own spellings
+    and values, measured on this build (see the module docstring).
+
+    `ON_NO_BREP` is included because it is a real, accepted OCCT value and a
+    caller may one day construct a mesh-only shape this module never has — not
+    because this module has verified what it does. Passing it to a Kryova solid
+    measures as `OFF`.
+    """
+
+    #: BRep only. OCCT's own default; passing this changes nothing.
+    OFF = "0"
+    #: BRep, plus a tessellation written alongside it as an additional
+    #: representation. The only value this module has measured doing something.
+    ON = "1"
+    #: Tessellation in place of BRep, *when the shape carries no BRep*.
+    #: Unmeasured here — see the module docstring.
+    ON_NO_BREP = "2"
+
 
 #: How far a re-read solid may differ from the one that was written, as a
 #: fraction of its volume. STEP is an exact B-rep exchange — the surfaces are
@@ -129,6 +195,8 @@ def _step() -> dict[str, Any]:
     needed it, rather than failing at process start.
     """
     try:
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
         from OCP.IFSelect import IFSelect_ReturnStatus
         from OCP.Interface import Interface_Static
         from OCP.STEPControl import (
@@ -148,11 +216,19 @@ def _step() -> dict[str, Any]:
         "reader": STEPControl_Reader,
         "writer": STEPControl_Writer,
         "as_is": STEPControl_StepModelType.STEPControl_AsIs,
+        "mesh": BRepMesh_IncrementalMesh,
+        "copy": BRepBuilderAPI_Copy,
     }
 
 
-def configure_writer(static: Any, schema: StepSchema) -> None:
-    """Tell the writer its schema and its unit, and refuse if it did not listen.
+def configure_writer(
+    static: Any,
+    schema: StepSchema,
+    *,
+    tessellated: TessellatedWrite = TessellatedWrite.OFF,
+) -> None:
+    """Tell the writer its schema, its unit and its tessellation mode, and
+    refuse if it did not listen.
 
     Public because `xde.py` writes through a *different* OCCT writer to the same
     static parameters, and two copies of this would be two places for the schema
@@ -160,11 +236,13 @@ def configure_writer(static: Any, schema: StepSchema) -> None:
 
     `SetCVal_s` returns a bool and every example discards it. Checking it is the
     difference between "this file is AP242" and "this file is whatever OCCT
-    defaults to, and the manifest says AP242".
+    defaults to, and the manifest says AP242". `tessellated` defaults to `OFF` —
+    OCCT's own default — so every existing caller is unaffected.
     """
     for name, value in (
         ("write.step.schema", str(schema)),
         ("write.step.unit", STEP_UNIT),
+        ("write.step.tessellated", str(tessellated)),
     ):
         if not static.SetCVal_s(name, value):
             raise ExportError(
@@ -175,7 +253,11 @@ def configure_writer(static: Any, schema: StepSchema) -> None:
 
 
 def write_step(
-    shape: Any, path: str | Path, *, schema: StepSchema = StepSchema.AP242
+    shape: Any,
+    path: str | Path,
+    *,
+    schema: StepSchema = StepSchema.AP242,
+    tessellated: TessellatedWrite = TessellatedWrite.OFF,
 ) -> StepExport:
     """Write one solid to a STEP file, returning what was written.
 
@@ -183,6 +265,9 @@ def write_step(
     it: a 4 kB STEP holding a header and nothing else opens without error in
     every CAD system there is and shows an empty part, which is the export
     equivalent of a blank drawing.
+
+    `tessellated=ON` adds a triangulated representation alongside the BRep —
+    see the module docstring for what was measured and what was not.
     """
     if shape is None:
         raise ExportError(
@@ -200,7 +285,26 @@ def write_step(
 
     step = _step()
     writer = step["writer"]()
-    configure_writer(step["static"], schema)
+    configure_writer(step["static"], schema, tessellated=tessellated)
+
+    if tessellated is not TessellatedWrite.OFF:
+        # The writer emits whatever triangulation is already attached to the
+        # shape; a shape with none writes no TESSELLATED_SOLID entity even with
+        # the parameter on. 0.1 mm matches this module's own round-trip
+        # tolerance being a geometry claim, not a visual one — a viewer
+        # consumer of this representation is P6's, and P6 has not asked for a
+        # deflection yet, so this is a placeholder default rather than a tuned
+        # one.
+        #
+        # **Meshed on a copy, never on the caller's shape.** `BRepMesh`
+        # attaches the triangulation to the faces it is handed, in place, and
+        # `BRepBndLib` then measures that triangulation — enlarged by its
+        # deflection — instead of the exact surfaces. Meshing the caller's
+        # shape turned a cached 120 mm bracket into a 120.207 mm one for every
+        # drawing made after the export, in the same process, with nothing
+        # raising. An export reads the part; it does not get to change it.
+        shape = step["copy"](shape, True, False).Shape()
+        step["mesh"](shape, 0.1)
 
     status = writer.Transfer(shape, step["as_is"])
     if status != step["done"]:
@@ -223,19 +327,34 @@ def write_step(
     )
 
 
-def read_step(path: str | Path) -> Any:
+def read_step(
+    path: str | Path, *, tessellated: TessellatedWrite = TessellatedWrite.ON
+) -> Any:
     """Read a STEP file back as one shape.
 
     Exists so the round trip is checkable in a test rather than asserted. An
     export whose only evidence is that a file appeared is an export nobody has
     verified — the standing rule in this codebase is that an unmeasured claim is
     never a pass, and "the file is 19 kB" measures the wrong thing.
+
+    `tessellated` defaults to `ON` here, the opposite of `write_step`'s `OFF` —
+    a file this module wrote never carries a tessellation unless asked for, so
+    reading is safe to leave permissive; a file from elsewhere may carry one
+    Kryova never wrote, and refusing it by default would refuse files this
+    reader is otherwise able to open. Set `read.step.tessellated` after
+    constructing the reader, matching the writer's own gotcha (see the module
+    docstring): the static resource set is what construction initialises.
     """
     source = Path(path)
     if not source.is_file():
         raise ExportError(f"There is no STEP file at {source}.")
     step = _step()
     reader = step["reader"]()
+    if not step["static"].SetCVal_s("read.step.tessellated", str(tessellated)):
+        raise ExportError(
+            f"OCCT refused to set read.step.tessellated to {tessellated!r}. This "
+            "build's OCCT may not know that parameter name."
+        )
     if reader.ReadFile(str(source)) != step["done"]:
         raise ExportError(
             f"{source.name} is not a STEP file OCCT can read. A file truncated in "
@@ -277,6 +396,7 @@ __all__ = [
     "STEP_UNIT",
     "StepExport",
     "StepSchema",
+    "TessellatedWrite",
     "configure_writer",
     "read_step",
     "step_schema_of",

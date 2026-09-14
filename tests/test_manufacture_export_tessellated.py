@@ -1,11 +1,12 @@
 """Tessellated STEP, master plan 21.3 — measured, not assumed.
 
 Kept out of `test_manufacture_export.py` on purpose: that file's own first line
-gates the whole module on `ezdxf`, which is not installed here (CLAUDE.md's own
-landmine list says so), so every STEP assertion in it is silently skipped along
-with the DXF ones. STEP does not depend on `ezdxf` at all, and a tessellation
-capability with no test that actually runs would be exactly the "green on a
-suite nobody ran" failure this codebase warns about elsewhere.
+gates the whole module on `ezdxf`, so on an environment without it every STEP
+assertion there is silently skipped along with the DXF ones. When this file was
+written `ezdxf` was in no requirements file and that was every environment; it
+has been listed since P4.2 (2026-09-14), and the separation still holds, because
+STEP does not depend on `ezdxf` at all and a tessellation capability should not
+share a skip with a DXF writer.
 
 See `app/manufacture/export.py`'s module docstring for what was measured about
 `write.step.tessellated` and `read.step.tessellated` on this OCCT build, and

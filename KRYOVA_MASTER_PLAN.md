@@ -4427,9 +4427,71 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
      strongest local table/layout/reading-order understanding, OCR for scans.
      **[MarkItDown](https://github.com/microsoft/markitdown)** (Microsoft, MIT) as the light
      fallback for the long tail. Chosen over hosted parsers: local, free, no data leaves the
-     deployment.
+     deployment. *Revised 2026-09-14: neither is used. See the status below for why.*
    - **Spreadsheets** keep their structure — a load-case table becomes rows with units, not prose.
    - **Images/photos** → the vision provider (already pluggable, P5 surfaces it).
+   > PARTIAL (2026-09-14) — **spreadsheets, CSV, Word, PowerPoint and HTML are now read into
+   > cells, slides and paragraphs, each located. Images and STEP-to-geometry are still open.**
+   > **Docling and MarkItDown were dropped, and the plan above is revised to match.** Both turn a
+   > document into Markdown, which loses exactly what task 4 needs: "cell C7 of loads.xlsx" cannot
+   > be recovered from a Markdown table. Docling's standard extra also requires torch,
+   > torchvision, transformers, accelerate and rapidocr (read from the 2.127.0 wheel metadata).
+   > MarkItDown sends Word through mammoth to HTML first. What replaced them:
+   > - `app/documents/tables.py`: `.xlsx` through `openpyxl`, and CSV/TSV through the standard
+   >   library. A typed number is `MEASURED`; a string, a CSV cell and a saved formula result are
+   >   `TRANSCRIBED`.
+   > - `app/documents/office.py`: `.docx` and `.pptx` read straight from the XML with `zipfile`
+   >   and `xml.etree`. `python-docx` was rejected because `Document.paragraphs` skips content
+   >   controls.
+   > - `app/documents/webpage.py`: HTML through `html.parser`.
+   > - `app/documents/structure.py`: what all three share, namely the plain-number rule, the
+   >   heading-row rule, the package guards (25 MB declared size, any DTD refused, Strict OOXML
+   >   refused by name) and a fragment budget that says where it stopped.
+   > **What a sender may not have seen is read, and said.** Hidden and very hidden sheets, hidden
+   > rows and columns, tracked insertions, hidden Word text, hidden slides, speaker notes,
+   > comments with their authors, custom properties, and HTML hidden by attribute or inline
+   > style are all read, located and counted in a note. Tracked deletions and HTML comments are
+   > counted but not read, and scripts and styles are skipped. A formula with no saved result
+   > and an error cell become `Unread`, with the formula quoted. A note names a sheet by number,
+   > never by name, because notes render outside the quote fence.
+   > **Five defects found, each on a file a real program wrote** (`tests/data/documents/`,
+   > pandoc 3.1.3 and LibreOffice 26.2.5.2):
+   > - **A Windows-1252 CSV was refused as a binary file** by `kinds._is_texty`. Single-byte text
+   >   is now text, and the reader notes that it guessed the encoding.
+   > - **A title row spanning a table was taken as column A's heading** on the LibreOffice docx.
+   >   A heading row must now cover every column the row below fills.
+   > - **LibreOffice's speaker notes were dropped without a sign.** They sit in an ordinary text
+   >   box, and the first reader read only the `body` placeholder.
+   > - **That fix was then missing from commit `3d6fa76`.** The committed reader still had the
+   >   `body`-only filter, the docstring said otherwise, and its own test failed. The mutation run
+   >   is what showed it.
+   > - **`ezdxf` was imported and listed nowhere**, so DXF attachment reading could never run. The
+   >   59 tests then in `test_documents_readers.py` and the 44 in `test_manufacture_export.py` had been
+   >   skipping on every environment built from the requirements. `ezdxf` 1.4.4 and `openpyxl`
+   >   3.1.5 are now listed, and both are MIT.
+   > **Interface changes, plainly.** No migration.
+   > - `GET /attachments/{id}/content`: each `fragments[]` entry gains `cells` (text, heading,
+   >   number, reliability, where, cite), and each `unread[]` entry gains `where`. Rows extracted
+   >   before today carry neither until they are read again.
+   > - `DocumentKind.HTML` is a new enum value.
+   > - `Locator` gains `slide`, `part`, `table`, `column` and `paragraph`. `Fragment` gains `cells`.
+   > **Flagged, not fixed:** the frontend's `ExtractedFragment` type has no `cells`, so the panel
+   > still renders a table row as one line.
+   > **Guards broken on purpose:** 44 mutations across the five modules, `kinds.py`, `readers.py`
+   > and `core/attachments.py`, all caught by named tests, with every restore sha256-checked.
+   > Three were re-run after the commit fix, because their first "catch" was the pre-existing
+   > failure.
+   > **Still open:**
+   > - **Images to the vision provider.** The result would be `INFERRED`.
+   > - **A STEP attachment becoming a `GeometryVersion` on request.** The geometry attach route
+   >   refuses a non-CAD media kind today, and three places create a version.
+   > - **OCR for scans.** That belongs to task 3.
+   > - **None of these files was saved by Microsoft Office.** That is THE QUEUE C3.
+   > Tested by: `tests/test_documents_tables.py` (44), `tests/test_documents_office.py` (38),
+   > `tests/test_documents_webpage.py` (37), `tests/test_documents_readers.py` (61),
+   > `tests/test_attachments.py::TestATableIsStoredAsCells` (3). Code: `app/documents/`.
+
+   <!-- superseded 2026-09-14 -->
    > PARTIAL (2026-09-06) — the readers are tested now, **including that text-bearing DXF entities
    > are no longer silently dropped**, which had been reading a drawing full of MULTILEADER notes
    > and TOLERANCE frames as an empty document. Code: `app/documents/`.

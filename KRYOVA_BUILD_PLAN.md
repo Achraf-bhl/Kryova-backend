@@ -24,11 +24,12 @@ happened.
 > **E15.2's cache key was fixed later the same evening.** E15's three remaining residuals are
 > not closable here: the CATScript half of task 1 needs a seat, autoscale in task 2 needs a
 > fleet, and crash recovery in task 4 needs a seat.
-> **Next unit of work: P4 task 2, the extraction pipeline.** No spreadsheet or DOCX reader is
-> installed (`openpyxl`, `python-docx`, Docling and MarkItDown are all absent), and the phase
-> proof asks for two paths nothing provides yet: a load-case spreadsheet that becomes a
-> provenance-tagged load case, and a STEP attachment that becomes a `GeometryVersion`. Read P4.2's
-> status line first.
+> **P4.2's structured readers are in and verified (2026-09-14, late).** The next units, in the
+> order the user asked for, are the nearly complete phases E7, E1, E3, P4 and E15. In P4.2 that
+> means a STEP attachment becoming a `GeometryVersion` and images going to the vision provider.
+> In E1.3 it means `catia_delete_feature` on the open kernel (the need is measured) and a
+> reasoned refusal for every other unimplemented operation. E3's only open item is its phase
+> proof, which needs the seat.
 > Say plainly when hardware or a mechanical engineer blocks a task, rather than marking it.
 > Standing flags carried forward, none fixed yet:
 > - E19's phase proof (review by someone outside CE) is still owed.
@@ -244,6 +245,33 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-14 — P4 task 2, structured readers: spreadsheets, CSV, Word, PowerPoint and HTML are
+  read into located cells, slides and paragraphs. Still partial.** The code landed in `3d6fa76`.
+  This entry records its verification, and one fix the verification forced.
+  - **Docling and MarkItDown were dropped**, and the master plan's task text is revised to say
+    so. Both emit Markdown, and a Markdown table cannot cite "cell C7". Docling's standard extra
+    also pulls in torch. The new modules are `tables.py` (openpyxl, csv), `office.py` (zipfile
+    and etree, no python-docx), `webpage.py` (html.parser) and `structure.py`.
+  - **Defects found on real-writer files:** a Windows-1252 CSV sniffed as binary; a spanning
+    title row taken as a column heading; LibreOffice speaker notes dropped.
+  - **`3d6fa76` shipped without the speaker-notes fix.** `office.py` still had the `body`-only
+    filter and `test_notes_in_an_ordinary_text_box_are_not_dropped` failed on `main`. The
+    mutation run exposed it, because two breaks were "caught" by a test that was already red.
+    Fixed here, and those breaks were re-run on the clean tree.
+  - **`ezdxf` 1.4.4 and `openpyxl` 3.1.5 are added to `requirements.txt`.** 103 tests that had
+    been skipping now run: 59 DXF reader tests and 44 manufacture export tests. CLAUDE.md
+    landmine 6 is removed, because it is no longer true.
+
+  **Interface changes, plainly:** no migration.
+  - `GET /attachments/{id}/content`: `fragments[].cells` and `unread[].where` are new.
+  - `DocumentKind.HTML` is a new enum value.
+  - `Locator` gains `slide`, `part`, `table`, `column` and `paragraph`, and `Fragment` gains
+    `cells`.
+
+  **Flagged, not fixed:** the frontend's `ExtractedFragment` type has no `cells`.
+  44 guards broken, all caught, restores sha256-checked. THE QUEUE C3 is added: Office files
+  saved by Microsoft Office. Still open in P4.2: images to vision, STEP to `GeometryVersion`.
+  Full suite **8964 passed / 0 failed / 10 skipped / 1 xpassed** (15 min 42 s).
 - **2026-09-14 — E15 task 2 corrected: the job cache binds the engine that computes an answer,
   read before the run. Until today it bound nothing.** The key hashed `job.solver_version`, which
   the runner sets only after the solve, so every key carried one "unknown" sentinel and unknown

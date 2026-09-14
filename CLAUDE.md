@@ -1229,6 +1229,54 @@ reason: it returns cell fields, not nodal ones, and has no load case.
 **Flagged, not fixed (2026-09-14):** the `solve.conduction` span (steady and transient) and
 `solve.plane` are not in `metering.SPAN_METERS`, so those runs are billed for meshing only.
 
+## Reading what users attach (`app/documents/`) — structured readers added 2026-09-14 with P4.2
+
+Spreadsheets, CSV, Word, PowerPoint and HTML are read into cells, slides and paragraphs, each with
+its own locator (`provenance.Locator`: sheet, slide, part, table, cell/row, column, paragraph,
+line). `structure.py` holds what every structured reader shares; `tables.py`, `office.py` and
+`webpage.py` are one format family each. Decision 8 still holds: every reader returns
+`UntrustedText`, and `raw_for_analysis` is called only inside `app/documents` and in storage.
+
+1. **Docling and MarkItDown are not used, and the plan's original choice was reversed on
+   purpose.** Both turn a document into Markdown. That loses the per-cell and per-slide location a
+   citation needs ("cell C7 of loads.xlsx"). Docling's standard extra also pulls in torch,
+   torchvision, transformers and accelerate (read from the 2.127.0 wheel metadata). Word and
+   PowerPoint are read with `zipfile` and `xml.etree`, and HTML with `html.parser`: no
+   dependency. Spreadsheets use `openpyxl`.
+2. **`python-docx` would have been wrong, not just unnecessary.** `Document.paragraphs` skips
+   content controls (`w:sdt`), so text a template puts in a form field disappears without an
+   error. `office._children` looks through `sdt`, `sdtContent` and `customXml`.
+3. **openpyxl has three traps, and each gives a wrong answer rather than an error.**
+   - **Read-only mode has no `row_dimensions`**, so hidden rows cannot be detected in it. The
+     workbook is opened in full mode, twice: `data_only=True` for saved results and `False` for
+     formulas.
+   - **A formula nobody saved a result for is simply absent under `data_only=True`.** Only a
+     program that calculates writes the cached value; openpyxl itself never does. Such a cell is
+     an `Unread` quoting the formula, never an empty cell.
+   - **It refuses a path without an `.xlsx` suffix**, and blobs are named by digest. Open the
+     workbook from a file handle.
+4. **Walk `worksheet._cells`, never `iter_rows`.** One cell typed at `XFD1048576` makes the
+   bounding box about 17 billion cells.
+5. **Prune `mc:Fallback`, or a text box is read twice.** A text box is written twice, once under
+   `mc:Choice` and again under `mc:Fallback` for older readers. `traps-libreoffice.docx` does this.
+6. **A note renders outside the quote fence, so it may not carry document text.** A hidden sheet
+   is named by its *number* in a note, never its name, because the name is attacker-controlled.
+   Anything a note would quote belongs in a fragment.
+7. **Heading rows are chosen by a stated rule, and it prefers binding none.** The heading row is
+   the first all-text row covering every column the row below fills, and the search stops at the
+   first row holding a non-text cell. A title row spanning the table was being taken as column A's
+   heading on a real LibreOffice export until that coverage clause was added. A wrong heading
+   mislabels every value under it; a missing one mislabels nothing.
+8. **Speaker notes are every shape on the notes page except the generated placeholders**
+   (`sldImg`, `sldNum`, `dt`). LibreOffice writes notes in an ordinary text box rather than the
+   `body` placeholder, and a `body`-only filter dropped them without a sign.
+9. **`kinds._is_texty` accepts single-byte text.** A Windows-1252 CSV was being refused as a
+   binary file. The reader decodes strict UTF-8 first, then falls back to cp1252 and adds a note
+   saying it guessed.
+10. **The fixtures under `tests/data/documents/` come from pandoc and LibreOffice, never from a
+   hand-built zip alone.** A fixture written by the person who wrote the parser only proves the two
+   agree. None of them was saved by Microsoft Office; that is THE QUEUE C3.
+
 ## Sending email (`app/mail/`) — added 2026-09-10 with P1.5
 
 There was no mail transport in this service until P1 needed one, and four phases assume it
@@ -1712,15 +1760,7 @@ difference between the two machines hides in whatever neither one has to state o
    lives in `api/rate_limit.py` and nowhere else — `routes/auth.py` keeps an alias, and
    `core/audit.py::request_origin` still has its own reading of `X-Forwarded-For` for the audit
    row, which is a different question and deliberately not merged.
-6. **`ezdxf` is imported by `manufacture/dxf.py` and `documents/readers.py` and is declared in no
-   requirements file** (found 2026-09-08). Both guard the import and degrade, so **DXF export and
-   DXF attachment reading can never run** — that half is still true and is a product decision
-   nobody has taken. The mypy half is fixed: the three `import-not-found` errors were **failing
-   the mypy gate in CI on every run**, and `pyproject.toml` now declares the module optional and
-   untyped, so `mypy app/` reports *Success: no issues found* and the "if mypy prints anything, it
-   is yours" rule is literally true again. Declaring it says the import is optional; it does not
-   decide whether DXF should be a supported feature.
-7. **The suite is green on `main`** (7,288 passing / 41 skipped / 1 xpassed / 0 failing,
+6. **The suite is green on `main`** (7,288 passing / 41 skipped / 1 xpassed / 0 failing,
    2026-09-10, 9 min 57 s against local PostgreSQL). Twelve failures that
    stood here on 2026-09-08 were fixed that day, and **the breakdown of what they turned out to
    be is worth reading before you assume a red test means a broken feature** — one real defect,
@@ -1734,6 +1774,11 @@ limiter trusts `X-Forwarded-For` unconditionally (it honours `trust_proxy_header
 the right, `auth.py::_client_ip`); no list endpoint paginates (all four do, `page_size` capped at
 100); SQLite is not actually refused (`_require_postgres` raises for any non-PostgreSQL URL);
 `/health` is not a readiness probe (it probes the database and the media store and returns 503).
+**Removed on 2026-09-14:** `ezdxf` is declared in no requirements file. It is in
+`requirements.txt` since P4.2, beside `openpyxl`, and the 103 DXF and manufacture tests that had
+been skipping on every environment built from it now run. The skip was the whole symptom: an
+`importorskip` on a package nobody installs is a test that never runs, which is *Optimisation*
+item 7 again.
 
 ## Do not
 

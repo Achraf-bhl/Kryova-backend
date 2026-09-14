@@ -605,6 +605,22 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       Note this is **not** LE3's blocker: that is `Blocker.NO_SHELL_SOLVER`. This row exists so
       the geometry half is not rediscovered from scratch.
 
+- [ ] **C3 — P4.2, Office files saved by Microsoft Office itself (added 2026-09-14).** The Word,
+      PowerPoint and Excel readers (`app/documents/office.py`, `tables.py`) are tested against
+      files from pandoc and LibreOffice (`tests/data/documents/README.md`). Microsoft Office
+      wrote none of them, and it is the writer most attachments will come from.
+      **On the seat:** in Word, save a document with a tracked deletion and insertion, hidden
+      text, a comment, a content control, a text box, a header and footer, and a table with a
+      merged cell. In PowerPoint, save a deck with a hidden slide, speaker notes, a chart and a
+      table. In Excel, save a workbook with a hidden and a very hidden sheet, a hidden row, a
+      merged range, a formula, `=1/0`, a date and a cell comment. Attach each one through the GUI
+      and compare `GET /attachments/{id}/content` against what Office shows.
+      **Settles:** whether the traps pinned on LibreOffice output hold on Office's. One thing is
+      worth looking at first: whether Office's speaker notes sit in the `body` placeholder, which
+      the first reader assumed and LibreOffice does not do.
+      Add every file that shows something new to `tests/data/documents/`, with its row in the
+      README.
+
 - [x] ~~**C1a — LE10's ellipse semi-axes.**~~ Resolved 2026-09-08 on Linux: the Abaqus
       verification manual's LE10 entry states the four semi-axes and the thickness in full, so
       no unavailable document was needed after all. LE10 now **runs and validates**

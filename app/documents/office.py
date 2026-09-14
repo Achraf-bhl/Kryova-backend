@@ -535,7 +535,7 @@ class _SlideReader:
     def _shape(self, shape: ET.Element) -> None:
         placeholder = shape.find(f"{_P}nvSpPr/{_P}nvPr/{_P}ph")
         kind_of_placeholder = placeholder.get("type") if placeholder is not None else None
-        if self.notes_page and kind_of_placeholder != "body":
+        if self.notes_page and kind_of_placeholder in _GENERATED_NOTES_PLACEHOLDERS:
             return
         heading = kind_of_placeholder in ("title", "ctrTitle")
         body = shape.find(f"{_P}txBody")

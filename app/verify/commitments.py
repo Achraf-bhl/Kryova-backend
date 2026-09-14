@@ -115,6 +115,22 @@ COMMITMENTS: Final[tuple[Commitment, ...]] = (
         enforcement=Enforcement.POLICY,
     ),
     Commitment(
+        id="the-manufacturer-makes-the-conformity-claims",
+        we_will_not=(
+            "We will not claim that Kryova, or a machine designed with it, meets the EU "
+            "Machinery Regulation, and no tool the agent is offered draws up a declaration of "
+            "conformity or a CE marking. Those are the manufacturer's acts, not ours."
+        ),
+        why=(
+            "Under Regulation (EU) 2023/1230, Article 10(2), the manufacturer draws up the EU "
+            "declaration of conformity and affixes the CE marking once a conformity assessment "
+            "has demonstrated compliance. Design software that implied it had done either would "
+            "be putting its customer's legal act in its own mouth."
+        ),
+        enforcement=Enforcement.MECHANICAL,
+        enforced_by=("app/compliance/boundary.py", "tests/test_compliance_boundary.py"),
+    ),
+    Commitment(
         id="bought-in-components-are-integrated",
         we_will_not=(
             "We will not claim to design the bought-in functional components of a "

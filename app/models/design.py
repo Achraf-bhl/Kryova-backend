@@ -31,9 +31,10 @@ the first time a field was added, and the two disagreeing is exactly the failure
 `subject_digest` exists to catch.
 """
 
+import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Date, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -89,6 +90,16 @@ class DesignDocument(UUIDPrimaryKey, TimestampMixin, Base):
     revision_number: Mapped[int] = mapped_column(Integer, default=1)
 
     document: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+    #: The day a unit of this machine was first placed on the market, as the
+    #: manufacturer records it (E19 task 5). Null means not recorded, which is
+    #: read as not yet placed: a change before it is design work, a change on or
+    #: after it is a different legal act (`app.compliance.modification`). Kryova
+    #: never infers it.
+    placed_on_market_on: Mapped[datetime.date | None] = mapped_column(Date, default=None)
+    placed_on_market_recorded_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     conversation: Mapped["Conversation"] = relationship()
     project: Mapped["Project | None"] = relationship()

@@ -2,10 +2,28 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from app.compliance.modification import notice as modification_notice
+from app.models.base import utcnow
+
+
+class ModificationNoticeRead(BaseModel):
+    """What a change to this design is in law, today (E19 task 5).
+
+    `character` is `design-time` or `after-placing-on-market`. It is computed
+    from the recorded date on every read and never stored, so recording a date
+    changes what every later read says without rewriting anything.
+    """
+
+    character: str
+    placed_on_market_on: date | None
+    headline: str
+    detail: str
+    citations: list[str]
 
 
 class DesignRead(BaseModel):
@@ -29,8 +47,16 @@ class DesignRead(BaseModel):
     digest: str
     revision_number: int
     document: dict[str, Any]
+    #: The day a unit of the machine was first placed on the market, as recorded.
+    placed_on_market_on: date | None = None
     created_at: datetime
     updated_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def modification(self) -> ModificationNoticeRead:
+        notice = modification_notice(self.placed_on_market_on, utcnow().date())
+        return ModificationNoticeRead.model_validate(notice.to_dict())
 
 
 class RevisionRead(BaseModel):
@@ -43,6 +69,9 @@ class RevisionRead(BaseModel):
     author: str
     author_id: str | None
     created_at: datetime
+    #: Written on or after the recorded placing-on-market date. Set by the
+    #: route from the document's date, so it follows a date recorded late.
+    after_placing_on_market: bool = False
 
 
 class RevisionPage(BaseModel):
@@ -62,6 +91,12 @@ class ParameterEdit(BaseModel):
     """
 
     value: float
+
+
+class PlacedOnMarket(BaseModel):
+    """The day a unit of this machine was first placed on the market."""
+
+    placed_on_market_on: date
 
 
 class DesignEdited(BaseModel):
@@ -110,7 +145,9 @@ __all__ = [
     "DesignPage",
     "DesignRead",
     "DesignSummary",
+    "ModificationNoticeRead",
     "ParameterEdit",
+    "PlacedOnMarket",
     "RevisionPage",
     "RevisionRead",
 ]

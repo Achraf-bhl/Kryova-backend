@@ -1295,6 +1295,7 @@ class ToolBox:
 
     def _read_design(self) -> dict[str, Any]:
         from app.core import designs
+        from app.models.base import utcnow
         from app.models.design import DesignRevision
 
         conversation = self._design_conversation()
@@ -1328,11 +1329,16 @@ class ToolBox:
                 }
                 for row in history
             ],
+            "placed_on_market_on": (
+                document.placed_on_market_on.isoformat() if document.placed_on_market_on else None
+            ),
+            "legal_character": designs.notice_for(document, utcnow().date()).character.value,
         }
 
     def _set_design_parameter(self, name: str, value: float) -> dict[str, Any]:
         from app.core import designs
         from app.design.errors import SpecError
+        from app.models.base import utcnow
 
         conversation = self._design_conversation()
         document = designs.load(self.db, conversation)
@@ -1352,13 +1358,20 @@ class ToolBox:
             raise ToolError(str(exc)) from None
 
         self.db.flush()
+        notice = designs.notice_for(outcome.document, utcnow().date())
         result: dict[str, Any] = {
             "design": outcome.document.name,
             "parameter": name,
             "value": value,
             "revision": outcome.document.revision_number,
             "digest": outcome.document.digest,
+            # E19 task 5: the same words the panel shows. After the recorded
+            # placing on the market this is not design work, and the agent must
+            # be able to say so rather than report the edit as routine.
+            "legal_character": notice.character.value,
         }
+        if notice.clauses:
+            result["legal_notice"] = f"{notice.headline} {notice.detail}"
         if outcome.diff is not None:
             result["rebuilds"] = outcome.diff.rebuild_sentence()
             result["affected"] = list(outcome.diff.affected)

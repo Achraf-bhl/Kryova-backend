@@ -70,18 +70,18 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 13/24 | 86/131 = 66% | 98/151 eng-months = 65% |
+| Engineering — E1–E23 | 14/24 | 92/131 = 70% | 103/151 eng-months = 68% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 19/34 | 134/192 = 70% | 125/189 eng-months = 66% |
+| **Programme** | 20/34 | 139/192 = 72% | 131/189 eng-months = 69% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, E20, P1, P2, P3, P5, P8, P10 |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
 | in flight | E15 70%, E18 50%, P4 75%, P9 57% |
-| nothing finished yet | E8, E9, E10, E13, E17, E19, E21, E22, E23, P6, P7 |
+| nothing finished yet | E8, E9, E10, E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -2778,7 +2778,11 @@ here"* has an answer in six months — from the artefact.
    > NOT STARTED.
 
 6. **Technical documentation**: assembly instructions, exploded views, service manuals, parts
-   catalogues.
+   catalogues. **Instructions for use it produces are a draft for a named person, never a
+   finished document (`app/compliance/boundary.py`), and their digital delivery must pass
+   `app.compliance.instructions.unmet`** — Article 10(7) of the Machinery Regulation, read from
+   the Official Journal on 2026-09-14 (E19 task 4). The checker exists before this task does, on
+   purpose.
    > NOT STARTED.
 
 **Gate G4 opens after E17 (with E17.3).**
@@ -2960,8 +2964,10 @@ of this plan assume:
    the horizon — which is exactly E14's interface contracts, so the plan's instinct was right and
    its reasoning was under-evidenced. E22 owns this.
 4. **The regulation moved in 2026 and the dates now land inside this plan's window.** The
-   Machinery Regulation applies from January 2027, its Annex I high-risk list contains *software
-   ensuring safety functions* and *safety components with self-evolving behaviour*, and the
+   Machinery Regulation applies from January 2027, its annexes list *software ensuring safety
+   functions* and *safety components with self-evolving behaviour* (Annex II, the indicative list
+   of safety components — not Annex I, as this paragraph first said; corrected 2026-09-14 from the
+   Official Journal, see E19 task 2), and the
    EU AI Act's obligations for AI embedded in Annex I products were pushed to **2 August 2028**
    by an Omnibus in force since 27 July 2026 — with the binding technical content for
    AI-in-machinery still unwritten, owed by delegated act to that same date. E19 owns this.
@@ -2970,6 +2976,13 @@ of this plan assume:
 document and the easiest one to keep postponing, because nothing in it makes a part.
 
 ##### Phase E19 — Conformity: the Machinery Regulation, the AI Act, and what a signature means in law #####
+
+> ✅ PHASE COMPLETE (2026-09-14) — all six tasks done and tested. Every date and clause is now
+> read from the Official Journal (Regulation (EU) 2023/1230, its corrigendum, and Regulation
+> (EU) 2026/1744), and the reading corrected the plan in four places, each recorded in its task.
+> **The phase proof is still owed**: nobody who has taken a machine through CE marking has read
+> the register, the boundary or the technical-file export, and until someone does, all of it is
+> Kryova's reading of the law rather than advice anybody can rely on.
 
 **~5 engineer-months. Needs a compliance-literate engineer for tasks 2 and 6; the rest is ours.**
 
@@ -2989,6 +3002,25 @@ documentation-first rule (Part 2) applied to law.
    from January 2024 (notified bodies, Articles 26–42). Recorded as a dated register in the repo
    with the clause number beside every claim — the same shape as the validation register, for the
    same reason.
+   > DONE (2026-09-14) — **both disputed dates are in the Official Journal, and the register now
+   > says exactly how.** The Regulation as published (OJ L 165, 29.6.2023) reads "shall apply from
+   > 14 January 2027"; the corrigendum (OJ L 169, 4.7.2023, p. 35) item 10 replaces it with
+   > **20 January 2027**, along with thirteen other dates. So the "widely repeated error" is a
+   > reading of the uncorrected text — which the ELI link above serves. Every provision in
+   > `app/compliance/eu_machinery_regulation.py` is now `PRIMARY_TEXT` with its clause and the
+   > words read; a corrected one keeps its published date and names the corrigendum item. The
+   > shared construction rules moved to `app/compliance/provisions.py`: no source, no provision;
+   > primary text needs an Official Journal source, a clause and a quote; a stated date must appear
+   > in its own quote as the OJ spells it; a correction names what it moved, both or neither.
+   > **Two corrections to the previous status:** the application date is **Article 54, second
+   > paragraph** (the old module cited Article 52), and Article 51(1)'s repeal of 73/361/EEC
+   > carries no date of its own, so none is recorded. One oddity kept, not smoothed: corrigendum
+   > item 12 moves Article 54(b) three years, not six days. EUR-Lex returns an empty body to
+   > curl/WebFetch; a rendered extract of the CELEX HTML works, and each source says so. All nine
+   > construction guards verified by breaking them. Tested by:
+   > `tests/test_compliance_eu_machinery_regulation.py` (18).
+
+   <!-- superseded 2026-09-14 -->
    > PARTIAL (2026-09-14) — `app/compliance/eu_machinery_regulation.py` records the five dated
    > facts this task names (OJ publication 2023-06-29, entry into force 2023-07-19, Articles
    > 26-42 from 2024-01-20, the Article 51 repeal and Article 52 application date both
@@ -3007,14 +3039,39 @@ documentation-first rule (Part 2) applied to law.
    > text in) and upgrade the five entries to `PRIMARY_TEXT` with article/paragraph citations.
    > Tested by: `tests/test_compliance_eu_machinery_regulation.py` (9).
 
-2. **Decide in writing whether anything Kryova produces is an Annex I item.** Annex I — the
-   high-risk list that triggers mandatory third-party conformity assessment — includes item 18
+2. **Decide in writing whether anything Kryova produces is an Annex I item.** *(Corrected
+   2026-09-14 against the Official Journal: the two items below are **Annex II** — the indicative
+   list of safety components — items 18 and 19, not Annex I. Annex I Part A carries the
+   self-evolving machine-learning safety components at items 5 and 6; Annex I Part B's 18 and 19
+   are ROPS and FOPS; recital (55) limits third-party assessment of safety software to
+   self-evolving systems.)* The list as this task first gave it: item 18
    **"software ensuring safety functions"** and item 19 **"safety components with fully or
    partially self-evolving behaviour"**. Kryova's own position is almost certainly *neither*: it
    is a design tool, and the machine it helps design is the regulated product. **But "almost
    certainly" is not a position**, and Decision 5's honest-scope statement is the natural home
    for the answer. The output of this task is a written boundary — what Kryova may generate, what
    it must refuse to generate unattended, and the sentence a salesperson is allowed to say.
+   > DONE (2026-09-14) — **decided: Kryova is neither an Annex I category nor an Annex II safety
+   > component**, because it is design software a manufacturer uses and nothing it produces runs
+   > on the machine — and no code path in the repository emits controller logic, PLC code or
+   > firmware, which a reader can check. `app/compliance/boundary.py` writes the position down
+   > with the clauses quoted, states what it rests on (the day a feature emits logic that runs on
+   > a machine, the position is re-decided before that feature ships), and sorts outputs three
+   > ways: **may generate** (drawings, explanations, design calculations — Annex IV A(c), (d),
+   > (g)); **draft for a named person only** (risk assessment, instructions for use — A(b), (i));
+   > **never** (safety-function software or logic, an EU declaration of conformity, a CE marking,
+   > a statement that a machine complies — Annex II 18, Annex I A5/A6 and B17, Article 10(2)).
+   > `SALES_SENTENCE` is the one sentence a salesperson may say. It is held mechanically:
+   > `FORBIDDEN_CLAIMS` is scanned over every string constant in `app/` outside
+   > `app/compliance/` (35,219 strings, zero hits), no tool the agent is offered may be named for
+   > a never-output, and a new public commitment,
+   > `the-manufacturer-makes-the-conformity-claims`, names the test. What it cannot hold: the
+   > model's free text. A chat answer is not scanned, and the commitment is worded so it does not
+   > claim otherwise. The frontend carries no such copy today (grepped), and nothing enforces that
+   > there. Five guards verified by breaking them. Tested by: `tests/test_compliance_boundary.py`
+   > (27).
+
+   <!-- superseded 2026-09-14 -->
    > NOT STARTED.
 
 3. **The technical file is an export format, because the law can demand our output.** Verified
@@ -3028,6 +3085,29 @@ documentation-first rule (Part 2) applied to law.
    a coherent technical file — geometry, provenance, analyses with their convergence basis,
    requirement coverage, and the plan calls that produced them — and it must still open in ten
    years, which is an argument about formats (E21) and about storage (E15).
+   > DONE (2026-09-14) — `GET /designs/{conversation_id}/technical-file` downloads Kryova's
+   > **contribution** to the technical file, organised by **Annex IV, Part A, points (a) to (o)**
+   > — all fifteen read from the Official Journal and quoted in the file. **No point is claimed in
+   > full**: Kryova contributes to (a), (c), (d) and (g) and says, point by point, what only the
+   > manufacturer can supply; the other eleven are listed as the manufacturer's rather than left
+   > out, and (m) — safety software source code — is answered: Kryova produces none. Six
+   > artefacts from the record: the head spec, the build plan compiled from it, the revision
+   > history, the operation log (failures included), the analyses run in the design's project
+   > (each naming its geometry and carrying `NOT_VALIDATED`), and the approval gates. UTF-8 JSON
+   > with a format version; every artefact carries the SHA-256 of its canonical JSON and the file
+   > a digest over the rest, checked by `technical_file.verify` — integrity, not a signature.
+   > **Three things it does not do, and the file lists them:** drawings and STEP are generated
+   > by a build and not stored, so they are absent; requirement coverage is not stored, so it is
+   > absent; and nothing keeps the export for Article 10(3)'s ten years — the format half is done,
+   > the storage half (E15) is not. A simulation records no link to a design revision, so the
+   > file says the analyses are the project's and the link is not recorded. The analyses are
+   > withheld when the exporter cannot read the project (found while writing it: a conversation
+   > can name a project its owner has since lost access to). The spec panel has an export button.
+   > Seven guards verified by breaking them. Tested by: `tests/test_compliance_technical_file.py`
+   > (18), `tests/test_designs.py::TestTheTechnicalFile` (6),
+   > `Kryova-frontend/src/components/design/spec-panel.test.tsx` (2).
+
+   <!-- superseded 2026-09-14 -->
    > NOT STARTED.
 
 4. **Digital instructions, to the conditions the regulation actually sets.** Instructions for use
@@ -3035,7 +3115,23 @@ documentation-first rule (Part 2) applied to law.
    kept accessible online for the expected lifetime of the machine and **at least 10 years** after
    it is placed on the market, and supplied on **paper on request at no extra cost**. That is a
    hard constraint on E17 task 6's technical documentation, and it is cheaper to build it in than
-   to discover it during a customer's audit.
+   to discover it during a customer's audit. *(Corrected 2026-09-14 against Article 10(7): paper
+   is due "at the request of the user at the time of the purchase … free of charge within one
+   month", not on request at any time.)*
+   > DONE (2026-09-14) — `app/compliance/instructions.py` checks a manufacturer's digital
+   > delivery plan against **Article 10(7)**, quoted clause by clause, and `unmet` returns each
+   > failure with the words it fails. The reading found two conditions this task left out: the
+   > machine (or, only where that is not possible, its packaging or a document) must be **marked
+   > with how to reach the instructions**, and the instructions must **clearly describe the model**
+   > they belong to; and the print/download/save condition applies to a copy **embedded in the
+   > machine's software**. Online is owed until the later of the expected end of life and ten years
+   > after placing (`required_online_until`); ten years from 29 February is taken as 1 March, and
+   > one month as 28 days — both choices stated as choices, not as rules read. **Nothing generates
+   > instructions yet**, so the checker has no caller; E17 task 6's text now names it as the gate.
+   > It checks a declared plan and cannot see whether a URL is online in 2037. Ten guards verified
+   > by breaking them. Tested by: `tests/test_compliance_instructions.py` (21).
+
+   <!-- superseded 2026-09-14 -->
    > NOT STARTED.
 
 5. **"Substantial modification" is a trap this product walks into by design.** Article 3(16)
@@ -3046,6 +3142,27 @@ documentation-first rule (Part 2) applied to law.
    distinction, in the product: a *design-time* regeneration of a machine not yet placed on the
    market, versus a change to one already in service — which is a different legal act and must
    read differently on screen.
+   > DONE (2026-09-14) — **schema and API change:** `design_documents` gains
+   > `placed_on_market_on` and `placed_on_market_recorded_by_id` (migration `b5d0e3dae224`,
+   > nullable, no backfill), recorded by `PUT /designs/{conversation_id}/placed-on-market` (a
+   > future date is 422; there is no clear). `DesignRead` gains `placed_on_market_on` and a
+   > computed `modification` notice; `RevisionRead` gains `after_placing_on_market`. From the
+   > recorded day — **the same day counts as after** — the notice, the panel and the agent's
+   > `set_design_parameter` result all say the change is not design-time work. **The reading
+   > sharpened the distinction the task drew:** after placing there are two acts, not one — the
+   > manufacturer changing its own design for machines still to be produced (Article 10(4)'s
+   > series-production duty) and a change to a machine in service, which is a substantial
+   > modification under Article 3(16) if unforeseen and hazard-creating, making whoever does it
+   > the manufacturer (Article 18). Kryova cannot tell them apart and does not assess hazards, and
+   > the notice says both. Article 3(16) is quoted to the end of point (b); the rest was not
+   > captured, and Article 10(4)'s article is placed from the numbered paragraphs around it —
+   > both stated in the module. `test_the_api_has_no_way_to_post_a_whole_spec` now allows exactly
+   > this one PUT and pins its body to one date field. Seven backend and two frontend guards
+   > verified by breaking them. Tested by: `tests/test_compliance_modification.py` (10),
+   > `tests/test_designs.py::TestPlacingOnTheMarket` (9),
+   > `Kryova-frontend/src/components/design/spec-panel.test.tsx` (5).
+
+   <!-- superseded 2026-09-14 -->
    > NOT STARTED.
 
 6. **The AI Act register, kept current because it is still moving.** As of the research date the
@@ -3063,6 +3180,28 @@ documentation-first rule (Part 2) applied to law.
    Omnibus was a provisional political agreement before it was law, so a version of this
    paragraph was true and stale within weeks. Hence a *register with dates and sources*, re-read
    at every legislative change, rather than a paragraph in a plan.
+   > DONE (2026-09-14) — **the agreement is now law and the dates are read from it**: Regulation
+   > (EU) 2026/1744 (Digital Omnibus on AI), OJ L, 2026/1744, 24.7.2026, in force 27 July 2026
+   > (its Article 4, third day). `app/compliance/eu_ai_act.py` quotes: AI Act Article 113 as
+   > replaced by Article 1(40) — Annex III high-risk from **2 December 2027**, Annex I from
+   > **2 August 2028**, Articles 102–110 from 27 July 2026, Article 5(1)(ba)/(bb) from 2 December
+   > 2026; and the Machinery Regulation's new Article 8 paragraphs (Article 3(1)) — the Commission
+   > **shall** adopt delegated acts adding AI requirements to Annex III, and "those delegated acts
+   > shall apply by 2 August 2028", **in the operative text, not only a recital** (a first draft
+   > of the module said otherwise; a second reading caught it before commit). The delegation runs
+   > five years from 27 July 2026 (Article 47(2) as replaced by Article 3(3)(a)). **The narrowing
+   > is quoted whole**: Article 6(1a) excludes systems "solely used for non-safety related
+   > aspects", and **Article 6(1b) — which this task left out — keeps any system whose failure
+   > "would endanger health and safety" a safety component.** The harmonised-standards interim is
+   > a recital's words and is labelled so. **Not found in what was read:** that a manufacturer
+   > performs one conformity assessment rather than two; it sits in `NOT_FOUND`, never in a
+   > provision. **The register expires:** `REVIEW_BY` is 2027-03-14, and
+   > `test_the_register_has_been_read_recently_enough_to_be_believed` goes red the day after, on
+   > purpose — the fix is to re-read EUR-Lex, not to move the date. Recital numbers were not
+   > captured and are not guessed. Three expiry guards verified by breaking them. Tested by:
+   > `tests/test_compliance_eu_ai_act.py` (15).
+
+   <!-- superseded 2026-09-14 -->
    > NOT STARTED.
 
 **Phase proof:** a package from the mission ladder (M2 upward) is reviewed by someone who has

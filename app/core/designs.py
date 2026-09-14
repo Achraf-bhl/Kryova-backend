@@ -34,11 +34,13 @@ it to soften.
 
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.compliance import modification
 from app.design.diff import SpecDiff, diff_specs
 from app.design.spec import DesignSpec
 from app.models.conversation import Conversation
@@ -232,6 +234,34 @@ def set_parameter(
         author=author,
         author_id=author_id,
     )
+
+
+def record_placed_on_market(
+    db: Session,
+    document: DesignDocument,
+    day: datetime.date,
+    *,
+    recorded_by_id: str | None,
+    today: datetime.date,
+) -> DesignDocument:
+    """Record the day a unit of this machine was first placed on the market (E19 task 5).
+
+    Not a revision: the spec did not change, and a revision chain that grew
+    when somebody typed a date would answer "what changed on Tuesday" with
+    something that changed nothing about the machine. A correction to the date
+    overwrites it and records who made it. `today` is passed in, never read from
+    a clock here, so the refusal of a future date is testable on any day.
+    """
+    modification.refuse_a_future_date(day, today)
+    document.placed_on_market_on = day
+    document.placed_on_market_recorded_by_id = recorded_by_id
+    db.flush()
+    return document
+
+
+def notice_for(document: DesignDocument, on: datetime.date) -> modification.Notice:
+    """What a change to this design made on `on` is, in law."""
+    return modification.notice(document.placed_on_market_on, on)
 
 
 def diff_between(

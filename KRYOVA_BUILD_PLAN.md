@@ -15,6 +15,21 @@ happened.
 
 ## Now
 
+> **Handoff, 2026-09-14 — where the next session starts.** E19 closed and committed this day
+> (`*E19`); the plan's progress block reads **20 of 34 phases, 139.0 of 192 tasks**. The work
+> is going phase by phase, and a phase is closed to 100% before the next one opens.
+> Still open: E8, E9, E10, E13, E15, E17, E18, E21, E22, E23, P4, P6, P7, P9. Read each open
+> task's status line in the master plan and take the ones Linux can close first. P4 (3 partial)
+> and E15 (3 partial) were the next to be surveyed. Say plainly when hardware or a mechanical
+> engineer blocks a task, rather than marking it.
+> Standing flags carried forward, none fixed yet:
+> - E19's phase proof (review by someone outside CE) is still owed.
+> - `eu_ai_act.REVIEW_BY` (2027-03-14) fails the suite on purpose once that date passes.
+> - `CCX_NAMES` lacks ccx_2.23, and the Windows seat runs 2.23 while the fleet is pinned to 2.20-1.
+> - The conda-forge code_aster ships no `tests_data`.
+> - The nightly corpus jobs have never run on GitHub.
+> - `data/bm25` holds copyrighted PDFs.
+
 > **Blocking gap found 2026-09-05, before the first Windows verification session:
 > nothing built in Era I–II is reachable from the product.** `OcctRunner` is constructed
 > only inside `app/kernel/` and its tests — `app/catia/dispatch.py` has no backend
@@ -221,6 +236,24 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-14 — E19 tasks 1–6, and `*E19`: every legal date and clause read from the Official
+  Journal, and the reading corrected the plan four times.** The disputed application date is
+  settled precisely — both dates are OJ text: 14 January 2027 as published, **20 January 2027**
+  after corrigendum item 10, and the ELI link the plan cites serves the first. The register
+  (`app/compliance/eu_machinery_regulation.py`, rules in `provisions.py`) is all `PRIMARY_TEXT`
+  now, and the old module had the article wrong (54, not 52). The AI Act register quotes
+  Regulation (EU) 2026/1744 itself and expires on 2027-03-14 by a test. Corrections: "software
+  ensuring safety functions" is **Annex II**, not Annex I; paper instructions are due at purchase
+  within a month; Article 6(1b) keeps any AI whose failure endangers safety a safety component; and
+  "one conformity assessment, not two" was **not found**. New: the boundary (Kryova is neither an
+  Annex I category nor an Annex II component; three-way output stance; a claim scan over 35,219
+  strings in `app/`; a public commitment), an Article 10(7) instructions checker for E17.6 to pass,
+  a technical-file export by Annex IV Part A (a)–(o) with hashes, and the placed-on-market
+  distinction (**migration `b5d0e3dae224`**, a PUT, notices on read, edit, revision, agent tool and
+  panel). Found while building: an export would have handed a project's analyses to a user who had
+  lost access to it. Phase proof still owed — an outside CE reviewer. 41 backend guards and 2
+  frontend guards broken and watched to fail. Tested by `tests/test_compliance_*.py` (109),
+  `tests/test_designs.py` (15 new), `spec-panel.test.tsx` (7 new).
 - **2026-09-14 — E20 task 4, and `*E20`: the solvers' own corpora run on pinned builds, and each
   run says what it does not prove.** `app/verify/corpora.py` drives CalculiX's examples through
   the archive's own `compare` rules and Perl checkers, and code_aster's V3 `ssl` family through

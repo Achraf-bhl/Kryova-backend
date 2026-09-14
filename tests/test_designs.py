@@ -10,6 +10,8 @@ silently spans two different designs, or two writers both claiming revision 4.
 
 from __future__ import annotations
 
+import datetime
+
 import pytest
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,7 @@ from app.core import designs
 from app.design.errors import SpecError
 from app.design.spec import DesignSpec, FeatureSpec, expr, ref
 from app.models import Conversation, DesignDocument, DesignRevision, User
+from app.models.base import utcnow
 from tests.test_design_compile import bracket
 from tests.typing import AuthenticatedTestClient
 
@@ -427,14 +430,26 @@ class TestTheRoutes:
         compile error against a revision already written. Asserted rather than
         left as a convention, because the convention is one PR from being lost.
         """
-        from tests.routes import methods_for, methods_under
+        from tests.routes import leaf_routes, methods_for, methods_under
 
         # Asserted first, because `methods_under` returning nothing is the
         # *passing* answer and would be indistinguishable from a route walk
         # that had stopped working.
         assert methods_for("/designs/{conversation_id}") == {"GET"}
 
-        assert not {"POST", "PUT"} & methods_under("/designs")
+        assert "POST" not in methods_under("/designs")
+        # One PUT exists, and it carries a date, not a spec (E19 task 5). Pinned
+        # by path *and* by body, so a second PUT — or a spec slipped into this
+        # one — fails here rather than being waved through with it.
+        puts = [
+            route
+            for route in leaf_routes()
+            if route.path.startswith("/designs") and "PUT" in route.methods
+        ]
+        assert [route.path for route in puts] == ["/designs/{conversation_id}/placed-on-market"]
+        (put,) = puts
+        assert put.body_field is not None
+        assert set(put.body_field.field_info.annotation.model_fields) == {"placed_on_market_on"}
 
     def test_the_design_list_paginates_and_omits_the_documents(
         self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
@@ -450,6 +465,318 @@ class TestTheRoutes:
         body = response.json()
         assert body["total"] == 2
         assert "document" not in body["items"][0]
+
+
+class TestPlacingOnTheMarket:
+    """E19 task 5, the product half: a change after the recorded placing on the
+    market must read differently from a design-time one, on both surfaces that
+    can make it. The legal wording is pinned in `test_compliance_modification.py`."""
+
+    def _today(self) -> datetime.date:
+        return utcnow().date()
+
+    def test_a_design_with_nothing_recorded_reads_as_design_time(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        conversation_id = _record(db_session, current_user_id, bracket())
+
+        body = auth_client.get(f"{API}/designs/{conversation_id}").json()
+
+        assert body["placed_on_market_on"] is None
+        assert body["modification"]["character"] == "design-time"
+        assert body["modification"]["citations"] == []
+
+    def test_recording_a_past_date_makes_every_read_say_it_is_not_design_time(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        conversation_id = _record(db_session, current_user_id, bracket())
+        placed = self._today() - datetime.timedelta(days=30)
+
+        response = auth_client.put(
+            f"{API}/designs/{conversation_id}/placed-on-market",
+            json={"placed_on_market_on": placed.isoformat()},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["placed_on_market_on"] == placed.isoformat()
+        assert body["modification"]["character"] == "after-placing-on-market"
+        assert "Article 3(16)" in body["modification"]["citations"]
+        document = db_session.query(DesignDocument).filter_by(conversation_id=conversation_id).one()
+        assert document.placed_on_market_recorded_by_id == current_user_id
+
+    def test_recording_the_date_writes_no_revision(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        """The machine did not change. A revision per typed date would put
+        something that changed nothing about the part into its history."""
+        conversation_id = _record(db_session, current_user_id, bracket())
+
+        body = auth_client.put(
+            f"{API}/designs/{conversation_id}/placed-on-market",
+            json={"placed_on_market_on": self._today().isoformat()},
+        ).json()
+
+        assert body["revision_number"] == 1
+
+    def test_a_future_date_is_refused_and_nothing_is_recorded(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        conversation_id = _record(db_session, current_user_id, bracket())
+
+        response = auth_client.put(
+            f"{API}/designs/{conversation_id}/placed-on-market",
+            json={"placed_on_market_on": (self._today() + datetime.timedelta(days=1)).isoformat()},
+        )
+
+        assert response.status_code == 422
+        assert "has not happened yet" in response.json()["detail"]
+        assert auth_client.get(f"{API}/designs/{conversation_id}").json()["placed_on_market_on"] is None
+
+    def test_an_edit_after_placing_comes_back_saying_so(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        conversation_id = _record(db_session, current_user_id, bracket())
+        auth_client.put(
+            f"{API}/designs/{conversation_id}/placed-on-market",
+            json={"placed_on_market_on": self._today().isoformat()},
+        )
+
+        body = auth_client.patch(
+            f"{API}/designs/{conversation_id}/parameters/thick_mm", json={"value": 12.0}
+        ).json()
+
+        assert body["changed"] is True
+        assert body["design"]["modification"]["character"] == "after-placing-on-market"
+        assert "substantial modification" in body["design"]["modification"]["detail"]
+
+    def test_the_history_marks_which_revisions_came_after_placing(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        conversation_id = _record(db_session, current_user_id, bracket())
+        first = db_session.query(DesignRevision).filter(DesignRevision.revision_number == 1).one()
+        first.created_at = utcnow() - datetime.timedelta(days=60)
+        db_session.flush()
+        auth_client.put(
+            f"{API}/designs/{conversation_id}/placed-on-market",
+            json={"placed_on_market_on": (self._today() - datetime.timedelta(days=10)).isoformat()},
+        )
+        auth_client.patch(f"{API}/designs/{conversation_id}/parameters/thick_mm", json={"value": 12.0})
+
+        items = auth_client.get(f"{API}/designs/{conversation_id}/revisions").json()["items"]
+
+        assert [(row["revision_number"], row["after_placing_on_market"]) for row in items] == [
+            (2, True),
+            (1, False),
+        ]
+
+    def test_another_users_design_cannot_have_a_date_recorded(
+        self, auth_client: AuthenticatedTestClient, db_session: Session
+    ) -> None:
+        stranger = User(email="placer@kryova.dev", hashed_password="x", is_active=True)
+        db_session.add(stranger)
+        db_session.flush()
+        conversation_id = _record(db_session, stranger.id, bracket(), title="Theirs")
+        db_session.commit()
+
+        response = auth_client.put(
+            f"{API}/designs/{conversation_id}/placed-on-market",
+            json={"placed_on_market_on": self._today().isoformat()},
+        )
+
+        assert response.status_code == 404
+
+    def test_the_agents_edit_after_placing_carries_the_notice(
+        self, db_session: Session, conversation: Conversation, owner: User
+    ) -> None:
+        toolbox = _toolbox(db_session, owner, conversation)
+        outcome = designs.save(db_session, conversation, bracket())
+        designs.record_placed_on_market(
+            db_session, outcome.document, self._today(), recorded_by_id=owner.id, today=self._today()
+        )
+
+        result = toolbox._set_design_parameter("thick_mm", 12.0)
+
+        assert result["legal_character"] == "after-placing-on-market"
+        assert "substantial modification" in result["legal_notice"]
+        assert toolbox._read_design()["placed_on_market_on"] == self._today().isoformat()
+
+    def test_the_agents_design_time_edit_carries_no_notice(
+        self, db_session: Session, conversation: Conversation, owner: User
+    ) -> None:
+        toolbox = _toolbox(db_session, owner, conversation)
+        designs.save(db_session, conversation, bracket())
+
+        result = toolbox._set_design_parameter("thick_mm", 12.0)
+
+        assert result["legal_character"] == "design-time"
+        assert "legal_notice" not in result
+
+
+class TestTheTechnicalFile:
+    """E19 task 3, the export route. The structure and the hashing are pinned
+    offline in `test_compliance_technical_file.py`; these pin what reaches the
+    file from the record, and who may see which part of it."""
+
+    def test_it_downloads_a_file_that_verifies_and_is_organised_by_annex_iv(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        from app.compliance import technical_file as tf
+        from app.verify.standards import NOT_VALIDATED
+
+        conversation_id = _record(db_session, current_user_id, bracket())
+        auth_client.patch(f"{API}/designs/{conversation_id}/parameters/thick_mm", json={"value": 12.0})
+
+        response = auth_client.get(f"{API}/designs/{conversation_id}/technical-file")
+
+        assert response.status_code == 200
+        assert response.headers["content-disposition"] == (
+            'attachment; filename="Bracket-r2-technical-file.json"'
+        )
+        body = response.json()
+        assert tf.verify(body)
+        assert [e["point"] for e in body["elements"]] == list("abcdefghijklmno")
+        assert body["statements"]["validation"] == NOT_VALIDATED
+        by_id = {a["id"]: a["content"] for a in body["artefacts"]}
+        assert {p["name"]: p.get("value") for p in by_id[tf.SPECIFICATION]["parameters"]}["thick_mm"] == 12.0
+        assert by_id[tf.BUILD_PLAN]["compiled"] is True
+        assert by_id[tf.BUILD_PLAN]["spec_digest"] == body["design"]["digest"]
+        assert [(r["revision"], r["author"]) for r in by_id[tf.REVISIONS]] == [(1, "agent"), (2, "user")]
+
+    def test_the_operations_that_built_it_are_in_the_file_failures_included(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        from app.compliance import technical_file as tf
+        from app.models import CatiaOperation
+
+        conversation_id = _record(db_session, current_user_id, bracket())
+        for ok, error in ((True, None), (False, "Sketch is not closed.")):
+            db_session.add(
+                CatiaOperation(
+                    conversation_id=conversation_id,
+                    user_id=current_user_id,
+                    tool="catia_pad",
+                    tier="kernel",
+                    arguments={"length_mm": 8},
+                    ok=ok,
+                    error=error,
+                )
+            )
+        db_session.flush()
+
+        body = auth_client.get(f"{API}/designs/{conversation_id}/technical-file").json()
+
+        (operations,) = [a["content"] for a in body["artefacts"] if a["id"] == tf.OPERATIONS]
+        assert [(o["ok"], o["error"]) for o in operations] == [(True, None), (False, "Sketch is not closed.")]
+
+    def test_the_projects_analyses_are_included_and_say_the_link_is_not_recorded(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        current_user_id: str,
+        project_id: str,
+    ) -> None:
+        from app.compliance import technical_file as tf
+
+        conversation_id = _record(db_session, current_user_id, bracket())
+        conversation = db_session.get(Conversation, conversation_id)
+        assert conversation is not None
+        conversation.project_id = project_id
+        designs.save(db_session, conversation, bracket().set_parameter("thick_mm", 9.0))
+        _simulation(db_session, current_user_id, project_id)
+
+        body = auth_client.get(f"{API}/designs/{conversation_id}/technical-file").json()
+
+        (analyses,) = [a for a in body["artefacts"] if a["id"] == tf.ANALYSES]
+        assert "not recorded" in analyses["description"]
+        (run,) = analyses["content"]["runs"]
+        assert run["solver"] == "calculix"
+        assert run["geometry"] == {"filename": "frame.stl", "version": 1, "sha256": "0" * 64}
+
+    def test_a_project_the_exporter_cannot_read_contributes_no_analyses(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        """The conversation is the owner's; a project they have lost access to
+        is not, and exporting a design must not become a way back into it."""
+        from app.compliance import technical_file as tf
+        from app.models import Project
+
+        stranger = User(email="projectless@kryova.dev", hashed_password="x", is_active=True)
+        db_session.add(stranger)
+        db_session.flush()
+        theirs = Project(name="Secret press", owner_id=stranger.id)
+        db_session.add(theirs)
+        db_session.flush()
+        _simulation(db_session, stranger.id, theirs.id)
+        conversation = Conversation(title="Mine", owner_id=current_user_id, project_id=theirs.id)
+        db_session.add(conversation)
+        db_session.flush()
+        designs.save(db_session, conversation, bracket())
+        db_session.flush()
+
+        body = auth_client.get(f"{API}/designs/{conversation.id}/technical-file").json()
+
+        (analyses,) = [a for a in body["artefacts"] if a["id"] == tf.ANALYSES]
+        assert analyses["content"]["runs"] == []
+        assert "not readable" in analyses["description"]
+
+    def test_a_placed_machine_s_file_carries_the_notice_and_marks_later_revisions(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        from app.compliance import technical_file as tf
+
+        conversation_id = _record(db_session, current_user_id, bracket())
+        auth_client.put(
+            f"{API}/designs/{conversation_id}/placed-on-market",
+            json={"placed_on_market_on": utcnow().date().isoformat()},
+        )
+
+        body = auth_client.get(f"{API}/designs/{conversation_id}/technical-file").json()
+
+        assert body["design"]["modification"]["character"] == "after-placing-on-market"
+        (revisions,) = [a["content"] for a in body["artefacts"] if a["id"] == tf.REVISIONS]
+        assert revisions[0]["after_placing_on_market"] is True
+
+    def test_another_users_technical_file_is_404(
+        self, auth_client: AuthenticatedTestClient, db_session: Session
+    ) -> None:
+        stranger = User(email="exporter@kryova.dev", hashed_password="x", is_active=True)
+        db_session.add(stranger)
+        db_session.flush()
+        conversation_id = _record(db_session, stranger.id, bracket(), title="Theirs")
+        db_session.commit()
+
+        response = auth_client.get(f"{API}/designs/{conversation_id}/technical-file")
+
+        assert response.status_code == 404
+
+
+def _simulation(db: Session, owner_id: str, project_id: str) -> None:
+    from app.models import GeometryVersion, JobStatus, Media, SimulationJob
+    from app.models.media import MediaKind
+
+    media = Media(
+        owner_id=owner_id, kind=MediaKind.CAD, filename="frame.stl", size_bytes=1024, sha256="0" * 64, meta={}
+    )
+    db.add(media)
+    db.flush()
+    geometry = GeometryVersion(
+        project_id=project_id, media_id=media.id, version_number=1, filename="frame.stl", file_format="stl", stats={}
+    )
+    db.add(geometry)
+    db.flush()
+    db.add(
+        SimulationJob(
+            project_id=project_id,
+            geometry_version_id=geometry.id,
+            status=JobStatus.SUCCEEDED,
+            solver="calculix",
+            solver_version="2.20",
+            load_case={},
+            result={"max_von_mises_mpa": 41.0},
+        )
+    )
+    db.flush()
 
 
 class TestTheAgentTools:

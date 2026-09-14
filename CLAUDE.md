@@ -300,7 +300,8 @@ app/
   verify/         convergence, the verification register, commitments, the accuracy changelog,
                   standards (the ASME words, and the statement that nothing is validated),
                   corpora (the solvers' own test suites on pinned builds)
-  compliance/     E19 — dated legal registers (EU Machinery Regulation so far), no signing
+  compliance/     E19 — the law read from the Official Journal: dated registers (Machinery
+                  Regulation, AI Act), the boundary, instructions, technical file. No signing
   observe/        spans and the metering listener
   parts/          bought-in standard parts
   handbook/       the docs site's content as data — guides, mission gallery, API reference.
@@ -1359,6 +1360,43 @@ unauthenticated trust page.
    data/verify/corpora/<corpus>.json` on the pinned build (the module docstring and
    `.github/workflows/nightly.yml` carry the exact environment). Never delete a non-reproducing
    case from a baseline to make it tidy — a vanished case fails the comparison on purpose.
+
+## The law, read and quoted (`app/compliance/`) — E19, closed 2026-09-14
+
+Everything here is a clause of an act with the words read, never a paraphrase. The phase exists
+because two otherwise accurate sources gave two application dates for the Machinery Regulation,
+and **both turned out to be Official Journal text**: 14 January 2027 as published, 20 January
+2027 after the corrigendum (OJ L 169, 4.7.2023, item 10). A summary is how the wrong one spreads.
+
+1. **EUR-Lex returns an empty body to `curl` and `WebFetch`.** A rendered extract of the CELEX
+   HTML page (`…/TXT/HTML/?uri=CELEX:32023R1230`) works; asking the extractor with a query
+   returns the relevant chunks. **The ELI link serves the text as published, without the
+   corrigendum** — read both documents, always.
+2. **`provisions.DatedProvision` refuses a date its own quote does not state**, spelled as the OJ
+   spells it (`spelled()` → "20 January 2027"). A correction keeps the published date and names
+   the corrigendum item. Do not relax either to get a register to import: the refusal *is* the
+   remembered-date failure, caught at construction.
+3. **Quote only what was read, and say what was not.** Article 3(16) is quoted to the end of point
+   (b) because that is where the reading stopped; recital numbers in 2026/1744 were not captured
+   and are written "number not captured". A first draft of `eu_ai_act.py` said the Machinery
+   Regulation's AI delegated acts had no operative date — the sentence carrying it was one past
+   where the first reading ended. Re-read before committing a claim of absence.
+4. **`eu_ai_act.REVIEW_BY` fails the suite on purpose** (2027-03-14). The fix is to re-read the
+   consolidated AI Act on EUR-Lex and update what moved — never to push the date alone.
+5. **`boundary.FORBIDDEN_CLAIMS` is scanned over every string constant in `app/`** except
+   `app/compliance/` itself (it quotes the law, which says "ensure the conformity"). The patterns
+   are positive claims with a subject — "the manufacturer affixes the CE marking" passes, "Kryova
+   affixes the CE marking" fails — so when copy trips it, the copy is the bug. The model's free
+   text is not scanned and nothing claims it is.
+6. **A design's legal character is computed from `placed_on_market_on` on every read, never
+   stored**, and the same day counts as after. `test_the_api_has_no_way_to_post_a_whole_spec` now
+   allows exactly one PUT under `/designs` — the placed-on-market date — and pins its body to that
+   one field; a second PUT fails it.
+7. **The technical-file export claims no Annex IV point in full** and lists the eleven that are the
+   manufacturer's alone. Its analyses are the *project's* (a simulation records no design
+   revision), and they are withheld when the exporter cannot read the project.
+8. **Nobody outside the repository has reviewed any of it.** That review is E19's phase proof and
+   is still owed; until then every sentence here is Kryova's reading, not advice.
 
 ## Reference manuals (`app/retrieval/`) and the CATIA KB (`app/catia_kb/`)
 

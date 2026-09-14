@@ -22,17 +22,22 @@ the spec panel is rendered beside a conversation and never on its own.
 
 from __future__ import annotations
 
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, DbSession
-from app.core import designs
+from app.core import designs, technical_file
 from app.design.errors import SpecError
+from app.models import OrgRole, Project
+from app.models.base import utcnow
 from app.models.conversation import Conversation
 from app.models.design import DesignDocument, DesignRevision
+from app.models.organisation import membership_for_user
 from app.models.user import User
 from app.schemas.design import (
     DesignDiffRead,
@@ -41,6 +46,7 @@ from app.schemas.design import (
     DesignRead,
     DesignSummary,
     ParameterEdit,
+    PlacedOnMarket,
     RevisionPage,
     RevisionRead,
 )
@@ -147,8 +153,17 @@ def list_revisions(
             .limit(page_size)
         )
     )
+    placed = document.placed_on_market_on
     return RevisionPage(
-        items=[RevisionRead.model_validate(row) for row in rows],
+        items=[
+            RevisionRead.model_validate(row).model_copy(
+                update={
+                    "after_placing_on_market": placed is not None
+                    and row.created_at.date() >= placed
+                }
+            )
+            for row in rows
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -237,3 +252,76 @@ def edit_parameter(
         changed=outcome.changed,
         diff=outcome.diff.to_dict() if outcome.diff is not None else None,
     )
+
+
+@router.get("/{conversation_id}/technical-file")
+def export_technical_file(
+    db: DbSession, current_user: CurrentUser, conversation_id: str
+) -> JSONResponse:
+    """Kryova's contribution to this machine's technical file — E19 task 3.
+
+    Organised by Annex IV, Part A of Regulation (EU) 2023/1230, point by point,
+    with what the design record supplies towards each and what only the
+    manufacturer can. UTF-8 JSON with a format version, every artefact hashed
+    and the whole file digested; `app.compliance.technical_file.verify` checks
+    both. Served as a download because it is a document somebody keeps, not a
+    view somebody reads once.
+    """
+    document = _document(db, current_user, conversation_id)
+    project = db.get(Project, document.project_id) if document.project_id else None
+    membership = (
+        membership_for_user(db, current_user, project.organisation_id) if project else None
+    )
+    body = technical_file.build(
+        db,
+        document,
+        now=utcnow(),
+        project_readable=membership is not None and membership.role.at_least(OrgRole.VIEWER),
+    )
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", document.name).strip("-") or "design"
+    return JSONResponse(
+        body,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename}-r{document.revision_number}-technical-file.json"'
+            )
+        },
+    )
+
+
+@router.put("/{conversation_id}/placed-on-market", response_model=DesignRead)
+def record_placed_on_market(
+    payload: PlacedOnMarket,
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+) -> DesignDocument:
+    """Record the day a unit of this machine was first placed on the market — E19 task 5.
+
+    From that day, every read of the design and every edit to it says it is not
+    a design-time change, with the clauses that make the difference. A PUT
+    because it is one fact about the design, and recording it again with a
+    different day is a correction, which records who made it. There is no way
+    to clear it: a machine does not stop having been placed on the market, and a
+    control that made its history read as design-time again is the silent
+    reading this exists to prevent.
+
+    A future date is refused with 422 — a placing on the market is something
+    that happened, not something planned.
+    """
+    document = _document(db, current_user, conversation_id)
+    try:
+        designs.record_placed_on_market(
+            db,
+            document,
+            payload.placed_on_market_on,
+            recorded_by_id=current_user.id,
+            today=utcnow().date(),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from None
+    db.commit()
+    db.refresh(document)
+    return document

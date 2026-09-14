@@ -442,7 +442,11 @@ rejected with a bare "Error loading". **The stored blob is never modified.**
 
 **An under-constrained model is caught by the equilibrium residual, not by looking for NaNs.**
 SuperLU returns a finite, meaningless vector for a singular system. Do not replace
-`_residual_is_small` with a finiteness check.
+`_residual_is_small` with a finiteness check. **But the residual only sees a free mode the load
+excites** (measured 2026-09-14 on `PlaneSolver`): an x-only roller under a load along x is a
+*consistent* singular system, SuperLU raises no rank warning, the residual is small, and the
+solve returns a displacement with no error. The same roller under a load along y is refused.
+Nothing checks the fixtures for rigid-body modes independently of the load — flagged, not fixed.
 
 **Loads are distributed by tributary area** (`solve/selection.distribute_force`), so refining the
 mesh does not change the applied load. Region selection is by geometric selector
@@ -1235,8 +1239,10 @@ proved end to end in exactly one place, `tests/test_auth_verification.py`.
 
 ## Seams — respect them
 
-1. **`solve.Solver`** (ABC) — mesh in, load case in, fields out. A surrogate or neural solver must
-   drop in without the API, job or AI layer knowing which ran.
+1. **`solve.Solver`** (ABC) — mesh in, load case in, fields out. **A surrogate is deliberately not
+   one** (decided 2026-09-14, E10.4): a job's output is stored, drawn, interpreted and published
+   as measured, so a surrogate behind this seam would be sampling where the provenance says
+   measured. Surrogates live in `app/optimise/` and may only rank — see *Optimisation* below.
 2. **`solve.ModalSolver`** (ABC) — a sibling, not a method on `Solver`: natural frequencies come
    from a different input and return a different output, so folding them in would make every
    caller branch on what it got back.
@@ -1861,6 +1867,37 @@ bar over a twenty-minute solve teaches a user to predict a finish time nobody me
 convergence study *does* have countable grids and gets `index`/`total`; a count with only one half
 present is refused. Every write opens **its own session**: the runner holds one transaction for
 the whole job, so a progress update written inside it is invisible until the run is over.
+
+## Optimisation, topology and the surrogate (`app/optimise/`) — E10.3/E10.4, 2026-09-14
+
+A library, not a product path: nothing here is offered to the agent or served by a route yet.
+`app/optimise/__init__.py` is the reading order for the drivers; the rest:
+
+1. **An approximation may rank and never decide, and that is enforced by types**
+   (`screening.py`). `Estimate` has no `measured`/`passed`, `Ranking` has no `best` and cannot send
+   zero candidates to be rebuilt, and `screen` judges only what the `Evaluator` rebuilt. A response
+   surface's prediction and the surrogate's are both `Estimate`s. Do not add a `best` to make a
+   caller shorter — `ParetoFront` has none either, because a front is a choice for a person.
+2. **The surrogate is not a `Solver`** (see *Seams*). `flywheel.py` holds no database import;
+   the harvest is `app/simulation/datapoints.py`, organisation-scoped, and skips cache hits so one
+   solve is not counted twice.
+3. **`cKDTree.sparse_distance_matrix(tree, r)` includes each point's zero distance to itself.**
+   The density filter once added `r·I` for "the zero self-distance" on top, doubling every
+   self-weight; rows still summed to one, so every uniform-mesh test passed. Test a filter on a
+   **graded** mesh against its definition.
+4. **Two stiffness floors, both measured.** SIMP uses 1e-9; the level set uses an ersatz of 1e-3,
+   because a black-and-white layout at 1e-9 fails the equilibrium check. A compliance with an
+   ersatz is slightly *below* the layout's own, and `LEVEL_SET_STATEMENT` says so.
+5. **Finite-difference checks of a sensitivity need a measured step.** On the SIMP compliance
+   the central-difference error is U-shaped in the step — 1e-6 fails on round-off, 1e-4 is the
+   minimum (2e-7). Pick the step by sweeping it, not from habit.
+6. **The p = 1 optimum's compliance is unique and its layout is not** — any parallel full-length
+   fibres reach F²L/(E·v·H·t). Assert the number, never the picture. The penalised layout has no
+   closed form; hold it to the theorem that it cannot beat the convex optimum under the same filter.
+7. **`openmdao` and `pylife` are in `requirements.txt`** since 2026-09-14. `pyproject.toml`
+   declared both for weeks while no requirements file installed either, so `OpenMdaoDriver` and
+   `app/fatigue/`'s federation could not run on any environment built from them. A test that
+   `importorskip`s a dependency nobody installs is a test that never runs — check the skip count.
 
 ## Not solving twice (`app/simulation/cache.py`) — added 2026-09-10 with E15.2
 

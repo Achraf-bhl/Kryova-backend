@@ -62,3 +62,13 @@ pywin32==312; sys_platform == "win32"
 # default provider is local Ollama, and only AI_PROVIDER=anthropic needs it.
 # Install it with `pip install anthropic` if you pick that provider.
 httpx==0.28.1
+
+# Federated engineering libraries (Decision 2: integrate, never re-implement).
+# Both Apache-2.0 and pure Python apart from pyLife's pandas/h5py wheels. Until
+# 2026-09-14 pyproject.toml called these "real dependencies" while no
+# requirements file named either, so neither was installed anywhere and every
+# test that needed one skipped itself — the ezdxf shape again, one layer up.
+# OpenMDAO (E10.3) is the second optimisation driver behind app/optimise's seam;
+# pyLife (E8) is the fatigue engine app/fatigue/backend.py federates to.
+openmdao==3.45.1
+pylife==2.3.1

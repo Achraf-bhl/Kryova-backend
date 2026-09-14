@@ -236,6 +236,23 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-14 — E10 tasks 3 and 4 closed: DOE, response surfaces, Pareto fronts, SIMP and
+  level-set topology optimisation, and the surrogate flywheel under "may rank, never decide".**
+  New modules `app/optimise/{doe,surface,pareto,topology,levelset,screening,flywheel}.py` and
+  `app/simulation/datapoints.py`. `openmdao==3.45.1` and `pylife==2.3.1` added to
+  `requirements.txt`. **`app/solve/plane.py` gains public `element_stiffness`,
+  `restrained_dofs` and `winding`** (a refactor of the existing assembly; V&V re-recorded,
+  outcomes unchanged to round-off). **Plan change:** the surrogate is *not* a `Solver` — a job's
+  output is treated as measured everywhere downstream. **Defect found and fixed** in the new
+  density filter: the self-weight was counted twice (`cKDTree.sparse_distance_matrix` already
+  holds the diagonal), invisible on a uniform mesh. **Flagged, not fixed:** `PlaneSolver` accepts
+  an under-constrained model when the load is orthogonal to the free mode (an x-only roller under
+  an x load solves, with no error), because SuperLU raises no rank warning and the residual of a
+  consistent singular system is small — CLAUDE.md's "caught by the residual" holds only when the
+  load excites the mode. 52 guards broken and watched to fail. No schema, route or response
+  shape changed. Full suite **8610 passed / 0 failed / 12 skipped / 1 xpassed** (12 min 45 s).
+  Tested by `tests/test_optimise_{problem,models,drivers,doe,surface,pareto,topology,levelset,flywheel}.py`,
+  `tests/test_simulation_datapoints.py`.
 - **2026-09-14 — E10 task 1 closed: transient conduction reaches the product, and a structural
   run can carry a thermal run's temperatures.** `analysis: "thermal-transient"` with a
   `transient_case` (**migration `5f1bc5c58c49`**, two nullable JSONB columns `transient_case` and

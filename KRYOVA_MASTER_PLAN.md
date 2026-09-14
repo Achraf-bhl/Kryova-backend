@@ -70,9 +70,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 14/24 | 92/131 = 71% | 104/151 eng-months = 69% |
+| Engineering — E1–E23 | 14/24 | 94/131 = 72% | 106/151 eng-months = 70% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 20/34 | 140/192 = 73% | 131/189 eng-months = 70% |
+| **Programme** | 20/34 | 141/192 = 73% | 134/189 eng-months = 71% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -80,7 +80,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E10 38%, E15 70%, E18 50%, P4 75%, P9 57% |
+| in flight | E10 75%, E15 70%, E18 50%, P4 75%, P9 57% |
 | nothing finished yet | E8, E9, E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2140,6 +2140,64 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
    framework; SIMP and level-set topology optimisation; DOE; response surfaces; multi-objective
    trade-offs (mass vs stiffness vs cost). The capability that makes an AI designer *better* than
    a human rather than merely faster.
+   > DONE (2026-09-14) — **every method the task names exists, and each is held to a closed
+   > form or a theorem.** OpenMDAO is a real dependency now (`openmdao==3.45.1`, and
+   > `pylife==2.3.1` beside it, in `requirements.txt` — `pyproject.toml` had declared both while
+   > no requirements file named either), and `OpenMdaoDriver` agrees with `ScipyDriver` on the
+   > same problem. `drivers.py`, `models.py` and `problem.py`, untested in the status below, are
+   > tested.
+   > **DOE** (`doe.py`): a full factorial with the bounds included, and a Latin hypercube with
+   > one point per stratum in every projection, random within its stratum. The seed is required
+   > and reproduces the plan; a survey over the problem's evaluation budget is refused, never
+   > truncated; every point is built through the `Evaluator` and a failure is recorded with its
+   > reason.
+   > **Response surfaces** (`surface.py`): degree 1 or 2 least squares in normalised coordinates,
+   > whose error basis is the exact leave-one-out residual from the hat matrix, checked against
+   > brute-force refits. Refused: fewer than terms + 2 points, a rank-deficient design (the
+   > two-level factorial asked for a quadratic is named), leverage 1. A prediction outside the
+   > bounds is refused and one outside the sampled range is flagged extrapolated; every
+   > prediction is an `Estimate` with a band, never a measurement.
+   > **Multi-objective** (`pareto.py`): epsilon-constraint through `optimise()`. Anchors run
+   > first and a missing anchor stops the study before any interior run; interior levels become
+   > `<=`/`>=` assertions by sense; a failed sub-problem is a gap, not a point; dominated and
+   > duplicate points are dropped and counted. Checked against the closed-form front
+   > f₂ = (√f₁ − 2)². `ParetoFront` has no `best`, because a front is a choice for a person, and
+   > a front read off a DOE survey is labelled *sampled*, not optimised.
+   > **SIMP** (`topology.py`) on `app.solve.plane`'s own element matrices: `element_stiffness`,
+   > `restrained_dofs` and `winding` are now public. **`plane.py` is fingerprinted**, so the V&V
+   > artefact was re-recorded, with outcomes unchanged to round-off. OC update with a log-space
+   > multiplier search, area-weighted cone density filter. The sensitivity is checked against a
+   > central difference on every element; the step was measured, not picked: the error is
+   > U-shaped with its minimum at 1e-4. Penalty 1 is the convex variable-thickness sheet, checked
+   > against F²L/(E·v·H·t) from a random start — the *compliance* is unique and the layout is not
+   > (any parallel full-length fibres), so the test reads the number. The penalised layout is
+   > held to a theorem: never stiffer than the convex optimum under the same filter.
+   > "Converged" needs the volume on target as well as the densities stopped.
+   > **A defect found while pinning the filter:** `cKDTree.sparse_distance_matrix` already stores
+   > each element's zero self-distance, so the `+ r·I` the filter added counted every element's
+   > own weight twice. On a uniform mesh that is invisible, because rows still sum to one. A
+   > graded-mesh test against the definition found it.
+   > **Level set** (`levelset.py`): the reaction–diffusion form (Yamada et al., *CMAME* 2010) on
+   > the element graph. It is black and white at every iterate. Void is an ersatz at 1e-3,
+   > because 1e-9 made a crisp layout fail the equilibrium check (measured). The volume is met by
+   > rank, because λ only shifts the solution. It is held to two theorems — the convex tension
+   > bound, and never stiffer than the full design space — and the regularisation is measured
+   > to shorten the boundary (314 → 145 edges). It is element-wise, so the boundary is
+   > staircased, and its statement says so.
+   > Every result says it is a concept on a mesh and not a part, and none carries an `optimum`,
+   > `part` or `solution`. **52 guards were verified by breaking each and watching a named test
+   > fail**, with restores checked by sha256. The 8 that no test caught at first each got one,
+   > and that pass is what found the filter defect.
+   > **Not claimed**: any of this reaching the agent, a route or the GUI — it is a library, as
+   > the rest of `app/optimise/` has been since 2026-09-06; topology on solids (plane only); a
+   > smooth level-set boundary; a stress or frequency objective. Written on Linux; no seat claim.
+   > Tested by: `tests/test_optimise_problem.py`, `tests/test_optimise_models.py`,
+   > `tests/test_optimise_drivers.py`, `tests/test_optimise_doe.py`,
+   > `tests/test_optimise_surface.py`, `tests/test_optimise_pareto.py`,
+   > `tests/test_optimise_topology.py`, `tests/test_optimise_levelset.py`,
+   > `tests/test_optimise_honesty.py`, `tests/test_optimise_gradients.py`.
+
+   <!-- superseded 2026-09-14 -->
    > PARTIAL (2026-09-06) — the honesty rules and the gradients now have tests, and
    > `design/sensitivity.py` finally has a caller outside a test (it had been listed beside
    > `app/render/` and `app/ai/vision.py` as capability wired to nothing). Gradients checked
@@ -2155,7 +2213,52 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
    the optimiser explores thousands of candidates before spending a real solve. Training data is a
    free by-product of use; the `Solver` ABC means the surrogate drops in as just another solver —
    which is what that seam was built for.
-   > NOT STARTED.
+   > DONE (2026-09-14) — **every solved run is a labelled datapoint, and a surrogate trained on
+   > them may rank and never decide.**
+   > **Plan change, and why.** The task says the surrogate "drops in as just another solver".
+   > It does not, on purpose. A `Solver` answers a job, and a job's output is stored as a field,
+   > drawn on the part, interpreted into prose and fed to the verification register — every one
+   > of which treats it as measured. A surrogate answering there would be the third forbidden
+   > speedup in `docs/MAKING_IT_FASTER.md` (sampling where the provenance says measured), and it
+   > would *decide*, which E22 task 1's rule forbids. So it lives beside the optimiser.
+   > **Harvest** (`app/simulation/datapoints.py`, kept out of `app/optimise` so that package
+   > stays free of sessions): an organisation's finished solid runs, newest first and bounded,
+   > derived on read and never stored. It is scoped to the organisation, because one tenant's
+   > solves are not another's training data. Each skipped run gets a reason:
+   > * a cache hit, because the solve it copies is already counted;
+   > * a run on a borrowed temperature field;
+   > * a result without the response;
+   > * a load with no single force (a pressure, a moment);
+   > * a geometry with no bounding box.
+   >
+   > Each datapoint carries solver, solver version and mesh convergence, so the in-house
+   > `solver_version=None` flagged under E10 task 1 surfaces as "(version not recorded)", not as
+   > a version.
+   > **Surrogate** (`app/optimise/flywheel.py`): a power law `log r = b₀ + Σ bᵢ log fᵢ`. That is
+   > the shape linear elasticity already has, so on a textbook family it is exact and its
+   > exponents are readable physics. Trained on 32 real `LinearStaticSolver` bar solves, the
+   > exponents come back as +1 on force and length and −1 on modulus, width and height, within
+   > 0.02. The error basis is the exact leave-one-out error in log space (checked against
+   > brute-force refits), reported as a ×/÷ factor together with how many runs were single-grid,
+   > whose own mesh error the band does not include. Refused: too few points, a constant
+   > feature, collinear features, a non-positive feature or response (a zero displacement is a
+   > fixture problem), leverage 1. A point outside the trained range is flagged.
+   > **The rule as types** (`app/optimise/screening.py`):
+   > * `Estimate` (provenance `approximated`, with a band and a basis sentence) has no
+   >   `measured` or `passed`.
+   > * `Ranking` has no `best` and always sends at least one candidate to be rebuilt.
+   > * `screen` rebuilds the top `verify_top` through the `Evaluator` — counted against the
+   >   budget and judged against the constraints — and `best_measured` reads only those.
+   >
+   > A test with a confidently backwards estimator shows the measurement winning.
+   > `MAY_RANK_NEVER_DECIDE` is one server string.
+   > **Not claimed**: a surrogate reachable by the agent or an API (E22 task 1 owns putting the
+   > rule where users read it); any response other than the three stored scalars; features
+   > beyond bounding box, volume, modulus, net force and element size — a geometry *family*
+   > needs its own parameters, which a run does not record; a few thousand runs of data (the
+   > test trains on 32).
+   > Tested by: `tests/test_optimise_flywheel.py`, `tests/test_optimise_surface.py`
+   > (`TestARankingMayRankAndNeverDecide`), `tests/test_simulation_datapoints.py`.
 
 ## ERA IV — ENGINEERING KNOWLEDGE
 

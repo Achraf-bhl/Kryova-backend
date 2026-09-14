@@ -394,11 +394,18 @@ def assemble_stiffness_tri3(
     element matrix exactly -- there is no quadrature error to trade off, only
     the element's inability to represent a strain gradient at all.
     """
+    ke, dofs = _tri3_element_stiffness(mesh, material, state, thickness_mm)
+    return _scatter(mesh, dofs, ke)
+
+
+def _tri3_element_stiffness(
+    mesh: TriMesh, material: Material, state: PlaneState, thickness_mm: float
+) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
     grads, areas = _tri3_shape_gradients(mesh)
     b = _strain_displacement(grads)
     d = constitutive_matrix(material, state)
     ke = (thickness_mm * areas)[:, None, None] * np.einsum("eji,jk,ekl->eil", b, d, b)
-    return _scatter(mesh, _element_dofs(mesh.tris), ke)
+    return np.asarray(ke, dtype=np.float64), _element_dofs(mesh.tris)
 
 
 def assemble_stiffness_tri6(
@@ -411,6 +418,13 @@ def assemble_stiffness_tri6(
     for the degree-2 integrand a straight-sided tri6 produces. See
     `_TRI_GAUSS_POINTS`.
     """
+    ke, dofs = _tri6_element_stiffness(mesh, material, state, thickness_mm)
+    return _scatter(mesh, dofs, ke)
+
+
+def _tri6_element_stiffness(
+    mesh: TriMesh, material: Material, state: PlaneState, thickness_mm: float
+) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
     if mesh.midside is None:
         raise SolverError("mesh has no midside nodes; it is not a tri6 mesh")
 
@@ -429,7 +443,37 @@ def assemble_stiffness_tri6(
             * np.einsum("eji,jk,ekl->eil", b, d, b)
         )
 
-    return _scatter(mesh, _element_dofs(connectivity), ke)
+    return ke, _element_dofs(connectivity)
+
+
+def element_stiffness(
+    mesh: TriMesh, material: Material, state: PlaneState, thickness_mm: float
+) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
+    """Every element's stiffness matrix and its global DOF indices, unassembled.
+
+    Shapes `(n_elem, k, k)` and `(n_elem, k)`, k = 6 for tri3 and 12 for tri6.
+    The same matrices `assemble_stiffness` sums — it is built from this — so a
+    caller that scales each element before summing (topology optimisation, where
+    an element's stiffness is a function of its density) is scaling *this*
+    solver's element and not a copy of it that could drift.
+    """
+    if mesh.midside is not None:
+        return _tri6_element_stiffness(mesh, material, state, thickness_mm)
+    return _tri3_element_stiffness(mesh, material, state, thickness_mm)
+
+
+def restrained_dofs(mesh: TriMesh, fixtures: list[Fixture]) -> NDArray[np.int64]:
+    """The global DOF indices the fixtures hold, sorted and unique."""
+    return _fixed_dofs(mesh, fixtures)
+
+
+def winding(mesh: TriMesh) -> float:
+    """+1 where every triangle is anticlockwise, −1 where every one is clockwise.
+
+    Refuses a mixed mesh, whose pressure direction is undefined. Public because
+    `assemble_loads` needs it and a caller assembling its own system does too.
+    """
+    return _winding(mesh)
 
 
 def thermal_load(mesh: TriMesh, case: PlaneCase) -> NDArray[np.float64]:

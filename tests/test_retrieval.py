@@ -891,6 +891,22 @@ class TestCorpus:
         found = discover_sources([tmp_path], exclude=[tmp_path / "README.md"])
         assert [path.name for path in found] == ["real.md"]
 
+    def test_verification_artefacts_are_not_offered_as_manuals(self):
+        """`data/` is scanned whole, and `data/verify/` holds a conda lock that
+        is a `.txt`. Found 2026-09-14 as a 26th "manual" and a stale index."""
+        from app.core.config import settings
+        from app.retrieval.service import knowledge_service, reset_knowledge_service
+
+        reset_knowledge_service()
+        try:
+            found = knowledge_service().sources()
+        finally:
+            reset_knowledge_service()
+        verify = (settings.knowledge_root.parent / "verify").resolve()
+
+        assert any(verify in path.resolve().parents for path in discover_sources([verify]))
+        assert not [path for path in found if verify in path.resolve().parents]
+
 
 class TestMergeAdjacent:
     def test_overlapping_passages_from_one_page_are_rejoined(self):

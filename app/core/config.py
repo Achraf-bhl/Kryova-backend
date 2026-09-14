@@ -620,6 +620,19 @@ class Settings(BaseSettings):
         """
         return [self.knowledge_root / "sources", self.knowledge_root.parent]
 
+    @property
+    def knowledge_exclude(self) -> list[Path]:
+        """Paths under a scanned root that are not reference material.
+
+        `data/verify/` holds verification artefacts — recorded benchmark runs,
+        solver-corpus baselines, and a conda lock that happens to be a `.txt`.
+        That lock is what made this necessary (2026-09-14): scanning `data/`
+        picked it up as a 26th manual, so the agent would have been offered 74
+        package URLs as CAD documentation, and the index read as stale until it
+        was rebuilt around them.
+        """
+        return [self.knowledge_root.parent / "verify"]
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,0 +1,6168 @@
+{
+ "build": "calculix-ccx 2.20-1 (Debian bookworm, amd64)",
+ "cases": {
+  "achtel2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "achtel29": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "achtel9": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "achtelc": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "achtelcas": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "achteld": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "achtelg": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "achtelp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "acou2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "acou3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "acou4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.77
+  },
+  "aircolumn": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "anipla": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "aniso": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "artery1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "artery2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "artery3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "artery4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "artery5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "ax6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "ax6ht": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "axial": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "axiplane": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "axrad": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.92
+  },
+  "axrad2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "b31": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "b31nodthi": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "ball": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.41
+  },
+  "beam10p": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beam10psmooth": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beam10psmooth.rfn": {
+   "detail": "beam10psmooth.rfn.dat.ref does not exist",
+   "outcome": "no-reference",
+   "seconds": 0.01
+  },
+  "beam20p": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beam20t": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beam8b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beam8f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beam8p": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beam8p_mpc": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beam8t": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beam_sens_freq_coord1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beam_sens_freq_coord2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beam_sens_freq_coord3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beam_sens_stress_coord1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beam_sens_stress_coord2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamabq": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamb": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamcom": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamcontact": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.26
+  },
+  "beamcr": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.26
+  },
+  "beamcr2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamd": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamd2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamd3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamdelay": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy10": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamdy10bm": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamdy10dd": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamdy11": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamdy12": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamdy13": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamdy14": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy15": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy16": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy17": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy18": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy19": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamdy2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy20": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamdy7bm": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamdy8": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdy9": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamdynamic": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.46
+  },
+  "beamdynamic2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamexpdy1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.82
+  },
+  "beamf": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamf2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamf3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamf3submodel": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamfrdread": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamfsh1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamfstrucdamp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.31
+  },
+  "beamfsubmodel": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beamft": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamheatplas": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.92
+  },
+  "beamhf": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamhtbf": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beamhtbo": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beamhtcr": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.42
+  },
+  "beamhtcr2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.22
+  },
+  "beamhtfc": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beamhtfc2": {
+   "deck_says": "Structure: cantilever beam. Test objective: forced convection generic gas network elements simultaneous temperature solution Before running this example, please run example beamhtfc and copy beamhtfc.rout to beamhtfc2.rin",
+   "detail": "beamhtfc2.dat and its reference differ in size",
+   "outcome": "size-mismatch",
+   "seconds": 0.0
+  },
+  "beamhtfcaero": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beamhtfcaerothne": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beamhtfcnu": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beamidset": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamimpdy1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.31
+  },
+  "beamimpdy1nodirect": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "beamimpdy2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.36
+  },
+  "beamlin": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beammix": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beammpc": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beammr": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beammrco": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beammrlin": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamnh": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamnld": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamnldy": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamnldye": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamnldye2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamnldye20": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamnldyems": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamnldynodirect": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamnldyp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.61
+  },
+  "beamnldype": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamnlmpc": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamnlp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamnlptp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "beamnlt": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamnoan": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamog": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamp1rotate": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamp2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamp2rotate": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.22
+  },
+  "beamp2stage": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamp_ciarlet": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beampd": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beampdepmpc": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamperror": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beampfix": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beampic": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beampik": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "beampis": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beampiso": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beampiso2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.07
+  },
+  "beampisof": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "beampkin": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "beampl": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamplane": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.56
+  },
+  "beampo1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beampo2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beampo3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beampo4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beampo5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beampo6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamprand": {
+   "checks": {
+    "recorded-output": {
+     "nook": 2,
+     "ok": 0,
+     "skip": 0
+    }
+   },
+   "deck_says": "Structure: cantilever beam. Test objective: random fields.",
+   "detail": "largest deviation 200 % of the block maximum",
+   "outcome": "deviated",
+   "seconds": 0.06
+  },
+  "beamprb": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beampset": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beampt": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamptied1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamptied1noadjust": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamptied2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamptied3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "beamptied4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "beamptied5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 1,
+     "ok": 0,
+     "skip": 0
+    }
+   },
+   "deck_says": "Structure: cantilever beam. Test objective: change of eigenfrequencies due to contact between two beam segments large displacement stiffness + stress stiffness + contact spring stiffness (with friction)",
+   "detail": "largest deviation 3.837 % of the block maximum",
+   "outcome": "deviated",
+   "seconds": 0.31
+  },
+  "beamptied6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 1,
+     "ok": 0,
+     "skip": 0
+    }
+   },
+   "deck_says": "Structure: cantilever beam. Test objective: change of eigenfrequencies due to contact between two beam segments large displacement stiffness + stress stiffness + contact spring stiffness (with sticking friction)",
+   "detail": "largest deviation 2.783 % of the block maximum",
+   "outcome": "deviated",
+   "seconds": 0.41
+  },
+  "beamptied7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamptrans": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.26
+  },
+  "beamrb": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamrb2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamread": {
+   "deck_says": "Structure: cantilever beam. Test objective: restart capability (reading part). Before running this example, please run example beamwrite and copy beamwrite.rout to beamread.rin",
+   "detail": "beamread.dat and its reference differ in size",
+   "outcome": "size-mismatch",
+   "seconds": 0.0
+  },
+  "beamread2": {
+   "deck_says": "Structure: cantilever beam. Test objective: restart capability (reading part). Before running this example, please run example beamwrite2 and copy beamwrite2.rout to beamread2.rin",
+   "detail": "beamread2.dat and its reference differ in size",
+   "outcome": "size-mismatch",
+   "seconds": 0.0
+  },
+  "beamread3": {
+   "deck_says": "Structure: cantilever beam. Test objective: restart capability (*DYNAMIC, reading part). Before running this example, please run example beamwrite3 and copy beamwrite3.rout to beamread3.rin",
+   "detail": "beamread3.frd does not exist",
+   "outcome": "no-output",
+   "seconds": 0.0
+  },
+  "beamread4": {
+   "deck_says": "Structure: cantilever beam. Test objective: restart capability (reading part). defining an extra amplitude Before running this example, please run example beamwrite and copy beamwrite.rout to beamread4.rin",
+   "detail": "beamread4.dat and its reference differ in size",
+   "outcome": "size-mismatch",
+   "seconds": 0.0
+  },
+  "beamstraight": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamt": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamt2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamt3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamt4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "beamt6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.31
+  },
+  "beamth": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "beamtor": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "beamu": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "beamuamp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamwrite": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamwrite2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "beamwrite3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.61
+  },
+  "bifur": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "bolt": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.87
+  },
+  "boxprofile": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "boxprofile2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "branch1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "branch2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "branchjoint1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "branchjoint2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "branchjoint3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "branchjoint4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "branchsplit1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "branchsplit2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "branchsplit3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "c3d15": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "c3d6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "capacitor": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "carbonseal": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "centheat1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "changefric": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.51
+  },
+  "changesolidsection": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "changesurfbeh": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "channel1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel10": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel11": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel12": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel13": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel14": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel15": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel16": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "channel3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel8": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channel9": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "channelcbs": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 3.17
+  },
+  "chanson1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "characteristic": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "circ10p": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.66
+  },
+  "circ10p.rfn": {
+   "detail": "skipped by compare",
+   "outcome": "skipped",
+   "seconds": 0.0
+  },
+  "circ10pcent": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "circ10pcent.rfn": {
+   "detail": "skipped by compare",
+   "outcome": "skipped",
+   "seconds": 0.0
+  },
+  "concretebeam": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "contact1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "contact10": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "contact11": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "contact12": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.26
+  },
+  "contact13": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "contact14": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "contact15": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "contact16": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.26
+  },
+  "contact17": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "contact2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.12
+  },
+  "contact3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "contact4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "contact4_mortar": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "contact5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "contact6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "contact7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "contact8": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "contact9": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "contactenergy": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "contdamp1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "contdamp2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "contdamp3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "cou2d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.46
+  },
+  "coucyl": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "coucylcent": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.26
+  },
+  "coucylcent2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "coucylcentcomp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 3.57
+  },
+  "coucylcomp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "couette1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.32
+  },
+  "couette2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.37
+  },
+  "couette5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.52
+  },
+  "coupling1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "coupling10": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "coupling11": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "coupling12": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "coupling13": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "coupling14": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "coupling2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "coupling3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "coupling6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "coupling7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "coupling8": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "coupling9": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "couseg": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "couseg2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "couseg3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 3.47
+  },
+  "cousegcomp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.27
+  },
+  "crackIIcum": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.17
+  },
+  "crackIIcumhcf": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.27
+  },
+  "crackIIcumhcf2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.32
+  },
+  "crackIIint": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.22
+  },
+  "crossley6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "cube2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "cubef2f1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 4.87
+  },
+  "cubef2f2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 4.72
+  },
+  "cubef2f3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.12
+  },
+  "cubenewt": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "cubes": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "cubeslinmortar": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "cubesmortar": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "cubespglinmortar": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "cubespring": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "cyl": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "dam": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "dashpot1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "dashpot2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "dashpot3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "dashpot5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "dashpot6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "disk2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "dist": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.87
+  },
+  "distcoup": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "distcoup2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "dloadlin20f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "dloadlinI": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "dloadlinIf": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "dyncube": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "dyncubeexp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.56
+  },
+  "edgeload": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "equrem1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "equrem2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "equrem3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "equrem4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.31
+  },
+  "freq_test": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "fricloop": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "friction1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "friction2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "friction3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "fullseg": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.77
+  },
+  "furnace": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 9.08
+  },
+  "gap": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 4.47
+  },
+  "gap2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe-cfd-pressure": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe-fanno10": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe-fanno8-oil": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe-fanno9": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "gaspipe1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe1-oil": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe11": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe12": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe13": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe14": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe15": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe8": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe8-cfd-massflow": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe8-cfd-pressure": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe8-cfd-pressure-split": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe8-oil": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspipe9": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "gaspres": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "green1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "green2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "green3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "green4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "greencyc1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.26
+  },
+  "greencyc2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.56
+  },
+  "hinge": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.71
+  },
+  "hueeber1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 8.73
+  },
+  "hueeber1_mortar": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 7.28
+  },
+  "hueeber2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 8.83
+  },
+  "hueeber2_mortar": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 7.43
+  },
+  "hueeber3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 3.57
+  },
+  "hueeber3_mortar": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 4.07
+  },
+  "hueeber4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 3.42
+  },
+  "hueeber4_mortar": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 4.02
+  },
+  "impdyn": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 5.42
+  },
+  "induction": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.07
+  },
+  "induction2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 2,
+     "ok": 0,
+     "skip": 0
+    }
+   },
+   "deck_says": "Structure: circular line within cube around beam-like conductor; Heaviside-step-like current Test objective: Calculation of E and B Heating of the conductor",
+   "detail": "largest deviation 1.143 % of the block maximum",
+   "outcome": "deviated",
+   "seconds": 7.78
+  },
+  "induction3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 5.97
+  },
+  "inistrain": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "inistrain2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "labyrinth1fin": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "labyrinthstepped": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "labyrinthstraight": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "largerot1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "largerot2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "largerot3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "largerot4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "largerot5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.31
+  },
+  "leifer1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.41
+  },
+  "leifer2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.07
+  },
+  "lin_stat_cooks_beam_128": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "lin_stat_initial_temp_condition": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "lin_stat_pres_load": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "lin_stat_th_gradient": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "lin_stat_twisted_beam": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "linearnet": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "load1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "mass1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "mass2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "mass3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "massflow_percent_ccx": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "membrane1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "membrane2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "membrane3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "metalforming": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.56
+  },
+  "modelchel": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "modelchel2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "modelchel3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "moehring": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 5.87
+  },
+  "mpcforce": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "multistage": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.37
+  },
+  "networkmpc": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "networkmpc2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "oneel": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "oneel20cf": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "oneel20df": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "oneel20df2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "oneel20fi": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "oneel20fi2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "oneel20fi3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "oneel20rs": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "oneel8ra": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "oneeltruss": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "opt1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "opt1dp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.71
+  },
+  "opt2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "opt3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "pendel": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.12
+  },
+  "pipe": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "pipe2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "pipempc1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "pipempc2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "pipempc3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "piperestrictor": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "planestrain": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "planestrain2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "planestress": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "planestress2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "planestress3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "planestress3dsens": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "planestress4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "plate": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "poi2dturb": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.76
+  },
+  "potied": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.26
+  },
+  "pret1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "pret2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "pret3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "pret4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "pret5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "pret6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "pret7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "primaryair": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "punch1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "punch2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "resstress1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "resstress2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "resstress3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "restrictor": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "restrictor-oil": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "ring1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "ring2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "ring3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "ring4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "ringfcontact1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.07
+  },
+  "ringfcontact2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.42
+  },
+  "ringfcontact3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.87
+  },
+  "ringfcontact4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.87
+  },
+  "ringfcontact5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.02
+  },
+  "rot1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "rot2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "rot3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "rot4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "rotor": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.67
+  },
+  "rotor2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.52
+  },
+  "rotor3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 5.93
+  },
+  "rotpipe1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "rotpipe2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "rotpipe3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "rotpipe3inv": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "rotpipe4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "rotpipe5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "rotpipe6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "rotpipe7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "rotpipeu": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "sc123": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.17
+  },
+  "sc123creep": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.62
+  },
+  "scheibe": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.57
+  },
+  "scheibe2f2f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "scheibe2n2f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "section": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "section4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "segdyn": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 3.47
+  },
+  "segment": {
+   "checks": {
+    "recorded-output": {
+     "nook": 2,
+     "ok": 0,
+     "skip": 0
+    }
+   },
+   "deck_says": "Structure: disk segment Test objective: cyclic symmetry",
+   "detail": "largest deviation 148.4 % of the block maximum",
+   "outcome": "deviated",
+   "seconds": 0.87
+  },
+  "segment1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "segment2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "segmentbeam": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.67
+  },
+  "segmentbeam2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.87
+  },
+  "segmentf": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "segmentface": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.62
+  },
+  "segmentm": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "segmentmass": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.51
+  },
+  "segmentnum": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.51
+  },
+  "segmentsmooth": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.07
+  },
+  "segmentsmooth.rfn": {
+   "detail": "skipped by compare",
+   "outcome": "skipped",
+   "seconds": 0.0
+  },
+  "segmentsmooth2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.92
+  },
+  "segmentsmooth2.rfn": {
+   "detail": "skipped by compare",
+   "outcome": "skipped",
+   "seconds": 0.0
+  },
+  "segmenttemp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 2,
+     "ok": 0,
+     "skip": 0
+    }
+   },
+   "deck_says": "Structure: disk segment Test objective: cyclic symmetry static pre-loading step with temperature and centrifugal force",
+   "detail": "largest deviation 52.68 % of the block maximum",
+   "outcome": "deviated",
+   "seconds": 1.12
+  },
+  "segmenttet": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 5.08
+  },
+  "segmentunsmooth": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.31
+  },
+  "segststate": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 3.27
+  },
+  "sens3d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "sens_disp_orien": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "sens_disp_orien_nlgeom": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "sens_freq_disp_cyc": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.82
+  },
+  "sens_freq_orien": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "sens_modalstress": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.21
+  },
+  "sensitivity_I": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "sensitivity_V": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "sensitivity_VI": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "sensitivity_VII": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "shell1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "shell1lin": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "shell2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "shell3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "shell4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.16
+  },
+  "shell5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "shell6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "shell6rot2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "shell7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "shell7rot": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "shell7rot2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "shellbeam": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "shellf": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "shellf2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "shellnor": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "simplebeam": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "simplebeampipe1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "simplebeampipe2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "simplebeampipe3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "simplebeampipe4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "simplebeampipe5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "slant": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 3.02
+  },
+  "small_pressure_gradient": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "solidshell1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "solidshell2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.11
+  },
+  "spring1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "spring2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "spring3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "spring4": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "spring5": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "spring6": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "spring7": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "square": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.41
+  },
+  "submodelbeamp": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "submodelbeampdouble": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "submodeltwobeam": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "submodeltwobeamnlgeom": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "substructure": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "swing": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "tempdiscon": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "testmortar": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.02
+  },
+  "thermomech": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 30.83
+  },
+  "thermomech2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 4.12
+  },
+  "thread": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 2.87
+  },
+  "transition": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.06
+  },
+  "truss": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "truss2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.26
+  },
+  "unet1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "unetp1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "uprofile": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.03
+  },
+  "userbeam": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "vortex1": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "vortex2": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "vortex3": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 0.01
+  },
+  "wire": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "outcome": "reproduced",
+   "seconds": 1.17
+  }
+ },
+ "checks": {
+  "closed-form": {
+   "nook": 0,
+   "ok": 0,
+   "skip": 0
+  },
+  "external": {
+   "nook": 0,
+   "ok": 0,
+   "skip": 0
+  },
+  "recorded-output": {
+   "nook": 10,
+   "ok": 717,
+   "skip": 0
+  },
+  "same-solver": {
+   "nook": 0,
+   "ok": 0,
+   "skip": 0
+  },
+  "unstated": {
+   "nook": 0,
+   "ok": 0,
+   "skip": 0
+  }
+ },
+ "corpus": "calculix-2.20",
+ "outcomes": {
+  "deviated": 6,
+  "errored": 0,
+  "nan": 0,
+  "no-checks": 0,
+  "no-output": 1,
+  "no-reference": 1,
+  "reproduced": 543,
+  "size-mismatch": 4,
+  "skipped": 4,
+  "timed-out": 0
+ },
+ "recorded_at": "2026-09-14T15:20:17Z",
+ "reported_version": "This is Version 2.20",
+ "schema_version": 1,
+ "seconds": 273.9,
+ "statement": {
+  "does_not_establish": [
+   "That any answer is correct. Every reference is an earlier CalculiX output, so a defect present when it was recorded is present in the reference; none of this is code verification against an independent answer.",
+   "Anything about validation: no case compares against a measurement.",
+   "Anything about the Windows seat's CalculiX 2.23, or any build but this one.",
+   "Anything about Kryova's own decks, meshes or load vocabulary: these are the maintainer's decks, not the ones app/solve/calculix writes."
+  ],
+  "establishes": [
+   "543 of 555 cases in the calculix-2.20 corpus reproduced on calculix-ccx 2.20-1 (Debian bookworm, amd64) (the binary reports 'This is Version 2.20').",
+   "Those cases produce the same numbers, within 0.1 % of each block's largest value, as the CalculiX build that recorded the reference files \u2014 this build is installed correctly and has not regressed on the features they exercise."
+  ]
+ },
+ "time_factor": 1.0
+}

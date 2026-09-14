@@ -21,6 +21,13 @@
 # not a staging environment**. P9 task 4's "staging with seeded demo orgs" needs
 # somewhere to deploy to, which this deployment does not yet have. What runs
 # here is the offline half of the ladder, which is the half that exists.
+#
+# **The two solver corpora run here too (master plan 20.4)**, each against its
+# pinned build and its recorded baseline in `data/verify/corpora/`. A case that
+# reproduced in the baseline and does not tonight fails the job. What a green
+# run of either establishes — and, at more length, what it does not — is
+# printed by the run itself and written in `app/verify/corpora.py`; neither is
+# "the solver is verified".
 
 name: nightly
 
@@ -97,3 +104,85 @@ jobs:
               caveats = "; ".join(entry.not_claimed) or "no caveats recorded"
               print(f"  {entry.rung}: {caveats}")
           PY
+
+  calculix-corpus:
+    name: CalculiX's own examples, on the fleet's build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # The fleet image's runtime stage is python:3.12-slim-bookworm with
+    # bookworm's calculix-ccx, so the corpus runs on that suite and that package
+    # — under the container's own Python, which is why the harness is stdlib only.
+    container: debian:bookworm-slim
+    steps:
+      # The version is spelled out, not left to the suite. Bookworm is frozen, so
+      # today this is the same binary as the Dockerfile's; the day it is not, the
+      # install fails here rather than recording a different build as this one.
+      - name: The pinned CalculiX, and what the maintainer's checks need
+        run: |
+          apt-get update
+          apt-get install --no-install-recommends -y calculix-ccx=2.20-1 perl python3 ca-certificates
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Every example, against the recorded baseline
+        run: >-
+          python3 -m app.verify.corpora calculix-2.20
+          --work "$RUNNER_TEMP/calculix"
+          --report corpus-reports/calculix-2.20.json
+          --baseline data/verify/corpora/calculix-2.20.json
+
+      # In the workspace rather than the runner's temp directory: inside a
+      # container job `runner.temp` names the host's path, which this step,
+      # running in the container, cannot see.
+      - name: Keep tonight's report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: corpus-calculix-2.20
+          path: corpus-reports/calculix-2.20.json
+          if-no-files-found: ignore
+
+  code-aster-corpus:
+    name: code_aster's linear statics tests, on the build an integration would take
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # From the explicit lock, not from a package spec: a spec re-solves every
+      # night, and openblas or mumps moving under an unchanged code-aster pin
+      # would be recorded as the same build.
+      - name: The pinned code_aster, from its lock
+        env:
+          MAMBA_ROOT_PREFIX: ${{ runner.temp }}/mamba
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL https://micro.mamba.pm/api/micromamba/linux-64/2.9.0 -o micromamba.tar.bz2
+          echo "8761c382127e6363bd9e0a2451aa3ef90d071a79133f736e2f759a3bf13040dd  micromamba.tar.bz2" | sha256sum -c -
+          tar -xjf micromamba.tar.bz2 bin/micromamba
+          ./bin/micromamba create -y -p "$RUNNER_TEMP/aster" --file "$GITHUB_WORKSPACE/data/verify/corpora/code_aster-18.0.12.explicit.txt"
+
+      # `--time-factor 4`, as the baseline was recorded: a time limit is not a
+      # check of an answer, and on the recording machine one case that
+      # reproduced already used 0.76 of its own. A runner slower than that
+      # machine would otherwise fail cases for being a runner.
+      - name: The ssl family, against the recorded baseline
+        env:
+          MAMBA_ROOT_PREFIX: ${{ runner.temp }}/mamba
+        run: >-
+          python3 -m app.verify.corpora code_aster-18.0.12
+          --work "$RUNNER_TEMP/aster-run"
+          --report corpus-reports/code_aster-18.0.12.json
+          --baseline data/verify/corpora/code_aster-18.0.12.json
+          --aster-tests "$RUNNER_TEMP/aster/share/aster/tests"
+          --run-ctest "$RUNNER_TEMP/bin/micromamba run -p $RUNNER_TEMP/aster run_ctest"
+          --jobs 4
+          --time-factor 4
+
+      - name: Keep tonight's report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: corpus-code_aster-18.0.12
+          path: corpus-reports/code_aster-18.0.12.json
+          if-no-files-found: ignore

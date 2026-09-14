@@ -221,6 +221,104 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-14 — E20 task 4, and `*E20`: the solvers' own corpora run on pinned builds, and each
+  run says what it does not prove.** `app/verify/corpora.py` drives CalculiX's examples through
+  the archive's own `compare` rules and Perl checkers, and code_aster's V3 `ssl` family through
+  its own `run_ctest`; both refuse a build that is not the pin, and both write a statement derived
+  from the run's counts. Baselines: **calculix-2.20** 543/559 reproduced on `calculix-ccx 2.20-1`,
+  flagging the same twelve cases as the unmodified `compare`; **code_aster-18.0.12** 661/664 on
+  conda-forge `py312_nompi_h60fb801_0`, 15,378/15,378 `ANALYTIQUE` checks agreeing — code
+  verification *of code_aster*, and nothing about a Kryova number, which no code path asks it for.
+  Both task-text "findings" were wrong once the corpora were opened (CalculiX *does* ship
+  references and a 0.1 % tolerance — they are its own earlier output; code_aster installs 4,540
+  cases, not 1,262). Found by running: `run_ctest` without a terminal returned **664 no-output
+  cases and exit 0**; its JUnit file reports a failed case's time as limit × 1.1; `TestCase`
+  assertions were invisible; one case already used 0.76 of its time limit here, so the nightly
+  scales limits ×4 and refuses a comparison across factors. Packaging gap recorded, not worked
+  around: the conda build has no `tests_data/`. Nightly jobs written (explicit conda lock,
+  hash-checked micromamba, exact apt pin) and reproduced locally — **not yet run on GitHub**. 29
+  guards broken and watched to fail. The full suite then found the lock indexed as a 26th
+  reference manual (the scan walks `data/` whole); `data/verify/` is now excluded. Tested by
+  `tests/test_verify_corpora.py` (80) and `tests/test_retrieval.py`.
+- **2026-09-14 — E20 task 3: nothing Kryova holds is validation, and every surface that shows a
+  number now says so.** ASME's definitions (quoted, second-hand, sourced in
+  `app/verify/standards.py`) make NAFEMS and closed-form agreement **code verification** and a GCI
+  study **solution verification**; validation needs measurements of a physical part and there are
+  none. So the "validation register" became `/trust/verification-register` (old path 404),
+  `Outcome.VALIDATED` → `AGREED`, `Standing` → `AGREES`/`DISPUTED`/`UNCONFIRMED`, register and
+  trust-index keys renamed, the artefact became `data/verify/benchmark-outcomes.json`
+  (`SCHEMA_VERSION` 2, re-recorded 3/5). `standards.NOT_VALIDATED` is one server string carried by
+  the trust pages, a computed `validation` field on `SimulationRead`/`SharedPackage`/
+  `ResultInterpretation` (never in the model's grammar), and an agent footnote on both closing
+  exits — converged runs included. Frontend renders it on the verification panel, the
+  interpretation card and the shared package. Nine guards broken and watched to fail.
+  **Also found and fixed on the way, in E21.3's uncommitted work:** `write_step(tessellated=ON)`
+  meshed the caller's shape in place, so the cached test bracket's drawings read `120.207` instead
+  of `120` for the rest of the process — the full suite went 1 red, the file alone stayed green.
+  It now meshes a copy. Full suite before the fix: 8119 passed / 1 failed / 41 skipped / 1 xpassed;
+  after it: **8122 passed / 0 failed / 41 skipped / 1 xpassed** (12 min 15 s, local PostgreSQL).
+  Tested by `tests/test_verify_standards.py`, `tests/test_verify_register.py`, `tests/test_trust.py`,
+  `tests/test_unconverged_verdict.py`, `tests/test_agent_verification.py`,
+  `tests/test_manufacture_export_tessellated.py`, and three frontend test files.
+- **2026-09-14 — three phases pushed on Linux: E21 task 3 (tessellated STEP, partial), E20
+  tasks 1/2/5 (ASME standards citation fixed, NAFEMS revision provenance, single-grid
+  labelling cross-referenced), E19 task 1 (Machinery Regulation dated register, partial).**
+  Every task genuinely closable via pure Linux work across the three phases was closed or
+  correctly left `PARTIAL`; every task gated on a CATIA seat, an ME's or lawyer's judgement,
+  or research-scale corpus work was left untouched — no phase in this batch is claimed
+  `PHASE COMPLETE`.
+  **E21.3** — `write.step.tessellated`/`read.step.tessellated` measured directly via
+  `SetCVal_s`/`SetIVal_s` readback rather than trusted from documentation: `On` attaches a
+  `TESSELLATED_SOLID` beside the BRep on OCCT primitives, and the **same setting is a no-op on
+  this codebase's own multi-feature `bracket()` fixture** — a real, reported negative finding,
+  not smoothed into a false blanket success. `OnNoBRep` is a no-op everywhere tried.
+  `app/manufacture/export.py` gained `TessellatedWrite` and the plumbing through
+  `write_step`/`read_step`/`configure_writer`, defaulting to unchanged behaviour. Tested by
+  `tests/test_manufacture_export_tessellated.py` (7), a new file rather than an addition to
+  `test_manufacture_export.py` because that file's `ezdxf` import-skip (ezdxf is not installed
+  here) would have silently skipped everything added to it.
+  **E20.1/E20.2/E20.5** — the register and benchmark modules cited "the ASME V&V 20 split" for
+  verification/validation terminology; the actual source is **VVUQ 1-2022** (V&V 20 covers
+  fluids/heat and stays cited correctly for the Grid Convergence Index it actually supplies).
+  `app/verify/standards.py` is the new single place every ASME citation in `app/verify/` now
+  resolves through, including which documents this codebase must never cite as its own
+  (V&V 40, medical-device scoped) and which task's standards claim has none published (VVUQ
+  70, E10 task 4's surrogate bound). `app/verify/nafems.py` gained `p18_revision`/
+  `p18_revision_of`, reading which NAFEMS TNSB P18 revision (2 or 3) each `Target.source`
+  reproduces rather than leaving Revision 3's corrections (LE4/LE7/LE9/LE10) implicit. Task 5
+  needed no new code — cross-referenced to E7 task 7 (seat-verified 2026-09-11), which already
+  built single-grid labelling. Tested by `tests/test_verify_standards.py` (10),
+  `tests/test_verify_nafems.py::TestEveryTargetNamesWhichP18RevisionItReproduces` (4).
+  **E19.1** — new package `app/compliance/` records five dated facts about Regulation (EU)
+  2023/1230 (publication, entry into force, Articles 26-42, the Directive repeal, the main
+  application date) as a `DatedProvision` table modelled on `nafems.SOURCES`, resolving the
+  phase's own flagged ambiguity in favour of **20 January 2027**, not the uncorroborated 14
+  January figure. **Left `PARTIAL`, not `DONE`: the task's own standard — read the OJ text
+  itself — was not met.** `WebFetch` returned empty content from eur-lex.europa.eu across four
+  URL forms; every date here instead rests on two independent secondary sources
+  (`LegalBasis.SECONDARY_CORROBORATED`, pinned by a test that fails the day any entry claims
+  `PRIMARY_TEXT` without an actual OJ citation replacing it). Tested by
+  `tests/test_compliance_eu_machinery_regulation.py` (9).
+  Whole-tree `ruff check app/ tests/` and `mypy app/` (fresh cache, 411 files) both clean.
+  `app.verify.recorded --check` confirms none of this expired the recorded validation
+  artefact (`app/compliance/` sits outside the fingerprinted paths). No CATIA seat, no GUI —
+  written and tested on Linux only.
+- **2026-09-14 — E10 task 1: transient conduction, coded and closed-form verified on Linux.**
+  Backward-Euler time integration (`BackwardEulerConductionSolver`) added beside the existing
+  steady solver in `app/solve/conduction.py` — `rho cp dT/dt = div(k grad T) + q_v`, the
+  consistent capacitance matrix reusing `modal._unit_mass_matrix`'s analytic barycentric
+  integration rather than re-deriving it, `(C/dt + K)` factorised once and reused every step.
+  Backward Euler was chosen over Crank-Nicolson explicitly for unconditional stability and no
+  spurious oscillation. Registered as a fifth ABC sibling (`TransientConductionSolver` in
+  `app/solve/base.py`) with its own registry table (`app/solve/registry.py`), never chosen
+  automatically, same as every other solver seam. Verified against the lumped-capacitance
+  cooling curve in the low-Biot limit; a first smoke run at a coarser time step showed the
+  expected first-order backward-Euler truncation error (~0.077 K), halving the step roughly
+  halved it (~0.011 K), confirming the numerics before the tolerance was picked.
+  **Deliberately solver-only**: not wired into `simulation/runner.py`, a route, a migration or
+  an AI tool schema — that is its own unit of work. No CATIA or GUI claim rides with this; it
+  was written and tested on Linux only. Tested by: `tests/test_conduction.py` (+23),
+  `tests/test_solver_registry.py` (+5). `ruff`/`mypy` clean on every touched file.
 - **2026-09-12 — THE QUEUE B3: three of the four Win32 questions answered, and two standing
   claims in CLAUDE.md corrected.** Win32 only, against a live modal dialog on the seat.
   **`StartCommand` does NOT fail silently — it wedges the seat.** CLAUDE.md said "hand it a name

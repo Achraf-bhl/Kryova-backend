@@ -64,24 +64,24 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-11** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-14** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 12/24 | 80/131 = 61% | 91/151 eng-months = 60% |
+| Engineering — E1–E23 | 13/24 | 86/131 = 66% | 98/151 eng-months = 65% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 18/34 | 128/192 = 66% | 119/189 eng-months = 63% |
+| **Programme** | 19/34 | 134/192 = 70% | 125/189 eng-months = 66% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, P1, P2, P3, P5, P8, P10 |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E11, E12, E14, E16, E17.3, E20, P1, P2, P3, P5, P8, P10 |
 | in flight | E15 70%, E18 50%, P4 75%, P9 57% |
-| nothing finished yet | E8, E9, E10, E13, E17, E19, E20, E21, E22, E23, P6, P7 |
+| nothing finished yet | E8, E9, E10, E13, E17, E19, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -2033,6 +2033,45 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 **~9 engineer-months.**
 
 1. **Steady/transient conduction, convection BCs, thermal-stress coupling.**
+   > PARTIAL (2026-09-14) — **transient conduction is no longer missing.** `app/solve/
+   > conduction.py` adds `TransientThermalCase`/`TransientThermalField` and
+   > `BackwardEulerConductionSolver`, solving `rho cp dT/dt = div(k grad T) + q_v` with backward
+   > Euler — chosen over Crank-Nicolson for unconditional stability and no spurious oscillation,
+   > not for cost — over the same `ThermalBoundary` vocabulary (Dirichlet, convection, flux) the
+   > steady solver already uses, so `SteadyConductionSolver`'s flux/convection assembly is reused
+   > rather than duplicated. The consistent capacitance matrix reuses `modal._unit_mass_matrix`'s
+   > analytic barycentric integration instead of re-deriving it — that integration is exact for
+   > tet10 where a four-point Gauss rule is not, and this is the second matrix it feeds. The
+   > system `(C/dt + K)` factorises once per solve and is reused every step (direct `splu` or
+   > iterative Jacobi-CG past `_ITERATIVE_THRESHOLD_NODES`, matching the steady solver's
+   > crossover).
+   > Verified against the lumped-capacitance cooling curve `T(t) = T_inf + (T0-T_inf)e^{-t/tau}`,
+   > `tau = rho cp V / (h A)`, forced into the low-Biot regime with an artificially high
+   > conductivity rather than a claimed material property — first-order backward-Euler
+   > truncation error measured directly (halving the time step roughly halved the deviation from
+   > the closed form), and the test tolerance is set with margin over the measured error rather
+   > than picked to make a run pass.
+   > `TransientThermalField` carries **no `mesh_convergence`** — two independent discretisations
+   > (mesh, time step) and one run assesses neither, so claiming convergence here would be exactly
+   > the unmeasured claim Decision 3 forbids. There is deliberately no `_thermally_floating`-style
+   > singularity refusal either: `C/dt + K` is SPD whenever `C` is, so an insulated part with a
+   > source correctly produces unbounded rise rather than a false refusal.
+   > Registered as its own ABC (`TransientConductionSolver` in `app/solve/base.py`, the fifth
+   > sibling — not a mode switch on `ConductionSolver`, for the same reason the other four are
+   > siblings rather than branches) and its own registry table
+   > (`build_transient_conduction_solver` in `app/solve/registry.py`, lazily imported, never
+   > chosen automatically).
+   > **Deliberately not wired to `simulation/runner.py`, a route, a migration or an AI tool
+   > schema** — this session's scope was the solver capability, not the delivery path; wiring it
+   > in is its own unit of work with its own `TransientThermalCase` persistence question
+   > (`ThermalCase`'s steady analysis needed a nullable-`load_case` migration for the same
+   > reason). Thermal *stress* coupling (a computed steady field feeding `LinearStaticSolver`)
+   > shipped 2026-09-09 and is unaffected by this addition. Written on Linux, not proved on a
+   > seat — no CATIA or GUI claim rides with this.
+   > Tested by: `tests/test_conduction.py` (+23), `tests/test_solver_registry.py` (+5). Code:
+   > `app/solve/conduction.py`, `app/solve/base.py`, `app/solve/registry.py`.
+
+   <!-- superseded 2026-09-14 -->
    > PARTIAL (2026-09-09) — **steady conduction is no longer missing**; the 2026-09-03 status
    > saying so was true for six days and is superseded. `app/solve/conduction.py` solves
    > `div(k grad T) = -q` on tet4 and tet10 with Dirichlet, convection (Robin) and heat-flux
@@ -2950,7 +2989,23 @@ documentation-first rule (Part 2) applied to law.
    from January 2024 (notified bodies, Articles 26–42). Recorded as a dated register in the repo
    with the clause number beside every claim — the same shape as the validation register, for the
    same reason.
-   > NOT STARTED.
+   > PARTIAL (2026-09-14) — `app/compliance/eu_machinery_regulation.py` records the five dated
+   > facts this task names (OJ publication 2023-06-29, entry into force 2023-07-19, Articles
+   > 26-42 from 2024-01-20, the Article 51 repeal and Article 52 application date both
+   > 2027-01-20) as a `DatedProvision` table modelled on `nafems.SOURCES` — every entry refuses
+   > construction with no source, and a `LegalBasis` enum distinguishes `PRIMARY_TEXT` from
+   > `SECONDARY_CORROBORATED`. **It is PARTIAL, not DONE, because the task's own standard —
+   > read off the OJ text itself — was not met.** `WebFetch` was tried against eur-lex.europa.eu
+   > in four URL forms this session and every one returned empty content (documented in the
+   > module docstring); the dates instead rest on two independent secondary sources (EU-OSHA,
+   > a Rockwell Automation PDF read page-by-page) plus a web-search corroboration for the
+   > article numbers, all marked `SECONDARY_CORROBORATED` and pinned as such by a test that
+   > fails the day anything here claims otherwise. What this session did settle, to the
+   > standard the phase header sets: **20 January 2027, not 14** — every source found agrees,
+   > and 14 January appears nowhere in the module. Remaining work: read the actual OJ
+   > consolidated text (needs network access this sandbox does not have, or a human pasting the
+   > text in) and upgrade the five entries to `PRIMARY_TEXT` with article/paragraph citations.
+   > Tested by: `tests/test_compliance_eu_machinery_regulation.py` (9).
 
 2. **Decide in writing whether anything Kryova produces is an Annex I item.** Annex I — the
    high-risk list that triggers mandatory third-party conformity assessment — includes item 18
@@ -3021,7 +3076,13 @@ proper answer to task 2 narrows what the product may say about itself.
 
 ##### Phase E20 — Simulation credibility as somebody else's standard #####
 
-**~5 engineer-months. Needs an ME for task 3.**
+> ✅ PHASE COMPLETE (2026-09-14) — all five tasks done and tested. What the phase proof still
+> needs is a reader outside the repository: every word is now traceable to a document, and
+> nobody who owns one has checked the tracing. Two residuals are named in task 4 — the nightly
+> corpus jobs have not yet run on GitHub, and the Windows seat's CalculiX 2.23 is not covered.
+
+**~5 engineer-months. Needs an ME for task 3.** *(It did not, in the end: ASME's published
+definitions decided task 3's one judgement call — see its status.)*
 
 **The question it answers:** when Kryova says an analysis is *verified*, does that word mean what
 it means to the people who define it — and can we name the document?
@@ -3037,7 +3098,27 @@ it means to the people who define it — and can we name the document?
    ASME-normative basis for validating an ML surrogate, which bounds what E10 task 4 may ever
    claim. Deliverable: the trust surface (P10 task 3) names the document behind every word it
    uses.
-   > NOT STARTED.
+   > DONE (2026-09-14) — **and it corrected a live mis-citation rather than only adding new
+   > ones.** `app.verify.__init__`, `benchmarks.py` and `register.py` had all said "the ASME V&V
+   > 20 split" for the general verification/validation distinction since the package was
+   > written. That is imprecise in the direction that matters once a reader can click through:
+   > **V&V 20-2009 is scoped to fluids and heat transfer**, and every benchmark this codebase
+   > actually runs — LE1, LE3, LE10, LE11, FV52 — is solid mechanics, V&V 10-2019's territory.
+   > The document that defines the *terms* "verification"/"validation"/"UQ" themselves,
+   > discipline-unspecified, is **VVUQ 1-2022**, and that is now what the split is credited to.
+   > `app/verify/standards.py` is the one place this is said, so the three modules cite it rather
+   > than each carrying a slightly different paraphrase — the same argument `nafems.SOURCES`
+   > makes for a citation repeated inline. It also records why V&V 20-2009 stays cited elsewhere:
+   > `app.verify.convergence`'s Grid Convergence Index procedure genuinely is Celik et al. 2008 /
+   > V&V 20's own method, borrowed as a numerical-error estimator regardless of which physics
+   > produced the mesh — removing that citation would have overcorrected.
+   > `NOT_OURS["vv-40"]` and `NO_STANDARD["vvuq-70"]` record the two documents by name, with the
+   > reason neither may be reached for — VVUQ 70 is the ceiling `E10 task 4`'s own text already
+   > pointed at before this task existed to name it.
+   > Tested by: `tests/test_verify_standards.py` (10) — including that no live module in
+   > `app/verify/` still carries the uncorrected phrase, checked against the source text rather
+   > than trusted from memory. Code: `app/verify/standards.py`, `app/verify/__init__.py`,
+   > `app/verify/benchmarks.py`, `app/verify/register.py`.
 
 2. **E7's NAFEMS targets must carry the revision they came from.** P18 — *The Standard NAFEMS
    Benchmarks* — has been corrected at least twice: **Revision 2** corrected LE8, LE10, LE11 and
@@ -3047,7 +3128,23 @@ it means to the people who define it — and can we name the document?
    vendor manual reproduces whichever revision it was written against. So each case records the
    manual, its date, **and the P18 revision that manual reproduces** — and a case that cannot
    establish the third says so rather than implying it.
-   > NOT STARTED.
+   > DONE (2026-09-14) — **derived from the existing citation text, not added as a second
+   > field.** Every `Target.source` in `nafems.SOURCES` already stated its revision in prose
+   > ("reproducing NAFEMS publication TNSB Rev. 3, ...") because that is where a reviewer reads
+   > it from; a hand-typed `revision="3"` beside it would be a second place for the two to
+   > disagree the day one is edited and the other is not. `p18_revision`/`p18_revision_of`
+   > extract it with a regex instead, scoped to the citation actually compared against (a case's
+   > `Target.source`) rather than every string in `SOURCES` — several entries there
+   > (`feenox-le1-geometry`, `esrd-le11-geometry`, ...) are geometry cross-checks that mention
+   > NAFEMS by name without reproducing the TNSB publication's own revision, and are not what a
+   > published number is checked against.
+   > **The finding: every target source in the catalogue reproduces Revision 3**, which is the
+   > later, more-corrected revision (LE10, the case where Revision 2 and Revision 3 disagree, is
+   > among them) — so nothing here is silently comparing against a superseded number. Checked
+   > against the value rather than merely for presence, so a future source crediting a different
+   > revision is a change the test asks about rather than one that passes quietly.
+   > Tested by: `tests/test_verify_nafems.py::TestEveryTargetNamesWhichP18RevisionItReproduces`
+   > (4). Code: `app/verify/nafems.py`.
 
 3. **Say "verification" and "validation" the way ASME does, everywhere the product speaks.**
    Verification asks whether the computational model fits the mathematical description;
@@ -3057,6 +3154,55 @@ it means to the people who define it — and can we name the document?
    claim it must not make on its own behalf. Part 4 already lists physical testing among the
    things no amount of code fixes; this task makes the product say so at the point a user reads a
    number.
+   > DONE (2026-09-14) — **the one judgement in the task was settled by ASME's words rather than
+   > an engineer's opinion, which is why it needed no ME.** `app/verify/standards.py` now quotes
+   > *verification*, *code verification*, *solution verification* and *validation* as V&V 10 and
+   > V&V 20 define them — read second-hand from ASME's public VVUQ page and Sandia SAND2016-5342C
+   > (a V&V 20 committee member's slides), and saying so, because the standards themselves are
+   > sold and were not read. On those definitions a NAFEMS target and a closed-form identity are
+   > both answers to a *mathematical* problem, so agreeing with either is **code verification**; a
+   > GCI study is **solution verification**; validation compares against *experimental data*, and
+   > Kryova has none. `KRYOVA_EVIDENCE` files the evidence that way with validation **empty**,
+   > `NOT_VALIDATED` is the one sentence, and importing the module **fails** the day validation
+   > evidence is recorded without that sentence being rewritten.
+   > **Public API, enum and artefact changes — every one a rename the correction required:**
+   > `/trust/validation-register` → `/trust/verification-register` (the old path is a 404, not a
+   > redirect: a URL reading "validation" that still resolved would keep the claim alive);
+   > `Outcome.VALIDATED="validated"` → `AGREED="agreed"`; `Standing` `validated`/`unvalidated` →
+   > `agrees`/`unconfirmed`; register JSON `analyses_validated`/`not_validated` →
+   > `analyses_agreeing`/`unconfirmed`, plus a `validation` block and an `evidence` label on every
+   > benchmark (`code-verification`) and convergence (`solution-verification`) entry; trust index
+   > `validation_headline`/`everything_validated` → `verification_headline`/
+   > `every_analysis_agrees_with_a_benchmark`, plus `validation`; the artefact
+   > `data/verify/validation-outcomes.json` → `benchmark-outcomes.json` (`SCHEMA_VERSION` 2,
+   > re-recorded: 3/5 agreed, fingerprint current); commitment `what-does-not-agree-is-published`;
+   > guide `check-what-is-verified`, which now lists validation under `not_covered`.
+   > **The sentence reaches every surface that shows a number, as the server's string:** the trust
+   > index and register; a computed `validation` field on `SimulationRead`, `SharedPackage` and
+   > `ResultInterpretation` — computed, so no client can send a softer one, and absent from the
+   > validation-mode schema the providers constrain decoding with, so the model is never asked to
+   > write it; and `not_validated_footnote`, appended by the loop on both exits that put numbers on
+   > screen whenever the turn read a solve. **Converged runs get it too** — `unconverged_footnote`
+   > states missing solution verification, which a study supplies; this states missing
+   > validation, which nothing in the product can. Frontend: the verification panel, the result
+   > interpretation card (beside "Passes", above the caveat) and the shared package page (above the
+   > results table), each in amber.
+   > Every guard was broken and watched to fail, then restored by `cp` and compared: both agent
+   > exits, the computed field, the import refusal, the headline clause and a published key
+   > renamed back to `unvalidated` (backend); the panel line, the interpretation line and the
+   > shared-page line (frontend).
+   > Tested by: `tests/test_verify_standards.py` (10 → 24), `tests/test_verify_register.py` (+6),
+   > `tests/test_trust.py` (+2, including a walk of every trust page for "validated" outside the
+   > statement), `tests/test_unconverged_verdict.py` (+7), `tests/test_agent_verification.py` (+4,
+   > through `run_agent`), `tests/test_verify_benchmarks.py`, `tests/test_verify_nafems.py`,
+   > `tests/test_verify_recorded.py`; frontend `src/components/verification/verification-panel.test.tsx`
+   > (+3), `src/components/result-interpretation.test.tsx` (1),
+   > `src/app/shared/[token]/page.test.tsx` (2). Code: `app/verify/standards.py`,
+   > `app/verify/{benchmarks,nafems,convergence,register,recorded,commitments,__init__}.py`,
+   > `app/api/routes/trust.py`, `app/schemas/{simulation,sharing}.py`, `app/ai/{schemas,verification,agent}.py`,
+   > `app/handbook/{guides,gallery}.py`; frontend `src/types/api.ts` and the three components above.
+
+   <!-- superseded 2026-09-14 -->
    > NOT STARTED.
 
 4. **Inherit the solvers' own corpora, and be precise about what they prove.** Two findings, both
@@ -3070,6 +3216,71 @@ it means to the people who define it — and can we name the document?
    third-party regression, with a written statement of what a green run does and does not
    establish. The assumption this kills is *"we ship CalculiX, so the solver is verified"* — the
    solver's own documentation refuses that reading.
+   > DONE (2026-09-14) — **both corpora run against pinned builds with recorded baselines, and
+   > both "verified findings" in this task's text turned out wrong when the corpora were opened.**
+   > **The task text, corrected:** CalculiX 2.20's example archive holds **559 decks, not 528,
+   > and it does carry references and a tolerance** — a `.dat.ref`/`.frd.ref` beside most decks,
+   > and `compare` + `datcheck.pl`/`frdcheck.pl` flagging any number more than 0.1 % of its
+   > block's largest value from the reference. What the manual's framing gets right is the
+   > conclusion, for a different reason: **every reference is CalculiX's own earlier output**, so
+   > a pass is regression and installation evidence and never code verification. And code_aster
+   > 18.0.12 installs **4,540 test cases, every one labelled `verification`** in its `.export`,
+   > not the 1,262-case manual figure; each check names where its reference came from, so the
+   > honest unit is the *check by reference kind*, not the passed case.
+   > **What shipped.** `app/verify/corpora.py` (standard library only, because the CalculiX job
+   > runs under `debian:bookworm-slim`'s own Python 3.11) runs each corpus with **the
+   > maintainer's own harness** — `compare`'s per-release rules parsed out of the archive being
+   > run, the Perl checkers invoked as shipped; code_aster through its own `run_ctest` — refuses
+   > a binary that is not the pinned build, and writes a report whose "establishes / does not
+   > establish" statement is **derived from the run's own counts**, never typed.
+   > **Baselines** (`data/verify/corpora/`): **calculix-2.20** on `calculix-ccx 2.20-1` (the
+   > fleet image's build) — 543 reproduced, 6 deviated, 1 no output, 1 no reference, 4 line-count
+   > mismatches, 4 skipped by `compare` itself; the unmodified `compare` on the same build flags
+   > **the same twelve cases**, five of them restart decks that fail by construction.
+   > **code_aster-18.0.12** on conda-forge `py312_nompi_h60fb801_0`, the V3 `ssl` family's 664
+   > sequential cases — **661 reproduced**; 15,378/15,378 `ANALYTIQUE` checks agreed (code
+   > verification *of code_aster*, for the models those cases pose), 19,053 non-regression, 881
+   > same-solver, 768 `SOURCE_EXTERNE` left unclassified, 92 Python assertions counted as
+   > `unstated`. The three that do not reproduce are findings, kept in the file: `ssll501a`/`b`
+   > stop with `<F>_ERROR` because **the conda-forge package ships no `share/aster/tests_data/`**
+   > (a packaging gap, not a solver result), and `ssls131a`'s only check sits behind a branch that
+   > did not run.
+   > **Nightly** (`.github/workflows/nightly.yml`): one job per corpus, each failing when a case
+   > the baseline reproduced does not. code_aster is created from an **explicit conda lock**
+   > (`code_aster-18.0.12.explicit.txt`, all 74 packages hashed) with micromamba fetched by
+   > version and checked by SHA-256, because a `code-aster=<build>` spec re-solves nightly and
+   > lets openblas and mumps move underneath an unchanged pin.
+   > **Five defects found while building it, three of them only by running it**, each now pinned:
+   > `run_ctest` meets an existing results directory with a y/n prompt and, with no terminal,
+   > came back as **664 cases with no output and exit 0** (refused, stdin closed, a run with no
+   > `.mess` raises); its JUnit file records a failed case's time as limit × 1.1 (`ssll501a`:
+   > 66.0 against 1.65 s actually — times now come from ctest's own lines); `TestCase` assertions
+   > print no `REFERENCE` and were missed (`sslp306a` read as holding no check); `aster_version`
+   > first read a file with no version in it; and a `--only` run compared with a whole baseline
+   > would report every omitted case as a regression (refused).
+   > **Decisions, stated:** only the V3 `ssl` family's *sequential* cases run (the seven parallel
+   > ones need MPI, which the nompi build lacks; the statement says so); **time limits are scaled
+   > ×4**, recorded in the report, and a comparison across factors is refused before the run —
+   > a time limit is not a check of an answer, one reproduced case already used 0.76 of its own
+   > limit on the recording machine, and at ×1 `sslv154b` stopped with `<S>_CPU_LIMIT` at 104 s
+   > of 110. **Only the fleet's CalculiX is covered**: the Windows seat's 2.23 is a different
+   > build and nothing here speaks for it.
+   > **Not yet run on GitHub** — committed, not pushed. Both jobs' steps were reproduced
+   > locally: the CalculiX job in `debian:bookworm-slim` with the exact apt pin, twice (the
+   > second time as the nightly command with `--baseline`, exit 0); the code_aster environment
+   > created from the lock with the pinned micromamba. 29 guards were broken and watched to
+   > fail, each restored by `cp` and checked by hash.
+   > **And the full suite found one thing no corpus test could:** the reference-manual scan
+   > walks `data/` whole, so the lock — a `.txt` — became a 26th "manual" offered to the agent
+   > and the index read as stale. `settings.knowledge_exclude` now keeps `data/verify/` out.
+   > Tested by: `tests/test_verify_corpora.py` (80),
+   > `tests/test_retrieval.py::TestCorpus::test_verification_artefacts_are_not_offered_as_manuals`.
+   > Code: `app/verify/corpora.py`,
+   > `data/verify/corpora/{calculix-2.20.json,code_aster-18.0.12.json,code_aster-18.0.12.explicit.txt}`,
+   > `.github/workflows/nightly.yml`, `app/verify/__init__.py`, `app/core/config.py`,
+   > `app/retrieval/service.py`.
+
+   <!-- superseded 2026-09-14 -->
    > NOT STARTED.
 
 5. **Solution verification, which is the open half of G1.** Numerical error is what verification
@@ -3081,7 +3292,20 @@ it means to the people who define it — and can we name the document?
    it does, **every stress this product reports comes from one mesh** and must be labelled as
    such — the third open item from the 2026-09-08 gate report, restated here because it is a
    credibility obligation and not only a feature.
-   > NOT STARTED.
+   > DONE (2026-09-14) — **already built, under E7 task 7, and this task is satisfied by that
+   > work rather than needing a second implementation.** `verification.unconverged_footnote`
+   > (`app/ai/verification.py`) walks every tool result the turn actually read and appends what
+   > the numbers rest on whenever a solve carries `mesh_convergence: {converged: false, ...}` —
+   > server-appended rather than a prompt rule, because the seat run that motivated it
+   > (`docs/verification-2026-09-10-night/`) showed the model *had* the block in front of it and
+   > wrote a pass/fail verdict anyway. It is silent only when a study ran and converged, matching
+   > Decision 3: an unconverged number is worse than no number, not "every number needs a
+   > disclaimer". Seat-verified before and after, DONE 2026-09-11 under E7 task 7 — see that
+   > entry for the full account, including the default-mesh defect the same seat run found beside
+   > it. Nothing new was written for this task; it is recorded here so E20's own denominator does
+   > not show an open item the plan already closed under a different phase.
+   > Tested by: `tests/test_unconverged_verdict.py` (see E7 task 7). Code:
+   > `app/ai/verification.py`, `app/ai/agent.py`.
 
 **Phase proof:** a results page states a number, and every word around it — *verified*, *not
 validated*, *converged to X% on N refinements*, *against P18 Rev. 3 via the Ansys manual of
@@ -3202,7 +3426,46 @@ lying about fidelity or breaching somebody's licence?
    default) cover the tessellated shape/shell/solid entities. This is a real capability sitting
    unused: it is a route for a heavy assembly to travel to P6's viewer, and a route for a
    customer's tessellated STEP to arrive through P4 without a B-rep rebuild.
-   > NOT STARTED.
+   > PARTIAL (2026-09-14) — everything the superseded status below records, **plus a defect it shipped with, found by the
+   > full suite the same day.** `write_step(..., tessellated=ON)` ran `BRepMesh_IncrementalMesh`
+   > on the shape it was *handed*, which attaches the triangulation in place; the tests hand it
+   > `built()`'s cached bracket, and `BRepBndLib` measures a triangulation (enlarged by its
+   > deflection) in preference to the surfaces. So every drawing made later in the same process
+   > drew a 120 mm edge as `120.207` — `test_manufacture_sheet.py` failed in the full run and
+   > passed alone. The export now meshes a `BRepBuilderAPI_Copy`, and the caller's shape is left
+   > untouched; broken back and watched to fail two new tests and the sheet test. What was
+   > measured about primitives, the bracket and `OnNoBRep` is unchanged by the fix (the copy is
+   > meshed and written exactly as the original was), and so is what remains open.
+   > Tested by: `tests/test_manufacture_export_tessellated.py` (9 — `TestExportingLeavesThePartAlone`
+   > added) and `tests/test_manufacture_sheet.py`. Code: `app/manufacture/export.py`.
+
+   <!-- superseded 2026-09-14 -->
+   > PARTIAL (2026-09-14) — **the parameter is plumbed and measured, and the measurement came
+   > back partial rather than rounded up.** `write_step`/`read_step` gained a `tessellated=`
+   > parameter (`TessellatedWrite.OFF`, the unchanged default; `ON`; `ON_NO_BREP`), applied
+   > through `configure_writer`'s existing refuse-if-OCCT-did-not-listen contract.
+   > **`ON` attaches a tessellated representation beside the BRep — on an OCCT primitive.** A
+   > box, a cylinder, a filleted box and a boolean-cut box all wrote a `TESSELLATED_SOLID` entity
+   > alongside `ADVANCED_FACE` when meshed first and written with `ON`, and the BRep a plain
+   > reader recovers is unperturbed (volume, extent and face count all round-trip, same tolerance
+   > as the existing schema tests). **The identical setting, on this codebase's own multi-feature
+   > `bracket()` fixture — six bolt holes on a pattern, four corner fillets, an edge break —
+   > writes no `TESSELLATED_SOLID` at all**, even though every one of its 34 faces carries a
+   > `Poly_Triangulation` on inspection. Curvature, one fillet, one boolean cut and a finer
+   > deflection were each tried in isolation against a primitive and none broke it alone, so the
+   > cause is not isolated — a real Kryova part cannot yet be relied on to carry the payload, and
+   > nothing here claims it does. Both findings are pinned as tests rather than one being assumed
+   > from the other.
+   > `OnNoBRep` measured as a no-op on every shape tried, primitive or not — it only suppresses
+   > BRep on a shape that carries none, which nothing this codebase's kernel produces and which
+   > this session did not construct to check.
+   > **Wiring to P6's viewer and P4's attachment path is a second, separate residual**, and not
+   > worth doing until the bracket-shaped gap above closes — a real Kryova part is exactly what
+   > both callers would hand it.
+   > Tested by: `tests/test_manufacture_export_tessellated.py` (7) — kept out of
+   > `tests/test_manufacture_export.py` because that file's own `importorskip("ezdxf")` silently
+   > skips every STEP assertion in it too, `ezdxf` being not installed here (see *Known
+   > landmines* item 6). Code: `app/manufacture/export.py`.
 
 4. **The materials licence position, written before any data is bought.** Two findings that
    settle E12 task 2's shape. **MatWeb cannot seed anything**: the licence is personal,

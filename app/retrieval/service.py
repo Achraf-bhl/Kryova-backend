@@ -233,6 +233,7 @@ def knowledge_service() -> KnowledgeService:
                 index_dir=settings.knowledge_index_dir,
                 source_dirs=settings.knowledge_source_dirs,
                 enabled=settings.knowledge_enabled,
+                exclude=settings.knowledge_exclude,
             )
     return _service
 

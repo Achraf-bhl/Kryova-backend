@@ -1,0 +1,11206 @@
+{
+ "build": "code-aster 18.0.12 py312_nompi_h60fb801_0 (conda-forge, linux-64)",
+ "cases": {
+  "ssla100a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.74
+  },
+  "ssla100b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.54
+  },
+  "ssla100c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "ssla103a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.37
+  },
+  "ssla103b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.72
+  },
+  "ssla103c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.76
+  },
+  "ssla103e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.14
+  },
+  "ssla103f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.01
+  },
+  "ssla103g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 5
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.12
+  },
+  "ssla103h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.86
+  },
+  "ssla200b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 122,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.92
+  },
+  "ssla310a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.3
+  },
+  "ssla311a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.33
+  },
+  "ssla311b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.54
+  },
+  "ssla311c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.39
+  },
+  "ssla311d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.45
+  },
+  "ssll01a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.82
+  },
+  "ssll02a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.45
+  },
+  "ssll03a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.58
+  },
+  "ssll04a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.68
+  },
+  "ssll05a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.2
+  },
+  "ssll06a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.76
+  },
+  "ssll07a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.24
+  },
+  "ssll08a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.5
+  },
+  "ssll09a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.98
+  },
+  "ssll100b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 32,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 31,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.52
+  },
+  "ssll101a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 76,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 87,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.3
+  },
+  "ssll101c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.96
+  },
+  "ssll101d": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.0
+  },
+  "ssll101e": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.44
+  },
+  "ssll102a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 167,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 148,
+     "skip": 38
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.82
+  },
+  "ssll102b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 166,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 80,
+     "skip": 86
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.02
+  },
+  "ssll102c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 129,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 41,
+     "skip": 88
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.95
+  },
+  "ssll102d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 102,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 74
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.19
+  },
+  "ssll102e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.34
+  },
+  "ssll102f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.76
+  },
+  "ssll102g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.76
+  },
+  "ssll102h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.57
+  },
+  "ssll102i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.69
+  },
+  "ssll102j": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "ssll103a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 27,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.39
+  },
+  "ssll103b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.05
+  },
+  "ssll104a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 60,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 60,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.39
+  },
+  "ssll104b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.01
+  },
+  "ssll104c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.08
+  },
+  "ssll105a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.35
+  },
+  "ssll105b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.26
+  },
+  "ssll105c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.23
+  },
+  "ssll105d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.91
+  },
+  "ssll105e": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.37
+  },
+  "ssll105f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 13.48
+  },
+  "ssll105g": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 17.67
+  },
+  "ssll105h": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.04
+  },
+  "ssll105i": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.34
+  },
+  "ssll106a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 73,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 76,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.71
+  },
+  "ssll106b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 37,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.0
+  },
+  "ssll106c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 73,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 76,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.41
+  },
+  "ssll106d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 37,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 10.94
+  },
+  "ssll106e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 73,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.65
+  },
+  "ssll106f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 39,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.35
+  },
+  "ssll107a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 29,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.28
+  },
+  "ssll107b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 39,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.76
+  },
+  "ssll107c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 38,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.62
+  },
+  "ssll107d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 5
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.3
+  },
+  "ssll107e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.63
+  },
+  "ssll107f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 22,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.96
+  },
+  "ssll107g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 52,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 41,
+     "skip": 11
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.18
+  },
+  "ssll107h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.29
+  },
+  "ssll107i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.53
+  },
+  "ssll107j": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.31
+  },
+  "ssll107k": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 7.06
+  },
+  "ssll107l": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 44,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 44,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.89
+  },
+  "ssll107m": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 80,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 80,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 20.62
+  },
+  "ssll108a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.68
+  },
+  "ssll109a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 6.05
+  },
+  "ssll10a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.7
+  },
+  "ssll110a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.67
+  },
+  "ssll111a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.75
+  },
+  "ssll111b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.24
+  },
+  "ssll112a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.0
+  },
+  "ssll116a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.08
+  },
+  "ssll116b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.23
+  },
+  "ssll117a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.0
+  },
+  "ssll117b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.15
+  },
+  "ssll118a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.7
+  },
+  "ssll118b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "ssll119a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 140,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 156,
+     "skip": 32
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 13.02
+  },
+  "ssll119b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 70,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 70,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 6.76
+  },
+  "ssll11a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 21,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.52
+  },
+  "ssll11b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 27,
+     "skip": 1
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.14
+  },
+  "ssll11c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.95
+  },
+  "ssll11d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.95
+  },
+  "ssll11e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.14
+  },
+  "ssll11f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.74
+  },
+  "ssll11g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 21,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.12
+  },
+  "ssll120a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 180,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 180,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.13
+  },
+  "ssll120b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 180,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 180,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.23
+  },
+  "ssll12a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 184,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.53
+  },
+  "ssll12b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 184,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.56
+  },
+  "ssll13a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 560,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 560,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.88
+  },
+  "ssll13b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 448,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 448,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.28
+  },
+  "ssll13c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 448,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 448,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.45
+  },
+  "ssll13d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 224,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 224,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.08
+  },
+  "ssll14a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 66,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 62,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.95
+  },
+  "ssll15a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "ssll16a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.08
+  },
+  "ssll17a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.68
+  },
+  "ssll18a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.38
+  },
+  "ssll18b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.46
+  },
+  "ssll400a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 86,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 86,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.09
+  },
+  "ssll402a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.95
+  },
+  "ssll403a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.94
+  },
+  "ssll404a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.36
+  },
+  "ssll501a": {
+   "detail": "diagnostic <F>_ERROR",
+   "outcome": "errored",
+   "seconds": 1.54
+  },
+  "ssll501b": {
+   "detail": "diagnostic <F>_ERROR",
+   "outcome": "errored",
+   "seconds": 1.43
+  },
+  "sslp01a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.08
+  },
+  "sslp02a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.27
+  },
+  "sslp02b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.65
+  },
+  "sslp02c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.74
+  },
+  "sslp02d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.67
+  },
+  "sslp100a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.12
+  },
+  "sslp100b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.7
+  },
+  "sslp100c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.85
+  },
+  "sslp101b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 44,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.53
+  },
+  "sslp101c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.83
+  },
+  "sslp101e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 12
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.37
+  },
+  "sslp101f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.3
+  },
+  "sslp102a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.39
+  },
+  "sslp102b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.15
+  },
+  "sslp102c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.96
+  },
+  "sslp102d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.56
+  },
+  "sslp102e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.0
+  },
+  "sslp102f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.15
+  },
+  "sslp102g": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.22
+  },
+  "sslp102h": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.14
+  },
+  "sslp102i": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 22.94
+  },
+  "sslp102j": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 52.65
+  },
+  "sslp102k": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 52.22
+  },
+  "sslp102l": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 50.83
+  },
+  "sslp102m": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.61
+  },
+  "sslp102n": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 63.01
+  },
+  "sslp103a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.14
+  },
+  "sslp103b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.75
+  },
+  "sslp104a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.73
+  },
+  "sslp104b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.86
+  },
+  "sslp104c": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.6
+  },
+  "sslp104d": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.18
+  },
+  "sslp104e": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.24
+  },
+  "sslp104f": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.38
+  },
+  "sslp104g": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.61
+  },
+  "sslp105a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.2
+  },
+  "sslp105b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.84
+  },
+  "sslp105c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.99
+  },
+  "sslp106a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.9
+  },
+  "sslp106b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.57
+  },
+  "sslp107a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.7
+  },
+  "sslp108a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.44
+  },
+  "sslp108b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.92
+  },
+  "sslp109a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.36
+  },
+  "sslp113a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.77
+  },
+  "sslp113b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.77
+  },
+  "sslp114a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 16.26
+  },
+  "sslp114b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 22.37
+  },
+  "sslp114c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 14.15
+  },
+  "sslp114d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 15.75
+  },
+  "sslp114e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 25.13
+  },
+  "sslp115a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 32,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 29.44
+  },
+  "sslp115b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 47.45
+  },
+  "sslp115c": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 40.83
+  },
+  "sslp116a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 46,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.45
+  },
+  "sslp116b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 46,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.36
+  },
+  "sslp116c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 7.43
+  },
+  "sslp116d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 16.98
+  },
+  "sslp117a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 38,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.95
+  },
+  "sslp117b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 38,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.38
+  },
+  "sslp119a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 24.94
+  },
+  "sslp119b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.87
+  },
+  "sslp200a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 146,
+     "skip": 6
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.48
+  },
+  "sslp201a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 110,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.04
+  },
+  "sslp201b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 110,
+     "skip": 5
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.79
+  },
+  "sslp300a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.68
+  },
+  "sslp301a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.59
+  },
+  "sslp301b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.63
+  },
+  "sslp303a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.57
+  },
+  "sslp304a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.75
+  },
+  "sslp304b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.98
+  },
+  "sslp304c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 19,
+     "skip": 1
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.71
+  },
+  "sslp304d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.59
+  },
+  "sslp305a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.69
+  },
+  "sslp306a": {
+   "checks": {
+    "unstated": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 6.27
+  },
+  "sslp306b": {
+   "checks": {
+    "unstated": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.54
+  },
+  "sslp306c": {
+   "checks": {
+    "unstated": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.47
+  },
+  "sslp311a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.82
+  },
+  "sslp311b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.72
+  },
+  "sslp311c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.93
+  },
+  "sslp311d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.8
+  },
+  "sslp313a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.71
+  },
+  "sslp313b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.65
+  },
+  "sslp314a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.29
+  },
+  "sslp314b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.27
+  },
+  "sslp314c": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.6
+  },
+  "sslp314d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.06
+  },
+  "sslp314e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 19.64
+  },
+  "sslp314f": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.3
+  },
+  "sslp315a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 7.72
+  },
+  "sslp315b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 7.24
+  },
+  "sslp315c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.1
+  },
+  "sslp315d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.91
+  },
+  "sslp315e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.16
+  },
+  "sslp316a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.96
+  },
+  "sslp316b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.95
+  },
+  "sslp317a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.63
+  },
+  "sslp317b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 6.76
+  },
+  "sslp317c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 7.07
+  },
+  "sslp318a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.3
+  },
+  "sslp318b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.51
+  },
+  "sslp318c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.26
+  },
+  "sslp319a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.93
+  },
+  "sslp319b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.84
+  },
+  "sslp319c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.35
+  },
+  "sslp319d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.25
+  },
+  "sslp319e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.03
+  },
+  "sslp320a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 15
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 20.73
+  },
+  "sslp320b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 15
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 16.84
+  },
+  "sslp320c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 15
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 19.99
+  },
+  "sslp320d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 15
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 17.19
+  },
+  "sslp321a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 16.17
+  },
+  "sslp321b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 14.07
+  },
+  "sslp321c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 13.84
+  },
+  "sslp321d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 13.76
+  },
+  "sslp322a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 65.81
+  },
+  "sslp323a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.17
+  },
+  "sslp323b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.97
+  },
+  "ssls04a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.3
+  },
+  "ssls04b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.39
+  },
+  "ssls04c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.27
+  },
+  "ssls04d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.1
+  },
+  "ssls07a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "ssls07b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.82
+  },
+  "ssls09a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "ssls09b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 19,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.88
+  },
+  "ssls09c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.78
+  },
+  "ssls100a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 54,
+     "skip": 6
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.43
+  },
+  "ssls100b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 9
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.09
+  },
+  "ssls100e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 9
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.95
+  },
+  "ssls100f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 9
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.79
+  },
+  "ssls100g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 9
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.95
+  },
+  "ssls100h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 33,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 9
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.83
+  },
+  "ssls100i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 29,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.86
+  },
+  "ssls100j": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.74
+  },
+  "ssls100k": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 68,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.02
+  },
+  "ssls100l": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 56,
+     "skip": 12
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.09
+  },
+  "ssls100m": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 21,
+     "skip": 9
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.02
+  },
+  "ssls100n": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 6.71
+  },
+  "ssls101a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 27,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 89,
+     "skip": 23
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.79
+  },
+  "ssls101b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.32
+  },
+  "ssls101e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 41,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.62
+  },
+  "ssls101f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 44,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.84
+  },
+  "ssls101g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 71,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.75
+  },
+  "ssls101h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 47,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.6
+  },
+  "ssls101i": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 38,
+     "skip": 9
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.89
+  },
+  "ssls101j": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 38,
+     "skip": 9
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.81
+  },
+  "ssls101m": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.64
+  },
+  "ssls101n": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.85
+  },
+  "ssls101o": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 6.22
+  },
+  "ssls104a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.92
+  },
+  "ssls104b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.81
+  },
+  "ssls104c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.96
+  },
+  "ssls105a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.93
+  },
+  "ssls105b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.03
+  },
+  "ssls106a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.32
+  },
+  "ssls107a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.89
+  },
+  "ssls107b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.12
+  },
+  "ssls108a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.37
+  },
+  "ssls108b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.11
+  },
+  "ssls108c": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.88
+  },
+  "ssls108i": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.12
+  },
+  "ssls108j": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.76
+  },
+  "ssls108k": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.58
+  },
+  "ssls108l": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.68
+  },
+  "ssls108m": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "ssls108n": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.77
+  },
+  "ssls10a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.63
+  },
+  "ssls10b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.91
+  },
+  "ssls10c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.91
+  },
+  "ssls10d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 13.03
+  },
+  "ssls110a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.22
+  },
+  "ssls110b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.42
+  },
+  "ssls110c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.98
+  },
+  "ssls110d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.92
+  },
+  "ssls110e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.85
+  },
+  "ssls111a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.98
+  },
+  "ssls111b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.22
+  },
+  "ssls111d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.45
+  },
+  "ssls111e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 7.21
+  },
+  "ssls111f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.07
+  },
+  "ssls111g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.52
+  },
+  "ssls111h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.22
+  },
+  "ssls111i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.36
+  },
+  "ssls111j": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.74
+  },
+  "ssls111k": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.76
+  },
+  "ssls111m": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.13
+  },
+  "ssls111n": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.13
+  },
+  "ssls111o": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 8
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.07
+  },
+  "ssls112a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.21
+  },
+  "ssls113a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 54,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.62
+  },
+  "ssls114a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.65
+  },
+  "ssls114b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.48
+  },
+  "ssls114c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.49
+  },
+  "ssls114d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.35
+  },
+  "ssls114e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.17
+  },
+  "ssls114f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.15
+  },
+  "ssls114g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.97
+  },
+  "ssls114h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.03
+  },
+  "ssls114i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 37,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 39,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.95
+  },
+  "ssls115a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.92
+  },
+  "ssls115b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.86
+  },
+  "ssls115c": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.97
+  },
+  "ssls115d": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.01
+  },
+  "ssls115e": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.98
+  },
+  "ssls115f": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.9
+  },
+  "ssls115g": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.01
+  },
+  "ssls115h": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.05
+  },
+  "ssls116a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 8
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.64
+  },
+  "ssls116b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 8
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.42
+  },
+  "ssls117a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.87
+  },
+  "ssls117b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.31
+  },
+  "ssls118a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 103,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 57,
+     "skip": 46
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.06
+  },
+  "ssls118b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 103,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 65,
+     "skip": 38
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.01
+  },
+  "ssls118c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 103,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 61,
+     "skip": 42
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.14
+  },
+  "ssls118d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 103,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 65,
+     "skip": 38
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.04
+  },
+  "ssls118e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 112,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 109,
+     "skip": 13
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.35
+  },
+  "ssls118f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 116,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 106,
+     "skip": 16
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.22
+  },
+  "ssls118g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 103,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 87,
+     "skip": 16
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.03
+  },
+  "ssls118h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 112,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 116,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.48
+  },
+  "ssls118i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 103,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 65,
+     "skip": 38
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.18
+  },
+  "ssls118j": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 103,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 65,
+     "skip": 38
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.35
+  },
+  "ssls118k": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 31,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 11
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.92
+  },
+  "ssls118l": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 31,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.1
+  },
+  "ssls118m": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 31,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 11
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.62
+  },
+  "ssls118n": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 31,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.66
+  },
+  "ssls118o": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 103,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 46,
+     "skip": 57
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.11
+  },
+  "ssls118p": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 103,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 45,
+     "skip": 58
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.36
+  },
+  "ssls118q": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 31,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 19,
+     "skip": 12
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.61
+  },
+  "ssls118r": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 31,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.6
+  },
+  "ssls118s": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 119,
+     "skip": 25
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.21
+  },
+  "ssls118t": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 73,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 45,
+     "skip": 28
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.04
+  },
+  "ssls118u": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 27,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 21,
+     "skip": 8
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.1
+  },
+  "ssls118v": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 33,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 31,
+     "skip": 22
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.08
+  },
+  "ssls118w": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 31,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.33
+  },
+  "ssls119a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.13
+  },
+  "ssls119b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.96
+  },
+  "ssls119c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.14
+  },
+  "ssls119d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.72
+  },
+  "ssls119e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.27
+  },
+  "ssls119f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.4
+  },
+  "ssls11a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 56,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 35,
+     "skip": 21
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.32
+  },
+  "ssls120a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.32
+  },
+  "ssls120b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.34
+  },
+  "ssls120c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.41
+  },
+  "ssls120d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.09
+  },
+  "ssls120e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.87
+  },
+  "ssls120f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.55
+  },
+  "ssls121a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.62
+  },
+  "ssls122a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.62
+  },
+  "ssls122b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 2
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.65
+  },
+  "ssls122c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.72
+  },
+  "ssls122d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.79
+  },
+  "ssls125a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.21
+  },
+  "ssls126a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 21,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.39
+  },
+  "ssls126b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.75
+  },
+  "ssls126c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 23,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.28
+  },
+  "ssls126d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.01
+  },
+  "ssls126e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.89
+  },
+  "ssls127a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 21,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.23
+  },
+  "ssls127b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.27
+  },
+  "ssls127c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.0
+  },
+  "ssls127d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 22,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.13
+  },
+  "ssls128a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 65.59
+  },
+  "ssls129a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 56,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 6.72
+  },
+  "ssls129b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.22
+  },
+  "ssls129c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.36
+  },
+  "ssls12a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 891,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 873,
+     "skip": 18
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 32.0
+  },
+  "ssls130a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.96
+  },
+  "ssls130b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.36
+  },
+  "ssls131a": {
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "no-checks",
+   "seconds": 4.98
+  },
+  "ssls132a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.79
+  },
+  "ssls132b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.21
+  },
+  "ssls132c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.11
+  },
+  "ssls132d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.12
+  },
+  "ssls132e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.72
+  },
+  "ssls132f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.3
+  },
+  "ssls132g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.09
+  },
+  "ssls132h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.94
+  },
+  "ssls132i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 15.08
+  },
+  "ssls134a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1680,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1680,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 13.27
+  },
+  "ssls134b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 320,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 310,
+     "skip": 10
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.8
+  },
+  "ssls134c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 320,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 174,
+     "skip": 146
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.93
+  },
+  "ssls134d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 140,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 140,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.52
+  },
+  "ssls135a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.24
+  },
+  "ssls136a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.81
+  },
+  "ssls136b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.78
+  },
+  "ssls137a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 12.54
+  },
+  "ssls137b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.74
+  },
+  "ssls137c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.73
+  },
+  "ssls137d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.69
+  },
+  "ssls137e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.66
+  },
+  "ssls137f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.46
+  },
+  "ssls138a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 64,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 56,
+     "skip": 8
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.06
+  },
+  "ssls138b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 19,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.14
+  },
+  "ssls138c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.95
+  },
+  "ssls138d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.98
+  },
+  "ssls139a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.53
+  },
+  "ssls139b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.23
+  },
+  "ssls139c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 9.67
+  },
+  "ssls141a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 5
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.91
+  },
+  "ssls141b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 5
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.9
+  },
+  "ssls141c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 5
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.88
+  },
+  "ssls141d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 5
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.95
+  },
+  "ssls141e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.83
+  },
+  "ssls141f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.16
+  },
+  "ssls142a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 34,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.61
+  },
+  "ssls142b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.9
+  },
+  "ssls143a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.14
+  },
+  "ssls144a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.84
+  },
+  "ssls145a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.5
+  },
+  "ssls146a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 1
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.01
+  },
+  "ssls146b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.71
+  },
+  "ssls147a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.9
+  },
+  "ssls148a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.03
+  },
+  "ssls150a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 34,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 74,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 94,
+     "skip": 14
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.83
+  },
+  "ssls150b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 56,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 63,
+     "skip": 13
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.39
+  },
+  "ssls150c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.47
+  },
+  "ssls200a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.09
+  },
+  "ssls200b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.98
+  },
+  "ssls20a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.84
+  },
+  "ssls20b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.8
+  },
+  "ssls20c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.83
+  },
+  "ssls20d": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.91
+  },
+  "ssls27a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.98
+  },
+  "ssls27b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 4.35
+  },
+  "ssls27c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.1
+  },
+  "ssls27d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.1
+  },
+  "ssls27e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.0
+  },
+  "ssls502a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.68
+  },
+  "ssls502b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.99
+  },
+  "ssls502c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.97
+  },
+  "ssls502d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.05
+  },
+  "ssls503a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.61
+  },
+  "ssls503b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.7
+  },
+  "ssls503c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 9,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.79
+  },
+  "ssls503d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.89
+  },
+  "ssls504a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.87
+  },
+  "ssls504b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.27
+  },
+  "ssls505a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.67
+  },
+  "sslv002a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.04
+  },
+  "sslv002b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.62
+  },
+  "sslv01a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.7
+  },
+  "sslv01b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.42
+  },
+  "sslv04a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 123,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 173,
+     "skip": 18
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.24
+  },
+  "sslv04b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 77,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 86,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.5
+  },
+  "sslv04c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 73,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 71,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.28
+  },
+  "sslv04d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 66,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 64,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.06
+  },
+  "sslv04e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 63,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 63,
+     "skip": 12
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.13
+  },
+  "sslv04f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 34,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.67
+  },
+  "sslv04g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 34,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.86
+  },
+  "sslv04h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 42,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.0
+  },
+  "sslv04i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 39,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 62,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.72
+  },
+  "sslv04j": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 32,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.74
+  },
+  "sslv04k": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.9
+  },
+  "sslv04l": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 38,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.85
+  },
+  "sslv04m": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 38,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.94
+  },
+  "sslv04n": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.61
+  },
+  "sslv04o": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.94
+  },
+  "sslv04p": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 70,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.06
+  },
+  "sslv04q": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 9.63
+  },
+  "sslv07a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 47,
+     "skip": 11
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.61
+  },
+  "sslv07b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.08
+  },
+  "sslv07c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 7
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.8
+  },
+  "sslv07d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.3
+  },
+  "sslv100a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 34,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.89
+  },
+  "sslv100b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 60,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 58,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.81
+  },
+  "sslv100c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 44,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 50,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.11
+  },
+  "sslv100d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.39
+  },
+  "sslv101a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 14.46
+  },
+  "sslv101b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 16.61
+  },
+  "sslv101c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 22.24
+  },
+  "sslv104a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.8
+  },
+  "sslv104b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.88
+  },
+  "sslv104c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.84
+  },
+  "sslv104d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.85
+  },
+  "sslv105a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.05
+  },
+  "sslv105b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.98
+  },
+  "sslv105c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.85
+  },
+  "sslv105d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.86
+  },
+  "sslv105e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.9
+  },
+  "sslv109a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 149,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 70,
+     "skip": 79
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.11
+  },
+  "sslv109b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 27,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.42
+  },
+  "sslv109c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 25,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 25,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "sslv109d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 23,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.79
+  },
+  "sslv109e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.87
+  },
+  "sslv109f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 24,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 25,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.97
+  },
+  "sslv110a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 41,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 33.76
+  },
+  "sslv110f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 96.4
+  },
+  "sslv111a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 32,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.19
+  },
+  "sslv111b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.82
+  },
+  "sslv111c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.82
+  },
+  "sslv111d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.81
+  },
+  "sslv111e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.79
+  },
+  "sslv111f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 11.68
+  },
+  "sslv111g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.41
+  },
+  "sslv113a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 20,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "sslv113b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 22,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.66
+  },
+  "sslv113c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.82
+  },
+  "sslv113d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.93
+  },
+  "sslv114a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.75
+  },
+  "sslv114b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.05
+  },
+  "sslv115a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.85
+  },
+  "sslv115b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.68
+  },
+  "sslv115c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.49
+  },
+  "sslv116a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 23,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 177.04
+  },
+  "sslv117a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 17.99
+  },
+  "sslv117b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 17.75
+  },
+  "sslv117c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 17.77
+  },
+  "sslv117d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 18.42
+  },
+  "sslv120a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 54,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 98,
+     "skip": 46
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.53
+  },
+  "sslv121a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 8
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.78
+  },
+  "sslv130a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 121,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 117,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.74
+  },
+  "sslv130b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 145,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 140,
+     "skip": 5
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 76.05
+  },
+  "sslv130c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 140,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 130,
+     "skip": 10
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 6.72
+  },
+  "sslv130d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 150,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 140,
+     "skip": 10
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.41
+  },
+  "sslv130e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 121,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 111,
+     "skip": 10
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 7.57
+  },
+  "sslv131a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 45,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 45,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.7
+  },
+  "sslv134a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 26,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 20.51
+  },
+  "sslv134b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 22,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 9.56
+  },
+  "sslv134c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.75
+  },
+  "sslv134d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 40,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 41,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 18.35
+  },
+  "sslv134h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 60.03
+  },
+  "sslv134i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 15.12
+  },
+  "sslv134j": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 14.51
+  },
+  "sslv134k": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.43
+  },
+  "sslv134l": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 33.25
+  },
+  "sslv134m": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 23.87
+  },
+  "sslv135a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 658,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 546,
+     "skip": 116
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 16.72
+  },
+  "sslv135c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 108,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 7.75
+  },
+  "sslv135d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 28,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 6.28
+  },
+  "sslv135g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 138,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 138,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 56.08
+  },
+  "sslv135h": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 144,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 120,
+     "skip": 24
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 14.11
+  },
+  "sslv135i": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 14.89
+  },
+  "sslv139a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.64
+  },
+  "sslv139b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.39
+  },
+  "sslv139c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 7.18
+  },
+  "sslv140a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.11
+  },
+  "sslv146a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 37,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 37,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.99
+  },
+  "sslv146b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.91
+  },
+  "sslv146c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 36,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.92
+  },
+  "sslv146d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.02
+  },
+  "sslv153a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.47
+  },
+  "sslv154a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 12.48
+  },
+  "sslv154b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 115.27
+  },
+  "sslv154c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 9.43
+  },
+  "sslv154d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 34.99
+  },
+  "sslv155a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.23
+  },
+  "sslv155b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.24
+  },
+  "sslv155c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 167.13
+  },
+  "sslv155d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.37
+  },
+  "sslv155e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 6.76
+  },
+  "sslv155f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.97
+  },
+  "sslv157a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.77
+  },
+  "sslv157b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 1
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.76
+  },
+  "sslv159a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.78
+  },
+  "sslv159b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.81
+  },
+  "sslv159c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.31
+  },
+  "sslv159d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.61
+  },
+  "sslv160a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 6.38
+  },
+  "sslv160b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.38
+  },
+  "sslv160c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 6.09
+  },
+  "sslv200a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 122,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.44
+  },
+  "sslv200b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 85,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.61
+  },
+  "sslv224b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 53.66
+  },
+  "sslv301a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.07
+  },
+  "sslv303a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.24
+  },
+  "sslv303b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.09
+  },
+  "sslv303c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 14,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.03
+  },
+  "sslv303d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.32
+  },
+  "sslv303e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 4
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.07
+  },
+  "sslv304a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 29,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.49
+  },
+  "sslv305a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 39,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 72,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 117,
+     "skip": 10
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.59
+  },
+  "sslv305b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 33,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 30,
+     "skip": 3
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.26
+  },
+  "sslv305c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 8.7
+  },
+  "sslv306a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.61
+  },
+  "sslv306b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.88
+  },
+  "sslv307a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 56,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 8
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 5.99
+  },
+  "sslv311a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "external": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 9.75
+  },
+  "sslv312a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.58
+  },
+  "sslv312b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 3.96
+  },
+  "sslv314a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 12.06
+  },
+  "sslv314b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 15.54
+  },
+  "sslv314c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 15.12
+  },
+  "sslv314d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 10.84
+  },
+  "sslv314e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 11.77
+  },
+  "sslv314f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 42.11
+  },
+  "sslv315a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 18.92
+  },
+  "sslv315b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 18.9
+  },
+  "sslv315c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 19.44
+  },
+  "sslv315d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 17.05
+  },
+  "sslv315e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 16.79
+  },
+  "sslv315i": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 16.9
+  },
+  "sslv315j": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 17.55
+  },
+  "sslv316a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 21.87
+  },
+  "sslv316b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 20.95
+  },
+  "sslv316c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 27.81
+  },
+  "sslv316d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 25.22
+  },
+  "sslv316e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 2
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 21.16
+  },
+  "sslv316f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 6
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 35.44
+  },
+  "sslv316g": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 20.41
+  },
+  "sslv316l": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 0,
+     "skip": 12
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 10.64
+  },
+  "sslv316m": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 4
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 20.73
+  },
+  "sslv318a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.81
+  },
+  "sslv318b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.99
+  },
+  "sslv319a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 91.73
+  },
+  "sslv319b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 86.0
+  },
+  "sslv319d": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 97.18
+  },
+  "sslv320a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 26.06
+  },
+  "sslv320b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 23.72
+  },
+  "sslv320c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 30.54
+  },
+  "sslv320d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 24.39
+  },
+  "sslv321a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.99
+  },
+  "sslv321b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.46
+  },
+  "sslv321c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.34
+  },
+  "sslv321d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.09
+  },
+  "sslv321e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.04
+  },
+  "sslv322a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 8,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 84.45
+  },
+  "sslv322c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 179.82
+  },
+  "sslx100a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 1
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.8
+  },
+  "sslx100b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 15,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.92
+  },
+  "sslx100c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 7,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.91
+  },
+  "sslx100d": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.96
+  },
+  "sslx100e": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 18,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.97
+  },
+  "sslx100f": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 16,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 1.82
+  },
+  "sslx101a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 5,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.5
+  },
+  "sslx101b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 10,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.4
+  },
+  "sslx102a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.72
+  },
+  "sslx102b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 13,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.67
+  },
+  "sslx102c": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.05
+  },
+  "sslx102d": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.02
+  },
+  "sslx102e": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.37
+  },
+  "sslx102f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    },
+    "same-solver": {
+     "nook": 0,
+     "ok": 2,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 13.38
+  },
+  "sslx103a": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.16
+  },
+  "sslx103b": {
+   "checks": {
+    "external": {
+     "nook": 0,
+     "ok": 3,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 1.78
+  },
+  "sslx104a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 48,
+     "skip": 0
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 4,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 5.45
+  },
+  "sslx200a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 17,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 21,
+     "skip": 10
+    },
+    "unstated": {
+     "nook": 0,
+     "ok": 1,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.37
+  },
+  "sslx201a": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.64
+  },
+  "sslx201b": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic OK",
+   "outcome": "reproduced",
+   "seconds": 2.6
+  },
+  "sslx201c": {
+   "checks": {
+    "closed-form": {
+     "nook": 0,
+     "ok": 6,
+     "skip": 0
+    },
+    "recorded-output": {
+     "nook": 0,
+     "ok": 12,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 2.8
+  },
+  "sslx300a": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 8.13
+  },
+  "sslx300b": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 10.07
+  },
+  "sslx300c": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 8.29
+  },
+  "sslx300d": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 6.67
+  },
+  "sslx300e": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 3.73
+  },
+  "sslx300f": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.28
+  },
+  "sslx300g": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.05
+  },
+  "sslx300h": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.04
+  },
+  "sslx300i": {
+   "checks": {
+    "recorded-output": {
+     "nook": 0,
+     "ok": 11,
+     "skip": 0
+    }
+   },
+   "detail": "diagnostic <A>_ALARM",
+   "outcome": "reproduced",
+   "seconds": 4.15
+  }
+ },
+ "checks": {
+  "closed-form": {
+   "nook": 0,
+   "ok": 15378,
+   "skip": 0
+  },
+  "external": {
+   "nook": 0,
+   "ok": 768,
+   "skip": 0
+  },
+  "recorded-output": {
+   "nook": 0,
+   "ok": 19053,
+   "skip": 2060
+  },
+  "same-solver": {
+   "nook": 0,
+   "ok": 881,
+   "skip": 0
+  },
+  "unstated": {
+   "nook": 0,
+   "ok": 92,
+   "skip": 0
+  }
+ },
+ "corpus": "code_aster-18.0.12",
+ "outcomes": {
+  "deviated": 0,
+  "errored": 2,
+  "nan": 0,
+  "no-checks": 1,
+  "no-output": 0,
+  "no-reference": 0,
+  "reproduced": 661,
+  "size-mismatch": 0,
+  "skipped": 0,
+  "timed-out": 0
+ },
+ "recorded_at": "2026-09-14T16:01:47Z",
+ "reported_version": "aster/config.json version_tag 18.0.12",
+ "schema_version": 1,
+ "seconds": 821.5,
+ "statement": {
+  "does_not_establish": [
+   "What the 768 SOURCE_EXTERNE checks mean. Their source is stated in each case's documentation, which this harness does not read, so none is counted as verification of any kind and none as validation.",
+   "What the 92 assertions written in the cases' own Python compare against. code_aster prints them passed or failed with no reference, so none is counted as verification of any kind.",
+   "Anything about a Kryova result. No Kryova code path invokes code_aster today; this is the evidence an integration would start from, not evidence about it.",
+   "Parallel (MPI) behaviour: only cases labelled sequential were run.",
+   "That each case finishes inside code_aster's own time limit: every limit was multiplied by 4 for this run."
+  ],
+  "establishes": [
+   "661 of 664 cases in the code_aster-18.0.12 corpus reproduced on code-aster 18.0.12 py312_nompi_h60fb801_0 (conda-forge, linux-64) (the binary reports 'aster/config.json version_tag 18.0.12').",
+   "15378 of 15378 checks against a closed-form value (ANALYTIQUE) agreed within their stated PRECISION \u2014 code verification of code_aster, for the models those cases pose.",
+   "19053 non-regression checks reproduced code_aster's own earlier values."
+  ]
+ },
+ "time_factor": 4.0
+}

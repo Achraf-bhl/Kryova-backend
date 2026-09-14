@@ -79,7 +79,7 @@ def service(index_dir: Path) -> KnowledgeService:
     return KnowledgeService(
         index_dir=index_dir,
         source_dirs=settings.knowledge_source_dirs,
-        exclude=[index_dir, index_dir.parent / "README.md"],
+        exclude=[index_dir, index_dir.parent / "README.md", *settings.knowledge_exclude],
     )
 
 

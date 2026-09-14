@@ -116,7 +116,7 @@ session.**
    subsequent break for a reason none of those breaks had caused. What caught it was
    `code_fingerprint()` — the recorded artefact's hash of every file that decides an answer — so
    after a break run, **check the fingerprint back to its recorded value**
-   (`data/verify/validation-outcomes.json`) rather than trusting `diff` against a backup that may
+   (`data/verify/benchmark-outcomes.json`) rather than trusting `diff` against a backup that may
    itself be the broken copy. If it does not match, the tree is dirty and nothing measured on it
    counts.
    **Key the backups on the full path, never `basename`.** This tree has
@@ -297,7 +297,10 @@ app/
   rules/          design rules, DFM, GD&T
   sheetmetal/     bend allowance, unfold, K-factor, the folded layout
   manufacture/    drawings, dimensions, sheet layout, DXF/STEP export
-  verify/         convergence, the validation register, commitments, the accuracy changelog
+  verify/         convergence, the verification register, commitments, the accuracy changelog,
+                  standards (the ASME words, and the statement that nothing is validated),
+                  corpora (the solvers' own test suites on pinned builds)
+  compliance/     E19 — dated legal registers (EU Machinery Regulation so far), no signing
   observe/        spans and the metering listener
   parts/          bought-in standard parts
   handbook/       the docs site's content as data — guides, mission gallery, API reference.
@@ -1229,7 +1232,7 @@ proved end to end in exactly one place, `tests/test_auth_verification.py`.
 
 **Never reach around a seam.** If a route needs to know which solver ran, put it on the job row.
 
-## Validation (`app/verify/`) — the one place a number may not come from you
+## Verification (`app/verify/`) — the one place a number may not come from you
 
 Decision 3 says verification is the product. `app/verify/` is where that is enforced:
 `convergence.py` refuses to state an unconverged number, `provenance.py` binds every result to
@@ -1272,7 +1275,7 @@ unauthenticated trust page.
 6. **A published result comes from a recorded run, and a recording expires.** The register never
    executes a benchmark (a public unauthenticated route that solves is a denial-of-service tool
    with a nice name), so a case that runs reaches it through
-   `data/verify/validation-outcomes.json`. That file carries a fingerprint of every source file
+   `data/verify/benchmark-outcomes.json`. That file carries a fingerprint of every source file
    that decides an answer — `app/solve/`, `app/mesh/`, and `benchmarks/convergence/nafems/
    provenance/quantities` — and a mismatch publishes **nothing**, with the reason, rather than a
    result nobody re-checked. `register.py` and `recorded.py` are outside the fingerprint on
@@ -1293,6 +1296,69 @@ unauthenticated trust page.
    published every citation as "[withheld: looked like a filesystem path]" — the guard destroying
    what it protects. A drive letter is one character and the lookbehind says so. The same pattern
    is duplicated in `tests/test_trust.py`; change both or neither.
+8. **Nothing here is validation, and the product says so beside every number.** Until
+   2026-09-14 this package called benchmark agreement *validation* — the register, its best
+   standing, its first published note, the artefact's filename. ASME's own definitions
+   (`standards.DEFINITIONS`, quoted with where each was read) say agreeing with a published
+   reference solution is **code verification**, a convergence study is **solution verification**,
+   and validation needs measurements of a physical part, which this product has never had. So
+   the standings are `AGREES` / `DISPUTED` / `UNCONFIRMED`, `Outcome.AGREED` is the one pass, the
+   page is `/trust/verification-register` (the old path is a 404, not a redirect), and
+   `standards.NOT_VALIDATED` is **one server string** carried by the trust index, the register,
+   `SimulationRead`, `SharedPackage`, `ResultInterpretation` and — as a footnote appended by the
+   loop, converged or not — every agent answer that read a solve. Three rules: **do not reword it
+   at a call site** (a statement with two wordings has two standards); **do not let the model
+   write it** (it is a `computed_field`, which is absent from the validation-mode schema the
+   providers constrain decoding with, so it is never in the grammar); and **the day somebody
+   records real validation evidence, `standards.py` refuses to import** until the statement is
+   rewritten to say what was measured against what. `tests/test_trust.py` walks every trust page
+   and fails on the word "validated" anywhere outside that statement and the quoted definitions.
+9. **The solvers' own test corpora are mostly regression evidence, and `corpora.py` says which
+   part is not** (E20.4). CalculiX's examples *do* carry references and a tolerance — the archive
+   ships `.dat.ref`/`.frd.ref` and `datcheck.pl`/`frdcheck.pl` flag 0.1 % of a block's largest
+   value — but every reference is **CalculiX's own earlier output**, so a pass is "this build
+   reproduces that build", never code verification. code_aster's checks each name where their
+   reference came from, so they are counted by kind (`ANALYTIQUE` is code verification;
+   `SOURCE_EXTERNE` is left unclassified because its source is only in each case's V-manual
+   page, which the harness does not read). Nine things, all met building it:
+   - **The harness is the maintainer's, not a re-implementation.** `compare` is parsed out of the
+     archive being run and its per-release rules differ (2.23 moves two `.mtx` files 2.20 does
+     not); a rule `CompareRules` cannot read refuses the run. On `calculix-ccx 2.20-1` the harness
+     and the unmodified `compare` flag **the same twelve cases**, and a test holds it to that —
+     five are restart decks whose headers ask for a `.rout` to be copied that `compare` never
+     copies, so they fail by construction, not by regression.
+   - **It is standard-library only**, because the CalculiX job runs under `debian:bookworm-slim`'s
+     own Python 3.11.2, where the venv does not exist and `tarfile`'s `filter=` does not either.
+     A test imports it with `python -S`.
+   - **`run_ctest` meets an existing `--resutest` by asking "do you want to continue (y/n)?"** on
+     the terminal, and with no terminal it dies of `EOFError`. The first real run of the ssl
+     family therefore came back as **664 cases with no output and exit 0**. The harness now
+     refuses an existing directory, closes stdin, and raises when no case wrote a `.mess`.
+   - **A `conda` spec is not a pin.** `code-aster=18.0.12=<build>` re-solves nightly and lets
+     openblas and mumps move underneath; the nightly job creates the environment from
+     `data/verify/corpora/code_aster-18.0.12.explicit.txt` (every package hashed) instead.
+   - **Only the fleet's CalculiX is covered.** The Windows seat runs 2.23; nothing here says
+     anything about it, and the statement printed with every run says so.
+   - **`run_ctest`'s JUnit file does not hold a failed case's time.** It reads ctest's cost data,
+     and for a failure that is not what the case took: `ssll501a` failed in 1.65 s and the file
+     says 66.0 (its limit × 1.1). Seconds come from the ctest lines in `run_ctest.log` instead.
+   - **Not every code_aster check is a `TEST_RESU` line.** A deck can assert in Python through
+     `code_aster.TestCase`, which prints ` OK  assertAlmostEqual passed` with no `REFERENCE`.
+     Reading only `TEST_RESU` reported `sslp306a` — twenty assertions, among them a plate's
+     deflection against its closed form — as holding no check. They are counted as `unstated`, classified as
+     nothing. The summary's bare ` OK ` is not one: `ssls131a` prints it over zero assertions
+     because its only check sits behind a branch that did not run.
+   - **A code_aster time limit is not a check, and CI is slower than the recording machine.**
+     Fifteen cases that reproduced used over half their `P time_limit` here, one 0.76 of it. The
+     nightly passes `--time-factor 4`, the baseline was recorded at 4, and a run is refused
+     comparison with a baseline at any other factor — before it starts, not after an hour.
+   - **The conda-forge build ships no `share/aster/tests_data/`**, so `ssll501a`/`ssll501b`
+     stop with `<F>_ERROR` on a missing `.mail`. A packaging gap, not a solver result; it stays
+     in the baseline as a non-reproducing case with its diagnostic.
+   Record a baseline with `python3 -m app.verify.corpora <corpus> --work <fresh dir> --report
+   data/verify/corpora/<corpus>.json` on the pinned build (the module docstring and
+   `.github/workflows/nightly.yml` carry the exact environment). Never delete a non-reproducing
+   case from a baseline to make it tidy — a vanished case fails the comparison on purpose.
 
 ## Reference manuals (`app/retrieval/`) and the CATIA KB (`app/catia_kb/`)
 
@@ -1346,6 +1412,11 @@ It ships **in the code, not in an index**, so unlike the manuals it is always pr
    macro that looks up `"Pad.1"` by string is the one that breaks abroad.
 10. **Ambiguity is named, not resolved.** SMD vs ASL, GSD vs WSF, Geometrical Set vs Body — the
     `Disambiguation` table forks these and the brief prints the fork.
+11. **Every `.txt`/`.md` under `data/` is a manual unless it is excluded**, because the scan
+    walks `data/` whole on purpose. `settings.knowledge_exclude` keeps `data/verify/` out: its
+    conda lock is a `.txt`, and on 2026-09-14 it became a 26th "manual" and turned
+    `test_the_index_is_current_for_the_documents_on_disk` red. Put a new non-manual text file
+    under `data/verify/`, or add its directory to that list — never rebuild the index around it.
 
 ```
 venv/bin/python -m app.retrieval.build            # build or rebuild

@@ -87,15 +87,47 @@ class Locator:
     entity: str | None = None
     """DXF entity handle, or another format's internal element id."""
 
+    slide: int | None = None
+    """1-based, in the order the presentation shows its slides. Presentations."""
+
+    part: str | None = None
+    """Which part of an Office file, when not the body: `header`, `footer`,
+    `footnotes`, `endnotes`, `comments`, `speaker notes`, `properties`.
+    Server-chosen vocabulary, never file text."""
+
+    table: int | None = None
+    """1-based table number within the part or slide. Documents and web pages;
+    a spreadsheet's sheet is its table and uses `sheet`/`cell` instead."""
+
+    column: int | None = None
+    """1-based column within a table row that has no A1-style reference."""
+
+    paragraph: int | None = None
+    """1-based count of the non-empty paragraphs in the part or slide.
+
+    Not a page: Word paginates at layout time, so a page number read from the
+    file would be the number on *somebody's* printer, and a citation naming the
+    wrong page is worse than one naming a paragraph."""
+
     def describe(self) -> str:
         """The location, in the words an engineer would use to find it again."""
         parts: list[str] = []
         if self.sheet is not None:
             parts.append(f'sheet "{self.sheet}"')
+        if self.slide is not None:
+            parts.append(f"slide {self.slide}")
+        if self.part is not None:
+            parts.append(f"the {self.part}")
+        if self.table is not None:
+            parts.append(f"table {self.table}")
         if self.cell is not None:
             parts.append(f"cell {self.cell}")
         elif self.row is not None:
             parts.append(f"row {self.row}")
+        if self.column is not None and self.cell is None:
+            parts.append(f"column {self.column}")
+        if self.paragraph is not None:
+            parts.append(f"paragraph {self.paragraph}")
         if self.page is not None:
             parts.append(f"page {self.page}")
         if self.layer is not None:
@@ -131,7 +163,7 @@ class SourceRef:
     locator: Locator = Locator()
 
     reader: str = "unknown"
-    """Which extractor produced this -- `pypdf`, `ezdxf`, `openpyxl`, `docling`.
+    """Which extractor produced this -- `pypdf`, `ezdxf`, `openpyxl`, `csv`, `ooxml`.
 
     Named so that a puzzling extraction can be traced back to the code that made
     it, exactly as `app.retrieval.extract` returns the extractor's name.

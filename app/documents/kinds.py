@@ -86,6 +86,11 @@ _OOXML_MARKERS: tuple[tuple[str, DocumentKind, str], ...] = (
 )
 
 _TABULAR_SUFFIXES = frozenset({".csv", ".tsv"})
+_HTML_SUFFIXES = frozenset({".html", ".htm", ".xhtml"})
+
+#: How an HTML file opens when it says so itself. Matched on the head with any
+#: byte-order mark and leading whitespace removed, lower-cased.
+_HTML_OPENINGS: tuple[bytes, ...] = (b"<!doctype html", b"<html")
 _TEXT_SUFFIXES = frozenset({".txt", ".md", ".markdown", ".rst", ".log", ".json", ".xml"})
 
 
@@ -174,6 +179,12 @@ def sniff(path: Path) -> Detection:
     if suffix in _TABULAR_SUFFIXES and _is_texty(head):
         return Detection(DocumentKind.SPREADSHEET, suffix.lstrip("."))
 
+    if _is_texty(head) and (
+        suffix in _HTML_SUFFIXES
+        or head.removeprefix(b"\xef\xbb\xbf").lstrip().lower().startswith(_HTML_OPENINGS)
+    ):
+        return Detection(DocumentKind.HTML, "html")
+
     if _is_texty(head):
         label = suffix.lstrip(".") if suffix in _TEXT_SUFFIXES else "text"
         return Detection(DocumentKind.PLAIN_TEXT, label)
@@ -182,8 +193,8 @@ def sniff(path: Path) -> Detection:
         DocumentKind.UNKNOWN,
         "binary",
         advice=(
-            "This does not look like any format read here (PDF, DXF, STEP/IGES/STL, "
-            "spreadsheet, or plain text). Export it as PDF and attach that."
+            "This does not look like any format read here (PDF, Word, PowerPoint, Excel, "
+            "CSV, HTML, DXF, STEP/IGES/STL, or plain text). Export it as PDF and attach that."
         ),
     )
 
@@ -233,22 +244,37 @@ def _looks_like_ascii_dxf(head: bytes) -> bool:
     return len(lines) >= 2 and lines[0] == "0" and lines[1] == "SECTION"
 
 
-def _is_texty(head: bytes) -> bool:
-    """Whether the head decodes as text with no NUL bytes.
+#: The control bytes ordinary text contains: tab, line feed, form feed, carriage
+#: return. Any other byte below 0x20 in the head means the file is not text.
+_TEXT_CONTROLS = frozenset(b"\t\n\x0c\r")
 
-    A NUL is the reliable signal of a binary file: it cannot appear in UTF-8
-    text, and every format above that is not caught by a magic number and is not
-    text has one within the first few kilobytes.
+
+def _is_texty(head: bytes) -> bool:
+    """Whether the head is text: UTF-8, or a single-byte encoding, with no NUL.
+
+    A NUL is the reliable signal of a binary file: it cannot appear in text, and
+    every format above that is not caught by a magic number and is not text has
+    one within the first few kilobytes.
+
+    **Text that is not UTF-8 is still text.** Until 2026-09-14 this required a
+    UTF-8 decode, so a CSV saved by Excel on Windows -- Windows-1252 by default --
+    with one `°` or `µ` in it was classified as binary and refused with "export
+    it as PDF", before any reader saw it. A head with no control bytes beyond
+    tab and the line endings is text in *some* single-byte encoding; which one
+    is the reader's guess to make and to say (`structure.decode_text`).
     """
     if b"\x00" in head:
         return False
     try:
         head.decode("utf-8")
+        return True
     except UnicodeDecodeError:
-        # A truncated multi-byte sequence at the sniff boundary is not evidence
-        # of a binary file; retry without the tail.
-        try:
-            head[:-4].decode("utf-8")
-        except UnicodeDecodeError:
-            return False
-    return True
+        pass
+    # A truncated multi-byte sequence at the sniff boundary is not evidence of a
+    # binary file; retry without the tail.
+    try:
+        head[:-4].decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        pass
+    return all(byte >= 0x20 or byte in _TEXT_CONTROLS for byte in head)

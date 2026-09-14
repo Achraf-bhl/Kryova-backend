@@ -54,6 +54,17 @@ faiss-cpu==1.15.0
 # a PDF silently indexes nothing.
 pypdf==6.4.0
 
+# Reading attachments (app/documents/, master plan P4.2). Both MIT.
+# `ezdxf` also writes DXF (app/manufacture/dxf.py). It was imported by both
+# paths and named in no requirements file until 2026-09-14, so neither could
+# run anywhere built from this file, and tests/test_documents_readers.py --
+# which importorskips it at module level -- skipped every test it holds,
+# the PDF and plain-text ones included.
+# `openpyxl` reads .xlsx. Word, PowerPoint, CSV and HTML need no package: they
+# are read with the standard library (app/documents/office.py says why).
+ezdxf==1.4.4
+openpyxl==3.1.5
+
 # CATIA V5 COM bridge (app/catia/). The marker keeps Linux/macOS installs
 # working -- the bridge imports everywhere and refuses at call time off Windows.
 pywin32==312; sys_platform == "win32"

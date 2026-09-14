@@ -380,3 +380,49 @@ class TestTheRoutes:
 
         assert body["unverified_note"]
         assert "Confirm every dimension" in body["unverified_note"]
+
+
+class TestATableIsStoredAsCells:
+    """P4.2 made a spreadsheet arrive as cells. The row is what the API serves, so
+    a cell dropped in `serialise` is a cell the panel and every later consumer
+    never see -- the structure would exist for one function call."""
+
+    def _stored(self, tmp_path: Path, name: str, content: str) -> dict:
+        from app.documents.readers import read_document
+
+        path = tmp_path / name
+        path.write_text(content, encoding="utf-8")
+        return attachments.serialise(read_document(path))
+
+    def test_a_row_is_stored_with_its_cells_their_headings_and_numbers(
+        self, tmp_path: Path
+    ) -> None:
+        stored = self._stored(tmp_path, "loads.csv", "Case,Fx [N]\nLC1,1200\n")
+        force = stored["fragments"][1]["cells"][1]
+
+        assert force["text"] == "1200"
+        assert force["heading"] == "Fx [N]"
+        assert force["number"] == 1200.0
+        assert force["reliability"] == "transcribed"
+        assert force["cite"].startswith("cell B2 of loads.csv")
+
+    def test_prose_is_stored_with_no_cells(self, tmp_path: Path) -> None:
+        stored = self._stored(tmp_path, "notes.txt", "Wall 8 mm\n")
+        assert stored["fragments"][0]["cells"] == []
+
+    def test_an_unread_entry_keeps_where_it_was(self, tmp_path: Path) -> None:
+        """A workbook refuses per cell. "A formula with no saved result" with no
+        "cell B3" beside it sends the engineer searching the whole sheet."""
+        import openpyxl
+
+        from app.documents.readers import read_document
+
+        workbook = openpyxl.Workbook()
+        workbook.active.append(["Case", "Fx"])
+        workbook.active.append(["LC1", "=1+1"])
+        path = tmp_path / "f.xlsx"
+        workbook.save(path)
+
+        stored = attachments.serialise(read_document(path))
+
+        assert stored["unread"][0]["where"] == 'sheet "Sheet", cell B2'

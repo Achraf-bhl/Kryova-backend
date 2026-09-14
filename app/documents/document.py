@@ -54,9 +54,43 @@ class DocumentKind(enum.Enum):
     SPREADSHEET = "spreadsheet"
     OFFICE = "office"
     DXF = "dxf"
+    HTML = "html"
     CAD_SOLID = "cad_solid"
     IMAGE = "image"
     UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class Cell:
+    """One cell of a table row: what it holds, the column heading it sits under,
+    and a number where there is one.
+
+    **This is what "a load-case table becomes rows with units, not prose" means**
+    (master plan P4.2). A row rendered as one line of text has lost which value
+    was under `Fx [N]`; a row of cells has not, and each cell carries its own
+    `SourceRef`, so "cell C7 of loads.xlsx" is still sayable about the one value
+    a consumer lifted out.
+
+    `heading` is the text of the cell at the top of this column when the reader
+    took a row as headings -- untrusted like everything else, and located at its
+    own cell, so a unit read out of a heading is cited where it was written.
+
+    `number` is set only where the characters *are* a number: a cell a
+    spreadsheet typed as numeric, or text that parses as a plain decimal with
+    nothing around it. `1,200`, `12 mm` and `nan` are not numbers here -- the
+    first is a thousands separator or a decimal comma depending on who wrote it,
+    and deciding which is exactly the guess `provenance` forbids. How far to
+    believe the number is on `text.source.reliability`, not here: a typed cell is
+    `MEASURED`, a string that happened to parse is `TRANSCRIBED`.
+    """
+
+    text: UntrustedText
+    heading: UntrustedText | None = None
+    number: float | None = None
+
+    @property
+    def source(self) -> SourceRef:
+        return self.text.source
 
 
 @dataclass(frozen=True)
@@ -67,10 +101,16 @@ class Fragment:
     own is still fully cited. That redundancy is deliberate: fragments get
     filtered, sorted and passed around, and a citation that lived only on the
     parent would be lost at the first list comprehension.
+
+    `cells` is filled for a `TABLE_ROW` and empty for everything else. The row's
+    `text` is still the whole row, so a consumer that only quotes loses nothing;
+    `cells` is for the consumer that needs to know which value was in which
+    column.
     """
 
     text: UntrustedText
     kind: FragmentKind = FragmentKind.PROSE
+    cells: tuple[Cell, ...] = ()
 
     @property
     def source(self) -> SourceRef:

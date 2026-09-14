@@ -28,9 +28,16 @@ So the tests are in four groups:
   chain; this module adds the metadata, which is a first-class injection channel
   and appears on no page.
 
-`ezdxf` and `pypdf` are both installed here (1.4.4 and 6.4.0 on Python 3.14) and
-`pdftotext` is on PATH, so the DXF and PDF paths below run for real rather than
-against a stub. Where a stub *is* used it is to reach a branch a healthy machine
+`ezdxf` and `pypdf` are both in `requirements.txt` (1.4.4 and 6.4.0), and
+`pdftotext` is on PATH where the poppler tests are not skipped, so the DXF and
+PDF paths below run for real rather than against a stub. **Until 2026-09-14 the
+first half of that sentence was false everywhere but one Windows machine**:
+ezdxf was in no requirements file, the `importorskip` below skipped this whole
+module on Linux and in CI -- the PDF and plain-text tests with it -- and the
+count of one skipped module read like one skipped test.
+
+The spreadsheet, Word, PowerPoint and HTML readers have their own files:
+`test_documents_tables.py`, `test_documents_office.py`, `test_documents_webpage.py`. Where a stub *is* used it is to reach a branch a healthy machine
 cannot — pypdf absent, an extractor that finds no text layer.
 """
 
@@ -298,6 +305,23 @@ class TestTheFormatIsDecidedByTheBytes:
 
         assert document.kind is DocumentKind.PLAIN_TEXT
         assert raw(document) == ["just words"]
+
+    def test_text_that_is_not_utf8_is_still_text(self, tmp_path: Path) -> None:
+        """Excel on Windows saves CSV and text in Windows-1252. Until 2026-09-14 a
+        single `°` sent such a file to "export it as PDF" before any reader saw it."""
+        path = tmp_path / "temps.txt"
+        path.write_bytes("Max 85 °C at the flange\n".encode("cp1252"))
+
+        document = read_document(path)
+
+        assert sniff(path).kind is DocumentKind.PLAIN_TEXT
+        assert [t.raw_for_analysis() for t in document.texts()] == ["Max 85 °C at the flange"]
+        assert any("Windows-1252" in note for note in document.notes)
+
+    def test_a_control_byte_still_marks_a_file_as_binary(self, tmp_path: Path) -> None:
+        path = tmp_path / "blob.txt"
+        path.write_bytes(b"looks like words \x01\x02 then \xb0 not")
+        assert sniff(path).kind is DocumentKind.UNKNOWN
 
     def test_sniffing_never_raises_on_nonsense(self, tmp_path: Path) -> None:
         """`sniff` is the cheap total half of the pair, so a caller that only

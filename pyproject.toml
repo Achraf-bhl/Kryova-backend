@@ -37,22 +37,19 @@ module = [
   "pdfminer",
   "pdfminer.*",
   # `ezdxf` backs DXF export (app/manufacture/dxf.py) and DXF attachment
-  # reading (app/documents/readers.py). Both guard the import and degrade, so
-  # the feature is simply unavailable rather than broken when it is missing --
-  # which is why it has never been in a requirements file.
+  # reading (app/documents/readers.py); `openpyxl` reads Excel attachments
+  # (app/documents/tables.py). Both are in requirements.txt since 2026-09-14,
+  # when P4.2 took the decision this comment used to say a lint config must not
+  # take. Before that ezdxf was declared here only because its missing import
+  # failed the mypy gate in CI on every run -- while neither DXF path could
+  # ever run, and tests/test_documents_readers.py skipped as a whole module.
   #
-  # It is declared here because the three `import-not-found` lines it produced
-  # were **failing the mypy gate in CI on every run**, and were documented in
-  # CLAUDE.md as errors to skim past. A tolerated error is one nobody reads, so
-  # the next real one hides behind it; that is the whole reason this project's
-  # rule is "if mypy prints anything, it is yours".
-  #
-  # This says the import is optional and untyped. It does **not** decide whether
-  # DXF should be a supported feature: today neither path can ever run, and
-  # making them run means adding a real dependency, which is a decision for the
-  # plan and not for a lint config.
+  # They stay listed because neither ships a py.typed marker: this override
+  # says the libraries are untyped upstream, which is a fact about them.
   "ezdxf",
   "ezdxf.*",
+  "openpyxl",
+  "openpyxl.*",
   # `stripe` backs the one payment adapter (app/core/payments.py). It is
   # imported *inside* each method, never at module scope, so a build that does
   # not sell -- which is every self-hosted one, Decision 4 -- neither needs it

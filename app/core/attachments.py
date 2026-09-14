@@ -43,7 +43,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.documents.document import ExtractedDocument, Fragment, FragmentKind
+from app.documents.document import Cell, ExtractedDocument, Fragment, FragmentKind
 from app.documents.errors import ExtractionFailed, UnsupportedDocument
 from app.documents.kinds import sniff
 from app.documents.provenance import SourceRef
@@ -179,8 +179,11 @@ def serialise(document: ExtractedDocument) -> dict[str, Any]:
         "notes": list(document.notes),
         "truncated": len(document.fragments) > len(fragments),
         "fragment_count": len(document.fragments),
+        # `where` was missing until P4.2 gave a workbook something to refuse per
+        # cell: "a formula with no saved result" is no use without "cell B3".
         "unread": [
-            {"what": item.what, "why": item.why} for item in document.unread
+            {"what": item.what, "why": item.why, "where": item.where.locator.describe()}
+            for item in document.unread
         ],
         "fragments": [
             {
@@ -188,9 +191,28 @@ def serialise(document: ExtractedDocument) -> dict[str, Any]:
                 "text": fragment.text.raw_for_analysis(),
                 "where": fragment.text.source.locator.describe(),
                 "cite": fragment.text.source.cite(),
+                "cells": [_cell(cell) for cell in fragment.cells],
             }
             for fragment in fragments
         ],
+    }
+
+
+def _cell(cell: Cell) -> dict[str, Any]:
+    """One table cell as stored: its value, its column heading, and where each was read.
+
+    The heading is stored as text beside the value rather than by reference to
+    the heading row, so a row lifted out of the list still says which column
+    each value was under. `reliability` is per cell because it differs within a
+    row -- a typed number is `measured` and the label beside it `transcribed`.
+    """
+    return {
+        "text": cell.text.raw_for_analysis(),
+        "heading": cell.heading.raw_for_analysis() if cell.heading is not None else None,
+        "number": cell.number,
+        "reliability": cell.source.reliability.value,
+        "where": cell.source.locator.describe(),
+        "cite": cell.source.cite(),
     }
 
 

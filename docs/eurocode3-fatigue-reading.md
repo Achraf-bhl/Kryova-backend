@@ -1,9 +1,24 @@
 # EN 1993-1-9:2005 (fatigue of steel) — reading record for master plan E8.3 and E8.5
 
-**Status: read, not yet encoded.** Written 2026-09-14 while E8.1, E8.2 and E8.4 closed, so the
-session that builds the weld catalogue (E8.3) and the hot-spot method (E8.5) does not have to find
-and read the standard again. One fact from it is already in code: the failure probability of a
-detail category (`app/fatigue/material.py`, `EC3_FAILURE_PROBABILITY`), quoted below.
+**Status: Tables 8.3–8.5, B.1, 3.1, §7.2.1 and §8 encoded on 2026-09-15** (master plan E8.3), in
+`app/fatigue/weld_catalogue.py` and `app/fatigue/eurocode3.py`, with the shear curve in
+`app/fatigue/material.py`. Every row was re-read on its page image before it reached code. Written
+first on 2026-09-14, so the session that built the catalogue did not have to find the standard
+again. The hot-spot method (E8.5) has not used it yet.
+
+**Three things the re-reading found, which the notes below did not say:**
+
+- **Read a figure's labels at 400 dpi.** At 110 dpi Figure 7.1's top curve label reads "180". At
+  400 dpi it is 160, which is the value the standard defines. A test pins the set.
+- **Table 8.5 detail 1 has a gap.** Its rows are "ℓ<50 mm" and "50<ℓ≤80", so ℓ = 50 mm is in
+  neither. The catalogue returns both rows, flagged `on_boundary`, instead of choosing one.
+- **Some rows overlap, and some joints are in no row.** Table 8.4 detail 4 gives 90 for
+  "r/ℓ ≥ 1/3 or r>150mm" and 71 for "1/6 ≤ r/ℓ ≤ 1/3", so r/ℓ = 1/3, or r > 150 with a small r/ℓ,
+  is both. Table 8.3 requires NDT for every two-sided plate splice, so one without NDT is in no row.
+  Transverse attachments (Table 8.4 details 6–8) stop at ℓ = 80 mm.
+
+§7.2.1 is on page 17 (PDF page 1042), not page 18; Figure 7.4 is on page 18. §7.1(4) and (5) on page
+17 say which tables are for nominal stress and that Annex B is for geometric stress.
 
 **These are notes, not quotations, except where quotation marks say otherwise.** The PDF's text layer
 is a poor OCR (`,6,Gc` for Δσc), so the tables were read from page images rendered at high
@@ -27,6 +42,7 @@ A university copy (`library.um.edu.mo`) failed its TLS certificate check and was
 | 1039 | 14 | §7.1 (1)–(2) |
 | 1040 | 15 | Figure 7.1, §7.1 (3) |
 | 1041 | 16 | Figure 7.2, NOTES 1–3 |
+| 1042 | 17 | Figure 7.3, §7.1(4)–(5), §7.2.1 |
 | 1043 | 18 | Figure 7.4, §7.2.2, §8 |
 | 1047–1048 | 22–23 | Table 8.3, transverse butt welds |
 | 1049 | 24 | Table 8.4, weld attachments and stiffeners |
@@ -40,14 +56,14 @@ Render a page with `pdftoppm -f <pdf page> -l <pdf page> -r 200 -png <pdf> page`
 - **7.1(1)**: the category number is the reference fatigue strength at 2 million cycles, in N/mm².
 - **7.1(2)**, direct stress: Δσ_R^m·N_R = Δσ_C^m·2·10⁶ with m = 3 for N ≤ 5·10⁶. Constant-amplitude
   limit Δσ_D = (2/5)^(1/3)·Δσ_C ≈ 0.737·Δσ_C. **Shear**: Δτ_R^m·N_R = Δτ_C^m·2·10⁶ with **m = 5 for
-  N ≤ 10⁸**, and cut-off Δτ_L = (2/100)^(1/5)·Δτ_C ≈ 0.457·Δτ_C. The code has the direct-stress curve
-  only (`WeldDetail`); the shear curve is not encoded.
+  N ≤ 10⁸**, and cut-off Δτ_L = (2/100)^(1/5)·Δτ_C ≈ 0.457·Δτ_C. Encoded as `ShearDetail`.
 - **7.1(3)**, direct stress under a spectrum that crosses Δσ_D: m = 3 to 5·10⁶, then
   Δσ_R^m·N_R = Δσ_D^m·5·10⁶ with m = 5 from 5·10⁶ to 10⁸, and cut-off
   Δσ_L = (5/100)^(1/5)·Δσ_D ≈ 0.549·Δσ_D.
 - **Figure 7.1**, direct-stress categories: 160, 140, 125, 112, 100, 90, 80, 71, 63, 56, 50, 45, 40,
-  36. **Figure 7.2**, shear categories: 100 and 80. `WeldDetail` accepts any positive number today;
-  validating membership of this set belongs to E8.3.
+  36. **Figure 7.2**, shear categories: 100 and 80. Catalogue rows are checked against these sets.
+  `WeldDetail` still accepts any positive number, because §7.1(5)'s NOTE lets a National Annex give
+  categories for details the tables do not cover.
 - **NOTE 1** (p. 16), quoted: Δσc for a detail determined from tests was calculated "for a 75%
   confidence level of 95% probability of survival for log N, taking into account the standard
   deviation and the sample size and residual stress effects", with not fewer than 10 data points,

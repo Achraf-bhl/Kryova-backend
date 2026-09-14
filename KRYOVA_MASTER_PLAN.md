@@ -64,7 +64,7 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-14** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-15** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
@@ -72,7 +72,7 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 |---|---|---|---|
 | Engineering — E1–E23 | 15/24 | 98/132 = 74% | 110/151 eng-months = 73% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 144/193 = 75% | 137/189 eng-months = 73% |
+| **Programme** | 21/34 | 145/193 = 75% | 138/189 eng-months = 73% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -80,7 +80,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 50%, E15 70%, E18 50%, P4 75%, P9 57% |
+| in flight | E8 58%, E15 70%, E18 50%, P4 75%, P9 57% |
 | nothing finished yet | E9, E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2090,8 +2090,38 @@ analyst.**
 3. **Weld classification** — BS 7608 / Eurocode 3 detail categories; where a welded frame lives or
    dies; judgement, not arithmetic. EN 1993-1-9:2005 was read on 2026-09-14, and the page map and
    notes are in `docs/eurocode3-fatigue-reading.md`: Tables 8.3–8.5, the shear curve, γMf, §8's
-   range limit and interaction rule. None of it is encoded except the curve's failure probability.
+   range limit and interaction rule. All of that was encoded on 2026-09-15 (status below).
    **BS 7608 has not been read**, and nothing may claim it until someone does.
+   > PARTIAL (2026-09-15) — **EN 1993-1-9's weld tables are in code, and a joint is classified
+   > into the rows it can still be, never into one.** `app/fatigue/weld_catalogue.py` holds 91 rows
+   > from Tables 8.3, 8.4, 8.5 and B.1. Each has its category, its details, its page, and its
+   > description and requirements quoted. Every row was re-read on a page image before encoding;
+   > the text layer is broken OCR, and one label (160) rendered as "180" until read at 400 dpi.
+   > `classify(joint, facts, basis=…)` returns every row no known fact contradicts, with the
+   > lowest named conservative per stress kind. It also lists the facts that would narrow the set,
+   > and what each candidate's facts left unconfirmed. **The reading is literal**: a row is excluded
+   > only by a condition that row states, so a one-sided weld checked by NDT keeps Table 8.3
+   > detail 13's 36 row beside its 71. Extra candidates can only lower the conservative category.
+   > Found on the page and encoded as found: Table 8.5 detail 1 covers ℓ < 50 and 50 < ℓ ≤ 80 and
+   > nothing at ℓ = 50, so both neighbours come back flagged; Table 8.4 detail 4's 90 and 71 rows
+   > overlap; a two-sided plate splice without NDT is in no row of Table 8.3; transverse
+   > attachments stop at ℓ = 80. The basis is enforced: Tables 8.x for nominal stress (§7.1(4)),
+   > B.1 for hot spot (§7.1(5)). `Candidate.detail` builds the curve input, needs the name of
+   > whoever chose the row, and applies k_s where the row carries it (detail 17's eccentric form
+   > included). `app/fatigue/eurocode3.py` holds the rest: the Figure 7.1 and 7.2 category sets;
+   > γMf from Table 3.1 as a recommendation naming the National Annex; §7.2.1's 60% compressive
+   > portion (as-welded refused, and the mean spent so no correction counts it twice); §8(1)'s
+   > range limit; and §8(2)–(3) with exponents 3 and 5. `material.ShearDetail` is the m = 5 shear
+   > curve, cut-off 0.457·Δτc. 49 guards verified by breaking each and watching a named test
+   > fail, restores checked by sha256.
+   > **Not claimed**: BS 7608 (not read); Tables 8.1, 8.2 and 8.6–8.10 (not read or not
+   > encoded); Δσ_E,2 and Δτ_E,2 are inputs, because Annex A and the λ factors have not been
+   > read; Table 8.5 detail 10 is referred to EN 1994-2 and refused; §7.1 NOTE 3's alternative for
+   > asterisk details is not offered; applying NOTE 1's 95% survival to Δτc is a stated reading.
+   > **Choosing the row is still the engineer's**, which is why the task stays *needs an ME*.
+   > Tested by: `tests/test_fatigue_eurocode3.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED — needs an ME.
 
 4. **Duty-cycle definition and damage over a real usage spectrum.**

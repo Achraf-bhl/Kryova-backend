@@ -2015,7 +2015,7 @@ A library, not a product path: nothing here is offered to the agent or served by
    `app/fatigue/`'s federation could not run on any environment built from them. A test that
    `importorskip`s a dependency nobody installs is a test that never runs — check the skip count.
 
-## Fatigue (`app/fatigue/`) — E8 tasks 1, 2 and 4 closed 2026-09-14
+## Fatigue (`app/fatigue/`) — E8 tasks 1, 2 and 4 closed 2026-09-14, task 3 partial 2026-09-15
 
 Counting and damage are pyLife's (Decision 2). What is ours is which history is counted, what a
 result may assume, and the refusals. `__init__.py` gives the reading order.
@@ -2044,6 +2044,15 @@ result may assume, and the refusals. `__init__.py` gives the reading order.
    in `assessment.py` came back uncaught because another session's half-edited kernel module
    raised `AttributeError` at *collection*, so no test ran at all. A "missed" guard whose output
    has no `FAILED` line is a collection failure: read the last line of the run before believing it.
+5. **A weld table is read literally, and a classification never picks.** `weld_catalogue.classify`
+   excludes a row only by a condition *that row* states. Do not tidy it by giving a row the
+   complement of its neighbour's condition. Table 8.3 detail 13's 36 row names no NDT, so NDT does
+   not exclude it, and that is the page. The tables also have gaps and overlaps, encoded as found:
+   ℓ = 50 mm is in no row of Table 8.5 detail 1, and r/ℓ = 1/3 is in two rows of Table 8.4 detail
+   4. An extra candidate only lowers the conservative category; a wrongly removed one raises it.
+6. **Read a figure's labels at 400 dpi.** At the 110 dpi a whole-page render gives, Figure 7.1's
+   top label reads "180"; it is 160. Crop with `pdftoppm -r 400 -x … -y … -W … -H …`. The small
+   grids of Table 8.5 (details 1 and 6) needed 300 dpi to read the bounds.
 
 ## Not solving twice (`app/simulation/cache.py`) — added 2026-09-10 with E15.2
 

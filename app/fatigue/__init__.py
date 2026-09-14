@@ -32,6 +32,8 @@ app/fatigue/
   assessment.py  the judgements: what is refused, what is assumed, what is reported
   field.py       a signed history at a node, from the solver's stress tensor
   duty.py        a life of operating modes, counted without writing it out
+  eurocode3.py   EN 1993-1-9's rules around a category: k_s, γMf, §7.2.1, §8
+  weld_catalogue.py  which categories a welded joint may have, never which it has
 ```
 
 **What this package does not do.** It does not sign anything, and it does not decide
@@ -78,7 +80,7 @@ from app.fatigue.history import (
     SignConvention,
     StressBasis,
 )
-from app.fatigue.material import SNCurve, WeldDetail
+from app.fatigue.material import ShearDetail, SNCurve, WeldDetail
 from app.fatigue.sources import require_source
 
 __all__ = [
@@ -102,6 +104,7 @@ __all__ = [
     "Method",
     "PyLifeBackend",
     "SNCurve",
+    "ShearDetail",
     "SignConvention",
     "StressBasis",
     "StressConcentration",

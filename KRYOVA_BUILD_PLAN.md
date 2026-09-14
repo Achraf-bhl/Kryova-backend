@@ -15,26 +15,22 @@ happened.
 
 ## Now
 
-> **Handoff, 2026-09-14 (late) — E8 is half closed; this is where fatigue starts next.**
-> Session `kryova-backend-4f` closed **E8.1** (`app/fatigue/field.py`: signed stress histories
-> from `SolveOutput.nodal_stress`), **E8.2** (the refusals, pinned in `tests/test_fatigue.py`,
-> plus the EC3 failure-probability default corrected from 0.025 to 0.05) and **E8.4**
-> (`app/fatigue/duty.py`: a whole life counted without expanding it, with the transition
-> cycle). The E8 target is now three tasks, in this order:
-> 1. **E8.3, the EC3 weld catalogue.** EN 1993-1-9 has already been read, and the page map and
->    notes are in `docs/eurocode3-fatigue-reading.md`. **Re-read each table row on its page
->    before it reaches code**: the notes are paraphrase. The plan is a sourced detail
->    catalogue from Tables 8.3–8.5 and B.1. Classification comes from attributes: where one that
->    separates two rows is unknown, it returns the candidate rows with the lowest named, never a
->    pick. Also: the category-set check against Figure 7.1, the shear curve (m = 5 to 10⁸,
->    Δτ_L = 0.457·Δτ_C), k_s, γMf from Table 3.1 as recommended values, the 60% compression rule
->    of 7.2.1 for non-welded details only, and 8(1)'s range limit and 8(3)'s interaction.
->    BS 7608 has not been read, so do not encode it.
-> 2. **E8.5, notch and hot spot.** Peterson or Neuber notch sensitivity with sourced constants,
+> **Handoff, 2026-09-15 — E8 is at 58%. The EC3 weld tables are in; notch and hot spot are next.**
+> Session `kryova-backend-43` moved **E8.3** to PARTIAL. `app/fatigue/weld_catalogue.py` holds
+> 91 rows of Tables 8.3, 8.4, 8.5 and B.1, and a literal classification that never picks.
+> `app/fatigue/eurocode3.py` holds k_s, γMf, §7.2.1 and §8, and `material.ShearDetail` is the
+> shear curve. What stays open in E8.3 needs a document (BS 7608; Tables 8.1, 8.2 and 8.6–8.10;
+> Annex A) or an engineer. E8.1, E8.2 and E8.4 closed on 2026-09-14 (`field.py`, the refusals,
+> `duty.py`). The E8 target is now two tasks, in this order:
+> 1. **E8.5, notch and hot spot.** Peterson or Neuber notch sensitivity with sourced constants,
 >    Neuber elastic-plastic through pyLife's `ExtendedNeuber`/`RambergOsgood`, and a hot-spot
->    extrapolation whose read-out distances are an input with a source (IIW is the usual
->    reference and has not been read).
-> 3. **E8.6, fatigue reaches the product.** It needs `app/simulation/runner.py` to archive
+>    extrapolation whose read-out distances are an input with a source. **Find a source that can
+>    be read before writing any of it.** IIW's fatigue recommendations and DNV-RP-C203 are the
+>    usual ones, and neither has been read. If none can be read, record that as the task's
+>    blocker, and do not type 0.4t and 1.0t from memory. Table B.1's categories are already in
+>    the catalogue (`Joint.HOT_SPOT_*`, basis `HOT_SPOT`), so the extrapolation's output must be
+>    a `StressBasis.HOT_SPOT` history that `classify` and `Assessment` accept.
+> 2. **E8.6, fatigue reaches the product.** It needs `app/simulation/runner.py` to archive
 >    `nodal_stress`. That file is in another session's lane, so ask before editing it.
 > **Findings for the user's other open phases, measured 2026-09-14 and not yet acted on:**
 > - **P9.** The nightly image health check fails because gmsh needs `libgomp.so.1` (run
@@ -281,6 +277,19 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E8 task 3, partial: EN 1993-1-9's weld tables are in code, and a joint is
+  classified into the rows it can still be, never into one. E8 goes from 50% to 58%.**
+  `app/fatigue/weld_catalogue.py` holds 91 rows of Tables 8.3, 8.4, 8.5 and B.1. Each was re-read
+  on a page image and quoted. `classify` excludes a row only by a condition that row states, and
+  names the lowest candidate conservative for each stress kind. `app/fatigue/eurocode3.py` holds
+  the Figure 7.1 and 7.2 category sets, k_s (detail 17's eccentric form included), γMf from
+  Table 3.1 as a recommendation, §7.2.1's 60% rule (as-welded refused), §8(1), and §8(2)–(3).
+  `material.ShearDetail` is the m = 5 shear curve. Found on the pages: Figure 7.1's 160 reads
+  "180" at 110 dpi; Table 8.5 detail 1 leaves ℓ = 50 mm uncovered; Table 8.4 detail 4's 90 and 71
+  rows overlap; a two-sided plate splice without NDT is in no row of Table 8.3. Checks: 109 tests
+  in `tests/test_fatigue_eurocode3.py`; 49 guards broken one at a time and all caught, restores
+  sha256-checked; ruff clean, and mypy clean on 445 files. No public API shape, DB schema or
+  persisted enum changed.
 - **2026-09-14 — E1 task 3 closed: every declared operation is implemented, served, or refused
   with a reason, and a wrong feature can be taken back on the open kernel.** 205 declared = 119
   in `HANDLERS` + 1 served by the dispatcher + 85 in `app/kernel/occt/refusals.py`, and a test

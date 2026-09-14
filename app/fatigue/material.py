@@ -44,6 +44,9 @@ EC3_SLOPE_ABOVE_KNEE: float = 5.0
 #: EN 1993-1-9:2005 §7.1, NOTE 1 after Figure 7.2: Δσc at 2 million cycles was calculated "for a
 #: 75% confidence level of 95% probability of survival for log N". Read from the standard's text.
 EC3_FAILURE_PROBABILITY: float = 0.05
+#: EN 1993-1-9:2005 §7.1(2): shear ranges follow Δτ_R^m·N_R = Δτ_C^m·2·10⁶ with m = 5 for
+#: N ≤ 10⁸, and Δτ_L = (2/100)^(1/5)·Δτ_C is the cut-off (p. 14–15). There is no knee.
+EC3_SHEAR_SLOPE: float = 5.0
 
 
 @dataclass(frozen=True)
@@ -279,13 +282,78 @@ class WeldDetail:
         )
 
 
+@dataclass(frozen=True)
+class ShearDetail:
+    """A detail's shear category Δτ_C, and the single-slope curve EN 1993-1-9 draws for it.
+
+    The sibling of `WeldDetail` for shear stress ranges (Figure 7.2): m = 5 all the way to the
+    cut-off at 10⁸ cycles, with no constant-amplitude knee. Like `WeldDetail`, the category is an
+    argument with a source and any positive value is accepted, because the National Annex may give
+    categories for details the tables do not cover (§7.1(5) NOTE). `weld_catalogue.py` is where a
+    category is checked against the two Figure 7.2 draws.
+    """
+
+    detail_category_mpa: float
+    source: str
+    description: str = ""
+    standard: str = "EN 1993-1-9"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "source", require_source(self.source, "A shear detail category"))
+        if not (self.detail_category_mpa > 0.0 and math.isfinite(self.detail_category_mpa)):
+            raise ValueError(
+                "A shear detail category is the shear stress range Δτc in MPa at 2×10⁶ cycles — "
+                "100 or 80 in EN 1993-1-9 Figure 7.2 — and must be positive."
+            )
+
+    @property
+    def cutoff_limit_mpa(self) -> float:
+        """Δτ_L = (2·10⁶/10⁸)^(1/5)·Δτ_C ≈ 0.457·Δτ_C, in shear stress *range* (§7.1(2)).
+
+        Reported, and **not applied** by `sn_curve()`, for the reason `WeldDetail.cutoff_limit_mpa`
+        gives.
+        """
+        ratio = EC3_REFERENCE_CYCLES / EC3_CUTOFF_CYCLES
+        return self.detail_category_mpa * ratio ** (1.0 / EC3_SHEAR_SLOPE)
+
+    def sn_curve(self, *, failure_probability: float = EC3_FAILURE_PROBABILITY) -> SNCurve:
+        """The shear curve in stress amplitude: slope 5 through (2·10⁶, Δτ_C), continued past 10⁸.
+
+        The curve is anchored at the cut-off (10⁸ cycles, Δτ_L/2) with k1 = k2 = 5, which is the
+        same line as anchoring it at Δτ_C. Continuing it below Δτ_L predicts damage the standard
+        does not, as `WeldDetail.sn_curve` does.
+
+        **The failure probability is a reading.** §7.1 NOTE 1 is written of Δσc, and says nothing
+        of Δτc. It is applied here to shear as well, because the shear categories are given in the
+        same tables and nothing in the standard says they were derived differently. The source says
+        so.
+        """
+        return SNCurve(
+            slope_k1=EC3_SHEAR_SLOPE,
+            slope_k2=EC3_SHEAR_SLOPE,
+            knee_cycles=EC3_CUTOFF_CYCLES,
+            knee_amplitude_mpa=self.cutoff_limit_mpa / 2.0,
+            failure_probability=failure_probability,
+            source=(
+                f"{self.standard} shear detail category {self.detail_category_mpa:g} MPa"
+                + (f" ({self.description})" if self.description else "")
+                + f"; category from: {self.source}"
+                + "; m = 5 to 10⁸ cycles, cut-off not applied (§7.1(2), Figure 7.2)"
+                + "; §7.1 NOTE 1's 95% survival, written of Δσc, read as applying to Δτc"
+            ),
+            standard=self.standard,
+        )
+
+
 __all__ = [
     "EC3_CUTOFF_CYCLES",
     "EC3_FAILURE_PROBABILITY",
     "EC3_KNEE_CYCLES",
     "EC3_REFERENCE_CYCLES",
+    "EC3_SHEAR_SLOPE",
     "EC3_SLOPE_ABOVE_KNEE",
     "EC3_SLOPE_BELOW_REFERENCE",
     "SNCurve",
+    "ShearDetail",
     "WeldDetail",
 ]

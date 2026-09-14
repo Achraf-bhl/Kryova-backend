@@ -30,6 +30,8 @@ app/fatigue/
   factors.py     everything between a laboratory specimen and the real part
   backend.py     the seam to pyLife (Decision 2), and nothing else
   assessment.py  the judgements: what is refused, what is assumed, what is reported
+  field.py       a signed history at a node, from the solver's stress tensor
+  duty.py        a life of operating modes, counted without writing it out
 ```
 
 **What this package does not do.** It does not sign anything, and it does not decide

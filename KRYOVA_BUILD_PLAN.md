@@ -15,6 +15,41 @@ happened.
 
 ## Now
 
+> **Handoff, 2026-09-14 (late) — E8 is half closed; this is where fatigue starts next.**
+> Session `kryova-backend-4f` closed **E8.1** (`app/fatigue/field.py`: signed stress histories
+> from `SolveOutput.nodal_stress`), **E8.2** (the refusals, pinned in `tests/test_fatigue.py`,
+> plus the EC3 failure-probability default corrected from 0.025 to 0.05) and **E8.4**
+> (`app/fatigue/duty.py`: a whole life counted without expanding it, with the transition
+> cycle). The E8 target is now three tasks, in this order:
+> 1. **E8.3, the EC3 weld catalogue.** EN 1993-1-9 has already been read, and the page map and
+>    notes are in `docs/eurocode3-fatigue-reading.md`. **Re-read each table row on its page
+>    before it reaches code**: the notes are paraphrase. The plan is a sourced detail
+>    catalogue from Tables 8.3–8.5 and B.1. Classification comes from attributes: where one that
+>    separates two rows is unknown, it returns the candidate rows with the lowest named, never a
+>    pick. Also: the category-set check against Figure 7.1, the shear curve (m = 5 to 10⁸,
+>    Δτ_L = 0.457·Δτ_C), k_s, γMf from Table 3.1 as recommended values, the 60% compression rule
+>    of 7.2.1 for non-welded details only, and 8(1)'s range limit and 8(3)'s interaction.
+>    BS 7608 has not been read, so do not encode it.
+> 2. **E8.5, notch and hot spot.** Peterson or Neuber notch sensitivity with sourced constants,
+>    Neuber elastic-plastic through pyLife's `ExtendedNeuber`/`RambergOsgood`, and a hot-spot
+>    extrapolation whose read-out distances are an input with a source (IIW is the usual
+>    reference and has not been read).
+> 3. **E8.6, fatigue reaches the product.** It needs `app/simulation/runner.py` to archive
+>    `nodal_stress`. That file is in another session's lane, so ask before editing it.
+> **Findings for the user's other open phases, measured 2026-09-14 and not yet acted on:**
+> - **P9.** The nightly image health check fails because gmsh needs `libgomp.so.1` (run
+>   34822694239), so the Dockerfile's runtime stage lacks `libgomp1`. CI on `main` is red:
+>   run 34902853774 fails
+>   `test_agent_verification.py::TestReadingInCirclesIsALoop::test_six_barren_rounds_are_called_out`
+>   and the office notes test (fixed locally in `5a0f937`, not yet pushed). Run 34901632201 also
+>   failed `test_optimise_levelset.py::test_no_layout_beats_the_convex_bound_in_tension` at 1.14×
+>   on CI's mesh, and that test did not fail in the run after.
+> - **E9.1.** `pychrono` 9.0.1 **does** install from conda-forge inside
+>   `mambaorg/micromamba:1.5.10` (Python 3.12), with `ChSystemNSC` and `ChVector3d` present. So
+>   the blocker is packaging, not availability, and a process-boundary engine shaped like
+>   OpenFOAM's is the route. The stopped container `kryova-chrono-probe` holds the environment.
+>   10.0.0 on the `projectchrono` channel is 534 MB and pulls CUDA.
+
 > **Handoff, 2026-09-14 (evening) — where the next session starts.** E10 closed and committed
 > this day (`*E10`, laminar flow through OpenFOAM). The work is going phase by phase, and a phase
 > is closed to 100% before the next one opens. Read the plan's generated progress block for
@@ -245,6 +280,31 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-14 — E8 tasks 1, 2 and 4: fatigue reads the solver's own stress, counts a whole
+  duty cycle, and refuses what it cannot assess. E8 goes from 20% to 50%; tasks 3, 5 and the new
+  6 stay open.**
+  - **E8.1** `app/fatigue/field.py`: load channels (one solve per load, with a signal) are
+    superposed at a node into a signed scalar history (plane component, principal or signed von
+    Mises), and the history reports its own principal-axis rotation and hydrostatic sign flips.
+    It was verified on a tet4 and a tet10 bar through `LinearStaticSolver` (F/A to 1e-9, and the
+    Basquin damage equal to the hand sum).
+  - **E8.4** `app/fatigue/duty.py`: modes × repetitions × passes are counted from small counts
+    using count(Aʳ) = r·closed(A) + (r−1)·closed(R⧺R). The residue identity it rests on is
+    checked on every count. The result matches brute force on the expanded history, 4,000 cases
+    before writing and 60 in the suite, and a million passes take under 5 s.
+  - **E8.2** had no refusal tests: its status cited "`tests/` under `app/fatigue/`", which is no
+    file. `tests/test_fatigue.py` now holds them.
+  - **Defect fixed:** `WeldDetail.sn_curve` defaulted to failure probability 0.025. EN
+    1993-1-9 §7.1 NOTE 1 says 95% survival, which is 0.05, and the old test asserted 0.025 under
+    a comment saying "95% survival".
+  - **A docstring was naming a file that does not exist** (`field.py` sent hot-spot stresses to
+    `hotspot.py`). Fixed before commit.
+  - 55 guards were verified by breaking each: field 20, assessment 19, duty 13, material 2,
+    factors 1. The first mutation run lost 15 items to another session's half-edited kernel
+    (`AttributeError` at collection) and re-ran them on a clean import.
+  - New plan task **E8.6**, fatigue reaching the product: the archive drops the tensor.
+    `docs/eurocode3-fatigue-reading.md` records the EC3 reading for E8.3 and E8.5.
+  - Written on Linux; no seat claim. The E8 phase proof needs a mechanical engineer.
 - **2026-09-14 — P4 task 2, structured readers: spreadsheets, CSV, Word, PowerPoint and HTML are
   read into located cells, slides and paragraphs. Still partial.** The code landed in `3d6fa76`.
   This entry records its verification, and one fix the verification forced.

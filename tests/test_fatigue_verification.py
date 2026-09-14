@@ -433,8 +433,9 @@ class TestEurocode3WeldCurve:
         curve = WeldDetail(detail_category_mpa=71.0, source="ME").sn_curve()
         assert curve.slope_k1 == pytest.approx(3.0)
         assert curve.slope_k2 == pytest.approx(5.0)
-        # And the standard's categories are 95% survival curves, not medians.
-        assert curve.failure_probability == pytest.approx(0.025)
+        # EN 1993-1-9 §7.1 NOTE 1: 95% probability of survival, so 5% failure — not a median.
+        assert curve.failure_probability == pytest.approx(0.05)
+        assert "95% survival" in curve.source
 
 
 class TestFailureProbabilityTransform:

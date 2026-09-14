@@ -70,9 +70,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 95/131 = 73% | 108/151 eng-months = 71% |
+| Engineering — E1–E23 | 15/24 | 97/132 = 73% | 110/151 eng-months = 73% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 142/192 = 74% | 135/189 eng-months = 72% |
+| **Programme** | 21/34 | 144/193 = 75% | 137/189 eng-months = 73% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -80,8 +80,8 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E15 70%, E18 50%, P4 75%, P9 57% |
-| nothing finished yet | E8, E9, E13, E17, E21, E22, E23, P6, P7 |
+| in flight | E8 50%, E15 70%, E18 50%, P4 75%, P9 57% |
+| nothing finished yet | E9, E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -1977,23 +1977,101 @@ trilinear curves. **The library is 20% of this phase. The methodology is 80%, an
 analyst.**
 
 1. **pyLife against the federation's stress output.**
+   > DONE (2026-09-14) — **a fatigue history is read off the federation's own stress output.**
+   > `app/fatigue/field.py` takes `SolveOutput.nodal_stress` (the (n, 6) tensor in Voigt order
+   > SXX SYY SZZ SXY SYZ SZX, from the in-house solver and CalculiX alike) as one `LoadChannel`
+   > per independently solved load, each with its dimensionless signal, superposes
+   > σ(t) = Σ s_k(t)·σ_k, and reads a **signed** scalar at a node — the history `history.py` has
+   > refused to take from von Mises since 2026-09-06. Three, each with its failure stated: the
+   > normal stress on a declared plane (linear, so exact under any number of channels); the
+   > principal stress of largest magnitude (the history reports how far the axis rotated, since a
+   > rotating axis is not the stress on one plane); von Mises signed by the hydrostatic stress (the
+   > history counts the sign flips, which manufacture a full-range cycle under torsion).
+   > `ranked_nodes` chooses where to assess by range, 4,096 nodes at a time; `nearest_node`
+   > reports its distance rather than hiding it. Refused by name: a solve with no tensor, a
+   > hot-spot basis read from a nodal value, a component with no plane, channels whose node
+   > counts differ (two meshes with one node count are not told apart; the caller owns that).
+   > Verified on a real solve: a bar meshed tet4 and tet10 through `LinearStaticSolver`
+   > reads F/A = 25 MPa at every node, a reversed signal reads ±25 MPa in both signed scalars, and
+   > the Basquin damage pyLife counts equals the hand sum. 20 guards verified by breaking each and
+   > watching a named test fail, restores checked by sha256.
+   > **Not claimed**: a nonlinear solve (none exists behind the seam, and `LoadChannel.solver` is
+   > carried for the refusal it will need); a critical-plane method for non-proportional loading;
+   > **any product path** — the simulation archive stores von Mises and displacements and not the
+   > tensor (`runner.py`), so nothing a user runs can be read into a history yet. That is task 6.
+   > Tested by: `tests/test_fatigue_field.py`, `tests/test_fatigue_verification.py`.
+
+   <!-- superseded 2026-09-14 -->
    > PARTIAL (2026-09-06) — **pyLife installs and imports on Python 3.14**, which was the open
    > question. Rainflow and damage federated to it per Decision 2, with the load-history/factor/
    > provenance vocabulary ours. Verified against closed form (exact cycle count, Miner
    > arithmetic). Tested by: `tests/` under `app/fatigue/`. Code: `app/fatigue/`.
 
 2. **Mean-stress correction, surface finish, size and reliability factors.**
+   > DONE (2026-09-14) — **every factor and correction the assessment applies is refused, stated
+   > or sourced, and each refusal is pinned by a test that fails when it is removed.** The code
+   > shipped on 2026-09-06 with its closed-form arithmetic tested and its refusals untested; the
+   > earlier status named "`tests/` under `app/fatigue/`", which is no file. `tests/test_fatigue.py`
+   > now holds them: an unsigned history is not counted; a flat history is `UNMEASURED`, never a
+   > zero damage; the notch is applied exactly once (a Kt on a notch-root or hot-spot stress is
+   > refused, a nominal stress with none is unmeasured); the surface and size factors cannot be
+   > left out, and one factor given twice is refused rather than squared; a survival probability
+   > needs the curve's scatter; a tensile mean needs FKM's M, or a written justification for
+   > declaring it irrelevant; a missing pyLife is a finding naming it, not a crash; Kf taken as Kt,
+   > Miner original and an unclosed residue are each stated.
+   > **A defect fixed:** `WeldDetail.sn_curve` defaulted to a failure probability of 0.025, under
+   > a test comment saying "95% survival". EN 1993-1-9:2005 §7.1 (NOTE 1 after Figure 7.2) says
+   > Δσc was calculated "for a 75% confidence level of 95% probability of survival for log N" —
+   > 0.05, now `EC3_FAILURE_PROBABILITY`, with the confidence level carried in the curve's source.
+   > 22 guards verified by breaking each (19 in `assessment.py`, 1 in `factors.py`, 2 in
+   > `material.py`). **Not claimed**: that any factor value suits any part. None is defaulted;
+   > choosing them is the engineer's, which is why the phase is marked *needs an ME*.
+   > Tested by: `tests/test_fatigue.py`, `tests/test_fatigue_verification.py`.
+
+   <!-- superseded 2026-09-14 -->
    > PARTIAL (2026-09-06) — every factor a qualified engineer must choose is an explicit input
    > with a source field rather than a buried default.
 
 3. **Weld classification** — BS 7608 / Eurocode 3 detail categories; where a welded frame lives or
-   dies; judgement, not arithmetic.
+   dies; judgement, not arithmetic. EN 1993-1-9:2005 was read on 2026-09-14, and the page map and
+   notes are in `docs/eurocode3-fatigue-reading.md`: Tables 8.3–8.5, the shear curve, γMf, §8's
+   range limit and interaction rule. None of it is encoded except the curve's failure probability.
+   **BS 7608 has not been read**, and nothing may claim it until someone does.
    > NOT STARTED — needs an ME.
 
 4. **Duty-cycle definition and damage over a real usage spectrum.**
+   > DONE (2026-09-14) — **a duty cycle of operating modes is counted over a whole life without
+   > expanding it, and the transition cycle between modes is in the count.** `app/fatigue/duty.py`:
+   > a `Mode` is a signed block history repeated a sourced number of times per pass
+   > (`Mode.from_hours` converts hours of use at a block length); a `DutyCycle` is the modes in
+   > order, repeated `passes` times over the life. `count` returns one `Collective` for
+   > `Assessment`, keeping the per-mode counts and the transitions apart for the reviewer. It rests
+   > on two identities of the three-point count, count(Aʳ) = r·closed(A) + (r−1)·closed(R⧺R) and
+   > the same over the sequence of the modes' residues, and both rest on residue(R⧺R) = R, which
+   > is **checked on every count** and refused (`DutyError`) where it fails. Verified against
+   > brute-force counting of the expanded history, cycle for cycle and in the residue: 60 random
+   > duty cycles in the suite, 4,000 before the module was written, zero mismatches. A million
+   > passes count in under 5 s and equal the exact linear growth of the expanded counts at
+   > N = 2 and 3. ±100 MPa about 0 then ±50 MPa about 300 carries a 450 MPa transition range that
+   > a per-mode sum caps at 200. 13 guards verified by breaking each.
+   > **Not claimed**: a usage spectrum for any real machine — every repetition count is an input
+   > with a source and none has been measured; sequence effects on damage (Miner is sequence-blind,
+   > and the assessment says so); modes that interleave at random rather than in a fixed order.
+   > Tested by: `tests/test_fatigue_duty.py`.
+
+   <!-- superseded 2026-09-14 -->
    > NOT STARTED.
 
-5. **Notch handling, hot-spot stress extrapolation.**
+5. **Notch handling, hot-spot stress extrapolation.** Annex B's hot-spot categories are in
+   `docs/eurocode3-fatigue-reading.md`. The extrapolation's read-out distances are not in the pages
+   read there and must be sourced before a method claims any.
+   > NOT STARTED.
+
+6. **Fatigue reaches the product.** Added 2026-09-14, when task 1 closed as a library. The
+   simulation archive keeps von Mises and displacements and drops the tensor, so no run a user
+   makes can be read into a history. Archive `nodal_stress`, serve a node's history and its
+   assessment through a route, offer the agent a tool, and test the path through the agent
+   (CLAUDE.md *Testing* item 8), not only through the function.
    > NOT STARTED.
 
 ##### Phase E9 — Multibody dynamics: where load cases actually come from #####

@@ -1751,6 +1751,10 @@ difference between the two machines hides in whatever neither one has to state o
    `TestContinuousIntegration` are what keep it that way.
 4. **`pip install pychrono` installs an unrelated package and succeeds.** The engine probe checks
    the module really is Chrono. There is no dynamics engine and the docstrings say so.
+   **The real Chrono does install from conda-forge** (measured 2026-09-14): `pychrono` 9.0.1 in
+   `mambaorg/micromamba:1.5.10` with Python 3.12, `ChSystemNSC` and `ChVector3d` present. It is
+   conda-only, and so cannot join this venv. The route is a process boundary in a container, the
+   shape `app/solve/openfoam/` already has.
 5. **The in-memory rate-limiter backend is per-process.** `RedisBackend` exists in
    `api/rate_limit.py`; with `InMemoryBackend` selected, multiple workers each enforce their own
    budget. Check which backend is configured before reasoning about a limit. **Since P1.6 the
@@ -1990,6 +1994,36 @@ A library, not a product path: nothing here is offered to the agent or served by
    declared both for weeks while no requirements file installed either, so `OpenMdaoDriver` and
    `app/fatigue/`'s federation could not run on any environment built from them. A test that
    `importorskip`s a dependency nobody installs is a test that never runs — check the skip count.
+
+## Fatigue (`app/fatigue/`) — E8 tasks 1, 2 and 4 closed 2026-09-14
+
+Counting and damage are pyLife's (Decision 2). What is ours is which history is counted, what a
+result may assume, and the refusals. `__init__.py` gives the reading order.
+
+1. **A history must be signed, and `field.py` is where the sign comes from.** `history.py` refuses
+   von Mises, because a fully reversed cycle reads in it as two half-range cycles. `field.py`
+   superposes one `LoadChannel` per solved load and reads a plane component, the principal stress
+   of largest magnitude, or signed von Mises. Each reports its own failure: the principal axis's
+   rotation, and the hydrostatic sign flips. **Superposition is exact only for a linear solve**,
+   and every structural `Solver` here is linear. `LoadChannel.solver` is carried for the day one
+   is not.
+2. **Never sum per-mode counts over a duty cycle.** The largest cycle a machine sees runs from one
+   mode's trough to another's peak, so it closes once per pass and is in no mode's count.
+   `duty.py` counts the life from small counts using count(Aʳ) = r·closed(A) + (r−1)·closed(R⧺R),
+   which holds only because residue(R⧺R) = R. **That identity is checked on every count, not
+   assumed.** The first version counted closed(S) once instead of N times and disagreed with
+   brute force in 111 of 300 cases. **A brute-force count of the expanded history is the oracle**
+   for anything that decomposes a count. Copy `tests/test_fatigue_duty.py`.
+3. **An EC3 detail category is a 95%-survival curve, and the failure probability is 0.05.** EN
+   1993-1-9 §7.1 NOTE 1 says "a 75% confidence level of 95% probability of survival for log N".
+   The code said 0.025, the mean-minus-two-standard-deviations habit, and a test pinned it under a
+   comment saying 95%. `docs/eurocode3-fatigue-reading.md` is the reading record, with a page map.
+   **The PDF's text layer is broken OCR** (`,6,Gc` for Δσc), so read the tables from rendered page
+   images, and re-read a row on its page before it reaches code.
+4. **A mutation run on a shared tree can be void, and it reports as "missed".** Fifteen breaks
+   in `assessment.py` came back uncaught because another session's half-edited kernel module
+   raised `AttributeError` at *collection*, so no test ran at all. A "missed" guard whose output
+   has no `FAILED` line is a collection failure: read the last line of the run before believing it.
 
 ## Not solving twice (`app/simulation/cache.py`) — added 2026-09-10 with E15.2
 

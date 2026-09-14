@@ -34,13 +34,16 @@ from app.fatigue.sources import require_source
 #: Eurocode 3 Part 1-9 fixes the reference life of a detail category at 2e6 cycles,
 #: the constant-amplitude fatigue limit at 5e6, and the cut-off at 1e8, with slope
 #: m = 3 up to the first and m = 5 between the first and second. Everything
-#: `WeldDetail.eurocode_3` computes follows from those five numbers by continuity, so
+#: `WeldDetail.sn_curve` computes follows from those five numbers by continuity, so
 #: they are named rather than inlined and the derivations are checkable arithmetic.
 EC3_REFERENCE_CYCLES: float = 2.0e6
 EC3_KNEE_CYCLES: float = 5.0e6
 EC3_CUTOFF_CYCLES: float = 1.0e8
 EC3_SLOPE_BELOW_REFERENCE: float = 3.0
 EC3_SLOPE_ABOVE_KNEE: float = 5.0
+#: EN 1993-1-9:2005 §7.1, NOTE 1 after Figure 7.2: Δσc at 2 million cycles was calculated "for a
+#: 75% confidence level of 95% probability of survival for log N". Read from the standard's text.
+EC3_FAILURE_PROBABILITY: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -228,7 +231,7 @@ class WeldDetail:
         ratio = EC3_KNEE_CYCLES / EC3_CUTOFF_CYCLES
         return self.constant_amplitude_limit_mpa * ratio ** (1.0 / EC3_SLOPE_ABOVE_KNEE)
 
-    def sn_curve(self, *, failure_probability: float = 0.025) -> SNCurve:
+    def sn_curve(self, *, failure_probability: float = EC3_FAILURE_PROBABILITY) -> SNCurve:
         """The EC3 design curve for this detail, converted to stress amplitude.
 
         Three things a reviewer must know, all of them consequences of the
@@ -250,10 +253,15 @@ class WeldDetail:
           down — rather than with a mean-stress correction of zero, which would
           look identical and mean something different.
 
-        `failure_probability` defaults to 0.025 because EC3's categories *are*
-        the 95% survival curves (mean minus two standard deviations), not median
-        curves. Passing 0.5 would claim a median curve and understate the design
-        margin by roughly a factor of two in life.
+        `failure_probability` defaults to 0.05 because EN 1993-1-9 §7.1 (NOTE 1
+        after Figure 7.2) says Δσc was calculated "for a 75% confidence level of
+        95% probability of survival for log N" — a 5% failure probability, read
+        to that level of confidence. It is not a median curve: passing 0.5 would claim one and
+        understate the design margin by roughly a factor of two in life. The 75%
+        confidence level has no field on `SNCurve` and is carried only in words,
+        in the curve's source. Until 2026-09-14 this default was 0.025, the
+        mean-minus-two-standard-deviations reading, which the standard's text
+        does not say.
         """
         return SNCurve(
             slope_k1=EC3_SLOPE_BELOW_REFERENCE,
@@ -265,6 +273,7 @@ class WeldDetail:
                 f"{self.standard} detail category {self.detail_category_mpa:g} MPa"
                 + (f" ({self.description})" if self.description else "")
                 + f"; category from: {self.source}"
+                + "; Δσc is the 75% confidence level of 95% survival for log N (§7.1, NOTE 1)"
             ),
             standard=self.standard,
         )
@@ -272,6 +281,7 @@ class WeldDetail:
 
 __all__ = [
     "EC3_CUTOFF_CYCLES",
+    "EC3_FAILURE_PROBABILITY",
     "EC3_KNEE_CYCLES",
     "EC3_REFERENCE_CYCLES",
     "EC3_SLOPE_ABOVE_KNEE",

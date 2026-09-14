@@ -21,8 +21,14 @@ happened.
 > today's counts; do not trust a number typed here.
 > Still open: E8, E9, E13, E15, E17, E18, E21, E22, E23, P4, P6, P7, P9. Read each open task's
 > status line in the master plan and take the ones Linux can close first.
-> **Next unit of work: E15.2's cache key.** It never includes a measured solver version, which
-> its own status line claims it does; fix that before surveying P4.
+> **E15.2's cache key was fixed later the same evening.** E15's three remaining residuals are
+> not closable here: the CATScript half of task 1 needs a seat, autoscale in task 2 needs a
+> fleet, and crash recovery in task 4 needs a seat.
+> **Next unit of work: P4 task 2, the extraction pipeline.** No spreadsheet or DOCX reader is
+> installed (`openpyxl`, `python-docx`, Docling and MarkItDown are all absent), and the phase
+> proof asks for two paths nothing provides yet: a load-case spreadsheet that becomes a
+> provenance-tagged load case, and a STEP attachment that becomes a `GeometryVersion`. Read P4.2's
+> status line first.
 > Say plainly when hardware or a mechanical engineer blocks a task, rather than marking it.
 > Standing flags carried forward, none fixed yet:
 > - E19's phase proof (review by someone outside CE) is still owed.
@@ -238,6 +244,42 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-14 — E15 task 2 corrected: the job cache binds the engine that computes an answer,
+  read before the run. Until today it bound nothing.** The key hashed `job.solver_version`, which
+  the runner sets only after the solve, so every key carried one "unknown" sentinel and unknown
+  matched unknown. A CalculiX upgrade, or a fix to the in-house solver, would have been served the
+  old build's results, and a test pinned "two unmeasured versions match" as a feature. Underneath
+  it, the runner asked the registry for the version of `linear-static`, a backend that does not
+  exist, so **every in-house result was stored with `solver_version` null**.
+
+  How the key binds now:
+  - `cache.engine_for` names the engine before the run: CalculiX by version and binary sha256,
+    the in-house solvers by source fingerprint (V&V's set plus runner and coupling) with numpy and
+    scipy versions, OpenFOAM by image id. Every engine also carries the gmsh version.
+  - An identity that cannot be read means no key.
+  - `runner.backend_for` is the one answer to "which backend", used by the route and the cache.
+    A plane run is `internal`.
+  - `cache.unbound` clears a row's key after a run that a different backend answered, or whose
+    engine moved mid-run.
+  - The ccx version memo is keyed on path, size and mtime.
+
+  **Interface changes, plainly:** no migration and no response shape change.
+  - `cache.Inputs` loses `solver_version`, and `engine` becomes required.
+  - `KEY_VERSION` 4: every existing key misses once.
+  - `cache.UNKNOWN_VERSION` is removed.
+  - New `registry.OPENFOAM`, `backend_of` and `calculix_identity`, and `runner.backend_for`.
+  - **An in-house run's `solver_version` goes from null to `<APP_VERSION>+<git sha>`.**
+  - A queued plane row names `internal` instead of `SOLVER_BACKEND`.
+
+  17 guards broken, all caught, every restore sha256-checked. V&V re-recorded (`registry.py` is
+  under `app/solve/`), outcomes unchanged to round-off.
+  **Flagged, not fixed:**
+  - The agent's `run_simulation` labels a queued row `linear-static` whatever `SOLVER_BACKEND`
+    says.
+  - The `solve.conduction` and `solve.plane` spans are still unmetered.
+
+  Full suite **8737 passed / 0 failed / 12 skipped / 1 xpassed** (14 min 26 s). Tested by
+  `tests/test_simulation_cache.py`, `tests/test_solver_registry.py`, `tests/test_simulations.py`.
 - **2026-09-14 — E10 task 2, and `*E10`: laminar flow and the heat it carries, through a real
   OpenFOAM, held to four closed forms and wired through the job.** New package
   `app/solve/openfoam/` (case, surface, dictionaries, run, results, solver). OpenFOAM is a separate

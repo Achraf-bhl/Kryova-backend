@@ -2661,6 +2661,53 @@ answerable meaning.
 
 2. **Simulation compute**: queue, autoscale, result caching keyed on the provenance digest.
    **FEA is not a request-path workload** and never becomes one.
+   > PARTIAL (2026-09-14) — **the cache now binds the engine that computes an answer, read
+   > before the run. For four days it bound nothing. Autoscale still needs a fleet this
+   > deployment does not have.**
+   > **The defect, found closing E10.2.** The status below says an unmeasured solver version
+   > never matches a known one. The key hashed `job.solver_version`, but the runner sets that
+   > only *after* the solve. So at key time it was empty on every job, and every key carried
+   > the same "unknown" sentinel. Unknown matched unknown everywhere: a CalculiX upgrade, or a
+   > fix to the in-house solver, would have been served the previous build's answers.
+   > `test_two_unmeasured_versions_match_each_other` pinned that as a feature. A second defect
+   > sat under the first. The runner asked the registry for the version of the solver's *name*
+   > (`linear-static`), the registry keys versions on the *backend* (`internal`), and so
+   > **every in-house result was stored with `solver_version` None**.
+   > **What binds now.** `cache.engine_for(backend)` names what will compute the answer before
+   > it runs:
+   > - **CalculiX:** version *and* binary sha256 (`registry.calculix_identity`), because two
+   >   builds of one release print one version.
+   > - **In-house solvers:** `source_identity()` — V&V's fingerprint plus the runner and
+   >   `coupling.py`, which decide what is stored — with numpy's and scipy's versions.
+   > - **OpenFOAM:** its image id.
+   > - **Every analysis:** the gmsh version as well.
+   > An identity that cannot be read means **no key**: not looked up and not offered. The
+   > backend is `runner.backend_for(analysis)`, read at run time, and the route uses the same
+   > function. A plane run is keyed `internal` even on a CalculiX deployment, because
+   > `_execute_plane` never reads `SOLVER_BACKEND`. **After the run, `cache.unbound`
+   > re-checks**: if a different backend answered or the engine moved while the run was in
+   > flight, the row's key is cleared. `registry.backend_of` maps solver names to backends,
+   > and a test builds every solver every table makes to keep it complete. The per-binary
+   > version cache is keyed on path, size and mtime, not the path, because a package upgrade
+   > replaces the binary under a running server.
+   > **Interface changes:**
+   > - `cache.Inputs` loses `solver_version`, and `engine` becomes required.
+   > - `KEY_VERSION` 4: every existing key misses once.
+   > - `cache.UNKNOWN_VERSION` is removed.
+   > - An in-house run's `solver_version` goes from null to `"<APP_VERSION>+<git sha>"`.
+   > - A queued plane row names `internal` rather than `SOLVER_BACKEND`'s value.
+   > No migration and no response shape change.
+   > **Guards broken on purpose:** 17 mutations across the registry, the runner and the cache,
+   > all caught by named tests, every restore sha256-checked.
+   > **Flagged, not fixed:** the agent's `run_simulation` still labels a queued row
+   > `linear-static` whatever `SOLVER_BACKEND` says (`app/ai/tools.py`). The runner overwrites
+   > the label, and the key no longer reads it.
+   > **Autoscale is still the residual**, for the reason below. P9 task 3's image is written and
+   > has never been built into a fleet.
+   > Tested by: `tests/test_simulation_cache.py`, `tests/test_solver_registry.py`,
+   > `tests/test_simulations.py`.
+
+   <!-- superseded 2026-09-14 -->
    > PARTIAL (2026-09-10) — **the cache is built and the queue already existed; autoscale needs
    > a fleet this deployment does not have.**
    > **Result caching keyed on the provenance digest** is `app/simulation/cache.py`, and it is a

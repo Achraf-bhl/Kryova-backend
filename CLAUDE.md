@@ -1226,12 +1226,8 @@ reason: it returns cell fields, not nodal ones, and has no load case.
    Nothing has run on Windows (THE QUEUE F1): the mount is a Windows path, there is no
    `os.getuid`, and `Allrun` must arrive with LF endings.
 
-**Flagged, not fixed (2026-09-14):** `cache.inputs_for` runs before `job.solver_version` is set,
-so **every cache key hashes `UNKNOWN_VERSION`**. A CalculiX upgrade behind the same
-`solver` name would be served the old build's results. The flow run avoids this only because
-its engine id is a separate key field. This belongs to E15.2. Separately, the `solve.conduction`
-span (steady and transient) and `solve.plane` are not in `metering.SPAN_METERS`, so those runs
-are billed for meshing only.
+**Flagged, not fixed (2026-09-14):** the `solve.conduction` span (steady and transient) and
+`solve.plane` are not in `metering.SPAN_METERS`, so those runs are billed for meshing only.
 
 ## Sending email (`app/mail/`) — added 2026-09-10 with P1.5
 
@@ -1957,10 +1953,33 @@ not "slow", it is a confident number computed under different conditions. The ke
 what the result depends on, and a test asserts the parametrised list is **every field of the
 dataclass** — so an input added and not keyed is a failing test rather than a wrong answer.
 
-Three exclusions, each of which would be a bug: an **unmeasured solver version does not match a
-known one** (that is the claim Decision 3 forbids); the lookup is **scoped to the organisation**,
-which is a security boundary rather than tuning; and a hit **keeps its own timings**, or the
-fleet's figures absorb a three-week-old solve as though it happened now.
+Three exclusions, each of which would be a bug: an **engine that cannot be named before the run
+is not keyed at all** (that is the claim Decision 3 forbids); the lookup is **scoped to the
+organisation**, which is a security boundary rather than tuning; and a hit **keeps its own
+timings**, or the fleet's figures absorb a three-week-old solve as though it happened now.
+
+**The key binds the engine, read before the run — and for four days it bound nothing.** Until
+2026-09-14 the key hashed `job.solver_version`, which the runner sets only *after* the solve, so
+every key carried the same "unknown" sentinel and unknown matched unknown: a CalculiX upgrade or a
+fix to the in-house solver was served the old build's answers. A test even pinned "two unmeasured
+versions match each other" as a feature. Four things now, each pinned by a test that fails when it
+is removed:
+
+1. **`cache.engine_for(backend)` names what will compute the answer.** CalculiX is its version
+   **and** its binary's sha256, because two builds of 2.20 both print "Version 2.20". The in-house
+   solvers are `source_identity()`: V&V's fingerprint plus `app/simulation/runner.py` and
+   `coupling.py`, with numpy's and scipy's versions. OpenFOAM is its image id. Every one carries
+   the gmsh version. A None identity means no key.
+2. **The backend is `runner.backend_for(analysis)`, read at run time**, not the label the route
+   wrote at queue time. The route calls the same function. A plane run is always `internal`.
+3. **`cache.unbound` re-checks after the run.** If a different backend answered (a solver handed
+   to `run_simulation`) or the engine moved while the run was in flight, the row's key is cleared,
+   so it is never served as a computation it is not.
+4. **A version is a fact about a backend, and a row records a solver's name.** `registry.backend_of`
+   maps one to the other. Asked for the version of `linear-static`, the registry knew no such
+   backend, so **every in-house result was stored with `solver_version` None** until the same day.
+   Its per-binary cache is now keyed on path, size and mtime, because a package upgrade replaces
+   the binary under a running server.
 
 ## An enum in a `String` column is a bug this codebase has shipped four times
 

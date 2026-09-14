@@ -43,7 +43,7 @@ from app.simulation.limits import check_mesh_request
 from app.solve.base import SolveOutput, Solver
 from app.solve.plane import PlaneCase, PlaneSolver, PlaneState
 from app.solve.postprocess import nodal_average
-from app.solve.registry import build_solver, solver_version
+from app.solve.registry import INTERNAL, OPENFOAM, backend_of, build_solver, solver_version
 from app.solve.types import LoadCase, MeshConvergence, SolverError
 
 logger = logging.getLogger(__name__)
@@ -137,13 +137,25 @@ def run_simulation(
             job.solver = ran
             # A federated engine that reports its own version in its output (OpenFOAM's
             # banner) is believed over the registry, which can only ask a binary it
-            # knows how to find; the version in the log is the one that ran.
+            # knows how to find; the version in the log is the one that ran. The
+            # registry is asked by *backend*, not by the solver's name: asked for
+            # "linear-static" it knew no such backend, and every in-house result
+            # was stored with no version until 2026-09-14.
             version = getattr(output.result, "solver_version", None) or solver_version(
-                ran, settings.calculix_path or None
+                backend_of(ran) or ran, settings.calculix_path or None
             )
             if version:
                 job.solver_version = version
             usage.annotate(solver=ran, solver_version=version or "unavailable")
+            if inputs is not None and job.cache_key is not None:
+                # The key was bound before the run to the engine that was going to
+                # answer. If something else answered, or the engine moved while it
+                # ran, the key describes a different computation — and a row
+                # carrying it would be served to the next job as this one.
+                unbound = cache.unbound(inputs, ran)
+                if unbound is not None:
+                    logger.warning("Simulation job %s is not reusable: %s", job_id, unbound)
+                    job.cache_key = None
 
             progress.report(session_scope, job_id, progress.Stage.STORING)
             fields = _store_fields(media, job, mesh, output)
@@ -246,6 +258,27 @@ THERMAL_ANALYSES: tuple[str, ...] = (CONDUCTION, TRANSIENT)
 #: The analyses whose archive holds no displacement and no stress, so a structural
 #: field route must refuse them by name.
 NOT_STRUCTURAL: tuple[str, ...] = (*THERMAL_ANALYSES, FLOW)
+
+
+def backend_for(analysis: str) -> str:
+    """The backend that will answer `analysis` on this deployment, read now.
+
+    One function, because three places ask: the route (what a queued row names),
+    the job cache (whose engine the key binds before the run) and the runner
+    itself. Each thermal analysis has its own setting because each names a solver
+    for a different equation. A plane run is always the in-house `PlaneSolver` —
+    `_execute_plane` never reads `SOLVER_BACKEND` — so it is never keyed as
+    CalculiX on a deployment configured for CalculiX solids.
+    """
+    if analysis == CONDUCTION:
+        return settings.conduction_backend
+    if analysis == TRANSIENT:
+        return settings.transient_conduction_backend
+    if analysis == FLOW:
+        return OPENFOAM
+    if analysis in PLANE_STATES:
+        return INTERNAL
+    return settings.solver_backend
 
 
 def _execute(

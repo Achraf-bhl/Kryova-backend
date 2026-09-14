@@ -33,6 +33,7 @@ adds a convenience re-export.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
@@ -48,6 +49,32 @@ INTERNAL: Final = "internal"
 
 #: CalculiX across a subprocess boundary (Decision 4: GPL, never linked).
 CALCULIX: Final = "calculix"
+
+#: OpenFOAM, also across a process boundary. Not in any factory table — a flow run
+#: has one engine and no setting that chooses it — but it is a backend a result
+#: can be bound to, so `backend_of` names it.
+OPENFOAM: Final = "openfoam"
+
+#: Which backend each solver's own `name` belongs to. A row records the solver's
+#: name (`linear-static`), a setting names a backend (`internal`), and a version is
+#: a fact about the backend — so reading a version by the solver's name asked the
+#: registry about a backend that does not exist, and **every in-house result was
+#: recorded with no solver version at all** until 2026-09-14. A test builds every
+#: solver every table can make and checks its name is here, so a new solver whose
+#: name is missing fails the suite rather than going unversioned.
+_BACKEND_OF: Final[Mapping[str, str]] = {
+    "linear-static": INTERNAL,
+    "plane": INTERNAL,
+    "steady-conduction": INTERNAL,
+    "transient-conduction": INTERNAL,
+    "calculix": CALCULIX,
+    "openfoam": OPENFOAM,
+}
+
+
+def backend_of(solver_name: str) -> str | None:
+    """The backend a solver's own `name` belongs to, or None for one this build never made."""
+    return _BACKEND_OF.get((solver_name or "").strip().lower())
 
 
 def _internal(executable: str | os.PathLike[str] | None = None) -> Solver:
@@ -219,10 +246,25 @@ def build_conduction_solver(
     return factory(executable)
 
 
-#: Cached per executable path, because reading it costs a subprocess and the
-#: answer cannot change while the process runs. `None` means "asked and could
-#: not tell", which is recorded as such rather than retried on every job.
+#: Cached per executable **file** — path, size and modification time — because
+#: reading it costs a subprocess. Keyed on the path alone until 2026-09-14, on the
+#: stated ground that the answer "cannot change while the process runs"; it can: a
+#: package upgrade replaces the binary at the same path under a running server,
+#: and every result after it was then recorded against the old version. `None`
+#: means "asked and could not tell", recorded as such rather than retried per job.
 _VERSIONS: dict[str, str | None] = {}
+
+#: The sha256 of a binary, cached on the same key for the same reason.
+_DIGESTS: dict[str, str | None] = {}
+
+
+def _file_key(path: os.PathLike[str] | str) -> str | None:
+    """Path, size and mtime — what changes when a binary is replaced in place."""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return f"{os.fspath(path)}\0{stat.st_size}\0{stat.st_mtime_ns}"
 
 #: `ccx -v` prints "This is Version 2.23" and exits **201** — 201 is its generic
 #: "did not run a job" code, not a failure, so the return code is ignored here
@@ -257,14 +299,16 @@ def solver_version(name: str, executable: str | os.PathLike[str] | None = None) 
     if binary is None:
         return None
 
-    cache_key = str(binary)
+    cache_key = _file_key(binary)
+    if cache_key is None:
+        return None
     if cache_key in _VERSIONS:
         return _VERSIONS[cache_key]
 
     version: str | None = None
     try:
         completed = subprocess.run(
-            [cache_key, "-v"], capture_output=True, text=True, timeout=30, check=False
+            [str(binary), "-v"], capture_output=True, text=True, timeout=30, check=False
         )
         match = _VERSION_RE.search((completed.stdout or "") + (completed.stderr or ""))
         version = match.group(1) if match else None
@@ -278,12 +322,47 @@ def solver_version(name: str, executable: str | os.PathLike[str] | None = None) 
     return version
 
 
+def calculix_identity(executable: str | os.PathLike[str] | None = None) -> str | None:
+    """The CalculiX that would answer, named by version **and bytes** — or None.
+
+    What the job cache keys a CalculiX run on, read before the run. A version is a
+    name, the way an image tag is: two builds of 2.20 against different sparse
+    solvers both print "Version 2.20". The digest is the build. None when there is
+    no binary, its version cannot be read, or its bytes cannot be — and the cache
+    treats None as "do not reuse", because an engine nobody identified matching a
+    known one is the claim Decision 3 forbids.
+    """
+    from app.solve.calculix.run import find_ccx
+
+    binary = find_ccx(executable)
+    if binary is None:
+        return None
+    version = solver_version(CALCULIX, binary)
+    key = _file_key(binary)
+    if version is None or key is None:
+        return None
+    if key not in _DIGESTS:
+        digest = hashlib.sha256()
+        try:
+            with open(binary, "rb") as handle:
+                for block in iter(lambda: handle.read(1 << 20), b""):
+                    digest.update(block)
+            _DIGESTS[key] = "sha256:" + digest.hexdigest()
+        except OSError:
+            _DIGESTS[key] = None
+    found = _DIGESTS[key]
+    return f"{CALCULIX} {version} {found}" if found else None
+
+
 __all__ = [
     "CALCULIX",
     "INTERNAL",
+    "OPENFOAM",
     "available",
+    "backend_of",
     "build_conduction_solver",
     "build_solver",
+    "calculix_identity",
     "conduction_available",
     "solver_version",
 ]

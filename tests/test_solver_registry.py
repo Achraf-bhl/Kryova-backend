@@ -17,7 +17,10 @@ rather than implying they passed.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -25,10 +28,13 @@ from app.solve.base import ConductionSolver, Solver, TransientConductionSolver
 from app.solve.registry import (
     CALCULIX,
     INTERNAL,
+    OPENFOAM,
     available,
+    backend_of,
     build_conduction_solver,
     build_solver,
     build_transient_conduction_solver,
+    calculix_identity,
     conduction_available,
     solver_version,
     transient_conduction_available,
@@ -284,8 +290,8 @@ class TestTheVersionIsRecorded:
         reason="CalculiX (ccx) is not installed, so the cache was NOT measured",
     )
     def test_the_version_is_cached_rather_than_re_read(self) -> None:
-        """A subprocess per job, for an answer that cannot change while the
-        process runs."""
+        """A subprocess per job would be the cost otherwise. Cached per binary
+        *file*, not per path — see `TestAReplacedBinaryIsReadAgain`."""
         from app.solve import registry
 
         registry._VERSIONS.clear()
@@ -297,8 +303,146 @@ class TestTheVersionIsRecorded:
         assert first == second
 
 
+class TestEverySolverNamesItsBackend:
+    """A row records a solver's name, a version belongs to a backend, and the
+    registry was asked for the version of `linear-static` — a backend that does not
+    exist — so every in-house result was stored with no version until 2026-09-14."""
+
+    def test_every_solver_a_table_builds_names_the_backend_that_built_it(self) -> None:
+        from app.solve import registry
+
+        tables = (
+            (registry._FACTORIES, build_solver),
+            (registry._CONDUCTION_FACTORIES, build_conduction_solver),
+            (registry._TRANSIENT_CONDUCTION_FACTORIES, build_transient_conduction_solver),
+        )
+        for table, build in tables:
+            for key in table:
+                assert backend_of(build(key).name) == key, key
+
+    def test_the_solvers_no_table_builds_name_theirs(self) -> None:
+        from app.solve.openfoam.solver import LaminarFlowSolver
+        from app.solve.plane import PlaneSolver
+
+        assert backend_of(PlaneSolver.name) == INTERNAL
+        assert backend_of(LaminarFlowSolver.name) == OPENFOAM
+
+    def test_a_solver_this_build_never_made_has_no_backend(self) -> None:
+        assert backend_of("a-solver-handed-in") is None
+
+
+def _fake_ccx(path: Path, printed: str) -> Path:
+    path.write_text(f"#!/bin/sh\necho '{printed}'\nexit 201\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="a shell script stands in for ccx, and Windows cannot execute one"
+)
+class TestAReplacedBinaryIsReadAgain:
+    """The version cache was keyed on the path, on the stated ground that the answer
+    "cannot change while the process runs". A package upgrade replaces the binary at
+    the same path under a running server, and every result after it was recorded
+    against the old version."""
+
+    def test_a_binary_replaced_at_the_same_path_is_read_again(self, tmp_path: Path) -> None:
+        ccx = _fake_ccx(tmp_path / "ccx", "This is Version 2.20")
+        assert solver_version(CALCULIX, ccx) == "2.20"
+
+        before = os.stat(ccx).st_mtime_ns
+        _fake_ccx(ccx, "This is Version 2.23.1")
+        os.utime(ccx, ns=(before + 10**9, before + 10**9))
+
+        assert solver_version(CALCULIX, ccx) == "2.23.1"
+
+    def test_the_identity_is_the_version_and_the_bytes(self, tmp_path: Path) -> None:
+        ccx = _fake_ccx(tmp_path / "ccx", "This is Version 2.20")
+        expected = hashlib.sha256(ccx.read_bytes()).hexdigest()
+
+        assert calculix_identity(ccx) == f"calculix 2.20 sha256:{expected}"
+
+    def test_two_builds_that_print_one_version_are_two_identities(self, tmp_path: Path) -> None:
+        """A version is a name, the way an image tag is."""
+        one = _fake_ccx(tmp_path / "one", "This is Version 2.20")
+        two = tmp_path / "two"
+        two.write_text(one.read_text(encoding="utf-8") + "# built against PARDISO\n", encoding="utf-8")
+        two.chmod(0o755)
+
+        assert solver_version(CALCULIX, two) == "2.20"
+        assert calculix_identity(one) != calculix_identity(two)
+
+    def test_a_binary_whose_version_cannot_be_read_has_no_identity(self, tmp_path: Path) -> None:
+        ccx = _fake_ccx(tmp_path / "ccx", "usage: ccx jobname")
+        assert calculix_identity(ccx) is None
+
+    def test_no_binary_has_no_identity(self, tmp_path: Path) -> None:
+        assert calculix_identity(tmp_path / "not-here") is None
+
+
 class TestTheJobRowCarriesWhatRan:
     """The point of all of the above. These need a database."""
+
+    def _solid(self, auth_client, project_with_geometry) -> str:  # noqa: F811 - the imported fixture
+        from tests.test_simulations import load_case
+
+        geometry = auth_client.get(f"/api/v1/projects/{project_with_geometry}/geometry").json()
+        rows = geometry if isinstance(geometry, list) else geometry["items"]
+        created = auth_client.post(
+            f"/api/v1/projects/{project_with_geometry}/simulations",
+            json={"geometry_version_id": rows[0]["id"], "element_size_mm": 8.0, "load_case": load_case()},
+        )
+        assert created.status_code == 202, created.text
+        return created.json()["id"]
+
+    def test_an_in_house_run_records_the_codebase_version(
+        self, auth_client, db_session, project_with_geometry  # noqa: F811 - the imported fixture
+    ) -> None:
+        from app.main import APP_VERSION
+        from app.models import SimulationJob
+
+        job = db_session.get(SimulationJob, self._solid(auth_client, project_with_geometry))
+
+        assert job.solver == "linear-static"
+        assert job.solver_version is not None and job.solver_version.startswith(APP_VERSION)
+
+    def test_an_in_house_run_is_keyed_and_its_twin_is_reused(
+        self, auth_client, db_session, project_with_geometry  # noqa: F811 - the imported fixture
+    ) -> None:
+        from app.models import SimulationJob
+
+        first = db_session.get(SimulationJob, self._solid(auth_client, project_with_geometry))
+        second = db_session.get(SimulationJob, self._solid(auth_client, project_with_geometry))
+
+        assert first.cache_key is not None
+        assert second.cache_source_id == first.id
+
+    def test_a_run_whose_engine_cannot_be_named_is_neither_keyed_nor_reused(
+        self, auth_client, db_session, project_with_geometry, monkeypatch  # noqa: F811
+    ) -> None:
+        from app.models import SimulationJob
+
+        monkeypatch.setattr("app.simulation.cache.engine_for", lambda backend: None)
+        first = db_session.get(SimulationJob, self._solid(auth_client, project_with_geometry))
+        second = db_session.get(SimulationJob, self._solid(auth_client, project_with_geometry))
+
+        assert first.result is not None and second.result is not None
+        assert first.cache_key is None and second.cache_key is None
+        assert second.cache_hit is False
+
+    def test_a_run_whose_engine_moved_while_it_ran_is_not_offered_for_reuse(
+        self, auth_client, db_session, project_with_geometry, monkeypatch  # noqa: F811
+    ) -> None:
+        """Keyed before the run on one engine, checked after it on another."""
+        from app.models import SimulationJob
+
+        seen = iter(["build one; gmsh 4", "build two; gmsh 4", "build two; gmsh 4", "build two; gmsh 4"])
+        monkeypatch.setattr("app.simulation.cache.engine_for", lambda backend: next(seen))
+        first = db_session.get(SimulationJob, self._solid(auth_client, project_with_geometry))
+        second = db_session.get(SimulationJob, self._solid(auth_client, project_with_geometry))
+
+        assert first.result is not None and first.cache_key is None
+        assert second.cache_hit is False and second.cache_key is not None
 
     def test_the_row_records_the_solver_the_runner_used(
         self, auth_client, db_session, project_with_geometry  # noqa: F811 - the imported fixture

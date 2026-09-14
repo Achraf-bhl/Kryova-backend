@@ -11,6 +11,7 @@ right up until somebody signs a drawing.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from sqlalchemy.orm import Session
@@ -29,6 +30,8 @@ from app.simulation import cache
 
 LOAD = {"name": "Bracket", "fixtures": [{"kind": "fixed", "at": "base"}]}
 
+CCX_220 = "calculix 2.20 sha256:" + "c" * 64
+
 
 def _inputs(**overrides: object) -> cache.Inputs:
     base = dict(
@@ -44,8 +47,7 @@ def _inputs(**overrides: object) -> cache.Inputs:
         grids=1,
         thickness_mm=None,
         solver="calculix",
-        solver_version="2.22",
-        engine=None,
+        engine=CCX_220 + "; gmsh 4.15.2",
     )
     base.update(overrides)
     return cache.Inputs(**base)  # type: ignore[arg-type]
@@ -73,8 +75,8 @@ class TestTheKey:
             ("analysis", "plane_stress"),
             ("grids", 3),
             ("thickness_mm", 5.0),
-            ("solver", "linear-static"),
-            ("solver_version", "2.21"),
+            ("solver", "internal"),
+            ("engine", "calculix 2.20 sha256:" + "d" * 64 + "; gmsh 4.15.2"),
         ],
     )
     def test_every_input_that_changes_the_answer_changes_the_key(
@@ -100,7 +102,7 @@ class TestTheKey:
             "grids",
             "thickness_mm",
             "solver",
-            "solver_version",
+            "engine",
             # Covered by its own test below rather than parametrised, because
             # `None` is the interesting value and the parametrisation supplies
             # a non-default.
@@ -108,7 +110,6 @@ class TestTheKey:
             "transient_case",
             "flow_case",
             "temperature_source",
-            "engine",
         }
         assert {field.name for field in fields(cache.Inputs)} == covered
 
@@ -145,16 +146,19 @@ class TestTheKey:
             _inputs(thermal_case=case).digest() != _inputs(transient_case=case).digest()
         )
 
-    def test_an_unmeasured_solver_version_does_not_match_a_known_one(self) -> None:
-        """"We do not know which CalculiX" must never be served as though it
-        came from a known one — that is the exact claim Decision 3 forbids."""
-        assert _inputs(solver_version=None).digest() != _inputs(solver_version="2.22").digest()
+    def test_the_same_version_from_a_different_build_is_a_different_run(self) -> None:
+        """A version is a name. Two builds of 2.20 both print "Version 2.20"."""
+        other_build = "calculix 2.20 sha256:" + "e" * 64 + "; gmsh 4.15.2"
+        assert _inputs(engine=other_build).digest() != _inputs().digest()
 
-    def test_two_unmeasured_versions_match_each_other(self) -> None:
-        # They are the same state of knowledge, and refusing to match would
-        # make the cache useless on every deployment where the version cannot
-        # be read at all.
-        assert _inputs(solver_version=None).digest() == _inputs(solver_version=None).digest()
+    def test_no_version_read_after_the_run_is_part_of_the_key(self) -> None:
+        """Until 2026-09-14 the key hashed `job.solver_version`, which the runner
+        sets only after the solve — so it was empty at key time on every job, and
+        every key carried the same "unknown" sentinel. Unknown matched unknown
+        everywhere, and a CalculiX upgrade was served the old build's answers."""
+        from dataclasses import fields
+
+        assert "solver_version" not in {field.name for field in fields(cache.Inputs)}
 
     def test_the_key_version_is_in_the_hash(self) -> None:
         """Bumping it must miss every old key. Recomputing is expensive; serving
@@ -309,7 +313,82 @@ class TestBuildingTheInputs:
         assert inputs is not None
         assert inputs.geometry_sha256 == job.geometry_version.media.sha256
         assert inputs.element_size_mm == job.element_size_mm
-        assert inputs.engine is None
+        assert inputs.engine == cache.engine_for("internal")
+
+    def test_the_key_names_the_backend_that_will_run_not_the_label_it_was_queued_with(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The row says `calculix` because that is what the route wrote; the
+        deployment now runs the in-house solver, and the key must bind that."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "solver_backend", "internal")
+        world = _world(db_session)
+        job = _job(db_session, world)
+        assert job.solver == "calculix"
+
+        inputs = cache.inputs_for(db_session, job)
+
+        assert inputs is not None and inputs.solver == "internal"
+        assert inputs.engine.startswith("kryova sha256:")
+
+    def test_a_calculix_run_is_keyed_on_the_binary_it_will_run(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "solver_backend", "calculix")
+        monkeypatch.setattr("app.solve.registry.calculix_identity", lambda executable: CCX_220)
+        world = _world(db_session)
+        job = _job(db_session, world)
+
+        inputs = cache.inputs_for(db_session, job)
+
+        assert inputs is not None and inputs.solver == "calculix"
+        assert inputs.engine.startswith(CCX_220 + "; gmsh ")
+
+    def test_a_calculix_run_whose_binary_cannot_be_identified_is_never_cached(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """"We do not know which CalculiX" must never be served as though it came
+        from a known one — nor from another unknown one, which is where it failed."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "solver_backend", "calculix")
+        monkeypatch.setattr("app.solve.registry.calculix_identity", lambda executable: None)
+        world = _world(db_session)
+        job = _job(db_session, world)
+
+        assert cache.inputs_for(db_session, job) is None
+
+    def test_a_backend_this_build_does_not_know_is_never_cached(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "solver_backend", "nonesuch")
+        world = _world(db_session)
+        job = _job(db_session, world)
+
+        assert cache.inputs_for(db_session, job) is None
+
+    def test_a_plane_run_is_keyed_on_the_in_house_solver_on_a_calculix_deployment(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`_execute_plane` never reads `SOLVER_BACKEND`, so neither may the key."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "solver_backend", "calculix")
+        monkeypatch.setattr("app.solve.registry.calculix_identity", lambda executable: CCX_220)
+        world = _world(db_session)
+        job = _job(db_session, world)
+        job.analysis, job.thickness_mm = "plane-stress", 2.0
+        db_session.flush()
+
+        inputs = cache.inputs_for(db_session, job)
+
+        assert inputs is not None and inputs.solver == "internal"
+        assert inputs.engine == cache.engine_for("internal")
 
     def test_a_flow_run_is_keyed_on_the_image_it_will_run(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch
@@ -323,7 +402,8 @@ class TestBuildingTheInputs:
 
         inputs = cache.inputs_for(db_session, job)
 
-        assert inputs is not None and inputs.engine == engine
+        assert inputs is not None and inputs.engine.startswith(engine + "; gmsh ")
+        assert inputs.solver == "openfoam"
         assert inputs.flow_case == {"cell_size_mm": 0.5}
 
     def test_a_flow_run_whose_engine_cannot_be_named_is_never_cached(
@@ -339,6 +419,97 @@ class TestBuildingTheInputs:
         monkeypatch.setattr("app.solve.openfoam.run.engine_identity", lambda launcher, image: None)
 
         assert cache.inputs_for(db_session, job) is None
+
+
+class TestTheEngineIsNamedBeforeItRuns:
+    def test_every_engine_carries_the_meshers_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Every analysis meshes with gmsh first; a different gmsh is a different mesh."""
+        import gmsh
+
+        monkeypatch.setattr("app.solve.registry.calculix_identity", lambda executable: CCX_220)
+        monkeypatch.setattr("app.solve.openfoam.run.engine_identity", lambda launcher, image: "docker x sha256:1")
+        for backend in ("internal", "calculix", "openfoam"):
+            engine = cache.engine_for(backend)
+            assert engine is not None and engine.endswith(f"; gmsh {gmsh.__version__}")
+
+    def test_the_in_house_engine_names_its_numerics(self) -> None:
+        import numpy
+        import scipy
+
+        engine = cache.in_house_identity()
+        assert f"numpy {numpy.__version__}" in engine and f"scipy {scipy.__version__}" in engine
+        assert cache.source_identity() in engine
+
+
+class TestTheInHouseSourceIdentity:
+    """What an in-house result is keyed on: the code that computes and stores it."""
+
+    def _tree(self, root: Path, newline: bytes = b"\n") -> Path:
+        from app.verify.recorded import FINGERPRINTED
+
+        for entry in (*FINGERPRINTED, "app/simulation/runner.py", "app/simulation/coupling.py"):
+            target = root / (entry if entry.endswith(".py") else f"{entry}/module.py")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"def f():" + newline + b"    return 1" + newline)
+        return root
+
+    def test_a_change_to_a_solver_moves_it(self, tmp_path: Path) -> None:
+        tree = self._tree(tmp_path)
+        before = cache.source_identity(tree)
+        (tree / "app/solve/module.py").write_text("def f():\n    return 2\n", encoding="utf-8")
+        assert cache.source_identity(tree) != before
+
+    def test_a_change_to_the_runner_moves_it(self, tmp_path: Path) -> None:
+        """The runner decides what is stored — a plane run's nodal averaging, a
+        flow's pressure conversion — and V&V's fingerprint does not cover it."""
+        tree = self._tree(tmp_path)
+        before = cache.source_identity(tree)
+        (tree / "app/simulation/runner.py").write_text("def f():\n    return 2\n", encoding="utf-8")
+        assert cache.source_identity(tree) != before
+
+    def test_a_change_to_the_coupling_moves_it(self, tmp_path: Path) -> None:
+        tree = self._tree(tmp_path)
+        before = cache.source_identity(tree)
+        (tree / "app/simulation/coupling.py").write_text("def f():\n    return 2\n", encoding="utf-8")
+        assert cache.source_identity(tree) != before
+
+    def test_line_endings_do_not_move_it(self, tmp_path: Path) -> None:
+        """A Windows checkout must key the same source the same way a Linux one does."""
+        lf = cache.source_identity(self._tree(tmp_path / "lf"))
+        crlf = cache.source_identity(self._tree(tmp_path / "crlf", b"\r\n"))
+        assert lf == crlf
+
+    def test_a_file_that_computes_nothing_does_not_move_it(self, tmp_path: Path) -> None:
+        """A route or a docstring elsewhere in `app/` must not throw the cache away."""
+        tree = self._tree(tmp_path)
+        before = cache.source_identity(tree)
+        (tree / "app/api").mkdir(parents=True)
+        (tree / "app/api/routes.py").write_text("x = 1\n", encoding="utf-8")
+        assert cache.source_identity(tree) == before
+
+
+class TestAKeyStillDescribesTheRun:
+    def _bound(self) -> cache.Inputs:
+        return _inputs(solver="internal", engine=cache.engine_for("internal"))
+
+    def test_the_run_the_key_named_is_bound(self) -> None:
+        assert cache.unbound(self._bound(), "linear-static") is None
+        assert cache.unbound(self._bound(), "plane") is None
+
+    def test_a_solver_from_another_backend_is_unbound(self) -> None:
+        reason = cache.unbound(self._bound(), "calculix")
+        assert reason is not None and "'internal'" in reason and "'calculix'" in reason
+
+    def test_a_solver_this_build_never_made_is_unbound(self) -> None:
+        """A caller that hands the runner its own solver has not run the engine the key named."""
+        assert cache.unbound(self._bound(), "a-solver-handed-in") is not None
+
+    def test_an_engine_that_moved_during_the_run_is_unbound(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A binary replaced, or an image re-tagged, while the run was in flight."""
+        inputs = self._bound()
+        monkeypatch.setattr(cache, "engine_for", lambda backend: "something else")
+        reason = cache.unbound(inputs, "linear-static")
+        assert reason is not None and "changed while the run was in flight" in reason
 
 
 # -- fixtures ---------------------------------------------------------------

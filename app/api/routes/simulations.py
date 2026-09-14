@@ -33,11 +33,11 @@ from app.schemas import (
 )
 from app.simulation import coupling
 from app.simulation.runner import (
-    CONDUCTION,
     FLOW,
     NOT_STRUCTURAL,
     THERMAL_ANALYSES,
     TRANSIENT,
+    backend_for,
     run_simulation,
 )
 
@@ -133,22 +133,12 @@ def _assert_within_allowance(db: DbSession, organisation_id: str) -> None:
 
 
 def _requested_solver(analysis: str) -> str:
-    """The setting that names the solver for this analysis, as written at queue time.
+    """What a queued row names before the runner overwrites it with what ran.
 
-    Each thermal analysis has its own setting because each names a solver for a
-    different equation; reading `SOLVER_BACKEND` for a temperature field is how a
-    deployment configured for CalculiX structural work would come to ask the
-    wrong name to answer it.
+    `runner.backend_for`, so the row, the job cache and the runner read one answer
+    rather than three copies of it that can drift.
     """
-    if analysis == CONDUCTION:
-        return settings.conduction_backend
-    if analysis == TRANSIENT:
-        return settings.transient_conduction_backend
-    if analysis == FLOW:
-        # One federated engine and no setting to choose it; the launcher and the
-        # image are how it is reached, not which solver answers.
-        return "openfoam"
-    return settings.solver_backend
+    return backend_for(analysis)
 
 
 def _bind_temperature_source(

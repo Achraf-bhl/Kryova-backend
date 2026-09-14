@@ -9,9 +9,9 @@ one that already happened.
 **The key is the provenance digest, and that is the whole design.** A result is
 reusable for a new job if and only if *everything the result depends on* is the
 same — the geometry bytes, the load case, the element size and order, the
-analysis, the number of grids, the solver and its version. Every one of those is
-already recorded, because Decision 3 requires a result to be bound to what
-produced it; this hashes exactly that binding and nothing else.
+analysis, the number of grids, and **the engine that computes it, identified
+before it runs**. Decision 3 requires a result to be bound to what produced it;
+this hashes exactly that binding and nothing else.
 
 Three things it deliberately excludes, each of which would be a bug:
 
@@ -21,11 +21,18 @@ lookup *is* scoped to the tenant — see `find`, and the reason there is that a
 result crossing a tenant boundary is a data leak wearing a performance
 improvement, not that the physics differs.
 
-**Anything not measured.** `solver_version` is `None` when it could not be read,
-and a `None` version does **not** hash to the same value as a known one — it
-hashes to a distinct sentinel. Treating "we do not know which CalculiX" as a
-match would let a result computed by one binary be served as though it came from
-another, which is the exact claim Decision 3 forbids.
+**Anything not measured — and an engine that cannot be named is not keyed at
+all.** Until 2026-09-14 the key hashed `job.solver_version`, which the runner only
+sets *after* the solve, so at key time it was always empty and every key carried
+the same "unknown version" sentinel: a CalculiX upgrade, or a fix to the in-house
+solver, was served the previous build's answers. The docstring said an unmeasured
+version could never match a known one; in practice nothing was ever measured, so
+unknown matched unknown everywhere. The engine is now read **before** the run
+(`engine_for`): a CalculiX binary by version and bytes, the in-house solvers by
+the source that computes the answer, OpenFOAM by its image id, and every one of
+them with the mesher's version beside it. Where that cannot be done, `inputs_for`
+returns None and the run is neither looked up nor offered for reuse. After the
+run, `unbound` checks the key still describes what answered.
 
 **Timestamps.** Obvious, and worth saying: including one would make every key
 unique and the cache a no-op that still costs a query, which is the failure mode
@@ -39,11 +46,13 @@ meaningless, and would make "why was this instant" unanswerable.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Final
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -67,12 +76,21 @@ logger = logging.getLogger(__name__)
 #: flow run's `solver` is always "openfoam" and the tag in `OPENFOAM_IMAGE` can be
 #: pointed at a different build. A flow run whose engine cannot be identified
 #: first (the `local` launcher) is never cached at all.
-KEY_VERSION = 3
+#:
+#: 4 (2026-09-14): `solver_version` left the key — it was always empty at key time —
+#: and `engine` became required for every analysis, read before the run. `solver`
+#: is now the backend that will answer (`runner.backend_for`), not the label the
+#: route wrote at queue time. Every version-3 key misses once.
+KEY_VERSION = 4
 
-#: What an unmeasured solver version hashes as. A distinct string rather than
-#: `None` or `""`, so it can never collide with a version that happens to be
-#: falsey, and so a grep for it in a key explains itself.
-UNKNOWN_VERSION = "\x00unknown-solver-version"
+#: The source an in-house result depends on, beyond the fingerprint V&V already
+#: keeps: the runner decides what is stored (nodal averaging on a plane mesh, the
+#: pressure conversion, a study's grid spacing) and `coupling` decides which
+#: temperatures a structural run borrows.
+_IN_HOUSE_SOURCES: Final[tuple[str, ...]] = (
+    "app/simulation/runner.py",
+    "app/simulation/coupling.py",
+)
 
 
 @dataclass(frozen=True)
@@ -96,12 +114,12 @@ class Inputs:
     analysis: str
     grids: int
     thickness_mm: float | None
+    #: The backend that will answer, read from this deployment's settings when the
+    #: run starts (`runner.backend_for`) — not the label a route wrote at queue time.
     solver: str
-    solver_version: str | None
-    #: The exact engine behind a federated process boundary, where the job's
-    #: `solver` name alone does not pin it — today only a flow run's image id.
-    #: None for everything else.
-    engine: str | None
+    #: The exact engine behind that name, identified before the run: see
+    #: `engine_for`. Never None — a run whose engine cannot be named has no key.
+    engine: str
 
     def digest(self) -> str:
         """A stable hash of the binding. Same inputs, same key, on any machine.
@@ -126,7 +144,6 @@ class Inputs:
             "grids": self.grids,
             "thickness_mm": self.thickness_mm,
             "solver": self.solver,
-            "solver_version": self.solver_version or UNKNOWN_VERSION,
             "engine": self.engine,
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
@@ -138,22 +155,19 @@ def inputs_for(db: Session, job: SimulationJob) -> Inputs | None:
 
     `None` when the geometry has no checksum to hash — a job whose blob is gone
     is a job that cannot be matched to anything, and inventing a key for it
-    would mean two such jobs matching each other.
+    would mean two such jobs matching each other — and `None` when the engine
+    that will answer cannot be identified before it runs, for the same reason.
     """
     version = db.get(GeometryVersion, job.geometry_version_id)
     if version is None or not version.media or not version.media.sha256:
         return None
-    engine: str | None = None
-    # The literal rather than `runner.FLOW`: the runner imports this module.
-    if job.analysis == "flow-laminar":
-        from app.core.config import settings
-        from app.solve.openfoam.run import engine_identity
+    # Imported here: the runner imports this module.
+    from app.simulation.runner import backend_for
 
-        engine = engine_identity(settings.openfoam_launcher, settings.openfoam_image)
-        if engine is None:
-            # The engine that would answer cannot be named before it runs, and a
-            # key with a hole where the solver belongs matches runs it should not.
-            return None
+    backend = backend_for(job.analysis)
+    engine = engine_for(backend)
+    if engine is None:
+        return None
     return Inputs(
         geometry_sha256=version.media.sha256,
         load_case=job.load_case,
@@ -166,10 +180,91 @@ def inputs_for(db: Session, job: SimulationJob) -> Inputs | None:
         analysis=job.analysis,
         grids=job.grids,
         thickness_mm=job.thickness_mm,
-        solver=job.solver,
-        solver_version=job.solver_version,
+        solver=backend,
         engine=engine,
     )
+
+
+def engine_for(backend: str) -> str | None:
+    """What will compute a result on `backend`, named before it runs — or None.
+
+    * **CalculiX**: the binary's version and sha256 (`registry.calculix_identity`).
+    * **In-house** (`internal`, whichever table selected it): the source that
+      computes the answer, plus numpy's and scipy's versions (`in_house_identity`).
+    * **OpenFOAM**: the Docker image's content id (`openfoam.run.engine_identity`).
+
+    Every one carries the mesher's version beside it, because every analysis here
+    meshes with gmsh first and a different gmsh is a different mesh. A backend
+    this build does not know, or one whose identity cannot be read, is None.
+    """
+    import gmsh
+
+    from app.core.config import settings
+    from app.solve.registry import CALCULIX, INTERNAL, OPENFOAM, calculix_identity
+
+    identity: str | None
+    if backend == INTERNAL:
+        identity = in_house_identity()
+    elif backend == CALCULIX:
+        identity = calculix_identity(settings.calculix_path or None)
+    elif backend == OPENFOAM:
+        from app.solve.openfoam.run import engine_identity
+
+        identity = engine_identity(settings.openfoam_launcher, settings.openfoam_image)
+    else:
+        identity = None
+    return f"{identity}; gmsh {gmsh.__version__}" if identity else None
+
+
+def source_identity(root: Path | None = None) -> str:
+    """A digest of the source an in-house result depends on.
+
+    V&V's own fingerprint (`app/solve`, `app/mesh` and the verification modules
+    that decide a number) with `_IN_HOUSE_SOURCES` folded in, normalised the same
+    way — so it moves when anything that computes or stores an answer moves, and
+    a docstring edit elsewhere in `app/` does not throw the cache away.
+    """
+    from app.verify.recorded import _REPO_ROOT, code_fingerprint
+
+    base = Path(_REPO_ROOT) if root is None else root
+    digest = hashlib.sha256(code_fingerprint(base).encode("utf-8"))
+    for relative in _IN_HOUSE_SOURCES:
+        digest.update(relative.encode("utf-8") + b"\0")
+        digest.update(hashlib.sha256((base / relative).read_bytes().replace(b"\r\n", b"\n")).digest())
+    return "sha256:" + digest.hexdigest()
+
+
+@functools.cache
+def in_house_identity() -> str:
+    """`source_identity` for the code this process imported, plus its numerics.
+
+    Once per process, on purpose: the code a worker runs is the code it imported,
+    and a file edited on disk under a running server is not what answers until the
+    server restarts. numpy and scipy are named because `spsolve` and `eigsh` are
+    theirs, and a release that changes an answer changes it here.
+    """
+    import numpy
+    import scipy
+
+    return f"kryova {source_identity()}; numpy {numpy.__version__}; scipy {scipy.__version__}"
+
+
+def unbound(inputs: Inputs, ran: str) -> str | None:
+    """Why a key bound before a run does not describe the run that happened, or None.
+
+    Two ways: a different backend answered than the one keyed (a solver handed in
+    by the caller, or a setting that moved between the lookup and the solve), or
+    the engine the key named is no longer the engine — a binary replaced or an
+    image re-tagged while the run was in flight. Either way a row carrying the key
+    would be served to the next job as a computation it is not.
+    """
+    from app.solve.registry import backend_of
+
+    if backend_of(ran) != inputs.solver:
+        return f"the key was bound to the {inputs.solver!r} backend and {ran!r} answered"
+    if engine_for(inputs.solver) != inputs.engine:
+        return f"the {inputs.solver} engine changed while the run was in flight"
+    return None
 
 
 def find(db: Session, job: SimulationJob, key: str) -> SimulationJob | None:
@@ -241,10 +336,13 @@ def note(job: SimulationJob, source: SimulationJob) -> str:
 
 __all__ = [
     "KEY_VERSION",
-    "UNKNOWN_VERSION",
     "Inputs",
     "adopt",
+    "engine_for",
     "find",
+    "in_house_identity",
     "inputs_for",
     "note",
+    "source_identity",
+    "unbound",
 ]

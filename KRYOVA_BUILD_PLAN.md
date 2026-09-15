@@ -71,8 +71,12 @@ happened.
 > are written and not run (QUEUE D4). **Found on the way, and now the target:** nothing quotes
 > an attachment into the agent's turn, and the composer never calls `createAttachment`. So
 > from the GUI a spreadsheet never reaches the agent at all (P4.7, and P4.6's correction).
-> **Next target: P4.7**, with P4.6's composer piece if it closes in the same turn. Then P7
-> (QUEUE rows for the Windows parts), then the E23.4 harness only.
+> **From 21:38 a turn takes at least six tasks** (the user's rule; CLAUDE.md *Ending every turn*
+> step 1). Each task is committed as it closes, and a fallback job is created at +5 h in case the
+> turn is cut off. **Next targets, in order:** (1) P4.7 with P4.6's composer piece, (2) the E22.3
+> harness, (3) the E23.4 harness, (4) P6.2 streaming scene, (5) P6.4 engineering interactions,
+> (6) P6.5 results on geometry. In place of any that is done or blocked: P6.6, P6.3, P7.3, P7.4,
+> then E9.1 (Chrono across a container boundary).
 > **Next continuation fires 2026-09-15 23:48** — held by the session named on the next line.
 > **Held by `kryova-backend-f1`**, which confirmed `scheduled 2026-09-15 23:48` at 21:00.
 > `kryova-backend-55` holds nothing; the job dies if `kryova-backend-f1` is closed.

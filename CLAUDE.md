@@ -73,10 +73,20 @@ lets the next session start.** Rules:
 prompt each step. **So every turn that finishes ends by scheduling the next turn.** A turn that
 stops without scheduling one stops the project. The order is fixed:
 
-1. **Finish the unit and run its checks.** That means tests, `ruff`, `mypy`, and breaking the
-   guard to watch it fail; the V&V re-record comes last. **Keep a turn to one unit**: a task, or
-   a few tasks that close together. The pause in step 3 is there to spread usage across the
-   five-hour limit, and a turn that runs through three phases defeats it.
+1. **Finish the batch and run its checks.** That means tests, `ruff`, `mypy`, and breaking the
+   guard to watch it fail; the V&V re-record comes last.
+   **A turn takes at least six tasks** (*the user's rule, 2026-09-15 21:38*, replacing "one
+   unit per turn"). Tasks that close together, such as P4.7 with P4.6's composer piece, count
+   as one. When fewer than six Linux-closable tasks are left, take all of them. The 2 h 30 min
+   pause in step 3 is unchanged. Two rules keep a long turn from losing work or the chain:
+   - **Commit each task as it closes, with its status line and plan_progress re-stamp.** A turn
+     cut off by the usage limit then loses only the task in flight. The *Done* line, the *Now*
+     handoff and CLAUDE.md may wait for the end of the turn.
+   - **Right after the guard passes, create a fallback job in your own session**, one-shot at
+     `date -d '+5 hours'`, with the same prompt you were started with. If the turn is cut off,
+     the fallback restarts the chain. At the end of the turn, `CronDelete` it before handing
+     the real job on. This is the one moment two jobs may exist, and both are yours. A task
+     the cut-off left unfinished goes first in the next prompt.
 2. **Update the documents before creating the job, never after.** The documents are what a
    fresh session reads.
    - `KRYOVA_MASTER_PLAN.md`: every status line the turn moved, in the supersede shape above.
@@ -135,7 +145,7 @@ remembers nothing of this one, so it follows this shape:
 
 ```
 Kryova continuation — written <date time>, after <what this turn finished>.
-Attempt <n> at the target below.
+Attempt <n> at the targets below.
 
 0. Guard. Do no work and edit nothing if any of these is true:
    - a pytest is running: ps -eo args | grep "[p]ython -m pytest"
@@ -145,6 +155,7 @@ Attempt <n> at the target below.
      or a last commit younger than 30 minutes (git log -1 --format=%ct).
    In that case, schedule this same prompt again 2 h 30 min out, change only the
    "Next continuation fires" line in KRYOVA_BUILD_PLAN.md's *Now*, and end the turn.
+   Once the guard passes, create the fallback job ("Ending every turn", step 1).
 1. Read, by line range and never whole, the master plan's progress block
    (venv/bin/python -m scripts.plan_progress), the phase named below, the top of
    KRYOVA_BUILD_PLAN.md's *Now*, and THE QUEUE if the target touches hardware. The master plan
@@ -153,9 +164,10 @@ Attempt <n> at the target below.
    tokens. The one exception is a session older than the file's last change
    (stat -c %y CLAUDE.md); that session reads only what changed, with git log -p and
    git diff on CLAUDE.md. Then run the dirty-tree checks from "Subagents" item 11.
-2. Target: <phase.task>. <What exactly remains. Which files already exist. Which test file will
-   prove it. Which status line it moves, and to what. The traps already known.>
-3. If the target is already done or blocked: <next target>, then <the one after>.
+2. Targets, in order, at least six: <phase.task> each with <what exactly remains, which files
+   already exist, which test file will prove it, which status line it moves and to what, and
+   the traps already known>. Commit each as it closes.
+3. If a target is already done or blocked: <the next ones to take in its place>.
 4. End per CLAUDE.md "Ending every turn": documents first, then a new prompt of this shape.
 ```
 

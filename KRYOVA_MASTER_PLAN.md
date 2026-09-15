@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 115/132 = 87% | 131/151 eng-months = 87% |
+| Engineering — E1–E23 | 15/24 | 116/132 = 88% | 133/151 eng-months = 88% |
 | Product — P1–P10 | 6/10 | 48/61 = 78% | 28/38 eng-months = 74% |
-| **Programme** | 21/34 | 162/193 = 84% | 159/189 eng-months = 84% |
+| **Programme** | 21/34 | 164/193 = 85% | 161/189 eng-months = 85% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 50%, E23 25%, P4 75%, P9 57% |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 50%, E23 62%, P4 75%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -4690,6 +4690,29 @@ them?
    surrogates, not a CAD or solver stack — and its announcement contains **no mention of
    certification, V&V or validation**. Each of those is a checkable claim with a date, and each
    will rot; the deliverable is the register, not this paragraph.
+   > DONE (2026-09-15) — **the paragraph above is now a register, `app/verify/competitors.py`:
+   > fourteen claims, each re-read at its source on 2026-09-15 and quoted in the page's words.**
+   > Every claim records its standing (`confirmed` / `changed` / `not re-read`) and how it was
+   > read (the page itself, or only a search engine's extract of it), and a claim that was not
+   > re-read may carry no quote and must say why. **Nine confirmed, three changed, two not
+   > re-read.** Changed: Zoo has supported assemblies in Design Studio since v1.0 (mates still on
+   > its roadmap; whether its agent generates one was not read); **Zoo also speaks MCP**, so E23.3
+   > is no differentiator against Zoo; and PTC announced Onshape Labs, an early-access AI
+   > programme, on July 14, 2026 (the March state itself was not re-read). Not re-read: Onshape's
+   > "data architecture" moat (no page stating it was found), and **FreeCAD 1.1 announcing no AI
+   > feature**, because an absence needs the whole announcement and neither page could be read —
+   > the blog answered 429 and the wiki serves an anti-AI-scraping challenge, which was respected
+   > rather than worked around. The PhysicsX absence *was* checked over the whole page. **Checked
+   > again at 18:00 the same day by exact string match against freshly fetched pages**: all eleven
+   > quotes marked as read from the page match (markup aside), the PhysicsX page contains none of
+   > `certif`/`verif`/`validat` even in its scripts, and both PTC claims were moved from search
+   > extract to page read, because the pages now serve and the extract had dropped the spaces
+   > around the dateline's dash. The FreeCAD release date is recorded as the two sources give it,
+   > a day apart. **Not yet on the trust surface**; that is the phase proof. **The tests were
+   > written on Linux and not run** (the user's rule); Windows runs them. Tested by:
+   > `tests/test_verify_competitors.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 2. **Read the map before believing the position.** The register above says the funded competition
@@ -4697,6 +4720,20 @@ them?
    That is the gap Decision 3 already aims at, and this task is the discipline of re-checking
    quarterly whether it is still open — because a plan that assumes an unoccupied niche for four
    years without looking is how a differentiator becomes an assumption.
+   > PARTIAL (2026-09-15) — **the quarterly re-check is enforced; the judgement it feeds is not
+   > recorded anywhere.** `competitors.REVIEW_BY` is 2026-12-15, a quarter after the reading, and
+   > `is_current` plus a test that fails the day after tell whoever sees it to re-read every
+   > source and update what moved, never to move the date alone (the shape of
+   > `eu_ai_act.REVIEW_BY`). What is left: a dated answer to "is nobody selling credibility still
+   > true?", written by a person from each quarter's register rather than derived by code. The
+   > first reading, as observations and not a verdict: PhysicsX sells speed (its models "predict
+   > physical behavior in seconds rather than hours or days") and its announcement mentions no
+   > certification, verification or validation — the only page that absence was checked on;
+   > Zoo's FAQ still says its agent may "produce incorrect geometry"; and MCP is no longer a gap
+   > anyone can occupy alone. **The test was written on Linux and not run.**
+   > Tested by: `tests/test_verify_competitors.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 3. **Speak MCP, because the incumbent chose it.** Kryova's registry is already a declarative

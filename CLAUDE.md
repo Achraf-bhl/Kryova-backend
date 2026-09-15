@@ -1628,6 +1628,14 @@ unauthenticated trust page.
    data/verify/corpora/<corpus>.json` on the pinned build (the module docstring and
    `.github/workflows/nightly.yml` carry the exact environment). Never delete a non-reproducing
    case from a baseline to make it tidy — a vanished case fails the comparison on purpose.
+10. **A quote register is checked by exact string against the fetched page, and a miss is read
+   before it is believed** (`competitors.py`, 2026-09-15). `curl` the page and match the quote
+   after stripping tags, never through a summarising fetch tool, which paraphrases and will say
+   a quote matches when it does not. Stripping produces its own misses: a link leaves a space
+   before the full stop (`GitHub .`), and a page escaped `$` as `\$`. Of three misses that day,
+   all three were markup. And **a search extract is not the page's words**: PTC's dateline
+   `July 14, 2026 – PTC` came through the extract as `2026–PTC`. Where the page itself now
+   serves, re-quote it and move `read_as` to the page.
 
 ## The law, read and quoted (`app/compliance/`) — E19, closed 2026-09-14
 

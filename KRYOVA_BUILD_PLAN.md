@@ -57,14 +57,23 @@ happened.
 > file's ASN.1 identifier; this build writes edition 1). **E21.4 is PARTIAL at 12:07** (every
 > material number names its right; MatWeb's terms read verbatim, and `steel-1018`/`stainless-304`
 > cite MatWeb, which forbids redistribution and engineering reliance, so this is flagged and not
-> fixed; the customer-licence loader exists and nothing consults it yet). Next: E23.1 (competitor
-> register), needing a source read, never recalled → P4's open tasks → P7 (QUEUE rows for the
-> Windows parts).
-> **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
-> **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
-> Its prompt names E23.3 as the target and says to skip a target that is already done; E23.3,
-> P9.3, E22.1, the E22.2 and E22.4 harnesses and case sets, and P6.1's tessellation, store
-> and route, E21.5's register, E21.6's reading, E21.2 and E21.4's model are done, so it should start at E23.1.
+> fixed; the customer-licence loader exists and nothing consults it yet). **E23.1 was stopped at
+> 12:10 by the usage limit, uncommitted, and closed at 18:05 by the 13:40 job's retry**: DONE
+> (`app/verify/competitors.py`, fourteen claims, nine confirmed / three changed / two not
+> re-read; every page quote re-matched by exact string against pages fetched at 18:00, both PTC
+> claims moved from search extract to page read). **E23.2 is PARTIAL** (`REVIEW_BY` 2026-12-15
+> enforced by `tests/test_verify_competitors.py`, not run; the quarterly judgement is a
+> person's and nothing records it yet). E23.4 (the public CadQuery benchmark) needs a model run
+> on Windows and is not next.
+> **Next target: P4.2's two Linux-closable pieces** — an attached image goes to the vision
+> provider (`app/ai/vision.py`) and comes back as fragments labelled `INFERRED` with
+> `attachments.UNVERIFIED_NOTE`, never `TRANSCRIBED`; and the agent is offered
+> `POST /projects/{id}/geometry/from-attachment` as a tool (CLAUDE.md testing item 8: a test
+> through the tool path, not the route alone). Then P4.3/P4.6 only if something there is
+> Linux-closable without the staged extraction, then P7 (QUEUE rows for the Windows parts).
+> **Next continuation fires 2026-09-15 20:33** — held by the session named on the next line.
+> **Held by `kryova-backend-df`** until a handover is confirmed; the job dies if that session
+> is closed.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -342,6 +351,15 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E23 task 1: the competitor register; task 2, partial: it expires.**
+  `app/verify/competitors.py` holds fourteen claims about Zoo, PTC/Onshape, FreeCAD and PhysicsX,
+  each quoted from its page with a standing and how it was read. Nine confirmed, three changed
+  (Zoo does assemblies in Design Studio; Zoo speaks MCP, so E23.3 is not a differentiator against
+  it; Onshape Labs launched July 14, 2026), two not re-read (Onshape's moat: no page found;
+  FreeCAD 1.1's "no AI": the blog 429s and the wiki's anti-AI challenge was respected). Written
+  at 12:10, re-checked and committed at 18:05: the eleven page quotes matched live pages by exact
+  string. `REVIEW_BY` 2026-12-15 fails the suite the day after. Not on the trust surface yet.
+  Tested by `tests/test_verify_competitors.py`. Not run here.
 - **2026-09-15 — E21 task 4, partial: every material number names its right.** `materials.Right`
   sits on every `Source`, with quoted `terms`, a `licensee` and `reliance_disclaimed`; a disclaimed
   source is never a design basis. `material_licences.customer_records` loads a customer's licensed

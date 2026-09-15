@@ -6,12 +6,10 @@ the registry's sketch vocabulary is *dimension-driven*: `catia_sketch_rectangle`
 width and a height, `catia_sketch_circle` a diameter, `catia_sketch_polygon` a side count
 and a diameter. A rectangle whose width is given is fully determined — there is nothing
 for a solver to solve. So the profiles that actually feed pads, pockets, shafts and
-grooves are buildable now, directly, and PlaneGCS is deferred to the one operation that
-genuinely needs it: `catia_sketch_constrain`, which applies arbitrary constraints to free
-geometry. That operation refuses with the reason until the solver lands.
-
-This is a real narrowing of scope, not a claim to have finished 1.3, and the coverage
-figure reports it as such.
+grooves are buildable now, directly. The one operation that would need a solver is
+`catia_sketch_constrain`, which applies arbitrary constraints to free geometry. Nothing in
+the product calls it, so it is refused with that reason (`app.kernel.occt.refusals`) and
+PlaneGCS is not owed (master plan E1 task 4, closed 2026-09-15 as a scope decision).
 
 **A sketch is a plane plus an ordered list of closed profiles.** It is not geometry until
 something consumes it: a pad extrudes it, a shaft revolves it. That matches both CATIA's

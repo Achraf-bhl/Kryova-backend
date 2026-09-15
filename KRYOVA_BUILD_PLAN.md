@@ -59,9 +59,8 @@ happened.
 > order the user asked for, are the nearly complete phases E7, E1, E3, P4 and E15. In P4.2 that
 > means a STEP attachment becoming a `GeometryVersion` and images going to the vision provider.
 > **E1.3 closed the same night** (`catia_delete_feature`, `catia_feature_parents`,
-> `catia_shell_faces`, and a reason for each of the other 85). E1's one open task is task 4, a
-> constraint solver for `catia_sketch_constrain`. E3's only open item is its phase proof, which
-> needs the seat.
+> `catia_shell_faces`, and a reason for each of the other 85). **E1.4 closed on 2026-09-15** as a scope
+> decision, so E1 is 12 of 12. E3's only open item is its phase proof, which needs the seat.
 > Say plainly when hardware or a mechanical engineer blocks a task, rather than marking it.
 > Standing flags carried forward, none fixed yet:
 > - E19's phase proof (review by someone outside CE) is still owed.
@@ -277,6 +276,16 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E1 task 4 closed as a scope decision, so E1 is 12 of 12.** The sketch layer the
+  product uses builds, since every profile tool is fully determined by its arguments. The PARTIAL
+  owed PlaneGCS to `catia_sketch_constrain`, which nothing in the product calls. It is withdrawn
+  for three reasons: Decision 1, the seat's own draw-at-size route, and `planegcs` 0.8.0 having
+  no wheel for the seat's Python 3.14. It reopens as a new task the day something needs a
+  constraint solved.
+  **Defect fixed:** that operation's handler did nothing but raise, so the agent was offered a
+  tool that could never work. It is now a reason in `refusals.py` (118 + 1 + 86 = 205), and a
+  test fails if any handler's whole body is a raise.
+  **Interface change:** `catia_sketch_constrain` is no longer offered on `occt`.
 - **2026-09-15 — E8 task 3, partial: EN 1993-1-9's weld tables are in code, and a joint is
   classified into the rows it can still be, never into one. E8 goes from 50% to 58%.**
   `app/fatigue/weld_catalogue.py` holds 91 rows of Tables 8.3, 8.4, 8.5 and B.1. Each was re-read

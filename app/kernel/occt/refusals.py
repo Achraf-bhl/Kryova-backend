@@ -206,6 +206,14 @@ REASONS: Final[dict[str, str]] = {
     "catia_sketch_chamfer": _not_needed(
         "Draw the chamfered outline directly with catia_sketch_polyline"
     ),
+    "catia_sketch_constrain": (
+        "It constrains free sketch geometry (tangent, parallel, coincident and the rest), "
+        "and that needs a 2D constraint solver such as PlaneGCS, which the open kernel does "
+        f"not have. {_NOT_NEEDED}. Every profile tool here is fully determined by its "
+        "arguments, so draw at the size and position you want with catia_sketch_rectangle, "
+        "catia_sketch_circle, catia_sketch_polygon or catia_sketch_polyline; the "
+        "coordinates are the constraint"
+    ),
     "catia_sketch_conic": _not_needed(
         "catia_sketch_ellipse draws an ellipse, and catia_sketch_spline a free curve"
     ),

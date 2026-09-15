@@ -702,7 +702,7 @@ class TestSketchesAndSolidFeatures:
     Every profile in the registry's vocabulary is dimension-driven (a rectangle takes a
     width and a height), so it is fully determined by its arguments and there is nothing
     for a constraint solver to solve. `catia_sketch_constrain` is the one operation that
-    genuinely needs PlaneGCS, and it refuses with that reason.
+    would need PlaneGCS; nothing has needed it, and it refuses with that reason.
     """
 
     @staticmethod

@@ -1,9 +1,10 @@
 """Solid primitives: geometry created from numbers rather than from a profile.
 
 These are the operations that need no sketcher, which is why they are the first ones
-mapped. Everything that starts from a 2D profile waits on PlaneGCS (master plan 1.3);
-these do not, and they are enough to exercise the naming layer, the measurement contract
-and the end-to-end path from a compiled spec to a checked assertion.
+mapped. Profile-based features came later, from dimension-driven sketches that need no
+solver (`app.kernel.occt.sketching`). These are still the smallest parts that exercise the
+naming layer, the measurement contract and the end-to-end path from a compiled spec to a
+checked assertion.
 """
 
 from __future__ import annotations

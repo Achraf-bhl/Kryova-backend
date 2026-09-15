@@ -41,7 +41,8 @@ Companion documents:
    phase heading: `> ✅ PHASE COMPLETE (YYYY-MM-DD) — all tasks done and tested.` A phase with one
    task still open does not get it, however much has shipped — **unless the marker names that task
    and says why it stays open**, which is the only honest way to close a phase whose last residual
-   is a scope decision (E1 tasks 3 and 4) or a wait on hardware (E3 task 5). "Complete" and
+   is a scope decision (E1 tasks 3 and 4 were, until 2026-09-14 and 2026-09-15) or a wait on
+   hardware (E3 task 5). "Complete" and
    `PARTIAL` ten lines apart, with nothing connecting them, leaves a reader unable to tell which
    of the two is stale — and that is worse than either statement alone. Enforced by
    `TestThePlanKnowsItsOwnProgress` in `tests/test_repository_hygiene.py`.
@@ -70,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 98/132 = 74% | 110/151 eng-months = 73% |
+| Engineering — E1–E23 | 15/24 | 98/132 = 75% | 111/151 eng-months = 73% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 145/193 = 75% | 138/189 eng-months = 73% |
+| **Programme** | 21/34 | 146/193 = 75% | 138/189 eng-months = 73% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -497,11 +498,10 @@ so the agent can consult them the same way it consults the CATIA manuals.
 > machine does not have. **Task 3 closed on 2026-09-14** (corrected that day): this marker said it
 > stayed `PARTIAL` *by design, permanently*, because it read the task as 201 implementations,
 > which Decision 1 forbids. The task also allows a reasoned refusal, and every unimplemented
-> operation now has one, so task 3 is `DONE` without the operation count being a goal. **The
-> open one is task 4**, which stays `PARTIAL`: it is the sketch layer, narrowed to the
-> dimension-driven profiles the registry actually uses, with PlaneGCS owed to exactly one
-> operation that refuses by name. That is a scope decision with its reasoning in the status
-> line, not work waiting to be done.
+> operation now has one, so task 3 is `DONE` without the operation count being a goal. **Task 4
+> closed on 2026-09-15**, also as a scope decision: the sketch layer the product uses builds, and
+> the one constraint operation, which nothing calls and whose solver has no wheel for the seat's
+> Python, is refused with that reason rather than owed. No task in the phase is open.
 
 **~8 engineer-months. The keystone. Nothing downstream is affordable until it lands.**
 
@@ -614,6 +614,34 @@ deterministically, in CI, at machine scale?
    > justification came from the ladder rather than from a sweep.
 
 4. **The sketch layer.**
+   > DONE (2026-09-15) — **closed as a scope decision rather than by building a solver, and the
+   > plan changed to say so.** The sketch layer the product uses is complete. Every profile tool
+   > that feeds a pad, pocket, shaft, groove or rib (rectangle, circle, polygon, slot, point, line,
+   > polyline, arc, three-point arc, ellipse, spline, axis) is fully determined by its arguments
+   > and builds. The PARTIAL below still owed PlaneGCS to one operation,
+   > `catia_sketch_constrain`. **Nothing in the product calls it.** On 2026-09-15 no design,
+   > mission, template or test named it outside its own refusal, and Decision 1 adds an operation
+   > only when a test, a sweep or an optimisation needs one. The seat takes the same route to a
+   > sized profile: `catia_sketch_dimension` fails on V5-R33 more often than it works (CLAUDE.md,
+   > *Two seat behaviours*), so the agent draws at the size it wants. **PlaneGCS also could not
+   > ship today.** `planegcs` 0.8.0 on PyPI has wheels for CPython 3.12 and 3.13 only, and the
+   > Windows seat runs 3.14, so installing it would mean compiling FreeCAD's solver from the
+   > sdist on the delivery machine. So the task stops owing PlaneGCS instead of carrying a debt
+   > nobody is going to pay.
+   > **One defect fixed with it.** `catia_sketch_constrain` sat in `HANDLERS` with a body that
+   > did nothing but raise, so `local_tool_names()` offered the agent a tool that could never
+   > work. That is the class CLAUDE.md testing item 8 describes, the other way round. It is now a
+   > reason in `refusals.py` beside the other 85, giving 118 implemented + 1 served + 86 refused =
+   > 205. A new test fails if any handler's whole body is a raise.
+   > **It reopens as a new task** the day a test, a sweep or an optimisation needs a sketch
+   > constraint solved. The solver choice (PlaneGCS over SolveSpace, reasoned below) and the
+   > wheel gap are both recorded here for that day.
+   > **Interface change:** `catia_sketch_constrain` is no longer offered on
+   > `GEOMETRY_BACKEND=occt`. The refusal still names PlaneGCS, and its CATIA side is untouched.
+   > Tested by: `tests/test_kernel.py::TestSketchesAndSolidFeatures`,
+   > `tests/test_kernel_refusals.py`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-05) — parametric half done, solver deferred with cause. The finding that
    > changed this task: **the registry's sketch vocabulary is dimension-driven, not
    > constraint-driven.** `catia_sketch_rectangle` takes a width and a height,

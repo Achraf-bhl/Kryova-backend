@@ -73,7 +73,6 @@ HANDLERS: Final[dict[str, Handler]] = {
     sketcher.POLYGON: sketcher.sketch_polygon,
     sketcher.SLOT: sketcher.sketch_slot,
     sketcher.CLOSE: sketcher.sketch_close,
-    sketcher.CONSTRAIN: sketcher.sketch_constrain,
     sketcher.POINT: sketcher.sketch_point,
     sketcher.LINE: sketcher.sketch_line,
     sketcher.POLYLINE: sketcher.sketch_polyline,

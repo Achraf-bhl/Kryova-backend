@@ -119,3 +119,40 @@ class TestTheAgentIsToldTheReason:
         assert "catia_drawing_create is not available on the open kernel" in message
         assert "app/manufacture" in message, "the reason says where drawings come from"
         assert "operations are" in message
+
+
+class TestNothingOfferedCanOnlyRefuse:
+    def test_no_handler_is_a_refusal_in_disguise(self) -> None:
+        """A handler whose whole body is a `raise` is offered to the agent by
+        `local_tool_names` and can never work. Its reason belongs in `REASONS`,
+        where the dispatcher already carries it. `catia_sketch_constrain` was one
+        until 2026-09-15."""
+        import ast
+        import inspect
+        import textwrap
+
+        from app.kernel.occt.operations import HANDLERS
+
+        def only_raises(handler) -> bool:
+            function = ast.parse(textwrap.dedent(inspect.getsource(handler))).body[0]
+            assert isinstance(function, ast.FunctionDef), handler
+            body = [
+                statement
+                for statement in function.body
+                if not (
+                    isinstance(statement, ast.Expr)
+                    and isinstance(statement.value, ast.Constant)
+                    and isinstance(statement.value.value, str)
+                )
+            ]
+            return len(body) == 1 and isinstance(body[0], ast.Raise)
+
+        assert [tool for tool, handler in HANDLERS.items() if only_raises(handler)] == []
+
+    def test_constraining_a_sketch_is_refused_rather_than_offered(self) -> None:
+        from app.geometry.backends import local_tool_names
+
+        assert "catia_sketch_constrain" not in local_tool_names()
+        reason = REASONS["catia_sketch_constrain"]
+        assert "PlaneGCS" in reason
+        assert "catia_sketch_polyline" in reason, "it says how to get the profile instead"

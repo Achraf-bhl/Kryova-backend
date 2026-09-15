@@ -3,7 +3,8 @@
 Every profile here is fully determined by its arguments, which is why none of them needs
 a constraint solver — see `app.kernel.occt.sketching` for why that is a property of the
 registry's vocabulary rather than a shortcut. `catia_sketch_constrain` is the operation
-that genuinely needs one, and it refuses with the reason until PlaneGCS lands.
+that would need one, and nothing has needed it, so it is refused with that reason in
+`app.kernel.occt.refusals` rather than offered here.
 
 **A sketch is addressed by name, not by position.** `catia_pad(sketch=@plate.profile)`
 resolves through the design's semantic name, so the profile a feature consumes is the one
@@ -17,7 +18,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.catia.ops import vocabulary
-from app.kernel.errors import GeometryError, OperationNotSupported
+from app.kernel.errors import GeometryError
 from app.kernel.occt import elements
 from app.kernel.occt.operations.context import (
     BuildContext,
@@ -46,7 +47,6 @@ CIRCLE = "catia_sketch_circle"
 POLYGON = "catia_sketch_polygon"
 SLOT = "catia_sketch_slot"
 CLOSE = "catia_sketch_close"
-CONSTRAIN = "catia_sketch_constrain"
 POINT = "catia_sketch_point"
 LINE = "catia_sketch_line"
 POLYLINE = "catia_sketch_polyline"
@@ -347,16 +347,6 @@ def sketch_close(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping
     return {"feature": sketch.name, **sketch.to_dict()}
 
 
-def sketch_constrain(context: BuildContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Apply a constraint to sketch geometry — the one operation needing a solver."""
-    raise OperationNotSupported(
-        CONSTRAIN,
-        "Constraining free geometry needs a 2D solver (PlaneGCS, master plan 1.3). The "
-        "dimension-driven profiles — rectangle, circle, polygon, slot — are fully "
-        "determined by their arguments and need no constraints",
-    )
-
-
 # -- helpers -----------------------------------------------------------------
 
 
@@ -508,7 +498,6 @@ __all__ = [
     "AXIS",
     "CIRCLE",
     "CLOSE",
-    "CONSTRAIN",
     "CREATE",
     "ELLIPSE",
     "LINE",
@@ -523,7 +512,6 @@ __all__ = [
     "sketch_axis",
     "sketch_circle",
     "sketch_close",
-    "sketch_constrain",
     "sketch_create",
     "sketch_ellipse",
     "sketch_line",

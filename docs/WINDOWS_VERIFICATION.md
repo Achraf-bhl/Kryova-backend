@@ -754,6 +754,15 @@ master plan's status line in the same commit.
       `CNEXT.exe` mid-plan, reconnect, and write the path that recovers. A session *pool* also
       needs `CatiaRegistry` on a shared bus before it means anything with more than one API
       worker (its docstring says so). Settles: E15.4 `PARTIAL` → `DONE`.
+- [ ] **E6 — E9 task 5: CATIA DMU Kinematics as a second mechanism backend.** Added
+      2026-09-15. `app/dynamics/engine.py` is the seam (`DynamicsEngine`), and
+      `app/dynamics/assembly.py` now derives a `Mechanism` from the product graph. Write a
+      `DmuKinematicsEngine` on the seat that builds the same joints in a CATIA Kinematics
+      mechanism, drives it, and reads positions back. Hold it to
+      `tests/test_dynamics_assembly.py`'s whirling rotor: the joint positions it reports must
+      match `kinematics.evaluate` pose for pose. Also settles whether CATIA's assembly
+      constraints can be read as joint declarations, which is the one input E9.2 still takes
+      by hand. Settles: E9.5 `NOT STARTED` → `DONE`.
 
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 

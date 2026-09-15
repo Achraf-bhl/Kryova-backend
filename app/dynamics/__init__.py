@@ -23,6 +23,12 @@ Reading order:
 6. `clearance.py` -- does it clash anywhere in its travel. Master plan 9.3 and gate G3.
 7. `engine.py` -- the seam an engine drops into, and an honest account of which ones are
    behind it.
+8. `assembly.py` -- a mechanism derived from the product graph: masses from the roll-up,
+   joint positions from the occurrence frames. Master plan 9.2.
+9. `travel.py` -- travel against end stops (exact), four-bar lock and transmission angle,
+   and the swept volume as a lower bound. Master plan 9.3.
+10. `channels.py` -- a cycle split into load channels a fatigue history is superposed
+    from. Master plan 9.4, the step from a reaction to damage.
 
 **What is exercised and what is a seam, stated plainly because the difference matters.**
 

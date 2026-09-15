@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 102/132 = 77% | 114/151 eng-months = 75% |
+| Engineering — E1–E23 | 15/24 | 103/132 = 78% | 116/151 eng-months = 77% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 148/193 = 77% | 141/189 eng-months = 75% |
+| **Programme** | 21/34 | 150/193 = 78% | 143/189 eng-months = 76% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,8 +81,8 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E15 80%, E18 50%, P4 75%, P9 57% |
-| nothing finished yet | E9, E13, E17, E21, E22, E23, P6, P7 |
+| in flight | E8 92%, E9 60%, E15 80%, E18 50%, P4 75%, P9 57% |
+| nothing finished yet | E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -2286,21 +2286,66 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 
 2. **Mechanism definition derived from assembly constraints** — the kinematic model comes from the
    CAD, never modelled twice.
+   > DONE (2026-09-15) — `app/dynamics/assembly.derive` builds a `Mechanism` from a
+   > `ProductStructure`: each body's mass and centre from `app.assembly.mass.roll_up` over every
+   > leaf under its occurrence path, each joint's origin and axis from the occurrence frames,
+   > the joint itself declared once in the child part's own coordinates. Nothing is typed
+   > twice. Refused by name: an unweighed part under a body (a partial mass gives a reaction
+   > that is too small), a body inside a body, a parent that is not a body, a body on two
+   > joints. Held to `m ω² r` for a rotor however it is placed and turned, and for a two-link
+   > chain whose elbow distance comes from the graph. **Not claimed**: reading mate
+   > constraints as joints (the product graph holds none; CATIA's are THE QUEUE E6), and
+   > inertia tensors (the roll-up has none, so bodies are point masses and the notes say so).
+   > **Not run here**: written on Linux on 2026-09-15 and not executed, at the user's
+   > instruction. Tested by: `tests/test_dynamics_assembly.py`, `tests/test_dynamics_kinematics.py`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-06) — kinematics tested against closed form: slider-crank at both dead
    > centres, the Grashof families each cross-checked against the solver. Tested by:
    > `tests/test_dynamics_*.py` (115 tests). Code: `app/dynamics/`.
 
 3. **Motion-range simulation**: swept volume, interference through motion, travel and lock checks.
+   > DONE (2026-09-15) — `app/dynamics/travel.py`. **Travel is exact**: a driver's extremes are
+   > solved in closed form (a harmonic's crests from its phase, a table's at its knots), so a
+   > stop passed between two samples is still found; limits carry a source. **Lock**:
+   > `lock_sweep` walks a four-bar, reports the first angle it cannot assemble or drive at, and
+   > the smallest transmission angle, held to the law-of-cosines value at a crank-rocker's
+   > in-line positions; the criterion is the caller's with a source. **Swept volume** is the
+   > union of the sampled poses fused in OCCT, a lower bound by construction, plus a sampled
+   > envelope box. Interference through motion is `clearance.py` (2026-09-06). **Not run
+   > here**: written on Linux on 2026-09-15 and not executed, at the user's instruction.
+   > Tested by: `tests/test_dynamics_travel.py`, `tests/test_dynamics_clearance.py`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-06) — clearance tested. Tested by: `tests/test_dynamics_*.py`.
 
 4. **Joint-load extraction feeding FEA** — manoeuvre → MBD → reactions at every joint → FEA load
    case → stress → fatigue damage. The loop that closes the system; nothing else in this plan
    produces a defensible load case.
+   > DONE (2026-09-15) — the loop closes: `app/dynamics/channels.plan` splits a mechanism's
+   > cycle into load channels, each a `LoadCase` solved once and a signal of multiples, and
+   > `CyclePlan.load_channels` hands them to `app.fatigue.field` for `history_at` and
+   > `Assessment`. The split is exact by load kind: a plain force mount by world axis, a
+   > bearing mount along its line as two one-sided channels (a turning bearing reaction is
+   > refused, because its pressure distribution depends on direction), the body's `g − a`
+   > field by axis. Held to one identity at every instant: the scaled channels reassemble to
+   > the reaction, and through a real linear solve of a clamped bar the summed nodal stress
+   > equals a direct solve of `loadcases.build` at three instants. **Not claimed**: a history
+   > between samples (a lower bound on the range), joint moments, the `ω² r` field across a
+   > spinning part. **Not run here**: written on Linux on 2026-09-15 and not executed, at the
+   > user's instruction. Tested by: `tests/test_dynamics_channels.py`,
+   > `tests/test_dynamics_kinematics.py`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-06) — reactions tested against closed form: `ω²r`, and the pendulum period
    > pinned through the reaction (driven at the natural frequency the rod carries no tangential
    > force; the residual is `mg·A³/6` to 4 figures). Tested by: `tests/test_dynamics_*.py`.
 
 5. **CATIA DMU Kinematics as an alternative backend where a seat exists.**
+   > BLOCKED — needs a CATIA seat with the Kinematics workbench; THE QUEUE E6 (added
+   > 2026-09-15) carries it with the test to hold it to.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 ##### Phase E10 — Thermal, flow, and optimisation #####

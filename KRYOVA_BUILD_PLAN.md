@@ -18,9 +18,12 @@ happened.
 > **Handoff, 2026-09-15 (morning) — the user is driving phases to 100% interactively, and on
 > Linux nothing is run.** "Write the code and the tests, don't launch pytest; Windows tests."
 > Done this stretch: **E7** (LE3 runs, `*E7`), **E8.5**, **E15.2** (autoscale recommendation),
-> the conformance ladder for B7, and **E8.6** (fatigue through a route and the agent). E3 (92%)
-> and E15 (80%) wait on the seat (B7, E4, E5); E8 (92%) waits on E8.3's engineer. Next, in the
-> user's order: **E18**, **E9**, **E13**, **E17**. No continuation job is held for this stretch: the user asked for continuous work in
+> the conformance ladder for B7, **E8.6** (fatigue through a route and the agent), and **E9.2,
+> E9.3, E9.4** (mechanism from the assembly, travel/lock/swept volume, cycle to fatigue
+> channels). E3 (92%) and E15 (80%) wait on the seat (B7, E4, E5); E8 (92%) waits on E8.3's
+> engineer; E9 (60%) waits on Chrono (9.1) and a seat (9.5, QUEUE E6). E18's open rungs
+> (M4, M5, M7, M8) name E13, E9 and E17 work as their needs, so they move after those. Next:
+> **E13**, **E17**, then E18's rungs. No continuation job is held for this stretch: the user asked for continuous work in
 > the session. Before anything else on Windows: THE QUEUE A6's 2026-09-15 update (run the new
 > tests, ruff, mypy, re-record V&V).
 
@@ -300,6 +303,15 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E9 tasks 2, 3 and 4 closed on Linux, tests written and not run.**
+  `app/dynamics/assembly.py` derives a `Mechanism` from a `ProductStructure` (roll-up masses,
+  occurrence frames, joints declared once in part coordinates). `app/dynamics/travel.py`:
+  exact travel extremes against sourced stops, four-bar lock and transmission angle against
+  the law-of-cosines value, and swept volume as an OCCT union of sampled poses (a lower
+  bound). `app/dynamics/channels.py` splits a cycle into load channels whose scaled sum is
+  each instant's load, and hands them to `app.fatigue.field`; checked through a real linear
+  solve. E9.5 is BLOCKED on a seat (QUEUE E6). Tested by `tests/test_dynamics_assembly.py`,
+  `tests/test_dynamics_travel.py`, `tests/test_dynamics_channels.py`. Not run here.
 - **2026-09-15 — E8 task 6 closed on Linux, tests written and not run: a fatigue check reaches
   the product.** The runner archives `nodal_stress_mpa`; `app/simulation/fatigue.assess_run` is
   shared by `POST /projects/{id}/simulations/{sim}/fatigue` and the agent tool `assess_fatigue`,

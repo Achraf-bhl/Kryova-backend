@@ -54,14 +54,17 @@ happened.
 > pyLife; tables-vs-method is for counsel). **E21.6 is PARTIAL at 11:56** (QIF read: Boost 1.0
 > community repo with *modified* schemas; no writer, no validator installed). **E21.2 is DONE at
 > 12:02** (every STEP record and `catia_export_step` result names the AP242 edition read from the
-> file's ASN.1 identifier; this build writes edition 1). Next: E21.4 (materials licence position)
-> / E23.1 (competitor register), each needing a source read, never recalled → P4's open tasks →
-> P7 (QUEUE rows for the Windows parts).
+> file's ASN.1 identifier; this build writes edition 1). **E21.4 is PARTIAL at 12:07** (every
+> material number names its right; MatWeb's terms read verbatim, and `steel-1018`/`stainless-304`
+> cite MatWeb, which forbids redistribution and engineering reliance, so this is flagged and not
+> fixed; the customer-licence loader exists and nothing consults it yet). Next: E23.1 (competitor
+> register), needing a source read, never recalled → P4's open tasks → P7 (QUEUE rows for the
+> Windows parts).
 > **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
 > **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
 > Its prompt names E23.3 as the target and says to skip a target that is already done; E23.3,
 > P9.3, E22.1, the E22.2 and E22.4 harnesses and case sets, and P6.1's tessellation, store
-> and route, E21.5's register, E21.6's reading and E21.2 are done, so it should start at E21.4.
+> and route, E21.5's register, E21.6's reading, E21.2 and E21.4's model are done, so it should start at E23.1.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -339,6 +342,14 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E21 task 4, partial: every material number names its right.** `materials.Right`
+  sits on every `Source`, with quoted `terms`, a `licensee` and `reliance_disclaimed`; a disclaimed
+  source is never a design basis. `material_licences.customer_records` loads a customer's licensed
+  allowables from their deployment as `CUSTOMER_LICENCE` (the file cannot choose). MatWeb's licence
+  was read (Wayback, 2026-02-03): no redistribution, no engineering reliance, no AI/ML use.
+  **`steel-1018` and `stainless-304` cite MatWeb**, flagged. MMPDS-2026 Vol I: $1,049, 2,784 pp.
+  Nothing consults the loader yet. Interface change: `Source` fields, property `source` dicts. Tested
+  by `tests/test_material_licences.py`. Not run here.
 - **2026-09-15 — E21 task 2: which AP242 edition "AP242" means.** `export.AP242_EDITIONS` maps
   the ASN.1 identifiers STEP Tools lists to editions 1–3 (edition 2 is arc 3); `StepExport` and
   the open kernel's `catia_export_step` result now carry `object_identifier` / `ap242_edition`,

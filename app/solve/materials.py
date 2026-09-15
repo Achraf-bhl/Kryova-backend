@@ -153,6 +153,23 @@ class SourceKind(StrEnum):
     DERIVED = "derived"
 
 
+class Right(StrEnum):
+    """The right under which a number is shown, and to whom (master plan E21.4).
+
+    Provenance says where a number came from. This says whether anyone may show
+    it. The two differ: a number can be well sourced and still be one the
+    source's licence forbids passing on.
+    """
+
+    #: Terms were read that let Kryova ship the number and show it to anyone.
+    REDISTRIBUTABLE = "redistributable"
+    #: Held under the customer's own licence, inside their deployment. Kryova does
+    #: not ship it, and `material_licences.customer_records` is the only way in.
+    CUSTOMER_LICENCE = "customer licence"
+    #: No terms granting Kryova the right to ship it have been read.
+    NOT_ESTABLISHED = "not established"
+
+
 @dataclass(frozen=True)
 class Source:
     """Where a number came from, in enough detail to go and check it.
@@ -169,6 +186,16 @@ class Source:
     year: int | None = None
     url: str = ""
     note: str = ""
+    #: The right the number is shown under. The default is the honest one for a
+    #: source whose terms nobody has read.
+    right: Right = Right.NOT_ESTABLISHED
+    #: The terms as read, with where and when, or the customer's licence.
+    terms: str = ""
+    #: Who holds the licence, for `Right.CUSTOMER_LICENCE`.
+    licensee: str = ""
+    #: True when the source's own terms say its data may not be relied on for
+    #: engineering decisions. No value from it is then a design basis.
+    reliance_disclaimed: bool = False
 
     def __post_init__(self) -> None:
         if not self.citation.strip():
@@ -176,6 +203,21 @@ class Source:
                 "A source needs a citation someone can follow. Name the standard, "
                 "the datasheet or the report — an empty citation is the same as no "
                 "provenance at all."
+            )
+        if self.right is Right.REDISTRIBUTABLE and not self.terms.strip():
+            raise ValueError(
+                f"{self.citation}: a source is redistributable only on terms somebody "
+                "read. Quote them in `terms`, or leave the right NOT_ESTABLISHED."
+            )
+        if self.right is Right.CUSTOMER_LICENCE and not (self.licensee.strip() and self.terms.strip()):
+            raise ValueError(
+                f"{self.citation}: data under a customer's licence names the licensee "
+                "and the licence, so a reader can see whose right it is shown under."
+            )
+        if self.reliance_disclaimed and not self.terms.strip():
+            raise ValueError(
+                f"{self.citation}: a reliance disclaimer is the source's own words. "
+                "Quote them in `terms`."
             )
 
     def __str__(self) -> str:
@@ -189,6 +231,13 @@ class Source:
             out["url"] = self.url
         if self.note:
             out["note"] = self.note
+        out["right"] = str(self.right)
+        if self.terms:
+            out["terms"] = self.terms
+        if self.licensee:
+            out["licensee"] = self.licensee
+        if self.reliance_disclaimed:
+            out["reliance_disclaimed"] = "the source's terms forbid relying on it for engineering decisions"
         return out
 
 
@@ -307,8 +356,12 @@ class Property:
 
     @property
     def is_design_basis(self) -> bool:
-        """Whether this value may be used as a strength allowable. See `Status`."""
-        return self.status.is_design_basis
+        """Whether this value may be used as a strength allowable.
+
+        See `Status`. A source whose own terms forbid relying on it is never a
+        design basis, whatever status the value was recorded with.
+        """
+        return self.status.is_design_basis and not self.source.reliance_disclaimed
 
     def __str__(self) -> str:
         return f"{self.value:g} {self.unit} ({self.status}, {self.source.citation})"
@@ -570,6 +623,23 @@ _ASM_AEROSPACE = Source(
         "representative of the grade, not guaranteed for a delivered batch."
     ),
 )
+#: MatWeb's License Agreement, read on 2026-09-15 from the Wayback Machine's
+#: capture of 2026-02-03 (matweb.com itself answered 403 to every fetch).
+MATWEB_TERMS_URL: Final = "https://www.matweb.com/reference/terms.aspx"
+MATWEB_TERMS_CAPTURE: Final = (
+    "https://web.archive.org/web/20260203071848/https://www.matweb.com/reference/terms.aspx"
+)
+#: Quoted from that capture.
+MATWEB_NO_REDISTRIBUTION: Final = (
+    "You may not: ... (b) sell or redistribute the MatWeb™ materials database or its content; "
+    "... (d) sublicense, rent, lend, transfer, post, transmit, or otherwise make the MatWeb™ "
+    "materials database or its content available to anyone else"
+)
+MATWEB_NO_RELIANCE: Final = (
+    "you shall not rely on the MatWeb™ materials database or its content in making structural "
+    "or engineering decisions and calculations"
+)
+
 _MATWEB_GRADE = Source(
     citation="MatWeb material property data — grade overview",
     kind=SourceKind.DATASHEET,
@@ -577,6 +647,14 @@ _MATWEB_GRADE = Source(
         "Aggregated from supplier data across many producers. Typical, not minimum; "
         "for a design allowable use MMPDS, EN 10025 or the supplier's certificate."
     ),
+    right=Right.NOT_ESTABLISHED,
+    terms=(
+        f"MatWeb License Agreement ({MATWEB_TERMS_URL}, read 2026-09-15 as captured "
+        f"{MATWEB_TERMS_CAPTURE}): \"{MATWEB_NO_REDISTRIBUTION}\"; and \"{MATWEB_NO_RELIANCE}\". "
+        "These values ship in Kryova's repository and feed its solvers, which those terms do "
+        "not permit. Flagged for replacement from a source whose terms allow it (E21.4)."
+    ),
+    reliance_disclaimed=True,
 )
 _POLYMER_GRADES = Source(
     citation="Unfilled thermoplastic supplier datasheets, spread across grades",

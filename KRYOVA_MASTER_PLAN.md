@@ -71,7 +71,7 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 114/132 = 87% | 131/151 eng-months = 87% |
+| Engineering — E1–E23 | 15/24 | 115/132 = 87% | 131/151 eng-months = 87% |
 | Product — P1–P10 | 6/10 | 48/61 = 78% | 28/38 eng-months = 74% |
 | **Programme** | 21/34 | 162/193 = 84% | 159/189 eng-months = 84% |
 
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 50%, E22 50%, E23 25%, P4 75%, P9 57% |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 50%, E23 25%, P4 75%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -4373,6 +4373,59 @@ lying about fidelity or breaching somebody's licence?
    sketched, hardened so that a customer's licensed allowables can be used **inside their
    deployment without Kryova ever holding, redistributing or seeing them**, and so that every
    property on screen names its source and the right under which it is being shown.
+   > PARTIAL (2026-09-15) — **every material number now names the right it is shown under.
+   > Found: two of the eight shipped materials cite a source whose licence forbids what Kryova
+   > does with them.**
+   >
+   > **Read on 2026-09-15:**
+   > - **MatWeb's License Agreement**, from the Wayback Machine's 2026-02-03 capture
+   >   (matweb.com answered 403). It forbids selling, redistributing or making the content
+   >   "available to anyone else". It caps a personal database at 500 materials. It says "you
+   >   shall not rely on the MatWeb™ materials database or its content in making structural or
+   >   engineering decisions and calculations". It also forbids AI/ML training, evaluation and
+   >   embeddings. So the plan's summary holds, and the licence has since gained the AI/ML
+   >   clause.
+   > - **MMPDS-2026 Volume I**, from the Accuris store: $1,049.00, 2,784 pages, published
+   >   2026-07-01. It is sold as a DRM-secured PDF or a finite set of single-user licences, with
+   >   a restricted-country list.
+   >
+   > The plan's 2025 figure ($939) was not re-read.
+   >
+   > **Shipped:**
+   > - `materials.Right` (`REDISTRIBUTABLE`, `CUSTOMER_LICENCE`, `NOT_ESTABLISHED`) on every
+   >   `Source`, with `terms`, `licensee` and `reliance_disclaimed`. `REDISTRIBUTABLE` needs
+   >   quoted terms, and a customer licence needs its licensee. `Source.to_dict`, and so every
+   >   property's, carries the right.
+   > - `Property.is_design_basis` is false for a source whose terms disclaim reliance.
+   > - `app/solve/material_licences.py`: the readings, and `customer_records` /
+   >   `load_customer_records`. These read a customer's licensed-allowables file kept in their
+   >   deployment. Every property goes through `transcribe`, is set to `CUSTOMER_LICENCE` (a
+   >   file cannot choose its right), names the licensee, and may not reuse a shipped slug.
+   > - A test fails if a tracked JSON looks like such a file.
+   > - **Interface change:** `Source` gains four defaulted fields, and every material
+   >   property's `source` dict gains `right`, plus `terms`, `licensee` and
+   >   `reliance_disclaimed` where set.
+   >
+   > **Found, flagged and not silently fixed:** `steel-1018` and `stainless-304` ship values
+   > cited to MatWeb, in this repository and in its solvers. Their source now quotes the two
+   > clauses and is never a design basis. Replacing the numbers needs a source whose terms have
+   > been read and allow it. No source in the shipped set has had its terms read (ASM Aerospace
+   > Specification Metals, the polymer datasheets, the elasticity text), so every shipped right
+   > is `NOT_ESTABLISHED`, and a test holds that until one is read.
+   >
+   > **Open:**
+   > - Nothing consults `customer_records` yet: `materials.resolve`, the agent's material
+   >   tools and the routes see only the shipped set, and no deployment setting names the file.
+   > - The frontend's material display was not checked for the new fields.
+   > - The MatWeb-cited values need a replacement source.
+   > - MatWeb's database-licensing terms and MMPDS's own licence text were not read.
+   >
+   > **The V&V artefact was already stale** (`app/verify/recorded --check`, before this change).
+   > `app/solve/materials.py` is fingerprinted, so Windows re-records it with THE QUEUE A6.
+   > Tests written on Linux and not run as pytest; each test body was run once by a one-off
+   > script. Tested by: `tests/test_material_licences.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 5. **Establish what free-and-normative fatigue data actually exists, as a spike.** The plan

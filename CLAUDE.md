@@ -141,7 +141,9 @@ stops without scheduling one stops the project. The order is fixed:
    Say that the job dies if that session is closed.
 
 **Write the prompt fresh every time; never copy the last one.** It briefs a session that
-remembers nothing of this one, so it follows this shape:
+remembers nothing of this one, so it follows this shape. **Every prompt names at least six
+targets and states the six-task rule in its own text, step 4 included**, so the rule reaches the
+turn after next even through a session that reads no CLAUDE.md:
 
 ```
 Kryova continuation — written <date time>, after <what this turn finished>.
@@ -168,7 +170,8 @@ Attempt <n> at the targets below.
    already exist, which test file will prove it, which status line it moves and to what, and
    the traps already known>. Commit each as it closes.
 3. If a target is already done or blocked: <the next ones to take in its place>.
-4. End per CLAUDE.md "Ending every turn": documents first, then a new prompt of this shape.
+4. End per CLAUDE.md "Ending every turn": documents first, then a new prompt of this shape,
+   with at least six targets and this same rule repeated in its step 4.
 ```
 
 **How to choose the target.** Finish a started phase before opening a new one. The order is:

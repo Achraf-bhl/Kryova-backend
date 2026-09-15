@@ -763,6 +763,14 @@ master plan's status line in the same commit.
       match `kinematics.evaluate` pose for pose. Also settles whether CATIA's assembly
       constraints can be read as joint declarations, which is the one input E9.2 still takes
       by hand. Settles: E9.5 `NOT STARTED` → `DONE`.
+- [ ] **E7 — E17 tasks 1 and 2 on the seat: FTA annotations and export from CATIA.** Added
+      2026-09-15. `app/manufacture/drawing.py` now carries a part's `Tolerancing` and
+      `dxf.py` tabulates it; nothing puts the same frames into CATIA's Functional Tolerancing &
+      Annotation workbench, and no STEP or DXF has been exported from a live seat. Write the
+      bridge side that creates one datum and one position frame on the bracket through FTA,
+      export the part as STEP AP242 and the drawing as DXF from CATIA, and read both back with
+      `app/manufacture/export.read_step` and ezdxf. Settles: E17.2's open item, and E17.1's FTA
+      item (the leader attachment and the reserved table zones remain Linux work).
 
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 

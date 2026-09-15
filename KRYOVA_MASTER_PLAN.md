@@ -3375,6 +3375,18 @@ here"* has an answer in six months — from the artefact.
 
 1. **Drawings with GD&T**: auto views, sections, details, dimension generation, FTA, BOM tables,
    title blocks. *Without this nothing leaves the building.*
+   > PARTIAL (2026-09-15) — **GD&T and BOM tables now reach the sheet.** `Drawing` carries the
+   > part's `Tolerancing` and its parts list; `dxf.py` draws a geometric-tolerance table (datums,
+   > then each feature control frame as its compartments: feature, symbol, zone with Ø and the
+   > material condition, datum references) and a parts list stacked on the title block, both on
+   > declared layers, and `to_dict` carries both. Views, sections, details, traced dimensions and
+   > the title block were already tested (below). **Open:** frames are tabulated by feature name,
+   > not attached to the geometry by a leader, because nothing resolves a frame's feature name to
+   > an edge on a view; the view layout does not reserve the tables' zones, so a crowded sheet can
+   > overlap them; and CATIA FTA on the seat is THE QUEUE **E7**. **Tests written on Linux and not
+   > run there.** Tested by: `tests/test_manufacture_drawing_tables.py`, and the files below.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-06) — dimensioning and sheet layout tested. **First and third angle
    > demonstrably place views on opposite sides**, so a convention that was stored and ignored is
    > caught: swapping them fails two tests, and a drawing read in the wrong convention is

@@ -44,10 +44,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from app.manufacture.errors import DrawingError
 from app.manufacture.sheet import SheetSize, TitleBlock, scale_text
+
+if TYPE_CHECKING:
+    from app.assembly.structure import BomLine
+    from app.rules.gdt import Tolerancing
 
 #: A run of connected points in view millimetres. The same shape
 #: `app.render.project.Projection` reports, deliberately: a projection can be
@@ -553,6 +557,15 @@ class Drawing:
     #: plan H5) and a drawing is the one place a manufacturer will read it.
     notes: tuple[str, ...] = ()
 
+    #: The part's datum scheme and feature control frames (`app.rules.gdt`), drawn as a
+    #: tolerancing table. Tabulated by feature name, not attached to the geometry by a
+    #: leader: a frame names its feature in words, and nothing yet resolves that name to
+    #: an edge on a view.
+    tolerancing: Tolerancing | None = None
+
+    #: The parts list, drawn as a table above the title block. An assembly drawing's BOM.
+    parts: tuple[BomLine, ...] = ()
+
     def view_named(self, name: str) -> DrawnView:
         for candidate in self.views:
             if candidate.name == name:
@@ -594,6 +607,11 @@ class Drawing:
             "fully_dimensioned": self.fully_dimensioned,
             "report": self.report.to_dict(),
             "notes": list(self.notes),
+            "tolerancing": None if self.tolerancing is None else self.tolerancing.to_dict(),
+            "parts": [
+                {"item": number, **line.to_dict()}
+                for number, line in enumerate(self.parts, start=1)
+            ],
         }
 
 

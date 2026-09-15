@@ -266,6 +266,8 @@ def to_document(drawing: Drawing) -> Any:
         _cutting_plane(space, drawing, plane)
     for dimension in drawing.dimensions:
         _dimension(space, drawing, dimension)
+    _tolerancing_table(space, drawing)
+    _parts_table(space, drawing)
     return doc
 
 
@@ -458,6 +460,82 @@ def _notes(space: Any, drawing: Drawing) -> None:
                 _text(space, wrapped, (left, y), TEXT_MM, NOTES)
                 y -= TEXT_MM * 1.6
     del x0
+
+
+#: Row height of the drawing's tables, sheet mm.
+TABLE_ROW_MM: Final = 7.0
+
+#: Parts-list columns: heading and width in sheet mm. The widths sum to the title
+#: block's width, so the list sits flush on top of it the way ISO 7200 stacks them.
+PARTS_COLUMNS: Final = (("ITEM", 14.0), ("QTY", 14.0), ("PART", 52.0), ("DESIGN", 60.0), ("MATERIAL", 40.0))
+
+
+def _cell(space: Any, x: float, y: float, width: float, content: str) -> None:
+    _polyline(
+        space,
+        ((x, y), (x + width, y), (x + width, y + TABLE_ROW_MM), (x, y + TABLE_ROW_MM)),
+        FRAME,
+        close=True,
+    )
+    _text(space, content, (x + 1.5, y + (TABLE_ROW_MM - TEXT_MM) / 2.0), TEXT_MM, NOTES)
+
+
+def _tolerancing_table(space: Any, drawing: Drawing) -> None:
+    """Datums, then one feature control frame per row, top-left inside the frame.
+
+    Each frame is drawn as its compartments, left to right: the feature it applies to,
+    the characteristic's symbol, the zone (with Ø and the material condition), then each
+    datum reference in precedence. A frame's feature is a name, so the table carries it
+    in words rather than pointing a leader at a line nothing has resolved it to.
+    """
+    tolerancing = drawing.tolerancing
+    if tolerancing is None or (not tolerancing.frames and not tolerancing.scheme.datums):
+        return
+    x0, _, _, y1 = drawing.sheet.frame
+    left = x0 + 5.0
+    y = y1 - 5.0 - TABLE_ROW_MM
+    _text(space, "GEOMETRIC TOLERANCES", (left, y + 1.5), TEXT_MM, NOTES)
+    for datum in tolerancing.scheme.datums:
+        y -= TABLE_ROW_MM
+        _cell(space, left, y, 12.0, datum.letter)
+        _cell(space, left + 12.0, y, 68.0, f"DATUM {datum.letter}: {datum.feature}")
+    for frame in tolerancing.frames:
+        y -= TABLE_ROW_MM
+        x = left
+        compartments = [
+            (40.0, frame.feature),
+            (10.0, frame.grammar.symbol),
+            (
+                30.0,
+                ("Ø" if frame.diametral else "")
+                + f"{frame.tolerance_mm:g}"
+                + {"rfs": "", "mmc": " Ⓜ", "lmc": " Ⓛ"}[frame.condition.value],
+            ),
+        ]
+        compartments += [(12.0, str(reference)) for reference in frame.datums]
+        for width, content in compartments:
+            _cell(space, x, y, width, content)
+            x += width
+
+
+def _parts_table(space: Any, drawing: Drawing) -> None:
+    """The parts list, stacked on the title block: headings nearest it, item 1 above, growing up."""
+    if not drawing.parts:
+        return
+    _, y0, x1, _ = drawing.sheet.frame
+    left = x1 - sum(width for _, width in PARTS_COLUMNS)
+    y = y0 + TITLE_BLOCK_HEIGHT_MM
+    x = left
+    for heading, width in PARTS_COLUMNS:
+        _cell(space, x, y, width, heading)
+        x += width
+    for number, line in enumerate(drawing.parts, start=1):
+        y += TABLE_ROW_MM
+        x = left
+        row = (str(number), str(line.quantity), line.component, line.design, line.material)
+        for (_, width), content in zip(PARTS_COLUMNS, row, strict=True):
+            _cell(space, x, y, width, content)
+            x += width
 
 
 def _wrap(text: str, width: int) -> tuple[str, ...]:

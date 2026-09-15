@@ -27,9 +27,10 @@ happened.
 > selection needs ISO 286's tables read from the document). E18's open rungs (M4, M5, M7, M8)
 > name E9, E13 and E17 work as their needs. **E17.3–E17.6 closed** (weldments with weld sizing
 > and tube routing, CAM with an in-house drop-cutter because OpenCAMLib has no 3.12 wheel,
-> inspection plans from GD&T, documentation drafts). E17 is 83%: E17.1 (GD&T frames and BOM
-> tables on the drawing) and E17.2 (IGES/STL/3MF export; the live-seat export needs Windows) are
-> next, then E18's rungs. No continuation job is held for this stretch: the user asked for continuous work in
+> inspection plans from GD&T, documentation drafts). E17 is 83%: E17.1 now draws GD&T and BOM
+> tables (still PARTIAL: leaders, reserved zones, FTA on the seat = QUEUE E7) and E17.2's open
+> item is the seat. Next: E18's rungs (M4, M5, M7, M8), whose needs E9/E13/E17 have now met in
+> part. No continuation job is held for this stretch: the user asked for continuous work in
 > the session. Before anything else on Windows: THE QUEUE A6's 2026-09-15 update (run the new
 > tests, ruff, mypy, re-record V&V).
 
@@ -309,6 +310,10 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E17 task 1, partial: GD&T frames and the parts list reach the drawing.**
+  `Drawing.tolerancing` and `Drawing.parts`; `dxf.py` draws a tolerance table and a parts
+  list on declared layers. Still open: leaders to geometry, reserved zones, FTA on the seat
+  (THE QUEUE E7). Tested by `tests/test_manufacture_drawing_tables.py`. Not run here.
 - **2026-09-15 — E17 tasks 3, 4, 5 and 6 closed on Linux, tests written and not run.**
   `app/manufacture/weldment.py` (cut list with mitres, fillet beads and ISO 2553 designations,
   throat-area weld sizing on caller strengths) and `tubing.py` (LRA bend table, developed

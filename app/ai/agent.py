@@ -44,6 +44,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.ai import prompts
+from app.ai.attached import for_turn as attachments_for_turn
 from app.ai.context import build_messages, maybe_summarise
 from app.ai.malformed import correction_for, find_written_tool_calls, is_contentless
 from app.ai.planning import extract_objectives
@@ -147,6 +148,7 @@ TOOL_LABELS: dict[str, str] = {
     "search_documentation": "Checking the documentation",
     "list_geometry": "Checking geometry versions",
     "import_geometry_from_attachment": "Importing the attached part",
+    "read_attachment": "Reading the attached file",
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
     "run_simulation": "Preparing the analysis",
@@ -268,6 +270,14 @@ def summarise_step(tool: str, result: Any, ok: bool) -> str:
             f"Imported version {result.get('version_number', '')} "
             f"({result.get('filename', 'the attached part')})"
         )
+    if tool == "read_attachment":
+        # The filename and how much was read, never the content: this line is
+        # the UI's, and a step list that printed a cell's value would put
+        # unquoted file text on screen with no citation beside it.
+        shown = result.get("fragments_returned", 0)
+        matched = result.get("fragments_matched", shown)
+        where = f"{shown} of {matched}" if matched != shown else f"{shown}"
+        return f"Read {where} fragment(s) of {result.get('filename', 'the attachment')}"
     if tool == "list_simulations":
         return f"{len(result.get('simulations', []))} previous run(s)"
     if tool == "get_simulation":
@@ -490,6 +500,13 @@ def stream_agent(
     # like the product refusing to work.
     interruption.clear_turn_stop(db, conversation)
 
+    # What the user attached, read *before* their message is appended: P4.7
+    # quotes what arrived since they last spoke, and appending first would make
+    # that "since a moment ago", so nothing would ever be quoted. The block is
+    # passed to `build_messages` for every round of this turn and is never
+    # persisted -- see that function, and `app/ai/attached.py` for why.
+    attached = attachments_for_turn(db, conversation, owner).block
+
     _append(db, conversation, MessageRole.USER, content=user_message)
 
     # Fold before building the window, so the material being folded is still
@@ -600,7 +617,7 @@ def stream_agent(
         turn = None
         for chunk in provider.stream_chat(
             system=system,
-            messages=build_messages(db, owner, conversation),
+            messages=build_messages(db, owner, conversation, attached=attached),
             tools=schemas,
             max_tokens=max_tokens,
         ):
@@ -979,7 +996,7 @@ def stream_agent(
     try:
         closing = provider.chat(
             system=system + prompts.AGENT_OUT_OF_STEPS,
-            messages=build_messages(db, owner, conversation)
+            messages=build_messages(db, owner, conversation, attached=attached)
             + (
                 [{"role": "user", "content": prompts.CONTROL_NOTE + shortfall}]
                 if shortfall

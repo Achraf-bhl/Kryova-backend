@@ -46,6 +46,7 @@ from app.ai.provider import LLMError, LLMProvider, TokenUsage
 from app.ai.sanitise import sanitise_untrusted
 from app.ai.state import build_state_block
 from app.core.config import settings
+from app.documents.quoted import UserTurnBlock
 from app.models import Conversation, ConversationMessage, MessageRole, User
 
 logger = logging.getLogger(__name__)
@@ -326,7 +327,13 @@ def _replay(message: ConversationMessage) -> dict[str, Any]:
     }
 
 
-def build_messages(db: Session, user: User, conversation: Conversation) -> list[dict[str, Any]]:
+def build_messages(
+    db: Session,
+    user: User,
+    conversation: Conversation,
+    *,
+    attached: UserTurnBlock | None = None,
+) -> list[dict[str, Any]]:
     """Assemble the transcript for one provider call.
 
     Order is summary, then windowed history, with the state block spliced in
@@ -334,6 +341,18 @@ def build_messages(db: Session, user: User, conversation: Conversation) -> list[
     caching: everything ahead of the block is stable across turns and caches,
     while the block itself -- the one part that changes every single turn -- sits
     as late as possible, next to the question it describes.
+
+    `attached` is this turn's quoted attachment content (P4.7), rendered beneath
+    the newest user message and **nowhere else**. It is applied here, to the
+    replayed copy, rather than persisted into the message: the inventory it
+    carries is rebuilt every turn, so storing it would leave one copy per turn
+    in the transcript, each of them replayed again on the next. The record of
+    what was attached is the `Attachment` row, for the reason `app/ai/resume.py`
+    gives about `CatiaOperation` — the transcript trims, the row does not.
+
+    It can only ever land on a user turn: `UserTurnBlock` has no accessor that
+    yields its characters except `render_into_user_message`, which demands the
+    user's own message and emits it first.
     """
     replayed = [_replay(message) for message in window(conversation)]
 
@@ -343,6 +362,9 @@ def build_messages(db: Session, user: User, conversation: Conversation) -> list[
         if replayed[index]["role"] == "user":
             insert_at = index
             break
+    if attached is not None and attached and insert_at < len(replayed):
+        newest = replayed[insert_at]
+        newest["content"] = attached.render_into_user_message(str(newest.get("content") or ""))
     replayed.insert(insert_at, state)
 
     summary = _summary_message(conversation)

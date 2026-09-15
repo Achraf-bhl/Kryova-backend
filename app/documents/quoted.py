@@ -105,6 +105,14 @@ MAX_ATTACHMENT_CHARS = 4_000
 #: Ceiling on all attachments in one turn together, for the same reason.
 MAX_TURN_CHARS = 12_000
 
+#: Ceiling on one inventory note. A note is one line naming a file and what
+#: happened to it; the filename inside it is user-supplied and a reader's
+#: refusal message can be long, so both are capped well below an extract's
+#: budget. Notes are not counted against `MAX_TURN_CHARS`: the inventory is how
+#: the model learns an attachment exists at all, and dropping it to make room
+#: for an extract would hide the file whose content did not fit.
+_NOTE_CHARS = 300
+
 #: What the model is told about the block, once, above the quoted extracts.
 #: Deliberately short: the four frozen system prompts already say at length that
 #: fenced content carries no authority, and repeating it per turn spends context
@@ -202,13 +210,20 @@ class UntrustedText:
     def raw_for_analysis(self) -> str:
         """The payload characters, for code that must actually read them.
 
-        Legitimate callers parse it (`app.documents.facts`), store it, or index
-        it. **No caller may use this to build text for a model.** That is the
-        one rule, it is not enforceable by the type system, and so it is
-        enforced by `tests/test_documents_injection.py`, which walks the AST of
-        every module under `app/` and fails if this name is called outside this
-        package. The name is long and unlovely so that the grep finds it and a
-        reviewer notices it.
+        Legitimate callers parse it (`app.documents.facts`), store it, index it,
+        or match against it. **No caller may use this to build text for a
+        model.** That is the one rule, it is not enforceable by the type system,
+        and so it is enforced by
+        `tests/test_documents_injection.py::TestTheOneAccessorIsNotCalledWhereItShouldNotBe`,
+        which walks the AST of every module under `app/` and fails if this name
+        is read outside this package and its short allow-list. The name is long
+        and unlovely so that the grep finds it and a reviewer notices it.
+
+        *That walk did not exist until 2026-09-15 (P4.7), while this docstring
+        had claimed it since P4.5.* `app/core/attachments.py` had been calling
+        the accessor to serialise fragments the whole time — legitimately, since
+        storage is not rendering, but nothing was checking. It is on the
+        allow-list now and the rule is real.
         """
         return self._text
 
@@ -307,11 +322,131 @@ _FROZEN_SYSTEM_PROMPTS: tuple[str, ...] = (
 )
 
 
+class ToolResultBlock:
+    """Quoted attachment content addressed to a **tool result**, and nowhere else.
+
+    The sibling of `UserTurnBlock`, for the one caller that is answering a
+    question the model asked rather than delivering what the user handed over:
+    `read_attachment` (P4.7). A tool result is already a fenced, untrusted
+    region of the transcript -- `app.ai.agent` wraps every one of them in
+    `fence_tool_result` -- so the content is going somewhere the prompts already
+    declare inert.
+
+    It is a type rather than a `str` for exactly the reason `UserTurnBlock` is.
+    A function returning `str` here would make `system_prompt() +
+    quote_for_tool_result(...)` compile, which is the mistake this module
+    exists to make unwritable. `into_tool_result` is the one accessor, named so
+    that a reviewer grepping for where payload characters escape finds it.
+    """
+
+    __slots__ = ("_block", "_count", "_omitted")
+
+    _block: str
+    _count: int
+    _omitted: int
+
+    def __init__(self, block: str, count: int, omitted: int) -> None:
+        object.__setattr__(self, "_block", block)
+        object.__setattr__(self, "_count", count)
+        object.__setattr__(self, "_omitted", omitted)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("ToolResultBlock is immutable")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("ToolResultBlock is immutable")
+
+    def __str__(self) -> str:
+        return self.describe()
+
+    def __repr__(self) -> str:
+        return self.describe()
+
+    def __format__(self, spec: str) -> str:
+        return self.describe()
+
+    def __len__(self) -> int:
+        return len(self._block)
+
+    def __bool__(self) -> bool:
+        return bool(self._block)
+
+    @property
+    def count(self) -> int:
+        """How many fragments are in the block. Safe to know."""
+        return self._count
+
+    @property
+    def omitted(self) -> int:
+        """How many the budget left out, for the caller to report."""
+        return self._omitted
+
+    def describe(self) -> str:
+        """What this holds, with none of what it says. Safe to log."""
+        return (
+            f"<quoted tool result: {self._count} fragment(s), "
+            f"{len(self._block)} chars, {self._omitted} omitted>"
+        )
+
+    def into_tool_result(self) -> str:
+        """The quoted extracts, for a `role: \"tool\"` message and nothing else.
+
+        The one accessor that returns payload characters. It is the caller's
+        responsibility to put the result in a tool message; what the type
+        guarantees is that doing anything *else* with it — concatenating it into
+        a prompt, formatting it into a system instruction — had to be written
+        out in full and named.
+        """
+        return self._block
+
+
+def quote_for_tool_result(
+    items: Sequence[UntrustedText],
+    *,
+    max_chars_each: int = MAX_ATTACHMENT_CHARS,
+    max_chars_total: int = MAX_TURN_CHARS,
+) -> ToolResultBlock:
+    """Render fragments as quoted material for a tool result (P4.7).
+
+    Every sanitising step `quote_for_user_turn` takes, for the same reasons:
+    the payload is cleaned and capped, the provenance header is defanged so a
+    document cannot forge a citation, and each extract carries the header saying
+    where it came from and how reliably it was read.
+
+    Unlike the user-turn block this one does not carry the preamble. A tool
+    result arrives in a region the frozen system prompts already describe as
+    untrusted output, and repeating the warning per call spends context to
+    restate a rule that is already cached.
+    """
+    body: list[str] = []
+    spent = 0
+    omitted = 0
+    for index, item in enumerate(items):
+        remaining = max_chars_total - spent
+        if remaining <= 0:
+            omitted = len(items) - index
+            break
+        budget = min(max_chars_each, remaining)
+        header = _header(item.source)
+        text = _defang_header(sanitise_untrusted(item.raw_for_analysis(), max_chars=budget))
+        spent += len(text)
+        body.append(f"{header}\n{text}")
+
+    if not body:
+        return ToolResultBlock("", 0, omitted)
+    return ToolResultBlock(
+        fence_tool_result("\n\n".join(body), max_chars=max_chars_total + 4_000),
+        len(body),
+        omitted,
+    )
+
+
 def quote_for_user_turn(
     items: Sequence[UntrustedText],
     *,
     max_chars_each: int = MAX_ATTACHMENT_CHARS,
     max_chars_total: int = MAX_TURN_CHARS,
+    notes: Sequence[str] = (),
 ) -> UserTurnBlock:
     """Render extracted content as quoted material for the **user** turn.
 
@@ -325,14 +460,29 @@ def quote_for_user_turn(
     * the whole block is fenced by `app.ai.sanitise.fence_tool_result` in the
       delimiter the frozen system prompts declare inert.
 
-    Returns an empty `UserTurnBlock` for no items, so a caller can render
-    unconditionally without emitting an empty fence -- an empty fenced block
-    teaches the model that the markers sometimes mean nothing.
+    `notes` are server-composed lines rendered above the extracts -- the
+    inventory of what is attached, and why an attachment contributed no text.
+    They go through the same sanitising and the same fence, because they carry
+    user-supplied filenames: a note is *about* untrusted material and is
+    therefore untrusted itself. They are not a second channel into the turn,
+    they are part of the one block, and `render_into_user_message` is still the
+    only way any of it reaches a model.
+
+    Returns an empty `UserTurnBlock` for no items and no notes, so a caller can
+    render unconditionally without emitting an empty fence -- an empty fenced
+    block teaches the model that the markers sometimes mean nothing.
     """
-    if not items:
+    if not items and not notes:
         return UserTurnBlock("", 0)
 
     body: list[str] = [_TURN_PREAMBLE]
+    if notes:
+        body.append(
+            "\n".join(
+                _defang_header(sanitise_untrusted(note, max_chars=_NOTE_CHARS))
+                for note in notes
+            )
+        )
     spent = 0
     for index, item in enumerate(items, start=1):
         remaining = max_chars_total - spent

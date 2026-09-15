@@ -65,15 +65,15 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-15** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-16** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 15/24 | 116/132 = 88% | 133/151 eng-months = 88% |
-| Product — P1–P10 | 6/10 | 48/62 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 164/194 = 85% | 161/189 eng-months = 85% |
+| Product — P1–P10 | 6/10 | 49/62 = 79% | 29/38 eng-months = 75% |
+| **Programme** | 21/34 | 166/194 = 85% | 162/189 eng-months = 86% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 50%, E23 62%, P4 71%, P9 57% |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 50%, E23 62%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -5388,6 +5388,34 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    extraction status, an attachment panel per conversation, inline previews (tables, images,
    geometry via P6 viewer), and "insert as parameter / as requirement / as load case" affordances —
    the moment extraction earns its keep.
+   > PARTIAL (2026-09-15) — **the composer now creates a document attachment; the insert
+   > affordances and inline previews are still deliberately absent.** The tests were written
+   > on Linux and **not run** (the user's rule; Windows runs them). `tsc --noEmit` is clean.
+   > **What closed.** `AttachPill` routes on the filename: a part (STEP/IGES/STL) goes to
+   > `uploadGeometryFile` and becomes a geometry version of the project, and everything else
+   > goes to the new `chunked-upload.ts::uploadDocumentFile`, which uploads the blob and calls
+   > `createAttachment` with the conversation id. `chat-view.tsx` bumps an `attachRevision` so
+   > the panel refreshes at once rather than on the next finished turn — a file that stays
+   > invisible until you send a message reads as an upload that failed.
+   > **The `accept` filter was the whole bug and is gone.** It listed only the CAD extensions,
+   > so the file dialog would not *offer* a spreadsheet; the backend sniffs content and
+   > records what it found, and a narrower opinion in the client made the wider one
+   > unreachable. An `unsupported` row is reported as such in the composer line, never as a
+   > plain "Attached".
+   > **Always chunked, whatever the size.** The single-shot route is `uploadGeometry`, which
+   > makes a geometry version — the one thing a document must not become — and the chunk loop
+   > is the only path yielding a bare media id.
+   > **`DocumentUploadTransport` is a second interface rather than two more methods** on
+   > `ChunkedUploadTransport`: a document never calls `attachGeometry` and a part never calls
+   > `createAttachment`, and widening the shared one made ten existing stubs fail to compile,
+   > which `tsc` caught.
+   > **Still open here, and unchanged:** "insert as parameter / requirement / load case" stays
+   > unbuilt for task 3's reason (the values are candidate readings), and inline previews are
+   > P6's viewer. Drag-and-drop still reaches only the geometry path.
+   > Tested by: `../Kryova-frontend/src/components/chat/attach-pill.test.tsx` (9, written on
+   > Linux and not run), `../Kryova-frontend/src/components/attachments/attachment-panel.test.tsx` (9).
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-15) — **correction: the composer never creates a document attachment.**
    > The status below says the document path reuses `AttachPill`. It does not.
    > `api-client.ts::createAttachment` is defined and nothing calls it: `AttachPill` uploads
@@ -5424,6 +5452,55 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    returns fragments beyond the turn's budget by locator. Without this, task 4's first sentence
    ("enters the conversation as quoted material") describes a path nothing takes, and the phase
    proof's load-case spreadsheet cannot be read by the agent at all.
+   > DONE (2026-09-15) — **the spreadsheet now reaches the model, quoted and cited, and the
+   > path is the only one there is.** The tests were written on Linux and **not run** (the
+   > user's rule; Windows runs them, THE QUEUE D4). `py_compile`, an import of `app.main`, the
+   > frontend's `tsc --noEmit` and a scripted exercise of the quoting path were run, so no
+   > guard here has been *seen* to fail.
+   > **Where it happens.** `app/ai/attached.py::for_turn` is read in `stream_agent` *before*
+   > the user's message is appended, and the block it returns is passed to `build_messages`
+   > for every round of that turn. It is **not persisted**: the inventory is rebuilt each
+   > turn, so storing it would leave one copy per turn in the transcript and replay all of
+   > them on the next. The record of what was attached is the `Attachment` row — the argument
+   > `app/ai/resume.py` makes about `CatiaOperation`.
+   > **Three decisions, each a trade-off rather than a discovery.** *(1) Content is quoted on
+   > the turn after it was attached; the inventory goes every turn.* Quoting everything every
+   > turn is 12,000 characters per step against a local model where prompt re-processing
+   > dominates (CLAUDE.md testing item 11), and quoting once with no way back is what
+   > `resume.py` exists to prevent, because the window trims. So: content once, a one-line
+   > inventory always, and `read_attachment` for the rest. *(2) "New" is "created since the
+   > user last spoke"* — no column, no migration, exactly the right question, and a tie
+   > quotes twice rather than never. *(3) A `FAILED` or `UNSUPPORTED` attachment is named
+   > with its reason*, because an agent silent about the PDF someone dropped in reads as the
+   > product having ignored it.
+   > **The read tool.** `read_attachment` reaches any fragment of any of the caller's
+   > attachments by `where` (the locator as the citations spell it), `contains`, `offset` and
+   > `limit`. Read-only. Access is the **owner's**, not the project's membership: an
+   > attachment is a file a person handed over, and a shared conversation does not make one
+   > member's datasheet readable by another. A foreign id and a made-up one get one sentence.
+   > **A new boundary type.** A tool result is not a user turn, so `quote_for_tool_result`
+   > returns a `ToolResultBlock` whose one accessor is `into_tool_result()`. Returning a
+   > `str` would have made `system_prompt() + quote_for_tool_result(...)` compile, which is
+   > the mistake `UserTurnBlock` exists to make unwritable.
+   > **Found and closed on the way: the AST guard `quoted.py` promised did not exist.** Its
+   > docstring had said since P4.5 that `tests/test_documents_injection.py` "walks the AST of
+   > every module under `app/` and fails if this name is called outside this package". Nothing
+   > walked anything, and `app/core/attachments.py` had been calling `raw_for_analysis` since
+   > P4.1. The walk is now written, with that module on a two-entry allow-list and a test that
+   > the matcher can see the construction it looks for. A claimed guard that does not exist is
+   > worse than an absent one (CLAUDE.md *Do not* item 8).
+   > **Interface changes.** `build_messages` takes `attached=`; `quote_for_user_turn` takes
+   > `notes=`; `serialise` stores a structured `locator` per fragment beside the rendered
+   > `where` (rows written before today quote fine and their header degrades to the filename,
+   > because a locator parsed back out of prose would sometimes be wrong). One new agent tool.
+   > No migration, no enum, no route.
+   > **Flagged, not fixed:** the inventory counts against no budget, so a conversation with
+   > many large filenames spends context on names; `MAX_LISTED` (20) bounds it and nothing
+   > measures it.
+   > Tested by: `tests/test_attachments_turn.py` (30, written on Linux and not run), and
+   > `tests/test_documents_injection.py::TestTheOneAccessorIsNotCalledWhereItShouldNotBe`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED — found 2026-09-15: nothing outside `app/documents` calls
    > `quote_for_user_turn` or `render_into_user_message`, and `routes/ai.py` never reads an
    > attachment. Today the agent learns about an attachment only from the user's words and

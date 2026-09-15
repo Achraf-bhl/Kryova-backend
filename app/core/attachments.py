@@ -42,6 +42,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -53,7 +54,8 @@ from app.documents.document import Cell, ExtractedDocument, Fragment, FragmentKi
 from app.documents.errors import ExtractionFailed, UnsupportedDocument
 from app.documents.images import Look
 from app.documents.kinds import sniff
-from app.documents.provenance import SourceRef
+from app.documents.provenance import Locator, Reliability, SourceRef
+from app.documents.quoted import ToolResultBlock, UntrustedText, quote_for_tool_result
 from app.documents.readers import read_document
 from app.geometry.formats import GEOMETRY_FORMATS
 from app.geometry.inspect import inspect
@@ -209,11 +211,33 @@ def serialise(document: ExtractedDocument) -> dict[str, Any]:
                 "kind": fragment.kind.value,
                 "text": fragment.text.raw_for_analysis(),
                 "where": fragment.text.source.locator.describe(),
+                # The structured locator beside the rendered one. `where` is for
+                # a human and cannot be parsed back — `cell C7` and
+                # `sheet "Loads", cell C7` are both strings and neither is a
+                # `Locator`. P4.7 needs the fields themselves twice: to rebuild
+                # the `SourceRef` whose header cites a quoted fragment, and so
+                # `read_attachment` can be *addressed* by locator rather than by
+                # position in a list that a re-read may reorder.
+                "locator": _locator(fragment.text.source.locator),
                 "cite": fragment.text.source.cite(),
                 "cells": [_cell(cell) for cell in fragment.cells],
             }
             for fragment in fragments
         ],
+    }
+
+
+def _locator(locator: Locator) -> dict[str, Any]:
+    """The locator's set fields, and only those.
+
+    Written out rather than `asdict`ed so a row does not carry eleven nulls per
+    fragment, and so adding a field to `Locator` is a decision here rather than
+    a silent change to every stored attachment.
+    """
+    return {
+        field.name: value
+        for field in dataclass_fields(locator)
+        if (value := getattr(locator, field.name)) is not None
     }
 
 
@@ -250,6 +274,200 @@ def list_for(
     if owner is not None:
         query = query.where(Attachment.owner_id == owner.id)
     return list(db.scalars(query))
+
+
+def stored_fragments(attachment: Attachment) -> list[UntrustedText]:
+    """This attachment's extracted fragments, as quotable untrusted text (P4.7).
+
+    The inverse of `serialise`, and the only way a stored fragment becomes
+    something a model may be shown: it comes back as `UntrustedText` carrying
+    its own `SourceRef`, so the one route onward is `quote_for_user_turn`. A
+    caller that wanted the characters would have to write
+    `raw_for_analysis`, which `tests/test_documents_injection.py` refuses
+    outside `app/documents`.
+
+    A row written before P4.7 has no structured `locator`, only the rendered
+    `where`. Its fragments still quote, and their header degrades to the
+    filename, the reader and the reliability. That is a citation that says less,
+    which is the acceptable half of the trade; the alternative is parsing
+    `sheet "Loads", cell C7` back into fields, and a citation reconstructed by
+    guesswork would be a citation that is sometimes wrong.
+    """
+    if not attachment.status.readable:
+        return []
+    stored = (attachment.extracted or {}).get("fragments") or []
+    base = SourceRef(
+        filename=attachment.filename,
+        digest=attachment.sha256,
+        attachment_id=attachment.id,
+        reader=attachment.reader,
+        reliability=_reliability(attachment.reliability),
+        attached_at=attachment.created_at,
+    )
+    quotable: list[UntrustedText] = []
+    for fragment in stored:
+        text = fragment.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        quotable.append(UntrustedText(text, base.at(**_locator_fields(fragment))))
+    return quotable
+
+
+def _locator_fields(fragment: dict[str, Any]) -> dict[str, Any]:
+    """The stored locator, keyed only by fields `Locator` actually declares.
+
+    A row is JSONB and an older one may hold a key this build has dropped;
+    `replace` would raise on it and lose the whole turn's quoting over one
+    stale fragment. Unknown keys are ignored rather than fatal.
+    """
+    stored = fragment.get("locator")
+    if not isinstance(stored, dict):
+        return {}
+    known = {field.name for field in dataclass_fields(Locator)}
+    return {key: value for key, value in stored.items() if key in known}
+
+
+def _reliability(value: str) -> Reliability:
+    """The stored reliability as its enum, defaulting to the cautious answer.
+
+    An unrecognised value becomes `INFERRED` rather than `TRANSCRIBED`, so a
+    row this build cannot interpret is quoted *with* the unverified-read
+    warning. Guessing in the safe direction is the whole of the rule.
+    """
+    try:
+        return Reliability(value)
+    except ValueError:
+        return Reliability.INFERRED
+
+
+def owned(db: Session, *, attachment_id: str, owner: User) -> Attachment:
+    """This user's attachment, or `AttachmentNotFound`.
+
+    One answer for "no such id" and "somebody else's", so ids cannot be probed
+    — the rule `geometry_version_from` already applies inline, lifted out so the
+    reading tool cannot accidentally choose a laxer one. **Owner, not
+    membership:** an attachment is a file a person handed over, and a
+    conversation shared with an organisation does not make one member's
+    uploaded datasheet readable by another. `_writable_project`'s membership
+    rule is about writing into a shared project, which is a different question.
+    """
+    attachment = db.get(Attachment, attachment_id)
+    if attachment is None or attachment.owner_id != owner.id:
+        raise AttachmentNotFound(attachment_id)
+    return attachment
+
+
+def read_fragments(
+    attachment: Attachment,
+    *,
+    where: str | None = None,
+    contains: str | None = None,
+    offset: int = 0,
+    limit: int = 40,
+) -> ReadResult:
+    """Fragments of one attachment, selected and quoted for a tool result (P4.7).
+
+    The way back to anything the turn's budget left out. Three ways to say which
+    part, all optional and combinable:
+
+    * `where` matches the rendered locator -- `"C7"`, `"sheet \"Loads\""`,
+      `"slide 3"` -- case-insensitively, as a substring. A substring rather than
+      a structured query because the model has *seen* these strings: every quoted
+      fragment's header carries one, so the natural way to ask for more of what
+      it just read is to repeat what it was shown.
+    * `contains` matches the fragment's own text. Matching payload characters is
+      a *search*, not a render: nothing that matches leaves this module except
+      through the quoting boundary below.
+    * `offset` and `limit` page through what is left, so a datasheet can be read
+      in sections rather than in one refused request.
+
+    The selection is by locator and content and never by list position alone,
+    because a re-read may reorder the list -- `serialise` stores the reader's
+    order, and a reader upgrade can change it. `offset` pages a *filtered*
+    result and is stated as such in the reply.
+    """
+    everything = stored_fragments(attachment)
+    matched = [
+        item
+        for item in everything
+        if _matches(item, where=where, contains=contains)
+    ]
+    window = matched[offset : offset + max(1, limit)]
+    return ReadResult(
+        block=quote_for_tool_result(window),
+        matched=len(matched),
+        total=len(everything),
+        offset=offset,
+        returned=len(window),
+    )
+
+
+@dataclass(frozen=True)
+class ReadResult:
+    """What `read_fragments` found, and how much of it it is handing back.
+
+    The counts are separate from the block so a caller can tell the model *"12
+    matched, 5 shown"* without opening the payload. `block` is the only member
+    carrying characters from the file, and its own type governs where they may
+    go.
+    """
+
+    block: ToolResultBlock
+    matched: int
+    total: int
+    offset: int
+    returned: int
+
+
+def _matches(item: UntrustedText, *, where: str | None, contains: str | None) -> bool:
+    """Does this fragment answer the request?
+
+    `raw_for_analysis` here is a read for *matching*, which is what the accessor
+    is for: the result is a boolean, and no path from this function returns
+    characters. The rendering is `quote_for_tool_result`'s and only its.
+    """
+    if where:
+        described = item.source.locator.describe()
+        if where.casefold() not in described.casefold():
+            return False
+    if contains:
+        if contains.casefold() not in item.raw_for_analysis().casefold():
+            return False
+    return True
+
+
+def inventory_line(attachment: Attachment) -> str:
+    """One line naming an attachment and what reading it produced (P4.7).
+
+    Sent every turn, unlike the content, which is sent on the turn after it was
+    attached. The transcript window trims, so an attachment quoted once and then
+    trimmed would leave the agent with no way to know the file exists; this line
+    is a few dozen characters and keeps it knowable. It is deliberately *about*
+    the file and never from it — the filename is the only user-supplied part,
+    and `quote_for_user_turn` sanitises it with everything else.
+
+    A `FAILED` or `UNSUPPORTED` attachment is named here with its reason. The
+    alternative — silence — makes the product look as though it ignored the file,
+    which is the question P4.1's status vocabulary exists to answer.
+    """
+    parts = [f"{attachment.filename!r} ({attachment.detected_format})"]
+    if attachment.status is ExtractionStatus.READY:
+        count = len((attachment.extracted or {}).get("fragments") or [])
+        parts.append(f"read by {attachment.reader}, {count} fragment(s)")
+        if attachment.needs_confirmation:
+            parts.append(UNVERIFIED_NOTE)
+        if ((attachment.extracted or {}).get("truncated")) is True:
+            total = (attachment.extracted or {}).get("fragment_count")
+            parts.append(
+                f"only the first {count} of {total} fragments were stored"
+                if total
+                else "not every fragment was stored"
+            )
+    else:
+        parts.append(attachment.status.value)
+        if attachment.status_detail:
+            parts.append(attachment.status_detail)
+    return f"- id {attachment.id}: " + " — ".join(parts)
 
 
 def unverified_note(attachment: Attachment) -> str | None:

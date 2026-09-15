@@ -76,6 +76,17 @@ class TestTheDockerfile:
         assert "gmsh" in text.lower()
         assert "cadquery-ocp" in text or "requirements.txt" in text
 
+    def test_the_runtime_stage_installs_the_openmp_runtime_gmsh_links(self) -> None:
+        """Nightly run 34822694239 failed with `libgomp.so.1: cannot open shared object file`.
+
+        The builder stage had the library through the compiler, so only the runtime stage's own
+        package list says whether the shipped layer has it.
+        """
+        runtime = self._text().split("AS runtime", 1)[1]
+        install = runtime.split("rm -rf /var/lib/apt/lists", 1)[0]
+
+        assert re.search(r"^\s+libgomp1 \\$", install, re.MULTILINE)
+
     def test_it_does_not_run_as_root(self) -> None:
         text = self._text()
 

@@ -5591,6 +5591,17 @@ scene in the Tauri app.
 3. **Backend images that carry the fleet**: containers with OCCT + gmsh + CalculiX + (later) Chrono
    pinned — the determinism substrate (E1 task 7) and the deploy artefact are the same thing. GPL
    components live in their own layers/processes per Decision 4.
+   > PARTIAL (2026-09-15) — everything the superseded status below records, **plus the first
+   > thing the nightly build found.** Run 34822694239 (2026-09-14) built the image and its health
+   > check failed honestly: `gmsh will not import: libgomp.so.1: cannot open shared object file`.
+   > The builder stage had GCC's OpenMP runtime only because the compiler brought it, so the
+   > runtime stage now installs `libgomp1` and says why. **Still PARTIAL:** nothing has built the
+   > image since, and the next missing shared object, if there is one, is only visible to the
+   > next nightly run. The test was written on Linux and not run (the user's rule).
+   > Tested by: `tests/test_delivery.py::TestTheDockerfile::test_the_runtime_stage_installs_the_openmp_runtime_gmsh_links`,
+   > `::TestTheContainerHealthCheck`, `::TestTheDockerfile`. Code: `Dockerfile`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-10) — **the image is written and its health check is real; nothing has
    > built it yet, and an image nobody has built is a Dockerfile.** `nightly.yml` is where it
    > gets built and health-checked; until that has run green the residual stands.

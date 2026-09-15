@@ -66,8 +66,14 @@ FROM python:3.12-slim-bookworm AS runtime
 # the life of the release. That is the same determinism argument as pinning a
 # digest, made by the base image rather than repeated here — and it is why the
 # base is `bookworm` and not `stable`, which moves.
+#
+# `libgomp1` is GCC's OpenMP runtime, and gmsh's wheel links it. The builder stage has it only
+# because the compiler brings it, so the runtime stage must name it: nightly run 34822694239
+# (2026-09-14) failed its health check with `gmsh will not import: libgomp.so.1: cannot open
+# shared object file`.
 RUN apt-get update && apt-get install --no-install-recommends -y \
         calculix-ccx \
+        libgomp1 \
         libgl1 \
         libglu1-mesa \
         libxrender1 \

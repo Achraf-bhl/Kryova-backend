@@ -44,7 +44,7 @@ happened.
 > **E22.2** (silent-corruption harness on design-IR edits, OCCT) → **E22.4** (selection +
 > argument accuracy harness) → **E22.1** (surrogate acceptance rule published where users read
 > it; `app/optimise/screening.py` already enforces rank-never-decide) → **P9.3** (`libgomp1`
-> missing from the Dockerfile runtime stage, nightly run 34822694239) → **P6.1** (OCCT shape →
+> now installed; waits on the next nightly run) → **P6.1** (OCCT shape →
 > glTF tessellation service) → E21.6 / E21.2 / E21.4 / E21.5 / E23.1 (documents and registers;
 > each needs a source read, never recalled).
 > **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
@@ -328,6 +328,9 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — P9 task 3, still partial: the runtime image installs `libgomp1`.** Nightly run
+  34822694239 failed its health check on `libgomp.so.1`; the builder had it via the compiler.
+  Tested by `tests/test_delivery.py::TestTheDockerfile`. Not run here; the next nightly decides.
 - **2026-09-15 — E23 task 3: Kryova speaks MCP (revision 2026-07-28).** `app/ai/mcp.py` (the
   stateless wire format: `_meta` per request, mirrored headers, `server/discover`, `tools/list`,
   `tools/call`) and `POST /mcp/conversations/{id}` over `ToolBox`, behind `CurrentUser`, 404

@@ -948,6 +948,31 @@ this file drives the ladder, with a screenshot each.
       Settles: whether "unmeasured" is *visible* as unmeasured, which is the whole reason the
       absent colour exists.
 
+- [ ] **G3 — P6.4, the engineering interactions driven by hand (added 2026-09-16).**
+      Section planes, explode, hide/isolate and bookmarks have their logic
+      (`../Kryova-frontend/src/lib/viewer-interactions.ts`, 33 tests written on Linux and
+      **not run**), and measure has its route
+      (`GET /kernel/conversations/{id}/measure/between`, 16 tests, same). **No control exists
+      for any of it.**
+      1. `npm run test -- src/lib/viewer-interactions.test.ts`, then
+         `venv\Scripts\python -m pytest tests/test_kernel_routes.py -q`, `ruff` and `mypy`.
+      2. **Check the section convention with your eyes, once.** The normal points at the
+         material that is *removed*. A viewer that cut the other way would look entirely
+         plausible and every test would stay green — that is why the convention is written
+         down rather than inferred, and why one look settles it.
+      3. Wire the controls: a section slider per axis, an explode slider, hide/isolate on the
+         tree, and a bookmark list. Then take a bookmark **through a section plane with a
+         subtree hidden**, change both, and restore it. The claim is that you get the picture
+         back, not just the camera.
+      4. Drive the measure route from a real conversation with the agent's element names
+         (`slab#top`, a bare face word) and check the number against the part's own dimensions.
+      Blocked underneath, and worth knowing before starting: **a pick cannot become an element
+      name yet.** Turning a click on a triangle into `Pad.1#top` is E2 task 1's face predicate
+      and is unwritten, so measure is reachable from the agent's vocabulary and not from the
+      mouse. Wiring the other four does not wait on it.
+      Settles: whether these interactions are usable rather than merely correct, and whether
+      the section convention is the one a person expects.
+
 ---
 
 ## Expect failures on the first run, and that is the point

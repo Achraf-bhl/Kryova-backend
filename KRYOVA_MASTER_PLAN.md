@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 15/24 | 118/132 = 89% | 135/151 eng-months = 89% |
-| Product — P1–P10 | 6/10 | 50/62 = 81% | 30/38 eng-months = 78% |
-| **Programme** | 21/34 | 168/194 = 86% | 164/189 eng-months = 87% |
+| Product — P1–P10 | 6/10 | 50/62 = 81% | 30/38 eng-months = 79% |
+| **Programme** | 21/34 | 168/194 = 87% | 165/189 eng-months = 87% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -5997,6 +5997,50 @@ client renders what it is sent, at the detail the view deserves.
    animated), measure (point-point, edge, face-face — against real geometry via a backend query,
    not against the decimated mesh), hide/isolate by subtree, camera bookmarks per conversation
    ("the view we were talking about").
+   > PARTIAL (2026-09-16) — **all five interactions have their logic, on both sides of the wire;
+   > none of them has a control in the viewer.** Frontend
+   > `../Kryova-frontend/src/lib/viewer-interactions.ts` (33 tests, written on Linux and not
+   > run; `tsc --noEmit` and `eslint` clean). Backend
+   > `GET /kernel/conversations/{id}/measure/between` and `.../measure/element`
+   > (16 tests, written on Linux and not run as pytest; `py_compile` clean, both routes in the
+   > OpenAPI document). QUEUE G3.
+   > **Measure is a backend query and adds no measurer.** The routes call the live runner with
+   > `catia_measure_between` and `catia_measure_item` — the operations the agent already has,
+   > behind `BRepExtrema_DistShapeShape` and a real boolean for the overlap. The task's own
+   > words are "against real geometry … not against the decimated mesh", and the reason is that
+   > the viewer's mesh detail comes from screen size (task 2), so a browser-side distance would
+   > be wrong by the chord error *and would change when the camera moved*. A second caller, not
+   > a second implementation: two measurers agree today and disagree after a fix to one. Both
+   > are `GET`s and neither operation is in `RECORDED`, so a viewer may poll one while the user
+   > drags a selection without journalling a step into the part.
+   > **The four client-side interactions are one module because they are one state**, and the
+   > bookmark is why: a bookmark that stored only the camera restores a solid block where the
+   > user saw a bore, or a machine with forty fasteners that were hidden when it was taken. It
+   > carries the sections, the hidden set and the explode factor, and deep-copies both ways so
+   > dragging a slider cannot rewrite a saved view.
+   > **Four traps pinned.** A section plane's normal points at the material *removed*
+   > (`catia_split`'s convention — two conventions for one question is how a part ends up
+   > mirrored with every test green). Sides are decided on the box's **corners**, because a long
+   > member through the cut reads as wholly on one side from its centre and then vanishes from
+   > the section view. A component centred on the assembly's centre does not move when exploded,
+   > because normalising a zero vector is `NaN` and a `NaN` translation removes the part from
+   > the view with nothing raising — on a symmetric machine that part is the main shaft. **Hide
+   > wins over isolate**, and an isolated root that is not in the tree shows nothing rather than
+   > falling back to the whole machine.
+   > **No runtime dependency added** (the doctrine is three).
+   > **Not done here, and it is the larger half:** no control exists for any of it — no section
+   > UI, no explode animation, no tree gutter, no bookmark panel — and bookmarks are persisted
+   > nowhere (no model, no route; a bookmark today lives as long as the tab). Exploded views are
+   > computed from bounding boxes rather than from the product structure's own frames, because
+   > no route serves assembly components yet (task 1's open list says the same). And measure has
+   > only one direction: an element **name** in, a number out. Turning a click on a triangle
+   > into that name is E2 task 1's face predicate and does not exist — so the route is
+   > reachable from the agent's vocabulary and not yet from a pick.
+   > Tested by: `../Kryova-frontend/src/lib/viewer-interactions.test.ts` (33),
+   > `tests/test_kernel_routes.py::TestMeasuringBetweenTwoElements`, `::TestMeasuringOneElement`
+   > (16) — all written on Linux and not run.
+
+   <!-- superseded 2026-09-16 -->
    > NOT STARTED.
 
 5. **Results on geometry**: the existing stress-field rendering generalised — scalar fields

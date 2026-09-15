@@ -17,9 +17,10 @@ happened.
 
 > **Handoff, 2026-09-15 (morning) — the user is driving phases to 100% interactively, and on
 > Linux nothing is run.** "Write the code and the tests, don't launch pytest; Windows tests."
-> Done this stretch: **E7** (LE3 runs, `*E7`) and **E8.5**. Next, in the user's order: E3 and
-> E15 residuals, then **E8** (task 6: fatigue reaches the product), **E18**, **E9**, **E13**,
-> **E17**. No continuation job is held for this stretch: the user asked for continuous work in
+> Done this stretch: **E7** (LE3 runs, `*E7`), **E8.5**, **E15.2** (autoscale recommendation),
+> the conformance ladder for B7, and **E8.6** (fatigue through a route and the agent). E3 (92%)
+> and E15 (80%) wait on the seat (B7, E4, E5); E8 (92%) waits on E8.3's engineer. Next, in the
+> user's order: **E18**, **E9**, **E13**, **E17**. No continuation job is held for this stretch: the user asked for continuous work in
 > the session. Before anything else on Windows: THE QUEUE A6's 2026-09-15 update (run the new
 > tests, ruff, mypy, re-record V&V).
 
@@ -299,6 +300,14 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E8 task 6 closed on Linux, tests written and not run: a fatigue check reaches
+  the product.** The runner archives `nodal_stress_mpa`; `app/simulation/fatigue.assess_run` is
+  shared by `POST /projects/{id}/simulations/{sim}/fatigue` and the agent tool `assess_fatigue`,
+  so the route and the tool cannot disagree. Runs archived before today hold no tensor and are
+  refused with "re-run", never assessed from von Mises. The answer carries the run's `result`
+  block, so the not-validated footnote fires on a fatigue reply. Interface changes: one route,
+  one tool, one archive key. Tested by `tests/test_simulation_fatigue.py` (service offline, the
+  20 MPa bar through the route, the loop through a scripted provider). Not run here.
 - **2026-09-15 — E7 task 1 and E8 task 5 closed on Linux, tests written and not run: NAFEMS
   LE3 runs on a shell, and the hot-spot and notch rules are in code.** At the user's instruction
   (09:22), code and tests are written on Linux and the Windows machine runs them. LE3 is the

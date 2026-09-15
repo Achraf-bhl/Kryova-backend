@@ -31,6 +31,7 @@ from app.schemas import (
     SurfaceField,
     SurfaceTemperature,
 )
+from app.schemas.fatigue import FatigueRead, FatigueRequest
 from app.simulation import coupling
 from app.simulation.runner import (
     FLOW,
@@ -483,6 +484,47 @@ def read_surface_temperature(
             step=None if time_s is None else index,
             step_count=step_count,
         )
+
+
+@router.post("/{simulation_id}/fatigue", response_model=FatigueRead)
+def assess_simulation_fatigue(
+    project: OwnedProject,
+    db: DbSession,
+    media: MediaServiceDep,
+    simulation_id: str,
+    body: FatigueRequest,
+) -> FatigueRead:
+    """A fatigue check at one node of a finished structural run (E8.6).
+
+    The solved load, scaled by `signal`, read as a signed history at the node, and
+    assessed against `curve` with the stated factors. A POST because the request
+    carries a whole assessment, but it writes nothing: the answer is computed from
+    the archive on every call. `app/simulation/fatigue.py` holds the refusals, and
+    the agent's `assess_fatigue` tool calls the same function.
+    """
+    from app.simulation.fatigue import FatigueRefused, assess_run, refuse_unless_assessable
+
+    job = _get_job(db, project.id, simulation_id)
+    try:
+        refuse_unless_assessable(job.analysis, job.status.value)
+        if job.fields_media is None:
+            raise FatigueRefused("This run stored no result fields.", status=409)
+        try:
+            handle = media.open(job.fields_media)
+        except MediaNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE, detail="Result fields are no longer available"
+            ) from exc
+        with handle as fh, np.load(fh) as data:
+            return assess_run(
+                data,
+                body,
+                simulation_id=job.id,
+                solver=job.solver or "",
+                result=job.result,
+            )
+    except FatigueRefused as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
 
 @router.post("/{simulation_id}/cancel", response_model=SimulationRead)

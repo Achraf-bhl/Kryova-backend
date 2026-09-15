@@ -151,6 +151,7 @@ TOOL_LABELS: dict[str, str] = {
     "run_simulation": "Preparing the analysis",
     "run_thermal_simulation": "Preparing the thermal analysis",
     "run_flow_simulation": "Preparing the flow analysis",
+    "assess_fatigue": "Checking fatigue life",
     "catia_status": "Checking CATIA",
     "open_in_catia": "Opening CATIA",
     "sync_geometry_from_catia": "Importing geometry from CATIA",
@@ -286,6 +287,8 @@ def summarise_step(tool: str, result: Any, ok: bool) -> str:
         )
     if tool == "delete_simulation":
         return "Run deleted"
+    if tool == "assess_fatigue":
+        return str(result.get("summary") or "Fatigue checked")
     if tool == "design_history":
         # Says how much of the record was read and how much was left, because
         # this is the one tool whose answer is deliberately partial -- a user

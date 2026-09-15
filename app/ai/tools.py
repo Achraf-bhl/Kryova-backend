@@ -138,6 +138,7 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     "run_thermal_simulation": "Submitting the thermal analysis",
     "run_flow_simulation": "Submitting the flow analysis",
     "delete_simulation": "Deleting the run",
+    "assess_fatigue": "Checking fatigue life",
     # The direct-COM tools. They carry no `catia_` prefix, so `catia_label`
     # never sees them and an unlisted name would render as "open in catia".
     "open_in_catia": "Opening CATIA",
@@ -1237,6 +1238,104 @@ class ToolBox:
                 ),
                 handler=self._run_flow_simulation,
                 mutating=True,
+            ),
+            Tool(
+                name="assess_fatigue",
+                description=(
+                    "Fatigue check at one node of a finished structural run: the solved load "
+                    "scaled by a signal of multiples (one block of the duty cycle), read as a "
+                    "signed stress history and assessed against an S-N curve with Miner's "
+                    "rule. Every engineering input must come from the user or a document they "
+                    "named: the curve with its source, the surface and size factors with "
+                    "sources, the design life in repetitions of the block, and the mean-stress "
+                    "policy. Never invent one. A missing factor comes back unmeasured, naming "
+                    "what is missing; report that rather than filling it in. The damage is a "
+                    "model prediction, not a measurement, and not validation."
+                ),
+                parameters=_object(
+                    {
+                        "simulation_id": {"type": "string"},
+                        "node": {"type": "integer", "minimum": 0},
+                        "point_mm": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "Read the node nearest this point instead of a node id.",
+                        },
+                        "scalar": {
+                            "type": "string",
+                            "enum": ["principal", "signed_von_mises", "component"],
+                        },
+                        "direction": {
+                            "type": "object",
+                            "properties": {
+                                "vector": {
+                                    "type": "array",
+                                    "items": {"type": "number"},
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                },
+                                "reason": {"type": "string"},
+                            },
+                            "required": ["vector", "reason"],
+                        },
+                        "signal": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "description": "Multiples of the solved load, e.g. [0, 1, -1, 0].",
+                        },
+                        "signal_source": {"type": "string"},
+                        "curve": {
+                            "type": "object",
+                            "properties": {
+                                "slope_k1": {"type": "number"},
+                                "knee_cycles": {"type": "number"},
+                                "knee_amplitude_mpa": {"type": "number"},
+                                "source": {"type": "string"},
+                                "slope_k2": {"type": "number"},
+                                "scatter_tn": {"type": "number"},
+                                "failure_probability": {"type": "number"},
+                                "mean_stress_sensitivity": {"type": "number"},
+                            },
+                            "required": [
+                                "slope_k1",
+                                "knee_cycles",
+                                "knee_amplitude_mpa",
+                                "source",
+                            ],
+                        },
+                        "factors": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "value": {"type": "number"},
+                                    "source": {"type": "string"},
+                                },
+                                "required": ["name", "value", "source"],
+                            },
+                        },
+                        "design_life_blocks": {"type": "number"},
+                        "damage_limit": {"type": "number"},
+                        "mean_stress_policy": {
+                            "type": "string",
+                            "enum": ["correct", "declared_irrelevant"],
+                        },
+                        "mean_stress_justification": {"type": "string"},
+                        "location": {"type": "string"},
+                    },
+                    required=[
+                        "simulation_id",
+                        "signal",
+                        "signal_source",
+                        "curve",
+                        "design_life_blocks",
+                    ],
+                ),
+                handler=self._assess_fatigue,
             ),
             Tool(
                 name="delete_simulation",
@@ -2435,6 +2534,48 @@ class ToolBox:
                 f"You already have {running} simulation(s) queued or running, which is "
                 f"the limit of {limit}. Wait for one to finish before submitting another."
             )
+
+    def _assess_fatigue(self, simulation_id: str, **request: Any) -> dict[str, Any]:
+        """The route's fatigue check, through the same function (`app.simulation.fatigue`).
+
+        The payload carries the run's `result` block beside the damage, so the
+        loop's unconverged and not-validated footnotes fire on a fatigue answer
+        exactly as they do on the stress it was read from.
+        """
+        import numpy as np
+        from pydantic import ValidationError
+
+        from app.media import MediaNotFound, MediaService, get_media_store
+        from app.schemas.fatigue import FatigueRequest
+        from app.simulation.fatigue import FatigueRefused, assess_run, refuse_unless_assessable
+
+        job = self._simulation(simulation_id)
+        try:
+            body = FatigueRequest.model_validate(request)
+        except ValidationError as exc:
+            problems = "; ".join(
+                f"{'.'.join(str(p) for p in error['loc']) or 'request'}: {error['msg']}"
+                for error in exc.errors()
+            )
+            raise ToolError(f"The fatigue request is not valid: {problems}.") from exc
+        media = self.media or MediaService(self.db, get_media_store())
+        try:
+            refuse_unless_assessable(job.analysis, job.status.value)
+            if job.fields_media is None:
+                raise FatigueRefused("This run stored no result fields.", status=409)
+            try:
+                handle = media.open(job.fields_media)
+            except MediaNotFound as exc:
+                raise ToolError(
+                    f"Simulation {job.id}'s result fields are no longer stored; re-run it."
+                ) from exc
+            with handle as fh, np.load(fh) as data:
+                answer = assess_run(
+                    data, body, simulation_id=job.id, solver=job.solver or "", result=job.result
+                )
+        except FatigueRefused as exc:
+            raise ToolError(str(exc)) from exc
+        return answer.model_dump(mode="json")
 
     def _delete_simulation(self, simulation_id: str) -> dict[str, Any]:
         """Delete one finished run, mirroring the HTTP route's ordering."""

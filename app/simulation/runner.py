@@ -921,6 +921,13 @@ def _store_fields(
             "von_mises_element": output.von_mises,
             "von_mises_nodal": nodal,
         }
+        # The signed tensor a fatigue history is read from (E8.6). Von Mises is
+        # a norm, so an archive without this cannot be assessed for fatigue at
+        # all; `app.simulation.fatigue` refuses such a run by name rather than
+        # substituting the norm. Absent when the solver produced no tensor.
+        nodal_stress = getattr(output, "nodal_stress", None)
+        if nodal_stress is not None:
+            arrays["nodal_stress_mpa"] = nodal_stress
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir) / "fields.npz"

@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 100/132 = 76% | 113/151 eng-months = 75% |
+| Engineering — E1–E23 | 15/24 | 102/132 = 77% | 114/151 eng-months = 75% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 148/193 = 76% | 140/189 eng-months = 74% |
+| **Programme** | 21/34 | 148/193 = 77% | 141/189 eng-months = 75% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 75%, E15 80%, E18 50%, P4 75%, P9 57% |
+| in flight | E8 92%, E15 80%, E18 50%, P4 75%, P9 57% |
 | nothing finished yet | E9, E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2253,6 +2253,22 @@ analyst.**
    makes can be read into a history. Archive `nodal_stress`, serve a node's history and its
    assessment through a route, offer the agent a tool, and test the path through the agent
    (CLAUDE.md *Testing* item 8), not only through the function.
+   > DONE (2026-09-15) — `app/simulation/runner.py` archives `nodal_stress_mpa`, the (n, 6)
+   > Voigt tensor, beside von Mises. `app/simulation/fatigue.assess_run` is the one function the
+   > route `POST /projects/{id}/simulations/{sim}/fatigue` and the agent tool `assess_fatigue`
+   > both call: one solved load scaled by a signal, read at a node (or the nearest node to a
+   > point, with the distance reported), assessed with the stated curve and factors. Refusals by
+   > name: a run not a finished `solid`/`plane-stress`/`plane-strain` solve (409), an archive
+   > with no tensor (409, "re-run"), a node off the mesh or a bad direction (422). The answer
+   > carries the run's `result` block, so the loop's not-validated footnote fires on it.
+   > Interface changes, stated: a new route, a new agent tool, and a new archive key; **runs
+   > archived before this change are refused**, never assessed from von Mises. **Not run here**:
+   > the tests were written on Linux on 2026-09-15 and not executed, at the user's instruction.
+   > **Not claimed**: two independently varying loads (the library's multi-channel path is not
+   > exposed), hot-spot or notch-strain reads through the route.
+   > Tested by: `tests/test_simulation_fatigue.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 ##### Phase E9 — Multibody dynamics: where load cases actually come from #####

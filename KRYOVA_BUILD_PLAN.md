@@ -48,15 +48,17 @@ happened.
 > **The E22.2 and E22.4 case sets and their commands landed at 11:45** (twelve edits on M1/M3/M6;
 > twelve requests over the real registry; QUEUE D2/D3 are now one command each). Found: M3's
 > `thickness_mm`/`width_mm`/`lip_mm`/`radius_mm` are read by no feature (flagged in E22.2).
-> **P6.1's store and route landed at 11:55** (`GET .../geometry/{n}/display?level=`, keyed on
+> **P6.1's store and route landed at 11:48** (`GET .../geometry/{n}/display?level=`, keyed on
 > the file's sha256 before the file is opened; still PARTIAL on Draco/meshopt and assemblies).
-> Next: E21.6 / E21.2 / E21.4 / E21.5 / E23.1 (documents and registers; each needs a source
-> read, never recalled) → P4's open tasks → P7 (QUEUE rows for the Windows parts).
+> **E21.5 is PARTIAL at 11:58** (the fatigue entitlement register; FKM methods already arrive via
+> pyLife; tables-vs-method is for counsel). Next: E21.6 (QIF: read the DMSC page and the QIF
+> Community GitHub licence) / E21.2 (AP242 edition) / E21.4 / E23.1 (each needs a source read,
+> never recalled) → P4's open tasks → P7 (QUEUE rows for the Windows parts).
 > **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
 > **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
 > Its prompt names E23.3 as the target and says to skip a target that is already done; E23.3,
 > P9.3, E22.1, the E22.2 and E22.4 harnesses and case sets, and P6.1's tessellation, store
-> and route are done, so it should start at E21.6.
+> and route, and E21.5's register are done, so it should start at E21.6.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -334,6 +336,11 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E21 task 5, partial: the fatigue entitlement register.** `app/fatigue/entitlements.py`
+  names every document the fatigue code takes from (EN 1993-1-9, IIW-1823-07, NACA TN 2805, FKM
+  through pyLife), how it is held and what is taken; FKM 7th ed. EN is EUR 320 and untouched; BS
+  7608 is not held. Found: FKM methods already arrive through pyLife. Tables-vs-method, third-party
+  copies and FKM's terms are for counsel. Tested by `tests/test_fatigue_entitlements.py`. Not run here.
 - **2026-09-15 — P6 task 1, still partial: a STEP version served as a GLB, once per file and
   level.** `GET /projects/{id}/geometry/{n}/display?level=` with levels relative to the bounding
   box (a Ø10 and a Ø3000 cylinder both 500/212/92 triangles), keyed on the file's sha256 before it

@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 112/132 = 85% | 129/151 eng-months = 85% |
+| Engineering — E1–E23 | 15/24 | 113/132 = 86% | 129/151 eng-months = 86% |
 | Product — P1–P10 | 6/10 | 48/61 = 78% | 28/38 eng-months = 74% |
-| **Programme** | 21/34 | 160/193 = 83% | 157/189 eng-months = 83% |
+| **Programme** | 21/34 | 160/193 = 83% | 158/189 eng-months = 83% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -4342,6 +4342,33 @@ lying about fidelity or breaching somebody's licence?
    EN 1993-1-9's detail categories are, what the FKM guideline costs and permits, and what may be
    *implemented* (a method is not copyrightable; its text is) versus *reproduced*. E8 task 3's
    weld classification depends on the answer.
+   > PARTIAL (2026-09-15) — **what exists, what it costs and what the code takes is now recorded
+   > and held by a test; what the code may take is a question for counsel.**
+   > `app/fatigue/entitlements.py` registers every document `app/fatigue/` takes from:
+   > - EN 1993-1-9, whose tables are encoded, read from a third-party copy of a Public.Resource.Org
+   >   compilation;
+   > - IIW-1823-07, whose hot-spot table is encoded, from a third-party copy;
+   > - NACA TN 2805, from NTRS;
+   > - the FKM methods pyLife implements.
+   >
+   > It also records the FKM 7th edition (EN), **EUR 320.00 incl. VAT, 232 pp.**, read on
+   > vdmashop.de, from which nothing is taken, and BS 7608, which is not held. A test scans every
+   > URL cited in `app/fatigue/` against the register, and every module naming FKM against it.
+   > `docs/fatigue-data-licences.md` is the reading record, and it quotes TRIPS Art. 9(2) from the
+   > WTO. **Found, and the plan had it wrong:** FKM methods already reach the product through
+   > pyLife (Apache-2.0): FKM-Goodman and the extended Neuber rule. Neither guideline has been
+   > read. **Not settled, needs counsel or the publisher:**
+   > - whether encoding a standard's tables is a method or an expression (TRIPS 9(2) does not
+   >   say);
+   > - reliance on third-party copies;
+   > - FKM's terms, which are not on the shop page;
+   > - NTRS's and IIW's terms, not looked up.
+   >
+   > C-588/21 P was read only as the Court's reproduced summary, because the judgment itself could
+   > not be fetched. Tests written on Linux and not run as pytest; the URL scan was checked by a
+   > one-off script. Tested by: `tests/test_fatigue_entitlements.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 6. **QIF, for E17 task 5's inspection plans, with its state read correctly.** The DMSC download

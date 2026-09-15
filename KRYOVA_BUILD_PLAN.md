@@ -71,8 +71,9 @@ happened.
 > `POST /projects/{id}/geometry/from-attachment` as a tool (CLAUDE.md testing item 8: a test
 > through the tool path, not the route alone). Then P4.3/P4.6 only if something there is
 > Linux-closable without the staged extraction, then P7 (QUEUE rows for the Windows parts).
-> **Next continuation fires 2026-09-15 20:33** — held by the session named on the next line.
-> **Held by `kryova-backend-df`** until a handover is confirmed; the job dies if that session
+> **Next continuation fires 2026-09-15 20:34** — held by the session named on the next line.
+> **Held by `kryova-backend-55`**, which confirmed `scheduled 2026-09-15 20:34` at 18:04.
+> `kryova-backend-df` and `kryova-backend-78` hold nothing; the job dies if `kryova-backend-55`
 > is closed.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending

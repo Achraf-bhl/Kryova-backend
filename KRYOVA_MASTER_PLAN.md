@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 116/132 = 88% | 133/151 eng-months = 88% |
+| Engineering — E1–E23 | 15/24 | 117/132 = 89% | 134/151 eng-months = 89% |
 | Product — P1–P10 | 6/10 | 49/62 = 79% | 29/38 eng-months = 75% |
-| **Programme** | 21/34 | 166/194 = 85% | 162/189 eng-months = 86% |
+| **Programme** | 21/34 | 166/194 = 86% | 163/189 eng-months = 86% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 50%, E23 62%, P4 86%, P9 57% |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 62%, E23 62%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -4614,6 +4614,47 @@ holds intent across a machine — and how does Kryova measure its own distance f
    memory is now a claim under contest** and must be measured on our own traces before it is
    built out. Deliverable: Kryova's agent measured per duration bucket, on our missions, with
    model selection driven by that and never by a leaderboard.
+   > PARTIAL (2026-09-15) — **the harness reads our own traces and reports per bucket; the
+   > numbers need runs, and every literature figure is recorded as unsourced.** Tests written
+   > on Linux and **not run** (the user's rule; Windows runs them, THE QUEUE D6).
+   > `app/verify/horizon.py`.
+   > **The task text named the wrong source and the work found it.** It said "`CatiaOperation`
+   > rows and turn events". `TurnEvent` is a **ten-minute resume buffer, pruned aggressively**
+   > — its own docstring says so — so a study over it would measure the last ten minutes of
+   > traffic and report it as the fleet's history. The durable pair is `ConversationMessage`
+   > (written as each step completes) and `CatiaOperation` (`resume.py`'s record of what was
+   > done), and that is what `read_traces` reads.
+   > **The unit is a turn and its duration is wall-clock**, user message to the last message
+   > before the next one — the span the user waits through. A conversation is the wrong unit;
+   > it spans idle days. The loop's own control messages are user-role, so the split skips
+   > them by `prompts.CONTROL_NOTE`; splitting on them would report one long turn as several
+   > short ones, which is the direction that flatters this product.
+   > **`completion_rate` is defined and is explicitly not a success rate.** It is the fraction
+   > of turns ending with an answer and none of the three recorded failure signals (budget
+   > exhausted, a tool whose last word was an error, no answer). Whether the part was *right*
+   > is not in these rows — a turn that confidently builds the wrong bracket completes
+   > perfectly — so `success_rate` is reported only over turns carrying a ground-truth label
+   > (`measure(outcomes=...)`, which E18's missions are the labelled set for) and is `None`
+   > everywhere else. `NOT_A_SUCCESS_RATE` is one string carried by every report, for
+   > `standards.NOT_VALIDATED`'s reason. An empty bucket reports `None`, never 0.0.
+   > **Every literature figure this task quotes is `Basis.UNSOURCED`, and the type refuses to
+   > let one carry a value.** Nobody in this repository has opened those papers; the plan's own
+   > prose is the only record, and the studies are not even named in it. `Figure` therefore
+   > refuses a `READ` basis with no URL and date, and refuses an `UNSOURCED` one with a number
+   > — `nafems.Target`'s rule one level earlier. **Reading them is the other half of this task
+   > and is not Linux work.** The most consequential is the memory-scaffold claim, which E16.2
+   > already cites as the reason `taskgraph.py` does not generate plans and which holds E16
+   > task 3 open.
+   > **Also deliberately not done:** the default buckets are chosen against *this product's*
+   > clock (a local-model turn is 4–7 minutes), **not** the cited study's, whose boundaries are
+   > unknown. Nothing here may be plotted against those figures until they are read, and the
+   > module says so.
+   > **Flagged, not fixed:** `_was_truncated` reads the closing summary's prompt text out of
+   > the transcript, because `AgentReply.truncated` is returned to the caller and never
+   > written down. A column would be exact; the string match is a proxy and is named as one.
+   > Tested by: `tests/test_verify_horizon.py` (22, written on Linux and not run).
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 4. **Finish the tool-retrieval argument at the half the papers skip: arguments.** The published

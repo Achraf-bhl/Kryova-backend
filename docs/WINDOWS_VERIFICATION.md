@@ -760,6 +760,21 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       for `read_attachment` unprompted once the quote is out of the window, and whether the
       inventory is enough to keep an attachment knowable across a long conversation.
 
+- [ ] **D6 — E22.3, the horizon harness run on real traces (added 2026-09-15).**
+      `app/verify/horizon.py` groups recorded turns into duration buckets and reports a
+      completion rate per bucket. Linux wrote it and ran no pytest.
+      1. `venv/bin/python -m pytest tests/test_verify_horizon.py -q`, then `ruff` and `mypy`.
+      2. Run it over this machine's own conversation history, which is the only place real
+         multi-minute agent turns exist: read traces for every conversation, `measure`, and
+         write the report beside the other verification artefacts. Expect most turns in the
+         `1-5 min` and `5-15 min` bands on the local model.
+      3. **Label a set.** `completion_rate` is not success. Take the ladder runs whose outcome
+         is known from `docs/GUI_PROMPT_LADDER.md`'s run log and pass them as `outcomes`, so a
+         real `success_rate` exists for at least one bucket. Without this the phase proof's
+         "success by task-duration bucket" is not met, however many traces are read.
+      Settles: whether reliability decays with turn length *on this product*, which is the one
+      number E22.3 is for, and whether the bucket boundaries are right for a local model.
+
 ### E. Needs a seat to *write*, not only to verify — **this section is coding work**
 
 These are not "run it and see". They are pieces of the product that can only be *written* on

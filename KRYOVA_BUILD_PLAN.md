@@ -29,8 +29,10 @@ happened.
 > and tube routing, CAM with an in-house drop-cutter because OpenCAMLib has no 3.12 wheel,
 > inspection plans from GD&T, documentation drafts). E17 is 83%: E17.1 now draws GD&T and BOM
 > tables (still PARTIAL: leaders, reserved zones, FTA on the seat = QUEUE E7) and E17.2's open
-> item is the seat. Next: E18's rungs (M4, M5, M7, M8), whose needs E9/E13/E17 have now met in
-> part. No continuation job is held for this stretch: the user asked for continuous work in
+> item is the seat. **E18 does not move, by its own rule:** M4 and M5 both still need E13.2
+> (ISO 286 transcription is a document; FTA is QUEUE E7), M7 needs all of E9 (Chrono 9.1,
+> seat 9.5) and M8 needs all of E8 (8.3's engineer). Nothing left in E3, E8, E9, E13, E15, E17
+> or E18 is closable on Linux without a seat, a document or an engineer. No continuation job is held for this stretch: the user asked for continuous work in
 > the session. Before anything else on Windows: THE QUEUE A6's 2026-09-15 update (run the new
 > tests, ruff, mypy, re-record V&V).
 
@@ -310,6 +312,10 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E13 task 2, partial: fit selection's arithmetic.** `app/rules/fits.py`:
+  clearance, kind and selection over caller-sourced zones; no ISO 286 value ships. M8's
+  declared need corrected from "E17.4 — tubular weldments" to E17.3, where weldments are.
+  Tested by `tests/test_rules_fits.py`. Not run here.
 - **2026-09-15 — E17 task 1, partial: GD&T frames and the parts list reach the drawing.**
   `Drawing.tolerancing` and `Drawing.parts`; `dxf.py` draws a tolerance table and a parts
   list on declared layers. Still open: leaders to geometry, reserved zones, FTA on the seat

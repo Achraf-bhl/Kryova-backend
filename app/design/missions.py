@@ -3840,7 +3840,7 @@ LADDER: Final[Sequence[Mission]] = (
         needs=(
             "E8 — fatigue and durability (pyLife)",
             "E9.4 — joint-load extraction feeding FEA",
-            "E17.4 — tubular weldments",
+            "E17.3 — tubular weldments",
         ),
     ),
     Mission(

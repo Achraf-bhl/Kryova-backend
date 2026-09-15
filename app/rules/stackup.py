@@ -84,7 +84,8 @@ linearised millimetres of gap per millimetre of that dimension: that
 linearisation is the engineer's, this module only multiplies by it.
 
 **What this does not do.** It does not select fits (ISO 286 tables are adopted
-data an ME chooses from, not arithmetic), it does not find the chain — somebody
+data an ME chooses from, not arithmetic; `app.rules.fits` does the arithmetic on zones a
+caller reads from them), it does not find the chain — somebody
 declares the contributors, and choosing them wrongly is the commonest way a real
 stack-up is wrong — and it does not compute sensitivities from geometry. It also
 does not convert a geometric tolerance into a contributor: bonus tolerance under

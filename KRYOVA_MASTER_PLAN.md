@@ -2865,6 +2865,17 @@ answerable meaning.
 
 2. **Tolerance and GD&T** — stack-up (worst case and RSS), fit selection, datum schemes, FTA.
    *A drawing without tolerances is not a drawing.*
+   > PARTIAL (2026-09-15) — **fit selection's arithmetic is in** (`app/rules/fits.py`): a hole
+   > and shaft zone, each with its deviations and the source they were read from, give the largest
+   > and smallest clearance and the fit's kind; `select_fit` keeps the candidates that always land
+   > inside a sourced clearance requirement and chooses the widest combined tolerance, with every
+   > rejection's reason in numbers. **No deviation ships.** `gdt.py` now has consumers
+   > (`app/manufacture/inspection.py`, and the drawing's tolerance table). **Open:** ISO 286's
+   > tables are not transcribed (a document), so zones are the caller's; and CATIA FTA is THE
+   > QUEUE **E7**. **Tests written on Linux and not run there.** Tested by:
+   > `tests/test_rules_fits.py`, and the files below.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-06) — stack-up and GD&T tested. GD&T deliberately evaluates no tolerance-zone
    > geometry, guarded three ways. **`gdt.py` has no consumer anywhere in `app/`.** Tested by:
    > `tests/test_rules_*.py`.

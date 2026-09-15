@@ -4621,6 +4621,36 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
      deployment. *Revised 2026-09-14: neither is used. See the status below for why.*
    - **Spreadsheets** keep their structure — a load-case table becomes rows with units, not prose.
    - **Images/photos** → the vision provider (already pluggable, P5 surfaces it).
+   > PARTIAL (2026-09-15) — **an attached part now becomes a geometry version on request, and a
+   > CSV attached through the product is finally read as a table. Images are the one reader-side
+   > item left.**
+   > **A defect that made the 2026-09-14 status below half true.** Detection falls back to the
+   > file's extension for CSV, TSV, STL and IGES. But the attachment route read the stored blob,
+   > which is named by its digest and has no extension. So every CSV attached through
+   > `POST /attachments` was read as plain text, and the CSV reader, with its cells, headings and
+   > numbers, only ever ran in tests that called it on a named file. That is CLAUDE.md testing
+   > item 8 again: the reader was proved and the path was not. `kinds.sniff` now takes the name
+   > the file arrived with, reads only its extension, and still lets content win (a PDF named
+   > `.csv` is a PDF). Both callers pass it.
+   > **`POST /projects/{id}/geometry/from-attachment`** takes an attachment id and registers the
+   > blob that is already stored, with no second upload. The version and the attachment share one
+   > blob. Access comes from the path: the project needs write access and the attachment must be
+   > the caller's, and either miss is 404. Only an attachment detected as STEP, IGES or STL is
+   > accepted; anything else is refused naming what it was read as. A part that does not inspect
+   > is refused, and its blob is kept, because it is still an attachment. The reader's refusal of
+   > solid geometry now says the attachment itself can become a version.
+   > **Security gap closed with it:** `POST /attachments` stored any `project_id` as given. An
+   > attachment could be filed under another tenant's project, and a real id answered 201 where a
+   > made-up one hit the foreign key, which told a stranger which ids exist. It now needs write
+   > access to that project, and a miss is 404.
+   > **Still open:** images to the vision provider (the result would be `INFERRED`). The agent is
+   > not offered the new route as a tool. OCR for scans belongs to task 3. No file here was saved
+   > by Microsoft Office (THE QUEUE C3). Everything the status below lists as shipped still stands.
+   > Tested by: `tests/test_attachments.py` (`TestAnAttachedPartBecomesGeometry`,
+   > `TestAStoredBlobIsReadByTheNameItArrivedWith`,
+   > `TestAnAttachmentCannotBeFiledUnderSomebodyElsesProject`), and the files named below.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-14) — **spreadsheets, CSV, Word, PowerPoint and HTML are now read into
    > cells, slides and paragraphs, each located. Images and STEP-to-geometry are still open.**
    > **Docling and MarkItDown were dropped, and the plan above is revised to match.** Both turn a

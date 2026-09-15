@@ -94,14 +94,21 @@ _HTML_OPENINGS: tuple[bytes, ...] = (b"<!doctype html", b"<html")
 _TEXT_SUFFIXES = frozenset({".txt", ".md", ".markdown", ".rst", ".log", ".json", ".xml"})
 
 
-def sniff(path: Path) -> Detection:
+def sniff(path: Path, name: str | None = None) -> Detection:
     """Classify `path` by its content, falling back to its name only when tied.
+
+    `name` is the name the file arrived with, and only its extension is read.
+    **Pass it for a stored blob.** The store names a blob by its digest, with no
+    extension, so without `name` a CSV is plain text and an STL is text or
+    unknown. Until 2026-09-15 neither caller passed one, so an attachment made
+    through `POST /attachments` never reached the CSV reader.
 
     Never raises for an unreadable or nonsense file: an unrecognised blob comes
     back as `DocumentKind.UNKNOWN` with advice, because the caller's job is to
     tell the user what to convert it to, not to handle an exception.
     """
     path = Path(path)
+    named = Path(name) if name else path
     try:
         with path.open("rb") as handle:
             head = handle.read(SNIFF_BYTES)
@@ -167,7 +174,7 @@ def sniff(path: Path) -> Detection:
     if _looks_like_ascii_dxf(head):
         return Detection(DocumentKind.DXF, "dxf")
 
-    geometry = detect_format(path.name)
+    geometry = detect_format(named.name)
     if geometry is not None:
         # STL and IGES have no magic worth trusting -- an ASCII STL begins
         # `solid <anything>` and a binary one begins with 80 arbitrary bytes --
@@ -175,7 +182,7 @@ def sniff(path: Path) -> Detection:
         # a fake at import.
         return Detection(DocumentKind.CAD_SOLID, geometry)
 
-    suffix = path.suffix.lower()
+    suffix = named.suffix.lower()
     if suffix in _TABULAR_SUFFIXES and _is_texty(head):
         return Detection(DocumentKind.SPREADSHEET, suffix.lstrip("."))
 

@@ -426,3 +426,262 @@ class TestATableIsStoredAsCells:
         stored = attachments.serialise(read_document(path))
 
         assert stored["unread"][0]["where"] == 'sheet "Sheet", cell B2'
+
+
+def _stored_blob(
+    auth_client: AuthenticatedTestClient,
+    db: Session,
+    user_id: str,
+    filename: str,
+    body: bytes,
+    sha: str,
+) -> Media:
+    media = Media(
+        owner_id=user_id,
+        kind=MediaKind.OTHER,
+        filename=filename,
+        size_bytes=len(body),
+        sha256=sha,
+        meta={},
+    )
+    db.add(media)
+    db.flush()
+    path = auth_client.store.path_for(sha)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
+    return media
+
+
+class TestAnAttachedPartBecomesGeometry:
+    """P4.2: a STEP file dropped into a conversation can become a geometry version.
+
+    The reader refuses solid geometry, because there is no text in it to quote, and
+    says to use it as geometry. Until 2026-09-15 that meant uploading the same file
+    a second time.
+    """
+
+    @staticmethod
+    def _step_attachment(
+        auth_client: AuthenticatedTestClient,
+        db: Session,
+        user_id: str,
+        tmp_path: Path,
+    ) -> dict:
+        from tests.test_mesh import write_step_box
+
+        body = write_step_box(tmp_path / "bracket.step", (40.0, 30.0, 20.0)).read_bytes()
+        media = _stored_blob(auth_client, db, user_id, "bracket.step", body, "7" * 64)
+        response = auth_client.post(f"{API}/attachments", json={"media_id": media.id})
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    def test_a_step_attachment_becomes_a_version_of_the_part_that_was_attached(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        current_user_id: str,
+        project_id: str,
+        tmp_path: Path,
+    ) -> None:
+        attached = self._step_attachment(auth_client, db_session, current_user_id, tmp_path)
+        assert attached["status"] == "unsupported"
+        assert "no second upload" in attached["status_detail"]
+
+        response = auth_client.post(
+            f"{API}/projects/{project_id}/geometry/from-attachment",
+            data={"attachment_id": attached["id"], "note": "from the chat"},
+        )
+
+        assert response.status_code == 201, response.text
+        version = response.json()
+        assert version["file_format"] == "step"
+        assert version["version_number"] == 1
+        assert version["note"] == "from the chat"
+        assert version["stats"]["bounding_box"]["size"] == pytest.approx([40.0, 30.0, 20.0])
+        assert version["stats"]["volume_mm3"] == pytest.approx(40.0 * 30.0 * 20.0)
+        # The same bytes, not a copy: the version and the attachment share one blob.
+        assert version["media_id"] == attached["media_id"]
+
+    def test_another_users_attachment_is_404(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        owner: User,
+        project_id: str,
+    ) -> None:
+        theirs = Attachment(
+            owner_id=owner.id,
+            media_id=_media(db_session, owner, "theirs.step", "8" * 64).id,
+            filename="theirs.step",
+            detected_kind="cad_solid",
+            detected_format="step",
+        )
+        db_session.add(theirs)
+        db_session.flush()
+
+        response = auth_client.post(
+            f"{API}/projects/{project_id}/geometry/from-attachment",
+            data={"attachment_id": theirs.id},
+        )
+
+        assert response.status_code == 404
+
+    def test_a_document_is_refused_saying_what_it_was_read_as(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        current_user_id: str,
+        project_id: str,
+    ) -> None:
+        media = _stored_blob(
+            auth_client, db_session, current_user_id, "notes.txt", b"Wall 8 mm\n", "9" * 64
+        )
+        attached = auth_client.post(f"{API}/attachments", json={"media_id": media.id}).json()
+
+        response = auth_client.post(
+            f"{API}/projects/{project_id}/geometry/from-attachment",
+            data={"attachment_id": attached["id"]},
+        )
+
+        assert response.status_code == 422
+        assert "not as solid geometry" in response.json()["detail"]
+        assert "read as txt" in response.json()["detail"]
+        assert "STEP, IGES or STL" in response.json()["detail"]
+
+    def test_a_part_that_does_not_inspect_keeps_its_blob(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        current_user_id: str,
+        project_id: str,
+    ) -> None:
+        """Named `.step` and holding prose, so it is detected as STEP by its name
+        and fails inspection. The upload routes discard an unreadable CAD blob;
+        this one is the file under an attachment the user can still see."""
+        media = _stored_blob(
+            auth_client, db_session, current_user_id, "fake.step", b"Wall 8 mm\n", "9" * 64
+        )
+        attached = auth_client.post(f"{API}/attachments", json={"media_id": media.id}).json()
+
+        response = auth_client.post(
+            f"{API}/projects/{project_id}/geometry/from-attachment",
+            data={"attachment_id": attached["id"]},
+        )
+
+        assert response.status_code == 422
+        assert "does not look like a STEP" in response.json()["detail"]
+        stored = db_session.get(Media, attached["media_id"])
+        assert stored is not None
+        assert auth_client.store.path_for(stored.sha256).is_file()
+        assert auth_client.get(f"{API}/attachments/{attached['id']}").status_code == 200
+
+
+class TestAnAttachmentCannotBeFiledUnderSomebodyElsesProject:
+    def test_a_project_the_caller_cannot_write_to_is_404(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        project_id: str,
+    ) -> None:
+        """Until 2026-09-15 the id was stored as given. A real project answered
+        201 where a made-up one hit the foreign key, which tells a stranger which
+        ids exist."""
+        from tests.conftest import register_verified
+
+        stranger = register_verified(auth_client, db_session, "stranger@kryova.dev")
+        auth_client.post(
+            f"{API}/auth/login",
+            data={"username": "stranger@kryova.dev", "password": "correct-horse-battery"},
+        )
+        auth_client.headers["x-csrf-token"] = auth_client.cookies["kryova_csrf"]
+        media = _stored_blob(auth_client, db_session, stranger, "notes.txt", b"8 mm", "a" * 64)
+
+        response = auth_client.post(
+            f"{API}/attachments", json={"media_id": media.id, "project_id": project_id}
+        )
+
+        assert response.status_code == 404
+        assert db_session.query(Attachment).filter_by(media_id=media.id).count() == 0
+
+    def test_the_callers_own_project_is_recorded(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        current_user_id: str,
+        project_id: str,
+    ) -> None:
+        media = _stored_blob(
+            auth_client, db_session, current_user_id, "notes.txt", b"8 mm", "b" * 64
+        )
+
+        response = auth_client.post(
+            f"{API}/attachments", json={"media_id": media.id, "project_id": project_id}
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["project_id"] == project_id
+
+
+class TestAStoredBlobIsReadByTheNameItArrivedWith:
+    """The store names a blob by its digest, with no extension. Detection falls back
+    to the extension for CSV, STL and IGES, and until 2026-09-15 it read the
+    digest's missing one: every CSV attached through the route was read as plain
+    text, and P4.2's tests passed because they called the reader on a named file."""
+
+    def test_a_csv_attached_through_the_route_arrives_as_cells(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        media = _stored_blob(
+            auth_client,
+            db_session,
+            current_user_id,
+            "loads.csv",
+            b"Case,Fx [N]\nLC1,1200\n",
+            "e" * 64,
+        )
+
+        attached = auth_client.post(f"{API}/attachments", json={"media_id": media.id}).json()
+        content = auth_client.get(f"{API}/attachments/{attached['id']}/content").json()
+
+        assert attached["detected_kind"] == "spreadsheet"
+        assert attached["detected_format"] == "csv"
+        force = content["fragments"][1]["cells"][1]
+        assert force["number"] == 1200.0
+        assert force["cite"].startswith("cell B2 of loads.csv")
+
+    def test_an_stl_attached_through_the_route_becomes_geometry(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        current_user_id: str,
+        project_id: str,
+    ) -> None:
+        from tests.test_mesh import box_stl
+
+        media = _stored_blob(
+            auth_client,
+            db_session,
+            current_user_id,
+            "block.stl",
+            box_stl((15.0, 25.0, 35.0)),
+            "f" * 64,
+        )
+        attached = auth_client.post(f"{API}/attachments", json={"media_id": media.id}).json()
+        assert attached["detected_kind"] == "cad_solid"
+
+        response = auth_client.post(
+            f"{API}/projects/{project_id}/geometry/from-attachment",
+            data={"attachment_id": attached["id"]},
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["stats"]["triangle_count"] == 12
+
+    def test_the_content_still_outranks_the_name(self, tmp_path: Path) -> None:
+        """A PDF named `.csv` is a PDF. The name only settles what the bytes leave open."""
+        from app.documents.kinds import sniff
+
+        blob = tmp_path / ("0" * 64)
+        blob.write_bytes(b"%PDF-1.7\n")
+
+        assert sniff(blob, "loads.csv").format == "pdf"

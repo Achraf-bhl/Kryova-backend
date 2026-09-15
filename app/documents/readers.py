@@ -133,7 +133,7 @@ def read_document(
     did not.
     """
     path = Path(path)
-    detected = sniff(path)
+    detected = sniff(path, filename)
     source = SourceRef(
         filename=filename if filename is not None else path.name,
         digest=digest,
@@ -171,7 +171,8 @@ def read_document(
     if detected.kind is DocumentKind.CAD_SOLID:
         raise UnsupportedDocument(
             f"{source.filename} is solid geometry ({detected.format}), not a document. "
-            "Upload it as geometry for the project and it can be meshed and analysed; "
+            "Make it a geometry version of the project and it can be meshed and analysed. "
+            "The attachment itself can become one, with no second upload; "
             "there is no text in it to quote."
         )
     raise UnsupportedDocument(

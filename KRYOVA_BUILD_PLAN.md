@@ -56,8 +56,9 @@ happened.
 > not closable here: the CATScript half of task 1 needs a seat, autoscale in task 2 needs a
 > fleet, and crash recovery in task 4 needs a seat.
 > **P4.2's structured readers are in and verified (2026-09-14, late).** The next units, in the
-> order the user asked for, are the nearly complete phases E7, E1, E3, P4 and E15. In P4.2 that
-> means a STEP attachment becoming a `GeometryVersion` and images going to the vision provider.
+> order the user asked for, are the nearly complete phases E7, E1, E3, P4 and E15. In P4.2 a STEP,
+> IGES or STL attachment becomes a `GeometryVersion` since 2026-09-15; images going to the vision
+> provider is what is left.
 > **E1.3 closed the same night** (`catia_delete_feature`, `catia_feature_parents`,
 > `catia_shell_faces`, and a reason for each of the other 85). **E1.4 closed on 2026-09-15** as a scope
 > decision, so E1 is 12 of 12. E3's only open item is its phase proof, which needs the seat.
@@ -276,6 +277,20 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — P4 task 2, partial: an attached part becomes a geometry version, and a CSV
+  attached through the product is read as a table at last.** Detection fell back to the stored
+  blob's name, which is a digest with no extension, so every CSV attached through
+  `POST /attachments` had been read as plain text since P4.2 shipped. The CSV reader only ran
+  in tests that called it on a named file. `kinds.sniff` now takes the name the file arrived
+  with. `POST /projects/{id}/geometry/from-attachment` registers an attached STEP, IGES or STL
+  without a second upload, keeps the blob if the part does not inspect, and gives 404 on
+  either access miss.
+  **Security gap closed:** `POST /attachments` stored any `project_id` as given, which filed
+  attachments under other tenants' projects and let a caller tell real ids from made-up ones.
+  It now needs write access, and a miss is 404.
+  **Interface changes:** one new route. `sniff(path, name=None)` gains a parameter. The reader's
+  refusal of solid geometry is reworded. No schema or migration change.
+  8 guards broken, all caught. Images to the vision provider are what is left of the task.
 - **2026-09-15 — E1 task 4 closed as a scope decision, so E1 is 12 of 12.** The sketch layer the
   product uses builds, since every profile tool is fully determined by its arguments. The PARTIAL
   owed PlaneGCS to `catia_sketch_constrain`, which nothing in the product calls. It is withdrawn

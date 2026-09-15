@@ -1296,6 +1296,11 @@ line). `structure.py` holds what every structured reader shares; `tables.py`, `o
 10. **The fixtures under `tests/data/documents/` come from pandoc and LibreOffice, never from a
    hand-built zip alone.** A fixture written by the person who wrote the parser only proves the two
    agree. None of them was saved by Microsoft Office; that is THE QUEUE C3.
+11. **A stored blob has no extension, so sniff it with the name it arrived with.** The store names
+   a blob by its digest. `kinds.sniff(path)` alone falls back to that name for CSV, TSV, STL and
+   IGES, and gets plain text or unknown. Every CSV attached through `POST /attachments` was read so
+   until 2026-09-15, while the reader's own tests, run on named temp files, stayed green. Pass
+   `sniff(path, filename)`, and test a reader through the route at least once.
 
 ## Sending email (`app/mail/`) — added 2026-09-10 with P1.5
 

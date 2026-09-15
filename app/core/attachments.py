@@ -97,7 +97,7 @@ def attach(
     outcome the user has to be told about, and an exception here would lose the
     row that says they handed us something.
     """
-    detected = sniff(path)
+    detected = sniff(path, filename)
     attachment = Attachment(
         owner_id=owner.id,
         conversation_id=conversation.id if conversation is not None else None,

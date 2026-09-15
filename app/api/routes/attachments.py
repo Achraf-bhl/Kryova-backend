@@ -26,7 +26,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, DbSession, MediaServiceDep
+from app.api.deps import CurrentUser, DbSession, MediaServiceDep, get_owned_project
 from app.core import attachments
 from app.models import Conversation, Media, User
 from app.models.attachment import Attachment
@@ -73,6 +73,13 @@ def create_attachment(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
             )
+
+    if payload.project_id is not None:
+        # The label is checked like a path parameter would be, and a miss is the
+        # same 404. Until 2026-09-15 any id was stored as given, which filed an
+        # attachment under another tenant's project and answered 201 for a real
+        # id where a made-up one hit the foreign key.
+        get_owned_project(db, current_user, payload.project_id)
 
     ingested = attachments.attach(
         db,

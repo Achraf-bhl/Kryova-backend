@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 111/132 = 84% | 127/151 eng-months = 84% |
+| Engineering — E1–E23 | 15/24 | 112/132 = 84% | 128/151 eng-months = 84% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 158/193 = 82% | 154/189 eng-months = 82% |
+| **Programme** | 21/34 | 158/193 = 82% | 155/189 eng-months = 82% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -4441,6 +4441,21 @@ holds intent across a machine — and how does Kryova measure its own distance f
    in CAD a wrong numeric argument is not a failure, it is a plausible wrong part, which is this
    codebase's entire threat model. Deliverable: selection accuracy *and* argument accuracy
    measured together, on the registry, per turn.
+   > PARTIAL (2026-09-15) — **the harness is built; no rate exists yet.**
+   > `app/ai/argument_accuracy.py` scores each turn three ways, each over its own denominator:
+   > whether `tool_retrieval.select` *offered* the gold tool (a retrieval miss, not a model miss),
+   > whether the chooser *selected* it (by name, offered or not, because `ToolBox.call` accepts
+   > either), and whether every gold argument arrived right given the right tool. Numbers compare
+   > within the tolerance the case states; a number sent as a string is wrong; booleans are not
+   > integers; extra arguments are listed, not scored. The report carries offer recall, selection
+   > accuracy, selection given offered, argument accuracy given the tool, and end to end, each
+   > `None` when its denominator is empty, bound to the chooser's name and the case set's digest.
+   > `model_chooser` makes `LLMProvider.chat` the chooser. **Still open:** a case set of real
+   > requests with gold calls over the real registry, the run against the local model (THE QUEUE
+   > D3), and publishing the numbers. The tests were written on Linux and not run (the user's
+   > rule). Tested by: `tests/test_ai_argument_accuracy.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 **Phase proof:** three numbers exist for Kryova that today exist only for other people's systems —

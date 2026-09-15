@@ -692,6 +692,15 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       `exact_rate`, counts and `case_set_digest` in E22.2's status. Settles: whether whole-spec
       edits by our model corrupt untargeted features, and how often.
 
+- [ ] **D3 — E22.4, selection and argument accuracy on the local model.** Linux wrote
+      `app/ai/argument_accuracy.py` (and `model_chooser`) and ran neither. Needs Ollama with the
+      configured `AI_MODEL` and a case set of real requests with gold tool calls over
+      `ToolBox.every_tool()`; the cases in `tests/test_ai_argument_accuracy.py` are fixtures on a
+      three-tool registry and must not be published. Run `measure(cases, tools,
+      model_chooser(get_provider(), max_tokens=...), chooser_name=<model, version, prompt>)` at
+      the deployed `DEFAULT_LIMIT` and record every rate, the limit and `case_set_digest` in E22.4's
+      status. Settles: given the right tool, how often our model sends the right numbers.
+
 ### E. Needs a seat to *write*, not only to verify — **this section is coding work**
 
 These are not "run it and see". They are pieces of the product that can only be *written* on

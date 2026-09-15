@@ -42,15 +42,15 @@ happened.
 > (M4/M5 need E13.2, M7 all of E9, M8 all of E8). **E23.3 closed at 11:18** (MCP server,
 > `tests/test_mcp.py`, not run); **P9.3** got `libgomp1`; **E22.2** is PARTIAL (harness and model
 > editor built; the rate needs a real case set run on Windows, QUEUE D2). The targets, in order,
-> are now: a real E22.2 case set from the mission designs (Linux can write it) → **E22.4** (selection +
-> argument accuracy harness) → **E22.1** (surrogate acceptance rule published where users read
+> are now: **E22.4** is PARTIAL too (harness built; QUEUE D3). Next: **E22.1** (surrogate acceptance rule published where users read
 > it; `app/optimise/screening.py` already enforces rank-never-decide) → **P6.1** (OCCT shape →
-> glTF tessellation service) → E21.6 / E21.2 / E21.4 / E21.5 / E23.1 (documents and registers;
+> glTF tessellation service) → real case sets for E22.2 and E22.4 (from the mission designs and
+> the registry) → E21.6 / E21.2 / E21.4 / E21.5 / E23.1 (documents and registers;
 > each needs a source read, never recalled).
 > **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
 > **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
 > Its prompt names E23.3 as the target and says to skip a target that is already done; E23.3,
-> P9.3 and E22.2's harness are done, so it should start at the E22.2 case set, then E22.4.
+> P9.3 and the E22.2 and E22.4 harnesses are done, so it should start at E22.1, then P6.1.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -328,6 +328,10 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E22 task 4, partial: selection and argument accuracy per turn.**
+  `app/ai/argument_accuracy.py` scores offered / selected / arguments-given-tool, each over its
+  own denominator and `None` when empty; `model_chooser` wraps `LLMProvider.chat`. No rate until
+  THE QUEUE D3 runs a real case set. Tested by `tests/test_ai_argument_accuracy.py`. Not run here.
 - **2026-09-15 — E22 task 2, partial: the silent-corruption harness.** `app/design/corruption.py`
   classifies an editor's result against a reference edit after compilation (FAILED, NO_CHANGE,
   EXACT, CLEAN, CORRUPTING with the corrupted features named); `app/ai/design_editor.py` makes

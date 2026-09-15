@@ -275,3 +275,49 @@ class TestTheCacheKey:
     def test_a_key_on_nothing_is_refused(self, digest: str, linear: float, angular: float) -> None:
         with pytest.raises(GltfError):
             cache_key(digest, linear_deflection_mm=linear, angular_deflection_rad=angular)
+
+
+class TestDisplayLevels:
+    """`app/render/display.py`: levels relative to size, keyed before the file is opened."""
+
+    def test_a_level_holds_the_same_detail_at_any_size(self) -> None:
+        from app.render.display import LEVELS, display_glb
+
+        small = symbol("BRepPrimAPI_MakeCylinder")(5.0, 10.0).Shape()
+        large = symbol("BRepPrimAPI_MakeCylinder")(1500.0, 3000.0).Shape()
+        for display_level in LEVELS:
+            assert display_glb(small, display_level, name="x")[1]["triangles"] == display_glb(
+                large, display_level, name="x"
+            )[1]["triangles"]
+
+    def test_the_levels_coarsen_on_a_curved_part(self) -> None:
+        from app.render.display import LEVELS, display_glb
+
+        cylinder = symbol("BRepPrimAPI_MakeCylinder")(5.0, 10.0).Shape()
+        counts = [display_glb(cylinder, lv, name="x")[1]["triangles"] for lv in LEVELS]
+        assert counts[0] > counts[1] > counts[2]  # 500, 212, 92 on 2026-09-15
+
+    def test_the_key_moves_with_the_file_the_level_and_the_layout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import app.render.display as display
+
+        sha = "a" * 64
+        base = display.display_key(sha, display.level(0))
+        assert base == display.display_key(sha, display.level(0))
+        assert base != display.display_key("b" * 64, display.level(0))
+        assert base != display.display_key(sha, display.level(1))
+        monkeypatch.setattr(display, "LAYOUT_VERSION", display.LAYOUT_VERSION + 1)
+        assert base != display.display_key(sha, display.level(0))
+
+    @pytest.mark.parametrize("sha", ["", "A" * 64, "a" * 63, "g" * 64])
+    def test_a_key_is_only_made_from_a_sha256(self, sha: str) -> None:
+        from app.render.display import display_key, level
+
+        with pytest.raises(KernelError, match="sha256"):
+            display_key(sha, level(0))
+
+    @pytest.mark.parametrize("index", [-1, 3])
+    def test_a_level_that_does_not_exist_is_refused(self, index: int) -> None:
+        from app.render.display import level
+
+        with pytest.raises(KernelError, match="no display level"):
+            level(index)

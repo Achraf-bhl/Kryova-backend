@@ -185,3 +185,92 @@ class TestBrepInspection:
         assert stats["bounding_box"]["min"] == pytest.approx(lo, abs=1e-6)
         assert stats["bounding_box"]["max"] == pytest.approx(hi, abs=1e-6)
         assert stats["volume_mm3"] == pytest.approx(mesh.volume, rel=1e-4)
+
+
+class TestTheDisplayMesh:
+    """`GET .../geometry/{n}/display` -- a STEP version as a GLB, made once per file and level (P6.1).
+
+    Written on Linux on 2026-09-15 and not run there as pytest (the user's rule). The route's
+    tessellation and store path were checked by a one-off script on a box read back from STEP.
+    """
+
+    @staticmethod
+    def _step_version(auth_client, project_id, tmp_path, size=(10.0, 30.0, 40.0)) -> None:
+        from tests.test_mesh import write_step_box
+
+        data = write_step_box(tmp_path / "box.step", size).read_bytes()
+        assert upload(auth_client, project_id, "box.step", data).status_code == 201
+
+    def test_a_step_version_is_served_as_a_glb_holding_the_part(
+        self, auth_client, project_id, tmp_path
+    ) -> None:
+        from app.render.gltf import mesh_arrays, read_glb
+
+        self._step_version(auth_client, project_id, tmp_path)
+        response = auth_client.get(f"/api/v1/projects/{project_id}/geometry/1/display")
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"] == "model/gltf-binary"
+        assert response.headers["x-display-cache"] == "miss"
+        document, binary = read_glb(response.content)
+        positions, indices = mesh_arrays(document, binary, 0)
+        assert positions.min(axis=0).tolist() == pytest.approx([0.0, 0.0, 0.0], abs=1e-5)
+        assert positions.max(axis=0).tolist() == pytest.approx([10.0, 30.0, 40.0], abs=1e-5)
+        assert document["meshes"][0]["name"] == "box"
+
+    def test_the_second_request_is_served_from_the_store_with_the_same_bytes(
+        self, auth_client, project_id, tmp_path, db_session
+    ) -> None:
+        from sqlalchemy import func, select
+
+        from app.models import Media, MediaKind
+
+        self._step_version(auth_client, project_id, tmp_path)
+        url = f"/api/v1/projects/{project_id}/geometry/1/display"
+        first = auth_client.get(url)
+        second = auth_client.get(url)
+        assert second.status_code == 200
+        assert second.headers["x-display-cache"] == "hit"
+        assert second.content == first.content
+        assert second.headers["x-display-key"] == first.headers["x-display-key"]
+        meshes = db_session.scalar(
+            select(func.count()).select_from(Media).where(Media.kind == MediaKind.MESH)
+        )
+        assert meshes == 1
+
+    def test_the_same_file_uploaded_again_is_the_same_key(
+        self, auth_client, project_id, tmp_path
+    ) -> None:
+        self._step_version(auth_client, project_id, tmp_path)
+        self._step_version(auth_client, project_id, tmp_path)
+        base = f"/api/v1/projects/{project_id}/geometry"
+        first = auth_client.get(f"{base}/1/display")
+        second = auth_client.get(f"{base}/2/display")
+        assert second.headers["x-display-cache"] == "hit"
+        assert second.headers["x-display-key"] == first.headers["x-display-key"]
+
+    def test_each_level_is_its_own_key(
+        self, auth_client, project_id, tmp_path
+    ) -> None:
+        self._step_version(auth_client, project_id, tmp_path)
+        base = f"/api/v1/projects/{project_id}/geometry/1/display"
+        keys = {auth_client.get(f"{base}?level={n}").headers["x-display-key"] for n in (0, 1, 2)}
+        assert len(keys) == 3
+
+    @pytest.mark.parametrize("level", [-1, 3])
+    def test_a_level_that_does_not_exist_is_refused(
+        self, auth_client, project_id, tmp_path, level
+    ) -> None:
+        self._step_version(auth_client, project_id, tmp_path)
+        response = auth_client.get(f"/api/v1/projects/{project_id}/geometry/1/display?level={level}")
+        assert response.status_code == 422
+
+    def test_an_stl_version_is_refused_and_told_to_send_step(
+        self, auth_client, project_id, cube_stl
+    ) -> None:
+        upload(auth_client, project_id, "part.stl", cube_stl)
+        response = auth_client.get(f"/api/v1/projects/{project_id}/geometry/1/display")
+        assert response.status_code == 422
+        assert "STEP" in response.json()["detail"]
+
+    def test_a_missing_version_is_404(self, auth_client, project_id) -> None:
+        assert auth_client.get(f"/api/v1/projects/{project_id}/geometry/9/display").status_code == 404

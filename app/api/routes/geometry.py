@@ -1,17 +1,21 @@
+import io
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject
 from app.core.config import settings
 from app.geometry.formats import GEOMETRY_FORMATS, detect_format, rejection_reason
 from app.geometry.inspect import GeometryError, inspect
+from app.kernel.errors import KernelError, KernelUnavailable
+from app.manufacture.export import ExportError, read_step
 from app.media import MediaNotFound, MediaTooLarge
-from app.models import GeometryVersion, MediaKind
+from app.models import GeometryVersion, Media, MediaKind
 from app.models.attachment import Attachment
+from app.render import display
 from app.schemas import GeometryVersionPage, GeometryVersionRead
 
 router = APIRouter(prefix="/projects/{project_id}/geometry", tags=["geometry"])
@@ -246,4 +250,89 @@ def download_geometry_version(
             "Content-Disposition": f'attachment; filename="{version.filename}"',
             "Content-Length": str(version.media.size_bytes),
         },
+    )
+
+
+@router.get("/{version_number}/display")
+def display_geometry_version(
+    project: OwnedProject,
+    db: DbSession,
+    media: MediaServiceDep,
+    version_number: int,
+    level: Annotated[int, Query(ge=0, description="0 is the finest level.")] = 0,
+):
+    """The version as a GLB for the viewer, tessellated once per file and level (P6.1).
+
+    Keyed on the stored file's sha256 and the level's definition, so a hit is found without
+    opening the file. The GLB is a `MediaKind.MESH` row owned by whoever owns the file, and
+    `X-Display-Cache` says whether this answer was made now or served from the store.
+    """
+    version = _get_version(db, project.id, version_number)
+    if version.file_format != "step":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"A display mesh is made from a STEP file, and version {version_number} is "
+                f"{version.file_format.upper()}. Export the part as STEP and upload that."
+            ),
+        )
+    try:
+        definition = display.level(level)
+    except KernelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    key = display.display_key(version.media.sha256, definition)
+    filename = display.stored_filename(key)
+    headers = {"X-Display-Key": key}
+
+    cached = db.scalar(
+        select(Media)
+        .where(
+            Media.owner_id == version.media.owner_id,
+            Media.kind == MediaKind.MESH,
+            Media.filename == filename,
+        )
+        .order_by(Media.created_at)
+        .limit(1)
+    )
+    if cached is not None and media.exists(cached):
+        return StreamingResponse(
+            media.iter_chunks(cached),
+            media_type=display.GLB_CONTENT_TYPE,
+            headers={
+                **headers,
+                "X-Display-Cache": "hit",
+                "Content-Length": str(cached.size_bytes),
+            },
+        )
+
+    if not media.exists(version.media):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="Stored file is no longer available"
+        )
+    try:
+        shape = read_step(media.local_path(version.media))
+        data, made_with = display.display_glb(shape, definition, name=Path(version.filename).stem)
+    except KernelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (ExportError, KernelError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    media.store_stream(
+        owner_id=version.media.owner_id,
+        kind=MediaKind.MESH,
+        filename=filename,
+        stream=io.BytesIO(data),
+        content_type=display.GLB_CONTENT_TYPE,
+        meta={
+            "display_key": key,
+            "level": level,
+            "geometry_sha256": version.media.sha256,
+            **made_with,
+        },
+    )
+    db.commit()
+    return Response(
+        content=data,
+        media_type=display.GLB_CONTENT_TYPE,
+        headers={**headers, "X-Display-Cache": "miss"},
     )

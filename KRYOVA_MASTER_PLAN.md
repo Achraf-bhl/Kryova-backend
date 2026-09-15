@@ -5476,6 +5476,39 @@ client renders what it is sent, at the detail the view deserves.
    (BOLTS parts repeat thousands of times — one mesh, N transforms). Cached in the
    content-addressed store keyed on geometry digest + tessellation params, so a part is tessellated
    once ever.
+   > PARTIAL (2026-09-15, afternoon) — **a stored STEP version is now served as a GLB, made once
+   > per file and level; compression is still unmeasured.** The route is
+   > `GET /projects/{id}/geometry/{n}/display?level=0|1|2`. `app/render/display.py` defines three
+   > levels. Each level's linear deflection is a fraction of the bounding-box diagonal (0.0002,
+   > 0.001, 0.005) and its angle also coarsens (0.1, 0.35, 1.0 rad), because the tighter
+   > deflection decides. A Ø10 cylinder and one 300× larger both give 500/212/92 triangles.
+   > **The key needs no shape:** the stored file's sha256, the level's definition and the GLB
+   > layout version. So a hit is found without opening the file, and a second upload of the
+   > same bytes is a hit too. The GLB is stored through `MediaService` as a `MediaKind.MESH` row
+   > named `display-<key>.glb`, owned by the file's owner. `X-Display-Cache: hit|miss` and
+   > `X-Display-Key` say which happened.
+   >
+   > **Refused:**
+   > - IGES and STL versions, told to send STEP;
+   > - a level outside 0–2;
+   > - an unreadable file, with the reader's own message.
+   >
+   > **Open:**
+   > - Draco and meshopt (not installed, and unmeasured on real parts);
+   > - an assembly GLB from the product structure through a route (`scene_for` exists, and no
+   >   route stores components);
+   > - a miss builds the GLB in memory;
+   > - a display row outlives a deleted project's files until its owner is deleted (nothing
+   >   sweeps it);
+   > - the display rows appear in `GET /media`.
+   >
+   > **Interface change:** a new route, and `MediaKind.MESH` is used for the first time (the enum
+   > value already existed; no migration). Tests written on Linux and not run as pytest. The
+   > levels, the scale invariance and a gmsh-written STEP read from a digest-named path were
+   > checked by a one-off script. Tested by: `tests/test_render_gltf.py`,
+   > `tests/test_geometry.py::TestTheDisplayMesh`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-15) — tessellation, levels, instancing, GLB and the key shipped; compression
    > and the store did not. `app/kernel/occt/tessellate.py` meshes a `BRepBuilderAPI_Copy`, so the
    > caller's shape keeps no triangulation. It applies each face's location and rewinds REVERSED

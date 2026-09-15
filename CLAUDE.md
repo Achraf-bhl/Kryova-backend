@@ -861,6 +861,35 @@ right tag.
 
 **Read only the files you need.** `rg` to locate first; avoid loading large files wholesale.
 
+**A flat scan of `app.routes` finds nothing, and it looks exactly like an unwired router.** This
+FastAPI version wraps each `include_router` in a `fastapi.routing._IncludedRouter`, so routes are
+**nested** rather than flattened onto the app: `[r.path for r in app.routes]` printed six entries
+(`/docs`, `/health`, a `Mount` with an empty path…) on a service with hundreds, and
+`api_router.routes` printed 23 objects with no `path` attribute at all. Measured 2026-09-16 while
+checking two new routes had landed, and it reads as the exact bug this repo warns about under
+*Naming* — an unwired router is invisible everywhere. **Ask the OpenAPI document instead**:
+`app.openapi()["paths"]` is the flat, authoritative list, and building it is also the check that
+the route's signature and response model are valid.
+
+## What a frontend test on Linux must not assert
+
+Tests written here and run on Windows cost a round trip each time one is wrong, and two shapes of
+wrong assertion were caught on 2026-09-16 *before* commit by reading them rather than by running
+them. Both are float equality wearing a disguise:
+
+1. **`Float32Array` reads back what IEEE 754 stored, not what you wrote.** `0.55` comes out as
+   `0.5500000119209290`, so `expect([buf[3], buf[4], buf[5]]).toEqual([...RGB])` fails against the
+   plain-number constant it was written from. Compare a typed array's contents with `toBeCloseTo`
+   per element; `toEqual` is right only for values exact in float32 (integers, halves, quarters).
+2. **"Returns the end exactly" is usually false of an interpolator.** `a + (b - a) * 1` is `b` only
+   when the arithmetic happens to be exact; `0.95 + (0.8 - 0.95)` is one rounding away from a
+   different literal. Assert the *claim* (it reaches the last stop) with `toBeCloseTo`, not the
+   bit pattern.
+
+A third, cheaper one: `npx tsc --noEmit` catches a leftover typo in an import list
+(`side0f as _unused`) that a reviewer's eye slides over, and `npx eslint <files>` catches the
+unused binding. Both are allowed on Linux under the no-pytest rule and both are seconds.
+
 ## The design IR (`app/design/`)
 
 A part described as a **specification that is compiled**, rather than a feature tree that is

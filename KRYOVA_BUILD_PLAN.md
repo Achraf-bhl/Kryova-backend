@@ -15,6 +15,37 @@ happened.
 
 ## Now
 
+> **Continuation, 2026-09-16 00:34 — six targets closed, and P6 is the phase with momentum.**
+> Linux writes code and tests and **runs no pytest, ruff or mypy** (the user's rule; Windows
+> runs them, and the frontend's vitest too). A turn takes at least six tasks (the user's rule,
+> 2026-09-15 21:38). Every test named below was **written on Linux and not run**.
+> **Closed this turn, each committed as it closed:** **P4.7 + P4.6** (`e86b50b`, `7acf199` —
+> attachments reach the agent's turn and the composer uploads them), **E22.3** (`ccbd963` — the
+> horizon-reliability harness), **E23.4** (`3c94caa` — BenchCAD recorded and scored),
+> **P6.2** (`2038676` — the streaming scene's ordering), **P6.5** (`5c5c131` — any scalar field
+> with an honest colour scale), **P6.4** (`71255ff`, `987e806` — the measure routes and the four
+> client-side interactions). Plan statuses `39c86b8` and `f85fd94`.
+> **P6 is now 1 DONE-equivalent short of interesting:** tasks 1, 2, 4 and 5 are PARTIAL, task 3
+> is PARTIAL (the single-part WebGL viewer), and **task 6 — tree ↔ 3D ↔ spec, one selection
+> model — is NOT STARTED and is the next target.** It is also the blocker under P6.4's measure:
+> a click on a triangle cannot become an element name until something names faces, which is
+> **E2 task 1's face predicate**.
+> **THE QUEUE gained section G** — "needs the product in a browser on real hardware" — with G1
+> (P6.2's 2 s / 30 fps targets, and the reference assembly that does not exist), G2 (P6.5's
+> palettes looked at with eyes), G3 (P6.4's controls, and the section convention checked once).
+> The existing six sections are ccx, a seat, an input, a model, a seat to write against, and
+> Docker; a GPU-and-browser measurement fits none of them.
+> **Already stale on arrival, and not caused here:** `venv/bin/python -m app.verify.recorded
+> --check` fails. E10.2, E15.2, E7.1/E8.5 and E21.4 each touched a fingerprinted file. The
+> re-record is the Windows machine's **last** step, after the suite — re-recording in the middle
+> measures a tree somebody is still editing.
+> **Next targets, in order:** (1) **P6.6** tree ↔ 3D ↔ spec selection, (2) **P6.3** the renderer
+> decision with its criteria written now, (3) **P7.3**, (4) **P7.4**, (5) **E9.1** Chrono across
+> a container boundary, (6) **P6.1's assembly GLB** (a route that serves the product structure
+> as one scene). Do not attempt E3, E8, E9.5, E13, E15, E17, E18 — each needs a seat, a document
+> or an engineer.
+> **Next continuation fires 2026-09-16 03:05** — held by the session named on the next line.
+
 > **Handoff, 2026-09-15 (morning) — the user is driving phases to 100% interactively, and on
 > Linux nothing is run.** "Write the code and the tests, don't launch pytest; Windows tests."
 > Done this stretch: **E7** (LE3 runs, `*E7`), **E8.5**, **E15.2** (autoscale recommendation),
@@ -77,9 +108,8 @@ happened.
 > harness, (3) the E23.4 harness, (4) P6.2 streaming scene, (5) P6.4 engineering interactions,
 > (6) P6.5 results on geometry. In place of any that is done or blocked: P6.6, P6.3, P7.3, P7.4,
 > then E9.1 (Chrono across a container boundary).
-> **Next continuation fires 2026-09-15 23:48** — held by the session named on the next line.
-> **Held by `kryova-backend-f1`**, which confirmed `scheduled 2026-09-15 23:48` at 21:00.
-> `kryova-backend-55` holds nothing; the job dies if `kryova-backend-f1` is closed.
+> **(Past) that continuation fired 2026-09-15 23:48** and ran the six targets; see the block at
+> the top of *Now*. It was held by `kryova-backend-f1`, scheduled at 21:00.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -357,6 +387,43 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-16 — six targets closed in one turn: P4.7 with P4.6, E22.3, E23.4, P6.2, P6.5, P6.4.**
+  **P4.7 + P4.6** (`e86b50b`, `7acf199`): what was attached now reaches the agent's turn.
+  `app/ai/attached.py` gathers a conversation's attachments, `quoted.quote_for_user_turn` renders
+  them into the *newest replayed user message only* and never persists them, and a new
+  `read_attachment` tool serves the rest through `quote_for_tool_result`. Decision 8 holds
+  throughout: `UntrustedText` in, one accessor out, and `TestTheOneAccessorIsNotCalledWhereItShould
+  NotBe` now enumerates the allowed callers. Found and closed on the way: the `raw_for_analysis`
+  docstring had claimed an AST guard since P4.5 that did not exist. The frontend composer routes
+  by filename and calls `createAttachment`, so a spreadsheet dragged into the chat now arrives.
+  **E22.3** (`ccbd963`): `app/verify/horizon.py` measures reliability against turn length over
+  `ConversationMessage` + `CatiaOperation` — **not** `TurnEvent`, which is a pruned ten-minute
+  buffer and would have measured the last ten minutes of traffic as history. `completion_rate` is
+  not `success_rate` and the type says so; both are `None` over an empty denominator; all four
+  literature figures are `UNSOURCED` and therefore carry no value.
+  **E23.4** (`3c94caa`): `app/verify/benchcad.py` records BenchCAD as read (arXiv 2605.10865, MIT
+  code, CC-BY-4.0 data) and scores geometry by voxel IoU over one shared grid, verified against
+  closed-form overlaps (1.0 / ⅓ / 0.0). Both readings of the benchmark's ambiguous scoring
+  sentence give the same number, and the ambiguity is recorded rather than resolved.
+  **P6.2** (`2038676`): `scene-streaming.ts` decides what to fetch and at which level, in part
+  radii so one table serves an M6 nut and a 2 m weldment. A part already finer than it deserves is
+  left alone (no thrash on flying away); the comparator is total, because `Infinity - Infinity` is
+  NaN and a NaN comparator loads a different thing first on every frame.
+  **P6.5** (`5c5c131`): `scalar-field.ts` colours any per-node field. An unmeasured node is grey,
+  not the bottom of the scale, and is left out of the fitted range; a fitted range says it was
+  fitted; damage is pinned to 0-1, because fitting 0-0.02 across the palette paints a part that
+  will last fifty lifetimes in the same red as one about to crack.
+  **P6.4** (`71255ff`, `987e806`): measure is a backend query against the B-rep — the routes call
+  the agent's own `catia_measure_between`/`catia_measure_item`, adding no second measurer — and
+  section planes, explode, hide/isolate and bookmarks are pure logic. A bookmark stores the whole
+  view state, because one that stored only the camera restores a solid block where the user saw a
+  bore. All six statuses moved in the supersede shape; QUEUE section **G** is new (G1, G2, G3),
+  for what only a browser on real hardware settles. **Every test in this turn was written on Linux
+  and not run** (the user's rule; Windows runs them); `py_compile`, `tsc --noEmit` and `eslint` are
+  clean, and the kernel measurements were checked by a one-off script against the real OCCT.
+  **Noted, not caused here:** `app.verify.recorded --check` was already stale on arrival —
+  E10.2, E15.2, E7.1/E8.5 and E21.4 each touched a fingerprinted file. Re-recording is the
+  Windows machine's last step, after the suite.
 - **2026-09-15 — P4 task 2 closed: a picture is described by a model that can see, and the agent
   can make an attached part geometry.** `app/documents/images.py` reads PNG and JPEG through an
   injected `Look` (`vision.AttachmentLook`). The result is `INFERRED` fragments carrying the

@@ -45,15 +45,17 @@ happened.
 > are now: **E22.4** is PARTIAL too (harness built; QUEUE D3). **E22.1** is DONE (the rule on
 > `/trust/commitments`). **P6.1 is PARTIAL at 11:40** (tessellation, levels, instancing, GLB,
 > cache key; `tests/test_render_gltf.py`, not run — Draco/meshopt unmeasured, no store or route).
-> Next: real case sets for E22.2 and E22.4 (from the mission designs and the registry) →
-> P6.1's store and route (a shape digest to key on, the GLB in the media store, a GET) →
+> **The E22.2 and E22.4 case sets and their commands landed at 11:45** (twelve edits on M1/M3/M6;
+> twelve requests over the real registry; QUEUE D2/D3 are now one command each). Found: M3's
+> `thickness_mm`/`width_mm`/`lip_mm`/`radius_mm` are read by no feature (flagged in E22.2).
+> Next: P6.1's store and route (a shape digest to key on, the GLB in the media store, a GET) →
 > E21.6 / E21.2 / E21.4 / E21.5 / E23.1 (documents and registers; each needs a source read,
 > never recalled).
 > **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
 > **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
 > Its prompt names E23.3 as the target and says to skip a target that is already done; E23.3,
-> P9.3, E22.1, the E22.2 and E22.4 harnesses and P6.1's first half are done, so it should
-> start at the E22.2/E22.4 case sets.
+> P9.3, E22.1, the E22.2 and E22.4 harnesses and case sets, and P6.1's first half are done, so
+> it should start at P6.1's store and route.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -331,6 +333,13 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E22 tasks 2 and 4, still partial: case sets and one command each.**
+  `app/design/corruption_cases.py` (twelve reference edits on M1, M3, M6, each EXACT against
+  itself) and `app/ai/argument_cases.py` (twelve requests, gold arguments read from and checked
+  against the live schemas; the selector offers 12/12 at limit 40). `python -m
+  app.ai.design_editor` and `python -m app.ai.argument_cases` write the reports QUEUE D2/D3 ask
+  for. Found, not fixed: four of M3's parameters are read by no feature. Tested by
+  `tests/test_design_corruption_cases.py`, `tests/test_ai_argument_cases.py`. Not run here.
 - **2026-09-15 — P6 task 1, partial: a shape as a GLB, and a machine as one mesh per component.**
   `app/kernel/occt/tessellate.py` (copy, location, REVERSED faces rewound; a box encloses 6,000 mm³)
   and `app/render/gltf.py` (glTF 2.0 from the Khronos spec: mm and Z-up in the data, one root

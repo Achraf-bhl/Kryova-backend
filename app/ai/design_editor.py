@@ -17,8 +17,12 @@ the literature found corrupting, and it is measured here so that claim has a num
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -72,4 +76,40 @@ def model_editor(
     return edit
 
 
-__all__ = ["EDIT_SYSTEM", "EditedSpec", "edit_message", "model_editor"]
+def editor_name(provider: LLMProvider, *, effort: str) -> str:
+    """Names what a rate belongs to: provider, model, effort and the exact system prompt."""
+    prompt = hashlib.sha256(EDIT_SYSTEM.encode()).hexdigest()[:12]
+    return f"{provider.name}:{provider.model} effort={effort} prompt={prompt}"
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the mission case set against the configured provider and write the report (QUEUE D2)."""
+    from app.ai.providers import get_provider
+    from app.design.corruption import measure
+    from app.design.corruption_cases import mission_cases
+
+    parser = argparse.ArgumentParser(prog="python -m app.ai.design_editor")
+    parser.add_argument("--out", type=Path, required=True, help="Where to write the JSON report.")
+    parser.add_argument("--effort", default="high")
+    parser.add_argument("--max-tokens", type=int, default=16000)
+    args = parser.parse_args(argv)
+
+    provider = get_provider()
+    report = measure(
+        mission_cases(),
+        model_editor(provider, effort=args.effort, max_tokens=args.max_tokens),
+        editor_name=editor_name(provider, effort=args.effort),
+    )
+    args.out.write_text(json.dumps(report.to_dict(), indent=2) + "\n", encoding="utf-8", newline="\n")
+    print(
+        f"{report.editor}: corruption {report.corruption_rate}, exact {report.exact_rate}, "
+        f"counts {dict(report.counts)}, cases {report.case_set_digest[:12]}"
+    )
+    return 0
+
+
+__all__ = ["EDIT_SYSTEM", "EditedSpec", "edit_message", "editor_name", "main", "model_editor"]
+
+
+if __name__ == "__main__":  # pragma: no cover - a command, exercised by THE QUEUE D2
+    sys.exit(main())

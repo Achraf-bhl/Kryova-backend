@@ -684,21 +684,21 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
 
 - [ ] **D2 — E22.2, the silent-corruption rate on edits, measured on the local model.** Linux
       wrote the harness (`app/design/corruption.py`) and the model editor
-      (`app/ai/design_editor.py`) and ran neither. Needs Ollama with the configured `AI_MODEL`, and
-      a case set of real instructions with reference edits, which does not exist yet: the cases in
-      `tests/test_design_corruption.py` are fixtures and must not be published as the rate. Build
-      the set from the mission designs, run `measure(cases, model_editor(get_provider(), ...),
-      editor_name=<model, version, prompt>)`, and record the report's `corruption_rate`,
+      (`app/ai/design_editor.py`) and ran neither. Needs Ollama with the configured `AI_MODEL`.
+      The case set now exists (`app/design/corruption_cases.py`, twelve edits on M1, M3 and M6);
+      the fixtures in `tests/test_design_corruption.py` must not be published as the rate. Run
+      `tests/test_design_corruption_cases.py`, then
+      `python -m app.ai.design_editor --out docs/verification-<date>/e22-2.json`, and record the report's `corruption_rate`,
       `exact_rate`, counts and `case_set_digest` in E22.2's status. Settles: whether whole-spec
       edits by our model corrupt untargeted features, and how often.
 
 - [ ] **D3 — E22.4, selection and argument accuracy on the local model.** Linux wrote
       `app/ai/argument_accuracy.py` (and `model_chooser`) and ran neither. Needs Ollama with the
-      configured `AI_MODEL` and a case set of real requests with gold tool calls over
-      `ToolBox.every_tool()`; the cases in `tests/test_ai_argument_accuracy.py` are fixtures on a
-      three-tool registry and must not be published. Run `measure(cases, tools,
-      model_chooser(get_provider(), max_tokens=...), chooser_name=<model, version, prompt>)` at
-      the deployed `DEFAULT_LIMIT` and record every rate, the limit and `case_set_digest` in E22.4's
+      configured `AI_MODEL`. The case set now exists (`app/ai/argument_cases.py`, twelve requests
+      over `ToolBox.every_tool()`); the fixtures in `tests/test_ai_argument_accuracy.py` are on a
+      three-tool registry and must not be published. Run `tests/test_ai_argument_cases.py`, then
+      `python -m app.ai.argument_cases --out docs/verification-<date>/e22-4.json` at the deployed
+      `DEFAULT_LIMIT`, and record every rate, the limit and `case_set_digest` in E22.4's
       status. Settles: given the right tool, how often our model sends the right numbers.
 
 ### E. Needs a seat to *write*, not only to verify — **this section is coding work**

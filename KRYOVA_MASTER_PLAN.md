@@ -4410,6 +4410,28 @@ holds intent across a machine — and how does Kryova measure its own distance f
    exists in E5's assertions and E4's visual verification; what does not exist is the number.
    Deliverable: a harness that measures **silent-corruption rate on edits** against our own
    registry, run like a benchmark and published like one.
+   > PARTIAL (2026-09-15, afternoon) — **the case set and the command exist; the number does not.**
+   > `app/design/corruption_cases.py` holds twelve instructions over designs the mission ladder
+   > builds: M1's bracket, M3's cover and M6's roller. Each carries the reference edit, and each is
+   > EXACT against itself (one-off script, 2026-09-15). The cases were chosen to probe five things:
+   > - one parameter reaching one feature;
+   > - a formula consequence (`m6-od` must move the bore, which is `od − 2·wall`);
+   > - removing a feature and removing one of a repeated pair;
+   > - a material change that must leave every feature alone;
+   > - an edit the parameter table cannot make.
+   >
+   > `python -m app.ai.design_editor --out <file>` runs the set against the configured provider.
+   > It writes the report, with the editor named by provider, model, effort and a hash of the
+   > system prompt. **Found while building it, flagged, not fixed:** M3's spec declares
+   > `thickness_mm`, `width_mm`, `lip_mm` and `radius_mm`, and no feature reads any of them,
+   > because `_m3_spec` writes the section from literals. Setting one through
+   > `set_design_parameter` or the panel's `PATCH` builds the same cover. `m3-thicker` pins that
+   > as NO_CHANGE, and `height_mm` alone moves only the glands. **Still open:** the run on the
+   > local model (THE QUEUE D2) and publishing the number. Tests written on Linux and not run as
+   > pytest. Tested by: `tests/test_design_corruption.py`,
+   > `tests/test_design_corruption_cases.py`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-15) — **the harness is built and exact; the number does not exist yet.**
    > `app/design/corruption.py` runs a set of `EditCase`s (a design, an instruction, and the
    > reference edit an engineer would make) through any `Editor` and classifies each result after
@@ -4459,6 +4481,24 @@ holds intent across a machine — and how does Kryova measure its own distance f
    in CAD a wrong numeric argument is not a failure, it is a plausible wrong part, which is this
    codebase's entire threat model. Deliverable: selection accuracy *and* argument accuracy
    measured together, on the registry, per turn.
+   > PARTIAL (2026-09-15, afternoon) — **the case set and the command exist; the model's rates
+   > do not.** `app/ai/argument_cases.py` holds twelve modelling requests over
+   > `ToolBox.every_tool()` (233 tools). Each gold argument was read from the live schemas, and a
+   > test re-checks name, type, enum and `required` against them. Rules for the set:
+   > - a number is gold only when the request states it, and then exactly;
+   > - an argument whose default already does what was asked is not gold;
+   > - a feature reference is gold only when `context` names it.
+   >
+   > **The one number without a model:** the deployed selector offers the gold tool in **12 of
+   > 12** cases at `DEFAULT_LIMIT` = 40. That is offer recall on a set written by the same session
+   > that wrote the selector's registry, so it is a floor check, not a retrieval result.
+   > `python -m app.ai.argument_cases --out <file>` runs the set against the configured provider
+   > and names the chooser by provider, model, limit and prompt hash. **Still open:** the run on
+   > the local model (THE QUEUE D3) and publishing its numbers. Tests written on Linux and not run
+   > as pytest. Tested by: `tests/test_ai_argument_accuracy.py`,
+   > `tests/test_ai_argument_cases.py`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-15) — **the harness is built; no rate exists yet.**
    > `app/ai/argument_accuracy.py` scores each turn three ways, each over its own denominator:
    > whether `tool_retrieval.select` *offered* the gold tool (a retrieval miss, not a model miss),

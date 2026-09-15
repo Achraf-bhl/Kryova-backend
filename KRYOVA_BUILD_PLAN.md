@@ -25,8 +25,11 @@ happened.
 > E3 (92%) and E15 (80%) wait on the seat (B7, E4, E5); E8 (92%) waits on E8.3's engineer;
 > E9 (60%) waits on Chrono (9.1) and a seat (9.5, QUEUE E6); E13 (88%) has E13.2 open (fit
 > selection needs ISO 286's tables read from the document). E18's open rungs (M4, M5, M7, M8)
-> name E9, E13 and E17 work as their needs. Next: **E17** (3 weldments with weld sizing, 4 CAM,
-> 5 inspection planning, 6 technical documentation), then E18's rungs. No continuation job is held for this stretch: the user asked for continuous work in
+> name E9, E13 and E17 work as their needs. **E17.3–E17.6 closed** (weldments with weld sizing
+> and tube routing, CAM with an in-house drop-cutter because OpenCAMLib has no 3.12 wheel,
+> inspection plans from GD&T, documentation drafts). E17 is 83%: E17.1 (GD&T frames and BOM
+> tables on the drawing) and E17.2 (IGES/STL/3MF export; the live-seat export needs Windows) are
+> next, then E18's rungs. No continuation job is held for this stretch: the user asked for continuous work in
 > the session. Before anything else on Windows: THE QUEUE A6's 2026-09-15 update (run the new
 > tests, ruff, mypy, re-record V&V).
 
@@ -306,6 +309,16 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E17 tasks 3, 4, 5 and 6 closed on Linux, tests written and not run.**
+  `app/manufacture/weldment.py` (cut list with mitres, fillet beads and ISO 2553 designations,
+  throat-area weld sizing on caller strengths) and `tubing.py` (LRA bend table, developed
+  length). `dropcutter.py` (exact flat/ball drop-cutter, bisected waterline loops) and `cam.py`
+  (stock, operations from features, corner-bounded cutter choice, 3-2-1 fixturing, raster);
+  plan change: OpenCAMLib is not installable on Python 3.12. `inspection.py` (CMM plan from the
+  GD&T scheme; the first consumer of `gdt.py`). `documentation.py` (parts catalogue, assembly
+  sequence, rendered exploded view, drafts for a named person, Article 10(7) delivery gate).
+  Tested by `tests/test_manufacture_weldment.py`, `tests/test_manufacture_cam.py`,
+  `tests/test_manufacture_inspection.py`, `tests/test_manufacture_documentation.py`. Not run here.
 - **2026-09-15 — E13 tasks 1, 3 and 4 closed on Linux, tests written and not run.**
   `app/rules/processes.py`: one rule set per process (cast, machined, printed, sheet, moulded,
   welded), attached from the part's feature tools, with no shipped limit; an unset limit makes

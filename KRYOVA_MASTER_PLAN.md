@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 106/132 = 80% | 120/151 eng-months = 80% |
+| Engineering — E1–E23 | 15/24 | 110/132 = 83% | 125/151 eng-months = 83% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 152/193 = 79% | 148/189 eng-months = 78% |
+| **Programme** | 21/34 | 156/193 = 81% | 152/189 eng-months = 81% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,8 +81,8 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E18 50%, P4 75%, P9 57% |
-| nothing finished yet | E17, E21, E22, E23, P6, P7 |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, P4 75%, P9 57% |
+| nothing finished yet | E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -3401,13 +3401,56 @@ here"* has an answer in six months — from the artefact.
 3. **Weldments and tubing**: beads, symbols, cut lists, tube routing, and **weld sizing** (moved
    here from E13 task 1 on 2026-09-15: a weld's size is a property of a bead on a weldment, which
    this task creates). **A motorcycle frame is a tubular weldment.**
+   > DONE (2026-09-15) — `app/manufacture/weldment.py`: members as `BeamSection`s between points;
+   > a **cut list** grouping identical pieces, with two-member corners mitred at (180° − φ)/2 and
+   > the long point extended by (d/2)·tan of it, d the depth in the joint's plane (refused by name
+   > for a section rotated off that plane); three or more members at a node are listed coped, not
+   > computed. **Beads** as fillet welds sized by throat, with leg a·√2 and deposited volume a²·L
+   > per run; the **symbol** is carried as its ISO 2553 designation (`a4 fillet 40, both sides`) —
+   > drawing the glyph on a sheet is E17 task 1's. **Weld sizing** by the throat-area method,
+   > required throat = w / f_vw,d, where the design shear strength and any throat-to-wall ratio
+   > are the caller's with sources; a weld with no declared force is unmeasured. Mass adds weld
+   > metal to the members. `app/manufacture/tubing.py`: **tube routing** through waypoints on one
+   > bend radius, with tangent lengths, overlapping bends refused, developed length and the LRA
+   > bend table (signed rotation between bend planes); bender limits are the caller's. Not built
+   > as a solid, and routing does not search around obstacles. **Tests written on Linux and not
+   > run there**, at the user's instruction. Tested by: `tests/test_manufacture_weldment.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 4. **CAM**: **[OpenCAMLib](https://github.com/aewallin/opencamlib)** (LGPL) — drop-cutter and
    waterline primitives — plus machining features, stock, fixturing notes.
+   > DONE (2026-09-15) — **Plan change: OpenCAMLib has no wheel for this project's Python 3.12**
+   > (`pip` finds no matching distribution), so it cannot be federated. Drop-cutter is geometry,
+   > not physics, so Decision 2 does not apply: `app/manufacture/dropcutter.py` computes it
+   > exactly for flat and ball end mills (vertex, edge and facet contacts in closed form), held
+   > to a brute-force oracle that fails on any gouge. The **waterline** is marching squares over
+   > drop-cutter queries with every loop point bisected onto the true waterline, labelled sampled
+   > with its step. `app/manufacture/cam.py`: **stock** as the smallest block in the caller's
+   > list holding the part plus the caller's allowance (oriented box preferred); **operations**
+   > from every feature tool; the **cutter** for a pocket as the largest in the caller's list no
+   > wider than twice the measured minimum concave radius; **fixturing** by 3-2-1 over the datum
+   > scheme; a zig-zag drop-cutter **finishing raster**. Not produced: feeds and speeds, setups by
+   > approach direction, G-code. **Tests written on Linux and not run there.** Tested by:
+   > `tests/test_manufacture_cam.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 5. **Inspection planning**: CMM points and measurement plans derived from the GD&T scheme.
+   > DONE (2026-09-15) — `app/manufacture/inspection.py`, the first consumer of `app/rules/gdt.py`:
+   > a plan that aligns on the datum features in precedence, measures size before any tolerance
+   > at MMC or LMC (its bonus depends on it), then each feature control frame with what the CMM
+   > evaluates for that characteristic and the datums it is evaluated in. Points are laid
+   > cell-centred on the nominal plane or cylinder with the probe approach into the material.
+   > **The count is the caller's sampling strategy with its source**; what is fixed is geometry
+   > (3 points determine a plane, 5 a cylinder), so a form tolerance at that count is refused as
+   > measuring zero on any part. Features with no geometry are unresolved, with no strategy
+   > unset, and either makes the plan incomplete. No DMIS is written. **Tests written on Linux
+   > and not run there.** Tested by: `tests/test_manufacture_inspection.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 6. **Technical documentation**: assembly instructions, exploded views, service manuals, parts
@@ -3416,6 +3459,19 @@ here"* has an answer in six months — from the artefact.
    `app.compliance.instructions.unmet`** — Article 10(7) of the Machinery Regulation, read from
    the Official Journal on 2026-09-14 (E19 task 4). The checker exists before this task does, on
    purpose.
+   > DONE (2026-09-15) — `app/manufacture/documentation.py`, from `ProductStructure`: a **parts
+   > catalogue** numbered over the BOM; an **assembly sequence** with sub-assemblies first and
+   > the author's instance notes carried; an **exploded view** as placement data and, given each
+   > part's shape, an OCCT compound drawn by `app.render` (deterministic); a **service manual**
+   > draft (disassembly in reverse, service parts). Every document is a `Draft` with
+   > `Stance.DRAFT_FOR_A_NAMED_PERSON`, refused without a named person or a product model, with
+   > no field that marks it finished and a `not_written` list of what the manufacturer writes.
+   > Digital delivery of instructions for use goes through `instructions.unmet` with the draft's
+   > own model (`delivery_gaps`). Annex III's contents are not quoted in the codebase, so they
+   > are not paraphrased here. **Tests written on Linux and not run there.** Tested by:
+   > `tests/test_manufacture_documentation.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 **Gate G4 opens after E17 (with E17.3).**

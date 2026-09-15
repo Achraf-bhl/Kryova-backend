@@ -39,7 +39,7 @@ happened.
 > **Continuation, 2026-09-15 11:15 — the user restarted the chain for the phases nobody had
 > looked at: E18, E21, E22, E23, P4, P6, P7, P9.** Linux writes code and tests and **runs no
 > pytest, ruff or mypy** (the user's rule; Windows runs them). E18 stays where its rule puts it
-> (M4/M5 need E13.2, M7 all of E9, M8 all of E8). **E23.3 closed at 11:50** (MCP server,
+> (M4/M5 need E13.2, M7 all of E9, M8 all of E8). **E23.3 closed at 11:18** (MCP server,
 > `tests/test_mcp.py`, not run); **P9.3** got `libgomp1`; **E22.2** is PARTIAL (harness and model
 > editor built; the rate needs a real case set run on Windows, QUEUE D2). The targets, in order,
 > are now: a real E22.2 case set from the mission designs (Linux can write it) → **E22.4** (selection +

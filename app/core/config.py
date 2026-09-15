@@ -150,6 +150,12 @@ class Settings(BaseSettings):
     inline_jobs: bool = False
     job_workers: int = 2
     job_queue_backend: str = "threadpool"  # "threadpool" or "inline"
+    # The autoscale recommendation (`app/jobs/autoscale.py`, GET /admin/compute/scaling).
+    # The application computes a worker count; an orchestrator acts on it. `job_workers`
+    # above is the jobs-per-worker figure the recommendation divides by.
+    autoscale_min_workers: int = 1
+    autoscale_max_workers: int = 8
+    autoscale_target_wait_s: float = 120.0
 
     # Analysis limits, to keep one upload from consuming the whole machine.
     max_elements: int = 400_000

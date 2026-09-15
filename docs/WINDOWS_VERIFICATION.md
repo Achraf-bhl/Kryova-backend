@@ -739,6 +739,22 @@ master plan's status line in the same commit.
       mathematics* into *cross-checked against another implementation*, which is the stronger
       claim and the one `CONDUCTION_BACKEND` was given its own setting to make possible.
 
+- [ ] **E4 — E15 task 1's CATIA half: run one `as_catscript` output on the seat.** Added
+      2026-09-15. `app/design/batch.py::as_catscript` emits a compiled plan as one CATScript
+      calling a `KryovaDispatch` per operation; nothing has ever executed one. Write the
+      dispatcher on the seat (it maps an operation name and literal arguments onto the bridge's
+      existing COM mapping; do not inline CATIA's API a second time). Then run M1's bracket
+      plan as one script and compare `catia_measure` against the per-call build with
+      `scripts/catia_conformance.py`'s `_measured_divergences`. Settles: E15.1 `PARTIAL` →
+      `DONE` if the one-script build measures the same part.
+- [ ] **E5 — E15 task 4: crash recovery against a real seat.** Added 2026-09-15.
+      `affinity.Outcome.stranded` names the state. What the product does about it is
+      unwritten, and it needs CATIA dying under a live conversation to write against: resume
+      from `CatiaCheckpoint`, or offer a rebuild elsewhere from the design record. Kill
+      `CNEXT.exe` mid-plan, reconnect, and write the path that recovers. A session *pool* also
+      needs `CatiaRegistry` on a shared bus before it means anything with more than one API
+      worker (its docstring says so). Settles: E15.4 `PARTIAL` → `DONE`.
+
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 
 - [ ] **F1 — The OpenFOAM flow run through Docker Desktop (E10.2, added 2026-09-14).** On Linux,

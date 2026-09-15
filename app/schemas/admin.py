@@ -341,6 +341,28 @@ class FailureClassRead(BaseModel):
     count: int
 
 
+class ComputeScalingRead(BaseModel):
+    """The worker count the job table asks for (E15.2), and why.
+
+    A recommendation, not an action: nothing in the application resizes a fleet.
+    `capped` is true when `max_workers` cut the answer short, so a clipped number
+    is never read as "the fleet is big enough".
+    """
+
+    desired_workers: int
+    current_workers: int | None
+    reason: str
+    capped: bool
+    policy: str
+    queued: int
+    running: int
+    oldest_wait_s: float | None
+    min_workers: int
+    max_workers: int
+    jobs_per_worker: int
+    target_wait_s: float
+
+
 class FleetHealthRead(BaseModel):
     """"Is Kryova healthy", with one answer and no estimates.
 

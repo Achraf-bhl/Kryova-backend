@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 100/132 = 76% | 112/151 eng-months = 74% |
+| Engineering — E1–E23 | 15/24 | 100/132 = 76% | 113/151 eng-months = 75% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 147/193 = 76% | 140/189 eng-months = 74% |
+| **Programme** | 21/34 | 148/193 = 76% | 140/189 eng-months = 74% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 75%, E15 70%, E18 50%, P4 75%, P9 57% |
+| in flight | E8 75%, E15 80%, E18 50%, P4 75%, P9 57% |
 | nothing finished yet | E9, E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2920,6 +2920,28 @@ answerable meaning.
 
 2. **Simulation compute**: queue, autoscale, result caching keyed on the provenance digest.
    **FEA is not a request-path workload** and never becomes one.
+   > DONE (2026-09-15) — **the application's half of autoscale is written: the job table
+   > decides a worker count, and says why.** `app/jobs/autoscale.py` and
+   > `GET /admin/compute/scaling` (staff only). **It recommends and changes nothing**, because
+   > resizing a fleet is the orchestrator's job (an HPA on an external metric, KEDA, a scale-set
+   > cron). The signal is the durable queue, not CPU, which sits at 100% on a solver worker
+   > whether one job waits or four hundred. Five rules, written before any tuning:
+   > - backlog ÷ `JOB_WORKERS`, rounded up;
+   > - never below what is running, since a solve handed to ccx cannot be stopped;
+   > - the oldest wait past `AUTOSCALE_TARGET_WAIT_S` adds one worker over the current size;
+   > - scale down one step at a time;
+   > - clamp to `[AUTOSCALE_MIN_WORKERS, AUTOSCALE_MAX_WORKERS]`, with `capped` saying when the
+   >   ceiling clipped the answer.
+   > Without `?current=` the wait and step rules cannot act, and the answer says so rather than
+   > guessing a fleet size. **New surface, stated**: one staff route, `ComputeScalingRead`, and
+   > three settings (documented in `.env.example`). No migration. The cache half stands as
+   > recorded below. **Not claimed**: a fleet acting on the number (P9 task 3's image has never
+   > been built into one). **Not run here**: tests written 2026-09-15 on Linux and not executed,
+   > at the user's instruction.
+   > Tested by: `tests/test_jobs_autoscale.py`, `tests/test_simulation_cache.py`,
+   > `tests/test_solver_registry.py`, `tests/test_simulations.py`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-14) — **the cache now binds the engine that computes an answer, read
    > before the run. For four days it bound nothing. Autoscale still needs a fleet this
    > deployment does not have.**

@@ -93,6 +93,7 @@ from app.schemas.admin import (
     FeatureFlagOverrideCreate,
     FeatureFlagRead,
     FeatureFlagUpdate,
+    ComputeScalingRead,
     FleetHealthRead,
     ImpersonationEscalate,
     ImpersonationIssued,
@@ -1351,6 +1352,62 @@ def end_maintenance(
 # ---------------------------------------------------------------------------
 # The operations dashboard (P3.6)
 # ---------------------------------------------------------------------------
+
+
+@router.get("/compute/scaling", response_model=ComputeScalingRead)
+def read_compute_scaling(
+    staff: SupportStaff,
+    db: DbSession,
+    current: Annotated[int | None, Query(ge=0, le=10_000)] = None,
+) -> ComputeScalingRead:
+    """How many solver workers the queue asks for (E15.2), for an orchestrator to act on.
+
+    `current` is the fleet size the caller runs now. Without it the answer is the backlog
+    rule alone: the application cannot see the fleet, and inventing a size would drive the
+    wait-time and step-down rules from a guess. See `app/jobs/autoscale.py` for the rules.
+    """
+    from app.jobs.autoscale import QueueSnapshot, ScalingPolicy, recommend, wait_seconds
+
+    counts = {member: 0 for member in (JobStatus.QUEUED, JobStatus.RUNNING)}
+    for job_status, count in db.execute(
+        select(SimulationJob.status, func.count())
+        .where(SimulationJob.status.in_(list(counts)))
+        .group_by(SimulationJob.status)
+    ).all():
+        counts[JobStatus(job_status)] = int(count)
+    oldest = db.scalar(
+        select(func.min(SimulationJob.created_at)).where(
+            SimulationJob.status == JobStatus.QUEUED
+        )
+    )
+    snapshot = QueueSnapshot(
+        queued=counts[JobStatus.QUEUED],
+        running=counts[JobStatus.RUNNING],
+        oldest_wait_s=(
+            wait_seconds(oldest, utcnow()) if counts[JobStatus.QUEUED] else None
+        ),
+    )
+    policy = ScalingPolicy(
+        min_workers=settings.autoscale_min_workers,
+        max_workers=settings.autoscale_max_workers,
+        jobs_per_worker=settings.job_workers,
+        target_wait_s=settings.autoscale_target_wait_s,
+    )
+    answer = recommend(snapshot, policy, current_workers=current)
+    return ComputeScalingRead(
+        desired_workers=answer.desired_workers,
+        current_workers=answer.current_workers,
+        reason=answer.reason,
+        capped=answer.capped,
+        policy=answer.policy,
+        queued=snapshot.queued,
+        running=snapshot.running,
+        oldest_wait_s=snapshot.oldest_wait_s,
+        min_workers=policy.min_workers,
+        max_workers=policy.max_workers,
+        jobs_per_worker=policy.jobs_per_worker,
+        target_wait_s=policy.target_wait_s,
+    )
 
 
 @router.get("/health", response_model=FleetHealthRead)

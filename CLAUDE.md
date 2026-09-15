@@ -1441,7 +1441,7 @@ line). `structure.py` holds what every structured reader shares; `tables.py`, `o
    versions only. So a green `/attachments` test proves the reader, not that a conversation can
    use a file (master plan P4.7, P4.6's correction). The agent's one route to an attachment is
    `import_geometry_from_attachment`, whose refusal lists what is attached.
-11. **A stored blob has no extension, so sniff it with the name it arrived with.** The store names
+14. **A stored blob has no extension, so sniff it with the name it arrived with.** The store names
    a blob by its digest. `kinds.sniff(path)` alone falls back to that name for CSV, TSV, STL and
    IGES, and gets plain text or unknown. Every CSV attached through `POST /attachments` was read so
    until 2026-09-15, while the reader's own tests, run on named temp files, stayed green. Pass

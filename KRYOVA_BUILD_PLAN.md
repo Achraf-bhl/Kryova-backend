@@ -74,8 +74,8 @@ happened.
 > **Next target: P4.7**, with P4.6's composer piece if it closes in the same turn. Then P7
 > (QUEUE rows for the Windows parts), then the E23.4 harness only.
 > **Next continuation fires 2026-09-15 23:48** — held by the session named on the next line.
-> **Held by: handover in progress from `kryova-backend-55` at 21:00**; the follow-up commit
-> names the holder. If this line still says "in progress", `kryova-backend-55` holds it.
+> **Held by `kryova-backend-f1`**, which confirmed `scheduled 2026-09-15 23:48` at 21:00.
+> `kryova-backend-55` holds nothing; the job dies if `kryova-backend-f1` is closed.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.

@@ -903,6 +903,51 @@ master plan's status line in the same commit.
       duct. Settles: whether the docker launcher works on the machine the product ships on, and
       whether a finished case directory is deletable by the server afterwards.
 
+### G. Needs the product in a browser on real hardware — the viewer
+
+The frontend's viewer work is written and type-checked on Linux and has never been *looked
+at*. These are not pytest items and they are not CATIA items: what they need is a GPU, a
+browser and an assembly big enough to be hard. Drive them from the GUI the way section 2 of
+this file drives the ladder, with a screenshot each.
+
+- [ ] **G1 — P6.2, the streaming scene's two targets, measured (added 2026-09-16).**
+      `../Kryova-frontend/src/lib/scene-streaming.ts` decides what to fetch next and at which
+      level, as pure arithmetic over bounding boxes and a camera; its 20 tests were written on
+      Linux and **not run**. What does not exist is any evidence about the numbers the task
+      actually asks for: **first meaningful paint of a 2,000-part machine under 2 s, and
+      interaction never below 30 fps.**
+      1. `npm run test -- src/lib/scene-streaming.test.ts`, then `npm run type-check` and
+         `npm run lint`.
+      2. **Build a reference assembly.** There is none, and that is the blocker under the
+         blocker: the target is meaningless without a fixed scene to measure it on. 2,000
+         parts with real repetition (a frame, a few hundred distinct components, thousands of
+         fasteners) exported once and pinned by digest, so two runs a month apart compare.
+      3. Wire the module to the viewer and the `?level=` route (`app/render/display.py` serves
+         levels 0-2), and measure first paint and the frame time under orbit with the
+         browser's own profiler.
+      4. **Record the numbers even if they miss.** The status line says the targets are
+         unmeasured; the honest replacement is a measurement, not a removal.
+      Open question recorded rather than answered: the task asks for the fps assertion **in
+      CI**, and CI has no GPU. Decide where it runs, and say so in the status.
+      Settles: whether the ordering this module implements actually produces a viewer that
+      feels instant on a machine-scale assembly, which is the only claim P6.2 is about.
+
+- [ ] **G2 — P6.5, the colour scale looked at by eyes (added 2026-09-16).**
+      `../Kryova-frontend/src/lib/scalar-field.ts` maps any per-node scalar field to colours
+      with a legend and a probe; its 24 tests were written on Linux and **not run**, and
+      nothing in the viewer calls it yet.
+      1. `npm run test -- src/lib/scalar-field.test.ts`, then `npm run type-check`.
+      2. Wire it into the viewer beside `surface-field`: the legend, the probe readout, and
+         the field picker.
+      3. **Look at all five palettes on a real part**, because this is the one thing a unit
+         test cannot check. Specifically: is `ABSENT` grey distinguishable from the low end of
+         every ramp on an actual screen, and does the reversed thickness ramp read as
+         intended rather than as a bug? A palette that is arithmetically correct and visually
+         ambiguous fails at exactly the job it has.
+      4. Screenshot each field kind.
+      Settles: whether "unmeasured" is *visible* as unmeasured, which is the whole reason the
+      absent colour exists.
+
 ---
 
 ## Expect failures on the first run, and that is the point

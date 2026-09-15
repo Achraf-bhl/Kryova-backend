@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 15/24 | 118/132 = 89% | 135/151 eng-months = 89% |
-| Product — P1–P10 | 6/10 | 49/62 = 79% | 29/38 eng-months = 75% |
-| **Programme** | 21/34 | 166/194 = 86% | 163/189 eng-months = 86% |
+| Product — P1–P10 | 6/10 | 50/62 = 81% | 30/38 eng-months = 78% |
+| **Programme** | 21/34 | 168/194 = 86% | 164/189 eng-months = 87% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -5951,6 +5951,37 @@ client renders what it is sent, at the detail the view deserves.
    Target: first meaningful paint of a 2,000-part machine under 2 s on a mid-range laptop;
    interaction never below 30 fps, measured in CI against a reference assembly — a performance
    *assertion*, in the house style.
+   > PARTIAL (2026-09-15) — **the ordering is built and pure; the fps and first-paint targets
+   > are unmeasured and are a hardware job.** `../Kryova-frontend/src/lib/scene-streaming.ts`.
+   > Tests written on Linux and **not run** (the user's rule); `tsc --noEmit` clean. QUEUE G1.
+   > **The problem at machine scale is ordering, not drawing**, so that is what this is: what
+   > to fetch next and at which level, as arithmetic over bounding boxes and a camera, with no
+   > WebGL, no fetch and no React in it. Pure for `app/design/`'s reason — the ordering is the
+   > part worth testing and it is untestable once tangled with a GL context.
+   > **Structure-first is a consequence rather than a phase.** A part with no mesh still has a
+   > box from the tree, so it is drawn as a box and ordered like anything else; there is no
+   > separate structure pass to fall out of step with the streaming one.
+   > **Four decisions.** LOD thresholds are in *part radii*, not millimetres, so one table
+   > serves an M6 nut and a 2 m weldment — a millimetre threshold loads the weldment at its
+   > coarsest level from across the room. A part already at a finer level than it now deserves
+   > is **left alone**, so flying away never spends a round trip on a worse mesh. A part under
+   > ~8 px gets no mesh at all, which on an assembly is most of the parts. Culling is a
+   > half-space test against the view direction, not a six-plane frustum: the cheap half is
+   > what matters on an interior view, and a full frustum needs the projection matrix, which
+   > belongs to the renderer this module stays out of.
+   > **The comparator is total**, including for parts containing the camera, because
+   > `Infinity - Infinity` is NaN and a NaN comparator leaves the order to the engine — a
+   > viewer that loads something different first on every frame.
+   > **No runtime dependency added** (the doctrine is three).
+   > **Not done here:** wiring it to the viewer and the `?level=` route, and the targets
+   > themselves — *first paint of a 2,000-part machine under 2 s, never below 30 fps* — which
+   > are measurements on real hardware against a reference assembly that does not exist yet.
+   > The task asks for them in CI; CI has no GPU, so where that assertion runs is an open
+   > question recorded here rather than answered.
+   > Tested by: `../Kryova-frontend/src/lib/scene-streaming.test.ts` (20, written on Linux and
+   > not run).
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 3. **The renderer decision, made explicitly**: extend the hand-rolled WebGL viewer to WebGL 2
@@ -5971,6 +6002,33 @@ client renders what it is sent, at the detail the view deserves.
 5. **Results on geometry**: the existing stress-field rendering generalised — scalar fields
    (stress, displacement, thickness, fatigue damage) on the streamed meshes, shared colour-scale
    legend, probe-a-value. The `surface-field` code is the seed.
+   > PARTIAL (2026-09-16) — **any per-node scalar field colours, with a legend that states its
+   > own bounds and a probe that can say "not measured"; nothing is wired to the viewer yet.**
+   > `../Kryova-frontend/src/lib/scalar-field.ts`. Tests written on Linux and **not run** (the
+   > user's rule; Windows runs them); `tsc --noEmit` and `eslint` clean. QUEUE G2.
+   > **It is a sibling of `surface-field.ts`, not a widening of it**, because that module is a
+   > wire format (a packed binary header with a JSON fallback) and this one is presentation.
+   > Five kinds — stress, displacement, thickness, damage, temperature — differ by a name, a
+   > unit and a palette, never by a second renderer. `magnitudeField` is the bridge from what a
+   > solve returns (xyz per node) to what a colour bar can show.
+   > **Three honesty rules, each the reason a plausible picture would otherwise be wrong.** An
+   > unmeasured node is `NaN` and gets `ABSENT` grey rather than the bottom of the scale, and it
+   > is left out of the fitted range, because the bottom of the scale is a reading and "nobody
+   > computed this" is not one; `probeNode` answers `measured: false` instead of 0 and refuses a
+   > node index that is not in the field. A fitted range carries `auto: true` and the legend
+   > prints the caveat, so a reader comparing two screenshots knows the colours do not mean the
+   > same thing in both. **Damage is never fitted** — `FIXED_RANGES` pins it to 0–1, because
+   > fitting 0–0.02 across the palette paints a part that will last fifty lifetimes in the same
+   > red as one about to crack. Thickness's ramp is reversed on purpose (thin is the problem),
+   > which is exactly the assumption a caller reading "high is red" everywhere would get wrong.
+   > **No runtime dependency added** (the doctrine is three); the palettes are arithmetic.
+   > **Not done here:** the viewer does not call it — no legend component, no probe UI, and
+   > nothing routes a thickness or damage field to the frontend (thickness is sampled and
+   > `app/fatigue/` has no per-node route). Those are the wiring half of this task.
+   > Tested by: `../Kryova-frontend/src/lib/scalar-field.test.ts` (24, written on Linux and not
+   > run).
+
+   <!-- superseded 2026-09-16 -->
    > NOT STARTED.
 
 6. **Tree ↔ 3D ↔ spec, one selection model**: click a part in the tree, it highlights in 3D and the

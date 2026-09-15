@@ -42,14 +42,18 @@ happened.
 > (M4/M5 need E13.2, M7 all of E9, M8 all of E8). **E23.3 closed at 11:18** (MCP server,
 > `tests/test_mcp.py`, not run); **P9.3** got `libgomp1`; **E22.2** is PARTIAL (harness and model
 > editor built; the rate needs a real case set run on Windows, QUEUE D2). The targets, in order,
-> are now: **E22.4** is PARTIAL too (harness built; QUEUE D3). **E22.1** is DONE (the rule on `/trust/commitments`). Next: **P6.1** (OCCT shape →
-> glTF tessellation service) → real case sets for E22.2 and E22.4 (from the mission designs and
-> the registry) → E21.6 / E21.2 / E21.4 / E21.5 / E23.1 (documents and registers;
-> each needs a source read, never recalled).
+> are now: **E22.4** is PARTIAL too (harness built; QUEUE D3). **E22.1** is DONE (the rule on
+> `/trust/commitments`). **P6.1 is PARTIAL at 11:40** (tessellation, levels, instancing, GLB,
+> cache key; `tests/test_render_gltf.py`, not run — Draco/meshopt unmeasured, no store or route).
+> Next: real case sets for E22.2 and E22.4 (from the mission designs and the registry) →
+> P6.1's store and route (a shape digest to key on, the GLB in the media store, a GET) →
+> E21.6 / E21.2 / E21.4 / E21.5 / E23.1 (documents and registers; each needs a source read,
+> never recalled).
 > **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
 > **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
 > Its prompt names E23.3 as the target and says to skip a target that is already done; E23.3,
-> P9.3, E22.1 and the E22.2 and E22.4 harnesses are done, so it should start at P6.1.
+> P9.3, E22.1, the E22.2 and E22.4 harnesses and P6.1's first half are done, so it should
+> start at the E22.2/E22.4 case sets.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -327,6 +331,12 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — P6 task 1, partial: a shape as a GLB, and a machine as one mesh per component.**
+  `app/kernel/occt/tessellate.py` (copy, location, REVERSED faces rewound; a box encloses 6,000 mm³)
+  and `app/render/gltf.py` (glTF 2.0 from the Khronos spec: mm and Z-up in the data, one root
+  node for ×0.001 and Z→Y, instances per occurrence, byte-deterministic, `cache_key`). The tighter
+  deflection decides a level's detail. Draco/meshopt, the store and a route are open.
+  Tested by `tests/test_render_gltf.py`. Not run here.
 - **2026-09-15 — E22 task 1: the surrogate rule is a public commitment.** `/trust/commitments`
   carries `an-approximation-may-rank-and-never-decide`, enforced by `app/optimise/screening.py`,
   with DoMINO's Table 1 figures re-read from arXiv:2501.13350v1. The plan's "non-monotonic" and

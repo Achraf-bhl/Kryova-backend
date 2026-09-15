@@ -72,7 +72,7 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 15/24 | 112/132 = 85% | 129/151 eng-months = 85% |
-| Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
+| Product — P1–P10 | 6/10 | 48/61 = 78% | 28/38 eng-months = 74% |
 | **Programme** | 21/34 | 160/193 = 83% | 157/189 eng-months = 83% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
@@ -5436,6 +5436,28 @@ client renders what it is sent, at the detail the view deserves.
    (BOLTS parts repeat thousands of times — one mesh, N transforms). Cached in the
    content-addressed store keyed on geometry digest + tessellation params, so a part is tessellated
    once ever.
+   > PARTIAL (2026-09-15) — tessellation, levels, instancing, GLB and the key shipped; compression
+   > and the store did not. `app/kernel/occt/tessellate.py` meshes a `BRepBuilderAPI_Copy`, so the
+   > caller's shape keeps no triangulation. It applies each face's location and rewinds REVERSED
+   > faces; a 10×20×30 box encloses exactly 6,000 mm³. `levels_of_detail` gives one mesh per
+   > deflection. **The tighter deflection decides**: at 0.05 rad a Ø10 cylinder was 1,004
+   > triangles at 0.01, 0.1 and 1 mm alike, and at 1.5 rad 280/88/32. `app/render/gltf.py` writes
+   > GLB from the glTF 2.0 specification (read 2026-09-15). Vertex data stays mm and Z-up, and one
+   > root node carries ×0.001 and Z→Y with a positive determinant, because glTF flips winding
+   > under a negative one; a mirrored instance frame is refused for that reason. `scene_for` makes
+   > each leaf component one mesh and each occurrence one node named by its path. Forty bolts are
+   > one bolt's bytes. Output is byte-deterministic. `cache_key` covers geometry digest, both
+   > deflections and a layout version. **Core glTF has no LOD, so it is one file per level.**
+   > **Open:** Draco and meshopt are not installed, and the task asks for both measured on real
+   > parts before choosing. Nothing stores the GLB under the key or serves it (no route), and
+   > nothing yet supplies a *shape* digest to key on. The frontend half is P6.2.
+   > **Interface change:** `occt/binding.py` registers `BRepBuilderAPI_Copy`,
+   > `BRepMesh_IncrementalMesh`, `TopAbs_Orientation` and `TopLoc_Location`.
+   > Tests written on Linux and not run as pytest (user's rule); the volume, instance count,
+   > untouched caller shape, location offset and level counts were checked by a one-off script.
+   > Tested by: `tests/test_render_gltf.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 2. **The streaming scene** (frontend): assembly loads structure-first (the tree and bounding boxes

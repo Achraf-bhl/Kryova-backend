@@ -52,6 +52,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     )
     from OCP.BRepBndLib import BRepBndLib
     from OCP.BRepBuilderAPI import (
+        BRepBuilderAPI_Copy,
         BRepBuilderAPI_GTransform,
         BRepBuilderAPI_MakeEdge,
         BRepBuilderAPI_MakeFace,
@@ -62,6 +63,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         BRepBuilderAPI_Transform,
     )
     from OCP.BRepCheck import BRepCheck_Analyzer
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.BRepExtrema import BRepExtrema_DistShapeShape
     from OCP.BRepFill import BRepFill_TypeOfContact
     from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer, BRepFilletAPI_MakeFillet
@@ -144,7 +146,8 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.TDF import TDF_LabelMap, TDF_TagSource
     from OCP.TDocStd import TDocStd_Application, TDocStd_Document
     from OCP.TNaming import TNaming_Builder, TNaming_Selector, TNaming_Tool
-    from OCP.TopAbs import TopAbs_ShapeEnum, TopAbs_State
+    from OCP.TopAbs import TopAbs_Orientation, TopAbs_ShapeEnum, TopAbs_State
+    from OCP.TopLoc import TopLoc_Location
     from OCP.TopExp import TopExp, TopExp_Explorer
     from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Edge, TopoDS_Iterator
     from OCP.TopTools import (
@@ -165,7 +168,9 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "BRepAlgoAPI_Section": BRepAlgoAPI_Section,
         "BRepAlgoAPI_Splitter": BRepAlgoAPI_Splitter,
         "BRepBndLib": BRepBndLib,
+        "BRepBuilderAPI_Copy": BRepBuilderAPI_Copy,
         "BRepBuilderAPI_GTransform": BRepBuilderAPI_GTransform,
+        "BRepMesh_IncrementalMesh": BRepMesh_IncrementalMesh,
         "BRepBuilderAPI_MakeEdge": BRepBuilderAPI_MakeEdge,
         "BRepBuilderAPI_MakeFace": BRepBuilderAPI_MakeFace,
         "BRepBuilderAPI_MakeSolid": BRepBuilderAPI_MakeSolid,
@@ -241,7 +246,9 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         "TNaming_Builder": TNaming_Builder,
         "TNaming_Selector": TNaming_Selector,
         "TNaming_Tool": TNaming_Tool,
+        "TopAbs_Orientation": TopAbs_Orientation,
         "TopAbs_ShapeEnum": TopAbs_ShapeEnum,
+        "TopLoc_Location": TopLoc_Location,
         "TopAbs_State": TopAbs_State,
         "TopExp": TopExp,
         "TopExp_Explorer": TopExp_Explorer,

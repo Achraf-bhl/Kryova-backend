@@ -67,7 +67,13 @@ from pathlib import Path
 from typing import Any, Final
 
 from app.manufacture.errors import ExportError
-from app.manufacture.export import STEP_UNIT, StepExport, StepSchema, configure_writer
+from app.manufacture.export import (
+    STEP_UNIT,
+    StepExport,
+    StepSchema,
+    configure_writer,
+    with_declared_edition,
+)
 
 #: What a flatness tolerance authored as `0.05` comes back as when the same
 #: OCCT build reads its own file: `50.0`. The writer emits the magnitude
@@ -376,11 +382,13 @@ def write_step_with_metadata(
             f"OCCT translated the document but could not write {target} ({status}). "
             "Check the directory exists and is writable."
         )
-    return StepExport(
-        path=target,
-        schema=schema,
-        unit=STEP_UNIT.lower(),
-        size_bytes=target.stat().st_size,
+    return with_declared_edition(
+        StepExport(
+            path=target,
+            schema=schema,
+            unit=STEP_UNIT.lower(),
+            size_bytes=target.stat().st_size,
+        )
     )
 
 

@@ -99,7 +99,8 @@ a real Kryova part is exactly what both callers would hand it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
@@ -176,6 +177,13 @@ class StepExport:
     schema: StepSchema
     unit: str
     size_bytes: int
+    #: The ASN.1 object identifier the file's own `FILE_SCHEMA` declares, read
+    #: back from the written file, or None when the header carries none.
+    object_identifier: tuple[int, ...] | None = None
+    #: Which AP242 edition that identifier names (`AP242_EDITIONS`), or None when
+    #: the file is not AP242 *or* its identifier is one this table does not know.
+    #: `object_identifier` beside it says which of the two.
+    ap242_edition: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -184,7 +192,35 @@ class StepExport:
             "schema": str(self.schema),
             "unit": self.unit,
             "size_bytes": self.size_bytes,
+            "object_identifier": (
+                None if self.object_identifier is None else list(self.object_identifier)
+            ),
+            "ap242_edition": self.ap242_edition,
         }
+
+
+#: Where `AP242_EDITIONS` was read, and when (master plan E21.2).
+AP242_EDITIONS_SOURCE: Final = "https://www.steptools.com/docs/stp_aim/notes_ap242e3.html"
+AP242_EDITIONS_READ_ON: Final = "2026-09-15"
+
+#: AP242's ASN.1 object identifiers, by edition, as STEP Tools lists them:
+#: "{ 1 0 10303 442 1 1 4 } ASN/1 for first edition { 1 0 10303 442 3 1 4 } ASN/1
+#: for second edition { 1 0 10303 442 4 1 4 } ASN/1 for third edition". The same
+#: page says "The AP242 schema name has not changed between editions", which is
+#: why the schema *name* in a header cannot say which edition a file is, and the
+#: identifier is the only thing that can. The second edition's version arc is 3,
+#: not 2 -- a table, not arithmetic. No identifier for ISO 10303-242:2025 was
+#: read, so a file declaring one reads as edition None, not as a guess.
+AP242_EDITIONS: Final[dict[tuple[int, ...], int]] = {
+    (1, 0, 10303, 442, 1, 1, 4): 1,
+    (1, 0, 10303, 442, 3, 1, 4): 2,
+    (1, 0, 10303, 442, 4, 1, 4): 3,
+}
+
+#: The AP242 schema name every edition shares (read from a file this build wrote).
+AP242_SCHEMA_NAME: Final = "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF"
+
+_OBJECT_IDENTIFIER = re.compile(r"\{([\d\s]+)\}")
 
 
 def _step() -> dict[str, Any]:
@@ -319,11 +355,13 @@ def write_step(
             f"OCCT translated the shape but could not write {target} ({status}). Check "
             "the directory exists and is writable."
         )
-    return StepExport(
-        path=target,
-        schema=schema,
-        unit=STEP_UNIT.lower(),
-        size_bytes=target.stat().st_size,
+    return with_declared_edition(
+        StepExport(
+            path=target,
+            schema=schema,
+            unit=STEP_UNIT.lower(),
+            size_bytes=target.stat().st_size,
+        )
     )
 
 
@@ -391,14 +429,64 @@ def step_schema_of(path: str | Path) -> str:
     return text[start : end if end > start else start + 200]
 
 
+def object_identifier_of(file_schema: str) -> tuple[int, ...] | None:
+    """The ASN.1 object identifier inside a `FILE_SCHEMA` string, or None.
+
+    OCCT writes it with a trailing space (`{1 0 10303 442 1 1 4 }`) and STEP Tools
+    prints it with spaces inside both braces, so it is compared as integers, never
+    as text.
+    """
+    found = _OBJECT_IDENTIFIER.search(file_schema)
+    if found is None:
+        return None
+    return tuple(int(arc) for arc in found.group(1).split())
+
+
+def ap242_edition_of(file_schema: str) -> int | None:
+    """Which AP242 edition a `FILE_SCHEMA` string declares.
+
+    None for a file that is not AP242, for one with no identifier, and for an
+    identifier `AP242_EDITIONS` does not hold. The last is deliberate: an edition
+    this table was never told about is unknown, and naming the nearest one would
+    be the edition-less "AP242" citation E21.2 exists to stop.
+    """
+    if AP242_SCHEMA_NAME not in file_schema.upper():
+        return None
+    identifier = object_identifier_of(file_schema)
+    if identifier is None:
+        return None
+    return AP242_EDITIONS.get(identifier)
+
+
+def with_declared_edition(record: StepExport) -> StepExport:
+    """`record` with the identifier and edition its own file declares.
+
+    Read from the file after it is written, for the reason `step_schema_of`
+    gives: what was requested is not evidence of what was written.
+    """
+    declared = step_schema_of(record.path)
+    return replace(
+        record,
+        object_identifier=object_identifier_of(declared),
+        ap242_edition=ap242_edition_of(declared),
+    )
+
+
 __all__ = [
+    "AP242_EDITIONS",
+    "AP242_EDITIONS_READ_ON",
+    "AP242_EDITIONS_SOURCE",
+    "AP242_SCHEMA_NAME",
     "ROUND_TRIP_TOLERANCE",
     "STEP_UNIT",
     "StepExport",
     "StepSchema",
     "TessellatedWrite",
+    "ap242_edition_of",
     "configure_writer",
+    "object_identifier_of",
     "read_step",
     "step_schema_of",
+    "with_declared_edition",
     "write_step",
 ]

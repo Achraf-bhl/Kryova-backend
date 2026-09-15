@@ -525,6 +525,9 @@ class TestThePartCanReachTheSolver:
         assert result["geometry_version_id"]
         assert result["filename"].endswith(".step")
         assert result["size_bytes"] > 0
+        # E21.2: the edition is named, read back from the file this build wrote.
+        assert result["step_schema"] == "AP242DIS"
+        assert result["ap242_edition"] == 1
         # The stats are what the mesher and the load-case drafter read; a version
         # with no bounding box is a row the next step cannot use.
         assert result["stats"]["bounding_box"]

@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 114/132 = 86% | 130/151 eng-months = 86% |
+| Engineering — E1–E23 | 15/24 | 114/132 = 87% | 131/151 eng-months = 87% |
 | Product — P1–P10 | 6/10 | 48/61 = 78% | 28/38 eng-months = 74% |
-| **Programme** | 21/34 | 161/193 = 83% | 158/189 eng-months = 84% |
+| **Programme** | 21/34 | 162/193 = 84% | 159/189 eng-months = 84% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,8 +81,8 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E22 50%, E23 25%, P4 75%, P9 57% |
-| nothing finished yet | E21, P6, P7 |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 50%, E22 50%, E23 25%, P4 75%, P9 57% |
+| nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -4270,6 +4270,46 @@ lying about fidelity or breaching somebody's licence?
    data. Two consequences: the normative text must be **bought** and cannot be redistributed by
    this repository, and FEA interchange is AP209/AP243 territory rather than something AP242 will
    grow into.
+   > DONE (2026-09-15) — **"AP242" here means the first edition, and every STEP this build writes
+   > now says so from its own header.** STEP Tools' AP242 notes (read 2026-09-15) list the ASN.1
+   > identifiers `{1 0 10303 442 1 1 4}` (first edition), `{… 442 3 1 4}` (second) and
+   > `{… 442 4 1 4}` (third). The same page says the schema *name* has not changed between
+   > editions, so the identifier is the only thing in a file that can name one. The second
+   > edition's arc is 3, not 2, so it is a table and not a formula. OCCT 7.9.3 writes the
+   > first-edition identifier (measured). So the build's `AP242DIS` spelling, the header's
+   > *'international standard'* with year 2013, and the identifier are three labels that do
+   > not agree, as task 1 recorded. The identifier is the one a receiving system matches on.
+   >
+   > Shipped:
+   > - `export.AP242_EDITIONS`, with its source and read date.
+   > - `object_identifier_of` and `ap242_edition_of`, which read a `FILE_SCHEMA` string.
+   >   An identifier the table does not hold is edition `None`, never the nearest one.
+   > - **Interface change:** `StepExport` gains `object_identifier` and `ap242_edition`, and
+   >   `to_dict` carries both. They are read back from the written file by
+   >   `with_declared_edition`, in `write_step` and in `xde.write_step_with_metadata`.
+   > - **Interface change:** the open kernel's `catia_export_step` result gains `step_schema`
+   >   and `ap242_edition`.
+   >
+   > AP214 carries `{1 0 10303 214 1 1 1 1}`. AP203 carries no identifier, and its record says
+   > `None`.
+   >
+   > **What was read about ISO, and what was not.** The ISO catalogue entry for 93277 (search
+   > snippet, 2026-09-15) gives its life cycle as "Previously ISO 10303-242:2025 / Now
+   > ISO/CD 10303-242". So the 2025 edition is published and a further revision is at committee
+   > draft. NIST's 2024 slides (Barnard/Feeney) list the 2014, 2020 and 2022 editions. No
+   > identifier for the 2025 edition was read, so a file declaring one reads as edition `None`.
+   > The normative text is ISO's and is sold. Its price was not read. The ISO catalogue page
+   > carries a notice restricting use of ISO content for AI and machine learning, including
+   > prompting AI tools. So nothing from the standard's text is quoted here, and only the
+   > catalogue's life-cycle line was read. What Ed.4 adds (AP243, assembly constraints, LOD) is
+   > the plan's earlier summary and was not re-read.
+   >
+   > Tests written on Linux and not run as pytest. The writer's identifiers and the pure
+   > functions were checked by a one-off script. Tested by:
+   > `tests/test_manufacture_step_edition.py` and `tests/test_geometry_backends.py`
+   > (`TestThePartCanReachTheSolver`).
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 3. **Tessellated STEP, which OCCT does support, wired to the viewer and the attachment path.**

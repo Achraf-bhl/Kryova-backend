@@ -51,16 +51,17 @@ happened.
 > **P6.1's store and route landed at 11:48** (`GET .../geometry/{n}/display?level=`, keyed on
 > the file's sha256 before the file is opened; still PARTIAL on Draco/meshopt and assemblies).
 > **E21.5 is PARTIAL at 11:54** (the fatigue entitlement register; FKM methods already arrive via
-> pyLife; tables-vs-method is for counsel). **E21.6 is PARTIAL at 12:05** (QIF read: Boost 1.0
-> community repo with *modified* schemas; no writer, no validator installed). Next: E21.2 (AP242
-> edition: read the ISO catalogue and the CAx-IF/AP242 site) / E21.4 (materials licence position)
+> pyLife; tables-vs-method is for counsel). **E21.6 is PARTIAL at 11:56** (QIF read: Boost 1.0
+> community repo with *modified* schemas; no writer, no validator installed). **E21.2 is DONE at
+> 12:02** (every STEP record and `catia_export_step` result names the AP242 edition read from the
+> file's ASN.1 identifier; this build writes edition 1). Next: E21.4 (materials licence position)
 > / E23.1 (competitor register), each needing a source read, never recalled → P4's open tasks →
 > P7 (QUEUE rows for the Windows parts).
 > **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
 > **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
 > Its prompt names E23.3 as the target and says to skip a target that is already done; E23.3,
 > P9.3, E22.1, the E22.2 and E22.4 harnesses and case sets, and P6.1's tessellation, store
-> and route, E21.5's register and E21.6's reading are done, so it should start at E21.2.
+> and route, E21.5's register, E21.6's reading and E21.2 are done, so it should start at E21.4.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -338,6 +339,13 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E21 task 2: which AP242 edition "AP242" means.** `export.AP242_EDITIONS` maps
+  the ASN.1 identifiers STEP Tools lists to editions 1–3 (edition 2 is arc 3); `StepExport` and
+  the open kernel's `catia_export_step` result now carry `object_identifier` / `ap242_edition`,
+  read back from the written file. This build writes edition 1. ISO lists 10303-242:2025 with a
+  CD in progress; its identifier was not read, so it reads as `None`. Interface change: two new
+  `StepExport` fields and two new tool-result keys. Tested by
+  `tests/test_manufacture_step_edition.py` and `tests/test_geometry_backends.py`. Not run here.
 - **2026-09-15 — E21 task 6, partial: QIF read as it is.** `app/manufacture/qif.py`: DMSC still
   offers QIF 3.0 (Dec 2018, ISO 23952:2020) behind a form with no terms; the QIF Community repo is
   Boost 1.0, but its QIF 3.0 schemas are modified copies of the `.xsdOrig` beside them. A schema

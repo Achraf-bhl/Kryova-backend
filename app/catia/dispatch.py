@@ -2149,7 +2149,7 @@ def _export_locally(
     with tempfile.TemporaryDirectory() as scratch:
         target = Path(scratch) / filename
         try:
-            write_step(shape, target)
+            record = write_step(shape, target)
         except ExportError as exc:
             raise CatiaError(str(exc)) from exc
         try:
@@ -2177,6 +2177,9 @@ def _export_locally(
             f"Geometry version {version.version_number} is ready. Build a load case "
             "against it and run a simulation."
         ),
+        # Read from the file's own header (E21.2): "AP242" alone names four documents.
+        "step_schema": str(record.schema),
+        "ap242_edition": record.ap242_edition,
     }
     if left_behind:
         result["bodies_not_exported"] = left_behind

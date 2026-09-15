@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 113/132 = 86% | 129/151 eng-months = 86% |
+| Engineering — E1–E23 | 15/24 | 114/132 = 86% | 130/151 eng-months = 86% |
 | Product — P1–P10 | 6/10 | 48/61 = 78% | 28/38 eng-months = 74% |
-| **Programme** | 21/34 | 160/193 = 83% | 158/189 eng-months = 83% |
+| **Programme** | 21/34 | 161/193 = 83% | 158/189 eng-months = 84% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -4378,6 +4378,32 @@ lying about fidelity or breaching somebody's licence?
    distributed through the same channel as separately versioned standards. So the metrology
    interop stack is three documents, not one, and the redistribution question is unanswered on
    the page and must be asked before anything is vendored.
+   > PARTIAL (2026-09-15) — **the state is read and the redistribution question has an answer
+   > for the community copies; no QIF is written yet.** `app/manufacture/qif.py` records, each with
+   > its page:
+   > - DMSC's download is still "ANSI QIF 3.0 released December 2018", free behind a form, and
+   >   states no terms.
+   > - The homepage adds ISO 23952:2020.
+   > - The QIF Community repository, linked from DMSC's own page and last committed 2026-03-20, is
+   >   **Boost Software License 1.0**. The exception is the CodeSynthesis C++ bindings, and it names
+   >   paths that no longer match the tree.
+   > - **The QIF 3.0 schemas in that repository are modified copies**
+   >   (`bindings/CPP-Kramer/schema/*.xsd` beside `.xsdOrig`; `QIFDocument.xsd` differs by 1,272
+   >   diff lines, key selectors included). So validating against them is not validating against
+   >   QIF 3.0 as published.
+   >
+   > The rule this settles, held by a test: a schema enters the repository only under `data/qif/`,
+   > beside its licence. **Open:**
+   > - a QIF writer for E17.5's plans;
+   > - a schema validator (neither lxml nor xmlschema is installed, so this is a dependency
+   >   decision);
+   > - the unmodified schemas' terms (DMSC's form);
+   > - ISO 23952's current status (iso.org refused the fetch);
+   > - MBC and DMIS, not read.
+   >
+   > Tests written on Linux and not run as pytest. Tested by: `tests/test_manufacture_qif.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 **Phase proof:** a full machine leaves Kryova as STEP with its edition named, is opened by a

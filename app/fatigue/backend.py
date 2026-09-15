@@ -36,7 +36,7 @@ import math
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app.fatigue.errors import BackendUnavailable
+from app.fatigue.errors import BackendUnavailable, FatigueError
 from app.fatigue.history import (
     Collective,
     CycleBlock,
@@ -53,6 +53,7 @@ try:  # pragma: no cover - exercised by whether the dependency is installed
     import pylife as _pylife
     import pylife.strength.fatigue as _pylife_fatigue  # noqa: F401  (registers accessors)
     import pylife.stress.collective as _pylife_collective  # noqa: F401  (registers accessors)
+    from pylife.materiallaws.notch_approximation_law import ExtendedNeuber as _ExtendedNeuber
     from pylife.strength.meanstress import HaighDiagram as _HaighDiagram
     from pylife.stress.rainflow import FullRecorder as _FullRecorder
     from pylife.stress.rainflow import ThreePointDetector as _ThreePointDetector
@@ -119,6 +120,23 @@ class FatigueBackend(ABC):
     @abstractmethod
     def at_failure_probability(self, curve: SNCurve, probability: float) -> SNCurve:
         """The same curve restated at another survival probability, using its scatter."""
+
+    @abstractmethod
+    def extended_neuber(
+        self,
+        elastic_mpa: float,
+        *,
+        youngs_modulus_mpa: float,
+        strength_coefficient_mpa: float,
+        hardening_exponent: float,
+        limit_load_factor: float,
+        as_range: bool,
+    ) -> tuple[float, float]:
+        """The elastic-plastic notch stress and strain for a linear-elastic notch stress.
+
+        With `as_range`, `elastic_mpa` is a range on a hysteresis branch and the answer is the
+        stress and strain ranges on that branch.
+        """
 
 
 class PyLifeBackend(FatigueBackend):
@@ -258,6 +276,64 @@ class PyLifeBackend(FatigueBackend):
         haigh = _HaighDiagram.fkm_goodman(_pd.Series(parameters))
         transformed = haigh.transform(_to_frame(collective), -1.0)
         return _from_frame(transformed, collective)
+
+    # -- the notch --------------------------------------------------------
+
+    def extended_neuber(
+        self,
+        elastic_mpa: float,
+        *,
+        youngs_modulus_mpa: float,
+        strength_coefficient_mpa: float,
+        hardening_exponent: float,
+        limit_load_factor: float,
+        as_range: bool,
+    ) -> tuple[float, float]:
+        """pyLife's `ExtendedNeuber`, with its root checked against the equation it solves.
+
+        pyLife's docstrings give the equation as FKM nonlinear's 2.5-45 (first loading) and
+        2.5-46 (hysteresis branches). Rearranged, both say ε·σ = L·K_p·e*, where e* is the
+        Ramberg–Osgood strain at L/K_p (for a branch, the Masing range strain at ΔL/K_p). The
+        root pyLife returns is checked against that product here, because its Newton solve has
+        a fixed iteration count and a loose default tolerance, and a root that is not one would
+        otherwise come back looking exactly like one.
+        """
+        require()
+        law = _ExtendedNeuber(
+            youngs_modulus_mpa, strength_coefficient_mpa, hardening_exponent, K_p=limit_load_factor
+        )
+        curve = law.ramberg_osgood_relation
+        try:
+            if as_range:
+                stress = float(law.stress_secondary_branch(elastic_mpa, rtol=_NEUBER_RTOL, tol=_NEUBER_TOL_MPA))
+                strain = float(law.strain_secondary_branch(stress))
+                e_star = float(curve.delta_strain(elastic_mpa / limit_load_factor))
+            else:
+                stress = float(law.stress(elastic_mpa, rtol=_NEUBER_RTOL, tol=_NEUBER_TOL_MPA))
+                strain = float(law.strain(stress))
+                e_star = float(curve.strain(elastic_mpa / limit_load_factor))
+        except RuntimeError as exc:
+            raise FatigueError(
+                f"pyLife's extended Neuber solve did not converge for an elastic notch stress of "
+                f"{elastic_mpa:g} MPa ({exc}). A stress this far past the cyclic curve is outside "
+                "what a notch approximation can answer; check the load and the curve's constants."
+            ) from exc
+        product = strain * stress
+        wanted = elastic_mpa * limit_load_factor * e_star
+        if not (math.isfinite(product) and math.isclose(product, wanted, rel_tol=_NEUBER_CHECK, abs_tol=1e-15)):
+            raise FatigueError(
+                f"pyLife's extended Neuber solve returned σ = {stress:g} MPa, ε = {strain:g} for an "
+                f"elastic notch stress of {elastic_mpa:g} MPa, and ε·σ = {product:g} where the rule "
+                f"requires {wanted:g}. The root is not a root, so no notch stress is reported."
+            )
+        return stress, strain
+
+
+#: Passed to pyLife's Newton solve, whose defaults (1e-4) are looser than the check below.
+_NEUBER_RTOL: float = 1e-10
+_NEUBER_TOL_MPA: float = 1e-9
+#: How closely ε·σ must equal L·K_p·e* for pyLife's answer to be reported.
+_NEUBER_CHECK: float = 1e-6
 
 
 def _to_woehler(curve: SNCurve) -> Any:

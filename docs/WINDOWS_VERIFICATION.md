@@ -365,6 +365,25 @@ server inherits and the Git Bash one.
       reproductions miss it. **Do not loosen it to make a run pass** — a model that needs 5%
       is telling you something true.
 
+      **UPDATE 2026-09-15 (Linux) — steps 2 and 3 are coded; the run and the re-record are
+      yours.** ccx 2.20-1 in docker solved the **full hemisphere** (not the quarter) and gave
+      184.97 mm at h = 250 mm tri6 — see E7 task 1's status for why the full model, why 4 kN
+      per point and why half the diametral change. `Blocker.NO_SHELL_SOLVER` is gone,
+      `nafems.run_le3` exists, and **nothing was run on Linux after the code was written**, at
+      the user's instruction. What this row now needs, in order:
+
+      1. `venv/bin/python -m pytest tests/test_verify_le3.py tests/test_verify_nafems.py
+         tests/test_fatigue_notch.py -q` — all written blind. `TestCalculiXReproducesTheReference`
+         solves one grid through your ccx 2.23; expect 185 mm ±2%.
+      2. `ruff check app/ tests/` and `mypy app/` — also not run on the code this row names.
+      3. **Re-record** (`venv/bin/python -m app.verify.recorded`). The artefact is stale on
+         purpose (`app/mesh/structural.py`, `app/verify/provenance.py`, `nafems.py` moved), so
+         until this runs `test_trust`, `test_verify_recorded` and `test_verify_register` are red
+         and the trust page publishes nothing. LE3's three grids (500/355/250 mm) are the slow
+         part. If the study comes back `UNCONVERGED`, record it as that — do not pick sizes after
+         the fact.
+      4. Commit the artefact. Tick this box only if LE3's recorded outcome is `AGREED`.
+
 ### B. CATIA seat — needs a licensed V5 seat and the bridge
 
 - [x] **B1 — E1 task 7, cross-backend conformance.** The same compiled `Plan` through

@@ -300,6 +300,17 @@ two of them.
 > four-arrow full-hemisphere figure. Taken as a pair total. **2 kN per point is the value**,
 > carried by four sources including the original figure and a committed deck.
 
+> **Correction, 2026-09-15 — measured, and it changes the Altair reading.** "2 kN per point" is
+> right for the **quarter model** every source describes, and it is **not** the load on the
+> whole body. A and C each lie on a symmetry plane of the quarter (A on y = 0, C on x = 0), and
+> a point force on a symmetry plane of a half model stands for twice itself on the full body.
+> `nafems.run_le3` solves the full hemisphere, and ccx 2.20-1 gave a half-diametral change of
+> **92.487 mm at 2 kN per point and 184.97 mm at 4 kN** (tri6, h = 250 mm) against 185 mm — off
+> by exactly the predicted factor at 2 kN. So Altair's `4000 N` reads naturally as **per point
+> on the full hemisphere**, and the four-arrow full-hemisphere figure's `2KN` labels are the
+> quarter model's values drawn on the whole. The "pair total" reading above is superseded; §6
+> item 2 ("do not halve the loads") remains right for a quarter model.
+
 ### 2.3 Boundary conditions
 
 | Constraint | Where | Sources |

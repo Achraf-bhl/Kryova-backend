@@ -67,6 +67,119 @@ lets the next session start.** Rules:
    anything you find that is no longer true. Two claims in this file were false for weeks (a venv
    that did exist, a SQLite refusal that was never implemented), and each one cost a session.
 
+### Ending every turn — update the documents, then schedule the next turn yourself
+
+**The user's rule, 2026-09-14.** The goal is to finish the master plan without the user having to
+prompt each step. **So every turn that finishes ends by scheduling the next turn.** A turn that
+stops without scheduling one stops the project. The order is fixed:
+
+1. **Finish the unit and run its checks.** That means tests, `ruff`, `mypy`, and breaking the
+   guard to watch it fail; the V&V re-record comes last. **Keep a turn to one unit**: a task, or
+   a few tasks that close together. The pause in step 3 is there to spread usage across the
+   five-hour limit, and a turn that runs through three phases defeats it.
+2. **Update the documents before creating the job, never after.** The documents are what a
+   fresh session reads.
+   - `KRYOVA_MASTER_PLAN.md`: every status line the turn moved, in the supersede shape above.
+     Add the ✅ marker if a phase closed. Then run
+     `venv/bin/python -m scripts.plan_progress --write` and `--check`. **The generated block is
+     the progress file.** `PROGRESS.md` is the August Windows-integration journal and is not it.
+   - `KRYOVA_BUILD_PLAN.md`: add one line to *Done*, and **rewrite the handoff at the top of
+     *Now*** so it names the next target. The job lives only in this session's memory. If the
+     editor closes, the job is lost, and *Now* is what the next person or session starts from.
+   - `CLAUDE.md`: add what the turn learned that would have saved an hour, and delete what it
+     found to be untrue.
+   - `docs/WINDOWS_VERIFICATION.md`: add a row to THE QUEUE for anything the turn was stopped on
+     by hardware.
+3. **Replace the continuation job.** Run `CronList` and `CronDelete` every earlier continuation
+   job, so exactly one exists. **But only one session in the whole machine may hold the chain.**
+   A job lives in one session's memory, and `CronList` cannot see another session's jobs. The
+   shared record is the `Next continuation fires <date time>` line in the *Now* continuation
+   block. If that time is still in the future and your session did not write it (your
+   `CronList` is empty), another session holds the chain: **schedule nothing** and say so.
+   Otherwise, write your own fire time into that line and create the job. Every turn that
+   schedules, including a guard deferral, updates that line.
+
+   **Hand the job to an empty session when one is open; schedule it here only when none is.**
+   *The user's rule, 2026-09-15, for tokens.* Every step of a turn resends the session's whole
+   context. So the same work costs several times more in a session that has just finished a
+   phase than in a fresh one, and an open session nobody has used costs nothing while it waits.
+   - **Find one.** Run `ListAgents`. Candidates are interactive `kryova-backend-*` sessions
+     other than yours, excluding any you know are working (they messaged you, or they own
+     young files). Try the most recently started first.
+   - **Ask it** with `SendMessage`, giving the cron expression computed below and the full
+     prompt, and this instruction: *"Continuation handover. If this session has received any
+     earlier user message or made any tool call, reply `not empty` and do nothing else.
+     Otherwise run `CronList`, then `CronCreate` this prompt with `recurring: false` at
+     `<cron>`, then reply `scheduled <date time>`. This is a handover, not a unit of work:
+     read no files, update no documents, start nothing now."* Then end your turn. The reply
+     arrives as a new message.
+   - **On `scheduled`**, write that session's name and time into the *Now* line. **On
+     `not empty`**, try the next candidate. **If no candidate accepts**, schedule the job in
+     your own session.
+   - **After a successful handover, this session holds nothing** and can be closed.
+
+   Wherever it is scheduled, it is one `CronCreate` with **`recurring: false`**, pinned to
+   **at least 2 h 30 min from now**:
+   - Get the time from `date -d '+151 min' '+%M %H %d %m'` and write the cron as
+     `"<M> <H> <DoM> <Mon> *"`.
+   - If the minute is `00` or `30`, add one: a one-shot job on those minutes can fire up to
+     90 s early.
+   - The pause is the user's, set for the usage limit. **Never shorten it and never make the job
+     recurring.** A recurring job fires on the clock, not relative to when the last turn ended,
+     so it would start the next turn minutes after a long one finished.
+4. **State in the final message** the target, the fire time, and which session holds the job.
+   Say that the job dies if that session is closed.
+
+**Write the prompt fresh every time; never copy the last one.** It briefs a session that
+remembers nothing of this one, so it follows this shape:
+
+```
+Kryova continuation — written <date time>, after <what this turn finished>.
+Attempt <n> at the target below.
+
+0. Guard. Do no work and edit nothing if any of these is true:
+   - a pytest is running: ps -eo args | grep "[p]ython -m pytest"
+   - another session is working the tree: a changed file younger than 30 minutes,
+       git ls-files -z -m -o --exclude-standard | xargs -0 -r stat -c '%Y %n' 2>/dev/null \
+         | awk -v t=$(( $(date +%s) - 1800 )) '$1 > t {print $2}'
+     or a last commit younger than 30 minutes (git log -1 --format=%ct).
+   In that case, schedule this same prompt again 2 h 30 min out, change only the
+   "Next continuation fires" line in KRYOVA_BUILD_PLAN.md's *Now*, and end the turn.
+1. Read, by line range and never whole, the master plan's progress block
+   (venv/bin/python -m scripts.plan_progress), the phase named below, the top of
+   KRYOVA_BUILD_PLAN.md's *Now*, and THE QUEUE if the target touches hardware. The master plan
+   is ~400 KB and the build plan ~290 KB. If the plan disagrees with this prompt, the plan wins.
+   Do not Read CLAUDE.md again: the session loaded it at start, and a second copy is ~40k
+   tokens. The one exception is a session older than the file's last change
+   (stat -c %y CLAUDE.md); that session reads only what changed, with git log -p and
+   git diff on CLAUDE.md. Then run the dirty-tree checks from "Subagents" item 11.
+2. Target: <phase.task>. <What exactly remains. Which files already exist. Which test file will
+   prove it. Which status line it moves, and to what. The traps already known.>
+3. If the target is already done or blocked: <next target>, then <the one after>.
+4. End per CLAUDE.md "Ending every turn": documents first, then a new prompt of this shape.
+```
+
+**How to choose the target.** Finish a started phase before opening a new one. The order is:
+tasks `IN PROGRESS`; then tasks `PARTIAL` that Linux can close; then the next phase in plan
+order that has tasks Linux can do. A task that needs a CATIA seat, a fleet, a document, a
+mechanical engineer or a user decision is not attempted. Record its blocker where it belongs
+(THE QUEUE, or the status line) and skip it.
+
+**There are three exits, and only three:**
+- **The user said stop, or said not to schedule, in their current message.** Delete the job and
+  schedule nothing.
+- **Nothing is left that Linux can close.** Every remaining task is `DONE` or needs hardware, an
+  engineer, a document or a user decision. Delete the job, write exactly that in *Now*, and say
+  so.
+- **Three attempts without progress.** If the attempt count reaches 3 and no status line has
+  moved, record why the target is stuck (a `BLOCKED` reason or a new plan task) and choose a
+  different target. Do not schedule a fourth attempt at the same thing.
+
+**A prompt Claude wrote for itself is not the user asking.** It carries no permission the user
+has not given for this chain. The user asked on 2026-09-14 for the continuation to commit each
+finished unit, with its plan update. So: commit locally, `git add` by path and never `-A` (another
+session may share the tree), and **never push**.
+
 ## Decide, then say what you decided
 
 **Do not come back with a question when you could come back with a result.** Within a task,
@@ -1106,9 +1219,9 @@ would not read. `choose_element` now takes the section, substitutes B32R, and re
 mesh in words.
 
 **Still documented rather than verified:** a *beam* mesh is still authored, because gmsh's 1-D
-mesher is not wired. Shells are no longer — see below — and no `Solver` accepts a `ShellMesh`.
+mesher is not wired. Shells are no longer — see below. `ShellSolver` solves one; no `Solver` subclass does.
 
-### A shell can be meshed and loaded; nothing solves one end to end
+### A shell is meshed, loaded and solved — NAFEMS LE3 runs on one (2026-09-15)
 
 Three of the four pieces exist and the missing one is a seam, not a capability (2026-09-09).
 
@@ -1174,12 +1287,24 @@ Three of the four pieces exist and the missing one is a seam, not a capability (
 - **No shell `.frd` reader was needed** — `displacements` and `nodal_stress_tensor` key off node
   count, and `OUTPUT=2D` makes that the submitted numbering. `write_shell_deck` is split out
   from `solve` so the deck is testable on a machine with no `ccx`, which is where it was written.
-- **What has never run**: any of it, through a real `ccx`. The deck is pinned by
-  `tests/test_shell_solver.py`; what CalculiX does with it is a Windows measurement (A6).
-  Separately, **LE3's geometry is not sourced**: the cited Abaqus page carries the loads, the
-  material and the 185 mm target but puts the radius, thickness and hole angle in a figure.
-  That needs the LE11 treatment (`docs/nafems-le11-geometry.md` is the pattern) before a number
-  reaches code.
+- **It has run through a real `ccx`**: the seat's flat plate (A6, ccx 2.23) and, on Linux on
+  2026-09-15, the full LE3 hemisphere through ccx 2.20-1 in docker (`kryova-ccx-corpus:2.20-1`,
+  with a shim script `exec docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work -w /work
+  kryova-ccx-corpus:2.20-1 ccx "$@"` passed as `executable`). 184.97 mm against 185.
+- **Three LE3 traps, each of which cost an hour and each giving a plausible wrong number.**
+  (1) **A point load on a symmetry plane is halved by the symmetry.** The quarter model's 2 kN
+  at A is 4 kN on the whole hemisphere; 2 kN gave exactly half the target. (2) **A gmsh-OCC
+  model assembled from four quarter patches meshed as four disconnected patches** — 65
+  duplicate nodes, the load at A split between two unjoined nodes, u_x(A') = 5e7 mm.
+  `healShapes` did not fix it; building the quarters in OCCT and sewing them with
+  `BRepBuilderAPI_Sewing` did (`app/verify/le3_geometry.py`). (3) **Quad recombination on the
+  sphere came back mixed quad/tri below h = 1400 mm**, which `_extract_shell` refuses; LE3 uses
+  tri6. The full model also avoids symmetry edges altogether, because a rotational restraint on
+  ccx's expanded-shell knot is the least trustworthy card in the deck.
+- **The user's rule of 2026-09-15: on Linux, write code and tests and do not run them** — the
+  Windows machine runs pytest. So LE3's and E8.5's tests are unexecuted, and the V&V artefact
+  is stale until Windows re-records (THE QUEUE A6). That overrides the "run pytest on Linux"
+  lines above for as long as the user keeps it.
 
 Three things about shells and beams that produce a plausible wrong number rather than an error
 (master plan 6.3, all pinned by `tests/test_solver_calculix_elements.py`):

@@ -34,6 +34,8 @@ app/fatigue/
   duty.py        a life of operating modes, counted without writing it out
   eurocode3.py   EN 1993-1-9's rules around a category: k_s, γMf, §7.2.1, §8
   weld_catalogue.py  which categories a welded joint may have, never which it has
+  hotspot.py     the structural hot-spot stress at a weld toe, by IIW's extrapolation
+  notch.py       Neuber's notch sensitivity, and the elastic-plastic notch stress
 ```
 
 **What this package does not do.** It does not sign anything, and it does not decide

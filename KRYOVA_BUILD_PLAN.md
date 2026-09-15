@@ -15,6 +15,28 @@ happened.
 
 ## Now
 
+> **Handoff, 2026-09-15 (morning) — the user is driving phases to 100% interactively, and on
+> Linux nothing is run.** "Write the code and the tests, don't launch pytest; Windows tests."
+> Done this stretch: **E7** (LE3 runs, `*E7`) and **E8.5**. Next, in the user's order: E3 and
+> E15 residuals, then **E8** (task 6: fatigue reaches the product), **E18**, **E9**, **E13**,
+> **E17**. No continuation job is held for this stretch: the user asked for continuous work in
+> the session. Before anything else on Windows: THE QUEUE A6's 2026-09-15 update (run the new
+> tests, ruff, mypy, re-record V&V).
+
+> **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
+> every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
+> **Next continuation fires 2026-09-15 03:28** — target **E8.5** (see the handoff below).
+> **Held by `kryova-backend-78`**, which confirmed `scheduled 2026-09-15 03:28` at 00:59 after
+> `kryova-backend-26` declined. `kryova-backend-43` holds nothing. The user stopped the chain on
+> 2026-09-15 at 00:10 and restarted it at 00:20; E8.3 closed as PARTIAL in `11fc17c`.
+> At 23:31 another
+> session was working **E8** (`app/fatigue/field.py`, `tests/test_fatigue_field.py`,
+> uncommitted, pytest running). The queued target is therefore: **finish E8 if that session has
+> stopped; else E1.3** (`catia_delete_feature` on the open kernel, plus a reasoned refusal for
+> every other unimplemented operation); **else P4.2** (a STEP attachment becomes a
+> `GeometryVersion`; images go to the vision provider). If the job was lost because the session
+> closed, start from this line.
+
 > **Handoff, 2026-09-15 — E8 is at 58%. The EC3 weld tables are in; notch and hot spot are next.**
 > Session `kryova-backend-43` moved **E8.3** to PARTIAL. `app/fatigue/weld_catalogue.py` holds
 > 91 rows of Tables 8.3, 8.4, 8.5 and B.1, and a literal classification that never picks.
@@ -277,6 +299,21 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E7 task 1 and E8 task 5 closed on Linux, tests written and not run: NAFEMS
+  LE3 runs on a shell, and the hot-spot and notch rules are in code.** At the user's instruction
+  (09:22), code and tests are written on Linux and the Windows machine runs them. LE3 is the
+  **full hemisphere** (`app/verify/le3_geometry.py`, `nafems.run_le3`): 4 kN per point because
+  a load on a symmetry plane of the quarter is halved, three isostatic translational supports,
+  half the diametral change A–A'. Measured before encoding on ccx 2.20-1 in docker at
+  h = 250 mm tri6: 184.97 mm against 185 (92.487 at 2 kN). `Blocker` is empty;
+  `RunProvenance` and the convergence study accept a `ShellMesh`. E8.5: IIW-1823-07 surface
+  extrapolation with exact Lagrange weights held to the printed coefficients
+  (`app/fatigue/hotspot.py`), Neuber's technical factor from NACA TN 2805 and the extended
+  Neuber rule through pyLife with its root checked (`app/fatigue/notch.py`,
+  `FatigueBackend.extended_neuber` — a new abstract method). Tests: `tests/test_verify_le3.py`,
+  `tests/test_fatigue_notch.py`, `tests/test_verify_nafems.py` (adjusted). **The V&V artefact is
+  stale until Windows re-records** (THE QUEUE A6), so the trust/recorded/register tests are red
+  there until it does. E7 closes at 100%; E8 goes to 67%.
 - **2026-09-15 — P4 task 2, partial: an attached part becomes a geometry version, and a CSV
   attached through the product is read as a table at last.** Detection fell back to the stored
   blob's name, which is a digest with no extension, so every CSV attached through
@@ -333,6 +370,11 @@ needs a different extraction stated up front rather than chosen after the sweep.
   30 guards broken: 28 caught, 1 removed as redundant, 1 unpinned (`Thickening`, measured
   identical). E1 is now 11 of 12. Task 4, the constraint solver for `catia_sketch_constrain`,
   is the one left.
+- **2026-09-14 — Process: every turn ends by scheduling the next one** (CLAUDE.md *Ending every
+  turn*). It is a one-shot job, never recurring, at least 2 h 30 min out so usage spreads across
+  the five-hour limit. The documents are updated before the job is created, and the prompt is
+  written fresh each time with a guard: no work while a pytest runs or another session is
+  changing the tree. No code and no plan status changed.
 - **2026-09-14 — E8 tasks 1, 2 and 4: fatigue reads the solver's own stress, counts a whole
   duty cycle, and refuses what it cannot assess. E8 goes from 20% to 50%; tasks 3, 5 and the new
   6 stay open.**

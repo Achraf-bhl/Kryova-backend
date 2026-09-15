@@ -51,6 +51,7 @@ from pydantic import BaseModel
 
 from app.kernel.provenance import Record, attach, measured, unavailable
 from app.mesh.planar import TriMesh, planar_quality
+from app.mesh.structural import ShellMesh, shell_quality
 from app.mesh.types import TetMesh, quality
 from app.verify.convergence import ConvergenceStudy
 
@@ -72,7 +73,11 @@ def _sha256(*chunks: bytes) -> str:
 #: plane model has triangles and an area — and the code below has to say which
 #: it is holding rather than paper over the difference with a shared attribute
 #: name that would put mm^2 under a key called `volume_mm3`.
-AnyMesh = TetMesh | TriMesh
+#: A shell mesh joined on 2026-09-15 with NAFEMS LE3, the first benchmark
+#: solved on one. It measures an area like a plane mesh does, but it is curved
+#: in three dimensions and is kept a separate member rather than folded into
+#: `TriMesh`, whose whole contract is z = 0.
+AnyMesh = TetMesh | TriMesh | ShellMesh
 
 
 def mesh_digest(mesh: AnyMesh) -> str:
@@ -85,7 +90,13 @@ def mesh_digest(mesh: AnyMesh) -> str:
     point: a result and the mesh it was computed on travel together or the
     result is worthless.
     """
-    elements = mesh.tris if isinstance(mesh, TriMesh) else mesh.tets
+    elements: Any
+    if isinstance(mesh, TriMesh):
+        elements = mesh.tris
+    elif isinstance(mesh, ShellMesh):
+        elements = mesh.faces
+    else:
+        elements = mesh.tets
     return _sha256(
         np.ascontiguousarray(mesh.nodes, dtype=np.float64).tobytes(),
         np.ascontiguousarray(elements, dtype=np.int64).tobytes(),
@@ -273,6 +284,15 @@ class RunProvenance:
             stats = dict(planar_quality(self.mesh))
             measure_key = "area_mm2"
             element_count = self.mesh.element_count
+        elif isinstance(self.mesh, ShellMesh):
+            # A shell has no sliver measure: `shell_quality` reports skew and
+            # aspect only. The key stays in the payload as None rather than a
+            # zero that would read as "measured, none found".
+            planar = True
+            stats = dict(shell_quality(self.mesh))
+            stats.setdefault("sliver_count", None)
+            measure_key = "area_mm2"
+            element_count = self.mesh.face_count
         else:
             planar = False
             stats = dict(quality(self.mesh))
@@ -316,7 +336,9 @@ class RunProvenance:
             payload,
             f"mesh.{measure_key}",
             measured(
-                "sum of signed triangle areas"
+                "sum of corner-node face areas (quadratic bulge ignored)"
+                if isinstance(self.mesh, ShellMesh)
+                else "sum of signed triangle areas"
                 if planar
                 else "sum of signed tetrahedron volumes"
             ),
@@ -384,6 +406,8 @@ class RunProvenance:
         elements = (
             self.mesh.element_count
             if isinstance(self.mesh, TriMesh)
+            else self.mesh.face_count
+            if isinstance(self.mesh, ShellMesh)
             else self.mesh.tet_count
         )
         attach(

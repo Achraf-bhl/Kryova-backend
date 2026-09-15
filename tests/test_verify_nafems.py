@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import replace
+from typing import cast
 
 import numpy as np
 import pytest
@@ -213,12 +215,20 @@ class TestACaseThatCannotRunSaysWhatWouldMakeItRun:
     def test_a_case_that_runs_and_also_names_a_blocker_is_refused(self) -> None:
         runnable = BY_ID["nafems-fv52"].benchmark
 
+        # `Blocker` has no members since LE3 ran (2026-09-15), so the refusal is
+        # exercised with a stand-in: `Case` checks presence, not membership.
         with pytest.raises(ValueError, match="runs and also names a blocker"):
-            Case(benchmark=runnable, blocker=Blocker.NO_SHELL_SOLVER)
+            Case(benchmark=runnable, blocker=cast(Blocker, "stand-in-blocker"))
 
     def test_a_case_that_does_not_run_and_names_no_blocker_is_refused(self) -> None:
+        not_running = replace(
+            BY_ID["nafems-le3"].benchmark,
+            run=None,
+            blocked_reason="waiting on something this test invents",
+        )
+
         with pytest.raises(ValueError, match="names no blocker"):
-            Case(benchmark=BY_ID["nafems-le3"].benchmark)
+            Case(benchmark=not_running)
 
     def test_every_blocker_in_the_vocabulary_is_used_by_a_case(self) -> None:
         """A declared blocker no case backs is a claim about the product with no

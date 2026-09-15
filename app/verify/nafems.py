@@ -32,13 +32,13 @@ reproduces every mode in it to 0.00%. Our own answer converges through 44.10 to
 
 ## What the catalogue reports today
 
-Three cases of five run, and all three agree — FV52 for free vibration, LE10
-for linear static on a solid, and LE1 for linear static in plane stress. The
-ratio is the useful output, not an embarrassment: `blockers()` rolls the other
-two up by what is missing, and the answer is now only two things — a shape
-nobody has authored, and shell elements. A catalogue that reports "this case is
-waiting on an element family E6 already describes and nothing solves" is telling
-you what to build next, where a silent skip tells you nothing.
+Every case of five runs as of 2026-09-15, when LE3 — the last one, blocked on
+shell elements — was joined to `ShellSolver`. `blockers()` still exists and is
+empty: the vocabulary is the catalogue's way of saying what a case waits on,
+and the day a sixth case is catalogued before it can run, it names its blocker
+the same way. A catalogue that reports "this case is waiting on an element
+family nothing solves" is telling you what to build next, where a silent skip
+tells you nothing.
 
 **Every blocker here has an owner outside this file**, and that is a rule rather
 than a coincidence. For a day, four cases named capabilities that appeared in no
@@ -84,10 +84,12 @@ from __future__ import annotations
 import math
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
+
+import numpy as np
 
 from app.mesh.planar import TriMesh
 from app.mesh.primitives import box_mesh, promote_to_tet10
@@ -95,6 +97,7 @@ from app.mesh.types import MeshError, TetMesh
 from app.solve.linear_static import LinearStaticSolver
 from app.solve.modal import ModalEigenSolver
 from app.solve.plane import PlaneCase, PlaneSolver, PlaneState
+from app.solve.sections import ShellSection
 from app.solve.types import (
     BoxSelector,
     EllipticalWallSelector,
@@ -105,6 +108,7 @@ from app.solve.types import (
     Material,
     ModalCase,
     PressureLoad,
+    SphereSelector,
 )
 from app.verify.benchmarks import (
     Benchmark,
@@ -114,6 +118,17 @@ from app.verify.benchmarks import (
     TargetBasis,
 )
 from app.verify.convergence import ConvergenceStudy, run_study
+from app.verify.le3_geometry import (
+    LE3_AREA_MM2,
+    LE3_POINT_A,
+    LE3_POINT_A_OPPOSITE,
+    LE3_POINT_C,
+    LE3_POINT_C_OPPOSITE,
+    LE3_POINT_E,
+    LE3_RADIUS_MM,
+    LE3_THICKNESS_MM,
+    hemisphere_shell,
+)
 from app.verify.le11_geometry import (
     LE11_OUTER_CYLINDER_RADIUS_MM,
     LE11_OUTER_SPHERE_RADIUS_MM,
@@ -123,7 +138,7 @@ from app.verify.le11_geometry import (
 )
 from app.verify.le11_geometry import LE11_POINT_A as LE11_GEOMETRY_POINT_A
 from app.verify.provenance import RunProvenance, identify_solver
-from app.verify.quantities import modal_frequency, stress_component_at
+from app.verify.quantities import Quantity, modal_frequency, stress_component_at
 
 # -- sources -----------------------------------------------------------------
 #
@@ -161,6 +176,50 @@ SOURCES: Final[dict[str, str]] = {
         "NAFEMS publication TNSB Rev. 3, October 1990. Read at "
         "https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le3.htm "
         "on 2026-09-08."
+    ),
+    "nafems-le3-figure": (
+        "The original NAFEMS LE3 dimensioned figure, reproduced as a scan on page 6 of "
+        "TechSoft3D 'The Standard NAFEMS Benchmark Tests for HOOPS Solve' (report for "
+        "HOOPS Solve 2.13.0), which cites 'NAFEMS Finite Element Methods & Standards, The "
+        "Standard NAFEMS Benchmarks, Test No. LE3. Glasgow: NAFEMS, Rev. 3, 1990'. The "
+        "primary geometry source: it states the sphere twice and in two forms, as the "
+        "equation x^2 + y^2 + z^2 = 100 and as r = 10m, with Thickness = 0.04m, 2KN "
+        "outward at A and 2KN inward at C, an axis triad with z polar / x through A / y "
+        "through C, and both the quarter view and the full-hemisphere view drawn CLOSED "
+        "AT THE POLE — LE3 has no polar hole. Only the figure is cited: the surrounding "
+        "prose on that page is corrupt (it states the loading as a 1 MPa pressure on a "
+        "plate, copy-pasted from the preceding benchmark). Read at "
+        "https://docs.techsoft3d.com/hoops/mesh/_static/benchmark_reports/"
+        "benchmark_results_2.13.0.pdf on 2026-09-09."
+    ),
+    "esrd-le3-geometry": (
+        "ESRD 'Benchmarks Guide — The Standard NAFEMS Benchmarks: Linear Elastic Tests' "
+        "(2018), section 'NAFEMS LE3: Hemispherical Shell with Point Loads', page 12, "
+        "reproducing NAFEMS publication TNSB Rev. 3, 'The Standard NAFEMS Benchmarks', "
+        "October 1990. States the geometry in text rather than only in a figure: '90 deg "
+        "sector of hemispherical shell of R = 10 m with a constant thickness T = 0.04 m', "
+        "'Uz = 0 at point E', 'Symmetry boundary conditions along edges AE and CE', "
+        "'Concentrated point loads of Fx = 2 kN at point A, Fy = -2 kN at point C', "
+        "'Radial displacement at point A is 185 mm'. Its figure closes at E, confirming "
+        "there is no polar hole. Reports StressCheck 184.3 mm (16 elements) and 184.4 mm "
+        "(64 elements), and warns that point loads are inadmissible data for a hierarchic "
+        "shell model because the strain energy of a point load is not finite. Read at "
+        "https://www.esrd.com/wp-content/uploads/dlm_uploads/"
+        "Benchmarks-Guide-Standard-NAFEMS-Benchmarks-Linear-Elastic-Tests.pdf "
+        "on 2026-09-09."
+    ),
+    "altair-le3": (
+        "Altair OptiStruct verification problem OS-V: 0030 'Radial Point Load on a "
+        "Hemisphere', reproducing NAFEMS LE3. Carries 'The hemisphere is 10m in radius and "
+        "0.04 m in radial thickness', 'only a quarter of the hemisphere is modeled', "
+        "E = 68.25 GPa and nu = 0.3, 'Symmetric boundary constraints are applied on edges "
+        "AE and CE', 'The z-translation at point E is fixed, and all displacements on edge "
+        "AC are free', and 'The target is x-translation at point A, with a target value of "
+        "0.185 m'. Writes the loads as 'Two pairs of identical loads, 4000 N'; see "
+        "docs/nafems-le3-geometry.md section 2.2 for how that reads against the 2 kN the "
+        "quarter-model sources print. Read at "
+        "https://help.altair.com/hwsolvers/os/topics/solvers/os/"
+        "nafems_test_problem_le3_r.htm on 2026-09-09."
     ),
     "abaqus-le10": (
         "Abaqus Benchmarks Guide (2017), LE10 'Thick plate under pressure', "
@@ -289,28 +348,19 @@ class Blocker(StrEnum):
     release them. Three cases blocked on one missing element family is a
     different message from three cases blocked on three different things, and
     free-text reasons cannot tell those apart.
-    """
 
-    #: `app/mesh/structural.py` and `app/solve/sections.py` describe shells,
-    #: `app/solve/calculix/elements.py` writes them into a deck, and since
-    #: 2026-09-09 `gmsh_mesher.generate_shell_mesh` produces one and
-    #: `shell_loads` loads it — but no `Solver` accepts a `ShellMesh`, so
-    #: nothing here solves one end to end. E6's named residual, narrowed.
-    NO_SHELL_SOLVER = "no-shell-solver"
+    **Empty since 2026-09-15.** Its last member, `NO_SHELL_SOLVER`, was retired
+    when `run_le3` joined `generate_shell_mesh`, `ShellSection` and
+    `ShellSolver` into a run. The vocabulary stays because a case catalogued
+    before it can run must still name what it waits on; add the member with
+    the case, and give it an owner outside this file (CLAUDE.md, Verification
+    item 3).
+    """
 
 
 #: What each blocker means and what would clear it. Kept beside the enum so a
 #: report can print the sentence without every call site inventing its own.
-BLOCKER_DETAIL: Final[dict[Blocker, str]] = {
-    Blocker.NO_SHELL_SOLVER: (
-        "The benchmark is posed on shell elements. A shell can now be meshed "
-        "(`app.mesh.gmsh_mesher.generate_shell_mesh`), loaded "
-        "(`app.solve.shell_loads`) and written into a deck "
-        "(`app.solve.calculix.elements`), but the `Solver` interface takes a "
-        "`TetMesh`, so no solver here accepts a `ShellMesh` and nothing joins "
-        "those three into a run. E6's named residual, narrowed to the seam."
-    ),
-}
+BLOCKER_DETAIL: Final[dict[Blocker, str]] = {}
 
 
 @dataclass(frozen=True)
@@ -1241,6 +1291,232 @@ def run_le10() -> BenchmarkRun:
     )
 
 
+# -- LE3: hemispherical shell under point loads -----------------------------
+#
+# The benchmark is posed on a quarter model with two symmetry edges. This
+# encodes the whole hemisphere instead, and three consequences follow, each
+# stated where it is taken rather than left for a reader to rediscover:
+#
+# 1. **No rotational restraint anywhere.** A symmetry edge on a shell restrains
+#    two rotations, and CalculiX has no shell formulation of its own — it
+#    expands S6 into wedge solids tied by knots, where a rotational restraint
+#    is the least trustworthy thing in the deck. The full hemisphere needs only
+#    three translational supports, which remove the six rigid-body modes and
+#    carry no reaction because the four loads are self-equilibrated.
+# 2. **The loads double.** A and C each lie on one of the quarter model's
+#    symmetry planes (A on y = 0, C on x = 0). A point force on a symmetry
+#    plane of a half model stands for twice that force on the whole body, so
+#    the quarter model's 2 kN at A is 4 kN at A on the hemisphere, and likewise
+#    at C, A' and C'. Measured rather than argued alone: on 2026-09-15, ccx
+#    2.20-1 on this full-hemisphere model gave a half-diametral change of
+#    92.487 mm at 2 kN per point and 184.97 mm at 4 kN (tri6, h = 250 mm)
+#    against the 185 mm target — the 2 kN reading is off by exactly the factor
+#    the symmetry argument predicts. `docs/nafems-le3-geometry.md` section 2.2
+#    records the reconciliation with Altair's "4000 N".
+# 3. **The read-out is half the diametral change**, (ux(A) - ux(A')) / 2. With
+#    self-equilibrated loads and isostatic supports ux(A) alone is the same
+#    number up to a rigid-body motion the supports already fix; the symmetric
+#    form is the one that does not depend on which point the supports picked.
+
+#: Per point on the full hemisphere, N. See item 2 above for why it is twice
+#: the quarter model's 2 kN (SOURCES["esrd-le3-geometry"], ["nafems-le3-figure"]).
+LE3_POINT_LOAD_N: Final = 4_000.0
+
+#: E = 68.25 GPa and nu = 0.3 (SOURCES["abaqus-le3"], ["altair-le3"]).
+#: `yield_strength_mpa` and `density_kg_m3` are required by `Material` and are
+#: **not** part of the benchmark: a linear static run reads neither for the
+#: displacement this case compares.
+LE3_MATERIAL: Final = Material(
+    name="NAFEMS LE3 hemisphere (E=68.25 GPa, nu=0.3)",
+    youngs_modulus_mpa=68_250.0,
+    poissons_ratio=0.3,
+    yield_strength_mpa=250.0,
+    density_kg_m3=2700.0,
+)
+
+#: Corner-node element sizes, mm, chosen on the 1.4 spacing rule before the
+#: sweep (CLAUDE.md, "Analyses available" item 5): 500 / 1.41 / 1.41. The
+#: finest is the size measured at 184.97 mm above.
+LE3_ELEMENT_SIZES_MM: Final[tuple[float, ...]] = (500.0, 355.0, 250.0)
+
+#: How far the mesh's corner area may fall short of 2 pi R^2. The same rule and
+#: the same 0.5% as LE10's volume check: a chorded sphere is a smaller shell,
+#: not a coarser mesh of this one.
+LE3_AREA_TOLERANCE: Final = 0.005
+
+#: How far the nearest node may sit from A or A' and still be that point, mm.
+#: A and A' are vertices of the sewn geometry, so gmsh puts a node exactly on
+#: each; this only has to survive round-off, like `SphereSelector`'s radius.
+LE3_POINT_TOLERANCE_MM: Final = 1.0
+
+#: ccx's wall clock for one level. The finest level is tens of thousands of S6
+#: expanded to wedges; the default 30 minutes is kept as a floor, not tuned.
+LE3_TIMEOUT_S: Final = 3600.0
+
+
+def _le3_point(point: tuple[float, float, float]) -> SphereSelector:
+    return SphereSelector(centre=point, radius=LE3_POINT_TOLERANCE_MM)
+
+
+def le3_case() -> LoadCase:
+    """The full hemisphere: four radial point loads and three isostatic supports.
+
+    Supports: E held in x, y and z; A held in y and z; C held in z. Translation
+    is fixed at E; rotation about z by A's y, about y by A's z, about x by C's
+    z. Six restraints, six rigid-body modes, no redundancy — so the supports
+    carry nothing and the shell deforms as if free.
+    """
+    force = LE3_POINT_LOAD_N
+    return LoadCase(
+        name="NAFEMS LE3 hemisphere under point loads (full model)",
+        material=LE3_MATERIAL,
+        fixtures=[
+            Fixture(where=_le3_point(LE3_POINT_E), dofs=["x", "y", "z"], name="pole E"),
+            Fixture(where=_le3_point(LE3_POINT_A), dofs=["y", "z"], name="point A"),
+            Fixture(where=_le3_point(LE3_POINT_C), dofs=["z"], name="point C"),
+        ],
+        loads=[
+            ForceLoad(
+                where=_le3_point(LE3_POINT_A), force_n=(force, 0.0, 0.0), name="outward at A"
+            ),
+            ForceLoad(
+                where=_le3_point(LE3_POINT_A_OPPOSITE),
+                force_n=(-force, 0.0, 0.0),
+                name="outward at A'",
+            ),
+            ForceLoad(
+                where=_le3_point(LE3_POINT_C), force_n=(0.0, -force, 0.0), name="inward at C"
+            ),
+            ForceLoad(
+                where=_le3_point(LE3_POINT_C_OPPOSITE),
+                force_n=(0.0, force, 0.0),
+                name="inward at C'",
+            ),
+        ],
+    )
+
+
+def le3_section() -> ShellSection:
+    """40 mm, on the mid-surface (SOURCES["nafems-le3-figure"])."""
+    return ShellSection(thickness_mm=LE3_THICKNESS_MM)
+
+
+def _le3_radial_displacement(mesh: Any, output: Any) -> float:
+    nodes = np.asarray(mesh.nodes)
+    moved = np.asarray(output.displacements).reshape(-1, 3)
+    picked: list[int] = []
+    for label, point in (("A", LE3_POINT_A), ("A'", LE3_POINT_A_OPPOSITE)):
+        distance = np.linalg.norm(nodes - np.asarray(point), axis=1)
+        node = int(np.argmin(distance))
+        if distance[node] > LE3_POINT_TOLERANCE_MM:
+            raise MeshError(
+                f"No node lies on point {label} {point}: the nearest is "
+                f"{distance[node]:.3g} mm away. The read-out needs a node on the loaded "
+                "point, which a mesh of the sewn hemisphere always has — so the geometry "
+                "handed to the mesher is not `le3_geometry.hemisphere_shell`."
+            )
+        picked.append(node)
+    return float((moved[picked[0], 0] - moved[picked[1], 0]) / 2.0)
+
+
+LE3_QUANTITY: Final = Quantity(
+    name="radial displacement at A (half the diametral change A-A')",
+    unit="mm",
+    read=_le3_radial_displacement,
+)
+
+
+def run_le3(executable: str | None = None) -> BenchmarkRun:
+    """Build the hemisphere, mesh it at three sizes in S6, solve with ccx, converge.
+
+    `executable` names the ccx binary; left out, it is `settings.calculix_path`
+    and then PATH, the order `app.simulation.runner` uses. A machine with no
+    ccx raises `CalculiXUnavailable` from the first level rather than recording
+    three failed levels, because "no solver" is not a discretisation result.
+    """
+    from app.core.config import settings
+    from app.manufacture.export import write_step
+    from app.mesh.gmsh_mesher import generate_shell_mesh
+    from app.solve.calculix.run import require_ccx
+    from app.solve.calculix.shell import ShellSolver
+    from app.solve.registry import calculix_identity
+
+    binary = str(require_ccx(executable or settings.calculix_path or None))
+    solver = ShellSolver(executable=binary, timeout_s=LE3_TIMEOUT_S)
+    case = le3_case()
+    section = le3_section()
+    meshes: dict[float, Any] = {}
+
+    with tempfile.TemporaryDirectory(prefix="nafems-le3-") as workspace:
+        step_path = Path(workspace) / "le3.step"
+        write_step(hemisphere_shell(LE3_RADIUS_MM), step_path)
+
+        def sample(element_size_mm: float) -> tuple[Any, float]:
+            mesh, _ = generate_shell_mesh(
+                step_path,
+                "step",
+                element_size_mm=element_size_mm,
+                element_order=2,
+                face_shape="tri",
+            )
+            shortfall = abs(mesh.area_mm2 - LE3_AREA_MM2) / LE3_AREA_MM2
+            if shortfall > LE3_AREA_TOLERANCE:
+                raise MeshError(
+                    f"At {element_size_mm:g} mm the mesh covers {mesh.area_mm2:.6g} mm^2 "
+                    f"against the hemisphere's exact {LE3_AREA_MM2:.6g} mm^2 "
+                    f"({shortfall * 100:.2f}% off): the flat facets have chorded the "
+                    "sphere into a smaller shell, not a coarser mesh of this one. Use a "
+                    "smaller element_size_mm."
+                )
+            meshes[element_size_mm] = mesh
+            return mesh, LE3_QUANTITY.read(mesh, solver.solve(mesh, case, section))
+
+        study = run_study(
+            LE3_QUANTITY.name, LE3_QUANTITY.unit, LE3_ELEMENT_SIZES_MM, sample
+        )
+
+    if not meshes:  # pragma: no cover - every level would have to fail to mesh
+        raise MeshError("No level of the LE3 study produced a mesh. " + study.report())
+
+    identity = identify_solver(solver)
+    engine = calculix_identity(binary)
+    identity = (
+        replace(identity, version=engine, version_reason="")
+        if engine is not None
+        else replace(
+            identity,
+            version_reason=(
+                f"The ccx binary at {binary!r} did not report a version, or its bytes "
+                "could not be read, so the build that produced this result is unnamed."
+            ),
+        )
+    )
+
+    finest = min(meshes)
+    return BenchmarkRun(
+        value=study.stated_value,
+        convergence=study,
+        provenance=RunProvenance(
+            analysis="linear-static",
+            quantity=LE3_QUANTITY.name,
+            unit=LE3_QUANTITY.unit,
+            value=study.stated_value,
+            geometry_source=(
+                "full hemisphere mid-surface, four 90 deg revolved patches sewn with OCCT "
+                f"and meshed from STEP in tri6: R = {LE3_RADIUS_MM:g} mm, shell section "
+                f"{LE3_THICKNESS_MM:g} mm; loads {LE3_POINT_LOAD_N:g} N per point (twice "
+                "the quarter model's, by symmetry)"
+            ),
+            mesh=meshes[finest],
+            case=case,
+            solver=identity,
+            element_size_mm=finest,
+            convergence=study,
+            notes={"benchmark": "nafems-le3", "section": f"shell {LE3_THICKNESS_MM:g} mm"},
+        ),
+    )
+
+
 # -- the catalogue -----------------------------------------------------------
 
 CASES: Final[tuple[Case, ...]] = (
@@ -1298,7 +1574,10 @@ CASES: Final[tuple[Case, ...]] = (
             analysis="linear-static",
             description=(
                 "A hemispherical shell pulled outward by 2 kN at A and pushed inward by "
-                "2 kN at C, on two symmetry edges, held at the pole. The classic test of "
+                "2 kN at C, on two symmetry edges, held at the pole — solved here as the "
+                "whole hemisphere with 4 kN at A, A', C and C' on three isostatic "
+                "supports, which is the same problem without a rotational restraint "
+                "for CalculiX's expanded shell to mistranslate. The classic test of "
                 "whether a shell element can represent inextensional bending: almost all "
                 "the 185 mm of movement is the shell changing shape rather than "
                 "stretching, so an element that locks reports a small fraction of it."
@@ -1316,14 +1595,21 @@ CASES: Final[tuple[Case, ...]] = (
                 ),
                 source=SOURCES["abaqus-le3"],
             ),
-            blocked_reason=blocked(
-                Blocker.NO_SHELL_SOLVER,
-                "LE3 is a shell benchmark and its whole subject is shell bending under "
-                "point loads.",
+            run=run_le3,
+            slow=True,
+            references=(
+                SOURCES["abaqus-le3"],
+                SOURCES["nafems-le3-figure"],
+                SOURCES["esrd-le3-geometry"],
+                SOURCES["altair-le3"],
+                "Geometry: docs/nafems-le3-geometry.md is the sourcing record. The model "
+                "is the full hemisphere rather than the published quarter, so each point "
+                "load is 4 kN (a load on a symmetry plane of the quarter stands for twice "
+                "itself on the whole body) and the quantity is half the diametral change "
+                "A-A'. Measured on 2026-09-15 with ccx 2.20-1: 92.487 mm at 2 kN per point "
+                "and 184.97 mm at 4 kN, tri6 at 250 mm.",
             ),
-            references=(SOURCES["abaqus-le3"],),
         ),
-        blocker=Blocker.NO_SHELL_SOLVER,
     ),
     Case(
         benchmark=Benchmark(
@@ -1502,6 +1788,10 @@ __all__ = [
     "FV52_QUANTITY",
     "FV52_SIDE_MM",
     "FV52_THICKNESS_MM",
+    "LE3_ELEMENT_SIZES_MM",
+    "LE3_MATERIAL",
+    "LE3_POINT_LOAD_N",
+    "LE3_QUANTITY",
     "NAFEMS_SUITE",
     "SOURCES",
     "Blocker",
@@ -1511,8 +1801,11 @@ __all__ = [
     "fv52_case",
     "fv52_fixtures",
     "fv52_mesh",
+    "le3_case",
+    "le3_section",
     "p18_revision",
     "p18_revision_of",
     "report",
     "run_fv52",
+    "run_le3",
 ]

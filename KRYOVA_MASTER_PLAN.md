@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 98/132 = 75% | 111/151 eng-months = 73% |
+| Engineering — E1–E23 | 15/24 | 100/132 = 76% | 112/151 eng-months = 74% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 146/193 = 75% | 138/189 eng-months = 73% |
+| **Programme** | 21/34 | 147/193 = 76% | 140/189 eng-months = 74% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 58%, E15 70%, E18 50%, P4 75%, P9 57% |
+| in flight | E8 75%, E15 70%, E18 50%, P4 75%, P9 57% |
 | nothing finished yet | E9, E13, E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -1611,8 +1611,15 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
 
-> ✅ PHASE COMPLETE (2026-09-11) — **task 1 stays `PARTIAL` on one case, LE3, and that is the
-> only thing open.** Tasks 2 through 7 are done and tested.
+> ✅ PHASE COMPLETE (2026-09-15) — all seven tasks done. **Task 1's last case, LE3, runs**: the
+> full hemisphere in tri6 through `ShellSolver`, 184.97 mm against the published 185 mm on
+> ccx 2.20-1 (measured on Linux in docker, one grid at h = 250 mm). **Its tests were written and
+> not run**, at the user's instruction of 2026-09-15 that the Windows machine runs the tests, and
+> the recorded V&V artefact is stale until that machine re-records it — THE QUEUE A6.
+>
+> The 2026-09-11 marker read as follows, heading hyphenated so the parser does not read it as
+> live: *PHASE-COMPLETE (2026-09-11)* — **task 1 stays `PARTIAL` on one case, LE3, and that is
+> the only thing open.** Tasks 2 through 7 are done and tested.
 >
 > **Task 7 was added and closed on the same day, and the reason is worth keeping.** The GUI run
 > of 2026-09-10 (night) showed this phase's central claim being broken on the surface the user
@@ -1658,6 +1665,29 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 1. **The NAFEMS standard benchmarks** (linear elastic, free vibration, thermal) as an automated
    suite. Reference values are reproduced in publicly readable vendor verification manuals
    (Abaqus, Ansys, DIANA) — a free, legitimate route to the targets.
+   > DONE (2026-09-15) — **all five cases run, and `Blocker` is empty.** LE3, the hemisphere
+   > under point loads, was the last, and it is encoded as the **whole hemisphere** rather than
+   > the published quarter (`app/verify/le3_geometry.py`, `nafems.run_le3`). The quarter needs
+   > rotational restraints on two symmetry edges, and ccx expands S6 into wedge solids tied by
+   > knots, where a rotational restraint is the least trustworthy card in the deck; the full
+   > model needs only three isostatic translational supports (E xyz, A yz, C z). Two
+   > consequences, both measured before they were encoded: **each point load is 4 kN**, because a
+   > point force on a symmetry plane of the quarter stands for twice itself on the whole body —
+   > 2 kN per point gave a half-diametral change of 92.487 mm and 4 kN gave **184.97 mm** against
+   > 185 mm (ccx 2.20-1 in docker, tri6, h = 250 mm) — and the quantity is **half the diametral
+   > change A–A'**, which a rigid-body motion cannot move. The geometry is four revolved quarters
+   > **sewn** with OCCT, because a gmsh-built four-patch model meshed as disconnected patches (65
+   > duplicate nodes along the seams) and split the load at A between two unjoined nodes. Three
+   > seams widened, stated: `RunProvenance.mesh` takes a `ShellMesh` (area, no sliver count);
+   > `ShellMesh` gained `element_count`/`area` so a convergence study places it as a 2-D level;
+   > `Blocker.NO_SHELL_SOLVER` was deleted with its last case. Sizes 500/355/250 mm on the 1.4
+   > rule, stated before any sweep. **Not run here**: the tests below were written on Linux on
+   > 2026-09-15 and not executed, at the user's instruction; the three-grid study has not been
+   > recorded, and the fingerprint moved (`app/mesh/structural.py`, `app/verify/*`), so the
+   > trust register publishes nothing until the Windows machine re-records (THE QUEUE A6).
+   > Tested by: `tests/test_verify_le3.py`, `tests/test_verify_nafems.py`.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-09) — **four of five cases run; three validate and the fourth honestly
    > does not.** LE1 joined FV52 and LE10 once E7 task 5 built the element family it needs.
    > **LE11 now runs too, and reports `UNCONVERGED`** — which is the finding rather than a
@@ -2178,6 +2208,30 @@ analyst.**
 5. **Notch handling, hot-spot stress extrapolation.** Annex B's hot-spot categories are in
    `docs/eurocode3-fatigue-reading.md`. The extrapolation's read-out distances are not in the pages
    read there and must be sourced before a method claims any.
+   > DONE (2026-09-15) — **the read-out distances are sourced, and both halves are in code.**
+   > `app/fatigue/hotspot.py` holds IIW-1823-07's five surface-extrapolation rules, equations
+   > (2.7)–(2.11) on pp. 24–25, read on page images because the equations have no text layer
+   > (`docs/iiw-hot-spot-and-neuber-reading.md`). **The weights applied are the exact Lagrange
+   > weights** through each rule's points, held to IIW's printed coefficients at the page's own
+   > precision: the printed 1.67/−0.67 would miss a linear field by 0.002 of its slope per
+   > thickness. `extrapolate` works instant by instant and refuses unsigned, nominal and
+   > already-hot-spot readings, readings off their reference point beyond round-off, and readings
+   > sampled at different instants. Its result is a signed `HOT_SPOT` history whose source names
+   > what is not applied: IIW's thickness correction (on IIW's resistance side, not
+   > half-applied to EN 1993-1-9 categories) and misalignment. `app/fatigue/notch.py` gives q
+   > from Neuber's technical factor (NACA TN 2805 formula (1), with its stated ±10%/69% accuracy
+   > carried in every source, and **no value of Neuber's constant held**, because Figure 3 is a
+   > curve an engineer reads). It also gives the elastic-plastic notch stress by the extended
+   > Neuber rule through pyLife, behind a new `FatigueBackend.extended_neuber`, **with the root
+   > checked against ε·σ = L·K_p·e***: pyLife's Newton solve has a fixed iteration count. K_p has
+   > no default. Interface change, stated: `FatigueBackend` gained an abstract method, so any
+   > other backend must implement it. **Not run here**: the tests were written on Linux on
+   > 2026-09-15 and not executed, at the user's instruction. **Not claimed**: FKM nonlinear
+   > itself (not read), Peterson's q (no readable source), variable-amplitude notch memory,
+   > strain-life damage.
+   > Tested by: `tests/test_fatigue_notch.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 6. **Fatigue reaches the product.** Added 2026-09-14, when task 1 closed as a library. The

@@ -44,8 +44,9 @@ stress in a meshed model is a local stress, so the default basis is
 `StressBasis.NOTCH_ROOT` and the assessment will refuse a stress concentration on top
 of it. `NOMINAL` is allowed, for the honest case of a model that deliberately omits the
 notch (the fillet was left out, Kt comes from a chart) — the caller says so. `HOT_SPOT`
-is refused here: a hot-spot stress is an extrapolation to a weld toe, not a nodal value,
-and nothing in this package makes one yet (master plan 8.5).
+is refused here: a hot-spot stress is an extrapolation to a weld toe, not a nodal value.
+Read the surface stress at each of the rule's reference points as `NOTCH_ROOT` and hand
+the histories to `hotspot.extrapolate`.
 
 Units are the codebase's mm-N-MPa throughout; nothing here converts.
 """
@@ -313,8 +314,8 @@ def history_at(
     if basis is StressBasis.HOT_SPOT:
         raise ValueError(
             "A nodal stress is not a hot-spot stress. A hot-spot stress is extrapolated to the weld "
-            "toe from read-out points ahead of it, and nothing in app.fatigue makes one yet (master "
-            "plan 8.5). Read the nodal stress as NOTCH_ROOT, or as NOMINAL where the model omits the notch."
+            "toe from read-out points ahead of it: read the surface stress at each reference point as "
+            "NOTCH_ROOT and pass the histories to app.fatigue.hotspot.extrapolate."
         )
     if scalar is Scalar.COMPONENT and direction is None:
         raise ValueError(

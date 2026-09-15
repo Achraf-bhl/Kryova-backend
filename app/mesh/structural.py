@@ -175,6 +175,22 @@ class ShellMesh:
     def area_mm2(self) -> float:
         return float(self.face_areas().sum())
 
+    @property
+    def element_count(self) -> int:
+        """`face_count` under the name `app.verify.convergence.PlaneMesh` reads."""
+        return self.face_count
+
+    @property
+    def area(self) -> float:
+        """`area_mm2` under the name `app.verify.convergence.PlaneMesh` reads.
+
+        These two aliases are what let a convergence study run on a shell
+        (NAFEMS LE3): a shell's representative size is `(A/N)^(1/2)`, exactly a
+        plane mesh's, and a structural protocol match is how the study learns
+        that without importing this module.
+        """
+        return self.area_mm2
+
     def volume_mm3(self, thickness_mm: float) -> float:
         """Area times thickness — the material a shell mesh stands for.
 

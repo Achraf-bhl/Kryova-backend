@@ -429,3 +429,221 @@ class TestCheckingDesignRulesAgainstTheLivePart:
         db_session.flush()
         theirs = _conversation(db_session, other.id)
         assert self._check(auth_client, theirs.id).status_code == 404
+
+
+class TestMeasuringBetweenTwoElements:
+    """P6.4's measure interaction — the number comes from the B-rep, not the mesh.
+
+    The viewer streams a decimated mesh and picks its detail from screen size
+    (P6.2), so a distance computed in the browser is a distance between triangles
+    somebody chose for looking at. It would be wrong by the chord error and it
+    would *change when the camera moved*, which is the worst available shape for
+    a number an engineer writes down. These tests pin that the route goes to the
+    geometry instead, and that it does so through the agent's own operation
+    rather than a second measurer.
+    """
+
+    @staticmethod
+    def _between(client: Any, conversation_id: str, **params: Any) -> Any:
+        query = {"first": "slab#top", "second": "slab#bottom", **params}
+        return client.get(
+            f"/api/v1/kernel/conversations/{conversation_id}/measure/between", params=query
+        )
+
+    def test_the_distance_across_a_20_mm_plate_is_20_mm(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """Exact, because it is an extremum search over the faces and not a mesh."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        body = self._between(auth_client, mine.id).json()
+
+        assert body["measurement"]["minimum_clearance_mm"] == pytest.approx(20.0)
+        assert body["backend"] == "occt"
+
+    def test_it_says_the_number_was_measured(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """The provenance sidecar rides along, or the viewer cannot tell the
+        difference between this and something it estimated itself."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        measurement = self._between(auth_client, mine.id).json()["measurement"]
+        basis = measurement["provenance"]["minimum_clearance_mm"]
+
+        assert basis["basis"] == "measured"
+        assert "BRepExtrema" in basis["method"]
+
+    def test_the_closest_points_come_back_for_drawing_the_line(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        measurement = self._between(auth_client, mine.id).json()["measurement"]
+        first, second = measurement["closest_points_mm"]
+
+        assert first[2] == pytest.approx(20.0)
+        assert second[2] == pytest.approx(0.0)
+
+    def test_two_parallel_faces_are_zero_degrees_apart(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        measurement = self._between(auth_client, mine.id, kind="angle").json()["measurement"]
+
+        assert measurement["angle_deg"] == pytest.approx(0.0)
+        assert measurement["parallel"] is True
+
+    def test_an_unknown_measurement_is_refused_with_the_list(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """Refused before the geometry is touched, and the message says what to ask for."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        response = self._between(auth_client, mine.id, kind="volume")
+
+        assert response.status_code == 400
+        assert "minimum_distance" in response.json()["detail"]
+
+    def test_an_unknown_element_is_refused_in_the_kernels_own_words(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """Naming what the part *does* hold is the whole value of the refusal — a
+        bare "not found" leaves the caller with nowhere to go."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        response = self._between(auth_client, mine.id, first="flange")
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "flange" in detail
+        assert "slab" in detail
+
+    def test_measuring_does_not_journal_a_step_into_the_part(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """A read may be polled while the user drags a selection, so it must not
+        grow the history a `catia_set_parameter` replay would rerun."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        runner = backends.peek_session(mine.id)
+        before = len(runner._context.journal)
+
+        self._between(auth_client, mine.id)
+
+        assert len(runner._context.journal) == before
+
+    def test_an_empty_conversation_says_build_something_first(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+
+        response = self._between(auth_client, mine.id)
+
+        assert response.status_code == 409
+        assert "Nothing has been built" in response.json()["detail"]
+
+    def test_a_catia_backend_part_is_refused_not_faked(
+        self,
+        auth_client: Any,
+        db_session: Session,
+        current_user_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(settings, "geometry_backend", "catia")
+        mine = _conversation(db_session, current_user_id)
+
+        response = self._between(auth_client, mine.id)
+
+        assert response.status_code == 409
+        assert "CATIA seat" in response.json()["detail"]
+
+    def test_someone_elses_conversation_is_404_never_403(
+        self, auth_client: Any, db_session: Session
+    ) -> None:
+        other = User(email="measure-other@kryova.dev", hashed_password="x")
+        db_session.add(other)
+        db_session.flush()
+        theirs = _conversation(db_session, other.id)
+
+        assert self._between(auth_client, theirs.id).status_code == 404
+
+    def test_it_requires_authentication(self, client: Any) -> None:
+        response = client.get(
+            "/api/v1/kernel/conversations/x/measure/between",
+            params={"first": "a", "second": "b"},
+        )
+        assert response.status_code == 401
+
+
+class TestMeasuringOneElement:
+    """The single-pick half, and it reports *what it found* as well as a number."""
+
+    @staticmethod
+    def _item(client: Any, conversation_id: str, element: str = "slab#top") -> Any:
+        return client.get(
+            f"/api/v1/kernel/conversations/{conversation_id}/measure/element",
+            params={"element": element},
+        )
+
+    def test_a_60_by_40_face_is_2400_square_millimetres(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        measurement = self._item(auth_client, mine.id).json()["measurement"]
+
+        assert measurement["area_mm2"] == pytest.approx(2400.0)
+
+    def test_it_says_which_kind_of_thing_it_found(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """An unexpected answer has to be traceable: an area and the word `Plane`,
+        never a silence and never a zero."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        measurement = self._item(auth_client, mine.id).json()["measurement"]
+
+        assert measurement["measured_kind"] == "Plane"
+        assert measurement["element"]["reference"] == "slab#top"
+
+    def test_a_named_feature_is_measured_as_the_whole_body(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        measurement = self._item(auth_client, mine.id, element="slab").json()["measurement"]
+
+        assert measurement["measured_kind"] == "body"
+        assert measurement["face_count"] == 6
+
+    def test_an_unknown_element_is_refused_with_what_the_part_holds(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        response = self._item(auth_client, mine.id, element="nonsense")
+
+        assert response.status_code == 400
+        assert "slab" in response.json()["detail"]
+
+    def test_someone_elses_conversation_is_404_never_403(
+        self, auth_client: Any, db_session: Session
+    ) -> None:
+        other = User(email="item-other@kryova.dev", hashed_password="x")
+        db_session.add(other)
+        db_session.flush()
+        theirs = _conversation(db_session, other.id)
+
+        assert self._item(auth_client, theirs.id).status_code == 404

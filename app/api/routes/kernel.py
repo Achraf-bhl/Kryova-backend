@@ -71,12 +71,13 @@ def _owned_conversation(db: Session, user: User, conversation_id: str) -> Conver
     return conversation
 
 
-def _live_document(conversation_id: str) -> Any:
-    """The `PartDocument` this conversation has built, or an explained refusal.
+def _live_runner(conversation_id: str) -> Any:
+    """The runner holding this conversation's part, or an explained refusal.
 
-    The document rather than the bare shape, because the two callers want
-    different things from it — a render wants `.shape`, a measurement wants
-    `.measure()`, and the document is what owns the cache behind the second.
+    The *runner* rather than the document, because `.../measure/between` drives
+    the agent's own operations through it — same handler, same argument
+    refusals, same registry. `_live_document` narrows this to the document for
+    the two callers that only want the shape.
 
     Three distinct 409s rather than one, because the remedies are different and
     the user has to be able to tell them apart: the wrong backend is a setting,
@@ -113,7 +114,17 @@ def _live_document(conversation_id: str) -> Any:
                 "for example, a 60 by 40 by 20 plate."
             ),
         )
-    return document
+    return runner
+
+
+def _live_document(conversation_id: str) -> Any:
+    """The `PartDocument` this conversation has built, or an explained refusal.
+
+    The document rather than the bare shape, because the two callers want
+    different things from it — a render wants `.shape`, a measurement wants
+    `.measure()`, and the document is what owns the cache behind the second.
+    """
+    return _live_runner(conversation_id).document
 
 
 @router.get(
@@ -225,6 +236,138 @@ def measure_conversation_part(
         "backend_version": backends.backend_version(),
         "detail": level.value,
         "measurements": payload,
+    }
+
+
+#: What `GET .../measure/between` will pass through to the operation. Declared
+#: here as well as in `inspection` because the route's 400 must list what a
+#: caller may ask for, and importing the private set to build an error message
+#: would couple the route to a name the operations package does not export.
+BETWEEN_KINDS: tuple[str, ...] = ("minimum_distance", "closest_points", "angle")
+
+
+@router.get("/conversations/{conversation_id}/measure/between")
+def measure_between_elements(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+    first: Annotated[
+        str, Query(min_length=1, max_length=200, description="The first element, by name.")
+    ],
+    second: Annotated[
+        str, Query(min_length=1, max_length=200, description="The second element, by name.")
+    ],
+    kind: Annotated[
+        str, Query(description=f"One of: {', '.join(BETWEEN_KINDS)}.")
+    ] = "minimum_distance",
+) -> dict[str, Any]:
+    """Measure between two named elements of the part — **against the real B-rep**.
+
+    P6.4's measure interaction. The viewer streams a *decimated* mesh (P6.2 picks
+    the level from screen size), so a distance computed in the browser is a
+    distance between triangles somebody chose for looking at, not between the
+    faces the part has. It would be wrong by the chord error and it would change
+    when the camera moved, which is the worst available shape for a number an
+    engineer writes down. So the picked elements come back here and the answer is
+    measured on the geometry.
+
+    **This adds no measurer.** It calls the live runner with
+    `catia_measure_between` — the operation the agent already has
+    (`app/kernel/occt/operations/inspection.py`), behind
+    `BRepExtrema_DistShapeShape` and a real boolean for the overlap. The route is
+    a second *caller*, not a second implementation, which is the difference
+    between this and the thing that would rot: two measurers agreeing today and
+    disagreeing after a fix to one.
+
+    A `GET` because it is a read. The operation is not in `RECORDED`, so it
+    cannot journal a step into the part, and a viewer may poll it while the user
+    drags a selection.
+
+    Element names are the same vocabulary the agent uses — `bore`,
+    `Pad.1#top`, a bare face word like `top`. What P6.4 still needs and this does
+    not give it is the *other* direction: turning a click on a triangle into one
+    of those names. That is E2 task 1's face predicate, and it is recorded in the
+    status line rather than faked here.
+    """
+    _owned_conversation(db, current_user, conversation_id)
+    runner = _live_runner(conversation_id)
+
+    wanted = kind.strip().lower()
+    if wanted not in BETWEEN_KINDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{kind!r} is not a measurement this takes. "
+                f"Use one of: {', '.join(BETWEEN_KINDS)}."
+            ),
+        )
+
+    from app.kernel.errors import KernelError
+
+    try:
+        payload = runner(
+            "catia_measure_between", {"elements": [first, second], "kind": wanted}
+        )
+    except KernelError as exc:
+        # The kernel's own words, which name the element and say what to do: an
+        # unresolvable name is the caller's mistake and is 400, and everything
+        # else ran and produced nothing usable.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 - a kernel fault must not 500 the viewer
+        logger.exception("Measuring between elements failed for %s", conversation_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Those two elements could not be measured: {exc}",
+        ) from exc
+
+    return {
+        "backend": backends.selected_backend(),
+        "backend_version": backends.backend_version(),
+        "measurement": dict(payload),
+    }
+
+
+@router.get("/conversations/{conversation_id}/measure/element")
+def measure_one_element(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+    element: Annotated[
+        str, Query(min_length=1, max_length=200, description="The element, by name.")
+    ],
+) -> dict[str, Any]:
+    """Measure one named element — the length of an edge, the area of a face.
+
+    The single-pick half of P6.4's measure interaction, and `catia_measure_item`
+    is the operation, for the reason above. The payload says which *kind* of
+    thing it found, which is what makes an unexpected answer traceable: asking
+    for the diameter of something that turns out to be a planar face returns an
+    area and the word `Plane`, not a silence and not a zero.
+    """
+    _owned_conversation(db, current_user, conversation_id)
+    runner = _live_runner(conversation_id)
+
+    from app.kernel.errors import KernelError
+
+    try:
+        payload = runner("catia_measure_item", {"element": element})
+    except KernelError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Measuring an element failed for %s", conversation_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"That element could not be measured: {exc}",
+        ) from exc
+
+    return {
+        "backend": backends.selected_backend(),
+        "backend_version": backends.backend_version(),
+        "measurement": dict(payload),
     }
 
 

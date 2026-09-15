@@ -519,11 +519,10 @@ class StackUp(MachineCheck):
 class CostBudget(MachineCheck):
     """What the machine may cost to make.
 
-    **Declared, and honestly unmeasurable today.** There is no cost model in
-    this codebase — Phase 13 owns it — so this check exists to say so in the
-    report rather than to be quietly left out of the library 5.1 describes. It
-    comes back `UNMEASURED` with the reason, which is never a pass, and it
-    becomes real the day a tool answers `cost`.
+    Checkable wherever the tools answer `cost`: `app.rules.cost.CostTools` does,
+    from rates the caller states with their sources (E13.3, 2026-09-15). Without
+    one it comes back `UNMEASURED` with the reason, which is never a pass. A cost
+    is an estimate, so the number is recorded `APPROXIMATED`, never measured.
     """
 
     limit: float
@@ -548,6 +547,7 @@ class CostBudget(MachineCheck):
                 self._path("total"),
                 lambda: getattr(tools, "cost")(subject, self.currency),  # noqa: B009
                 method="cost model",
+                approximate=True,
             ),
         )
 

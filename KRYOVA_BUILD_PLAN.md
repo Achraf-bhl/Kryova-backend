@@ -20,10 +20,13 @@ happened.
 > Done this stretch: **E7** (LE3 runs, `*E7`), **E8.5**, **E15.2** (autoscale recommendation),
 > the conformance ladder for B7, **E8.6** (fatigue through a route and the agent), and **E9.2,
 > E9.3, E9.4** (mechanism from the assembly, travel/lock/swept volume, cycle to fatigue
-> channels). E3 (92%) and E15 (80%) wait on the seat (B7, E4, E5); E8 (92%) waits on E8.3's
-> engineer; E9 (60%) waits on Chrono (9.1) and a seat (9.5, QUEUE E6). E18's open rungs
-> (M4, M5, M7, M8) name E13, E9 and E17 work as their needs, so they move after those. Next:
-> **E13**, **E17**, then E18's rungs. No continuation job is held for this stretch: the user asked for continuous work in
+> channels), and **E13.1, E13.3, E13.4** (process rule sets attached from features, the
+> `POST /kernel/conversations/{id}/rules` red build, bolted-joint rules, the cost model).
+> E3 (92%) and E15 (80%) wait on the seat (B7, E4, E5); E8 (92%) waits on E8.3's engineer;
+> E9 (60%) waits on Chrono (9.1) and a seat (9.5, QUEUE E6); E13 (88%) has E13.2 open (fit
+> selection needs ISO 286's tables read from the document). E18's open rungs (M4, M5, M7, M8)
+> name E9, E13 and E17 work as their needs. Next: **E17** (3 weldments with weld sizing, 4 CAM,
+> 5 inspection planning, 6 technical documentation), then E18's rungs. No continuation job is held for this stretch: the user asked for continuous work in
 > the session. Before anything else on Windows: THE QUEUE A6's 2026-09-15 update (run the new
 > tests, ruff, mypy, re-record V&V).
 
@@ -303,6 +306,15 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E13 tasks 1, 3 and 4 closed on Linux, tests written and not run.**
+  `app/rules/processes.py`: one rule set per process (cast, machined, printed, sheet, moulded,
+  welded), attached from the part's feature tools, with no shipped limit; an unset limit makes
+  the report not ok. `POST /kernel/conversations/{id}/rules` runs the needed scans on the live
+  part and returns the verdict. `app/rules/joints.py`: clamp length, VDI 2230 preload over the
+  service load, thread engagement. `app/rules/cost.py`: material, process, tooling, assembly;
+  `CostBudget` is now checkable and its value recorded approximated. Weld sizing moved to
+  E17.3. Tested by `tests/test_rules_processes.py`, `tests/test_rules_joints.py`,
+  `tests/test_rules_cost.py`, `tests/test_kernel_routes.py`. Not run here.
 - **2026-09-15 — E9 tasks 2, 3 and 4 closed on Linux, tests written and not run.**
   `app/dynamics/assembly.py` derives a `Mechanism` from a `ProductStructure` (roll-up masses,
   occurrence frames, joints declared once in part coordinates). `app/dynamics/travel.py`:

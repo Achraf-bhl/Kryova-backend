@@ -14,6 +14,10 @@ Three endpoints, all about the part a *conversation* owns:
   and per-requirement evidence (added 2026-09-09, the same gap one layer up:
   `app/requirements/` could verify a specification against a measurement payload
   and nothing outside a test had ever handed it one).
+* `POST .../rules` — the design rules a manufacturing process owes this part,
+  attached from the features it was built with and checked against the part's own
+  measurements and scans (added 2026-09-15, E13.1: `app/rules/engine.py` had no
+  consumer anywhere in `app/`).
 
 **These serve the open-kernel backend only, and say so rather than guessing.** On
 `GEOMETRY_BACKEND=catia` the part lives on the workstation, not in this process;
@@ -336,6 +340,115 @@ def check_conversation_requirements(
         # measured — the per-requirement outcomes say that.
         "scans_needed": list(requirements.scans_needed()),
     }
+
+
+class LimitIn(BaseModel):
+    value: float
+    source: str = Field(min_length=1, max_length=500)
+
+
+class RuleCheck(BaseModel):
+    """A process and the limits its rule set needs, each with the guide it came from.
+
+    No limit has a default. A rule the process needs and the request does not give a
+    limit for is reported as unset, and the answer is then not ok.
+    """
+
+    process: str = Field(description="cast, machined, printed, sheet, moulded or welded")
+    limits: dict[str, LimitIn] = Field(default_factory=dict)
+    pull_direction: tuple[float, float, float] | None = Field(
+        default=None,
+        description="The tool's pull or spindle direction; needed when a draft or undercut rule attaches.",
+    )
+    detail: str = Field(default="full")
+
+
+@router.post("/conversations/{conversation_id}/rules")
+def check_conversation_rules(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+    body: RuleCheck,
+) -> dict[str, Any]:
+    """Check the part against the design rules its manufacturing process owes (E13.1).
+
+    The rules are attached from the process and the feature tools the part was built
+    with (`app.rules.processes.attach`), measured here, and the scans they need
+    (wall thickness, draft, curvature) are run here too, so a wall rule is not left
+    unmeasured because nobody knew to scan. A scan that fails leaves its rules
+    `UNMEASURED` with the reason in `notes`, never a pass. An unknown process or a
+    limit no rule reads is 422; a draft rule with no pull direction is 422 before
+    anything is measured.
+    """
+    _owned_conversation(db, current_user, conversation_id)
+    document = _live_document(conversation_id)
+
+    from app.kernel.measurement import Detail
+    from app.kernel.provenance import PROVENANCE_KEY
+    from app.rules.errors import RuleError
+    from app.rules.processes import Limit, attach, check
+
+    try:
+        level = Detail(body.detail.strip().lower())
+    except ValueError as exc:
+        allowed = ", ".join(one.value for one in Detail)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{body.detail!r} is not a detail level. Use one of: {allowed}.",
+        ) from exc
+
+    try:
+        attachment = attach(
+            body.process,
+            [feature.tool for feature in document],
+            {key: Limit(value=one.value, source=one.source) for key, one in body.limits.items()},
+        )
+    except RuleError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    scans = attachment.scans_needed()
+    if "draft" in scans and body.pull_direction is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"The {attachment.process} rules include draft or undercut, which are "
+                "measured against the direction the tool pulls. Give pull_direction, "
+                "e.g. [0, 0, 1] for a tool that opens along +Z."
+            ),
+        )
+
+    try:
+        measurements = dict(document.measure(detail=level))
+    except Exception as exc:  # noqa: BLE001 - a kernel fault must not 500 the check
+        logger.exception("Measuring failed for conversation %s", conversation_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"The part could not be measured: {exc}",
+        ) from exc
+
+    notes: list[str] = []
+    runner = backends.peek_session(conversation_id)
+    for kind in scans:
+        arguments: dict[str, Any] = {"kind": kind}
+        if kind == "draft":
+            arguments["direction"] = list(body.pull_direction or ())
+        try:
+            scanned = dict(runner("catia_analysis_part", arguments))
+        except Exception as exc:  # noqa: BLE001 - a failed scan leaves its rules unmeasured
+            notes.append(f"The {kind} scan failed, so its rules are unmeasured: {exc}")
+            continue
+        sidecar = scanned.pop(PROVENANCE_KEY, None)
+        measurements.update(scanned)
+        if isinstance(sidecar, dict):
+            # A new dict, not an update in place: the base payload's sidecar may be
+            # the document's cached one.
+            measurements[PROVENANCE_KEY] = {**measurements.get(PROVENANCE_KEY, {}), **sidecar}
+
+    answer = check(attachment, measurements).to_dict()
+    answer["notes"] = notes
+    return answer
 
 
 __all__ = ["router"]

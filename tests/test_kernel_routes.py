@@ -340,3 +340,92 @@ class TestCheckingRequirementsAgainstTheLivePart:
         body = self._check(auth_client, mine.id, document=document).json()
         assert body["report"]["results"][0]["outcome"] == "unmeasured"
         assert body["scans_needed"]
+
+
+GUIDE = "test fixture: a shop's machine sheet nobody published"
+
+
+class TestCheckingDesignRulesAgainstTheLivePart:
+    """E13.1 reaching the product (2026-09-15): `app/rules/engine.py` had no consumer.
+
+    The plate is 60 x 40 x 20, built with one pad. The route attaches the machined rule
+    set from that feature list, measures the part, runs the scans the rules need, and
+    answers with the verdict. Written on Linux and not run there, at the user's
+    instruction that the Windows machine runs the tests.
+    """
+
+    def _check(self, auth_client: Any, conversation_id: str, **body: Any) -> Any:
+        payload: dict[str, Any] = {
+            "process": "machined",
+            "limits": {
+                "travel_x": {"value": 50.0, "source": GUIDE},
+                "travel_y": {"value": 500.0, "source": GUIDE},
+                "travel_z": {"value": 500.0, "source": GUIDE},
+                "undercuts": {"value": 0.0, "source": GUIDE},
+            },
+            "pull_direction": [0.0, 0.0, 1.0],
+        }
+        payload.update(body)
+        return auth_client.post(
+            f"/api/v1/kernel/conversations/{conversation_id}/rules", json=payload
+        )
+
+    def test_a_plate_too_long_for_the_machine_is_a_red_build_naming_the_rule(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(auth_client, mine.id)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["ok"] is False
+        by_name = {one["name"]: one for one in body["report"]["results"]}
+        assert by_name["machined.travel_x"]["outcome"] == "failed"
+        assert by_name["machined.travel_y"]["outcome"] == "passed"
+        # The undercut rule read a scan the route ran itself, not a number it was given.
+        assert by_name["machined.undercuts"]["outcome"] != "unmeasured"
+        assert body["scans_needed"] == ["draft"]
+        # A pad-only plate has no pocket, so no cutter-radius rule attaches.
+        assert body["not_applicable"] == ["minimum_inside_radius"]
+
+    def test_a_rule_left_without_a_limit_is_not_a_pass(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        limits = {
+            "travel_x": {"value": 500.0, "source": GUIDE},
+            "travel_y": {"value": 500.0, "source": GUIDE},
+            "travel_z": {"value": 500.0, "source": GUIDE},
+        }
+        body = self._check(auth_client, mine.id, limits=limits, pull_direction=None).json()
+        assert body["report"]["ok"] is True
+        assert body["ok"] is False
+        assert [one["key"] for one in body["unset"]] == ["undercuts"]
+
+    def test_a_draft_rule_without_a_pull_direction_is_refused_before_measuring(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(auth_client, mine.id, pull_direction=None)
+        assert response.status_code == 422
+        assert "pull_direction" in response.json()["detail"]
+
+    def test_an_unknown_process_is_refused(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(auth_client, mine.id, process="forged", limits={})
+        assert response.status_code == 422
+        assert "forged" in response.json()["detail"]
+
+    def test_someone_elses_conversation_is_404_never_403(
+        self, auth_client: Any, db_session: Session
+    ) -> None:
+        other = User(email="rules-other@kryova.dev", hashed_password="x")
+        db_session.add(other)
+        db_session.flush()
+        theirs = _conversation(db_session, other.id)
+        assert self._check(auth_client, theirs.id).status_code == 404

@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 103/132 = 78% | 116/151 eng-months = 77% |
+| Engineering — E1–E23 | 15/24 | 106/132 = 80% | 120/151 eng-months = 80% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 150/193 = 78% | 143/189 eng-months = 76% |
+| **Programme** | 21/34 | 152/193 = 79% | 148/189 eng-months = 78% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,8 +81,8 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E15 80%, E18 50%, P4 75%, P9 57% |
-| nothing finished yet | E13, E17, E21, E22, E23, P6, P7 |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E18 50%, P4 75%, P9 57% |
+| nothing finished yet | E17, E21, E22, E23, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -2839,6 +2839,22 @@ answerable meaning.
 1. **Design rules as assertions** — minimum wall by process, draft angles, bolt torque and preload,
    thread engagement, weld sizing, machining access — attached automatically from feature type +
    declared process, running in the E5 engine. **DFM becomes a red build.**
+   > DONE (2026-09-15) — rules are attached from the declared process and the part's own feature
+   > tools (`app/rules/processes.py`: a pocket brings the cutter-radius rule, a plain plate does
+   > not), become `Assertion`s for the E5 loop through `Attachment.assertions()`, and run as a red
+   > build on the live part at **`POST /kernel/conversations/{id}/rules`**, which runs the scans
+   > the rules need itself. **No limit ships**: each is the caller's with its source, and a rule
+   > the process needs with no limit is `unset`, which makes the report not ok. Bolt preload and
+   > thread engagement are `app/rules/joints.py` over the catalogue bolt (VDI 2230 preload,
+   > recorded approximated); tightening torque stays a derivation in `fasteners.tightening_torque`,
+   > not a rule, because no limit exists to compare it to. **Plan change: weld sizing moves to
+   > E17 task 3**, which owns the weldment model it needs, and the `welded` set says so on every
+   > report. `engine.py` now has its consumer. **Tests written on Linux and not run there**, at
+   > the user's instruction; they run on Windows. Tested by: `tests/test_rules_processes.py`,
+   > `tests/test_rules_joints.py`, `tests/test_kernel_routes.py`
+   > (`TestCheckingDesignRulesAgainstTheLivePart`).
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-06). A rule naming a quantity outside `kernel/contract.py` is refused **at
    > construction**; the verdicts are literally `design.assertions.Outcome`; and **a rule resting
    > on a *sampled* bound cannot prove a pass** — `minimum_wall_mm >= 2.5` measuring 2.6 is
@@ -2855,10 +2871,30 @@ answerable meaning.
 
 3. **Cost model** — material + process + tooling + assembly time, as an assertion. An agent that
    ignores cost confidently designs the unbuildable.
+   > DONE (2026-09-15) — `app/rules/cost.py`: material (mass × stock factor × price/kg), process
+   > (cycle and setup over the batch at a machine rate), tooling (amortised) and assembly (minutes
+   > × labour rate), each with its formula and sources. **No rate ships.** A missing input is not
+   > a zero: the total is unavailable naming it, and an explicit zero needs a source. A total is
+   > recorded `APPROXIMATED`. `CostTools.cost` is what E5's `CostBudget` was waiting on, so a cost
+   > budget now passes or fails where rates are given, is `UNMEASURED` where one is missing or the
+   > currency differs (nothing converts), and **its value is now recorded approximated** (an
+   > interface change in `machine_checks`). **Tests written on Linux and not run there.** Tested
+   > by: `tests/test_rules_cost.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED — out of scope for now. E5 task 1's cost budget reports `UNMEASURED` until this
    > lands.
 
 4. **Process-specific rule sets**: cast, machined, printed, sheet, moulded, welded.
+   > DONE (2026-09-15) — `RULE_SETS` in `app/rules/processes.py`, one per process, each template
+   > naming the measured quantity, the direction, the triggering features and why, and **no
+   > number**. Cast and moulded: wall, draft, undercuts, inside radius. Machined: cutter radius
+   > (pocket, groove, slot, rib, shell only), undercuts, X/Y/Z travel. Printed: wall, open edges,
+   > build volume, with overhang named as not measured yet. Sheet carries no solid rules and names
+   > `app/sheetmetal/` as where its checks live; welded checks the parent wall and names E17 task
+   > 3. **Tests written on Linux and not run there.** Tested by: `tests/test_rules_processes.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 ## ERA V — SCALE
@@ -3362,8 +3398,9 @@ here"* has an answer in six months — from the artefact.
    > a live CATIA seat.** Tested by: `tests/test_manufacture_export.py`. Code:
    > `app/manufacture/dxf.py`, `app/manufacture/export.py`.
 
-3. **Weldments and tubing**: beads, symbols, cut lists, tube routing. **A motorcycle frame is a
-   tubular weldment.**
+3. **Weldments and tubing**: beads, symbols, cut lists, tube routing, and **weld sizing** (moved
+   here from E13 task 1 on 2026-09-15: a weld's size is a property of a bead on a weldment, which
+   this task creates). **A motorcycle frame is a tubular weldment.**
    > NOT STARTED.
 
 4. **CAM**: **[OpenCAMLib](https://github.com/aewallin/opencamlib)** (LGPL) — drop-cutter and

@@ -588,6 +588,18 @@ server inherits and the Git Bash one.
       see the note added to E6 for what would have to be true first.
       Probe scripts are throwaway; the numbers above are the record.
 
+- [ ] **B7 — E3 phase proof through M4: the ladder's own parts on the seat.** Added
+      2026-09-15 on Linux. B2 measured agreement on two plates; E3's proof is "every assertion
+      in the ladder through M4 is measurable, and each measurement agrees between OCCT and
+      CATIA". `scripts/catia_conformance.py --ladder` now builds **M1's bracket and every
+      component of M2's frame** on both backends and measures each with `catia_measure`. M3 is
+      skipped by name (no CATIA sheet-metal operations until E1 in section E) and M4 has no
+      geometry yet; the run prints both reasons. Run
+      `venv\Scripts\python -m scripts.catia_conformance --ladder --out docs/verification-<date>/B7-ladder.json`,
+      then `pytest tests/test_seat_conformance.py` (its ladder class was written blind). Settles:
+      E3's `PARTIAL` phase proof → `DONE` if every part agrees within `SEAT_TOLERANCE_MM3`, with
+      the known seam-edge and density differences named rather than reconciled.
+
 ### C. Not hardware — an input this machine does not have
 
 Recorded here because the effect is the same: a Linux session cannot finish it.

@@ -1133,6 +1133,20 @@ model.
 
 **Phase proof:** every assertion in the ladder through M4 is measurable, and each measurement
 agrees between OCCT and CATIA to declared tolerance.
+> PARTIAL (2026-09-15) — **both halves have evidence, and the seat half is short of M4.** OCCT:
+> green and reachable via `catia_analysis_part`, `catia_measure`, `catia_measure_item` and
+> `catia_measure_between`. Seat: THE QUEUE B2 measured a plate and a bored plate on CATIA
+> V5-R33 (2026-09-11/12). Volume and area agree to 0.000%, faces agree, and the one-edge seam
+> difference per closed cylinder is understood. Mass differs by 0.127% by design (CATIA's
+> *Acier* density). **What is left is the "through M4" half.** `scripts/catia_conformance.py
+> --ladder` (written 2026-09-15) hands the seat M1's bracket and every M2 component, names M3
+> (no CATIA sheet metal until THE QUEUE E1) and M4 (no geometry) as skipped with reasons, and
+> is queued as THE QUEUE B7. Its offline tests were written and not run, at the user's
+> instruction. **Not claimable from Linux**: the seat run is the evidence.
+> Tested by: `tests/test_interrogation.py`, `tests/test_measurement_elements.py`,
+> `tests/test_seat_conformance.py`.
+
+<!-- superseded 2026-09-15 -->
 > PARTIAL (2026-09-08) — the OCCT half is green and reachable via `catia_analysis_part`,
 > `catia_measure`, `catia_measure_item` and `catia_measure_between`. The cross-backend agreement
 > half needs a Windows seat, same as E1 task 7, and is claimed at no gate before then.

@@ -108,3 +108,48 @@ class TestAQuantityOnlyOneSideReportsIsStillADivergence:
 
     def test_a_key_absent_from_both_is_not_a_divergence(self) -> None:
         assert compare({"volume_mm3": 1.0}, {"volume_mm3": 1.0}) == []
+
+
+class TestTheLadderReachesTheSeatThroughM4:
+    """E3's phase proof names the ladder through M4; `--ladder` is how a seat run covers it.
+
+    Written 2026-09-15 on Linux and not run there (the user's instruction: Windows tests).
+    """
+
+    def test_every_rung_through_m4_is_either_built_or_skipped_with_a_reason(self) -> None:
+        from scripts.catia_conformance import LADDER_RUNGS, ladder_plans
+
+        plans, skipped = ladder_plans()
+        built = {label.split(" ", 1)[0] for label, _ in plans}
+        assert built | set(skipped) == set(LADDER_RUNGS)
+        assert not built & set(skipped)
+        for rung, reason in skipped.items():
+            assert reason.strip(), f"{rung} is skipped with no reason"
+
+    def test_m1_and_every_m2_component_are_handed_to_the_seat(self) -> None:
+        from app.design.missions import LADDER
+        from scripts.catia_conformance import ladder_plans
+
+        plans, _ = ladder_plans()
+        labels = {label for label, _ in plans}
+        by_rung = {mission.rung: mission for mission in LADDER}
+        assert f"M1 {by_rung['M1'].title}" in labels
+        assembly = by_rung["M2"].assembly
+        assert assembly is not None
+        for component in assembly.parts:
+            assert f"M2 {component}" in labels
+
+    def test_the_folded_rung_says_why_it_cannot_reach_catia(self) -> None:
+        from scripts.catia_conformance import ladder_plans
+
+        _, skipped = ladder_plans()
+        assert "sheet-metal" in skipped["M3"]
+        assert "E1" in skipped["M3"]
+
+    def test_every_handed_plan_is_a_compiled_plan_with_calls(self) -> None:
+        from scripts.catia_conformance import ladder_plans
+
+        plans, _ = ladder_plans()
+        assert plans
+        for label, plan in plans:
+            assert len(plan) > 0, f"{label} compiled to nothing"

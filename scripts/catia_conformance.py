@@ -59,6 +59,9 @@ _COMPARED = (
 #: seconds, and this is the running-one case because the operator started it.
 BRIDGE_WAIT_S = 180.0
 
+#: The rungs E3's phase proof names ("through M4").
+LADDER_RUNGS = ("M1", "M2", "M3", "M4")
+
 
 def _plans() -> list[tuple[str, Any]]:
     """Plans in increasing order of what they can disagree about.
@@ -101,6 +104,43 @@ def _plans() -> list[tuple[str, Any]]:
         ],
     )
     return [("plate", compile_spec(plate)), ("bored plate", compile_spec(bored))]
+
+
+def ladder_plans() -> tuple[list[tuple[str, Any]], dict[str, str]]:
+    """E3's phase proof: every part the mission ladder builds through M4, and what is skipped.
+
+    "Every assertion in the ladder through M4 is measurable, and each measurement agrees
+    between OCCT and CATIA." B2 answered that for two plates. This hands the seat the ladder's
+    own parts: M1's bracket and each component of M2's frame, compiled from the same
+    `DesignSpec` the offline ladder builds. A rung that cannot reach a seat is returned in the
+    second value **with its reason**, never dropped: a skipped rung that nobody names reads as
+    a rung that agreed.
+    """
+    from app.design import compile_spec
+    from app.design.missions import LADDER
+
+    plans: list[tuple[str, Any]] = []
+    skipped: dict[str, str] = {}
+    for mission in LADDER:
+        if mission.rung not in LADDER_RUNGS:
+            continue
+        if mission.spec is not None:
+            plans.append((f"{mission.rung} {mission.title}", compile_spec(mission.spec)))
+        elif mission.assembly is not None:
+            for component, spec in mission.assembly.parts.items():
+                plans.append((f"{mission.rung} {component}", compile_spec(spec)))
+        elif mission.folded is not None:
+            skipped[mission.rung] = (
+                "a folded sheet: no sheet-metal operation exists in the CATIA registry, "
+                "deliberately, until THE QUEUE E1 writes its COM half on a seat"
+            )
+        else:
+            skipped[mission.rung] = (
+                "no geometry yet; the rung needs " + "; ".join(mission.needs)
+                if mission.needs
+                else "no geometry yet"
+            )
+    return plans, skipped
 
 
 def _serve_in_this_process(port: int) -> threading.Thread:
@@ -208,6 +248,11 @@ def main(argv: list[str] | None = None) -> int:
         help="leave the CATIA documents open afterwards, to look at them",
     )
     parser.add_argument("--out", default="", help="write the result as JSON to this path")
+    parser.add_argument(
+        "--ladder",
+        action="store_true",
+        help="also build every part of missions M1-M4 on both backends (E3's phase proof)",
+    )
     args = parser.parse_args(argv)
 
     from app.catia.runner import CatiaSeatRunner
@@ -233,7 +278,14 @@ def main(argv: list[str] | None = None) -> int:
             return 3
         print("bridge connected\n")
 
-        for label, plan in _plans():
+        plans = _plans()
+        if args.ladder:
+            ladder, skipped = ladder_plans()
+            plans = plans + ladder
+            for rung, reason in skipped.items():
+                print(f"skipped {rung}: {reason}")
+                results.append({"label": rung, "skipped": reason})
+        for label, plan in plans:
             convo = Conversation(id=str(uuid.uuid4()), owner_id=user.id, title=f"B1 {label}")
             db.add(convo)
             db.commit()
@@ -289,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {args.out}")
     if args.keep_open:
         print("leaving CATIA as it is (--keep-open)")
-    return 0 if all(r.get("agrees") for r in results) else 1
+    return 0 if all(r.get("agrees") for r in results if "skipped" not in r) else 1
 
 
 if __name__ == "__main__":

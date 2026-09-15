@@ -775,6 +775,26 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       Settles: whether reliability decays with turn length *on this product*, which is the one
       number E22.3 is for, and whether the bucket boundaries are right for a local model.
 
+- [ ] **D7 — E23.4, BenchCAD run against Kryova's pipeline (added 2026-09-15).**
+      `app/verify/benchcad.py` records the benchmark as read and scores geometry; nothing has
+      been run. The benchmark is BenchCAD (arXiv 2605.10865, benchcad.com), code MIT, data
+      CC-BY-4.0.
+      1. `venv/bin/python -m pytest tests/test_verify_benchcad.py -q`, then `ruff` and `mypy`.
+      2. **Read the benchmark's own scoring code** (it is MIT) and settle what
+         `SCORING_RULE_CAVEAT` records as unknown: the voxel pitch, the alignment convention,
+         and whether parts are posed canonically before comparison. Each moves the number.
+         Correct `voxel_iou`'s defaults to match, or record where we deliberately differ.
+      3. Obtain the dataset from Hugging Face and export the reference parts as STEP.
+      4. Write the adapter from a case to a Kryova request. This is design work, not a
+         wrapper: BenchCAD is image -> CadQuery and Kryova is a conversation -> OCCT/CATIA, so
+         decide deliberately whether the agent is given the renderings (the benchmark's task)
+         or the parameters (an easier task that would not be the same benchmark), and say
+         which in the published number.
+      5. Run it. Publish the score **including if it is bad** — that is the task, and a bad
+         number published first is the whole of E23's argument.
+      Settles: what this stack actually scores on somebody else's benchmark, which is the one
+      number in the plan that no amount of internal verification can substitute for.
+
 ### E. Needs a seat to *write*, not only to verify — **this section is coding work**
 
 These are not "run it and see". They are pieces of the product that can only be *written* on

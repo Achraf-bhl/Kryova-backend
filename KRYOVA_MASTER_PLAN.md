@@ -71,7 +71,7 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 117/132 = 89% | 134/151 eng-months = 89% |
+| Engineering — E1–E23 | 15/24 | 118/132 = 89% | 135/151 eng-months = 89% |
 | Product — P1–P10 | 6/10 | 49/62 = 79% | 29/38 eng-months = 75% |
 | **Programme** | 21/34 | 166/194 = 86% | 163/189 eng-months = 86% |
 
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 62%, E23 62%, P4 86%, P9 57% |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -4811,6 +4811,41 @@ them?
    an adjective into a number, and publishing the number — beside the silent-corruption rate from
    E22 — is a thing a company with a valuation to defend structurally cannot do first. That
    asymmetry, not the technology, is what open source is actually for here.
+   > PARTIAL (2026-09-15) — **the benchmark is found, named and read; the scoring arithmetic
+   > is implemented and checked against closed-form overlaps; no case has been run.**
+   > `app/verify/benchcad.py`. Tests written on Linux and **not run** (THE QUEUE D7).
+   > **It is BenchCAD**, which the plan described without naming: *"BenchCAD: A
+   > Comprehensive, Industry-Standard Benchmark for Programmatic CAD"*,
+   > <https://arxiv.org/abs/2605.10865> and <https://benchcad.com/>, **read 2026-09-15**.
+   > 17,900 execution-verified CadQuery programs across **106 industrial part families**,
+   > 52 of them anchored to 47 ISO/DIN/EN/ASME/IEC standards. **Code MIT, data CC-BY-4.0** —
+   > which matters to this phase, because the argument is about what a free stack may publish.
+   > **The scoring rule as published:** IoU-score = voxel Intersection over Union × execution
+   > success rate, graded on *executed geometry, not appearances*, with a no-tools and an
+   > agentic track. The sentence admits two readings — mean IoU over executed cases × the
+   > execution rate, or mean IoU over all cases scoring a non-execution as zero — and **they
+   > are the same number** (`(ΣIoU/executed)×(executed/total)` = `ΣIoU/total`), so the
+   > ambiguity does not reach the arithmetic. `score` computes it once and reports both
+   > factors beside it, because a low score being bad geometry and a low score being a
+   > failure to build call for opposite work.
+   > **`voxel_iou` is verified against closed form, not recorded output:** a part against
+   > itself is exactly 1.0, two 10 mm cubes offset 5 mm are exactly 1/3 (500 mm³ over
+   > 1,500 mm³), disjoint parts are 0.0. Both solids are sampled on **one** grid over the
+   > union box — a per-solid grid would score two shapes that never touch. `ON` counts as
+   > inside, or a grid aligned with a machined part's faces scores it against itself below 1.
+   > **What is recorded as unknown rather than assumed** (`SCORING_RULE_CAVEAT`): the pages
+   > were read, the benchmark's *scoring code* was not, so the voxel pitch, the alignment
+   > convention and whether parts are posed canonically are unknown here — and each moves the
+   > number. The licence is MIT, so that code can be read; until it is, a number from this
+   > module is Kryova's arithmetic of the published rule and not a reproduction of the
+   > harness, and it says so. `NOT_SUBMITTED` rides every report: a local run is not an entry.
+   > **Still open, and none of it is Linux work:** obtaining the dataset, writing the adapter
+   > from a case to a Kryova request (BenchCAD is image → CadQuery; Kryova is a conversation →
+   > OCCT/CATIA, so the adapter is a real piece of design, not a wrapper), and the run itself,
+   > which is 106 families against a local model. THE QUEUE D7.
+   > Tested by: `tests/test_verify_benchcad.py` (17, written on Linux and not run).
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 **Phase proof:** a page on the public trust surface (P10 task 3) carries our benchmark score, our

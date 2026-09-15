@@ -45,6 +45,9 @@ happened.
 > as one scene). Do not attempt E3, E8, E9.5, E13, E15, E17, E18 — each needs a seat, a document
 > or an engineer.
 > **Next continuation fires 2026-09-16 03:05** — held by the session named on the next line.
+> **Held by `kryova-backend-9f`**, which confirmed `scheduled 2026-09-16 03:05` at 00:37.
+> `kryova-backend-f1` (the session that ran this turn) holds nothing and can be closed; the
+> job dies if `kryova-backend-9f` is closed.
 
 > **Handoff, 2026-09-15 (morning) — the user is driving phases to 100% interactively, and on
 > Linux nothing is run.** "Write the code and the tests, don't launch pytest; Windows tests."

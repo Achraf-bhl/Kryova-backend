@@ -36,9 +36,22 @@ happened.
 > the session. Before anything else on Windows: THE QUEUE A6's 2026-09-15 update (run the new
 > tests, ruff, mypy, re-record V&V).
 
+> **Continuation, 2026-09-15 11:15 — the user restarted the chain for the phases nobody had
+> looked at: E18, E21, E22, E23, P4, P6, P7, P9.** Linux writes code and tests and **runs no
+> pytest, ruff or mypy** (the user's rule; Windows runs them). E18 stays where its rule puts it
+> (M4/M5 need E13.2, M7 all of E9, M8 all of E8), so the targets, in order, are:
+> **E23.3** (MCP server over the tool registry, same tenancy as HTTP) → **E22.2** (silent-corruption
+> harness on design-IR edits, OCCT) → **E22.4** (selection + argument accuracy harness) →
+> **E22.1** (surrogate acceptance rule published where users read it; `app/optimise/screening.py`
+> already enforces rank-never-decide) → **P9.3** (`libgomp1` missing from the Dockerfile runtime
+> stage, nightly run 34822694239) → **P6.1** (OCCT shape → glTF tessellation service) → E21.6 /
+> E21.2 / E21.4 / E21.5 / E23.1 (documents and registers; each needs a source read, never recalled).
+> **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
+> **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
+
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
-> **Next continuation fires 2026-09-15 03:28** — target **E8.5** (see the handoff below).
+> **(Past) continuation fired 2026-09-15 03:28** — target **E8.5** (see the handoff below).
 > **Held by `kryova-backend-78`**, which confirmed `scheduled 2026-09-15 03:28` at 00:59 after
 > `kryova-backend-26` declined. `kryova-backend-43` holds nothing. The user stopped the chain on
 > 2026-09-15 at 00:10 and restarted it at 00:20; E8.3 closed as PARTIAL in `11fc17c`.

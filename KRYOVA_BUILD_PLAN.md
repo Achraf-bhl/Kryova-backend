@@ -40,17 +40,17 @@ happened.
 > looked at: E18, E21, E22, E23, P4, P6, P7, P9.** Linux writes code and tests and **runs no
 > pytest, ruff or mypy** (the user's rule; Windows runs them). E18 stays where its rule puts it
 > (M4/M5 need E13.2, M7 all of E9, M8 all of E8). **E23.3 closed at 11:50** (MCP server,
-> `tests/test_mcp.py`, not run). The targets, in order, are now:
-> **E22.2** (silent-corruption harness on design-IR edits, OCCT) → **E22.4** (selection +
+> `tests/test_mcp.py`, not run); **P9.3** got `libgomp1`; **E22.2** is PARTIAL (harness and model
+> editor built; the rate needs a real case set run on Windows, QUEUE D2). The targets, in order,
+> are now: a real E22.2 case set from the mission designs (Linux can write it) → **E22.4** (selection +
 > argument accuracy harness) → **E22.1** (surrogate acceptance rule published where users read
-> it; `app/optimise/screening.py` already enforces rank-never-decide) → **P9.3** (`libgomp1`
-> now installed; waits on the next nightly run) → **P6.1** (OCCT shape →
+> it; `app/optimise/screening.py` already enforces rank-never-decide) → **P6.1** (OCCT shape →
 > glTF tessellation service) → E21.6 / E21.2 / E21.4 / E21.5 / E23.1 (documents and registers;
 > each needs a source read, never recalled).
 > **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
 > **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
-> Its prompt names E23.3 as the target and says to skip a target that is already done, so it
-> starts at E22.2.
+> Its prompt names E23.3 as the target and says to skip a target that is already done; E23.3,
+> P9.3 and E22.2's harness are done, so it should start at the E22.2 case set, then E22.4.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -328,6 +328,11 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E22 task 2, partial: the silent-corruption harness.** `app/design/corruption.py`
+  classifies an editor's result against a reference edit after compilation (FAILED, NO_CHANGE,
+  EXACT, CLEAN, CORRUPTING with the corrupted features named); `app/ai/design_editor.py` makes
+  the configured model an editor. No rate exists until THE QUEUE D2 runs a real case set.
+  Tested by `tests/test_design_corruption.py`. Not run here.
 - **2026-09-15 — P9 task 3, still partial: the runtime image installs `libgomp1`.** Nightly run
   34822694239 failed its health check on `libgomp.so.1`; the builder had it via the compiler.
   Tested by `tests/test_delivery.py::TestTheDockerfile`. Not run here; the next nightly decides.

@@ -682,6 +682,16 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       — that refusal is the guard working (Ollama drops an image handed to a text-only model
       and answers anyway, so a check that trusted it would manufacture agreement).
 
+- [ ] **D2 — E22.2, the silent-corruption rate on edits, measured on the local model.** Linux
+      wrote the harness (`app/design/corruption.py`) and the model editor
+      (`app/ai/design_editor.py`) and ran neither. Needs Ollama with the configured `AI_MODEL`, and
+      a case set of real instructions with reference edits, which does not exist yet: the cases in
+      `tests/test_design_corruption.py` are fixtures and must not be published as the rate. Build
+      the set from the mission designs, run `measure(cases, model_editor(get_provider(), ...),
+      editor_name=<model, version, prompt>)`, and record the report's `corruption_rate`,
+      `exact_rate`, counts and `case_set_digest` in E22.2's status. Settles: whether whole-spec
+      edits by our model corrupt untargeted features, and how often.
+
 ### E. Needs a seat to *write*, not only to verify — **this section is coding work**
 
 These are not "run it and see". They are pieces of the product that can only be *written* on

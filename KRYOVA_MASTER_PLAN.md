@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 110/132 = 84% | 126/151 eng-months = 84% |
+| Engineering — E1–E23 | 15/24 | 111/132 = 84% | 127/151 eng-months = 84% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 158/193 = 82% | 154/189 eng-months = 81% |
+| **Programme** | 21/34 | 158/193 = 82% | 154/189 eng-months = 82% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -4392,6 +4392,23 @@ holds intent across a machine — and how does Kryova measure its own distance f
    exists in E5's assertions and E4's visual verification; what does not exist is the number.
    Deliverable: a harness that measures **silent-corruption rate on edits** against our own
    registry, run like a benchmark and published like one.
+   > PARTIAL (2026-09-15) — **the harness is built and exact; the number does not exist yet.**
+   > `app/design/corruption.py` runs a set of `EditCase`s (a design, an instruction, and the
+   > reference edit an engineer would make) through any `Editor` and classifies each result after
+   > compilation, where a feature moved iff its resolved calls differ: FAILED, NO_CHANGE, EXACT,
+   > CLEAN (right features, wrong values) or CORRUPTING (named features the reference does not
+   > move). The targets are *derived from the reference*, so a formula consequence counts as
+   > targeted and nobody types the list. `corruption_rate` is corrupting over nominal successes and
+   > is `None`, never 0, when nothing succeeded; `exact_rate` sits beside it so an editor that never
+   > edits cannot score perfect. A formula rewritten as its own value is not corruption; an
+   > unrequested material change or removed feature is. `app/ai/design_editor.py` is the model
+   > editor (whole spec in, whole spec out through `LLMProvider.complete`, parsed by
+   > `DesignSpec.from_dict`). **Still open:** a case set of real instructions over real designs
+   > (today's cases are test fixtures), the run against the local model (THE QUEUE D2), and
+   > publishing the number. The tests were written on Linux and not run (the user's rule).
+   > Tested by: `tests/test_design_corruption.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 3. **Re-found E14 and E16 on what the horizon literature measures, including where it refutes

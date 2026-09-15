@@ -29,6 +29,12 @@ turns an extracted fragment into the one-line source pointer that goes into a
 parameter's description — "cell C7 of loads.xlsx, attached 2026-09-05" — so
 "where did 42 mm come from" has an answer in the artefact rather than in a
 transcript that trims.
+
+**An attached part becomes geometry through one function** (P4.2).
+`geometry_version_from` is called by `POST /projects/{id}/geometry/from-attachment`
+and by the agent's `import_geometry_from_attachment` tool, so the button and the
+assistant cannot disagree about which attachments are parts. Both callers
+authorise the project first; this checks the attachment.
 """
 
 from __future__ import annotations
@@ -38,18 +44,24 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.documents.document import Cell, ExtractedDocument, Fragment, FragmentKind
 from app.documents.errors import ExtractionFailed, UnsupportedDocument
+from app.documents.images import Look
 from app.documents.kinds import sniff
 from app.documents.provenance import SourceRef
 from app.documents.readers import read_document
-from app.models import Conversation, Media, User
+from app.geometry.formats import GEOMETRY_FORMATS
+from app.geometry.inspect import inspect
+from app.models import Conversation, GeometryVersion, Media, Project, User
 from app.models.attachment import Attachment, ExtractionStatus
+
+if TYPE_CHECKING:
+    from app.media import MediaService
 
 logger = logging.getLogger(__name__)
 
@@ -90,12 +102,18 @@ def attach(
     path: Path,
     conversation: Conversation | None = None,
     project_id: str | None = None,
+    look: Look | None = None,
 ) -> Ingested:
     """Record an attachment and read it, recording whatever happened.
 
     Never raises for a file it cannot read. An unreadable attachment is an
     outcome the user has to be told about, and an exception here would lose the
     row that says they handed us something.
+
+    `look` is the model a PNG or JPEG is described by (`app.documents.images`).
+    Without one a picture is `UNSUPPORTED`, saying so; with one that cannot
+    see, it is `UNSUPPORTED` with the provider's reason; with one that did not
+    answer, `FAILED`. It is never `READY` with nothing in it.
     """
     detected = sniff(path, filename)
     attachment = Attachment(
@@ -135,6 +153,7 @@ def attach(
             digest=media.sha256,
             attachment_id=attachment.id,
             attached_at=attachment.created_at,
+            look=look,
         )
     except UnsupportedDocument as exc:
         # Not a failure. The message already names what the file *is* and what
@@ -284,14 +303,97 @@ def fact_from_fragment(fragment: Fragment) -> str:
     return cite_fact(fragment.text.source, fragment.text.raw_for_analysis())
 
 
+class AttachmentNotFound(LookupError):
+    """No attachment with this id belongs to the caller.
+
+    One answer for "does not exist" and "is somebody else's", so an id cannot be
+    probed. The route renders it as 404 and the agent's tool as "not found".
+    """
+
+
+class NotSolidGeometry(ValueError):
+    """The attachment was read as something other than a part. The message names what."""
+
+
+def is_solid_geometry(attachment: Attachment) -> bool:
+    """Was this attachment detected as a STEP, IGES or STL part?
+
+    Detection read the bytes when the file was attached, so a `.step` that is
+    really a text file was recorded as text and is not a part here.
+    """
+    return attachment.detected_format in GEOMETRY_FORMATS
+
+
+def geometry_version_from(
+    db: Session,
+    media: MediaService,
+    *,
+    owner: User,
+    project: Project,
+    attachment_id: str,
+    note: str | None = None,
+) -> GeometryVersion:
+    """Make an attached part a geometry version of `project`, with no second upload.
+
+    **The caller has already authorised `project` for writing.** The route does it
+    with `OwnedProject` and the tool with the same membership rule; this checks
+    only that the attachment is the caller's own. `Attachment.project_id` is not
+    consulted, because a label on an attachment grants nothing.
+
+    The version and the attachment share one blob. Flushed, not committed: the
+    caller commits, or rolls back when it has a reason to.
+
+    Raises `AttachmentNotFound`, `NotSolidGeometry`, and whatever inspection
+    raises for a file that does not read as the part it claims to be
+    (`GeometryError`) or is no longer stored (`MediaNotFound`). **A failed
+    inspection deletes nothing.** The upload routes discard an unreadable CAD
+    blob, but this one is under an attachment the user can still see.
+    """
+    attachment = db.get(Attachment, attachment_id)
+    if attachment is None or attachment.owner_id != owner.id:
+        raise AttachmentNotFound(attachment_id)
+    if not is_solid_geometry(attachment):
+        *others, last = [name.upper() for name in GEOMETRY_FORMATS]
+        supported = f"{', '.join(others)} or {last}"
+        raise NotSolidGeometry(
+            f"This attachment was read as {attachment.detected_format}, not as solid "
+            f"geometry, so it cannot become a geometry version. Attach the part as "
+            f"{supported} and use that."
+        )
+
+    stored = attachment.media
+    stats = inspect(media.local_path(stored), attachment.detected_format)
+    highest = db.scalar(
+        select(func.max(GeometryVersion.version_number)).where(
+            GeometryVersion.project_id == project.id
+        )
+    )
+    version = GeometryVersion(
+        project_id=project.id,
+        media_id=stored.id,
+        version_number=(highest or 0) + 1,
+        filename=stored.filename,
+        file_format=attachment.detected_format,
+        note=note,
+        stats=stats,
+    )
+    db.add(version)
+    db.flush()
+    return version
+
+
 __all__ = [
     "MAX_STORED_FRAGMENTS",
     "UNVERIFIED_NOTE",
+    "AttachmentNotFound",
     "Ingested",
+    "NotSolidGeometry",
     "attach",
     "cite_fact",
     "dimensions_in",
     "fact_from_fragment",
+    "geometry_version_from",
+    "is_solid_geometry",
     "list_for",
     "serialise",
     "unverified_note",

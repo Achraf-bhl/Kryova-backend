@@ -65,16 +65,17 @@ happened.
 > enforced by `tests/test_verify_competitors.py`, not run; the quarterly judgement is a
 > person's and nothing records it yet). E23.4 (the public CadQuery benchmark) needs a model run
 > on Windows and is not next.
-> **Next target: P4.2's two Linux-closable pieces** — an attached image goes to the vision
-> provider (`app/ai/vision.py`) and comes back as fragments labelled `INFERRED` with
-> `attachments.UNVERIFIED_NOTE`, never `TRANSCRIBED`; and the agent is offered
-> `POST /projects/{id}/geometry/from-attachment` as a tool (CLAUDE.md testing item 8: a test
-> through the tool path, not the route alone). Then P4.3/P4.6 only if something there is
-> Linux-closable without the staged extraction, then P7 (QUEUE rows for the Windows parts).
-> **Next continuation fires 2026-09-15 20:34** — held by the session named on the next line.
-> **Held by `kryova-backend-55`**, which confirmed `scheduled 2026-09-15 20:34` at 18:04.
-> `kryova-backend-df` and `kryova-backend-78` hold nothing; the job dies if `kryova-backend-55`
-> is closed.
+> **P4.2 closed at 21:00 (DONE, the 20:34 job).** An attached PNG or JPEG is described by the
+> vision model as `INFERRED` fragments. It is `UNSUPPORTED` with a reason when no model can see,
+> and it is never `READY` and empty. The agent has `import_geometry_from_attachment`. Its tests
+> are written and not run (QUEUE D4). **Found on the way, and now the target:** nothing quotes
+> an attachment into the agent's turn, and the composer never calls `createAttachment`. So
+> from the GUI a spreadsheet never reaches the agent at all (P4.7, and P4.6's correction).
+> **Next target: P4.7**, with P4.6's composer piece if it closes in the same turn. Then P7
+> (QUEUE rows for the Windows parts), then the E23.4 harness only.
+> **Next continuation fires 2026-09-15 23:48** — held by the session named on the next line.
+> **Held by: handover in progress from `kryova-backend-55` at 21:00**; the follow-up commit
+> names the holder. If this line still says "in progress", `kryova-backend-55` holds it.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -352,6 +353,17 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — P4 task 2 closed: a picture is described by a model that can see, and the agent
+  can make an attached part geometry.** `app/documents/images.py` reads PNG and JPEG through an
+  injected `Look` (`vision.AttachmentLook`). The result is `INFERRED` fragments carrying the
+  unverified note. When no model can see, the attachment is `UNSUPPORTED` with a reason, and a
+  text-only Ollama model is refused at `/api/show` before the image is sent. The route records
+  the tokens as `attachment_image` against the vision model. `import_geometry_from_attachment`
+  and the route now share `attachments.geometry_version_from`, so the same 404 and refusal rules
+  apply to both. Also fixed: the hosted providers labelled every image `image/png`. Found and
+  added as P4.7: nothing quotes an attachment into the agent's turn, and the composer never
+  calls `createAttachment`. Tested by `tests/test_attachments.py` and `tests/test_vision.py`
+  (29 new tests, written on Linux and not run; QUEUE D4).
 - **2026-09-15 — E23 task 1: the competitor register; task 2, partial: it expires.**
   `app/verify/competitors.py` holds fourteen claims about Zoo, PTC/Onshape, FreeCAD and PhysicsX,
   each quoted from its page with a standing and how it was read. Nine confirmed, three changed

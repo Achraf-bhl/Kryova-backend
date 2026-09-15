@@ -126,6 +126,18 @@ class Finished:
 #: What `stream_chat` yields: zero or more deltas, then exactly one `Finished`.
 ChatEvent = TextDelta | Finished
 
+_JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def image_media_type(image: bytes) -> str:
+    """The media type to label an image part with: `image/jpeg` or `image/png`.
+
+    Read from the bytes. `look` takes the two formats `app.documents.images`
+    sends, and a render is always PNG, so anything that does not open like a
+    JPEG is labelled PNG, which is what every provider sent before JPEG arrived.
+    """
+    return "image/jpeg" if image.startswith(_JPEG_MAGIC) else "image/png"
+
 
 class LLMError(RuntimeError):
     """The model could not be reached, or did not answer usably."""
@@ -246,7 +258,12 @@ class LLMProvider(ABC):
         effort: str,
         max_tokens: int,
     ) -> Completion[T]:
-        """Same contract as `complete`, with pictures attached. PNG bytes, in order.
+        """Same contract as `complete`, with pictures attached. PNG or JPEG bytes, in order.
+
+        JPEG since P4.2, when attached photographs started arriving here as well as
+        renders. A provider that labels a part's media type names it with
+        `image_media_type`, never a fixed `image/png`: a hosted API checks the
+        label against the bytes.
 
         **Not abstract, and that is the decision.** Sight is a capability some
         providers and most models do not have, so an abstract method would force

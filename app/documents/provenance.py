@@ -92,7 +92,8 @@ class Locator:
 
     part: str | None = None
     """Which part of an Office file, when not the body: `header`, `footer`,
-    `footnotes`, `endnotes`, `comments`, `speaker notes`, `properties`.
+    `footnotes`, `endnotes`, `comments`, `speaker notes`, `properties`. For a
+    picture, `model's description` or `text the model read` (`images.py`).
     Server-chosen vocabulary, never file text."""
 
     table: int | None = None

@@ -701,6 +701,31 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       `DEFAULT_LIMIT`, and record every rate, the limit and `case_set_digest` in E22.4's
       status. Settles: given the right tool, how often our model sends the right numbers.
 
+- [ ] **D4 — P4.2, an attached photograph read by a real vision model (added 2026-09-15).**
+      Linux wrote the picture reader (`app/documents/images.py`, `app/ai/vision.py::AttachmentLook`)
+      and the agent's `import_geometry_from_attachment` tool, and ran nothing. In order:
+      1. `venv/bin/python -m pytest tests/test_attachments.py tests/test_vision.py
+         tests/test_documents_readers.py tests/test_tool_registry.py tests/test_mcp.py
+         tests/test_ai_tool_selection.py tests/test_agent.py -q`, then `ruff check app/ tests/`
+         and `mypy app/`. The route for geometry from an attachment was refactored onto
+         `attachments.geometry_version_from`, so its four older tests are regression evidence too.
+      2. With the text-only `AI_MODEL` and **no** `AI_VISION_MODEL`, attach a JPEG through
+         `POST /attachments` (the composer does not create document attachments yet, P4.6's
+         correction, so use `/docs` or curl). Expect `unsupported`, a detail naming the model
+         and `AI_VISION_MODEL`, and **no `/api/chat` line in the Ollama server log** for it.
+         That refusal is the guard: Ollama would otherwise drop the picture and describe nothing.
+      3. Set `AI_VISION_MODEL` to a model that can see (D1's `llava`, or whatever fits the card
+         beside `AI_MODEL`), restart, attach a real photograph of a part with a printed label
+         and a real drawing scan. Expect `ready`, `reliability: inferred`, the unverified note in
+         `GET /attachments/{id}/content`, and an `attachment_image` row in `ai_token_usage`
+         naming the vision model. Read the text lines against the picture and write down every
+         misread: that is the first measurement of how far `INFERRED` is from the page.
+      4. Agent path: attach a STEP to a conversation through the API, then ask the chat "analyse
+         the part I attached" with mutations confirmed. Expect `import_geometry_from_attachment`
+         in the step list and a geometry version, with no request to upload the file again.
+      Settles: whether the `_sees()` gate holds on the real server for an attachment, what a
+      real model makes of a photograph, and whether the agent reaches for the tool unprompted.
+
 ### E. Needs a seat to *write*, not only to verify — **this section is coding work**
 
 These are not "run it and see". They are pieces of the product that can only be *written* on

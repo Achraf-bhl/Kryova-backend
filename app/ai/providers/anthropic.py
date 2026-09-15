@@ -39,6 +39,7 @@ from app.ai.provider import (
     LLMUnavailable,
     TokenUsage,
     ToolCall,
+    image_media_type,
 )
 from app.ai.providers._json_schema import strictify
 
@@ -253,7 +254,7 @@ class AnthropicProvider(LLMProvider):
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": "image/png",
+                    "media_type": image_media_type(one),
                     "data": base64.b64encode(one).decode("ascii"),
                 },
             }

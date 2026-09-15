@@ -146,6 +146,7 @@ TOOL_LABELS: dict[str, str] = {
     "list_materials": "Checking the material library",
     "search_documentation": "Checking the documentation",
     "list_geometry": "Checking geometry versions",
+    "import_geometry_from_attachment": "Importing the attached part",
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
     "run_simulation": "Preparing the analysis",
@@ -262,6 +263,11 @@ def summarise_step(tool: str, result: Any, ok: bool) -> str:
         versions = result.get("geometry_versions", [])
         latest = versions[0]["filename"] if versions else "none"
         return f"{len(versions)} version(s), latest {latest}"
+    if tool == "import_geometry_from_attachment":
+        return (
+            f"Imported version {result.get('version_number', '')} "
+            f"({result.get('filename', 'the attached part')})"
+        )
     if tool == "list_simulations":
         return f"{len(result.get('simulations', []))} previous run(s)"
     if tool == "get_simulation":

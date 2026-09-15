@@ -17,9 +17,15 @@ three outcomes and the useful one to act on is `objected`.
 `assertions.py` applies to an unmeasured assertion and `provenance.py` applies
 to an unavailable number. Every way this can fail — no vision model installed,
 the provider unreachable, the model unsure, nothing drawn to look at — lands in
-`unchecked` with the reason in words. Nothing here raises: like
+`unchecked` with the reason in words. Nothing in the check raises: like
 `KnowledgeService.search`, this improves an answer and must never be the reason
 there is not one.
+
+**The second half reads a picture a user attached** (P4.2, `AttachmentLook`), and
+it does raise, on purpose. It is the `Look` that `app.documents.images` injects,
+and that contract turns "no model here can see" into `UnsupportedDocument` and
+"the model did not answer" into `ExtractionFailed`, so the attachment row records
+*not read, and why*. A description is not a check, and none of it is a pass.
 
     review = review_shape("a 60x40 plate with a 14 mm hole in the middle", shape)
     if review.objected:
@@ -42,7 +48,9 @@ from typing import Any, Final, Literal
 from app.ai import prompts
 from app.ai.provider import Completion, LLMError, LLMProvider, TokenUsage, VisionUnsupported
 from app.ai.sanitise import sanitise_untrusted
-from app.ai.schemas import VisualCheck
+from app.ai.schemas import ImageReading, VisualCheck
+from app.documents.errors import ExtractionFailed, UnsupportedDocument
+from app.documents.images import Sight
 from app.render import Render, render_views
 
 logger = logging.getLogger(__name__)
@@ -238,13 +246,101 @@ def review_shape(
     return review(request, [rendered[name] for name in views], provider=provider)
 
 
+# ---------------------------------------------------------------------------
+# Reading a picture somebody attached (P4.2).
+# ---------------------------------------------------------------------------
+
+#: Output ceiling for describing an attached picture. A few sentences and the
+#: text on a drawing's title block fit well inside it; it is also the only bound
+#: on the description's length, because `ImageReading` puts none in the schema.
+ATTACHMENT_MAX_TOKENS: Final = 1_500
+
+
+def looks_with(provider: LLMProvider) -> str:
+    """The model `provider.look` sends pictures to: the vision model if one is set.
+
+    Read from the provider rather than from settings, because the provider is
+    what actually makes the call. Every provider here keeps it as
+    `_vision_model` beside `model`, and the seam has no public name for it.
+    """
+    return str(getattr(provider, "_vision_model", None) or provider.model)
+
+
+class AttachmentLook:
+    """`app.documents.images.Look`, answered by `provider`, and what it spent.
+
+    A class rather than a closure so the caller can read `usage` after the
+    attachment is read and post it to the ledger. A picture is a model call, and
+    a model call that never reaches the ledger is one the daily allowance and
+    the bill both miss.
+
+    **The provider's own refusal is the gate for a model that cannot see.**
+    Ollama answers `/api/show` with the model's capabilities and `look` raises
+    `VisionUnsupported` before any image is sent, because Ollama would otherwise
+    drop the picture and describe nothing. That becomes `UnsupportedDocument`
+    here, so the attachment is recorded as not read, with the reason, and never
+    as an empty picture.
+    """
+
+    def __init__(self, provider: LLMProvider) -> None:
+        self.provider = provider
+        self.model = looks_with(provider)
+        self.usage = TokenUsage()
+        #: How many pictures the model answered for. A call that answered is
+        #: posted to the ledger even at zero tokens, as `usage.record` asks.
+        self.answered = 0
+
+    def __call__(self, image: bytes, image_format: str) -> Sight:
+        try:
+            answered: Completion[ImageReading] = self.provider.look(
+                system=prompts.ATTACHED_IMAGE_SYSTEM,
+                user=prompts.attached_image_user_message(image_format),
+                images=[image],
+                schema=ImageReading,
+                effort=EFFORT,
+                max_tokens=ATTACHMENT_MAX_TOKENS,
+            )
+        except VisionUnsupported as exc:
+            raise UnsupportedDocument(
+                f"the picture was not read, because the configured model cannot see "
+                f"images. {exc}"
+            ) from exc
+        except LLMError as exc:
+            # Unreachable, refused, or answered with something unusable. A fault,
+            # not a capability, so it is `FAILED` rather than `UNSUPPORTED`.
+            logger.info("An attached picture was not described: %s", exc)
+            raise ExtractionFailed(
+                f"the vision model did not describe the picture: {exc} Attach it again "
+                "once the model is available to have it read.",
+                short="the vision model did not answer",
+            ) from exc
+
+        self.usage = self.usage + answered.usage
+        self.answered += 1
+        reading = answered.value
+        return Sight(
+            describes=reading.describes,
+            visible_text=tuple(reading.visible_text),
+            seen_by=f"vision:{self.model}",
+        )
+
+
+def attachment_look(provider: LLMProvider) -> AttachmentLook:
+    """The `Look` an attachment reads a PNG or JPEG with, bound to `provider`."""
+    return AttachmentLook(provider)
+
+
 __all__ = [
+    "ATTACHMENT_MAX_TOKENS",
     "DEFAULT_VIEWS",
     "EFFORT",
     "MAX_TOKENS",
     "REQUEST_MAX_CHARS",
+    "AttachmentLook",
     "Outcome",
     "VisualReview",
+    "attachment_look",
+    "looks_with",
     "review",
     "review_shape",
 ]

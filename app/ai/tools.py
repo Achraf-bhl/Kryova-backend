@@ -127,6 +127,9 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     # consulted, not which of two lookup mechanisms answered.
     "explain_catia_term": "Checking the CATIA reference",
     "list_geometry": "Checking geometry versions",
+    # P4.2. Says what happens to the file the user handed over, not which route
+    # answers.
+    "import_geometry_from_attachment": "Importing the attached part",
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
     # Says what it produces, not how. A user watching the step list should
@@ -1006,6 +1009,41 @@ class ToolBox:
                     }
                 ),
                 handler=self._list_geometry,
+            ),
+            Tool(
+                name="import_geometry_from_attachment",
+                description=(
+                    "Make a part the user attached to this conversation -- a STEP, IGES or "
+                    "STL file -- a geometry version of the project, so it can be meshed "
+                    "and analysed. Call this when the user has attached a part and wants "
+                    "it analysed or checked; never ask them to upload a file they have "
+                    "already attached. Leave attachment_id out to use the one part "
+                    "attached here; when there are several, the error names each with its "
+                    "id and you ask the user which. A document, a picture or a drawing "
+                    "cannot become geometry and is refused saying what it was read as. "
+                    "Returns the new version number, which run_simulation can then use."
+                ),
+                parameters=_object(
+                    {
+                        "attachment_id": {
+                            "type": "string",
+                            "description": (
+                                "The attachment to import. Omit when one part is attached "
+                                "to this conversation."
+                            ),
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Omit to use the current project.",
+                        },
+                        "note": {
+                            "type": "string",
+                            "description": "Short note, e.g. 'supplier bracket, rev B'.",
+                        },
+                    }
+                ),
+                handler=self._import_geometry_from_attachment,
+                mutating=True,
             ),
             Tool(
                 name="list_simulations",
@@ -2066,6 +2104,144 @@ class ToolBox:
                 for g in rows
             ],
             "supported_formats": sorted(ext for exts in GEOMETRY_FORMATS.values() for ext in exts),
+        }
+
+    def _writable_project(self, project_id: str | None) -> Project:
+        """The project, if this user may write to it, by the HTTP layer's rule.
+
+        `MEMBER` or above in the owning organisation, which is what `OwnedProject`
+        asks of `POST .../geometry/from-attachment`. **Not `_project`**, which asks
+        for the project's owner: a tool stricter than the route beside it would
+        refuse, in the agent, what the same product's button does. A project that
+        does not exist and one the user cannot write to get one sentence, so an id
+        cannot be probed.
+        """
+        from app.models import OrgRole
+        from app.models.organisation import membership_for_user
+
+        resolved = project_id or self.project_id
+        if not resolved:
+            raise ToolError(
+                "No project specified and this conversation is not scoped to one. "
+                "Call list_projects and ask the user which one they mean."
+            )
+        project = self.db.get(Project, resolved)
+        membership = (
+            membership_for_user(self.db, self.user, project.organisation_id)
+            if project is not None
+            else None
+        )
+        if project is None or membership is None or not membership.role.at_least(OrgRole.MEMBER):
+            raise ToolError(f"No project with id {resolved!r} is one you can write to.")
+        return project
+
+    def _the_attached_part(self) -> str:
+        """The id of the one STEP, IGES or STL attached to this conversation.
+
+        Two parts is a question for the user, never a guess: the newer one is not
+        necessarily the one meant. Every refusal lists what is attached, with ids,
+        so the retry needs no other tool.
+        """
+        from app.core import attachments
+
+        if self.conversation is None:
+            raise ToolError(
+                "Give attachment_id: this call is not part of a conversation, so there "
+                "are no attachments to choose from."
+            )
+        attached = list(
+            attachments.list_for(self.db, conversation=self.conversation, owner=self.user)
+        )
+        parts = [one for one in attached if attachments.is_solid_geometry(one)]
+        if len(parts) == 1:
+            return parts[0].id
+        if parts:
+            listed = "; ".join(f"{one.filename!r} (id {one.id})" for one in parts[:10])
+            raise ToolError(
+                f"{len(parts)} parts are attached to this conversation: {listed}. Ask the "
+                "user which one they mean, then call again with its attachment_id."
+            )
+        if not attached:
+            raise ToolError(
+                "Nothing is attached to this conversation. Ask the user to attach the "
+                "part as a STEP, IGES or STL file."
+            )
+        listed = "; ".join(
+            f"{one.filename!r} (read as {one.detected_format}, id {one.id})"
+            for one in attached[:10]
+        )
+        raise ToolError(
+            "No STEP, IGES or STL file is attached to this conversation, so there is no "
+            f"part to import. Attached: {listed}. Ask the user to attach the part itself."
+        )
+
+    def _import_geometry_from_attachment(
+        self,
+        attachment_id: str | None = None,
+        project_id: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """`POST /projects/{id}/geometry/from-attachment`, offered to the agent (P4.2).
+
+        The capability existed and the agent was not handed it (CLAUDE.md testing
+        item 8): a user who attached a STEP file and asked for an analysis got an
+        agent whose only routes to geometry were CATIA and a second upload. The
+        route and this tool call one function,
+        `attachments.geometry_version_from`, so they cannot disagree about what a
+        part is, and they share the route's access rules (`_writable_project`).
+
+        Mutating, like `sync_geometry_from_catia`: it writes a version into a
+        project every member of the organisation sees.
+        """
+        from app.core import attachments
+        from app.geometry.inspect import GeometryError
+        from app.media import MediaNotFound, MediaService, get_media_store
+
+        project = self._writable_project(project_id)
+        chosen = attachment_id or self._the_attached_part()
+        media = self.media or MediaService(self.db, self.media_store or get_media_store())
+        try:
+            version = attachments.geometry_version_from(
+                self.db,
+                media,
+                owner=self.user,
+                project=project,
+                attachment_id=chosen,
+                note=(note or "").strip() or None,
+            )
+        except attachments.AttachmentNotFound as exc:
+            raise ToolError(
+                f"No attachment with id {chosen!r} belongs to you. Leave attachment_id "
+                "out to use the part attached to this conversation."
+            ) from exc
+        except attachments.NotSolidGeometry as exc:
+            raise ToolError(str(exc)) from exc
+        except GeometryError as exc:
+            raise ToolError(
+                f"The attached file could not be read as a part: {exc} Ask the user to "
+                "export it again and attach that."
+            ) from exc
+        except MediaNotFound as exc:
+            raise ToolError(
+                "The attached file is no longer stored, so there is nothing to import. "
+                "Ask the user to attach it again."
+            ) from exc
+        self.db.commit()
+        self.db.refresh(version)
+
+        return {
+            "project_id": project.id,
+            "geometry_version_id": version.id,
+            "version_number": version.version_number,
+            "attachment_id": chosen,
+            "filename": version.filename,
+            "file_format": version.file_format,
+            "stats": version.stats,
+            "next_step": (
+                f"Geometry version {version.version_number} is ready. Read its bounding "
+                "box with list_geometry, then build a load case against it and run a "
+                "simulation."
+            ),
         }
 
     def _list_simulations(self, project_id: str | None = None, limit: int = 10) -> dict[str, Any]:

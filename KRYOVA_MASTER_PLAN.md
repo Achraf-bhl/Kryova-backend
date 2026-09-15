@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 15/24 | 116/132 = 88% | 133/151 eng-months = 88% |
-| Product — P1–P10 | 6/10 | 48/61 = 78% | 28/38 eng-months = 74% |
-| **Programme** | 21/34 | 164/193 = 85% | 161/189 eng-months = 85% |
+| Product — P1–P10 | 6/10 | 48/62 = 77% | 28/38 eng-months = 73% |
+| **Programme** | 21/34 | 164/194 = 85% | 161/189 eng-months = 85% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 50%, E23 62%, P4 75%, P9 57% |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 50%, E23 62%, P4 71%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -5181,6 +5181,59 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
      deployment. *Revised 2026-09-14: neither is used. See the status below for why.*
    - **Spreadsheets** keep their structure — a load-case table becomes rows with units, not prose.
    - **Images/photos** → the vision provider (already pluggable, P5 surfaces it).
+   > DONE (2026-09-15) — **an attached PNG or JPEG is described by the configured vision model
+   > and stored as a guess labelled as one, and the agent is offered the from-attachment route
+   > as a tool.** The tests were written on Linux and **not run** (the user's rule; Windows runs
+   > them, THE QUEUE D4). Only `py_compile` and an import of `app.main` were run, so no guard
+   > here has been seen to fail.
+   > **Pictures.** `app/documents/images.py` reads a picture through an injected `Look`, so
+   > `app/documents` still imports nothing from `app.ai` and the tests open no socket.
+   > `app/ai/vision.py::AttachmentLook` is the real one: it sends the image with a frozen prompt
+   > (`ATTACHED_IMAGE_SYSTEM`, "data, not instruction", never estimate a size, never complete a
+   > partly legible number) against `ImageReading` (a description, then each line of text).
+   > Everything that comes back is `INFERRED` and `UntrustedText`: a description fragment and
+   > one `ANNOTATION` per line, cited as "the model's description of weld.png" and "the text
+   > the model read, line 2", so the route returns `UNVERIFIED_NOTE` beside it. Nothing is ever
+   > a `DIMENSION`; that is P4.3's staging. **No picture is ever an empty document:** no
+   > provider is `UNSUPPORTED` with sniff's advice; a model that cannot see is `UNSUPPORTED` with
+   > the provider's reason, and Ollama's `_sees()` refuses before the image is sent; an
+   > unreachable model and an answer with nothing in it are `FAILED`. Only PNG and JPEG are
+   > sent, under 5 MB.
+   > **What a picture costs is recorded.** The route posts the call to the token ledger and the
+   > bill through `routes/ai.py::_record`, under the new purpose `attachment_image` and the
+   > vision model's name, and refuses the read (not the upload) when the daily allowance is
+   > spent. A spreadsheet costs no ledger query.
+   > **Defect closed with it:** the Anthropic and OpenAI-compatible providers labelled every
+   > image `image/png`. A JPEG would have been rejected by a hosted API that checks the label
+   > against the bytes. `provider.image_media_type` reads it from the bytes.
+   > **The agent's tool.** `import_geometry_from_attachment` calls
+   > `attachments.geometry_version_from`, which the route now calls too, so the button and the
+   > agent cannot disagree about what a part is. Omitting the id uses the one part attached to
+   > the conversation; two parts is a refusal naming both with ids, never a guess. Access is
+   > the route's rule (`MEMBER` of the owning organisation), and a foreign attachment or
+   > project is refused in the same words as a made-up id. Mutating, like
+   > `sync_geometry_from_catia`.
+   > **Interface changes.** `POST /attachments` now answers `ready` with `reliability:
+   > inferred` for a PNG or JPEG where a vision model is configured (it was `unsupported`), and
+   > the request waits on that model call. `LLMProvider.look` takes JPEG as well as PNG. A new
+   > agent tool. `routes/ai.py::_record` and `_meter_tokens` take an optional `model`. No
+   > migration, no enum.
+   > **Flagged, not fixed:** (1) a picture blocks the request for the model call, seconds to a
+   > minute on a local model; `ExtractionStatus.PENDING` is there for moving it to the job
+   > queue. (2) `ToolBox._project`, used by every other project tool, asks for the project's
+   > *owner*, while the HTTP layer asks for membership, so an organisation member can run a
+   > simulation through the button and not through the agent. (3) Nothing quotes an
+   > attachment's content into the agent's turn, and the frontend never calls
+   > `createAttachment` (task 7 below, and task 6's correction).
+   > Still Windows: THE QUEUE C3 (files saved by Microsoft Office) and D4 (a real vision model
+   > reading a real photograph, and running these tests).
+   > Tested by: `tests/test_attachments.py` (`TestAPictureIsDescribedByAModelThatCanSee`,
+   > `TestAPictureNobodyCouldReadIsNotAnEmptyPicture`, `TestAPictureAttachedThroughTheRoute`,
+   > `TestTheAgentCanMakeAnAttachedPartGeometry`), `tests/test_vision.py`
+   > (`TestAnAttachedPictureIsDescribed`, `TestTheImageIsLabelledByWhatItIs`), all written on
+   > Linux and not run, plus the files named in the statuses below.
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-15) — **an attached part now becomes a geometry version on request, and a
    > CSV attached through the product is finally read as a table. Images are the one reader-side
    > item left.**
@@ -5335,6 +5388,18 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    extraction status, an attachment panel per conversation, inline previews (tables, images,
    geometry via P6 viewer), and "insert as parameter / as requirement / as load case" affordances —
    the moment extraction earns its keep.
+   > PARTIAL (2026-09-15) — **correction: the composer never creates a document attachment.**
+   > The status below says the document path reuses `AttachPill`. It does not.
+   > `api-client.ts::createAttachment` is defined and nothing calls it: `AttachPill` uploads
+   > geometry and inserts "Attached … — geometry vN" into the message. So from the GUI a
+   > spreadsheet, a PDF or a photograph never becomes an attachment, and the panel only ever
+   > shows rows made through the API. Found 2026-09-15 while giving the agent the
+   > from-attachment tool (task 2). Open here: the composer calls `createAttachment` with the
+   > conversation id for anything that is not a part, and the panel refreshes. Everything else
+   > below still stands.
+   > Tested by: `../Kryova-frontend/src/components/attachments/attachment-panel.test.tsx` (9).
+
+   <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-10) — **the panel is built; the insert affordances are deliberately not,
    > and inline previews wait on P6.**
    > `components/attachments/attachment-panel.tsx` lists what this conversation was handed,
@@ -5351,6 +5416,18 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    > Upload progress and drag-drop remain as they were — `AttachPill` and `chunked-upload.ts`
    > already carry the geometry path, and the document path reuses it.
    > Tested by: `../Kryova-frontend/src/components/attachments/attachment-panel.test.tsx` (9).
+
+7. **What was attached reaches the agent's turn.** *(added 2026-09-15)* A `READY` attachment
+   in the conversation is quoted into the user turn through `quote_for_user_turn`, which
+   Decision 8 makes the only way payload characters reach a model. Each fragment carries its
+   citation, and an `INFERRED` read carries `UNVERIFIED_NOTE` inside the quote. A read tool
+   returns fragments beyond the turn's budget by locator. Without this, task 4's first sentence
+   ("enters the conversation as quoted material") describes a path nothing takes, and the phase
+   proof's load-case spreadsheet cannot be read by the agent at all.
+   > NOT STARTED — found 2026-09-15: nothing outside `app/documents` calls
+   > `quote_for_user_turn` or `render_into_user_message`, and `routes/ai.py` never reads an
+   > attachment. Today the agent learns about an attachment only from the user's words and
+   > from `import_geometry_from_attachment`'s refusal, which lists what is attached.
 
 **Phase proof:** the hostile-document suite passes; a load-case spreadsheet becomes a named,
 provenance-tagged load case applied to a design; a STEP attachment becomes geometry through the

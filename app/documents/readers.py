@@ -48,7 +48,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.documents import office, tables, webpage
+from app.documents import images, office, tables, webpage
 from app.documents.document import (
     DocumentKind,
     ExtractedDocument,
@@ -119,6 +119,7 @@ def read_document(
     digest: str | None = None,
     attachment_id: str | None = None,
     attached_at: datetime | None = None,
+    look: images.Look | None = None,
 ) -> ExtractedDocument:
     """Read `path` into fragments, or say why it could not be read.
 
@@ -126,6 +127,10 @@ def read_document(
     `path.name`: the blob store names by digest, so the recognisable name has to
     be carried alongside. It is user-written text and is treated as such
     everywhere it is rendered.
+
+    `look` is how a PNG or JPEG is read: a model that can see, injected so this
+    package imports nothing from `app.ai` (`images.py`). Without one a picture
+    is refused with the advice `sniff` gave, exactly as before P4.2 reached it.
 
     Raises `UnsupportedDocument` when nothing in this deployment reads the
     format -- with the advice `sniff` produced, so the message names the next
@@ -140,6 +145,18 @@ def read_document(
         attachment_id=attachment_id,
         attached_at=attached_at,
     )
+
+    # Before the advice check, because a picture always carries advice: whether
+    # it can be read depends on the injected model, which `sniff` cannot see.
+    if detected.kind is DocumentKind.IMAGE and detected.advice is not None:
+        return images.read_image(
+            path,
+            source,
+            detected.format,
+            look=look,
+            advice=detected.advice,
+            max_fragments=MAX_FRAGMENTS,
+        )
 
     if detected.advice is not None:
         raise UnsupportedDocument(f"{source.filename}: {detected.advice}")

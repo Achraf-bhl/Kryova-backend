@@ -39,6 +39,8 @@ PURPOSE_INTERPRET = "interpret"
 PURPOSE_LOAD_CASE = "load_case"
 PURPOSE_SUMMARY = "summary"
 PURPOSE_TITLE = "title"
+#: Describing a PNG or JPEG a user attached (P4.2). One call per picture.
+PURPOSE_ATTACHMENT_IMAGE = "attachment_image"
 
 
 def daily_token_budget() -> int:

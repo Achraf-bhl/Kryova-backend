@@ -155,6 +155,41 @@ class VisualCheck(BaseModel):
     )
 
 
+class ImageReading(BaseModel):
+    """A vision model's account of one picture a user attached (P4.2).
+
+    `describes` comes first for `VisualCheck`'s reason: a decoder constrained to
+    this schema says what it sees before it starts listing text, so the lines it
+    reads are read in the light of what the picture is.
+
+    Everything here reaches the product as `INFERRED` content
+    (`app.documents.images`), and nothing in it is a measurement. There is
+    deliberately no field for a dimension: a number a model read off a photograph
+    arrives as a line of text with the unverified-read label, never as a value.
+    """
+
+    # No `max_length` on the string. Ollama compiles the schema into a decoding
+    # grammar, where a bounded string becomes a repetition that size, and no
+    # schema here has one. The output token ceiling in `vision.py` is the bound.
+    describes: str = Field(
+        description=(
+            "What the picture shows, in two to five sentences. First what kind of picture "
+            "it is (a photograph, an engineering drawing, a sketch, a screenshot, a "
+            "chart), then the object or content, then anything notable about its "
+            "condition. Describe only what is visible; if part of it is unclear, say so."
+        ),
+    )
+    visible_text: list[str] = Field(
+        max_length=40,
+        description=(
+            "Every piece of text you can read in the picture, one entry per line or "
+            "label, copied exactly as written, including numbers, units and symbols. "
+            "Leave out anything you cannot read clearly rather than guessing at it. "
+            "Empty when the picture has no text."
+        ),
+    )
+
+
 class LoadCaseDraft(BaseModel):
     """A load case parsed out of a natural-language description."""
 

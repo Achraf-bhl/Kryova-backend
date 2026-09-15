@@ -7,14 +7,14 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject
+from app.core import attachments
 from app.core.config import settings
-from app.geometry.formats import GEOMETRY_FORMATS, detect_format, rejection_reason
+from app.geometry.formats import detect_format, rejection_reason
 from app.geometry.inspect import GeometryError, inspect
 from app.kernel.errors import KernelError, KernelUnavailable
 from app.manufacture.export import ExportError, read_step
 from app.media import MediaNotFound, MediaTooLarge
 from app.models import GeometryVersion, Media, MediaKind
-from app.models.attachment import Attachment
 from app.render import display
 from app.schemas import GeometryVersionPage, GeometryVersionRead
 
@@ -137,39 +137,46 @@ def geometry_from_attachment(
       upload routes discard an unreadable CAD blob. This one is an attachment
       the user can still see, and deleting it would leave that row pointing at
       nothing.
+
+    The work is `attachments.geometry_version_from`, which the agent's
+    `import_geometry_from_attachment` tool also calls, so the two cannot drift.
     """
-    attachment = db.get(Attachment, attachment_id)
-    if attachment is None or attachment.owner_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    file_format = attachment.detected_format
-    # Only the solid-geometry detection yields one of these labels; a document
-    # is `text`, `pdf`, `xlsx`, `dxf` and so on.
-    if file_format not in GEOMETRY_FORMATS:
-        *others, last = [name.upper() for name in GEOMETRY_FORMATS]
-        supported = f"{', '.join(others)} or {last}"
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"This attachment was read as {attachment.detected_format}, not as solid "
-                f"geometry, so it cannot become a geometry version. Attach the part as "
-                f"{supported} and use that."
-            ),
+    try:
+        version = attachments.geometry_version_from(
+            db,
+            media,
+            owner=current_user,
+            project=project,
+            attachment_id=attachment_id,
+            note=note,
         )
-    return _attach(db, media, project.id, attachment.media, file_format, note, discard=False)
+    except attachments.AttachmentNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        ) from exc
+    except attachments.NotSolidGeometry as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except GeometryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MediaNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="Uploaded file is no longer on disk"
+        ) from exc
+    db.commit()
+    db.refresh(version)
+    return version
 
 
-def _attach(
-    db, media, project_id: str, stored, file_format: str, note: str | None, *, discard: bool = True
-):
+def _attach(db, media, project_id: str, stored, file_format: str, note: str | None):
     try:
         stats = inspect(media.local_path(stored), file_format)
     except GeometryError as exc:
         # The blob is content-addressed and may be shared, so let the orphan
         # sweep decide whether it can go rather than deleting it here. A blob
-        # under an attachment is not offered to the sweep at all.
-        if discard:
-            media.delete(stored)
-            db.commit()
+        # under an attachment never comes through here: `geometry_from_attachment`
+        # keeps it (`attachments.geometry_version_from`).
+        media.delete(stored)
+        db.commit()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except MediaNotFound as exc:
         raise HTTPException(

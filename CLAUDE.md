@@ -1421,6 +1421,26 @@ line). `structure.py` holds what every structured reader shares; `tables.py`, `o
 10. **The fixtures under `tests/data/documents/` come from pandoc and LibreOffice, never from a
    hand-built zip alone.** A fixture written by the person who wrote the parser only proves the two
    agree. None of them was saved by Microsoft Office; that is THE QUEUE C3.
+11. **A picture is read through an injected `Look`, and `tests/conftest.py` injects nothing**
+   (P4.2, 2026-09-15). `app/documents/images.py` imports nothing from `app.ai`. The route builds
+   `app/ai/vision.py::AttachmentLook` through `routes/attachments.py::get_attachment_look`, and
+   the `client` fixture overrides that to `None`, because the default provider is Ollama on
+   localhost and a test attaching a PNG would otherwise open a socket. A test that wants a model
+   sets `app.dependency_overrides[get_attachment_look]` itself. What a model says is `INFERRED`,
+   never a `DIMENSION`. The outcomes are fixed: no provider gives `UNSUPPORTED` with sniff's
+   advice; a model that cannot see gives `UNSUPPORTED` with the provider's reason (Ollama's
+   `_sees()` refuses before the image is sent); an unreachable model or an empty answer gives
+   `FAILED`. None of them is `READY` with nothing in it.
+12. **Never label an image part `image/png` by hand.** `LLMProvider.look` takes JPEG since
+   P4.2, and a hosted API checks the label against the bytes. Use `provider.image_media_type`.
+   Until 2026-09-15 the Anthropic and OpenAI-compatible providers hard-coded PNG, which was
+   harmless only while every image was a render.
+13. **An attachment reaches neither the agent's turn nor, from the GUI, the attachment table.**
+   Found 2026-09-15. Nothing outside `app/documents` calls `quote_for_user_turn`, and
+   `api-client.ts::createAttachment` has no caller: the composer's `AttachPill` makes geometry
+   versions only. So a green `/attachments` test proves the reader, not that a conversation can
+   use a file (master plan P4.7, P4.6's correction). The agent's one route to an attachment is
+   `import_geometry_from_attachment`, whose refusal lists what is attached.
 11. **A stored blob has no extension, so sniff it with the name it arrived with.** The store names
    a blob by its digest. `kinds.sniff(path)` alone falls back to that name for CSV, TSV, STL and
    IGES, and gets plain text or unknown. Every CSV attached through `POST /attachments` was read so
@@ -1929,6 +1949,13 @@ difference between the two machines hides in whatever neither one has to state o
    one tripwire working as designed, one stale artefact, and nine tests that were right about
    what they claimed and wrong about how they checked it. Written up in `KRYOVA_BUILD_PLAN.md`'s
    *Done*, 2026-09-08, where the history belongs.
+
+7. **`ToolBox._project` asks for the project's *owner*; the HTTP layer asks for membership.**
+   `get_owned_project` admits any `MEMBER` of the owning organisation, so since P2 a colleague
+   can run a simulation through the button and is told "No project with id … belongs to you" by
+   the agent. Flagged 2026-09-15, not fixed. `ToolBox._writable_project` is the route's rule, and
+   only `import_geometry_from_attachment` uses it so far. Moving the other tools onto it widens
+   what the agent may write for a non-owner, which is a decision to take on its own.
 
 **Removed on 2026-09-08 because they were no longer true** — recorded so nobody reinstates them
 from memory: `SECRET_KEY="changeme"` boots (it is refused at startup, `config.py:450`); the rate

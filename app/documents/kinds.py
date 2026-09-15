@@ -67,13 +67,15 @@ _IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
     (b"BM", "bmp"),
 )
 
-#: Images are recognised so the user is told what to do, not so they are read.
-#: P4.2 routes photographs to the vision provider; that is `app/ai/vision.py`'s
-#: job and not this package's, and until an attachment reaches it the honest
-#: answer is that no text was extracted.
+#: Every image carries advice, including the two that can be read. Since P4.2 a
+#: PNG or JPEG is described by a model that can see (`images.py`), but whether
+#: one is configured is decided by the caller that injects it, which this module
+#: cannot see. So the advice is what the reader says when nothing can look, and
+#: for every other image format it is the whole answer.
 _IMAGE_ADVICE = (
-    "Images are not read as text here. Describe what the picture shows, or "
-    "attach the drawing as a PDF or DXF."
+    "Only PNG and JPEG pictures are described, and only where a model that can see "
+    "images is configured. Describe what the picture shows, or attach the drawing "
+    "as a PDF or DXF."
 )
 
 #: Zip entry prefixes that identify an Office Open XML package. Checked against

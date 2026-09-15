@@ -142,6 +142,7 @@ def _record(
     provider: LLMProvider,
     conversation: Conversation | None = None,
     session_scope: SessionScope | None = None,
+    model: str | None = None,
 ) -> None:
     """Record a turn's tokens against the daily budget **and** the bill (P8.1).
 
@@ -154,21 +155,27 @@ def _record(
     a ledger, and neither is the shape the other needs.
 
     This is the single funnel every AI path already went through, which is why
-    the billing half is wired here rather than at four call sites.
+    the billing half is wired here rather than at four call sites. Since P4.2
+    that includes reading an attached picture (`routes/attachments.py`).
+
+    `model` names the model that answered when it is not `provider.model`: a
+    picture goes to the vision model, and a ledger row naming the chat model
+    would put a vision call on the wrong line of the bill.
     """
+    answered_by = model or provider.model
     token_usage.record(
         db,
         user=user,
         usage=usage,
         purpose=purpose,
         provider=provider.name,
-        model=provider.model,
+        model=answered_by,
         conversation=conversation,
     )
     db.commit()
     _meter_tokens(
         db, user, usage, purpose=purpose, provider=provider,
-        conversation=conversation, session_scope=session_scope,
+        conversation=conversation, session_scope=session_scope, model=answered_by,
     )
 
 
@@ -181,6 +188,7 @@ def _meter_tokens(
     provider: LLMProvider,
     conversation: Conversation | None,
     session_scope: SessionScope | None,
+    model: str | None = None,
 ) -> None:
     """Post the turn's tokens to the usage ledger.
 
@@ -216,7 +224,7 @@ def _meter_tokens(
                 scope,
                 prompt=usage.prompt_tokens,
                 completion=usage.completion_tokens,
-                model=provider.model,
+                model=model or provider.model,
             )
     except Exception:  # noqa: BLE001 - metering must never fail the work
         logger.exception("Could not meter AI tokens for user %s", user.id)

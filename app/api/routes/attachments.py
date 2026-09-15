@@ -17,17 +17,37 @@ blob is downloadable through the media routes, which already own that. What this
 returns is the fragments with their citations — and for an inferred read, the
 "unverified read" label travels *with* the content rather than being left to the
 screen that happens to show it (P4 task 3).
+
+**A PNG or JPEG is described by a model that can see, inside this request**
+(P4.2). The model is a dependency (`get_attachment_look`), so a test injects a
+fake and opens no socket. What it says is `INFERRED`, carries the unverified-read
+label, and is posted to the same token ledger and bill as every other model call.
+A picture waits on that call, which on a local model is seconds to a minute:
+`ExtractionStatus.PENDING` exists for the day this moves onto the job queue.
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, DbSession, MediaServiceDep, get_owned_project
+from app.ai import get_provider
+from app.ai import usage as token_usage
+from app.ai.provider import LLMUnavailable
+from app.ai.vision import AttachmentLook, attachment_look
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    MediaServiceDep,
+    SessionScopeDep,
+    get_owned_project,
+)
+from app.api.routes.ai import _record as record_model_usage
 from app.core import attachments
+from app.documents.errors import ExtractionFailed
+from app.documents.images import Look, Sight
 from app.models import Conversation, Media, User
 from app.models.attachment import Attachment
 from app.schemas.attachment import (
@@ -38,6 +58,44 @@ from app.schemas.attachment import (
 )
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
+
+
+def get_attachment_look() -> AttachmentLook | None:
+    """How an attached PNG or JPEG is read: the configured provider's model, or nothing.
+
+    `None` only when no provider can be built at all. A provider whose model
+    cannot see is still returned, because its own refusal (Ollama's `_sees()`
+    gate) is the reason the attachment then records. `tests/conftest.py`
+    overrides this to `None` for every test, so no test reaches a model by
+    attaching a picture.
+    """
+    try:
+        return attachment_look(get_provider())
+    except LLMUnavailable:
+        return None
+
+
+AttachmentLookDep = Annotated[AttachmentLook | None, Depends(get_attachment_look)]
+
+
+def _within_allowance(look: AttachmentLook, db: Session, user: User) -> Look:
+    """`look`, refused when the user's daily AI allowance is already spent.
+
+    Checked when a picture is actually about to be sent, so attaching a
+    spreadsheet costs no ledger query. The attachment is still recorded: the
+    allowance message says "uploads are unaffected", and the row is the upload.
+    """
+
+    def guarded(image: bytes, image_format: str) -> Sight:
+        if token_usage.over_budget(db, user.id):
+            raise ExtractionFailed(
+                f"the picture was not read. {token_usage.budget_message(db, user.id)} "
+                "Attach it again after the reset to have it read.",
+                short="daily AI allowance spent",
+            )
+        return look(image, image_format)
+
+    return guarded
 
 
 def _owned(db: Session, user: User, attachment_id: str) -> Attachment:
@@ -54,6 +112,8 @@ def create_attachment(
     db: DbSession,
     current_user: CurrentUser,
     media_service: MediaServiceDep,
+    session_scope: SessionScopeDep,
+    look: AttachmentLookDep,
 ) -> Attachment:
     """Attach an already-uploaded blob to a conversation, and read it.
 
@@ -89,8 +149,20 @@ def create_attachment(
         path=media_service.local_path(stored),
         conversation=conversation,
         project_id=payload.project_id,
+        look=_within_allowance(look, db, current_user) if look is not None else None,
     )
     db.commit()
+    if look is not None and look.answered:
+        record_model_usage(
+            db,
+            current_user,
+            look.usage,
+            purpose=token_usage.PURPOSE_ATTACHMENT_IMAGE,
+            provider=look.provider,
+            conversation=conversation,
+            session_scope=session_scope,
+            model=look.model,
+        )
     db.refresh(ingested.attachment)
     return ingested.attachment
 

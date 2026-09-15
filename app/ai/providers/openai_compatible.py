@@ -26,6 +26,7 @@ from app.ai.provider import (
     LLMUnavailable,
     TokenUsage,
     ToolCall,
+    image_media_type,
 )
 from app.ai.providers._json_schema import strictify
 
@@ -308,7 +309,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": "data:image/png;base64,"
+                        "url": f"data:{image_media_type(one)};base64,"
                         + base64.b64encode(one).decode("ascii")
                     },
                 }

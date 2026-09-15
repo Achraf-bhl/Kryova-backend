@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 110/132 = 83% | 125/151 eng-months = 83% |
+| Engineering — E1–E23 | 15/24 | 110/132 = 84% | 126/151 eng-months = 84% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 156/193 = 81% | 152/189 eng-months = 81% |
+| **Programme** | 21/34 | 158/193 = 82% | 154/189 eng-months = 81% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,8 +81,8 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, P4 75%, P9 57% |
-| nothing finished yet | E21, E22, E23, P6, P7 |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E23 25%, P4 75%, P9 57% |
+| nothing finished yet | E21, E22, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -4469,6 +4469,26 @@ them?
    the interop surface is one somebody else is standardising rather than one we invented. Scoped
    behind the same tenancy and CSRF guarantees as the HTTP API; it is another caller, not another
    trust boundary.
+   > DONE (2026-09-15) — **Kryova is an MCP server for one conversation's tools, on revision
+   > 2026-07-28, read from modelcontextprotocol.io that day.** That revision removed the
+   > `initialize` handshake and protocol sessions, so the server is stateless: every request
+   > carries its version and client capabilities in `_meta`, the `MCP-Protocol-Version`,
+   > `Mcp-Method` and `Mcp-Name` headers must match the body (`-32020`), an unsupported version
+   > is `-32022` with the supported list, a legacy `initialize` is told which version to speak,
+   > and an unknown method is 404. `app/ai/mcp.py` is the wire format with no session in it;
+   > `POST /mcp/conversations/{id}` (`app/api/routes/mcp.py`) binds it to `CurrentUser`, the chat
+   > API's own ownership check (404 cross-tenant), a new `mcp_requests_per_minute` budget and an
+   > `Origin` check against `cors_origins`. `tools/list` is exactly `ToolBox.every_tool()`, sorted;
+   > `tools/call` goes through `ToolBox.call` and commits either way, as the agent loop does. A
+   > mutating tool needs `_meta["kryova/allowMutations"]: true`, the MCP form of the chat API's
+   > `allow_mutations`. Decisions: one endpoint per conversation (the conversation owns the
+   > document); `draft_load_case` is not offered (the caller brings its own model); input
+   > validation is top-level only (required and undeclared names), because no JSON Schema library
+   > is installed; replies are always `application/json`, with no SSE, subscriptions, resources or
+   > prompts. **Interface change:** a new route and a new setting. **The tests were written on Linux
+   > and not run** (the user's rule); Windows runs them. Tested by: `tests/test_mcp.py`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 4. **Enter a public benchmark and publish the score, including when it is bad.** An

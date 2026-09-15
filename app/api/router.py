@@ -13,6 +13,7 @@ from app.api.routes import (
     handbook,
     kernel,
     materials,
+    mcp,
     media,
     organisations,
     platform,
@@ -44,6 +45,8 @@ api_router.include_router(designs.router)
 api_router.include_router(attachments.router)
 api_router.include_router(catia.router)
 api_router.include_router(kernel.router)
+# MCP (E23.3): another caller of the same tools, behind the same authentication.
+api_router.include_router(mcp.router)
 # Public and unauthenticated on purpose -- see each module's docstring.
 api_router.include_router(trust.router)
 # The docs site and the status page (P10.2, P10.4). Public for the same reason

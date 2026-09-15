@@ -39,15 +39,18 @@ happened.
 > **Continuation, 2026-09-15 11:15 — the user restarted the chain for the phases nobody had
 > looked at: E18, E21, E22, E23, P4, P6, P7, P9.** Linux writes code and tests and **runs no
 > pytest, ruff or mypy** (the user's rule; Windows runs them). E18 stays where its rule puts it
-> (M4/M5 need E13.2, M7 all of E9, M8 all of E8), so the targets, in order, are:
-> **E23.3** (MCP server over the tool registry, same tenancy as HTTP) → **E22.2** (silent-corruption
-> harness on design-IR edits, OCCT) → **E22.4** (selection + argument accuracy harness) →
-> **E22.1** (surrogate acceptance rule published where users read it; `app/optimise/screening.py`
-> already enforces rank-never-decide) → **P9.3** (`libgomp1` missing from the Dockerfile runtime
-> stage, nightly run 34822694239) → **P6.1** (OCCT shape → glTF tessellation service) → E21.6 /
-> E21.2 / E21.4 / E21.5 / E23.1 (documents and registers; each needs a source read, never recalled).
+> (M4/M5 need E13.2, M7 all of E9, M8 all of E8). **E23.3 closed at 11:50** (MCP server,
+> `tests/test_mcp.py`, not run). The targets, in order, are now:
+> **E22.2** (silent-corruption harness on design-IR edits, OCCT) → **E22.4** (selection +
+> argument accuracy harness) → **E22.1** (surrogate acceptance rule published where users read
+> it; `app/optimise/screening.py` already enforces rank-never-decide) → **P9.3** (`libgomp1`
+> missing from the Dockerfile runtime stage, nightly run 34822694239) → **P6.1** (OCCT shape →
+> glTF tessellation service) → E21.6 / E21.2 / E21.4 / E21.5 / E23.1 (documents and registers;
+> each needs a source read, never recalled).
 > **Next continuation fires 2026-09-15 13:40** — held by the session named on the next line.
 > **Held by `kryova-backend-df`**, which confirmed `scheduled 2026-09-15 13:40` at 11:11. `kryova-backend-78` holds nothing; the job dies if `kryova-backend-df` is closed.
+> Its prompt names E23.3 as the target and says to skip a target that is already done, so it
+> starts at E22.2.
 
 > **Continuation, 2026-09-14 23:31 — every turn now schedules the next one** (CLAUDE.md *Ending
 > every turn*). The job fires no sooner than 2 h 30 min after a turn ends.
@@ -325,6 +328,11 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-15 — E23 task 3: Kryova speaks MCP (revision 2026-07-28).** `app/ai/mcp.py` (the
+  stateless wire format: `_meta` per request, mirrored headers, `server/discover`, `tools/list`,
+  `tools/call`) and `POST /mcp/conversations/{id}` over `ToolBox`, behind `CurrentUser`, 404
+  ownership, `mcp_requests_per_minute` and an `Origin` check. Mutations need
+  `_meta["kryova/allowMutations"]`. New route and setting. Tested by `tests/test_mcp.py`. Not run here.
 - **2026-09-15 — E13 task 2, partial: fit selection's arithmetic.** `app/rules/fits.py`:
   clearance, kind and selection over caller-sourced zones; no ISO 286 value ships. M8's
   declared need corrected from "E17.4 — tubular weldments" to E17.3, where weldments are.

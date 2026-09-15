@@ -176,6 +176,9 @@ class Settings(BaseSettings):
     # per minute and exist to stop a loop, not to ration ordinary work.
     chat_requests_per_minute: int = 20
     simulation_requests_per_minute: int = 10
+    # MCP calls (E23.3). One `tools/call` is one request, and a client agent makes many per
+    # task, so this is wider than the chat budget, which is one per turn.
+    mcp_requests_per_minute: int = 120
 
     # --- Billing (P8.2) ------------------------------------------------------
     # `none` is the default and the only one a self-hosted install needs: plans

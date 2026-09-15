@@ -1,8 +1,10 @@
 """Approximations may rank and may never decide — the rule, as types.
 
 Master plan E22 task 1 derives the rule from the best published surrogate
-(DoMINO on DrivAerML: 12–50% surface errors, R² 0.96 on the integrated quantity,
-and *non-monotonic errors when ranking successive designs*): **a surrogate may
+(DoMINO on DrivAerML, arXiv:2501.13350v1, re-read 2026-09-15: surface relative L2
+errors 0.1505 to 0.3359, R² 0.96 on drag, and, in its authors' words, "smaller
+directional changes between successive designs shows some oscillatory behavior";
+the public form is `app/verify/commitments.py`): **a surrogate may
 rank, and may never decide; every surrogate answer carries its error basis; and
 the decision point always spends a real solve.** With VVUQ 70 unpublished there
 is no standard to appeal to, so the rule is Kryova's own and it is written here,

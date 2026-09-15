@@ -313,6 +313,20 @@ class TestWhatKryovaWillNotClaim:
         assert entry["enforcement"] == "mechanical"
         assert "app/design/assertions.py" in entry["enforced_by"]
 
+    def test_the_surrogate_rule_is_a_public_commitment_with_its_source(
+        self, anonymous: TestClient
+    ) -> None:
+        """E22.1: the rule is written where users read it, beside the paper it was derived from."""
+        payload = anonymous.get("/trust/commitments").json()
+        entry = next(
+            c for c in payload["commitments"] if c["id"] == "an-approximation-may-rank-and-never-decide"
+        )
+
+        assert entry["enforcement"] == "mechanical"
+        assert "app/optimise/screening.py" in entry["enforced_by"]
+        assert "arXiv:2501.13350v1" in entry["why"]
+        assert "may choose which candidates to build next" in entry["we_will_not"]
+
     def test_every_named_enforcement_file_exists(self) -> None:
         """What makes this page checkable rather than persuasive. A commitment
         pointing at a file that was renamed is a claim nobody can verify, which

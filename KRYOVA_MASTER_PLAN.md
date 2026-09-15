@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 112/132 = 84% | 128/151 eng-months = 84% |
+| Engineering — E1–E23 | 15/24 | 112/132 = 85% | 129/151 eng-months = 85% |
 | Product — P1–P10 | 6/10 | 47/61 = 77% | 28/38 eng-months = 73% |
-| **Programme** | 21/34 | 158/193 = 82% | 155/189 eng-months = 82% |
+| **Programme** | 21/34 | 160/193 = 83% | 157/189 eng-months = 83% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,8 +81,8 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E23 25%, P4 75%, P9 57% |
-| nothing finished yet | E21, E22, P6, P7 |
+| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E22 50%, E23 25%, P4 75%, P9 57% |
+| nothing finished yet | E21, P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -4377,6 +4377,24 @@ holds intent across a machine — and how does Kryova measure its own distance f
    may never decide**; every surrogate answer carries its error basis; and the decision point
    always spends a real solve. With VVUQ 70 unpublished (E20 task 1) there is no standard to
    appeal to, so this rule is ours and must be written where users read it.
+   > DONE (2026-09-15) — **the rule is published on `/trust/commitments`, beside the paper it
+   > came from, and the code that holds it was already there.** `app/optimise/screening.py` has
+   > enforced it by types since E10.4 (`Estimate` has no `passed`, `Ranking` has no `best`, `screen`
+   > returns only rebuilt candidates, `MAY_RANK_NEVER_DECIDE` rides every ranking). What was missing
+   > was the place users read, so `app/verify/commitments.py` now carries
+   > `an-approximation-may-rank-and-never-decide`, MECHANICAL, enforced by `screening.py` and
+   > `tests/test_optimise_surface.py`. **The paper was re-read for it** (arXiv:2501.13350v1, Table 1
+   > and section 4.1): pressure 0.1505, wall shear 0.2124 to 0.3359, drag R² 0.96, 500 morphs of
+   > one car with 10% held out, and no inference time, training time or speedup. Two corrections to
+   > the task text above, not silently absorbed: the authors' words are "smaller directional
+   > changes between successive designs shows some oscillatory behavior", not "non-monotonic
+   > errors"; and "12–50%" is not in Table 1's surface rows, which run from 0.1181 (area-weighted
+   > pressure) to 0.3359, so the page quotes the rows and not the range. The test was written on
+   > Linux and not run (the user's rule). Tested by:
+   > `tests/test_trust.py::TestWhatKryovaWillNotClaim::test_the_surrogate_rule_is_a_public_commitment_with_its_source`,
+   > `tests/test_optimise_surface.py::TestARankingMayRankAndNeverDecide`.
+
+   <!-- superseded 2026-09-15 -->
    > NOT STARTED.
 
 2. **Measure silent corruption, because that is the failure mode of this interaction model.** The

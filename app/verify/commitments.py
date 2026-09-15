@@ -293,6 +293,29 @@ COMMITMENTS: Final[tuple[Commitment, ...]] = (
         enforcement=Enforcement.MECHANICAL,
         enforced_by=("app/api/routes/kernel.py", "tests/test_kernel_routes.py"),
     ),
+    Commitment(
+        id="an-approximation-may-rank-and-never-decide",
+        we_will_not=(
+            "We will not accept, reject or sign off a design on a surrogate's or a response "
+            "surface's prediction. An approximation may choose which candidates to build next; "
+            "every candidate we report as better was rebuilt and measured, and every approximate "
+            "number carries the basis of its error."
+        ),
+        why=(
+            "The published surrogate this rule was derived from does not support more. DoMINO on "
+            "DrivAerML (Ranade et al., arXiv:2501.13350v1, Table 1 and section 4.1, read "
+            "2026-09-15) reports test-set relative L2 errors of 0.1505 for surface pressure and "
+            "0.2124 to 0.3359 for the three wall-shear components, while the drag force it "
+            "predicts reaches R\u00b2 = 0.96; its authors write that 'smaller directional changes "
+            "between successive designs shows some oscillatory behavior in the DoMINO "
+            "predictions'. It was trained on 500 morphs of one car and reports no inference "
+            "time, training time or speedup. Telling two nearby designs apart is exactly what a "
+            "design loop asks, so the decision spends a real solve. No standard governs this "
+            "yet, so the rule is ours."
+        ),
+        enforcement=Enforcement.MECHANICAL,
+        enforced_by=("app/optimise/screening.py", "tests/test_optimise_surface.py"),
+    ),
 )
 
 BY_ID: Final[dict[str, Commitment]] = {c.id: c for c in COMMITMENTS}

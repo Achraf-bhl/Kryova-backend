@@ -5990,6 +5990,41 @@ client renders what it is sent, at the detail the view deserves.
    hand-rolled path cannot hold the fps target on M5-class assemblies; that decision point is
    scheduled and its criteria written now, so it is a measurement, not a mood. WebGPU is the
    follow-on where available, behind capability detection.
+   > PARTIAL (2026-09-16) — **the decision point is scheduled and its criteria are written,
+   > which is what this task actually asks for; nothing has been adopted and nothing has been
+   > measured.** `docs/RENDERER_DECISION.md`.
+   > **Date: 2027-03-16**, six months after the first viewer task landed, with two named
+   > early triggers (two successive months past the fail threshold, or a P6 task needing more
+   > than two engineer-weeks of something a library supplies outright). Six criteria with
+   > pass/fail bands and a deliberately wide *marginal* middle — first paint, 95th-percentile
+   > and worst frame time, section latency, GPU memory, and pick-to-highlight — each a median
+   > of five runs, never one.
+   > **Two prerequisites are missing and are recorded rather than assumed**, which is the
+   > substantive finding here and both are now in QUEUE G1:
+   > - **The reference assembly does not exist and cannot be M5.** The plan names M5's
+   >   stamping press; M5 is not built and is blocked on E13, and the largest assembly this
+   >   repository can produce today is **M6 at three components** against a 2,000-part target
+   >   (measured 2026-09-16). So §4 defines the assembly by its *properties* and permits a
+   >   synthetic one, labelled synthetic in the run log.
+   > - **No reference laptop is named anywhere in this repository** (checked 2026-09-16).
+   >   P6.2 says "a mid-range laptop", the phase proof says "the reference laptop", and
+   >   neither is a machine. A frame-time threshold with no hardware behind it is not a
+   >   threshold.
+   > **If either is still missing on the date, the outcome is "no decision", recorded** —
+   > deciding without the measurement is exactly what writing the criteria in advance is for.
+   > §7 lists what is explicitly *not* a reason to adopt a library, including the two that
+   > have historically ended this argument: a hard bug, and the renderer being unpleasant to
+   > work in.
+   > **The default stance is stated and argued**: keep the hand-rolled WebGL 2 path, because
+   > the viewer's hard problem is *what to fetch and at what detail* (`scene-streaming.ts`),
+   > which no library helps with — a library would replace the part that works and leave the
+   > part that is hard.
+   > **Not done here:** the WebGL 2 upgrade itself (instancing, attribute handling) and the
+   > WebGPU capability-detection follow-on; the viewer is still the single-part WebGL 1
+   > `webgl-stress-viewer.tsx`. This task is the *decision procedure*, and no measurement can
+   > happen on Linux.
+
+   <!-- superseded 2026-09-16 -->
    > PARTIAL — the single-part WebGL viewer exists and is tested. Code:
    > `webgl-stress-viewer.tsx`.
 

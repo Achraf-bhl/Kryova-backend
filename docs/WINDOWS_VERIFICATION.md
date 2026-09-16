@@ -922,6 +922,19 @@ this file drives the ladder, with a screenshot each.
          blocker: the target is meaningless without a fixed scene to measure it on. 2,000
          parts with real repetition (a frame, a few hundred distinct components, thousands of
          fasteners) exported once and pinned by digest, so two runs a month apart compare.
+         **The properties it must have are now written down** — `docs/RENDERER_DECISION.md`
+         §4 gives the table (2,000 occurrences, 120 distinct components, ≥90% instanced,
+         ≤1.5 M triangles after LOD, ≥4 deep). Note while planning it that the plan's own
+         choice, M5's stamping press, **is not built and is blocked on E13**; the largest
+         assembly this repository can produce today is M6 at **three** components (measured
+         2026-09-16). So this is a synthetic generator until M5 lands, and a run on it is
+         labelled synthetic.
+      2b. **Name the reference laptop**, here, with make, GPU, driver version and screen
+         resolution — and then measure on that one. P6.2 says "a mid-range laptop" and the
+         phase proof says "the reference laptop"; **no machine is named anywhere in this
+         repository** (checked 2026-09-16). A frame-time threshold with no machine behind it
+         is not a threshold, and the workstation is the wrong answer: it has a discrete card
+         and is the opposite of mid-range. Integrated graphics at 1920×1080 is the intent.
       3. Wire the module to the viewer and the `?level=` route (`app/render/display.py` serves
          levels 0-2), and measure first paint and the frame time under orbit with the
          browser's own profiler.

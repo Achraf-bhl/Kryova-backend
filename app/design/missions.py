@@ -1254,8 +1254,14 @@ def _motion_payload(
             for name, body in path.bodies.items()
         },
     }
-    if available:
-        motion["peak_reaction_force_n"] = max(r.peak_force_n for r in available)
+    # The walrus filter is `app/dynamics/types.py`'s own idiom for this, and it is
+    # not merely a type-checker appeasement: `available` means the chain resolved,
+    # and a resolved reaction with no peak force is a state the type still allows.
+    # Omitting the key then leaves the claim UNMEASURED, which is this function's
+    # stated answer everywhere else, rather than raising inside a payload builder.
+    peaks = [peak for r in available if (peak := r.peak_force_n) is not None]
+    if peaks:
+        motion["peak_reaction_force_n"] = max(peaks)
     # **Nested, not flattened, and this cost a build to learn.** It was written first
     # as flat keys spelled "motion.total_mass_kg", and every motion claim came back
     # NOT CHECKED against a payload that visibly contained them: the assertion
@@ -5109,7 +5115,13 @@ def _m4_design(
     from app.assembly.contracts import bind_into
 
     float_verdict = m4_end_float()
-    assert float_verdict.result.maximum_mm is not None  # noqa: S101 - worst case always resolves
+    # `minimum_mm`, not `maximum_mm`: the line below subtracts the *minimum* end
+    # float to get the largest span the stack allows. The assert named the other
+    # attribute until 2026-09-17, so it narrowed a value nothing here reads and
+    # left the subtraction taking `float | None` — a verdict with no minimum
+    # would have raised `TypeError: unsupported operand` instead of the
+    # assertion's own message. Found by running mypy on Windows.
+    assert float_verdict.result.minimum_mm is not None  # noqa: S101 - worst case always resolves
     stacked_maximum = _M4_SEAT_SPAN_MM + _M4_SEAT_SPAN_TOL_MM - float_verdict.result.minimum_mm
     return AssemblyDesign(
         structure=_m4_structure() if structure is None else structure,

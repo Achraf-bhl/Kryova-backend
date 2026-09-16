@@ -86,6 +86,15 @@ module = [
   "scipy.*",
   "OCP",
   "OCP.*",
+  # PyChrono exists only inside the container `app/dynamics/chrono/run.py` starts,
+  # and `pychrono` MUST NOT enter any requirements file: the PyPI name of that
+  # spelling is an unrelated timing utility, and installing it would make the
+  # availability probe report an engine that is not there (`_entrypoint.py` checks
+  # for `ChSystemNSC` for exactly this reason). So the import is declared missing
+  # here rather than satisfied. Added 2026-09-17, the first time mypy was run on
+  # a machine in this project.
+  "pychrono",
+  "pychrono.*",
 ]
 ignore_missing_imports = true
 

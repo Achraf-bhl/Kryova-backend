@@ -798,6 +798,19 @@ def check_conversation_rules(
     notes: list[str] = []
     runner = backends.peek_session(conversation_id)
     for kind in scans:
+        if runner is None:
+            # `_live_document` above proved a document existed, but a session can
+            # still be evicted between that call and this one — and calling None
+            # would arrive in the handler below as "'NoneType' object is not
+            # callable", a note that tells the reader nothing about what to do.
+            # Both sibling call sites in this module guard and this one did not;
+            # found by running mypy on Windows for the first time, 2026-09-17.
+            notes.append(
+                f"The {kind} scan could not run: the part left memory between being "
+                "measured and being scanned, so its rules are unmeasured. Ask for the "
+                "part again."
+            )
+            continue
         arguments: dict[str, Any] = {"kind": kind}
         if kind == "draft":
             arguments["direction"] = list(body.pull_direction or ())

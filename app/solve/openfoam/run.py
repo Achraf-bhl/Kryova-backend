@@ -139,8 +139,17 @@ def run_case(
     directory = directory.resolve()
     if launcher == "docker":
         command = ["docker", "run", "--rm", "-v", f"{directory}:/case"]
-        if hasattr(os, "getuid"):
-            command += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        # `getattr` rather than `hasattr` plus a bare call: `os.getuid` and
+        # `os.getgid` do not exist on Windows, so the bare names are a type
+        # error there even inside a branch guarded by `hasattr`, which mypy
+        # cannot use to narrow a module attribute. This is exactly the case
+        # THE QUEUE F1 exists for — the container then runs as its own user and
+        # writes files the server may not be able to delete. Found by running
+        # mypy on Windows for the first time, 2026-09-17.
+        getuid = getattr(os, "getuid", None)
+        getgid = getattr(os, "getgid", None)
+        if getuid is not None and getgid is not None:
+            command += ["--user", f"{getuid()}:{getgid()}"]
         command += [image, "bash", "-lc", "bash /case/Allrun"]
     else:
         command = ["bash", str(directory / "Allrun")]

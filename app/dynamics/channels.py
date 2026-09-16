@@ -298,6 +298,21 @@ def instant(cycle: CyclePlan, index: int) -> dict[str, Any]:
             for k in range(3):
                 field[k] += scale_by * load.magnitude_mm_s2 * load.direction[k]
             continue
+        if not isinstance(load, (ForceLoad, BearingLoad)):
+            # `ForceLoad` and `BearingLoad` are the two members of `LoadCase.loads`
+            # that carry a `force_n`, and `build` above puts a bearing mount's
+            # split into one of each — so the narrowing has to name both. The
+            # other three (pressure, moment, centrifugal) have no resultant force
+            # to superpose at an instant, so there is nothing to add and no
+            # sensible default; refused by name rather than left to reach the
+            # caller as `AttributeError`. Found by mypy on Windows, 2026-09-17,
+            # and the too-tight first narrowing was caught immediately by
+            # `TestABearingMountSplitsAlongItsLine`.
+            raise MechanismError(
+                f"Channel {channel.name!r} carries a {type(load).__name__}, which has no "
+                "resultant force to superpose at an instant. A duty cycle's channels must "
+                "carry point forces, bearing loads and gravity only."
+            )
         key = channel.name.rsplit(" ", 1)[0]
         total = forces.setdefault(key, [0.0, 0.0, 0.0])
         for k in range(3):

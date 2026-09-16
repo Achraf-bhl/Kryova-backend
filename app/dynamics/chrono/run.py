@@ -174,8 +174,13 @@ def run_mechanism(
 
     if launcher == "docker":
         command = ["docker", "run", "--rm", "-v", f"{directory}:/work", "-w", "/work"]
-        if hasattr(os, "getuid"):
-            command += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        # `getattr`, not `hasattr` plus a bare call — see the same lines in
+        # `app/solve/openfoam/run.py`: these names are absent on Windows, so a
+        # bare reference is a type error there however the branch is guarded.
+        getuid = getattr(os, "getuid", None)
+        getgid = getattr(os, "getgid", None)
+        if getuid is not None and getgid is not None:
+            command += ["--user", f"{getuid()}:{getgid()}"]
         # `--network none`: this run reads one file and writes one file. A solver that
         # can reach the network is a solver that can fetch something, and then the
         # engine identity above stops describing what actually answered.

@@ -203,11 +203,24 @@ class TestAPendingRungIsNeverAPass:
     """`assertions.UNMEASURED` one level up: a rung nobody climbed is not green."""
 
     def test_a_pending_rung_reports_pending_and_says_what_it_waits_on(self) -> None:
-        result = run_mission(mission("M7"), _runner_returning(_payload()))
+        """Derived, not named. This asked for `mission("M7")` until 2026-09-17 and
+        M7 became buildable on 2026-09-16, so a rung *advancing* broke a test about
+        how pending rungs are reported — and it broke it with a message about
+        runners rather than about pendingness, which is the confusing kind. The
+        claim here is about the reporting, so the rung comes from the ladder.
+        """
+        pending = [rung for rung in LADDER if not rung.buildable]
+        assert pending, "the ladder has no pending rung left to test the report with"
 
-        assert result.outcome is MissionOutcome.PENDING
-        assert not result.passed
-        assert "multibody" in result.reason
+        for rung in pending:
+            result = run_mission(rung, _runner_returning(_payload()))
+
+            assert result.outcome is MissionOutcome.PENDING, rung.rung
+            assert not result.passed, rung.rung
+            # What it waits on, in its own words: every need this rung declared
+            # has to appear, or "says what it waits on" is not what it does.
+            for need in rung.needs:
+                assert need in result.reason, (rung.rung, need)
 
     def test_a_pending_rung_is_never_built(self) -> None:
         """Building a rung we predicted cannot build spends time to learn nothing."""
@@ -334,12 +347,19 @@ class TestTheReportSerialises:
             lambda: _runner_returning(_payload()), _harness_ladder()
         ).to_dict()
 
+        harness = _harness_ladder()
+        pending_rungs = [rung for rung in harness if not rung.buildable]
+
         assert data["ok"] is True
         assert data["complete"] is False
-        assert data["pending"] == 4
-        m7 = next(r for r in data["results"] if r["rung"] == "M7")
-        assert m7["outcome"] == "pending"
-        assert any("E9" in need for need in m7["needs"])
+        # Derived from the harness ladder rather than written as 4: this read
+        # `== 4` and named M7 until 2026-09-17, so M7 becoming buildable failed a
+        # test whose subject is the *shape* of the dict.
+        assert data["pending"] == len(pending_rungs)
+        for rung in pending_rungs:
+            row = next(r for r in data["results"] if r["rung"] == rung.rung)
+            assert row["outcome"] == "pending"
+            assert list(row["needs"]) == list(rung.needs)
 
     def test_an_empty_ladder_is_not_a_pass(self) -> None:
         """Truthiness on an empty report would make a mis-wired suite look green."""

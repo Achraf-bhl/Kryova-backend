@@ -750,7 +750,11 @@ class TestTheRungInTheLadder:
         pending = [rung.rung for rung in LADDER if not rung.buildable]
 
         assert "M5" not in pending
-        assert pending == ["M7", "M8", "M9"]
+        # M5's own membership, not the whole pending list. It read
+        # `pending == ["M7", "M8", "M9"]` until 2026-09-17, so M7 landing
+        # afterwards failed a test about M5 — the ladder's total belongs to
+        # whichever rung last moved it, never to every rung that ever moved.
+        assert {"M8", "M9"} <= set(pending)
 
     def test_it_carries_what_it_does_not_claim(self) -> None:
         rung = mission("M5")
@@ -791,13 +795,21 @@ class TestTheRungInTheLadder:
         assert entry.not_claimed == mission("M5").unproven
         assert entry.rung == "M5"
 
-    def test_the_ladder_now_stands_at_six_of_nine(self) -> None:
-        from app.design.missions import run_ladder
+    def test_the_ladder_is_not_complete_and_m5_is_not_why(self) -> None:
+        """Superseding `test_the_ladder_now_stands_at_six_of_nine`.
+
+        That name and its `"6/9 rungs pass"` were true on 2026-09-16 and false
+        the same day M7 landed, which made a rung *advancing* fail a test about
+        M5. The count is derived here instead, and what is asserted is the two
+        things M5 is actually entitled to say: the ladder runs green, and it is
+        still short of complete.
+        """
+        from app.design.missions import LADDER, run_ladder
         from app.kernel import OcctRunner
 
         report = run_ladder(OcctRunner)
 
-        assert len(report.pending) == 3
-        assert "6/9 rungs pass" in report.summary()
+        assert len(report.pending) == sum(1 for rung in LADDER if not rung.buildable)
+        assert f"/{len(LADDER)} rungs pass" in report.summary()
         assert report.ok, report.summary()
         assert not report.complete

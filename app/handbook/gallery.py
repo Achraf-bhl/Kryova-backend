@@ -37,8 +37,9 @@ class GalleryEntry:
     #: The master plan's own "what makes this hard" column, carried across so a
     #: reader knows what the rung was testing rather than only that it passed.
     hard: str
-    #: `"part"`, `"assembly"`, `"sheet"` or `"pending"`. Four rather than a
-    #: boolean, because "builds one part" and "builds a product graph" are
+    #: `"part"`, `"assembly"`, `"sheet"`, `"moving"` or `"pending"`. Five rather
+    #: than a boolean, because "builds one part", "builds a product graph" and
+    #: "builds a product that moves and reports its own joint reactions" are
     #: different demonstrations and a reader deciding whether this product suits
     #: them cares which.
     builds: str
@@ -69,12 +70,28 @@ class GalleryEntry:
 
 
 def _builds(mission: Mission) -> str:
+    """Which demonstration this rung is, or `"pending"` if it is none of them.
+
+    **The `moving` branch was missing from 2026-09-16 to 2026-09-17**, and the
+    consequence was on a public page: `Mission.buildable` learned about
+    `MovingDesign` when M7 landed and this function did not, so the handbook's
+    gallery published the seven-part robot arm as *pending*, with an empty
+    `waiting_on`, and `headline()` undercounted the ladder by one. A derived
+    page is only as derived as its last branch — the failure mode `app/handbook/`
+    exists to prevent, arriving from inside it.
+
+    The order matters as little as it looks: a mission carries exactly one of
+    these four, and `tests/test_docs.py` holds the gallery to `Mission.buildable`
+    so a fifth kind cannot be added to one and not the other again.
+    """
     if mission.spec is not None:
         return "part"
     if mission.assembly is not None:
         return "assembly"
     if mission.folded is not None:
         return "sheet"
+    if mission.moving is not None:
+        return "moving"
     return "pending"
 
 

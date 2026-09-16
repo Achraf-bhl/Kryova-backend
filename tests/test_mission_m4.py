@@ -564,16 +564,22 @@ class TestTheRungInTheLadder:
         """E12 is complete and E13.2's open half is a document — ISO 286's deviation
         tables — not the stack-up arithmetic a gearbox's axial chain uses. A rung
         held pending on the half of a prerequisite it does not use is a ladder that
-        has stopped measuring anything, which is M6's entry in this same file."""
+        has stopped measuring anything, which is M6's entry in this same file.
+
+        **This asserts M4's own membership, not the whole buildable list.** It
+        listed `["M1", "M2", "M3", "M4", "M6"]` verbatim until 2026-09-17, which
+        made M5 and M7 landing afterwards read as *this* rung regressing — the
+        same trap the blocked-case count in `app/verify/nafems.py` fell into
+        twice. A test about M4 asserts M4, and the ladder's own total belongs to
+        whichever rung last moved it.
+        """
         from app.design.missions import LADDER
 
-        assert [rung.rung for rung in LADDER if rung.buildable] == [
-            "M1",
-            "M2",
-            "M3",
-            "M4",
-            "M6",
-        ]
+        buildable = [rung.rung for rung in LADDER if rung.buildable]
+        assert "M4" in buildable
+        # M4 stands on nothing M5, M6 or M7 build, so it must be buildable
+        # whatever happened to them — and it must not have overtaken M1-M3.
+        assert {"M1", "M2", "M3"} <= set(buildable)
 
     def test_it_does_not_claim_the_gears_have_teeth(self) -> None:
         """The rung's headline caveat, and the argument for a gear-profile operation

@@ -452,30 +452,32 @@ class TestTheLadderItself:
 
         return run_ladder(OcctRunner)
 
-    def test_four_rungs_pass_and_five_are_not_yet_buildable(self) -> None:
+    def test_five_rungs_pass_and_four_are_not_yet_buildable(self) -> None:
         """M6 joined on 2026-09-10, when E14.1 and E12.3 — its two declared
-        needs — were both complete. The coverage figure is measured here rather
-        than asserted anywhere, so it moves deliberately."""
+        needs — were both complete; M4 joined on 2026-09-16 the same way. The
+        coverage figure is measured here rather than asserted anywhere, so it
+        moves deliberately."""
         report = self._ladder()
 
-        assert [r.rung for r in report.passed] == ["M1", "M2", "M3", "M6"]
-        assert len(report.pending) == 5
+        assert [r.rung for r in report.passed] == ["M1", "M2", "M3", "M4", "M6"]
+        assert len(report.pending) == 4
         assert report.ok, report.summary()
 
     def test_the_ladder_is_not_complete_even_though_nothing_failed(self) -> None:
-        """Five rungs unclimbed, M2's welds unsized, M3's K never bent and M6's
-        belt never loaded. `ok` is the regression question; `complete` is the
-        programme question, and they are not the same."""
+        """Four rungs unclimbed, M2's welds unsized, M3's K never bent, M4's
+        gears untoothed and M6's belt never loaded. `ok` is the regression
+        question; `complete` is the programme question, and they are not the
+        same."""
         report = self._ladder()
 
         assert not report.complete
-        assert [r.rung for r in report.caveated] == ["M2", "M3", "M6"]
+        assert [r.rung for r in report.caveated] == ["M2", "M3", "M4", "M6"]
 
     def test_the_sentence_a_human_reads_names_both(self) -> None:
         summary = self._ladder().summary()
 
-        assert "4/9 rungs pass" in summary
-        assert "5 not yet buildable" in summary
+        assert "5/9 rungs pass" in summary
+        assert "4 not yet buildable" in summary
         assert "not claimed" in summary and "weld" in summary
 
 

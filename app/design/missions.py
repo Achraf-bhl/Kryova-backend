@@ -117,6 +117,8 @@ from app.design.errors import SpecError
 from app.design.execute import BuildReport, CallRunner, execute_plan
 from app.design.params import Parameter, ParameterSet, Unit
 from app.design.spec import DesignSpec, FeatureSpec, expr, ref
+from app.parts.bearings import CATALOGUE, Bearing, Duty, Refusal, Selection, select
+from app.rules.stackup import Contributor, Method, StackVerdict, check, stack, symmetric
 from app.sheetmetal import (
     HOLE_EDGE_TO_TANGENT_FACTOR,
     Bend,
@@ -3756,6 +3758,1359 @@ _M3_UNPROVEN: Final = (
 )
 
 
+# ---------------------------------------------------------------------------
+# M4 — the gearbox
+# ---------------------------------------------------------------------------
+#
+# A single-stage spur reducer: a pinion and a wheel on two parallel shafts, each
+# shaft on two ball bearings, inside a rectangular housing closed by a cover at
+# each end. Ratio 2:1, module 3, 24 and 48 teeth.
+#
+# **Why this rung moves now.** Its declared `needs` were E12.3 (standard parts,
+# so bearings are bought rather than modelled), E12.4 (a parts selection engine)
+# and E13.2 (tolerance and GD&T, for the stacks). E12 is complete; E13.2 is
+# `PARTIAL`, and what is open in it is a **document** — ISO 286's deviation
+# tables are not transcribed, and CATIA FTA needs a seat — while the arithmetic
+# this rung needs, `app/rules/stackup.py`, is in and tested. A rung held pending
+# on the half of a prerequisite it does not use is the ladder M6's entry warns
+# about: one that has stopped measuring anything. So it moves, and the half it
+# does not have is in `_M4_UNPROVEN` rather than hidden.
+#
+# **The rung's difficulty is that a gearbox is three claims that must agree and
+# only one of them is geometry.**
+#
+# * **The mesh is arithmetic before it is a shape.** Centre distance is
+#   `m(z1 + z2)/2` and nothing about the solids knows that. So the gear pair is
+#   declared as an `Interface` — the contract both gears are built from — and the
+#   claim that closes it is measured *between the built solids*: the gap between
+#   the two root cylinders must be `2.5 m`, which is true exactly when the centre
+#   distance is right. A pinion built to a different module cannot be placed at a
+#   centre distance that satisfies it.
+# * **The axial stack is a chain, and the chain closes on a gap that must not
+#   close.** Bearing, spacer, gear hub, bearing, inside the housing's seat span:
+#   five dimensions, five tolerances, and an end float of 4 mm nominal. A stack
+#   that closes clamps the bearings axially and they fail in months. The stack is
+#   `app/rules/stackup.py`'s worst case — exact interval arithmetic, no
+#   assumption about a factory — and it is asserted **against the built housing**,
+#   so a housing machined to a length the stack was not computed for is a red
+#   build rather than a drawing nobody re-checked.
+# * **The bearings are bought, and the product says so by refusing to size
+#   them.** `app.parts.bearings.select` runs, considers every 6-series bearing
+#   that fits the shaft, and returns a `Refusal`: every one of them is missing
+#   `C` and `C0`, because a load rating is the maker's number and this library
+#   ships ISO 15 boundary dimensions only. That refusal is a *finding of this
+#   rung*, measured on 2026-09-16 rather than assumed, and it is why the bearings
+#   here are placed by their boundary dimensions and their life is not claimed.
+#
+# **What a gearbox cannot be on this kernel, and it is the rung's other finding.**
+# There is no gear-tooth operation in the OCCT backend. `catia_sketch_gear_profile`
+# exists on the CATIA side — it generates a real involute from module, tooth count
+# and pressure angle — and the open kernel's `refusals.py` answers it with
+# `_not_needed()`, which this rung shows is false: the involute is exactly what the
+# open kernel cannot draw and cannot approximate from its primitives, and there is
+# no "instead". So each gear is modelled as its **root cylinder** — the blank
+# below the tooth roots, which is material that is certainly there — and the tooth
+# material the model does not carry is published as a number rather than left to be
+# noticed. This is M3's shape exactly: the rung builds what it can, states the
+# residual, and names the phase that owns the gap.
+
+#: The gear pair. Module and tooth counts are the design; everything else below
+#: is derived from them, because a diameter typed beside a tooth count is a
+#: diameter that stops agreeing with it the day somebody changes the ratio.
+_M4_MODULE_MM: Final = 3.0
+_M4_PINION_TEETH: Final = 24
+_M4_WHEEL_TEETH: Final = 48
+#: Declared and not used by any geometry here: the root and tip diameters below
+#: are the same for any pressure angle, and the flank shape — which is the only
+#: thing the angle decides — is what this kernel cannot draw. Carried so the
+#: specification is complete and so the gap is legible.
+_M4_PRESSURE_ANGLE_DEG: Final = 20.0
+_M4_FACE_WIDTH_MM: Final = 30.0
+
+#: Standard full-depth proportions, in module: addendum 1, dedendum 1.25. So the
+#: tip circle is `m(z + 2)` and the root circle `m(z - 2.5)`, and the clearance
+#: between one gear's root and the other's tip is `0.25 m` — which makes the gap
+#: between the two *root* cylinders `2.5 m` at the correct centre distance. That
+#: last number is the one this rung measures.
+_M4_ADDENDUM_FACTOR: Final = 1.0
+_M4_DEDENDUM_FACTOR: Final = 1.25
+
+_M4_CENTRE_DISTANCE_MM: Final = (
+    _M4_MODULE_MM * (_M4_PINION_TEETH + _M4_WHEEL_TEETH) / 2.0
+)
+_M4_PINION_PITCH_MM: Final = _M4_MODULE_MM * _M4_PINION_TEETH
+_M4_WHEEL_PITCH_MM: Final = _M4_MODULE_MM * _M4_WHEEL_TEETH
+_M4_PINION_TIP_MM: Final = _M4_PINION_PITCH_MM + 2.0 * _M4_ADDENDUM_FACTOR * _M4_MODULE_MM
+_M4_WHEEL_TIP_MM: Final = _M4_WHEEL_PITCH_MM + 2.0 * _M4_ADDENDUM_FACTOR * _M4_MODULE_MM
+_M4_PINION_ROOT_MM: Final = _M4_PINION_PITCH_MM - 2.0 * _M4_DEDENDUM_FACTOR * _M4_MODULE_MM
+_M4_WHEEL_ROOT_MM: Final = _M4_WHEEL_PITCH_MM - 2.0 * _M4_DEDENDUM_FACTOR * _M4_MODULE_MM
+
+#: The gap between the two root cylinders when the centre distance is right.
+#: `a - r_f1 - r_f2 = m(z1+z2)/2 - m(z1-2.5)/2 - m(z2-2.5)/2 = 2.5 m`, with the
+#: tooth counts cancelling — so this number is a fact about the tooth *system*
+#: and not about this particular pair, which is what makes it worth measuring.
+_M4_ROOT_CLEARANCE_MM: Final = (
+    _M4_CENTRE_DISTANCE_MM - _M4_PINION_ROOT_MM / 2.0 - _M4_WHEEL_ROOT_MM / 2.0
+)
+
+#: How far the tip circles overlap: `2 m`. Nothing is built to it — it is here
+#: because it is the reason the gears are modelled as root cylinders and not as
+#: tip cylinders. A gear pair modelled at its tip diameter **always** interferes,
+#: by construction, so a clash check over tip cylinders reports a clash on a
+#: correct gearbox and there is no threshold that fixes it.
+_M4_TIP_OVERLAP_MM: Final = (
+    _M4_PINION_TIP_MM / 2.0 + _M4_WHEEL_TIP_MM / 2.0 - _M4_CENTRE_DISTANCE_MM
+)
+
+#: The shafts, and the bearings that carry them. The bearing designations are
+#: looked up in `app.parts.bearings.CATALOGUE` rather than typed, so the boundary
+#: dimensions this rung places carry ISO 15 as their source and a change to the
+#: shipped table moves the gearbox rather than silently disagreeing with it.
+_M4_INPUT_SHAFT_MM: Final = 25.0
+_M4_OUTPUT_SHAFT_MM: Final = 35.0
+_M4_INPUT_BEARING: Final = "6005"
+_M4_OUTPUT_BEARING: Final = "6007"
+
+
+def _m4_bearing(designation: str, bore_mm: float) -> Bearing:
+    """One catalogue bearing, checked against the shaft it is being put on.
+
+    The check is here rather than left to the reader because the failure it
+    catches is silent: a designation typed one digit out is a bearing that exists,
+    has plausible dimensions, and does not fit the shaft — and every number
+    downstream of it, the stack included, would be arithmetic about a bearing
+    nobody could assemble.
+    """
+    bearing = CATALOGUE.get(designation)
+    if bearing is None:  # pragma: no cover - the shipped table is a constant
+        raise SpecError(
+            f"M4 asks for bearing {designation!r}, which is not in the shipped "
+            "catalogue. The table is ISO 15 boundary dimensions; add the "
+            "designation there rather than typing its dimensions here."
+        )
+    if bearing.bore_mm != bore_mm:
+        raise SpecError(
+            f"M4 puts {designation} (bore {bearing.bore_mm:g} mm) on a "
+            f"{bore_mm:g} mm shaft. A bearing that does not fit its shaft is a "
+            "transcription error that reads as a design."
+        )
+    return bearing
+
+
+_M4_INPUT_BEARING_PART: Final = _m4_bearing(_M4_INPUT_BEARING, _M4_INPUT_SHAFT_MM)
+_M4_OUTPUT_BEARING_PART: Final = _m4_bearing(_M4_OUTPUT_BEARING, _M4_OUTPUT_SHAFT_MM)
+
+#: Spacer sleeves. Each one is what sets its shaft's gear on the mesh centreline
+#: and takes up the rest of the seat span; the widths below are what makes both
+#: chains close on the same end float, which is why they are different numbers.
+_M4_INPUT_SPACER_OD_MM: Final = 32.0
+_M4_OUTPUT_SPACER_OD_MM: Final = 45.0
+
+#: The housing's seat span: the distance between the two covers' inner faces,
+#: which is the housing tube's own length. It is the first contributor in the
+#: axial chain and the one the built solid is checked against.
+_M4_SEAT_SPAN_MM: Final = 80.0
+_M4_END_FLOAT_MM: Final = 4.0
+
+_M4_OUTPUT_SPACER_MM: Final = (
+    _M4_SEAT_SPAN_MM
+    - _M4_END_FLOAT_MM
+    - 2.0 * _M4_OUTPUT_BEARING_PART.width_mm
+    - _M4_FACE_WIDTH_MM
+)
+_M4_INPUT_SPACER_MM: Final = (
+    _M4_SEAT_SPAN_MM
+    - _M4_END_FLOAT_MM
+    - 2.0 * _M4_INPUT_BEARING_PART.width_mm
+    - _M4_FACE_WIDTH_MM
+)
+
+#: Tolerances on the five dimensions in the chain. **These are this mission's own
+#: drawing and nothing more.** ISO 492's width deviations for a rolling bearing
+#: are not transcribed anywhere in this repository — they are a document, the same
+#: gap E13.2 carries for ISO 286 — so the bearing figure below is a declaration by
+#: this design, not a standard's value, and `_M4_UNPROVEN` says so. A tolerance
+#: quietly attributed to a standard nobody read is exactly the failure
+#: `app/verify/` exists to prevent.
+_M4_SEAT_SPAN_TOL_MM: Final = 0.10
+_M4_BEARING_WIDTH_TOL_MM: Final = 0.06
+_M4_SPACER_TOL_MM: Final = 0.05
+_M4_FACE_WIDTH_TOL_MM: Final = 0.05
+
+#: How much room the gears need inside the housing, measured from the mesh
+#: centreline out to the furthest tip circle. Derived, never typed: a housing
+#: sized by hand is a housing that stops clearing the wheel the day the ratio
+#: changes, and the wheel is the part that grows.
+_M4_RADIAL_CLEARANCE_MM: Final = 10.0
+_M4_CAVITY_HALF_HEIGHT_MM: Final = (
+    _M4_CENTRE_DISTANCE_MM / 2.0
+    + max(_M4_PINION_TIP_MM, _M4_WHEEL_TIP_MM) / 2.0
+    + _M4_RADIAL_CLEARANCE_MM
+)
+_M4_CAVITY_HEIGHT_MM: Final = 2.0 * _M4_CAVITY_HALF_HEIGHT_MM
+_M4_CAVITY_WIDTH_MM: Final = 2.0 * (
+    max(_M4_PINION_TIP_MM, _M4_WHEEL_TIP_MM) / 2.0 + _M4_RADIAL_CLEARANCE_MM
+)
+_M4_WALL_MM: Final = 15.0
+_M4_HOUSING_HEIGHT_MM: Final = _M4_CAVITY_HEIGHT_MM + 2.0 * _M4_WALL_MM
+_M4_HOUSING_WIDTH_MM: Final = _M4_CAVITY_WIDTH_MM + 2.0 * _M4_WALL_MM
+
+_M4_COVER_MM: Final = 12.0
+#: Clearance on the shaft where it passes through a cover. A cover bore sized to
+#: the shaft would put two cylindrical faces exactly on each other, which is a
+#: fit question (E13.2's `fits.py`) and not a clash question — and a clash check
+#: asked about coincident faces answers neither "clear" nor "interfering".
+_M4_COVER_BORE_CLEARANCE_MM: Final = 2.0
+_M4_SHAFT_PROTRUSION_MM: Final = 48.0
+_M4_SHAFT_LENGTH_MM: Final = (
+    _M4_SEAT_SPAN_MM + 2.0 * _M4_COVER_MM + _M4_SHAFT_PROTRUSION_MM
+)
+
+#: The axes. The wheel sits below the pinion, which is why the machine's centre of
+#: mass is below its own mid-plane — the one claim here that knows which way up
+#: the gearbox is, and the one a mirrored placement breaks.
+_M4_PINION_AXIS_Z_MM: Final = _M4_CENTRE_DISTANCE_MM / 2.0
+_M4_WHEEL_AXIS_Z_MM: Final = -_M4_CENTRE_DISTANCE_MM / 2.0
+
+#: Where each part starts along the shaft axis. The housing's cavity runs from
+#: x = 0 to x = the seat span; everything inside is stacked from x = 0, which is
+#: the chain the tolerance stack closes.
+_M4_HOUSING_X_MM: Final = 0.0
+_M4_FRONT_COVER_X_MM: Final = -_M4_COVER_MM
+_M4_REAR_COVER_X_MM: Final = _M4_SEAT_SPAN_MM
+_M4_INPUT_SHAFT_X_MM: Final = -_M4_COVER_MM - _M4_SHAFT_PROTRUSION_MM
+_M4_OUTPUT_SHAFT_X_MM: Final = -_M4_COVER_MM
+
+_M4_STEEL_DENSITY_KG_M3: Final = _M2_DENSITY_KG_M3
+
+#: How far apart two parts are still worth measuring, and it is not zero for M2's
+#: reason: the mesh gap is `2.5 m` = 7.5 mm, so a contact-only broad phase throws
+#: away the one pair this rung exists to measure and `_boundary_payload` answers
+#: the mesh contract UNMEASURED — which is not a pass, but is also not the finding.
+_M4_INSPECTION_MM: Final = 12.0
+
+
+def _annulus_mm2(outer_mm: float, bore_mm: float) -> float:
+    return math.pi / 4.0 * (outer_mm**2 - bore_mm**2)
+
+
+def m4_gear_pair(
+    *,
+    module_mm: float = _M4_MODULE_MM,
+    pinion_teeth: int = _M4_PINION_TEETH,
+    wheel_teeth: int = _M4_WHEEL_TEETH,
+) -> dict[str, float]:
+    """The mesh, as arithmetic, before anything is drawn.
+
+    **Every diameter a spur gear has is `module x (teeth +/- a constant)`**, and
+    the centre distance is the mean of the two pitch diameters. None of that is
+    geometry: it is the tooth system, it is what decides whether two gears mesh
+    at all, and a gearbox whose shafts are bored at anything but `m(z1+z2)/2`
+    binds or rattles however well each part is made.
+
+    Returned as a dict for `m6_counts`'s reason — every value here is a length in
+    millimetres and two of them transposed would go unnoticed in a tuple.
+    """
+    if module_mm <= 0:
+        raise SpecError(
+            "A gear module is a positive length: it is the pitch diameter per "
+            "tooth, and every other diameter on the gear is a multiple of it."
+        )
+    if pinion_teeth < 1 or wheel_teeth < 1:
+        raise SpecError(
+            f"A gear needs at least one tooth; got {pinion_teeth} and {wheel_teeth}. "
+            "A zero-tooth gear has a pitch diameter of zero and a root diameter "
+            "below it, which builds as a negative cylinder rather than failing."
+        )
+    pinion_pitch = module_mm * pinion_teeth
+    wheel_pitch = module_mm * wheel_teeth
+    addendum = _M4_ADDENDUM_FACTOR * module_mm
+    dedendum = _M4_DEDENDUM_FACTOR * module_mm
+    centre_distance = (pinion_pitch + wheel_pitch) / 2.0
+    pinion_root = pinion_pitch - 2.0 * dedendum
+    wheel_root = wheel_pitch - 2.0 * dedendum
+    pinion_tip = pinion_pitch + 2.0 * addendum
+    wheel_tip = wheel_pitch + 2.0 * addendum
+    return {
+        "module_mm": module_mm,
+        "centre_distance_mm": centre_distance,
+        "ratio": wheel_teeth / pinion_teeth,
+        "pinion_pitch_diameter_mm": pinion_pitch,
+        "wheel_pitch_diameter_mm": wheel_pitch,
+        "pinion_tip_diameter_mm": pinion_tip,
+        "wheel_tip_diameter_mm": wheel_tip,
+        "pinion_root_diameter_mm": pinion_root,
+        "wheel_root_diameter_mm": wheel_root,
+        # The two numbers the solids can be checked against.
+        "root_clearance_mm": centre_distance - pinion_root / 2.0 - wheel_root / 2.0,
+        "tip_overlap_mm": pinion_tip / 2.0 + wheel_tip / 2.0 - centre_distance,
+    }
+
+
+def m4_axial_chain(
+    *,
+    seat_span_mm: float = _M4_SEAT_SPAN_MM,
+    bearing_width_mm: float = _M4_OUTPUT_BEARING_PART.width_mm,
+    spacer_mm: float = _M4_OUTPUT_SPACER_MM,
+    face_width_mm: float = _M4_FACE_WIDTH_MM,
+) -> tuple[Contributor, ...]:
+    """The output shaft's axial chain, closing on the end float.
+
+    **The signs are the whole of it.** The seat span makes the gap larger and
+    every part stacked inside it makes the gap smaller, which is `Contributor`'s
+    own convention — `+80` and four negatives closing on `+4`. Written the other
+    way round the arithmetic still runs and the stack comes out at 156 mm, which
+    is not a number anybody would query.
+
+    Every `source` below says *this design*, because that is what it is. The one
+    figure a reader would reasonably expect to come from a standard — the
+    bearing's width deviation, ISO 492 — is not transcribed anywhere here, and
+    attributing this design's own choice to a standard nobody read is the exact
+    move `app/verify/nafems.py` refuses for a benchmark target.
+    """
+    drawing = "M4 drawing; not a standard's value"
+    return (
+        symmetric(
+            "housing seat span",
+            seat_span_mm,
+            _M4_SEAT_SPAN_TOL_MM,
+            source=drawing,
+        ),
+        symmetric(
+            "bearing width, cover side",
+            -bearing_width_mm,
+            _M4_BEARING_WIDTH_TOL_MM,
+            source=f"{drawing}; ISO 492's width deviations are not transcribed here",
+        ),
+        symmetric("spacer sleeve", -spacer_mm, _M4_SPACER_TOL_MM, source=drawing),
+        symmetric("gear hub width", -face_width_mm, _M4_FACE_WIDTH_TOL_MM, source=drawing),
+        symmetric(
+            "bearing width, drive side",
+            -bearing_width_mm,
+            _M4_BEARING_WIDTH_TOL_MM,
+            source=f"{drawing}; ISO 492's width deviations are not transcribed here",
+        ),
+    )
+
+
+def m4_end_float() -> StackVerdict:
+    """Can the axial chain close on a gearbox built to this drawing?
+
+    **Worst case, and deliberately not RSS.** `stackup.stack` will not produce a
+    statistical number without somebody's name against the independence
+    assumption, and rightly: this is a five-dimension chain in which two of the
+    contributors are the same bearing from the same batch, which is precisely the
+    correlation an RSS band assumes away. Worst case is exact interval arithmetic
+    and needs no signature, so the rung uses the method a regression suite can
+    actually stand behind.
+
+    `at_least_mm=0.0` is the claim: **the float may be small and may not close.**
+    A stack that goes negative is not a tight fit, it is a pair of bearings
+    clamped axially through their balls, which is a failure measured in months.
+    """
+    return check(
+        stack(m4_axial_chain(), method=Method.WORST_CASE),
+        name="output shaft end float",
+        at_least_mm=0.0,
+    )
+
+
+#: Every occurrence in the gearbox, as `(volume_mm3, z_of_its_centroid)`. The
+#: closed form below is a sum over this table and the product graph is built
+#: separately, so the two disagree whenever a part is placed that the arithmetic
+#: does not know about — which is M6's rung applied to a machine whose parts are
+#: all different rather than all the same.
+def _m4_volumes() -> dict[str, float]:
+    """Each component's volume from its own formula. Boxes and annuli, exactly."""
+    cover_bore_in = _M4_INPUT_SHAFT_MM + _M4_COVER_BORE_CLEARANCE_MM
+    cover_bore_out = _M4_OUTPUT_SHAFT_MM + _M4_COVER_BORE_CLEARANCE_MM
+    return {
+        "housing": (
+            _M4_HOUSING_WIDTH_MM * _M4_HOUSING_HEIGHT_MM
+            - _M4_CAVITY_WIDTH_MM * _M4_CAVITY_HEIGHT_MM
+        )
+        * _M4_SEAT_SPAN_MM,
+        "cover": (
+            _M4_HOUSING_WIDTH_MM * _M4_HOUSING_HEIGHT_MM
+            - math.pi / 4.0 * cover_bore_in**2
+            - math.pi / 4.0 * cover_bore_out**2
+        )
+        * _M4_COVER_MM,
+        "pinion": _annulus_mm2(_M4_PINION_ROOT_MM, _M4_INPUT_SHAFT_MM)
+        * _M4_FACE_WIDTH_MM,
+        "wheel": _annulus_mm2(_M4_WHEEL_ROOT_MM, _M4_OUTPUT_SHAFT_MM) * _M4_FACE_WIDTH_MM,
+        "input_shaft": math.pi / 4.0 * _M4_INPUT_SHAFT_MM**2 * _M4_SHAFT_LENGTH_MM,
+        "output_shaft": math.pi / 4.0 * _M4_OUTPUT_SHAFT_MM**2 * _M4_SHAFT_LENGTH_MM,
+        "input_bearing": _annulus_mm2(
+            _M4_INPUT_BEARING_PART.outer_diameter_mm, _M4_INPUT_SHAFT_MM
+        )
+        * _M4_INPUT_BEARING_PART.width_mm,
+        "output_bearing": _annulus_mm2(
+            _M4_OUTPUT_BEARING_PART.outer_diameter_mm, _M4_OUTPUT_SHAFT_MM
+        )
+        * _M4_OUTPUT_BEARING_PART.width_mm,
+        "input_spacer": _annulus_mm2(_M4_INPUT_SPACER_OD_MM, _M4_INPUT_SHAFT_MM)
+        * _M4_INPUT_SPACER_MM,
+        "output_spacer": _annulus_mm2(_M4_OUTPUT_SPACER_OD_MM, _M4_OUTPUT_SHAFT_MM)
+        * _M4_OUTPUT_SPACER_MM,
+    }
+
+
+#: Component -> the z of each of its occurrences' centroids. Every part here is a
+#: prism or a cylinder about its own axis, so its centroid sits on that axis and
+#: the only coordinate that varies is z. A cover is the exception and is handled
+#: where it is computed: its two bores are different sizes at opposite heights, so
+#: removing them moves the cover's centroid off the mid-plane.
+_M4_OCCURRENCE_AXES: Final[tuple[tuple[str, float], ...]] = (
+    ("housing", 0.0),
+    ("cover", 0.0),
+    ("cover", 0.0),
+    ("pinion", _M4_PINION_AXIS_Z_MM),
+    ("wheel", _M4_WHEEL_AXIS_Z_MM),
+    ("input_shaft", _M4_PINION_AXIS_Z_MM),
+    ("output_shaft", _M4_WHEEL_AXIS_Z_MM),
+    ("input_bearing", _M4_PINION_AXIS_Z_MM),
+    ("input_bearing", _M4_PINION_AXIS_Z_MM),
+    ("output_bearing", _M4_WHEEL_AXIS_Z_MM),
+    ("output_bearing", _M4_WHEEL_AXIS_Z_MM),
+    ("input_spacer", _M4_PINION_AXIS_Z_MM),
+    ("output_spacer", _M4_WHEEL_AXIS_Z_MM),
+)
+
+
+def _m4_cover_centroid_z_mm() -> float:
+    """Where a cover's own centroid sits, which is not on its mid-plane.
+
+    The plate is symmetric; the two bores are not. A 37 mm bore below the
+    centreline and a 27 mm bore above it remove more material from the bottom
+    half, so the cover's centroid rises. Small — well under a millimetre — and it
+    is in the closed form because a centre-of-mass claim accurate to a tolerance
+    it does not meet is a claim that gets its tolerance widened until it passes.
+    """
+    bore_in = _M4_INPUT_SHAFT_MM + _M4_COVER_BORE_CLEARANCE_MM
+    bore_out = _M4_OUTPUT_SHAFT_MM + _M4_COVER_BORE_CLEARANCE_MM
+    plate = _M4_HOUSING_WIDTH_MM * _M4_HOUSING_HEIGHT_MM
+    hole_in = math.pi / 4.0 * bore_in**2
+    hole_out = math.pi / 4.0 * bore_out**2
+    moment = -hole_in * _M4_PINION_AXIS_Z_MM - hole_out * _M4_WHEEL_AXIS_Z_MM
+    return moment / (plate - hole_in - hole_out)
+
+
+def m4_mass_kg() -> float:
+    """The closed form: every occurrence's volume, summed, times the density.
+
+    Held apart from the product graph and compared against the roll-up by an
+    assertion, for M6's reason. The failure it catches on a machine of thirteen
+    different parts is not a count that drifted — it is a part placed twice, or a
+    diameter changed in one of the two places it is written.
+    """
+    volumes = _m4_volumes()
+    total = sum(volumes[component] for component, _ in _M4_OCCURRENCE_AXES)
+    return total * 1e-9 * _M4_STEEL_DENSITY_KG_M3
+
+
+def m4_centre_of_mass_z_mm() -> float:
+    """Where the gearbox balances, vertically. Negative: the wheel is below.
+
+    **The one number here that knows which way up the machine is.** Every mass,
+    every diameter and every clearance in this rung is unchanged by swapping the
+    two shafts; this is not, because the wheel's blank is nearly five times the
+    pinion's and it hangs below the mesh centreline.
+    """
+    volumes = _m4_volumes()
+    cover_z = _m4_cover_centroid_z_mm()
+    moment = 0.0
+    total = 0.0
+    for component, axis_z in _M4_OCCURRENCE_AXES:
+        volume = volumes[component]
+        centroid = cover_z if component == "cover" else axis_z
+        moment += volume * centroid
+        total += volume
+    return moment / total
+
+
+def m4_tooth_volume_not_modelled_mm3() -> float:
+    """The material between root and tip that the blanks do not carry.
+
+    **An exact bound, not an estimate of the teeth.** The true gear sits somewhere
+    between the root cylinder — all tooth space removed — and the tip cylinder,
+    with none removed; this is the whole of the difference, so the gearbox's real
+    mass is above what this rung reports by at most this much. It is published
+    rather than estimated because the obvious estimate (teeth and spaces are equal
+    at the pitch circle, so take half) is a rule of thumb, and a rule of thumb
+    dressed as a volume is the kind of number that ends up in a quotation.
+    """
+    pinion = _annulus_mm2(_M4_PINION_TIP_MM, _M4_PINION_ROOT_MM) * _M4_FACE_WIDTH_MM
+    wheel = _annulus_mm2(_M4_WHEEL_TIP_MM, _M4_WHEEL_ROOT_MM) * _M4_FACE_WIDTH_MM
+    return pinion + wheel
+
+
+def m4_bearing_verdict(
+    *,
+    radial_n: float = 2_500.0,
+    speed_rpm: float = 480.0,
+    required_life_hours: float = 20_000.0,
+) -> Selection | Refusal:
+    """Ask the parts library to size the output bearing, and publish the answer.
+
+    **This is called for the answer it gives, not for the bearing it returns.**
+    Every 6-series bearing that fits a 35 mm shaft is in the shipped table with
+    its ISO 15 boundary dimensions and without `C` or `C0`, because a load rating
+    is the maker's number and differs between makers for the same envelope. So
+    this returns a `Refusal` naming every candidate it could not size, the rung
+    carries the refusal instead of a life, and `_M4_UNPROVEN` names the phase that
+    owns the missing data. A mission that quietly skipped the call would be a
+    gearbox whose bearings nobody had even asked about.
+    """
+    return select(
+        Duty(
+            radial_n=radial_n,
+            speed_rpm=speed_rpm,
+            required_life_hours=required_life_hours,
+        ),
+        bore_mm=_M4_OUTPUT_SHAFT_MM,
+    )
+
+
+def _m4_gear_parameters() -> ParameterSet:
+    """The mesh, as the numbers both gears are built from.
+
+    On the interface rather than in either gear's spec, for `_M2_JOINT`'s reason
+    and more strongly: two gears drawn from two copies of the module is a pair
+    that stops meshing when one copy is edited, and the machine still builds.
+    """
+    pair = m4_gear_pair()
+    return ParameterSet.of(
+        [
+            Parameter(
+                "module_mm",
+                Unit.MM,
+                value=pair["module_mm"],
+                description="Pitch diameter per tooth. Both gears share it or they do not mesh.",
+            ),
+            Parameter(
+                "pinion_teeth", Unit.NONE, value=float(_M4_PINION_TEETH)
+            ),
+            Parameter("wheel_teeth", Unit.NONE, value=float(_M4_WHEEL_TEETH)),
+            Parameter(
+                "pressure_angle_deg",
+                Unit.NONE,
+                value=_M4_PRESSURE_ANGLE_DEG,
+                description=(
+                    "Declared and unused: it decides the flank shape, which is the "
+                    "one thing this kernel cannot draw."
+                ),
+            ),
+            Parameter("face_width_mm", Unit.MM, value=_M4_FACE_WIDTH_MM),
+            Parameter(
+                "centre_distance_mm",
+                Unit.MM,
+                value=pair["centre_distance_mm"],
+                description="m(z1 + z2)/2. What the housing's bores must be bored at.",
+            ),
+            Parameter(
+                "pinion_root_diameter_mm",
+                Unit.MM,
+                value=pair["pinion_root_diameter_mm"],
+                description="The blank below the tooth roots — what is actually built.",
+            ),
+            Parameter(
+                "wheel_root_diameter_mm", Unit.MM, value=pair["wheel_root_diameter_mm"]
+            ),
+            Parameter(
+                "root_clearance_mm",
+                Unit.MM,
+                value=pair["root_clearance_mm"],
+                description=(
+                    "2.5 x module, whatever the tooth counts. The gap between the "
+                    "two blanks, and the measurement that says the centre distance "
+                    "is right."
+                ),
+            ),
+        ]
+    )
+
+
+def _m4_gear_spec(name: str, *, root_diameter: str, bore_mm: float) -> DesignSpec:
+    """One gear, as its root cylinder with the shaft bore through it.
+
+    **What is built is the blank, and the rung says so everywhere it can.** The
+    teeth are not here: there is no gear-tooth operation in the open kernel, the
+    involute cannot be approximated from the primitives that are there, and
+    `catia_sketch_gear_profile` — which does generate one — is refused by
+    `app/kernel/occt/refusals.py` as "not needed". This rung is the case that
+    needs it.
+
+    The diameter comes from the interface, so a gear built to a root diameter that
+    does not belong to the pair's module is a compile error at the boundary rather
+    than a mesh that binds.
+    """
+    return DesignSpec.of(
+        name,
+        material="steel-1018",
+        description="Spur gear blank: the root cylinder, not the toothed gear.",
+        parameters=[
+            Parameter("bore_mm", Unit.MM, value=bore_mm, description="Shaft seat."),
+        ],
+        features=[
+            FeatureSpec("gear.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "gear.outline",
+                "catia_sketch_circle",
+                {"sketch": ref("gear.profile"), "diameter_mm": expr(root_diameter)},
+            ),
+            FeatureSpec(
+                "gear.body",
+                "catia_pad",
+                {"sketch": ref("gear.profile"), "length_mm": expr("face_width_mm")},
+                note="The blank, to the face width the axial chain was closed on.",
+            ),
+            FeatureSpec("gear.bore_sketch", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "gear.bore_outline",
+                "catia_sketch_circle",
+                {"sketch": ref("gear.bore_sketch"), "diameter_mm": expr("bore_mm")},
+            ),
+            FeatureSpec(
+                "gear.bore",
+                "catia_pocket",
+                {"sketch": ref("gear.bore_sketch"), "limit": "up_to_last"},
+                note="The shaft seat. No keyway: that is a feature nobody has asked for yet.",
+            ),
+        ],
+    )
+
+
+def _m4_sleeve_spec(
+    name: str, *, outer_mm: float, bore_mm: float, length_mm: float, description: str
+) -> DesignSpec:
+    """A tube: bearing, spacer, or anything else that is an annulus.
+
+    One function for three components because they are one shape. The bearings
+    are **bought parts modelled as the envelope they occupy** — M6's roller
+    exactly — and the envelope *over*-states a bearing's mass, because a rolling
+    bearing is two rings, a set of balls and a cage inside that envelope and is
+    mostly air. The gear blanks under-state theirs. Neither is corrected, because
+    a correction would be a number nobody measured; both are in `_M4_UNPROVEN`.
+    """
+    return DesignSpec.of(
+        name,
+        material="steel-1018",
+        description=description,
+        parameters=[
+            Parameter("outer_mm", Unit.MM, value=outer_mm),
+            Parameter("bore_mm", Unit.MM, value=bore_mm),
+            Parameter("length_mm", Unit.MM, value=length_mm),
+        ],
+        features=[
+            FeatureSpec("sleeve.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "sleeve.outline",
+                "catia_sketch_circle",
+                {"sketch": ref("sleeve.profile"), "diameter_mm": expr("outer_mm")},
+            ),
+            FeatureSpec(
+                "sleeve.body",
+                "catia_pad",
+                {"sketch": ref("sleeve.profile"), "length_mm": expr("length_mm")},
+            ),
+            FeatureSpec("sleeve.bore_sketch", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "sleeve.bore_outline",
+                "catia_sketch_circle",
+                {"sketch": ref("sleeve.bore_sketch"), "diameter_mm": expr("bore_mm")},
+            ),
+            FeatureSpec(
+                "sleeve.bore",
+                "catia_pocket",
+                {"sketch": ref("sleeve.bore_sketch"), "limit": "up_to_last"},
+            ),
+        ],
+    )
+
+
+def _m4_shaft_spec(name: str, diameter_mm: float) -> DesignSpec:
+    """A plain shaft: one cylinder, no steps and no keyways.
+
+    A real gearbox shaft is stepped, and the steps are what locate the bearings
+    axially — which is why this one is not, and why the spacer sleeves exist
+    instead. A step is a second pad on an offset plane, and the chain it would
+    replace is exactly the chain `m4_axial_chain` closes; modelling it both ways
+    would put the same tolerance in two places.
+    """
+    return DesignSpec.of(
+        name,
+        material="steel-1018",
+        description="Plain shaft: located by spacer sleeves, not by its own shoulders.",
+        parameters=[
+            Parameter("diameter_mm", Unit.MM, value=diameter_mm),
+            Parameter("length_mm", Unit.MM, value=_M4_SHAFT_LENGTH_MM),
+        ],
+        features=[
+            FeatureSpec("shaft.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "shaft.outline",
+                "catia_sketch_circle",
+                {"sketch": ref("shaft.profile"), "diameter_mm": expr("diameter_mm")},
+            ),
+            FeatureSpec(
+                "shaft.body",
+                "catia_pad",
+                {"sketch": ref("shaft.profile"), "length_mm": expr("length_mm")},
+            ),
+        ],
+    )
+
+
+def _m4_housing_spec(seat_span_mm: float = _M4_SEAT_SPAN_MM) -> DesignSpec:
+    """The housing: a rectangular tube, open at both ends, closed by the covers.
+
+    **The sketch's own axes are not the machine's, and the mapping is the trap.**
+    Every part here is built along its own +Z and turned a quarter turn about Y to
+    lay it along the machine's X, which sends the sketch's +X to the world's *-Z*.
+    So the rectangle's `width_mm` is the housing's height in the world and its
+    `height_mm` is the width. Measured on the real kernel rather than reasoned
+    about, because this is the same asymmetry `app/render/project.py` and
+    `occt/sheetmetal.py` each document from their own side, and it produces a
+    machine that is correct in every dimension and lying on its side.
+    """
+    return DesignSpec.of(
+        "M4 housing",
+        material="steel-1018",
+        description="Gearbox housing: a rectangular tube on the shaft axis.",
+        parameters=[
+            Parameter("tall_mm", Unit.MM, value=_M4_HOUSING_HEIGHT_MM),
+            Parameter("across_mm", Unit.MM, value=_M4_HOUSING_WIDTH_MM),
+            Parameter("cavity_tall_mm", Unit.MM, value=_M4_CAVITY_HEIGHT_MM),
+            Parameter("cavity_across_mm", Unit.MM, value=_M4_CAVITY_WIDTH_MM),
+            Parameter(
+                "seat_span_mm",
+                Unit.MM,
+                value=seat_span_mm,
+                description="Cover face to cover face: the first link in the axial chain.",
+            ),
+        ],
+        features=[
+            FeatureSpec("housing.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "housing.outline",
+                "catia_sketch_rectangle",
+                {
+                    "sketch": ref("housing.profile"),
+                    # Sketch +X becomes world -Z once the part is turned; see the
+                    # docstring. The names say which world direction each is.
+                    "width_mm": expr("tall_mm"),
+                    "height_mm": expr("across_mm"),
+                },
+            ),
+            FeatureSpec(
+                "housing.body",
+                "catia_pad",
+                {"sketch": ref("housing.profile"), "length_mm": expr("seat_span_mm")},
+                note="The tube's length is the seat span the tolerance stack closes on.",
+            ),
+            FeatureSpec("housing.cavity_sketch", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "housing.cavity_outline",
+                "catia_sketch_rectangle",
+                {
+                    "sketch": ref("housing.cavity_sketch"),
+                    "width_mm": expr("cavity_tall_mm"),
+                    "height_mm": expr("cavity_across_mm"),
+                },
+            ),
+            FeatureSpec(
+                "housing.cavity",
+                "catia_pocket",
+                {"sketch": ref("housing.cavity_sketch"), "limit": "up_to_last"},
+                note="Through, both ends: the covers close it and locate the bearings.",
+            ),
+        ],
+    )
+
+
+def _m4_cover_spec() -> DesignSpec:
+    """One cover, with a bore for each shaft. Two occurrences of one design.
+
+    **The bores are drawn at negative sketch x for the shaft that runs high.**
+    The quarter turn about Y sends sketch +X to world -Z, so the input shaft —
+    which sits above the mesh centreline in the machine — is bored below the
+    centreline in the sketch. Get it the wrong way round and the covers build, the
+    mass is unchanged, every dimension is right, and each shaft runs through solid
+    plate: the clash check is what catches it, which is why `clash.clash_count`
+    is one of this rung's claims.
+    """
+    return DesignSpec.of(
+        "M4 cover",
+        material="steel-1018",
+        description="End cover: closes the housing and locates the bearings axially.",
+        parameters=[
+            Parameter("tall_mm", Unit.MM, value=_M4_HOUSING_HEIGHT_MM),
+            Parameter("across_mm", Unit.MM, value=_M4_HOUSING_WIDTH_MM),
+            Parameter("thickness_mm", Unit.MM, value=_M4_COVER_MM),
+            Parameter(
+                "input_bore_mm",
+                Unit.MM,
+                value=_M4_INPUT_SHAFT_MM + _M4_COVER_BORE_CLEARANCE_MM,
+            ),
+            Parameter(
+                "output_bore_mm",
+                Unit.MM,
+                value=_M4_OUTPUT_SHAFT_MM + _M4_COVER_BORE_CLEARANCE_MM,
+            ),
+        ],
+        features=[
+            FeatureSpec("cover.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "cover.outline",
+                "catia_sketch_rectangle",
+                {
+                    "sketch": ref("cover.profile"),
+                    "width_mm": expr("tall_mm"),
+                    "height_mm": expr("across_mm"),
+                },
+            ),
+            FeatureSpec(
+                "cover.body",
+                "catia_pad",
+                {"sketch": ref("cover.profile"), "length_mm": expr("thickness_mm")},
+            ),
+            FeatureSpec("cover.input_sketch", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "cover.input_outline",
+                "catia_sketch_circle",
+                {
+                    "sketch": ref("cover.input_sketch"),
+                    "diameter_mm": expr("input_bore_mm"),
+                    "at": [-_M4_PINION_AXIS_Z_MM, 0.0],
+                },
+            ),
+            FeatureSpec(
+                "cover.input_bore",
+                "catia_pocket",
+                {"sketch": ref("cover.input_sketch"), "limit": "up_to_last"},
+            ),
+            FeatureSpec("cover.output_sketch", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "cover.output_outline",
+                "catia_sketch_circle",
+                {
+                    "sketch": ref("cover.output_sketch"),
+                    "diameter_mm": expr("output_bore_mm"),
+                    "at": [-_M4_WHEEL_AXIS_Z_MM, 0.0],
+                },
+            ),
+            FeatureSpec(
+                "cover.output_bore",
+                "catia_pocket",
+                {"sketch": ref("cover.output_sketch"), "limit": "up_to_last"},
+            ),
+        ],
+    )
+
+
+#: The mesh, as a contract. Provider and consumer are the two gears, and the one
+#: claim that matters is measured *between* them: `boundary.minimum_clearance_mm`
+#: is the gap between the built root cylinders, and it is `2.5 x module` exactly
+#: when the centre distance is `m(z1 + z2)/2`.
+_M4_MESH: Final = Interface(
+    name="spur gear mesh",
+    provider="pinion",
+    consumer="wheel",
+    parameters=_m4_gear_parameters(),
+    claims=(
+        Assertion(
+            name="the pinion is the blank its tooth count and module give",
+            measure="provider.bounding_box_mm.size[0]",
+            comparison="==",
+            bound="=pinion_root_diameter_mm",
+            tolerance=1e-3,
+            note="A gear whose blank is not m(z - 2.5) across cannot carry the teeth it claims.",
+        ),
+        Assertion(
+            name="the wheel is the blank its tooth count and module give",
+            measure="consumer.bounding_box_mm.size[0]",
+            comparison="==",
+            bound="=wheel_root_diameter_mm",
+            tolerance=1e-3,
+            note=(
+                "Checked on both sides rather than inferred from one: two gears built "
+                "from one module is the thing the contract exists to guarantee."
+            ),
+        ),
+        Assertion(
+            name="both gears are the face width the axial chain was closed on",
+            measure="provider.bounding_box_mm.size[2]",
+            comparison="==",
+            bound="=face_width_mm",
+            tolerance=1e-3,
+            note=(
+                "The gear hub is one of the five dimensions in the stack. A hub built "
+                "wider than the chain assumed closes the end float with nothing red."
+            ),
+        ),
+        Assertion(
+            name="the wheel is the face width the axial chain was closed on",
+            measure="consumer.bounding_box_mm.size[2]",
+            comparison="==",
+            bound="=face_width_mm",
+            tolerance=1e-3,
+        ),
+        Assertion(
+            name="the blanks stand 2.5 modules apart, so the centre distance is right",
+            # `minimum_clearance_mm`, unprefixed. `contracts.measurements()` merges
+            # the boundary's own numbers at the top level and namespaces only the
+            # two parties — measured on 2026-09-16 by writing it the other way and
+            # watching the claim come back NOT CHECKED, which is not a pass and is
+            # also not the finding anybody wants from a gear mesh.
+            measure="minimum_clearance_mm",
+            comparison="==",
+            bound="=root_clearance_mm",
+            tolerance=1e-3,
+            note=(
+                "The rung's mesh claim, measured on the real solids rather than "
+                "computed from the placement that put them there. m(z1+z2)/2 minus "
+                "the two root radii is 2.5m with the tooth counts cancelling, so a "
+                "pair bored at the wrong centre distance fails here whatever the "
+                "ratio — and a gearbox that binds or rattles is exactly this number "
+                "wrong by a fraction of a millimetre."
+            ),
+        ),
+    ),
+)
+
+
+def _m4_structure(
+    *,
+    centre_distance_mm: float = _M4_CENTRE_DISTANCE_MM,
+    upside_down: bool = False,
+    spare_bearing_at_mm: float | None = None,
+) -> ProductStructure:
+    """The gearbox as a graph. X along the shafts, Z up, Y across.
+
+    Every cylindrical part is built along its own +Z and laid along the machine's
+    +X by a quarter turn about Y — `compose(at(...), turned(...))`, translation
+    after rotation, the idiom M6's stringers use.
+
+    **The three arguments exist so a test can build it wrong**, M6's reason: a
+    guard nobody has seen fail is a guard nobody has verified. `centre_distance_mm`
+    bores the shafts at a spacing the tooth counts do not give;`upside_down` puts
+    the wheel on top, which changes nothing any other claim here measures; and
+    `spare_bearing_at_mm` places one more bearing on the protruding output shaft,
+    where it fouls nothing — a part in the graph that the bill of materials does
+    not know about, which is the failure M6's pair of counting claims exists for.
+    """
+    turn = turned((0.0, 1.0, 0.0), math.pi / 2.0)
+    high, low = centre_distance_mm / 2.0, -centre_distance_mm / 2.0
+    pinion_axis_z, wheel_axis_z = (low, high) if upside_down else (high, low)
+    builder = StructureBuilder()
+    builder.define("gearbox", description="Single-stage spur reducer, 2:1.")
+    builder.define(
+        "housing", design="M4 housing", material="steel-1018",
+        description="Rectangular tube on the shaft axis.",
+    )
+    builder.define(
+        "cover", design="M4 cover", material="steel-1018",
+        description="End cover, bored for both shafts.",
+    )
+    builder.define(
+        "pinion", design="M4 pinion", material="steel-1018",
+        description=f"{_M4_PINION_TEETH} teeth, module {_M4_MODULE_MM:g} — blank only.",
+    )
+    builder.define(
+        "wheel", design="M4 wheel", material="steel-1018",
+        description=f"{_M4_WHEEL_TEETH} teeth, module {_M4_MODULE_MM:g} — blank only.",
+    )
+    builder.define(
+        "input_shaft", design="M4 input shaft", material="steel-1018",
+        description="Drive shaft.",
+    )
+    builder.define(
+        "output_shaft", design="M4 output shaft", material="steel-1018",
+        description="Driven shaft.",
+    )
+    builder.define(
+        "input_bearing", design="M4 input bearing", material="steel-1018",
+        description=f"Bought {_M4_INPUT_BEARING} ball bearing: envelope only.",
+    )
+    builder.define(
+        "output_bearing", design="M4 output bearing", material="steel-1018",
+        description=f"Bought {_M4_OUTPUT_BEARING} ball bearing: envelope only.",
+    )
+    builder.define(
+        "input_spacer", design="M4 input spacer", material="steel-1018",
+        description="Sleeve setting the pinion on the mesh centreline.",
+    )
+    builder.define(
+        "output_spacer", design="M4 output spacer", material="steel-1018",
+        description="Sleeve setting the wheel on the mesh centreline.",
+    )
+
+    builder.add(
+        "gearbox", "housing",
+        placement=compose(at(_M4_HOUSING_X_MM, 0.0, 0.0), turn),
+        note="The tube, from the front cover face to the rear one.",
+    )
+    for label, x in (("front", _M4_FRONT_COVER_X_MM), ("rear", _M4_REAR_COVER_X_MM)):
+        builder.add(
+            "gearbox", "cover",
+            placement=compose(at(x, 0.0, 0.0), turn),
+            note=f"{label.title()} cover.",
+        )
+
+    builder.add(
+        "gearbox", "input_shaft",
+        placement=compose(at(_M4_INPUT_SHAFT_X_MM, 0.0, pinion_axis_z), turn),
+        note="Drive end out of the front cover.",
+    )
+    builder.add(
+        "gearbox", "output_shaft",
+        placement=compose(at(_M4_OUTPUT_SHAFT_X_MM, 0.0, wheel_axis_z), turn),
+        note="Driven end out of the rear cover — the opposite end from the input.",
+    )
+
+    # The two chains, stacked from x = 0 in the order the tolerance stack names.
+    input_run = (
+        ("input_bearing", _M4_INPUT_BEARING_PART.width_mm),
+        ("input_spacer", _M4_INPUT_SPACER_MM),
+        ("pinion", _M4_FACE_WIDTH_MM),
+        ("input_bearing", _M4_INPUT_BEARING_PART.width_mm),
+    )
+    output_run = (
+        ("output_bearing", _M4_OUTPUT_BEARING_PART.width_mm),
+        ("output_spacer", _M4_OUTPUT_SPACER_MM),
+        ("wheel", _M4_FACE_WIDTH_MM),
+        ("output_bearing", _M4_OUTPUT_BEARING_PART.width_mm),
+    )
+    for run, axis_z in ((input_run, pinion_axis_z), (output_run, wheel_axis_z)):
+        x = 0.0
+        for component, width in run:
+            builder.add(
+                "gearbox", component,
+                placement=compose(at(x, 0.0, axis_z), turn),
+                note=f"{component.replace('_', ' ')} at {x:g} mm along the seat span.",
+            )
+            x += width
+    if spare_bearing_at_mm is not None:
+        builder.add(
+            "gearbox", "output_bearing",
+            placement=compose(at(spare_bearing_at_mm, 0.0, wheel_axis_z), turn),
+            note="A bearing nobody counted. Only a test places this.",
+        )
+    return builder.build("gearbox")
+
+
+def _m4_design(
+    *,
+    seat_span_mm: float = _M4_SEAT_SPAN_MM,
+    structure: ProductStructure | None = None,
+) -> AssemblyDesign:
+    """The gearbox: the graph, ten part designs, the mesh contract and the numbers.
+
+    `seat_span_mm` machines the housing to a length the tolerance stack was not
+    closed on — the one break that exercises the stack claim, because the stack's
+    own numbers stay where they are and only the metal moves.
+    """
+    from app.assembly.contracts import bind_into
+
+    float_verdict = m4_end_float()
+    assert float_verdict.result.maximum_mm is not None  # noqa: S101 - worst case always resolves
+    stacked_maximum = _M4_SEAT_SPAN_MM + _M4_SEAT_SPAN_TOL_MM - float_verdict.result.minimum_mm
+    return AssemblyDesign(
+        structure=_m4_structure() if structure is None else structure,
+        parts={
+            "housing": _m4_housing_spec(seat_span_mm),
+            "cover": _m4_cover_spec(),
+            "pinion": bind_into(
+                _M4_MESH,
+                _m4_gear_spec(
+                    "M4 pinion",
+                    root_diameter="pinion_root_diameter_mm",
+                    bore_mm=_M4_INPUT_SHAFT_MM,
+                ),
+            ),
+            "wheel": bind_into(
+                _M4_MESH,
+                _m4_gear_spec(
+                    "M4 wheel",
+                    root_diameter="wheel_root_diameter_mm",
+                    bore_mm=_M4_OUTPUT_SHAFT_MM,
+                ),
+            ),
+            "input_shaft": _m4_shaft_spec("M4 input shaft", _M4_INPUT_SHAFT_MM),
+            "output_shaft": _m4_shaft_spec("M4 output shaft", _M4_OUTPUT_SHAFT_MM),
+            "input_bearing": _m4_sleeve_spec(
+                "M4 input bearing",
+                outer_mm=_M4_INPUT_BEARING_PART.outer_diameter_mm,
+                bore_mm=_M4_INPUT_SHAFT_MM,
+                length_mm=_M4_INPUT_BEARING_PART.width_mm,
+                description=(
+                    f"Bought {_M4_INPUT_BEARING}: the envelope it occupies, not the "
+                    "maker's geometry."
+                ),
+            ),
+            "output_bearing": _m4_sleeve_spec(
+                "M4 output bearing",
+                outer_mm=_M4_OUTPUT_BEARING_PART.outer_diameter_mm,
+                bore_mm=_M4_OUTPUT_SHAFT_MM,
+                length_mm=_M4_OUTPUT_BEARING_PART.width_mm,
+                description=(
+                    f"Bought {_M4_OUTPUT_BEARING}: the envelope it occupies, not the "
+                    "maker's geometry."
+                ),
+            ),
+            "input_spacer": _m4_sleeve_spec(
+                "M4 input spacer",
+                outer_mm=_M4_INPUT_SPACER_OD_MM,
+                bore_mm=_M4_INPUT_SHAFT_MM,
+                length_mm=_M4_INPUT_SPACER_MM,
+                description="Spacer sleeve, pinion side.",
+            ),
+            "output_spacer": _m4_sleeve_spec(
+                "M4 output spacer",
+                outer_mm=_M4_OUTPUT_SPACER_OD_MM,
+                bore_mm=_M4_OUTPUT_SHAFT_MM,
+                length_mm=_M4_OUTPUT_SPACER_MM,
+                description="Spacer sleeve, wheel side.",
+            ),
+        },
+        interfaces=(_M4_MESH,),
+        clearance_mm=_M4_INSPECTION_MM,
+        parameters=ParameterSet.of(
+            [
+                *_m4_gear_parameters(),
+                Parameter(
+                    "seat_span_mm",
+                    Unit.MM,
+                    value=_M4_SEAT_SPAN_MM,
+                    description="Cover face to cover face.",
+                ),
+                Parameter(
+                    "stacked_maximum_mm",
+                    Unit.MM,
+                    value=stacked_maximum,
+                    description=(
+                        "The widest the four parts inside the housing can be, all at "
+                        "their limits at once. The seat span must be at least this or "
+                        "the end float closes."
+                    ),
+                ),
+                Parameter(
+                    "end_float_nominal_mm", Unit.MM, value=float_verdict.result.nominal_mm
+                ),
+                Parameter(
+                    "end_float_worst_case_min_mm",
+                    Unit.MM,
+                    value=float_verdict.result.minimum_mm or 0.0,
+                ),
+                Parameter("housing_height_mm", Unit.MM, value=_M4_HOUSING_HEIGHT_MM),
+                Parameter("housing_width_mm", Unit.MM, value=_M4_HOUSING_WIDTH_MM),
+                Parameter(
+                    "overall_length_mm",
+                    Unit.MM,
+                    value=_M4_SHAFT_LENGTH_MM + _M4_SHAFT_PROTRUSION_MM,
+                    description=(
+                        "Front shaft end to rear shaft end. **Not the shaft length**: "
+                        "the two shafts protrude at opposite ends, so the machine is "
+                        "one shaft plus one more protrusion. Written as the shaft "
+                        "length first, and the envelope claim caught it."
+                    ),
+                ),
+                Parameter(
+                    "occurrence_count",
+                    Unit.NONE,
+                    value=float(len(_M4_OCCURRENCE_AXES)),
+                    description="What the bill of materials says is in this gearbox.",
+                ),
+                Parameter(
+                    "mass_closed_form_kg",
+                    Unit.KG,
+                    value=m4_mass_kg(),
+                    description=(
+                        "Summed over the occurrence table, not read off the graph. "
+                        "The assertion that this equals the roll-up is the rung."
+                    ),
+                ),
+                Parameter(
+                    "centre_of_mass_z_mm",
+                    Unit.MM,
+                    value=m4_centre_of_mass_z_mm(),
+                    description=(
+                        "Negative: the wheel is the heavy blank and it hangs below "
+                        "the mesh centreline. The one number that knows which way up "
+                        "the machine is."
+                    ),
+                ),
+                Parameter(
+                    "tooth_volume_not_modelled_mm3",
+                    Unit.MM3,
+                    value=m4_tooth_volume_not_modelled_mm3(),
+                    description=(
+                        "Material between root and tip that the blanks do not carry. "
+                        "An exact bound on how much this gearbox under-reports its "
+                        "own gears, not an estimate of the teeth."
+                    ),
+                ),
+            ]
+        ),
+    )
+
+
+_M4_ASSERTIONS: Final = (
+    Assertion(
+        name="the roll-up equals the closed form over every occurrence",
+        measure="mass_kg",
+        comparison="==",
+        bound="=mass_closed_form_kg",
+        tolerance=1e-6,
+        note=(
+            "The rung. Thirteen occurrences of ten different parts, weighed once by "
+            "the product graph and once by arithmetic over the table — so a part "
+            "placed twice, or a diameter changed in one of the two places it is "
+            "written, is red rather than a gearbox that is quietly 2 kg out."
+        ),
+    ),
+    Assertion(
+        name="the graph holds exactly the parts the bill of materials counts",
+        measure="clash.occurrence_count",
+        comparison="==",
+        bound="=occurrence_count",
+        note=(
+            "The BOM against the graph directly, beside the mass claim that checks it "
+            "by arithmetic — M6's pair of checks, for M6's reason."
+        ),
+    ),
+    Assertion(
+        name="nothing in the gearbox occupies the same space as anything else",
+        measure="clash.clash_count",
+        comparison="==",
+        bound=0.0,
+        note=(
+            "The claim that catches a mirrored cover. The quarter turn about Y sends "
+            "each part's sketch +X to the world's -Z, so a bore drawn on the wrong "
+            "side of the sketch centreline builds a cover of exactly the right mass "
+            "with the shaft running through solid plate."
+        ),
+    ),
+    Assertion(
+        name="the seat span leaves room for the widest stack the drawing allows",
+        measure="housing.bounding_box_mm.size[2]",
+        comparison=">=",
+        bound="=stacked_maximum_mm",
+        note=(
+            "The tolerance stack, read off the built housing rather than off the "
+            "drawing it was computed from. Bearing, spacer, hub and bearing all at "
+            "their upper limits inside a seat span at its lower one: if that does not "
+            "fit, the end float closes and the bearings are clamped through their "
+            "balls. `app/rules/stackup.py` worst case, which is interval arithmetic "
+            "and assumes nothing about anybody's factory."
+        ),
+    ),
+    Assertion(
+        name="the bearing is as wide as the chain says it is",
+        measure="output_bearing.bounding_box_mm.size[2]",
+        comparison="==",
+        bound=_M4_OUTPUT_BEARING_PART.width_mm,
+        tolerance=1e-3,
+        note=(
+            "A contributor checked against the solid it describes. The stack is "
+            "arithmetic over five numbers and it is only worth anything while those "
+            "five numbers are the machine's."
+        ),
+    ),
+    Assertion(
+        name="the spacer is as wide as the chain says it is",
+        measure="output_spacer.bounding_box_mm.size[2]",
+        comparison="==",
+        bound=_M4_OUTPUT_SPACER_MM,
+        tolerance=1e-3,
+    ),
+    Assertion(
+        name="the machine is as long as its shafts",
+        measure="envelope_mm.size[0]",
+        comparison="==",
+        bound="=overall_length_mm",
+        tolerance=1e-3,
+        note="Front shaft end to rear shaft end: the space the gearbox needs on a bench.",
+    ),
+    Assertion(
+        name="the machine is as tall as its housing",
+        measure="envelope_mm.size[2]",
+        comparison="==",
+        bound="=housing_height_mm",
+        tolerance=1e-3,
+        note=(
+            "The wheel's tip circle clears the cavity by the radial clearance, so the "
+            "housing is the tallest thing here. A cavity sized by hand rather than "
+            "derived from the tip diameters stops being true the day the ratio changes."
+        ),
+    ),
+    Assertion(
+        name="the gearbox is symmetric across the plane the shafts lie in",
+        measure="centre_of_mass_mm[1]",
+        comparison="==",
+        bound=0.0,
+        tolerance=1e-6,
+        note="Every part is a body of revolution or a centred prism; one placed off-axis moves this.",
+    ),
+    Assertion(
+        name="the weight hangs below the mesh centreline",
+        measure="centre_of_mass_mm[2]",
+        comparison="==",
+        bound="=centre_of_mass_z_mm",
+        tolerance=1e-4,
+        note=(
+            "The one claim that knows which way up the gearbox is. Swap the two "
+            "shafts and every mass, every diameter and every clearance here is "
+            "unchanged; this moves, because the wheel's blank is nearly five times "
+            "the pinion's and it is the part that hangs."
+        ),
+    ),
+)
+
+
+#: What M4 builds and does **not** claim. Its ladder column is "gear geometry,
+#: bearings, tolerance stacks, lubrication" — the stack is checked, the bearings
+#: are bought and the other two are not here at all. Printed beside every pass.
+_M4_UNPROVEN: Final = (
+    "E1 — there are no teeth: the gears are root cylinders, because the open "
+    "kernel has no gear-profile operation and cannot approximate an involute from "
+    "the primitives it has. `catia_sketch_gear_profile` generates one on a CATIA "
+    "seat and `app/kernel/occt/refusals.py` answers it 'not needed', which this "
+    "rung is the case against",
+    f"E1 — the blanks under-report the gears by {m4_tooth_volume_not_modelled_mm3():,.0f} "
+    "mm3 of tooth material, an exact bound and not an estimate: the real pair is "
+    "somewhere between these root cylinders and the tip cylinders, and nothing "
+    "here says where",
+    "E12.4 — no bearing life: `app.parts.bearings.select` runs on this shaft, "
+    "considers every 6-series bearing that fits it and refuses, because not one of "
+    "them carries C or C0. A load rating is the maker's number and this library "
+    "ships ISO 15 boundary dimensions only, so the bearings are placed and not sized",
+    "E12.4 — the bearing envelopes over-state their mass: a rolling bearing is two "
+    "rings, a ball set and a cage inside the annulus drawn here, so the roll-up is "
+    "high on those four occurrences and low on the two gears, and neither is corrected",
+    "E13.2 — the stack is worst case only. An RSS band needs a signature against "
+    "the independence assumption and this chain contains two widths off the same "
+    "bearing, which is the correlation RSS assumes away. No fit is checked either: "
+    "`app/rules/fits.py` has the arithmetic and ISO 286's deviation tables are not "
+    "transcribed, so the bearing seats and the gear bores are basic sizes with no zones",
+    "E13.2 — the bearing width tolerance in the chain is this drawing's own "
+    "declaration. ISO 492 is not transcribed anywhere here, so no figure in the "
+    "stack rests on a standard somebody read",
+    "E6 — no load case: nothing says the shafts carry the mesh separating force, "
+    "that the housing does not deflect enough to open the mesh, or that the covers "
+    "hold the bearings against anything",
+    "E8 — no tooth rating. ISO 6336's bending and contact stresses are what decides "
+    "whether these gears last, and the module and face width here were chosen to "
+    "make a machine, not to carry a torque",
+    "E9 — nothing turns: this is a static layout, so there is no mesh frequency, no "
+    "transmission error, no bearing speed check and no dynamic load",
+    "E13 — no lubrication, no thermal, no efficiency and no seals. A gearbox is an "
+    "oil bath with a level, a breather and two shaft seals, and none of those is "
+    "modelled or checked",
+)
+
+
 #: The ladder, in tractability order. Every rung of Decision 5's table appears
 #: here; `tests/test_design_missions.py` asserts that, so a rung cannot be
 #: dropped from the programme by being deleted from a list.
@@ -3791,11 +5146,15 @@ LADDER: Final[Sequence[Mission]] = (
         title="Gearbox",
         era="IV",
         hard="Gear geometry, bearings, tolerance stacks, lubrication",
-        needs=(
-            "E12.3 — standard parts (BOLTS), so bearings are bought not modelled",
-            "E12.4 — a parts selection engine",
-            "E13.2 — tolerance and GD&T, for the stacks",
-        ),
+        # Its declared needs were E12.3 (standard parts), E12.4 (a parts selection
+        # engine) and E13.2 (tolerance and GD&T, for the stacks). E12 is complete;
+        # E13.2 is PARTIAL and what is open in it is a document — ISO 286's
+        # deviation tables — while `app/rules/stackup.py`, the half this rung uses,
+        # is in. So it moved on 2026-09-16, by M6's rule rather than by anyone
+        # deciding it should, and what it does not have is in `_M4_UNPROVEN`.
+        assembly=_m4_design(),
+        assertions=_M4_ASSERTIONS,
+        unproven=_M4_UNPROVEN,
     ),
     Mission(
         rung="M5",

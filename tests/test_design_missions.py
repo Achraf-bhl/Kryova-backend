@@ -83,9 +83,15 @@ class TestTheLadderIsTheMasterPlansLadder:
         multibody, which is precisely why it moved while M4, M5, M7 and M8 did not.
         A rung whose stated prerequisites are met and which is still marked pending
         is a ladder that has stopped measuring anything.
+
+        **M4 joined it on 2026-09-16, by that same rule.** Its needs were E12.3,
+        E12.4 and E13.2; E12 is complete, and what is still open in E13.2 is a
+        document — ISO 286's deviation tables — rather than the stack-up arithmetic
+        a gearbox's axial chain actually uses. So the half it does not have is in
+        `unproven` and the rung builds.
         """
         buildable = [m.rung for m in LADDER if m.buildable]
-        assert buildable == ["M1", "M2", "M3", "M6"], (
+        assert buildable == ["M1", "M2", "M3", "M4", "M6"], (
             "If a rung became buildable, give it a spec, an assembly or a folded "
             "design and its assertions, and update this test deliberately — it is the "
             "coverage figure."
@@ -213,10 +219,11 @@ class TestAPendingRungIsNeverAPass:
 
         run_ladder(counting)
 
-        assert calls == ["made"] * 7, (
+        assert calls == ["made"] * 17, (
             "one runner for M1, one for each of M2's two members, one for M3's single "
-            "folded solid, one for each of M6's three part designs — stringer, leg and "
-            "the bought roller — and none for the five pending rungs"
+            "folded solid, one for each of M4's ten part designs, one for each of M6's "
+            "three — stringer, leg and the bought roller — and none for the four "
+            "pending rungs"
         )
 
     def test_pending_rungs_do_not_make_the_report_red(self) -> None:
@@ -224,7 +231,7 @@ class TestAPendingRungIsNeverAPass:
         report = run_ladder(lambda: _runner_returning(_payload()), _harness_ladder())
 
         assert report.ok
-        assert len(report.pending) == 5
+        assert len(report.pending) == 4
 
     def test_but_the_ladder_is_not_complete(self) -> None:
         """`ok` is the regression question; `complete` is the programme question."""
@@ -238,10 +245,11 @@ class TestAPendingRungIsNeverAPass:
             lambda: _runner_returning(_payload()), _harness_ladder()
         ).summary()
 
-        # M6 left the pending set on 2026-09-10, so the harness ladder — M1 plus
-        # everything nobody can build — is one rung shorter than it was.
-        assert "1/6 rungs pass" in summary
-        assert "5 not yet buildable" in summary
+        # M6 left the pending set on 2026-09-10 and M4 on 2026-09-16, so the
+        # harness ladder — M1 plus everything nobody can build — is two rungs
+        # shorter than it was.
+        assert "1/5 rungs pass" in summary
+        assert "4 not yet buildable" in summary
 
 
 class TestARungThatClaimsToBuildAndDoesNotIsAFailure:
@@ -326,7 +334,7 @@ class TestTheReportSerialises:
 
         assert data["ok"] is True
         assert data["complete"] is False
-        assert data["pending"] == 5
+        assert data["pending"] == 4
         m7 = next(r for r in data["results"] if r["rung"] == "M7")
         assert m7["outcome"] == "pending"
         assert any("E9" in need for need in m7["needs"])

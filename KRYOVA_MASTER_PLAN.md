@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 119/133 = 89% | 136/151 eng-months = 90% |
+| Engineering — E1–E23 | 15/24 | 120/133 = 90% | 137/151 eng-months = 90% |
 | Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 21/34 | 171/195 = 88% | 167/189 eng-months = 88% |
+| **Programme** | 21/34 | 172/195 = 88% | 168/189 eng-months = 89% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 62%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -3693,6 +3693,47 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
    > `tests/test_mission_m3.py`.
 
 4. **M4 — gearbox.**
+   > DONE (2026-09-16) — a single-stage spur reducer, 2:1 on module 3, and **it moved by
+   > M6's rule rather than by anyone deciding it should.** Its declared `needs` were E12.3,
+   > E12.4 and E13.2. E12 is complete; E13.2 is `PARTIAL` and what is open in it is a
+   > **document** — ISO 286's deviation tables, and CATIA FTA on a seat — while the
+   > stack-up arithmetic a gearbox's axial chain actually uses is in and tested. A rung
+   > held pending on the half of a prerequisite it does not use is a ladder that has
+   > stopped measuring anything.
+   > **The rung is three claims that must agree and only one of them is geometry.** The
+   > *mesh* is declared as an `Interface` both gears are built from, and closed by a
+   > measurement between the built solids: the gap between the two root cylinders is
+   > `2.5 x module` exactly when the centre distance is `m(z1+z2)/2`, with the tooth
+   > counts cancelling — so one measurement says the centre distance is right without
+   > knowing which gears are in front of it, and a shaft bored a millimetre out fails it.
+   > The *axial chain* is five dimensions and five tolerances closing on a 4 mm end float
+   > (worst case 3.68–4.32), through `app/rules/stackup.py`, and it is asserted **against
+   > the built housing** — a housing machined to 76 mm against a 76.42 mm worst-case stack
+   > is red, which is the case a stack computed once and never re-checked is blind to. The
+   > *bought parts* are declined: `app.parts.bearings.select` runs on the 35 mm shaft,
+   > considers every 6-series bearing that fits and **refuses all of them**, because not
+   > one carries `C` or `C0`.
+   > **Two findings, both measured on the day.** (1) **There is no gear-profile operation
+   > in the OCCT backend**, and `app/kernel/occt/refusals.py` answers
+   > `catia_sketch_gear_profile` with "not needed" — which this rung is the case against:
+   > the involute is exactly what the open kernel cannot draw and cannot approximate from
+   > its primitives, and there is no "instead". So each gear is its **root cylinder**, and
+   > the 136,459 mm3 of tooth material the blanks do not carry is published as an exact
+   > bound rather than estimated. (2) **The bearing selection engine exists, runs and
+   > refuses**: the shipped table is ISO 15 boundary dimensions only, because a load rating
+   > is the maker's number and differs between makers for the same envelope. Both are in
+   > the rung's `unproven` and reach the public gallery (P10.2).
+   > Built on the real kernel: 26.805 kg over 13 occurrences of 10 parts, 200x200x308 mm,
+   > 78 pairs checked with 0 clashes, mesh gap measured 7.5000 mm, centre of mass 6.636 mm
+   > **below** the mesh centreline — the one number that knows which way up the machine is,
+   > and assembling it upside down fails that *and* the clash check, because the 35 mm
+   > shaft will not pass the 27 mm cover bore. Four guards were broken and each named claim
+   > was watched to fail. **Ladder now 5/9.** **Tests written on Linux on 2026-09-16 and
+   > not run there**, at the user's instruction; every number in them was measured first by
+   > building the real gearbox through the real kernel. Tested by: `tests/test_mission_m4.py`
+   > (38), `tests/test_design_missions.py`, `tests/test_mission_m2.py::TestTheLadderItself`.
+
+   <!-- superseded 2026-09-16 -->
    > NOT STARTED — PENDING in the ladder report, naming the phase that owns the gap.
 
 5. **M5 — sheet-metal stamping press.**
@@ -3733,7 +3774,7 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
 8. **M8 — motorcycle chassis + swingarm.**
    > NOT STARTED — PENDING.
 
-**Ladder standing at 4/9** (M1, M2, M3, M6).
+**Ladder standing at 5/9** (M1, M2, M3, M4, M6).
 **Gate G5 opens after M2 upward.**
 
 ## ERA VIII — THE WORLD THIS HAS TO SURVIVE CONTACT WITH

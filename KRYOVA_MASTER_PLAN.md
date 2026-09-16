@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 120/133 = 90% | 137/151 eng-months = 90% |
+| Engineering — E1–E23 | 15/24 | 121/133 = 91% | 138/151 eng-months = 91% |
 | Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 21/34 | 172/195 = 88% | 168/189 eng-months = 89% |
+| **Programme** | 21/34 | 173/195 = 89% | 169/189 eng-months = 89% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 62%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 75%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -3737,6 +3737,60 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
    > NOT STARTED — PENDING in the ladder report, naming the phase that owns the gap.
 
 5. **M5 — sheet-metal stamping press.**
+   > DONE (2026-09-16) — **the master plan's own "honest mid-point milestone": structure,
+   > mechanism, sheet metal, bought parts, fatigue and guarding at once, and if M5 does not
+   > work the phases before it were decoration.** It moved by M6's rule, as M4 did the same
+   > day: its declared `needs` were E17.3, E12.3, E13 and E14, three of which are complete,
+   > and the one open task in E13 is E13.2, whose open half is a *document* this rung does
+   > not read.
+   > **The rung is one idea: a press is a chain of dimensions from the crank down to the
+   > strip.** The slide's face at bottom dead centre is `crank_axis - (rod + throw)`, the
+   > upper shoe hangs under the slide, the lower shoe under that, the bolster under that,
+   > the bed under that — and the whole chain reaches the floor at z = 0 rather than being
+   > told to. Not one of those heights is typed. What falls out at the bottom is the gap
+   > between the two die shoes, and **that gap is the strip being stamped**: it is measured
+   > between the two built solids through an `Interface`, and a connecting rod 1 mm long
+   > closes the dies through the work while 1 mm short never cuts. Both were built and both
+   > failed the named claim.
+   > **Three findings, all measured on the day, and each one leaves a plausible number
+   > rather than an error.** (1) **The tonnage claim had to be inverted, and nothing in the
+   > repository can close it.** A blanking force is `F = perimeter x thickness x shear
+   > strength`, and there is **no shear strength here — it is not even a property the
+   > material vocabulary can name**: `MATERIAL_PROPERTIES` carries `shear_modulus_mpa`,
+   > which is elasticity, not strength. So the press states the *greatest shear strength its
+   > 400 kN rating covers over this blank* — 500 MPa, exact arithmetic needing no material
+   > property — and says in `unproven` that it cannot tell you whether the strip is inside
+   > it. (2) **The crank pin was drawn as a block and weighed as a cylinder**, and the
+   > roll-up disagreed with the closed form by 2.16 kg in 5,691 — 0.04%, far too small to
+   > see, and exactly what the mass claim exists to catch. (3) **A formability finding can
+   > never be an assertion on an assembly**: written as one it came back NOT CHECKED,
+   > because an `AssemblyDesign`'s parameters resolve the *bound* side of a claim and never
+   > the measured side, which is geometry the kernel reported — and the kernel never sees a
+   > fold tree. The check moved to construction, where it is stronger than a claim: the
+   > press cannot be built with a guard that will not fold.
+   > **The guard is where E17.3's residual bites one level up.** A `SheetMetalPart` still
+   > cannot compile to a `DesignSpec`, so it is declared twice — as a fold tree, which
+   > unfolds to the 991.74 mm blank a laser cuts, and as the same radiused section drawn by
+   > hand and extruded. The only thing joining them is the volume, and **the two agree to
+   > 9.1e-09 mm3 out of 1,588,106** (a relative difference of 6e-15: floating point, not
+   > modelling). Above that sits **THE QUEUE E1 — there is no sheet-metal operation in the
+   > CATIA registry and deliberately is not one** — so every sheet claim on this press is an
+   > open-kernel claim and the mission says so rather than implying a seat could build it.
+   > Built on the real kernel: 5,689.491 kg over 12 occurrences of 11 parts, 900x850x1500 mm
+   > standing on z = 0, 66 pairs with 0 clashes, die gap measured 2.0000 mm, centre of mass
+   > 198.41 mm *behind* the throat — a gap-frame press is back-heavy and that claim is the
+   > one that knows which way round the C faces. Five guards were broken and each named
+   > claim watched to fail, including one post moved 10 mm, which fails the symmetry claim
+   > **and no other** — measured, not assumed. Ten caveats travel to the public gallery,
+   > of which **frame stiffness is the one a buyer would ask about first**: a C opens under
+   > load and no load case has been run, so "the force path is continuous" is a geometry
+   > claim and this rung does not let it be read as a stiffness one. **Ladder now 6/9.**
+   > **Tests written on Linux on 2026-09-16 and not run there**, at the user's instruction;
+   > every number in them was measured first by building the real press through the real
+   > kernel. Tested by: `tests/test_mission_m5.py` (54), `tests/test_design_missions.py`,
+   > `tests/test_mission_m2.py::TestTheLadderItself`.
+
+   <!-- superseded 2026-09-16 -->
    > NOT STARTED — PENDING.
 
 6. **M6 — belt conveyor system.**

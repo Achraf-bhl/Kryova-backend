@@ -135,6 +135,7 @@ from app.sheetmetal import (
     SheetMetalPart,
     check_part,
     din6935,
+    folded_volume_mm3,
     machinerys_handbook,
     sheet_material,
     unfold,
@@ -5111,6 +5112,1060 @@ _M4_UNPROVEN: Final = (
 )
 
 
+# ---------------------------------------------------------------------------
+# M5 — the sheet-metal stamping press
+# ---------------------------------------------------------------------------
+#
+# A 400 kN gap-frame mechanical press: bed, column and crown in a C, a bolster,
+# a two-post die set, a slide driven by a crank and connecting rod, and a folded
+# sheet guard over the drive. Twelve occurrences of eleven parts.
+#
+# **The master plan calls this "the honest mid-point milestone" — structure,
+# mechanism, sheet metal, bought parts, fatigue and guarding at once, and if M5
+# does not work the phases before it were decoration.** So the useful thing this
+# rung produces is not that it builds. It is the list of what it found it cannot
+# say, which is at the bottom of this section.
+#
+# **Why it moves now.** Its declared `needs` were E17.3, E12.3, E13 and E14.
+# E17.3 is complete, E12 and E14 are complete, and E13 is three tasks done out of
+# four with the open one — E13.2 — open on a *document*. That is M4's argument two
+# days later, and it is M6's rule: a rung held pending on the half of a
+# prerequisite it does not use is a ladder that has stopped measuring anything.
+#
+# **The rung's spine is that a press is a chain of dimensions from the crank down
+# to the strip, and every one of them is somebody else's part.**
+#
+# The whole vertical layout here is *derived downward from the crank axis*: the
+# slide's face at bottom dead centre is `crank_axis - (rod + throw)`, the upper
+# shoe hangs under it, the lower shoe sits under that, the bolster under that and
+# the bed under that. Nothing in that chain is typed. What falls out at the bottom
+# is the gap between the two die shoes at bottom dead centre — and **that gap is
+# the strip being stamped**. Lengthen the connecting rod by a millimetre and the
+# dies crash into each other through the work; shorten it and the press never
+# cuts. It is measured between the two built solids, through an interface
+# contract, exactly as M4 measures its gear mesh.
+#
+# **The tonnage claim is inverted on purpose, and that is this rung's sharpest
+# finding.** A blanking force is `F = perimeter x thickness x shear strength`, and
+# **nothing in this repository carries a shear strength.** `app/solve/materials.py`
+# ships yield and ultimate *tensile* strength for steel-1018, both transcribed
+# with a source; there is no shear column, and every ratio between shear and
+# tensile that a shop table would give is a rule of thumb this file is not
+# entitled to invent. So the press does not claim it can stamp this blank. It
+# states the limit the other way round — **the greatest shear strength its rating
+# covers over this blank's perimeter** — which is exact arithmetic needing no
+# material property at all, and then says, in `_M5_UNPROVEN`, that it cannot tell
+# you whether mild steel is inside it.
+#
+# **The guard is where sheet metal meets an assembly, and they do not meet.**
+# `AssemblyDesign.parts` maps a component to a `DesignSpec`, and a
+# `SheetMetalPart` cannot compile to one — M3's finding, still true, and here it
+# blocks one level up. So the guard is declared twice, the way M3's cover is: as a
+# fold tree, which is what unfolds into a blank a laser cuts, and as the same
+# radiused section drawn by hand and extruded, which is what the kernel builds.
+# The number tying them together is the volume, and it is asked to agree exactly.
+# Above that sits the other half of E17.3's residual: **there is no sheet-metal
+# operation in the CATIA registry and deliberately is not one** (THE QUEUE E1), so
+# every sheet claim on this press is an open-kernel claim and the mission says so
+# rather than implying a seat could build it.
+
+#: Rated force. A 40-tonne gap-frame press — small enough to be a real machine and
+#: large enough that its die set, guard and frame are all real parts.
+_M5_RATED_FORCE_N: Final = 400_000.0
+
+#: The blank this press is set up to make: a rectangle, so its cut perimeter is
+#: arithmetic rather than a number off a drawing.
+_M5_BLANK_LENGTH_MM: Final = 120.0
+_M5_BLANK_WIDTH_MM: Final = 80.0
+#: The strip. It is also the gap between the two die shoes at bottom dead centre,
+#: which is the whole reason the vertical chain below is derived rather than typed.
+_M5_STRIP_MM: Final = 2.0
+
+#: The drive. Stroke is twice the throw, exactly; the rod length decides nothing
+#: about the stroke and everything about where the stroke *sits*.
+_M5_THROW_MM: Final = 50.0
+_M5_ROD_MM: Final = 400.0
+_M5_CRANK_AXIS_Z_MM: Final = 1_182.0
+_M5_PIN_DIAMETER_MM: Final = 80.0
+_M5_PIN_LENGTH_MM: Final = 200.0
+
+#: The vertical chain, derived downward from the crank axis. Every one of these is
+#: a consequence of the one above it; the only independent numbers are the part
+#: thicknesses, which are what a press shop actually buys.
+_M5_SLIDE_MM: Final = 300.0
+_M5_UPPER_SHOE_MM: Final = 50.0
+_M5_LOWER_SHOE_MM: Final = 50.0
+_M5_BOLSTER_MM: Final = 80.0
+_M5_BED_MM: Final = 250.0
+
+#: At bottom dead centre the crank pin is one throw below the axis and the rod is
+#: vertical, so the slide's top face is `rod + throw` below the axis. This is the
+#: one line in the file that makes the press a mechanism rather than a stack.
+_M5_SLIDE_TOP_MM: Final = _M5_CRANK_AXIS_Z_MM - (_M5_ROD_MM + _M5_THROW_MM)
+_M5_SLIDE_BOTTOM_MM: Final = _M5_SLIDE_TOP_MM - _M5_SLIDE_MM
+_M5_UPPER_SHOE_BOTTOM_MM: Final = _M5_SLIDE_BOTTOM_MM - _M5_UPPER_SHOE_MM
+_M5_LOWER_SHOE_TOP_MM: Final = _M5_UPPER_SHOE_BOTTOM_MM - _M5_STRIP_MM
+_M5_LOWER_SHOE_BOTTOM_MM: Final = _M5_LOWER_SHOE_TOP_MM - _M5_LOWER_SHOE_MM
+_M5_BOLSTER_BOTTOM_MM: Final = _M5_LOWER_SHOE_BOTTOM_MM - _M5_BOLSTER_MM
+_M5_BED_BOTTOM_MM: Final = _M5_BOLSTER_BOTTOM_MM - _M5_BED_MM
+
+#: The rod body is drawn from the slide face up to the pin's *surface*: the big end
+#: that wraps the pin is not modelled, because two solids sharing a journal is an
+#: interference by construction and the clash check would be right to say so.
+_M5_PIN_CENTRE_Z_MM: Final = _M5_CRANK_AXIS_Z_MM - _M5_THROW_MM
+_M5_ROD_BODY_MM: Final = (
+    _M5_PIN_CENTRE_Z_MM - _M5_PIN_DIAMETER_MM / 2.0 - _M5_SLIDE_TOP_MM
+)
+
+#: The frame. X across the press, Y from the front of the throat to the back of
+#: the column, Z up.
+_M5_FRAME_WIDTH_MM: Final = 900.0
+_M5_THROAT_DEPTH_MM: Final = 600.0
+_M5_COLUMN_DEPTH_MM: Final = 250.0
+_M5_CROWN_MM: Final = 250.0
+_M5_COLUMN_FRONT_MM: Final = _M5_THROAT_DEPTH_MM / 2.0
+_M5_COLUMN_HEIGHT_MM: Final = _M5_SLIDE_TOP_MM + _M5_ROD_BODY_MM + 408.0
+
+_M5_BOLSTER_WIDTH_MM: Final = 800.0
+_M5_BOLSTER_DEPTH_MM: Final = 500.0
+_M5_LOWER_SHOE_WIDTH_MM: Final = 560.0
+_M5_SHOE_DEPTH_MM: Final = 300.0
+_M5_UPPER_SHOE_WIDTH_MM: Final = 400.0
+_M5_SLIDE_WIDTH_MM: Final = 400.0
+_M5_SLIDE_DEPTH_MM: Final = 500.0
+_M5_ROD_SECTION_MM: Final = 120.0
+
+#: The die set's guide posts: two, outboard of the upper shoe so they guide it
+#: without passing through it. A real die set has bushes in the upper shoe; a bush
+#: is a bore, and a post through a bore is the coincident-cylinder question
+#: `app/rules/fits.py` owns rather than the clash check.
+_M5_POST_DIAMETER_MM: Final = 50.0
+_M5_POST_X_MM: Final = 240.0
+_M5_POST_MM: Final = 320.0
+
+#: The guard: a folded channel of 2 mm cold-rolled mild steel over the drive, open
+#: at the bottom so the connecting rod passes through it.
+_M5_GUARD_GRADE: Final = "steel_mild_cr"
+_M5_GUARD_THICKNESS_MM: Final = 2.0
+_M5_GUARD_RADIUS_MM: Final = 3.0
+_M5_GUARD_WIDTH_MM: Final = 400.0
+_M5_GUARD_HEIGHT_MM: Final = 300.0
+_M5_GUARD_LENGTH_MM: Final = 800.0
+_M5_GUARD_TOP_Z_MM: Final = 1_200.0
+_M5_GUARD_BEND_ANGLE_DEG: Final = 90.0
+
+_M5_DENSITY_KG_M3: Final = _M2_DENSITY_KG_M3
+
+#: Two parts that are meant to touch are 0 mm apart, and a fit-up gap of a few
+#: hundredths is still a joint. Ten millimetres is a part cut short, and a
+#: contact-only broad phase throws that pair away as "safely apart" — M2 measured
+#: exactly that and the claim came back UNMEASURED rather than red.
+_M5_INSPECTION_MM: Final = 25.0
+
+
+def m5_stroke_mm(*, throw_mm: float = _M5_THROW_MM) -> float:
+    """Twice the crank throw, and nothing else decides it.
+
+    Not a rule of thumb: the slide's travel is the difference between the
+    slider-crank's two extremes, `(l + r) - (l - r)`, and the rod length cancels.
+    A press bought for a 100 mm stroke and built with a longer rod has the same
+    stroke in a different place, which is the confusion this states out of the way.
+    """
+    return 2.0 * throw_mm
+
+
+def m5_slide_drop_mm(
+    angle_deg: float, *, throw_mm: float = _M5_THROW_MM, rod_mm: float = _M5_ROD_MM
+) -> float:
+    """How far below the crank axis the slide's face sits, at a crank angle.
+
+    The slider-crank, exactly: `r cos(theta) + sqrt(l^2 - r^2 sin^2(theta))`,
+    measured with theta = 0 at bottom dead centre so that the number grows as the
+    slide rises. No small-angle approximation and no harmonic substitute — the
+    second-order term is what makes a press's velocity asymmetric about mid-stroke,
+    and it is the reason a die's shear is not the same on the way in as on the way
+    out.
+    """
+    if rod_mm <= throw_mm:
+        raise SpecError(
+            f"A connecting rod of {rod_mm:g} mm on a {throw_mm:g} mm throw cannot "
+            "turn: the rod must be longer than the throw or the crank locks. The "
+            "square root below would be the square root of a negative number, which "
+            "is where a mechanism stops being a mechanism."
+        )
+    theta = math.radians(angle_deg)
+    return throw_mm * math.cos(theta) + math.sqrt(
+        rod_mm**2 - (throw_mm * math.sin(theta)) ** 2
+    )
+
+
+def m5_blank_perimeter_mm(
+    *, length_mm: float = _M5_BLANK_LENGTH_MM, width_mm: float = _M5_BLANK_WIDTH_MM
+) -> float:
+    """The cut line of the blank. A rectangle, so this is arithmetic."""
+    return 2.0 * (length_mm + width_mm)
+
+
+def m5_shear_strength_limit_mpa(
+    *,
+    rated_force_n: float = _M5_RATED_FORCE_N,
+    strip_mm: float = _M5_STRIP_MM,
+) -> float:
+    """The greatest shear strength this press's rating covers, over this blank.
+
+    **The capacity claim, inverted, and the inversion is the honest part.** A
+    blanking force is `F = L x t x tau`, so a press of rated force `F` can blank a
+    perimeter `L` in a strip `t` out of any material whose shear strength is at
+    most `F / (L t)`. That is exact and needs no material property.
+
+    What it does *not* say is whether the strip in the die is inside that limit,
+    and this rung deliberately does not say it: **nothing in this repository
+    carries a shear strength.** `app/solve/materials.py` transcribes yield and
+    ultimate tensile strength for steel-1018 with a source and has no shear
+    column, and every published ratio between the two is a shop rule of thumb that
+    this file is not entitled to invent — which is the `app/verify/` rule about
+    recalled figures, applied to a material instead of a benchmark. So the number
+    below is a limit, `_M5_UNPROVEN` says what cannot be checked against it, and
+    E12 owns the gap.
+    """
+    perimeter = m5_blank_perimeter_mm()
+    if perimeter <= 0 or strip_mm <= 0:
+        raise SpecError(
+            "A blank with no perimeter or no thickness needs no force, which is not "
+            "a press capacity — check the blank dimensions."
+        )
+    return rated_force_n / (perimeter * strip_mm)
+
+
+def _m5_guard_part(
+    *,
+    width_mm: float = _M5_GUARD_WIDTH_MM,
+    height_mm: float = _M5_GUARD_HEIGHT_MM,
+    length_mm: float = _M5_GUARD_LENGTH_MM,
+    thickness_mm: float = _M5_GUARD_THICKNESS_MM,
+    inside_radius_mm: float = _M5_GUARD_RADIUS_MM,
+    grade: str = _M5_GUARD_GRADE,
+) -> SheetMetalPart:
+    """The guard as a fold tree: a chain of three flanges and two bends.
+
+    Rooted at a wall rather than at the top, for M3's reason and it is the whole
+    of why this is a chain: rooted at the top the part is a *tree* — two walls off
+    one panel — and `unfold` refuses a flat length for a tree, because a branching
+    blank has an extent in two directions and no chain to sum along. Rooted at a
+    wall it is a chain, and `flat_length_mm` is computed twice, once from the bend
+    deductions and once from the allowances, and refused if the two disagree.
+
+    The K-factor comes from `_m3_k_factor`, which is DIN 6935 for cold-formed
+    steel — one K doctrine for the whole ladder, so a guard and an enclosure folded
+    from the same coil do not get their neutral axes from different traditions.
+    """
+    sheet = sheet_material(grade, thickness_mm=thickness_mm)
+    bend_k = _m3_k_factor(
+        inside_radius_mm=inside_radius_mm, thickness_mm=thickness_mm, grade=grade
+    )
+    # See `_m5_guard_formability` below: an unformable guard is refused here rather
+    # than asserted about later, because an assembly's parameters cannot be measured.
+
+    def bend(name: str) -> Bend:
+        return Bend(
+            angle_deg=_M5_GUARD_BEND_ANGLE_DEG,
+            inside_radius_mm=inside_radius_mm,
+            direction=BendDirection.DOWN,
+            k=bend_k,
+            name=name,
+        )
+
+    part = SheetMetalPart(
+        name="M5 drive guard",
+        material=sheet,
+        convention=LengthConvention.OUTSIDE_MOULD_LINE,
+        root=Flange(
+            name="wall_left",
+            length_mm=height_mm,
+            width_mm=length_mm,
+            joints=(
+                Joint(
+                    edge=Edge.FAR,
+                    bend=bend("corner_left"),
+                    flange=Flange(
+                        name="roof",
+                        length_mm=width_mm,
+                        joints=(
+                            Joint(
+                                edge=Edge.FAR,
+                                bend=bend("corner_right"),
+                                flange=Flange(name="wall_right", length_mm=height_mm),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    return _m5_guard_formability(part)
+
+
+def _m5_guard_formability(part: SheetMetalPart) -> SheetMetalPart:
+    """Refuse a guard that cannot be folded, and say which check failed.
+
+    **This is a refusal rather than an assertion, and the reason is a fact about the
+    assembly machinery that cost a build to find** (2026-09-16). It was first written
+    as a claim in `_M5_ASSERTIONS` measuring a `guard_formability_failure_count`
+    parameter, and the ladder came back **NOT CHECKED**: an `AssemblyDesign`'s
+    `parameters` resolve the *bound* side of an assertion — `bound="=mass_closed_form_kg"`
+    works — and never the *measured* side, which comes from `_combined_payload` and is
+    geometry the kernel reported. A formability finding is not geometry. The kernel
+    never sees the fold tree, so there is no measurement for this claim to read and
+    there never could be.
+
+    An unchecked assertion is `UNMEASURED`, which is honest and useless. So the check
+    moves to construction, where it is stronger than a claim: **M5 cannot be built
+    with a guard that cannot be folded.** `check_part` is `app/sheetmetal/`'s, and
+    both halves of its report are read — `failed` refuses, and `unmeasured` refuses
+    too, because a guard whose formability was not assessed is not a guard that
+    passed, which is the distinction `FormabilityReport` keeps `ok` and `complete`
+    apart for.
+    """
+    report = check_part(part)
+    if report.failed:
+        findings = "; ".join(f"{f.check}: {f.message}" for f in report.failed)
+        raise SpecError(
+            f"The M5 guard cannot be folded from {part.material.name}: {findings}. "
+            "Open the bend radius, lengthen the flange, or choose a grade that will "
+            "take the bend — a guard that cracks at the corner is a guard nobody fits."
+        )
+    if report.unmeasured:
+        open_checks = ", ".join(f.check for f in report.unmeasured)
+        raise SpecError(
+            f"The M5 guard's formability was not fully assessed ({open_checks} could "
+            "not be measured), and a part nobody assessed is not a part that passed. "
+            "Supply what the check needs — a die opening, a grade's minimum radius — "
+            "or state the gap in `_M5_UNPROVEN` rather than building past it."
+        )
+    return part
+
+
+def _m5_guard_section(
+    *,
+    thickness_mm: float,
+    inside_radius_mm: float,
+    width_mm: float,
+    height_mm: float,
+    sketch: str,
+) -> list[FeatureSpec]:
+    """The guard's folded cross-section, drawn segment by segment as one contour.
+
+    **The part the design IR cannot say**, in M3's words, and the same twelve-line
+    answer: there is no `catia_wall`, no `catia_flange`, no `catia_bend` and no
+    `catia_unfold` in the OCCT backend, so a folded solid is drawn the way a
+    draughtsman would have drawn one — the section, by hand, and extruded.
+
+    Every coordinate is *derived* from the fold rather than chosen, which is why
+    they are computed here from the same constants the fold tree is built from.
+    The corner arcs are the real bend radii, inside and out, so this section is not
+    an approximation of the folded part: it is the folded part's section, and the
+    volumes are asked to agree exactly rather than within a tolerance.
+    """
+    t, r = thickness_mm, inside_radius_mm
+    outer = r + t
+    inset = t + r
+    top, floor = 0.0, -height_mm
+    left, right = 0.0, width_mm
+    centres = {
+        "corner_left": (inset, top - inset),
+        "corner_right": (right - inset, top - inset),
+    }
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def line(start: tuple[float, float], end: tuple[float, float]) -> None:
+        calls.append(("catia_sketch_line", {"start": list(start), "end": list(end)}))
+
+    def arc(centre: tuple[float, float], radius: float, a0: float, a1: float) -> None:
+        calls.append(
+            (
+                "catia_sketch_arc",
+                {
+                    "centre": list(centre),
+                    "radius_mm": radius,
+                    "start_angle_deg": a0,
+                    "end_angle_deg": a1,
+                },
+            )
+        )
+
+    # Outside, from the bottom of the left wall, up and over.
+    line((left, floor), (left, top - inset))
+    arc(centres["corner_left"], outer, 180.0, 90.0)
+    line((inset, top), (right - inset, top))
+    arc(centres["corner_right"], outer, 90.0, 0.0)
+    line((right, top - inset), (right, floor))
+    # Across the free edge of the right wall and back along the inside.
+    line((right, floor), (right - t, floor))
+    line((right - t, floor), (right - t, top - inset))
+    arc(centres["corner_right"], r, 0.0, 90.0)
+    line((right - inset, top - t), (inset, top - t))
+    arc(centres["corner_left"], r, 90.0, 180.0)
+    line((left + t, top - inset), (left + t, floor))
+    line((left + t, floor), (left, floor))
+
+    return [
+        FeatureSpec(f"guard.seg{index + 1:02d}", tool, {"sketch": ref(sketch), **arguments})
+        for index, (tool, arguments) in enumerate(calls)
+    ]
+
+
+def _m5_guard_spec(
+    *,
+    width_mm: float = _M5_GUARD_WIDTH_MM,
+    height_mm: float = _M5_GUARD_HEIGHT_MM,
+    length_mm: float = _M5_GUARD_LENGTH_MM,
+    thickness_mm: float = _M5_GUARD_THICKNESS_MM,
+    inside_radius_mm: float = _M5_GUARD_RADIUS_MM,
+) -> DesignSpec:
+    """The same guard as geometry: one sketch of the section, extruded."""
+    return DesignSpec.of(
+        "M5 drive guard",
+        material="steel-1018",
+        description=(
+            "Folded sheet guard over the drive. Drawn as a section because a "
+            "SheetMetalPart cannot compile to a DesignSpec."
+        ),
+        parameters=[
+            Parameter("guard_length_mm", Unit.MM, value=length_mm),
+            Parameter("guard_width_mm", Unit.MM, value=width_mm),
+            Parameter("guard_height_mm", Unit.MM, value=height_mm),
+            Parameter("guard_thickness_mm", Unit.MM, value=thickness_mm),
+        ],
+        features=[
+            FeatureSpec("guard.section", "catia_sketch_create", {"support": "XY"}),
+            *_m5_guard_section(
+                thickness_mm=thickness_mm,
+                inside_radius_mm=inside_radius_mm,
+                width_mm=width_mm,
+                height_mm=height_mm,
+                sketch="guard.section",
+            ),
+            FeatureSpec(
+                "guard.body",
+                "catia_pad",
+                {"sketch": ref("guard.section"), "length_mm": expr("guard_length_mm")},
+                note="Extrude the folded section along the guard's length.",
+            ),
+        ],
+    )
+
+
+def _m5_block_spec(
+    name: str, *, width_mm: float, depth_mm: float, height_mm: float, description: str
+) -> DesignSpec:
+    """A plate or a block. Most of a press frame is one of these.
+
+    Built centred on its own origin in X and Y and rising from z = 0, which is what
+    a padded rectangle does — measured on the kernel rather than assumed, because
+    "the sketch is centred" and "the sketch starts at the origin" are both plausible
+    and only one of them is true.
+    """
+    return DesignSpec.of(
+        name,
+        material="steel-1018",
+        description=description,
+        parameters=[
+            Parameter("width_mm", Unit.MM, value=width_mm),
+            Parameter("depth_mm", Unit.MM, value=depth_mm),
+            Parameter("height_mm", Unit.MM, value=height_mm),
+        ],
+        features=[
+            FeatureSpec("block.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "block.outline",
+                "catia_sketch_rectangle",
+                {
+                    "sketch": ref("block.profile"),
+                    "width_mm": expr("width_mm"),
+                    "height_mm": expr("depth_mm"),
+                },
+            ),
+            FeatureSpec(
+                "block.body",
+                "catia_pad",
+                {"sketch": ref("block.profile"), "length_mm": expr("height_mm")},
+            ),
+        ],
+    )
+
+
+def _m5_cylinder_spec(
+    name: str, *, diameter_mm: float, length_mm: float, description: str
+) -> DesignSpec:
+    """A round bar, built along its own +Z.
+
+    Separate from `_m5_block_spec` for a reason the mass claim found on 2026-09-16:
+    the crank pin was *drawn* by the block helper and *weighed* as a cylinder, so the
+    closed form and the roll-up disagreed by 2.16 kg out of 5,691 — 0.04%, which is
+    far too small to notice by eye and exactly the size of error the assertion exists
+    to catch. Two shapes for one part is the failure; one helper per shape is the fix.
+    """
+    return DesignSpec.of(
+        name,
+        material="steel-1018",
+        description=description,
+        parameters=[
+            Parameter("diameter_mm", Unit.MM, value=diameter_mm),
+            Parameter("length_mm", Unit.MM, value=length_mm),
+        ],
+        features=[
+            FeatureSpec("bar.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "bar.outline",
+                "catia_sketch_circle",
+                {"sketch": ref("bar.profile"), "diameter_mm": expr("diameter_mm")},
+            ),
+            FeatureSpec(
+                "bar.body",
+                "catia_pad",
+                {"sketch": ref("bar.profile"), "length_mm": expr("length_mm")},
+            ),
+        ],
+    )
+
+
+#: The die set, as a contract. The claim is the gap at bottom dead centre, and it
+#: is the strip: the press's entire vertical chain exists to put the two shoe faces
+#: exactly one material thickness apart at the bottom of the stroke.
+_M5_DIE_SET: Final = Interface(
+    name="die set at bottom dead centre",
+    provider="lower_shoe",
+    consumer="upper_shoe",
+    parameters=ParameterSet.of(
+        [
+            Parameter(
+                "strip_mm",
+                Unit.MM,
+                value=_M5_STRIP_MM,
+                description="The material in the die. Also the shut gap, by construction.",
+            ),
+            Parameter("shoe_depth_mm", Unit.MM, value=_M5_SHOE_DEPTH_MM),
+        ]
+    ),
+    claims=(
+        Assertion(
+            name="the shoes close on the strip and not on each other",
+            measure="minimum_clearance_mm",
+            comparison="==",
+            bound="=strip_mm",
+            tolerance=1e-3,
+            note=(
+                "The rung. The slide's face at bottom dead centre is "
+                "`crank_axis - (rod + throw)` and everything below it hangs off that, "
+                "so this gap is a consequence of the connecting rod's length. A rod a "
+                "millimetre long crashes the dies through the work; a millimetre short "
+                "and the press never cuts. Measured between the built solids."
+            ),
+        ),
+        Assertion(
+            name="the shoes are the same depth, so the strip is supported across the die",
+            measure="provider.bounding_box_mm.size[1]",
+            comparison="==",
+            bound="=shoe_depth_mm",
+            tolerance=1e-3,
+        ),
+        Assertion(
+            name="the upper shoe is the depth the die set was laid out to",
+            measure="consumer.bounding_box_mm.size[1]",
+            comparison="==",
+            bound="=shoe_depth_mm",
+            tolerance=1e-3,
+            note="Checked on both sides: a contract that only looks at one party has one party.",
+        ),
+    ),
+)
+
+
+#: The force path where it leaves the frame. The bolster carries the whole rated
+#: force into the bed, and the two must be in contact over the joint rather than
+#: near it — a bolster sitting on a high spot is a cracked bed.
+_M5_FORCE_PATH: Final = Interface(
+    name="bolster to bed",
+    provider="bed",
+    consumer="bolster",
+    parameters=ParameterSet.of(
+        [Parameter("fit_up_mm", Unit.MM, value=0.05, description="What a machined joint may open to.")]
+    ),
+    claims=(
+        Assertion(
+            name="the bolster sits on the bed",
+            measure="minimum_clearance_mm",
+            comparison="<=",
+            bound="=fit_up_mm",
+        ),
+        Assertion(
+            name="and sits on it everywhere, not at one corner",
+            measure="widest_gap_mm",
+            comparison="<=",
+            bound="=fit_up_mm",
+            note=(
+                "The minimum alone cannot carry a fit-up claim: a bolster touching at "
+                "one edge and 10 mm clear at the other has a minimum clearance of zero. "
+                "M2 learned this from the other side and `_boundary_payload` publishes "
+                "both numbers for exactly this reason."
+            ),
+        ),
+    ),
+)
+
+
+def _m5_volumes() -> dict[str, float]:
+    """Each component's volume from its own formula. Blocks, cylinders and a fold."""
+    return {
+        "bed": _M5_FRAME_WIDTH_MM * _M5_THROAT_DEPTH_MM * _M5_BED_MM,
+        "column": _M5_FRAME_WIDTH_MM * _M5_COLUMN_DEPTH_MM * _M5_COLUMN_HEIGHT_MM,
+        "crown": _M5_FRAME_WIDTH_MM * _M5_THROAT_DEPTH_MM * _M5_CROWN_MM,
+        "bolster": _M5_BOLSTER_WIDTH_MM * _M5_BOLSTER_DEPTH_MM * _M5_BOLSTER_MM,
+        "lower_shoe": _M5_LOWER_SHOE_WIDTH_MM * _M5_SHOE_DEPTH_MM * _M5_LOWER_SHOE_MM,
+        "upper_shoe": _M5_UPPER_SHOE_WIDTH_MM * _M5_SHOE_DEPTH_MM * _M5_UPPER_SHOE_MM,
+        "guide_post": math.pi / 4.0 * _M5_POST_DIAMETER_MM**2 * _M5_POST_MM,
+        "slide": _M5_SLIDE_WIDTH_MM * _M5_SLIDE_DEPTH_MM * _M5_SLIDE_MM,
+        "connecting_rod": _M5_ROD_SECTION_MM**2 * _M5_ROD_BODY_MM,
+        "crank_pin": math.pi / 4.0 * _M5_PIN_DIAMETER_MM**2 * _M5_PIN_LENGTH_MM,
+        # Not a formula of its own: the folded volume is `app/sheetmetal/fold.py`'s
+        # closed form over the faces and the bend sectors, and asking the guard's
+        # volume here any other way would be a second opinion about one part.
+        "guard": folded_volume_mm3(_m5_guard_part()),
+    }
+
+
+#: Every occurrence in the press. Two guide posts, one of everything else.
+_M5_OCCURRENCES: Final[tuple[str, ...]] = (
+    "bed",
+    "column",
+    "crown",
+    "bolster",
+    "lower_shoe",
+    "upper_shoe",
+    "guide_post",
+    "guide_post",
+    "slide",
+    "connecting_rod",
+    "crank_pin",
+    "guard",
+)
+
+
+def m5_mass_kg() -> float:
+    """The press weighed by arithmetic, against the roll-up from the graph.
+
+    M6's rung on a machine of eleven different parts. The failure it catches here
+    is not a count that drifted: it is a plate whose thickness was changed in the
+    layout chain and not in the volume table, which moves the machine's mass and
+    every dimension below it.
+    """
+    volumes = _m5_volumes()
+    return sum(volumes[name] for name in _M5_OCCURRENCES) * 1e-9 * _M5_DENSITY_KG_M3
+
+
+def _m5_structure(
+    *,
+    rod_mm: float = _M5_ROD_MM,
+    guard_top_z_mm: float = _M5_GUARD_TOP_Z_MM,
+    post_x_mm: tuple[float, float] = (-_M5_POST_X_MM, _M5_POST_X_MM),
+    spare_post_at_mm: float | None = None,
+) -> ProductStructure:
+    """The press as a graph. X across, Y front to back, Z up.
+
+    **The vertical positions are recomputed here from `rod_mm`**, not read off the
+    module constants, so lengthening the connecting rod moves the slide, the upper
+    shoe and the die gap together — which is the point of the rung and the only way
+    a test can build it wrong without editing a source file.
+
+    `guard_top_z_mm` and `spare_post_at_mm` are the other two breaks: a guard
+    dropped onto the drive it is meant to cover, and a part in the graph nobody
+    counted.
+    """
+    slide_top = _M5_CRANK_AXIS_Z_MM - (rod_mm + _M5_THROW_MM)
+    slide_bottom = slide_top - _M5_SLIDE_MM
+    upper_shoe_bottom = slide_bottom - _M5_UPPER_SHOE_MM
+    lower_shoe_top = _M5_LOWER_SHOE_TOP_MM
+    lower_shoe_bottom = _M5_LOWER_SHOE_BOTTOM_MM
+
+    upright = None
+    across = turned((0.0, 1.0, 0.0), math.pi / 2.0)
+    # The guard is drawn in its own section plane and has to end up with its roof
+    # horizontal and its opening downward. One quarter turn about Y lays the
+    # extrusion along X; a second about X brings the section's own axes upright.
+    # Measured on the kernel rather than reasoned about — the same asymmetry
+    # `app/render/project.py` and `occt/sheetmetal.py` each document.
+    guard_turn = compose(turned((1.0, 0.0, 0.0), math.pi / 2.0), across)
+
+    builder = StructureBuilder()
+    builder.define("press", description="400 kN gap-frame mechanical press.")
+    for name, description in (
+        ("bed", "The C-frame's foot; carries the bolster and the rated force."),
+        ("column", "The C's back. Everything above the throat hangs off it."),
+        ("crown", "The C's head; carries the crankshaft bearings."),
+        ("bolster", "The plate the lower die bolts to."),
+        ("lower_shoe", "Die set, lower shoe: carries the die block."),
+        ("upper_shoe", "Die set, upper shoe: carries the punch."),
+        ("guide_post", "Die-set guide post."),
+        ("slide", "The ram."),
+        ("connecting_rod", "Crank pin to slide."),
+        ("crank_pin", "The throw. The crankshaft itself is not modelled."),
+        ("guard", "Folded sheet guard over the drive."),
+    ):
+        builder.define(name, design=f"M5 {name.replace('_', ' ')}",
+                       material="steel-1018", description=description)
+
+    def block(component: str, *, y_mm: float, z_mm: float, note: str) -> None:
+        builder.add("press", component, placement=at(0.0, y_mm, z_mm), note=note)
+
+    block("bed", y_mm=0.0, z_mm=_M5_BED_BOTTOM_MM, note="Sits on the floor.")
+    builder.add(
+        "press", "column",
+        placement=at(
+            0.0,
+            _M5_COLUMN_FRONT_MM + _M5_COLUMN_DEPTH_MM / 2.0,
+            _M5_BED_BOTTOM_MM,
+        ),
+        note="Behind the throat, full height.",
+    )
+    block(
+        "crown", y_mm=0.0,
+        z_mm=_M5_BED_BOTTOM_MM + _M5_COLUMN_HEIGHT_MM - _M5_CROWN_MM,
+        note="Over the throat, level with the top of the column.",
+    )
+    block("bolster", y_mm=0.0, z_mm=_M5_BOLSTER_BOTTOM_MM, note="Bolted to the bed.")
+    block("lower_shoe", y_mm=0.0, z_mm=lower_shoe_bottom, note="On the bolster.")
+    block("upper_shoe", y_mm=0.0, z_mm=upper_shoe_bottom, note="Under the slide face.")
+    block("slide", y_mm=0.0, z_mm=slide_bottom, note="At bottom dead centre.")
+    block("connecting_rod", y_mm=0.0, z_mm=slide_top, note="Vertical at bottom dead centre.")
+
+    # Given as two positions rather than one half-width, so a test can move *one*
+    # post. Moving both keeps the press symmetric and proves nothing; adding a third
+    # fails the mass and count claims as well, so neither isolates the centre of mass.
+    for x_mm in post_x_mm:
+        builder.add(
+            "press", "guide_post",
+            placement=at(x_mm, 0.0, lower_shoe_top),
+            note=f"Guide post at x = {x_mm:g} mm, outboard of the upper shoe.",
+        )
+    if spare_post_at_mm is not None:
+        builder.add(
+            "press", "guide_post",
+            placement=at(spare_post_at_mm, 0.0, lower_shoe_top),
+            note="A post nobody counted. Only a test places this.",
+        )
+
+    builder.add(
+        "press", "crank_pin",
+        placement=compose(
+            at(-_M5_PIN_LENGTH_MM / 2.0, 0.0, _M5_PIN_CENTRE_Z_MM), across
+        ),
+        note="One throw below the crank axis: bottom dead centre.",
+    )
+    builder.add(
+        "press", "guard",
+        placement=compose(
+            at(
+                -_M5_GUARD_LENGTH_MM / 2.0,
+                -_M5_GUARD_WIDTH_MM / 2.0,
+                guard_top_z_mm,
+            ),
+            guard_turn,
+        ),
+        note="Over the drive, open at the bottom so the rod passes through.",
+    )
+    assert upright is None  # noqa: S101 - every block is placed unrotated on purpose
+    return builder.build("press")
+
+
+def _m5_design(
+    *,
+    rod_mm: float = _M5_ROD_MM,
+    structure: ProductStructure | None = None,
+) -> AssemblyDesign:
+    """The press: the graph, eleven part designs, two contracts and the numbers."""
+    from app.assembly.contracts import bind_into
+
+    guard = _m5_guard_part()
+    pattern = unfold(guard)
+    formability = check_part(guard)
+    return AssemblyDesign(
+        structure=_m5_structure(rod_mm=rod_mm) if structure is None else structure,
+        parts={
+            "bed": bind_into(
+                _M5_FORCE_PATH,
+                _m5_block_spec(
+                    "M5 bed",
+                    width_mm=_M5_FRAME_WIDTH_MM,
+                    depth_mm=_M5_THROAT_DEPTH_MM,
+                    height_mm=_M5_BED_MM,
+                    description="C-frame foot.",
+                ),
+            ),
+            "column": _m5_block_spec(
+                "M5 column",
+                width_mm=_M5_FRAME_WIDTH_MM,
+                depth_mm=_M5_COLUMN_DEPTH_MM,
+                height_mm=_M5_COLUMN_HEIGHT_MM,
+                description="C-frame back.",
+            ),
+            "crown": _m5_block_spec(
+                "M5 crown",
+                width_mm=_M5_FRAME_WIDTH_MM,
+                depth_mm=_M5_THROAT_DEPTH_MM,
+                height_mm=_M5_CROWN_MM,
+                description="C-frame head.",
+            ),
+            "bolster": bind_into(
+                _M5_FORCE_PATH,
+                _m5_block_spec(
+                    "M5 bolster",
+                    width_mm=_M5_BOLSTER_WIDTH_MM,
+                    depth_mm=_M5_BOLSTER_DEPTH_MM,
+                    height_mm=_M5_BOLSTER_MM,
+                    description="The plate the lower die bolts to.",
+                ),
+            ),
+            "lower_shoe": bind_into(
+                _M5_DIE_SET,
+                _m5_block_spec(
+                    "M5 lower shoe",
+                    width_mm=_M5_LOWER_SHOE_WIDTH_MM,
+                    depth_mm=_M5_SHOE_DEPTH_MM,
+                    height_mm=_M5_LOWER_SHOE_MM,
+                    description="Die set, lower shoe.",
+                ),
+            ),
+            "upper_shoe": bind_into(
+                _M5_DIE_SET,
+                _m5_block_spec(
+                    "M5 upper shoe",
+                    width_mm=_M5_UPPER_SHOE_WIDTH_MM,
+                    depth_mm=_M5_SHOE_DEPTH_MM,
+                    height_mm=_M5_UPPER_SHOE_MM,
+                    description="Die set, upper shoe.",
+                ),
+            ),
+            "guide_post": _m5_cylinder_spec(
+                "M5 guide post",
+                diameter_mm=_M5_POST_DIAMETER_MM,
+                length_mm=_M5_POST_MM,
+                description="Die-set guide post. Hardened and ground in reality.",
+            ),
+            "slide": _m5_block_spec(
+                "M5 slide",
+                width_mm=_M5_SLIDE_WIDTH_MM,
+                depth_mm=_M5_SLIDE_DEPTH_MM,
+                height_mm=_M5_SLIDE_MM,
+                description="The ram.",
+            ),
+            "connecting_rod": _m5_block_spec(
+                "M5 connecting rod",
+                width_mm=_M5_ROD_SECTION_MM,
+                depth_mm=_M5_ROD_SECTION_MM,
+                height_mm=_M5_ROD_BODY_MM,
+                description="Crank pin to slide. The big end is not modelled.",
+            ),
+            "crank_pin": _m5_cylinder_spec(
+                "M5 crank pin",
+                diameter_mm=_M5_PIN_DIAMETER_MM,
+                length_mm=_M5_PIN_LENGTH_MM,
+                description="The throw. The crankshaft it belongs to is not modelled.",
+            ),
+            "guard": _m5_guard_spec(),
+        },
+        interfaces=(_M5_DIE_SET, _M5_FORCE_PATH),
+        clearance_mm=_M5_INSPECTION_MM,
+        parameters=ParameterSet.of(
+            [
+                Parameter("strip_mm", Unit.MM, value=_M5_STRIP_MM),
+                Parameter("stroke_mm", Unit.MM, value=m5_stroke_mm()),
+                Parameter("rated_force_n", Unit.NEWTON, value=_M5_RATED_FORCE_N),
+                Parameter(
+                    "shear_strength_limit_mpa",
+                    Unit.MPA,
+                    value=m5_shear_strength_limit_mpa(),
+                    description=(
+                        "The greatest shear strength this rating covers over this "
+                        "blank's perimeter. Not a claim that the strip is inside it: "
+                        "nothing here carries a shear strength."
+                    ),
+                ),
+                Parameter("blank_perimeter_mm", Unit.MM, value=m5_blank_perimeter_mm()),
+                Parameter(
+                    "guard_blank_length_mm",
+                    Unit.MM,
+                    value=pattern.flat_length_mm or 0.0,
+                    description="What the laser cuts, from the unfold.",
+                ),
+                Parameter(
+                    "guard_volume_mm3",
+                    Unit.MM3,
+                    value=folded_volume_mm3(guard),
+                    description=(
+                        "The fold's closed form. Asked to equal the extruded "
+                        "section's measured volume exactly, not within a tolerance."
+                    ),
+                ),
+                Parameter(
+                    "guard_formability_checks_passed",
+                    Unit.NONE,
+                    value=float(len(formability.passed)),
+                    description=(
+                        "Radius, flange reach and hole-to-bend, from app/sheetmetal/. "
+                        "Published as a record and deliberately not asserted on: an "
+                        "assembly's parameters are the bound side of a claim and never "
+                        "the measured side, so a formability assertion here is always "
+                        "NOT CHECKED. `_m5_guard_formability` refuses instead."
+                    ),
+                ),
+                Parameter("frame_width_mm", Unit.MM, value=_M5_FRAME_WIDTH_MM),
+                Parameter(
+                    "overall_height_mm", Unit.MM, value=_M5_COLUMN_HEIGHT_MM
+                ),
+                Parameter(
+                    "occurrence_count", Unit.NONE, value=float(len(_M5_OCCURRENCES))
+                ),
+                Parameter("mass_closed_form_kg", Unit.KG, value=m5_mass_kg()),
+            ]
+        ),
+    )
+
+
+_M5_ASSERTIONS: Final = (
+    Assertion(
+        name="the roll-up equals the closed form over every occurrence",
+        measure="mass_kg",
+        comparison="==",
+        bound="=mass_closed_form_kg",
+        tolerance=1e-6,
+        note=(
+            "Twelve occurrences of eleven parts, weighed once by the product graph and "
+            "once by arithmetic — and the guard's share of that arithmetic is "
+            "`app/sheetmetal/fold.py`'s closed form, so this claim reaches into the "
+            "sheet-metal package as well as the kernel."
+        ),
+    ),
+    Assertion(
+        name="the graph holds exactly the parts the bill of materials counts",
+        measure="clash.occurrence_count",
+        comparison="==",
+        bound="=occurrence_count",
+    ),
+    Assertion(
+        name="nothing in the press occupies the same space as anything else",
+        measure="clash.clash_count",
+        comparison="==",
+        bound=0.0,
+        note=(
+            "The guard is the claim that earns this. It is a 2 mm shell hanging over a "
+            "moving rod and a crank pin, and a guard that fouls the drive is the one "
+            "mistake on this machine that injures somebody rather than scrapping a part."
+        ),
+    ),
+    Assertion(
+        name="the guard the kernel built is the guard the fold tree describes",
+        measure="guard.volume_mm3",
+        comparison="==",
+        bound="=guard_volume_mm3",
+        tolerance=1e-6,
+        note=(
+            "**Exactly, not within a tolerance.** The section is drawn with the real "
+            "bend radii inside and out, so it is not an approximation of the folded "
+            "part — it is its section. Two descriptions of one part with nothing in "
+            "the code base connecting them, which is M3's finding and is why this "
+            "number is worth asking for."
+        ),
+    ),
+    Assertion(
+        name="the press is as tall as its frame",
+        measure="envelope_mm.size[2]",
+        comparison="==",
+        bound="=overall_height_mm",
+        tolerance=1e-3,
+    ),
+    Assertion(
+        name="the press is as wide as its frame",
+        measure="envelope_mm.size[0]",
+        comparison="==",
+        bound="=frame_width_mm",
+        tolerance=1e-3,
+        note=(
+            "The guide posts sit outboard of the upper shoe and inboard of the frame, "
+            "so a post moved out far enough to foul the slide shows up here as well as "
+            "in the clash count."
+        ),
+    ),
+    Assertion(
+        name="the press is symmetric about its own centre plane",
+        measure="centre_of_mass_mm[0]",
+        comparison="==",
+        bound=0.0,
+        tolerance=1e-6,
+        note=(
+            "Two guide posts, one each side. **Moving one of them moves this claim and "
+            "no other** — measured on 2026-09-16 rather than assumed: a post shifted "
+            "10 mm leaves the mass, the occurrence count, the envelope and both "
+            "contracts untouched, so this is the only claim standing between a "
+            "die set that guides squarely and one that cocks the slide."
+        ),
+    ),
+    Assertion(
+        name="the mass sits behind the throat",
+        measure="centre_of_mass_mm[1]",
+        comparison=">",
+        bound=0.0,
+        note=(
+            "A gap-frame press is back-heavy — the column is the single heaviest part "
+            "and it is all behind the work — which is why one is bolted to the floor. "
+            "The claim that knows which way round the C faces."
+        ),
+    ),
+)
+
+
+_M5_UNPROVEN: Final = (
+    "E1 — there is no sheet-metal operation in the CATIA registry and deliberately "
+    "is not one (THE QUEUE E1), so the guard is an **open-kernel claim**: the COM "
+    "half is unwritten and unverifiable without a seat, and nothing here says a "
+    "CATIA user could build this part at all",
+    "E17.3 — a `SheetMetalPart` still cannot compile to a `DesignSpec`, so the guard "
+    "is declared twice — as a fold tree and as a hand-drawn section — and the only "
+    "thing holding the two descriptions together is a volume. M3 found this on one "
+    "part; here it is what stops a folded part being a *component* of an assembly",
+    "E12 — **nothing in this repository carries a shear strength, and it is not even "
+    "a property the material vocabulary can name**: `MATERIAL_PROPERTIES` holds "
+    "`shear_modulus_mpa`, which is elasticity and not strength, so no material here "
+    "could carry one. So the press states the greatest shear strength its rating "
+    "covers over this blank and cannot say whether the strip in the die is inside it. "
+    "steel-1018 has sourced yield and ultimate tensile and both are `TYPICAL` rather "
+    "than design basis, and every published ratio between tensile and shear is a shop "
+    "rule of thumb this file will not invent",
+    "E6 — **frame stiffness is not measured, and it is the thing a gap-frame press is "
+    "bought or rejected on**. A C opens under load: the throat deflects, the slide "
+    "tips, and the die's clearance goes uneven down one side. No load case has been "
+    "run, so 'the force path is continuous' is a geometry claim and not a stiffness one",
+    "E8 — no fatigue. A press frame sees one full load cycle per stroke and runs at "
+    "tens of strokes a minute, so its duty cycle is millions of cycles a year and the "
+    "throat corner is the classic crack. Nothing here counts them",
+    "E9 — nothing moves. The slide is placed at bottom dead centre and the kinematics "
+    "are arithmetic; there is no inertia of the slide, no flywheel energy budget, no "
+    "clutch and brake, and no snap-through when the blank breaks — which is the load "
+    "case that actually shakes a press",
+    "E9 — the crankshaft is not modelled at all: only its pin is, because a pin and "
+    "the shaft it belongs to are one part, and two solids sharing a journal interfere "
+    "by construction. The connecting rod's big end is absent for the same reason, so "
+    "the drive here is a bar and a stub and not a mechanism that could be assembled",
+    "E12.3 — nothing is bolted. A press is held together by tie rods, bolster bolts "
+    "and die clamps, and not one fastener is in this bill of materials",
+    "E13 — no guarding standard. A guard is sheet metal *and* a reach distance, an "
+    "interlock and a stopping time, and none of those is a geometry question. Nothing "
+    "here has read a standard about it",
+    "E13 — no cost and no DFM. Eleven parts, no quotation, and no view on whether a "
+    "900 mm frame plate is a sensible thing to ask a shop to machine",
+)
+
+
 #: The ladder, in tractability order. Every rung of Decision 5's table appears
 #: here; `tests/test_design_missions.py` asserts that, so a rung cannot be
 #: dropped from the programme by being deleted from a list.
@@ -5161,12 +6216,15 @@ LADDER: Final[Sequence[Mission]] = (
         title="Sheet-metal stamping press",
         era="V",
         hard="Force path, frame stiffness, die set, drive, guarding",
-        needs=(
-            "E17.3 — sheet metal",
-            "E12.3 — standard parts",
-            "E13 — design rules, GD&T and cost",
-            "E14 — product structure and interface contracts",
-        ),
+        # Its declared needs were E17.3, E12.3, E13 and E14. Three of the four are
+        # complete; E13 is three tasks of four with the open one — E13.2 — open on a
+        # *document*, ISO 286's deviation tables, which this rung does not read. So
+        # it moved on 2026-09-16 by M6's rule, as M4 did the same day, and what a
+        # press needs that nobody here has checked is in `_M5_UNPROVEN` — eleven
+        # entries, of which frame stiffness is the one a buyer would ask about first.
+        assembly=_m5_design(),
+        assertions=_M5_ASSERTIONS,
+        unproven=_M5_UNPROVEN,
     ),
     Mission(
         rung="M6",

@@ -73,8 +73,23 @@ class TestTheTheoremsHold:
         modulus = _tension().material.youngs_modulus_mpa
         bound = FORCE**2 * LENGTH / (modulus * scale * HEIGHT * THICKNESS)
         assert result.converged, result.message
+        # The theorem, and the only line here that is one: no layout under this
+        # filter beats the convex optimum. Exact, to one ulp.
         assert result.compliance_n_mm >= bound * (1.0 - 1e-9)
-        assert result.compliance_n_mm <= 1.2 * bound, "measured 1.14× on this mesh"
+        # NOT a theorem — a sanity ceiling, and the number is deliberately far
+        # from either measurement. The level set converges to a *local* optimum
+        # that depends on the mesh, the regularisation and the volume schedule
+        # (the result's own message says so), so the iterate path depends on the
+        # linear algebra underneath: **1.14× measured on Linux 2026-09-14,
+        # 1.2325× on Windows 2026-09-17**, same code, same mesh, same seed.
+        # Writing the Linux figure as a 1.2 bound made a platform difference
+        # read as a broken theorem. What this line is for is catching an
+        # optimiser that has wandered off, not pinning which local optimum a
+        # given BLAS lands in.
+        assert result.compliance_n_mm <= 1.5 * bound, (
+            f"{result.compliance_n_mm / bound:.4g}x the convex bound — the optimiser "
+            "found a far worse local optimum than either machine has measured"
+        )
 
     def test_removing_material_never_stiffens(self, cantilever: LevelSetResult) -> None:
         assert all(value >= cantilever.solid_compliance_n_mm * (1.0 - 1e-9) for value in cantilever.history)

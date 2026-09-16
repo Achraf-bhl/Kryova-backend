@@ -240,8 +240,21 @@ class TestTheDisplayMesh:
     def test_the_same_file_uploaded_again_is_the_same_key(
         self, auth_client, project_id, tmp_path
     ) -> None:
-        self._step_version(auth_client, project_id, tmp_path)
-        self._step_version(auth_client, project_id, tmp_path)
+        """One buffer uploaded twice, not `_step_version` called twice.
+
+        **OCCT's STEP writer is not deterministic across two writes in one
+        process**: it names the product `'Open CASCADE STEP translator 7.8 N'`
+        with N incrementing per process, so two calls to `write_step_box` with
+        identical arguments differ on two lines and hash differently. Measured
+        2026-09-17. Calling the helper twice therefore uploaded two *different*
+        files and then asserted they shared a content-addressed key — a test
+        that could never have passed on any machine, and had never run on one.
+        """
+        from tests.test_mesh import write_step_box
+
+        data = write_step_box(tmp_path / "box.step", (10.0, 30.0, 40.0)).read_bytes()
+        for _ in range(2):
+            assert upload(auth_client, project_id, "box.step", data).status_code == 201
         base = f"/api/v1/projects/{project_id}/geometry"
         first = auth_client.get(f"{base}/1/display")
         second = auth_client.get(f"{base}/2/display")

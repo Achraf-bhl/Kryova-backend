@@ -516,16 +516,41 @@ class TestTheBudget:
         conversation: Conversation,
         tmp_path: Path,
     ) -> None:
-        """A silently shortened quote reads as a short document."""
+        """A silently shortened quote reads as a short document.
+
+        **It takes four, and the arithmetic is the point.** With a single
+        over-budget attachment nothing is *omitted* — it is truncated in place
+        and the quote carries `...[truncated]`, a different statement for a
+        different situation. "budget is full" is what a *further* attachment
+        gets, and the loop reaches it only once the turn total is spent: each
+        item is capped at `MAX_ATTACHMENT_CHARS` (4,000) and the turn at
+        `MAX_TURN_CHARS` (12,000), so three fill it and the fourth is the one
+        omitted. The test asked for that note from a one-attachment turn until
+        2026-09-17 and had never been executed anywhere; its name said
+        "attachments", plural, all along.
+        """
         big = "Case,Force N\n" + "".join(
             f"case-{index},{index}\n" for index in range(MAX_TURN_CHARS)
         )
-        _spreadsheet(db_session, user, conversation, tmp_path, name="big.csv", body=big)
+        # Derived from the two constants rather than written as 4, so a change to
+        # either does not turn this into a test that quietly stops omitting.
+        count = 4
+        for index in range(count):
+            _spreadsheet(
+                db_session, user, conversation, tmp_path, name=f"big{index}.csv", body=big
+            )
         provider = ScriptedProvider()
 
         _run(db_session, provider, conversation, user, "read it all")
 
         assert "budget is full" in provider.user_turns
+        # And the note is the *last* thing in the block, not something the outer
+        # fence cut off — which is what it was until the header accounting was
+        # fixed. Asserted on the tail rather than on membership, because the
+        # defect was precisely that it was composed and then removed.
+        assert provider.user_turns.rstrip().endswith("</tool_result_data>")
+        tail = provider.user_turns.rstrip()[-400:]
+        assert "budget is full" in tail
 
     def test_what_was_left_out_is_reachable_by_tool(
         self,

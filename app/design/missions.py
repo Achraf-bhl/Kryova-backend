@@ -94,7 +94,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from itertools import product as _cross
 from typing import Any, Final
@@ -116,6 +116,18 @@ from app.design.compile import compile_spec
 from app.design.errors import SpecError
 from app.design.execute import BuildReport, CallRunner, execute_plan
 from app.design.params import Parameter, ParameterSet, Unit
+from app.dynamics.assembly import JointDeclaration, body_name, derive
+from app.dynamics.kinematics import evaluate as evaluate_motion
+from app.dynamics.reactions import compute as compute_reactions, free_body_check
+from app.dynamics.types import (
+    GRAVITY_DOWN_MM_S2,
+    Driver,
+    JointReaction,
+    Mechanism,
+    MotionPath,
+    MotionRange,
+    Vec3,
+)
 from app.design.spec import DesignSpec, FeatureSpec, expr, ref
 from app.parts.bearings import CATALOGUE, Bearing, Duty, Refusal, Selection, select
 from app.rules.stackup import Contributor, Method, StackVerdict, check, stack, symmetric
@@ -444,6 +456,99 @@ class FoldedDesign:
 
 
 @dataclass(frozen=True)
+class MovingDesign:
+    """A rung that moves: the product, the joints between its parts, and a motion.
+
+    **The fourth kind of rung, and it exists for the reason the third did.** M3 added
+    `folded` because a sheet-metal part is two descriptions that must agree and no
+    single one of them is the part. A mechanism is the same shape of problem one level
+    up: an arm is a product graph *and* a chain of joints, and the load on its shoulder
+    bearing is a consequence of both together. Neither half can state it. A rung that
+    was only an `assembly` could check that the arm is the right size and weight and
+    would be silent about the only number anybody buys a robot for.
+
+    **The joints are declared against the product graph, not beside it.** Every
+    `JointDeclaration.child` is an *occurrence path* in `assembly.structure`, so a
+    body's mass and centre of mass come from the same roll-up the geometry claims are
+    checked against — `app.dynamics.assembly.derive` refuses a body it cannot weigh,
+    because a reaction computed on a partial mass is too small, which is the direction
+    every check passes. Rename a component and the mechanism stops resolving rather
+    than quietly moving a different part.
+
+    **Inertia is supplied here and is not measured, and that is a real limitation.**
+    `derive` will take a `measure_inertia` answering at `Detail.INERTIA`, and building
+    one needs `app.assembly.inertia.from_document`, which reads an OCCT document —
+    and this package may not import the kernel (the rule that keeps its tests offline
+    and under a second). So a mission hands over `inertia_kg_mm2` computed in closed
+    form from the same dimensions its specs are drawn from. That is exact for the
+    idealised solids a rung is made of and is *not* the kernel's integration of the
+    part that was actually built; a rung using it says so in `unproven`, and E9.6 owns
+    closing the gap.
+
+    A body left out of `inertia_kg_mm2` is a **point mass**, which costs the rotary
+    term of its own spin. `app.dynamics` states that cost rather than hiding it, and a
+    rung that leaves a body out inherits the statement.
+    """
+
+    assembly: AssemblyDesign
+    joints: tuple[JointDeclaration, ...]
+    motion: MotionRange
+    drivers: tuple[Driver, ...] = ()
+
+    #: Principal inertia about each body's own centre of mass, in world axes at the
+    #: assembled pose, keyed by occurrence path. See the class docstring.
+    inertia_kg_mm2: Mapping[str, Vec3] | None = None
+    gravity_mm_s2: Vec3 = GRAVITY_DOWN_MM_S2
+
+    def __post_init__(self) -> None:
+        if not self.joints:
+            raise SpecError(
+                "A moving rung with no joints is an assembly rung. Declare how the "
+                "first moving part is held — `JointDeclaration(parent=None)` is ground "
+                "— or give the mission an `assembly` instead."
+            )
+        driven = {driver.joint for driver in self.drivers}
+        declared = {joint.name for joint in self.joints}
+        unknown = sorted(driven - declared)
+        if unknown:
+            raise SpecError(
+                f"Drivers name joints this mechanism does not have: {', '.join(unknown)}. "
+                f"The joints are {', '.join(sorted(declared))}. A driver on a joint "
+                "nobody declared moves nothing and reports no error at run time."
+            )
+        if not driven:
+            raise SpecError(
+                "A moving rung needs at least one driver, or nothing moves and every "
+                "reaction it reports is the static one wearing a time axis. Drive a "
+                "joint, or make this an assembly rung."
+            )
+
+
+@dataclass(frozen=True)
+class MotionReport:
+    """What running the mechanism over its motion found.
+
+    Everything here is `app.dynamics`' own data except `payload`, the one mapping the
+    assertion vocabulary reads — the same split `FoldedReport` keeps.
+    """
+
+    mechanism: Mechanism
+    path: MotionPath
+    reactions: Mapping[str, JointReaction]
+
+    #: The Newton-Euler consistency check: the residual of the whole chain's free-body
+    #: balance, in newtons. Not a claim that the answer is right — a claim that it is
+    #: self-consistent, which is the strongest thing an inverse-dynamics run can say
+    #: about itself.
+    free_body_residual_n: float = 0.0
+
+    #: What `derive` had to say about bodies it could only treat as point masses, plus
+    #: any caveat a reaction carries about its own moment.
+    notes: tuple[str, ...] = ()
+    payload: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class FoldedReport:
     """What building, flattening and assessing a folded part found.
 
@@ -492,11 +597,12 @@ class FoldedReport:
 class Mission:
     """One rung: a machine, what makes it hard, and either a design or a reason.
 
-    A rung is buildable exactly when it carries a `spec`, an `assembly` **or** a
-    `folded` — one part, a product graph of them, or a folded sheet. The three
-    states are kept apart from "waiting" by validation rather than by convention,
-    because the failure they guard against is a rung drifting into "declared but
-    claiming nothing", which reads as coverage and is not.
+    A rung is buildable exactly when it carries a `spec`, an `assembly`, a `folded`
+    **or** a `moving` — one part, a product graph of them, a folded sheet, or a
+    product graph with joints between its parts. The four states are kept apart from
+    "waiting" by validation rather than by convention, because the failure they guard
+    against is a rung drifting into "declared but claiming nothing", which reads as
+    coverage and is not.
     """
 
     rung: str
@@ -521,6 +627,14 @@ class Mission:
     #: `DesignSpec` of its own, so a rung setting `spec` *and* `folded` would build
     #: two different parts and check one set of claims against whichever ran last.
     folded: FoldedDesign | None = None
+
+    #: The mechanism, when the rung moves. Mutually exclusive with the three above,
+    #: and note that a `MovingDesign` *carries* an `AssemblyDesign` — so a rung
+    #: setting `assembly` and `moving` would build one product and check its claims
+    #: against the other. `is_assembly` is deliberately False here: a moving rung is
+    #: run through the assembly path, but "is this rung an assembly" and "does this
+    #: rung move" are different questions and only one of them is about the payload.
+    moving: MovingDesign | None = None
 
     #: What must be true of the built part. Checked by `assertions.py` against the
     #: measurement payload the build reports — for an assembly, against the
@@ -551,6 +665,7 @@ class Mission:
                 ("a part design", self.spec),
                 ("an assembly", self.assembly),
                 ("a folded sheet", self.folded),
+                ("a mechanism", self.moving),
             )
             if value is not None
         ]
@@ -602,7 +717,10 @@ class Mission:
     @property
     def buildable(self) -> bool:
         return (
-            self.spec is not None or self.assembly is not None or self.folded is not None
+            self.spec is not None
+            or self.assembly is not None
+            or self.folded is not None
+            or self.moving is not None
         )
 
     @property
@@ -612,6 +730,23 @@ class Mission:
     @property
     def is_folded(self) -> bool:
         return self.folded is not None
+
+    @property
+    def is_moving(self) -> bool:
+        return self.moving is not None
+
+    @property
+    def product(self) -> AssemblyDesign | None:
+        """The product graph this rung builds, however it was declared.
+
+        A moving rung is an assembly rung with joints on top, and several callers —
+        the runner-count check, the gallery — want the product without caring which
+        field it arrived in. Without this they each grow the same two-branch read,
+        and the day a fifth kind lands one of them is missed.
+        """
+        if self.assembly is not None:
+            return self.assembly
+        return None if self.moving is None else self.moving.assembly
 
     def __str__(self) -> str:
         return f"{self.rung} — {self.title}"
@@ -639,6 +774,13 @@ class MissionResult:
     #: single-part rung's always is — a folded rung builds exactly one part, so putting
     #: it anywhere else would give "which build is this?" a second answer.
     folded: FoldedReport | None = None
+
+    #: Everything a moving rung produced beyond its geometry: the derived mechanism,
+    #: the motion path, the joint reactions and the free-body residual. The product's
+    #: own builds, clash and roll-up are on `assembly`, where an assembly rung's
+    #: always are — a moving rung *is* an assembly rung with joints, and putting its
+    #: geometry somewhere else would give "what did it build" a second answer.
+    motion: MotionReport | None = None
 
     #: Why, in words, for anything that is not a plain pass.
     reason: str = ""
@@ -819,6 +961,15 @@ def run_mission(
             reason="not yet buildable — waiting on " + "; ".join(mission.needs),
         )
 
+    if mission.moving is not None:
+        if runner_factory is None:
+            raise SpecError(
+                f"{mission.rung} moves, so it is a product of "
+                f"{len(mission.moving.assembly.parts)} parts and needs one runner "
+                "each. Pass runner_factory=, not runner=."
+            )
+        return _run_moving(mission, mission.moving, runner_factory)
+
     if mission.assembly is not None:
         if runner_factory is None:
             raise SpecError(
@@ -878,6 +1029,9 @@ def _run_assembly(
     mission: Mission,
     design: AssemblyDesign,
     runner_factory: Callable[[], CallRunner],
+    *,
+    augment: Callable[[Mapping[str, Any], Mapping[str, Mapping[str, Any]]], Mapping[str, Any]]
+    | None = None,
 ) -> MissionResult:
     """Build every part, walk the product, and check what the rung claims.
 
@@ -928,6 +1082,13 @@ def _run_assembly(
     )
 
     payload = _combined_payload(design, payloads, mass, clash, shapes)
+    # A moving rung adds its mechanism's numbers here rather than in a second payload,
+    # so one `check_assertions` call sees the geometry and the motion together and a
+    # claim may compare them — "the shoulder carries more than the arm weighs" needs
+    # both and would otherwise have nowhere to live. Default None leaves every other
+    # rung's behaviour byte-identical.
+    if augment is not None:
+        payload = dict(augment(payload, payloads))
     contracts = tuple(
         check_contract(
             interface,
@@ -969,6 +1130,138 @@ def _run_assembly(
         assembly=built,
         checks=checks,
     )
+
+
+def _run_moving(
+    mission: Mission,
+    design: MovingDesign,
+    runner_factory: Callable[[], CallRunner],
+) -> MissionResult:
+    """Build the product, derive the mechanism from it, and move it.
+
+    The order matters and is the order the answers depend on each other: the parts are
+    built and weighed first, because `derive` refuses a body it cannot weigh; then the
+    mechanism is assembled *from that roll-up*, so the mass a reaction is computed
+    against is the mass the geometry claims were checked against and not a second
+    number somebody typed; then the motion is evaluated exactly, with no time stepping;
+    then the reactions.
+
+    This delegates to `_run_assembly` rather than repeating it. A moving rung's
+    geometry claims are an assembly rung's geometry claims — same builds, same clash,
+    same roll-up, same contracts — and a second copy of that path would be a second
+    place for them to drift.
+    """
+    captured: list[MotionReport] = []
+
+    def augment(
+        payload: Mapping[str, Any], payloads: Mapping[str, Mapping[str, Any]]
+    ) -> Mapping[str, Any]:
+        report = _evaluate_motion(design, payloads)
+        captured.append(report)
+        return {**payload, **report.payload}
+
+    result = _run_assembly(mission, design.assembly, runner_factory, augment=augment)
+    return result if not captured else replace(result, motion=captured[0])
+
+
+def _evaluate_motion(
+    design: MovingDesign, payloads: Mapping[str, Mapping[str, Any]]
+) -> MotionReport:
+    """The mechanism, its motion and its reactions, from the built product.
+
+    The measurer reads what the build already reported, exactly as `_run_assembly`'s
+    roll-up does and for the same reason: every backend's mutating calls return mass
+    and centre of mass, so going back to the document would make this unobtainable on
+    a CATIA seat for numbers the seat has already sent.
+    """
+    derived = derive(
+        design.assembly.structure,
+        design.joints,
+        lambda component: payloads[component],
+        drivers=design.drivers,
+        gravity_mm_s2=design.gravity_mm_s2,
+        inertia_kg_mm2=design.inertia_kg_mm2,
+    )
+    path = evaluate_motion(derived.mechanism, design.motion)
+    reactions = compute_reactions(derived.mechanism, path)
+    residual = free_body_check(derived.mechanism, path, reactions)
+    notes = (
+        *derived.notes,
+        *path.warnings,
+        *(
+            f"{reaction.joint}: {reaction.moment_caveat}"
+            for reaction in reactions.values()
+            if reaction.moment_caveat
+        ),
+    )
+    return MotionReport(
+        mechanism=derived.mechanism,
+        path=path,
+        reactions=reactions,
+        free_body_residual_n=residual,
+        notes=notes,
+        payload=_motion_payload(derived.mechanism, path, reactions, residual),
+    )
+
+
+def _motion_payload(
+    mechanism: Mechanism,
+    path: MotionPath,
+    reactions: Mapping[str, JointReaction],
+    residual_n: float,
+) -> dict[str, Any]:
+    """The mechanism's numbers, under `motion.`, for the assertion vocabulary.
+
+    **A reaction that is not available publishes nothing, and that is the whole of the
+    honesty here.** `JointReaction.available` is false when the chain could not be
+    resolved at that joint, and the reaction then carries `unavailable_reason` instead
+    of numbers. Writing a zero, or the static value, would turn "we could not compute
+    this" into "this joint carries nothing" — which passes every upper-bound claim
+    anybody would write. Omitting the key makes the claim UNMEASURED, which is
+    `app/design/assertions.py`'s own answer and never a pass. The *count* of such
+    joints is published so a rung can assert there are none.
+
+    `peak_reaction_force_n` is over the available joints only, for the same reason, and
+    is therefore a lower bound whenever `unavailable_reaction_count` is not zero — a
+    rung that wants it to mean what it says asserts the count is zero first.
+    """
+    available = [reaction for reaction in reactions.values() if reaction.available]
+    motion: dict[str, Any] = {
+        "step_count": len(path.times_s),
+        "duration_s": path.times_s[-1] - path.times_s[0] if path.times_s else 0.0,
+        "body_count": len(mechanism.bodies),
+        "joint_count": len(mechanism.joints),
+        "driver_count": len(mechanism.drivers),
+        "total_mass_kg": mechanism.total_mass_kg,
+        "total_weight_n": mechanism.total_mass_kg * abs(mechanism.gravity_mm_s2[2]) * 1e-3,
+        "free_body_residual_n": residual_n,
+        "unavailable_reaction_count": len(reactions) - len(available),
+        "warning_count": len(path.warnings),
+        "point_mass_count": sum(1 for body in mechanism.bodies if body.is_point_mass),
+        "joint": {
+            reaction.joint: {
+                "peak_force_n": reaction.peak_force_n,
+                "peak_moment_n_mm": reaction.peak_moment_n_mm,
+            }
+            for reaction in available
+        },
+        "body": {
+            name: {
+                "peak_acceleration_mm_s2": body.peak_acceleration_mm_s2,
+                "travel_mm": body.travel_mm,
+            }
+            for name, body in path.bodies.items()
+        },
+    }
+    if available:
+        motion["peak_reaction_force_n"] = max(r.peak_force_n for r in available)
+    # **Nested, not flattened, and this cost a build to learn.** It was written first
+    # as flat keys spelled "motion.total_mass_kg", and every motion claim came back
+    # NOT CHECKED against a payload that visibly contained them: the assertion
+    # resolver reads `.` as a path separator, so it looked for payload["motion"]
+    # ["total_mass_kg"] and found a mapping with no "motion" in it at all. Exactly how
+    # `_combined_payload` nests `clash`, and for the same reason.
+    return {"motion": motion}
 
 
 def _shape_of(runner: CallRunner) -> Any:
@@ -5556,10 +5849,10 @@ def _m5_guard_spec(
     )
 
 
-def _m5_block_spec(
+def _solid_block_spec(
     name: str, *, width_mm: float, depth_mm: float, height_mm: float, description: str
 ) -> DesignSpec:
-    """A plate or a block. Most of a press frame is one of these.
+    """A plate or a block. Most of a press frame is one of these, and most of an arm.
 
     Built centred on its own origin in X and Y and rising from z = 0, which is what
     a padded rectangle does — measured on the kernel rather than assumed, because
@@ -5595,12 +5888,12 @@ def _m5_block_spec(
     )
 
 
-def _m5_cylinder_spec(
+def _solid_cylinder_spec(
     name: str, *, diameter_mm: float, length_mm: float, description: str
 ) -> DesignSpec:
     """A round bar, built along its own +Z.
 
-    Separate from `_m5_block_spec` for a reason the mass claim found on 2026-09-16:
+    Separate from `_solid_block_spec` for a reason the mass claim found on 2026-09-16:
     the crank pin was *drawn* by the block helper and *weighed* as a cylinder, so the
     closed form and the roll-up disagreed by 2.16 kg out of 5,691 — 0.04%, which is
     far too small to notice by eye and exactly the size of error the assertion exists
@@ -5894,7 +6187,7 @@ def _m5_design(
         parts={
             "bed": bind_into(
                 _M5_FORCE_PATH,
-                _m5_block_spec(
+                _solid_block_spec(
                     "M5 bed",
                     width_mm=_M5_FRAME_WIDTH_MM,
                     depth_mm=_M5_THROAT_DEPTH_MM,
@@ -5902,14 +6195,14 @@ def _m5_design(
                     description="C-frame foot.",
                 ),
             ),
-            "column": _m5_block_spec(
+            "column": _solid_block_spec(
                 "M5 column",
                 width_mm=_M5_FRAME_WIDTH_MM,
                 depth_mm=_M5_COLUMN_DEPTH_MM,
                 height_mm=_M5_COLUMN_HEIGHT_MM,
                 description="C-frame back.",
             ),
-            "crown": _m5_block_spec(
+            "crown": _solid_block_spec(
                 "M5 crown",
                 width_mm=_M5_FRAME_WIDTH_MM,
                 depth_mm=_M5_THROAT_DEPTH_MM,
@@ -5918,7 +6211,7 @@ def _m5_design(
             ),
             "bolster": bind_into(
                 _M5_FORCE_PATH,
-                _m5_block_spec(
+                _solid_block_spec(
                     "M5 bolster",
                     width_mm=_M5_BOLSTER_WIDTH_MM,
                     depth_mm=_M5_BOLSTER_DEPTH_MM,
@@ -5928,7 +6221,7 @@ def _m5_design(
             ),
             "lower_shoe": bind_into(
                 _M5_DIE_SET,
-                _m5_block_spec(
+                _solid_block_spec(
                     "M5 lower shoe",
                     width_mm=_M5_LOWER_SHOE_WIDTH_MM,
                     depth_mm=_M5_SHOE_DEPTH_MM,
@@ -5938,7 +6231,7 @@ def _m5_design(
             ),
             "upper_shoe": bind_into(
                 _M5_DIE_SET,
-                _m5_block_spec(
+                _solid_block_spec(
                     "M5 upper shoe",
                     width_mm=_M5_UPPER_SHOE_WIDTH_MM,
                     depth_mm=_M5_SHOE_DEPTH_MM,
@@ -5946,27 +6239,27 @@ def _m5_design(
                     description="Die set, upper shoe.",
                 ),
             ),
-            "guide_post": _m5_cylinder_spec(
+            "guide_post": _solid_cylinder_spec(
                 "M5 guide post",
                 diameter_mm=_M5_POST_DIAMETER_MM,
                 length_mm=_M5_POST_MM,
                 description="Die-set guide post. Hardened and ground in reality.",
             ),
-            "slide": _m5_block_spec(
+            "slide": _solid_block_spec(
                 "M5 slide",
                 width_mm=_M5_SLIDE_WIDTH_MM,
                 depth_mm=_M5_SLIDE_DEPTH_MM,
                 height_mm=_M5_SLIDE_MM,
                 description="The ram.",
             ),
-            "connecting_rod": _m5_block_spec(
+            "connecting_rod": _solid_block_spec(
                 "M5 connecting rod",
                 width_mm=_M5_ROD_SECTION_MM,
                 depth_mm=_M5_ROD_SECTION_MM,
                 height_mm=_M5_ROD_BODY_MM,
                 description="Crank pin to slide. The big end is not modelled.",
             ),
-            "crank_pin": _m5_cylinder_spec(
+            "crank_pin": _solid_cylinder_spec(
                 "M5 crank pin",
                 diameter_mm=_M5_PIN_DIAMETER_MM,
                 length_mm=_M5_PIN_LENGTH_MM,
@@ -6166,6 +6459,648 @@ _M5_UNPROVEN: Final = (
 )
 
 
+# ---------------------------------------------------------------------------
+# M7 — the 6-axis robot arm
+# ---------------------------------------------------------------------------
+#
+# A serial chain: base, shoulder, upper arm, forearm, wrist, hand, flange, with six
+# revolute joints between them. Seven occurrences of seven parts, six of which move.
+#
+# **This is the first rung on the ladder whose answer is not a dimension.** Every rung
+# before it asks how big something is or whether two things fit. An arm's dimensions
+# are the easy half; what an engineer buys a robot for is what its shoulder bearing
+# carries when the thing is moving, and no amount of geometry contains that number.
+# So M7 is the first `MovingDesign`, and the reason that kind exists is written on it.
+#
+# **Its wait is over, and it ended the way M4's and M5's did — by the prerequisite
+# landing, not by anyone deciding.** M7's declared `needs` were E9 (multibody, for
+# loads that come from the machine moving) and E9.3 (motion range and swept volume).
+# E9.1 put Project Chrono behind a container, E9.6 put inertia tensors in the mass
+# roll-up, and `app/dynamics/` has carried an exact serial-chain recursion, Newton-Euler
+# inverse dynamics and a travel model since the phase opened.
+#
+# **The joints are declared against the product graph, not beside it**, and that is the
+# whole design of the rung. Each `JointDeclaration.child` is an occurrence path in the
+# same `ProductStructure` the mass roll-up and the clash check walk, so the mass a
+# reaction is computed against *is* the mass the geometry claims were checked against.
+# `app.dynamics.assembly.derive` refuses a body it cannot weigh, in words, because a
+# reaction computed on a partial mass is too small — and too small is the direction in
+# which every check passes.
+#
+# **Three traps carried from E9.1, each of which yields a plausible wrong number rather
+# than an error, and none of which this rung can hit — because it does not integrate.**
+# Chrono's default iterative solver does not satisfy a revolute constraint (a pendulum
+# whose closed-form pivot reaction is 29.42 N reported 4286 N); `GetReaction1` is the
+# load on the *child* and the wrong one has the right magnitude and the wrong sign; and
+# reaction *n* is expressed in frame *n*, so rotating by the wrong frame leaves a
+# constant force on a mass going round a circle. `engines()` keeps Chrono behind
+# `KinematicEngine` permanently for exactly this reason: **where both can answer, the
+# kinematic engine is exact and Chrono integrates.** A driven serial chain is a case
+# both can answer, so this rung takes the exact one and never starts a container. That
+# is also what keeps its tests offline, which is the property `app/design/` is built on.
+#
+# **What it cannot say is in `_M7_UNPROVEN`, and the sharpest entry is stiffness.** The
+# master plan's own column for this rung is "kinematics, dynamic loads, stiffness under
+# motion". Two of the three are here. The third is not: nothing has run a load case on a
+# link, so the arm is rigid, and a rigid arm has no deflection at the tool, which is the
+# number a robot's repeatability specification is actually about.
+
+#: The chain, bottom to top. Each link sits on the one below it, so the assembled pose
+#: is the "candle" — every joint at zero. It is the pose a robot is shipped and
+#: calibrated in, and it is the one pose in which a serial chain's clash check is
+#: worth running, because it is the only one the product graph actually holds.
+_M7_BASE_DIAMETER_MM: Final = 300.0
+_M7_BASE_MM: Final = 200.0
+_M7_SHOULDER_MM: Final = (260.0, 260.0, 220.0)
+_M7_UPPER_ARM_MM: Final = (160.0, 180.0, 600.0)
+_M7_FOREARM_MM: Final = (140.0, 160.0, 500.0)
+_M7_WRIST_MM: Final = (120.0, 120.0, 160.0)
+_M7_HAND_MM: Final = (100.0, 100.0, 120.0)
+_M7_FLANGE_DIAMETER_MM: Final = 90.0
+_M7_FLANGE_MM: Final = 40.0
+
+_M7_DENSITY_KG_M3: Final = _M2_DENSITY_KG_M3
+
+#: Where each link's underside sits, derived by stacking rather than typed — the same
+#: rule M5's vertical chain follows, and for the same reason: a thickness changed in
+#: one of two places is the failure, and there is only one place.
+_M7_BASE_TOP_MM: Final = _M7_BASE_MM
+_M7_SHOULDER_TOP_MM: Final = _M7_BASE_TOP_MM + _M7_SHOULDER_MM[2]
+_M7_UPPER_ARM_TOP_MM: Final = _M7_SHOULDER_TOP_MM + _M7_UPPER_ARM_MM[2]
+_M7_FOREARM_TOP_MM: Final = _M7_UPPER_ARM_TOP_MM + _M7_FOREARM_MM[2]
+_M7_WRIST_TOP_MM: Final = _M7_FOREARM_TOP_MM + _M7_WRIST_MM[2]
+_M7_HAND_TOP_MM: Final = _M7_WRIST_TOP_MM + _M7_HAND_MM[2]
+_M7_REACH_MM: Final = _M7_HAND_TOP_MM + _M7_FLANGE_MM
+
+#: The motion. Two seconds at 20 Hz — long enough that every harmonic joint passes
+#: through a full cycle and its acceleration changes sign, which is what makes the
+#: reaction a range rather than a number.
+_M7_DURATION_S: Final = 2.0
+_M7_SAMPLES: Final = 41
+
+#: A contact-only broad phase would throw away the pairs that matter here: in the
+#: candle pose every link touches the next, so "safely apart" is the wrong default and
+#: the interesting pairs are the ones a few millimetres from each other.
+_M7_INSPECTION_MM: Final = 20.0
+
+_M7_ROOT: Final = "arm"
+
+
+def _m7_path(component: str) -> str:
+    """The occurrence path of a link, which is how `app.dynamics` names a body.
+
+    Written once here rather than spelled out six times in the joint table: a body
+    addressed by a path that does not resolve is refused by `derive`, which is good,
+    but a *typo* that happens to resolve to the wrong link is not refusable and this
+    is what stops one being written.
+    """
+    return f"{_M7_ROOT}/{component}.1"
+
+
+def _m7_body_name(component: str) -> str:
+    """What `app.dynamics` calls a link, which is not what the product graph calls it.
+
+    `derive` names a body from its occurrence path through
+    `app.dynamics.assembly.body_name`, and a mechanism name may not contain `.`, `[`
+    or `]` — those are the assertion vocabulary's own path syntax, so a body called
+    `arm/flange.1` would make `motion.body.arm/flange.1.travel_mm` unparseable. The
+    sanitised name is therefore the one a reaction and a load case are reported under,
+    and this is the single place the mapping is written down.
+    """
+    return body_name(_m7_path(component))
+
+
+def _m7_links() -> dict[str, tuple[float, float, float]]:
+    """Each moving link's bounding dimensions. The base is not here: it is ground."""
+    return {
+        "shoulder": _M7_SHOULDER_MM,
+        "upper_arm": _M7_UPPER_ARM_MM,
+        "forearm": _M7_FOREARM_MM,
+        "wrist": _M7_WRIST_MM,
+        "hand": _M7_HAND_MM,
+    }
+
+
+def _m7_volumes() -> dict[str, float]:
+    """Every part's volume from its own shape. Two cylinders and five boxes."""
+    volumes = {
+        name: dimensions[0] * dimensions[1] * dimensions[2]
+        for name, dimensions in _m7_links().items()
+    }
+    volumes["base"] = math.pi / 4.0 * _M7_BASE_DIAMETER_MM**2 * _M7_BASE_MM
+    volumes["flange"] = math.pi / 4.0 * _M7_FLANGE_DIAMETER_MM**2 * _M7_FLANGE_MM
+    return volumes
+
+
+def m7_reach_mm() -> float:
+    """Tip height in the candle pose: the arm stood straight up, base to flange face.
+
+    **Not the working reach**, and the difference is the point of the caveat that goes
+    with it. A robot's published reach is the radius of the sphere its tool frame can
+    touch, which is a property of the joint limits and the link lengths *together*.
+    This is one number off one pose, and E9.3's swept volume is what would answer the
+    other question.
+    """
+    return _M7_REACH_MM
+
+
+def m7_mass_kg() -> float:
+    """The arm weighed by arithmetic, base included."""
+    return sum(_m7_volumes().values()) * 1e-9 * _M7_DENSITY_KG_M3
+
+
+def m7_moving_mass_kg() -> float:
+    """What the base carries: everything above the first joint.
+
+    The claim this one earns is that the mechanism's own `total_mass_kg` equals it —
+    two counts of the same six links, one from the product graph through
+    `app.dynamics.assembly.derive` and one from arithmetic here. A base accidentally
+    declared as a body would double-count 111 kg and pass every geometry claim.
+    """
+    volumes = _m7_volumes()
+    return (
+        sum(volume for name, volume in volumes.items() if name != "base")
+        * 1e-9
+        * _M7_DENSITY_KG_M3
+    )
+
+
+def _m7_box_inertia(
+    dimensions: tuple[float, float, float], mass_kg: float
+) -> tuple[float, float, float]:
+    """A rectangular block's principal inertia about its own centre, in kg mm^2.
+
+    `m (b^2 + c^2) / 12` and its two rotations. Exact for the solid this rung draws,
+    which is the whole of the claim: it is *not* the kernel's integration of the part
+    that was built. See `_M7_UNPROVEN` and `MovingDesign`'s docstring for why the
+    design package cannot ask the kernel for the measured tensor.
+    """
+    a, b, c = dimensions
+    return (
+        mass_kg * (b * b + c * c) / 12.0,
+        mass_kg * (a * a + c * c) / 12.0,
+        mass_kg * (a * a + b * b) / 12.0,
+    )
+
+
+def _m7_cylinder_inertia(
+    diameter_mm: float, length_mm: float, mass_kg: float
+) -> tuple[float, float, float]:
+    """A solid cylinder about its own centre, its axis along z. `m r^2 / 2` about it."""
+    radius = diameter_mm / 2.0
+    across = mass_kg * (3.0 * radius * radius + length_mm * length_mm) / 12.0
+    return (across, across, mass_kg * radius * radius / 2.0)
+
+
+def _m7_inertia() -> dict[str, tuple[float, float, float]]:
+    """The principal diagonal of every moving body, keyed by occurrence path.
+
+    Every link is axis-aligned in the candle pose, so the body axes *are* the world
+    axes and the closed form needs no rotation — which is exactly the condition
+    `derive` documents for `inertia_kg_mm2` ("in world axes at the assembled pose").
+    A rung whose assembled pose was not axis-aligned could not use this shortcut, and
+    would have to rotate each tensor or leave the body a point mass.
+    """
+    volumes = _m7_volumes()
+    inertia = {
+        _m7_path(name): _m7_box_inertia(
+            dimensions, volumes[name] * 1e-9 * _M7_DENSITY_KG_M3
+        )
+        for name, dimensions in _m7_links().items()
+    }
+    inertia[_m7_path("flange")] = _m7_cylinder_inertia(
+        _M7_FLANGE_DIAMETER_MM,
+        _M7_FLANGE_MM,
+        volumes["flange"] * 1e-9 * _M7_DENSITY_KG_M3,
+    )
+    return inertia
+
+
+def _m7_joints(*, base_is_a_body: bool = False) -> tuple[JointDeclaration, ...]:
+    """The six revolutes, in chain order, each hung from the link below it.
+
+    `base_is_a_body` is a break knob and nothing else: declaring the base as a moving
+    body is the mistake that puts 111 kg of bolted-down casting into the arm's moving
+    mass, and it is the one error here that makes every *reaction* bigger — which is
+    the safe direction, so nothing downstream would complain.
+    """
+    first_parent = _m7_path("base") if base_is_a_body else None
+    joints = [
+        JointDeclaration(
+            name="j1_base",
+            kind="revolute",
+            child=_m7_path("shoulder"),
+            parent=first_parent,
+            at_mm=(0.0, 0.0, _M7_BASE_TOP_MM),
+            axis=(0.0, 0.0, 1.0),
+        ),
+        JointDeclaration(
+            name="j2_shoulder",
+            kind="revolute",
+            child=_m7_path("upper_arm"),
+            parent=_m7_path("shoulder"),
+            at_mm=(0.0, 0.0, _M7_SHOULDER_TOP_MM),
+            axis=(0.0, 1.0, 0.0),
+        ),
+        JointDeclaration(
+            name="j3_elbow",
+            kind="revolute",
+            child=_m7_path("forearm"),
+            parent=_m7_path("upper_arm"),
+            at_mm=(0.0, 0.0, _M7_UPPER_ARM_TOP_MM),
+            axis=(0.0, 1.0, 0.0),
+        ),
+        JointDeclaration(
+            name="j4_roll",
+            kind="revolute",
+            child=_m7_path("wrist"),
+            parent=_m7_path("forearm"),
+            at_mm=(0.0, 0.0, _M7_FOREARM_TOP_MM),
+            axis=(0.0, 0.0, 1.0),
+        ),
+        JointDeclaration(
+            name="j5_pitch",
+            kind="revolute",
+            child=_m7_path("hand"),
+            parent=_m7_path("wrist"),
+            at_mm=(0.0, 0.0, _M7_WRIST_TOP_MM),
+            axis=(0.0, 1.0, 0.0),
+        ),
+        JointDeclaration(
+            name="j6_flange",
+            kind="revolute",
+            child=_m7_path("flange"),
+            parent=_m7_path("hand"),
+            at_mm=(0.0, 0.0, _M7_HAND_TOP_MM),
+            axis=(0.0, 0.0, 1.0),
+        ),
+    ]
+    if base_is_a_body:
+        joints.insert(
+            0,
+            JointDeclaration(
+                name="j0_floor",
+                # Fixed, not revolute: the base is bolted down. A revolute here is
+                # refused by `app.dynamics` in words — "nothing drives it, so its
+                # motion is an output of the forces on it, which is a dynamics
+                # problem, not a kinematic one" — which is the package declining to
+                # guess rather than quietly integrating something.
+                kind="fixed",
+                child=_m7_path("base"),
+                parent=None,
+                at_mm=(0.0, 0.0, 0.0),
+                axis=(0.0, 0.0, 1.0),
+            ),
+        )
+    return tuple(joints)
+
+
+def _m7_drivers() -> tuple[Driver, ...]:
+    """What moves, and how. Four harmonics and two constant rates.
+
+    Harmonic rather than constant on the three joints that carry the arm's mass,
+    because a constant rate is a *steady* rotation: its angular acceleration is zero,
+    so every body's acceleration is pure centripetal and the reaction never changes
+    sign. That is a real load case and it is the easy one. A harmonic joint reverses
+    twice a cycle, which is where a robot's peak joint torque actually occurs, and
+    `Driver.derivatives_are_exact` is true for it — the velocity and acceleration are
+    differentiated in closed form rather than finite-differenced off the position, so
+    the peak is the peak and not a sampling artefact.
+    """
+    return (
+        Driver(joint="j1_base", kind="harmonic", amplitude=0.6, frequency_hz=0.5),
+        Driver(
+            joint="j2_shoulder",
+            kind="harmonic",
+            amplitude=0.4,
+            frequency_hz=0.5,
+            phase_rad=math.pi / 2.0,
+        ),
+        Driver(
+            joint="j3_elbow",
+            kind="harmonic",
+            amplitude=0.5,
+            frequency_hz=0.5,
+            phase_rad=math.pi,
+        ),
+        Driver(joint="j4_roll", kind="constant", rate=1.0),
+        Driver(
+            joint="j5_pitch",
+            kind="harmonic",
+            amplitude=0.3,
+            frequency_hz=0.5,
+            phase_rad=math.pi / 4.0,
+        ),
+        Driver(joint="j6_flange", kind="constant", rate=2.0),
+    )
+
+
+def _m7_structure(*, flange_offset_mm: float = 0.0) -> ProductStructure:
+    """The arm as a graph, in the candle pose. Every link stacked on the one below.
+
+    `flange_offset_mm` is a break knob: a tool flange machined off-centre is the
+    classic way an arm acquires a wobble nothing in the drawing explains, and it is
+    invisible to every dimension claim because no part changed size.
+    """
+    builder = StructureBuilder()
+    builder.define(_M7_ROOT, description="Six-axis articulated robot arm.")
+    for name, description in (
+        ("base", "Bolted to the floor. Ground: it is not a body of the mechanism."),
+        ("shoulder", "Rotates about the base's axis on j1."),
+        ("upper_arm", "Shoulder to elbow."),
+        ("forearm", "Elbow to wrist."),
+        ("wrist", "Roll."),
+        ("hand", "Pitch."),
+        ("flange", "The tool flange. Nothing is mounted to it."),
+    ):
+        builder.define(
+            name,
+            design=f"M7 {name.replace('_', ' ')}",
+            material="steel-1018",
+            description=description,
+        )
+
+    for component, bottom_mm in (
+        ("base", 0.0),
+        ("shoulder", _M7_BASE_TOP_MM),
+        ("upper_arm", _M7_SHOULDER_TOP_MM),
+        ("forearm", _M7_UPPER_ARM_TOP_MM),
+        ("wrist", _M7_FOREARM_TOP_MM),
+        ("hand", _M7_WRIST_TOP_MM),
+    ):
+        builder.add(
+            _M7_ROOT,
+            component,
+            placement=at(0.0, 0.0, bottom_mm),
+            note=f"{component} underside at z = {bottom_mm:g} mm.",
+        )
+    builder.add(
+        _M7_ROOT,
+        "flange",
+        placement=at(flange_offset_mm, 0.0, _M7_HAND_TOP_MM),
+        note="Tool flange on the hand's face.",
+    )
+    return builder.build(_M7_ROOT)
+
+
+def _m7_assembly(*, structure: ProductStructure | None = None) -> AssemblyDesign:
+    """The arm's geometry: the graph and a design per link."""
+    parts: dict[str, DesignSpec] = {
+        name: _solid_block_spec(
+            f"M7 {name.replace('_', ' ')}",
+            width_mm=dimensions[0],
+            depth_mm=dimensions[1],
+            height_mm=dimensions[2],
+            description=f"Robot arm link: {name.replace('_', ' ')}.",
+        )
+        for name, dimensions in _m7_links().items()
+    }
+    parts["base"] = _solid_cylinder_spec(
+        "M7 base",
+        diameter_mm=_M7_BASE_DIAMETER_MM,
+        length_mm=_M7_BASE_MM,
+        description="Bolted to the floor.",
+    )
+    parts["flange"] = _solid_cylinder_spec(
+        "M7 flange",
+        diameter_mm=_M7_FLANGE_DIAMETER_MM,
+        length_mm=_M7_FLANGE_MM,
+        description="Tool flange.",
+    )
+    return AssemblyDesign(
+        structure=_m7_structure() if structure is None else structure,
+        parts=parts,
+        clearance_mm=_M7_INSPECTION_MM,
+        parameters=ParameterSet.of(
+            [
+                Parameter("reach_mm", Unit.MM, value=m7_reach_mm()),
+                Parameter("base_diameter_mm", Unit.MM, value=_M7_BASE_DIAMETER_MM),
+                Parameter("mass_closed_form_kg", Unit.KG, value=m7_mass_kg()),
+                Parameter(
+                    "moving_mass_closed_form_kg",
+                    Unit.KG,
+                    value=m7_moving_mass_kg(),
+                    description=(
+                        "Everything above the first joint. The base is ground and is "
+                        "deliberately not a body; a rung that declared it one would "
+                        "make every reaction larger, which is the direction nothing "
+                        "downstream complains about."
+                    ),
+                ),
+                Parameter("occurrence_count", Unit.NONE, value=7.0),
+                Parameter("joint_count", Unit.NONE, value=6.0),
+                Parameter("sample_count", Unit.NONE, value=float(_M7_SAMPLES)),
+                Parameter(
+                    "free_body_tolerance_n",
+                    Unit.NEWTON,
+                    value=1e-6,
+                    description=(
+                        "What the Newton-Euler balance may fail to close by. Not a "
+                        "physical slack: the recursion is closed form, so anything "
+                        "above rounding is a missing term."
+                    ),
+                ),
+            ]
+        ),
+    )
+
+
+def _m7_design(
+    *,
+    structure: ProductStructure | None = None,
+    joints: tuple[JointDeclaration, ...] | None = None,
+    drivers: tuple[Driver, ...] | None = None,
+    inertia_kg_mm2: Mapping[str, tuple[float, float, float]] | None = -1,  # type: ignore[assignment]
+    samples: int = _M7_SAMPLES,
+) -> MovingDesign:
+    """The arm, its joints and its motion.
+
+    `inertia_kg_mm2` defaults to a sentinel rather than to `None` so that a test can
+    ask for *no* inertia — every body a point mass — which is a different thing from
+    "use the rung's own tensors" and would otherwise be unsayable.
+    """
+    return MovingDesign(
+        assembly=_m7_assembly(structure=structure),
+        joints=_m7_joints() if joints is None else joints,
+        drivers=_m7_drivers() if drivers is None else drivers,
+        motion=MotionRange(duration_s=_M7_DURATION_S, samples=samples),
+        inertia_kg_mm2=_m7_inertia() if inertia_kg_mm2 == -1 else inertia_kg_mm2,
+    )
+
+
+_M7_ASSERTIONS: Final = (
+    Assertion(
+        name="the roll-up equals the closed form over every link",
+        measure="mass_kg",
+        comparison="==",
+        bound="=mass_closed_form_kg",
+        tolerance=1e-6,
+    ),
+    Assertion(
+        name="the graph holds exactly the parts the bill of materials counts",
+        measure="clash.occurrence_count",
+        comparison="==",
+        bound="=occurrence_count",
+    ),
+    Assertion(
+        name="no two links occupy the same space in the shipped pose",
+        measure="clash.clash_count",
+        comparison="==",
+        bound=0.0,
+        note=(
+            "The candle pose only. A serial chain's interesting clashes are the ones it "
+            "finds *while moving*, and this claim does not look for them — E9.3's swept "
+            "volume does, and `app/dynamics/clearance.py` is where that question lives."
+        ),
+    ),
+    Assertion(
+        name="the arm stands as tall as its links add up to",
+        measure="envelope_mm.size[2]",
+        comparison="==",
+        bound="=reach_mm",
+        tolerance=1e-3,
+    ),
+    Assertion(
+        name="the arm is as wide as its base",
+        measure="envelope_mm.size[0]",
+        comparison="==",
+        bound="=base_diameter_mm",
+        tolerance=1e-3,
+        note="Every link is narrower than the base, so in this pose the base is the plan view.",
+    ),
+    Assertion(
+        name="the arm is stacked on its own axis",
+        measure="centre_of_mass_mm[0]",
+        comparison="==",
+        bound=0.0,
+        tolerance=1e-6,
+        note="A flange machined off-centre moves this and no dimension on the drawing.",
+    ),
+    Assertion(
+        name="the mechanism carries everything above the first joint and nothing below",
+        measure="motion.total_mass_kg",
+        comparison="==",
+        bound="=moving_mass_closed_form_kg",
+        tolerance=1e-9,
+        note=(
+            "**The claim that joins the two halves of this rung.** The left side is the "
+            "product graph rolled up through `app.dynamics.assembly.derive`; the right is "
+            "arithmetic over the same links. The base is ground, so it is in the mass and "
+            "not in the mechanism, and that is the one thing about this arm a reader "
+            "would get wrong."
+        ),
+    ),
+    Assertion(
+        name="every joint reported a reaction",
+        measure="motion.unavailable_reaction_count",
+        comparison="==",
+        bound=0.0,
+        note=(
+            "Asserted *before* any claim about the peak, because "
+            "`motion.peak_reaction_force_n` is a maximum over the joints that answered: "
+            "with a joint missing it is a lower bound wearing the name of a peak."
+        ),
+    ),
+    Assertion(
+        name="the chain's free-body balance closes",
+        measure="motion.free_body_residual_n",
+        comparison="<=",
+        bound="=free_body_tolerance_n",
+        note=(
+            "Newton-Euler consistency: every body's `ma` is accounted for by the joint "
+            "loads on it. **Not a claim that the answer is right** — it is a claim that "
+            "the answer is self-consistent, which is the strongest thing an inverse "
+            "dynamics run can say about itself, and it is what would catch a mass, an "
+            "inertia or a gravity term dropped on one link."
+        ),
+    ),
+    Assertion(
+        name="the arm in motion loads its base harder than standing still would",
+        measure="motion.peak_reaction_force_n",
+        comparison=">",
+        bound="=moving_mass_closed_form_kg",
+        note=(
+            "A deliberately weak inequality with a strong purpose: the peak reaction in "
+            "newtons must exceed the moving mass in kilogrammes, which it does by roughly "
+            "g — so this fails loudly if a unit is dropped somewhere between the roll-up's "
+            "kilogrammes and the reaction's newtons. The *interesting* comparison, against "
+            "the static weight, is in the tests, where the static case can be built."
+        ),
+    ),
+    Assertion(
+        name="the motion was sampled as asked",
+        measure="motion.step_count",
+        comparison="==",
+        bound="=sample_count",
+    ),
+    Assertion(
+        name="no link was reduced to a point mass",
+        measure="motion.point_mass_count",
+        comparison="==",
+        bound=0.0,
+        note=(
+            "A point mass has no rotary term of its own, so a spinning link contributes "
+            "nothing to the torque at the joint driving it. `app.dynamics` states that "
+            "cost rather than hiding it; this rung refuses to pay it."
+        ),
+    ),
+    Assertion(
+        name="nothing about the motion needed a warning",
+        measure="motion.warning_count",
+        comparison="==",
+        bound=0.0,
+        note=(
+            "`MotionPath.warnings` is where a tabulated driver's finite-differenced "
+            "derivatives are declared, among other things. Every driver here is closed "
+            "form, so a warning appearing means one stopped being."
+        ),
+    ),
+)
+
+
+_M7_UNPROVEN: Final = (
+    "E6 — **the arm is rigid, and stiffness under motion is a third of what the master "
+    "plan says this rung is about**. No load case has been run on any link, so there is "
+    "no deflection at the tool — which is the number a robot's repeatability "
+    "specification is actually about, and the reason a long forearm is a casting rather "
+    "than a bar",
+    "E9.3 — the clash check runs in the shipped pose only. A serial chain's interesting "
+    "collisions are the ones it finds *while moving*, and the swept volume that would "
+    "find them is `app/dynamics/clearance.py`'s question, not asked here",
+    "E9.3 — `m7_reach_mm` is the tip height in one pose and **not the working reach**, "
+    "which is a property of the joint limits and the link lengths together. There are no "
+    "joint limits on this mechanism at all, so every driver swings through whatever "
+    "angle it is given and nothing refuses an elbow that folds through its own forearm",
+    "E9 — the inertia tensors are **closed forms for the idealised solids this rung "
+    "draws, not the kernel's integration of the parts that were built**. E9.6 put "
+    "measured tensors in the roll-up and `derive` will take them, but building that "
+    "measurer needs `app.assembly.inertia.from_document`, which reads an OCCT document "
+    "— and this package may not import the kernel, which is what keeps its tests "
+    "offline. For seven axis-aligned prisms the two agree exactly; for a casting they "
+    "would not, and nothing here would notice",
+    "E9 — nothing is driven *by* anything. The joint angles are prescribed functions of "
+    "time, so there are no motors, no gearboxes, no torque limits and no check that a "
+    "drive able to produce the computed joint torque exists. A motion no real arm could "
+    "perform is reported with the same confidence as one it could",
+    "E9 — no contact, friction, springs, end stops or flexible bodies, and no case where "
+    "the motion is an output rather than an input. `app/dynamics/` refuses each of those "
+    "by name rather than approximating it, and this rung inherits the refusals",
+    "E8 — no fatigue. A robot's duty cycle is the same move a few million times, which "
+    "is precisely the case `app/fatigue/duty.py` was built for, and the reactions this "
+    "rung computes are the input it wants. Nothing has joined them up",
+    "E12.3 — there is not one bearing, gearbox, motor or bolt in this bill of materials. "
+    "The six joints are kinematic declarations; a real arm's joint is a bearing pair and "
+    "a reducer, and `app.parts.bearings.select` would refuse to size them anyway because "
+    "the shipped table carries no load ratings",
+    "E13 — the links are solid steel prisms. A real arm's upper arm is a thin-walled "
+    "casting or a welded box, so this arm is several times heavier than its equivalent "
+    "and every reaction it reports is correspondingly large. The numbers are right for "
+    "the machine described and the machine described is not one anybody would build",
+    "E17 — nothing is fastened. How a link is attached to the one below it is the whole "
+    "engineering content of a robot joint, and this rung's joints are declarations",
+)
+
+
 #: The ladder, in tractability order. Every rung of Decision 5's table appears
 #: here; `tests/test_design_missions.py` asserts that, so a rung cannot be
 #: dropped from the programme by being deleted from a list.
@@ -6244,10 +7179,16 @@ LADDER: Final[Sequence[Mission]] = (
         title="6-axis robot arm",
         era="VI",
         hard="Kinematics, dynamic loads, stiffness under motion",
-        needs=(
-            "E9 — multibody dynamics, for loads that come from the machine moving",
-            "E9.3 — motion-range simulation and swept volume",
-        ),
+        # Its declared needs were E9 and E9.3. E9.1 put Project Chrono behind a
+        # container, E9.6 put inertia tensors in the roll-up, and the exact
+        # serial-chain recursion and Newton-Euler reactions have been in
+        # `app/dynamics/` since the phase opened. So it moved on 2026-09-16, and
+        # it is the first `MovingDesign`: the first rung whose answer is a load
+        # rather than a dimension. Stiffness — the third of the three things the
+        # `hard` column names — is in `_M7_UNPROVEN` and is E6's.
+        moving=_m7_design(),
+        assertions=_M7_ASSERTIONS,
+        unproven=_M7_UNPROVEN,
     ),
     Mission(
         rung="M8",

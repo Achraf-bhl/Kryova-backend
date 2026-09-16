@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 121/133 = 91% | 138/151 eng-months = 91% |
+| Engineering — E1–E23 | 15/24 | 122/133 = 92% | 138/151 eng-months = 92% |
 | Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 21/34 | 173/195 = 89% | 169/189 eng-months = 89% |
+| **Programme** | 21/34 | 174/195 = 89% | 170/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 75%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 88%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -3823,6 +3823,60 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
    > `tests/test_mission_m2.py::TestTheLadderItself`.
 
 7. **M7 — 6-axis robot arm.**
+   > DONE (2026-09-16) — **the first rung on the ladder whose answer is not a
+   > dimension, and the ladder's fourth kind of rung because of it.** Its declared
+   > `needs` were E9 and E9.3; E9.1 put Project Chrono behind a container, E9.6 put
+   > inertia tensors in the mass roll-up, and the exact serial-chain recursion and
+   > Newton-Euler reactions have been in `app/dynamics/` since the phase opened. So it
+   > moved by M6's rule, as M4 and M5 did the same day.
+   > **`MovingDesign` is new and exists for the reason `folded` did.** Every rung below
+   > M7 asks how big something is or whether two things fit. What an engineer buys a
+   > robot for is what its shoulder bearing carries while it is moving, and no amount of
+   > geometry contains that number: an arm is a product graph *and* a chain of joints,
+   > and the load at a joint is a consequence of both together, so neither half alone can
+   > state it. A `MovingDesign` carries an `AssemblyDesign`, the joints between its parts
+   > and a motion; `_run_moving` delegates the whole geometry half to `_run_assembly`, so
+   > a moving rung's builds, clash, roll-up and contracts are an assembly rung's and
+   > cannot drift from them.
+   > **Every joint is declared against the product graph, not beside it.** Each
+   > `JointDeclaration.child` is an occurrence path in the same `ProductStructure` the
+   > roll-up and the clash check walk, so the mass a reaction is computed against *is*
+   > the mass the geometry claims were checked against, and `derive` refuses a body it
+   > cannot weigh — because a reaction on a partial mass is too small, which is the
+   > direction in which every check passes.
+   > **The rung's strongest claim has a closed form.** Hold every joint still and the
+   > whole mechanism is a statics problem with one answer: the ground joint carries `m g`
+   > and nothing else. Measured **3635.9075824256697 N against a weight of
+   > 3635.90758242567 N** — the same number. A dropped link, a wrong density, gravity
+   > applied twice, or a unit lost between the roll-up's kilogrammes and the reaction's
+   > newtons all fail there, and none is visible in any geometry claim. Moving, the base
+   > peaks at **4048.43 N — 11.3% harder than standing still**, which is the number the
+   > rung exists to produce.
+   > **Two findings.** (1) **A payload key containing a dot is not a path.**
+   > `_motion_payload` first published flat keys spelled `"motion.total_mass_kg"` and
+   > every motion claim came back NOT CHECKED against a payload that visibly contained
+   > them — the assertion resolver reads `.` as a separator. It nests now, exactly as
+   > `clash` does. (2) **`app.dynamics` refuses an undriven revolute joint by name**,
+   > rather than integrating: its motion would be an output of the forces on it, which is
+   > a different question. This arm's ground joint is `fixed` because of it.
+   > Built and moved: 482.019 kg over 7 occurrences (370.759 kg of it moving — the base
+   > is ground), 300x300x1840 mm, 21 pairs with 0 clashes, 41 exact samples with no time
+   > integration, free-body residual **9.1e-13 N**. Chrono is never started: `engines()`
+   > keeps it behind `KinematicEngine` because where both can answer the kinematic engine
+   > is exact and Chrono integrates — which is also what keeps these tests offline. Eight
+   > guards were broken and each named claim watched to fail; declaring the base a body
+   > fails **two** claims, the second unpredicted (ground needs no tensor, so promoting it
+   > silently makes it a point mass). Ten caveats travel to the public gallery, and
+   > **stiffness is the sharpest**: the `hard` column promises "kinematics, dynamic loads,
+   > stiffness under motion" and two of the three are here — the arm is rigid, so there is
+   > no deflection at the tool, which is what a repeatability figure is about (E6).
+   > **Ladder now 7/9.** **Tests written on Linux on 2026-09-16 and not run there**, at
+   > the user's instruction; every number was measured first by building the real arm
+   > through the real kernel and running the real dynamics. Tested by:
+   > `tests/test_mission_m7.py` (51), `tests/test_design_missions.py`,
+   > `tests/test_mission_m2.py::TestTheLadderItself`.
+
+   <!-- superseded 2026-09-16 -->
    > NOT STARTED — PENDING, waiting on E9's multibody.
 
 8. **M8 — motorcycle chassis + swingarm.**

@@ -452,32 +452,37 @@ class TestTheLadderItself:
 
         return run_ladder(OcctRunner)
 
-    def test_six_rungs_pass_and_three_are_not_yet_buildable(self) -> None:
+    def test_seven_rungs_pass_and_two_are_not_yet_buildable(self) -> None:
         """M6 joined on 2026-09-10, when E14.1 and E12.3 — its two declared
         needs — were both complete; M4 and M5 joined on 2026-09-16 the same
-        way. The coverage figure is measured here rather than asserted
-        anywhere, so it moves deliberately."""
+        way, and M7 the same day once E9.1's container and E9.6's inertia
+        tensors landed. The coverage figure is measured here rather than
+        asserted anywhere, so it moves deliberately."""
         report = self._ladder()
 
-        assert [r.rung for r in report.passed] == ["M1", "M2", "M3", "M4", "M5", "M6"]
-        assert len(report.pending) == 3
+        assert [r.rung for r in report.passed] == [
+            "M1", "M2", "M3", "M4", "M5", "M6", "M7",
+        ]
+        assert len(report.pending) == 2
         assert report.ok, report.summary()
 
     def test_the_ladder_is_not_complete_even_though_nothing_failed(self) -> None:
-        """Three rungs unclimbed, M2's welds unsized, M3's K never bent, M4's
-        gears untoothed, M5's frame never loaded and M6's belt never loaded.
-        `ok` is the regression question; `complete` is the programme question,
-        and they are not the same."""
+        """Two rungs unclimbed, M2's welds unsized, M3's K never bent, M4's
+        gears untoothed, M5's frame never loaded, M6's belt never loaded and
+        M7's arm rigid. `ok` is the regression question; `complete` is the
+        programme question, and they are not the same."""
         report = self._ladder()
 
         assert not report.complete
-        assert [r.rung for r in report.caveated] == ["M2", "M3", "M4", "M5", "M6"]
+        assert [r.rung for r in report.caveated] == [
+            "M2", "M3", "M4", "M5", "M6", "M7",
+        ]
 
     def test_the_sentence_a_human_reads_names_both(self) -> None:
         summary = self._ladder().summary()
 
-        assert "6/9 rungs pass" in summary
-        assert "3 not yet buildable" in summary
+        assert "7/9 rungs pass" in summary
+        assert "2 not yet buildable" in summary
         assert "not claimed" in summary and "weld" in summary
 
 

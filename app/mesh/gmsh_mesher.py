@@ -464,7 +464,17 @@ def _assert_midside_ordering(mesh: TetMesh) -> None:
     actual = mesh.nodes[mesh.midside]
     lo, hi = mesh.bounding_box
     scale = float(np.linalg.norm(hi - lo)) or 1.0
-    if not np.allclose(actual, expected, atol=1e-6 * scale):
+    # `rtol=0` deliberately, and it is measured rather than copied from the
+    # shell assertion. `np.allclose`'s default `rtol=1e-5` is relative to the
+    # absolute *coordinate*, so a part authored far from the origin -- a small
+    # component exported in assembly coordinates, the ordinary CATIA case --
+    # gets a tolerance that grows with its position. Swept over all fifteen
+    # tet10 slot swaps on 2026-09-16: **1<->2 and 3<->5 pass silently from
+    # x = 1e5 outwards** and every other pair is caught, because those two are
+    # the pairs whose midpoints differ only in the coordinates the offset does
+    # not inflate. `atol` is the real budget and has four orders of headroom
+    # over a midside offset of about `diagonal / 20`.
+    if not np.allclose(actual, expected, rtol=0.0, atol=1e-6 * scale):
         raise MeshError(
             "Gmsh returned tet10 nodes in an unexpected order; the quadratic "
             "element formulation cannot be trusted against this mesh."
@@ -758,7 +768,11 @@ def _assert_tri_midside_ordering(mesh: TriMesh) -> None:
     actual = mesh.nodes[mesh.midside]
     lo, hi = mesh.bounding_box
     scale = float(np.linalg.norm(hi - lo)) or 1.0
-    if not np.allclose(actual, expected, atol=1e-6 * scale):
+    # `rtol=0`, for `_assert_midside_ordering`'s measured reason. The tri6
+    # sibling has one escaping pair rather than two: swapping slots 1 and 2
+    # passes silently from x = 1e5 outwards, and 0<->1 and 0<->2 are caught
+    # everywhere.
+    if not np.allclose(actual, expected, rtol=0.0, atol=1e-6 * scale):
         raise MeshError(
             "Gmsh returned tri6 nodes in an unexpected order; the quadratic plane "
             "element formulation cannot be trusted against this mesh."

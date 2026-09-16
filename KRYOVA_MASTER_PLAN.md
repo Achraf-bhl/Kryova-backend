@@ -1553,6 +1553,22 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    > **identity** for both shapes, and is re-checked by coordinate on every quadratic mesh
    > rather than assumed. **Still authored:** every *beam* mesh here, for want of a 1-D
    > mesher — which is the half of this residual that is still open.
+   > **CLOSED 2026-09-16 — the two sibling assertions were not enforcing what this one does.**
+   > `_assert_shell_midside_ordering` passed `rtol=0.0`; `_assert_midside_ordering` (tet10) and
+   > `_assert_tri_midside_ordering` (tri6) left it defaulted, so `np.allclose`'s `rtol=1e-5`
+   > applied relative to the **absolute coordinate** and the tolerance grew with the part's
+   > distance from the origin — a small component exported in assembly coordinates, which is the
+   > ordinary CATIA case. Swept over every slot swap rather than argued: of the fifteen tet10
+   > pairs, **1↔2 and 3↔5 pass silently from x = 1e5 outwards**, and so does tri6's **1↔2** —
+   > exactly the pairs whose midpoints differ only in the coordinates the offset does not
+   > inflate, which is why a single hand-picked swap looks like the guard is fine. Nothing
+   > raises; the solver is handed a plausible, wrong stiffness matrix, and a convergence study
+   > reads it as converging. Both now pass `rtol=0.0`, every swap is caught at 0, 1e3, 1e5 and
+   > 1e7, and a correctly ordered mesh still passes out there — `atol` is scaled by the element's
+   > own diagonal precisely so a tightened tolerance does not become a guard nothing passes.
+   > Measured by a one-off script against the real assertions; tests written on Linux and not run
+   > as pytest (the user's rule). Tested by:
+   > `tests/test_mesh.py::TestASwappedMidsideIsCaughtWhereverThePartWasAuthored` (36).
 
 4. **Analysis types unlocked by task 1**: nonlinear static, large deformation, plasticity, contact,
    bolt pretension, modal, buckling, transient dynamics, coupled thermal-stress.

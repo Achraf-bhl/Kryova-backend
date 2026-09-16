@@ -325,3 +325,109 @@ class TestFaceMidsideTable:
         from app.mesh.primitives import box_mesh
 
         assert box_mesh((1.0, 1.0, 1.0), divisions=(1, 1, 1)).surface_midside_nodes is None
+
+
+class TestASwappedMidsideIsCaughtWhereverThePartWasAuthored:
+    """The tolerance on the tet and plane midside assertions was relative to the
+    absolute coordinate, so it grew with the part's distance from the origin —
+    a small component exported in assembly coordinates, the ordinary CATIA case.
+
+    `_assert_shell_midside_ordering` was fixed when it was written and CLAUDE.md
+    recorded these two as unfixed. Measured 2026-09-16: of the fifteen tet10
+    slot swaps, **1↔2 and 3↔5 passed silently from x = 1e5 outwards**, and so
+    did tri6's 1↔2 — precisely the pairs whose midpoints differ only in the
+    coordinates the offset does not inflate. Nothing raises; the solver is
+    handed a plausible, wrong stiffness matrix.
+    """
+
+    @staticmethod
+    def _tet10(x0: float, size: float = 1.0):
+        from app.mesh.types import TET10_EDGES
+
+        corners = np.array(
+            [[0, 0, 0], [size, 0, 0], [0, size, 0], [0, 0, size]], dtype=np.float64
+        ) + np.array([x0, 0.0, 0.0])
+        mids = np.array([0.5 * (corners[a] + corners[b]) for a, b in TET10_EDGES])
+        return (
+            np.vstack([corners, mids]),
+            np.array([[0, 1, 2, 3]], dtype=np.int64),
+            np.array([[4, 5, 6, 7, 8, 9]], dtype=np.int64),
+        )
+
+    @staticmethod
+    def _tri6(x0: float, size: float = 1.0):
+        from app.mesh.planar import TRI6_EDGES
+
+        corners = np.array(
+            [[0, 0, 0], [size, 0, 0], [0, size, 0]], dtype=np.float64
+        ) + np.array([x0, 0.0, 0.0])
+        mids = np.array([0.5 * (corners[a] + corners[b]) for a, b in TRI6_EDGES])
+        return (
+            np.vstack([corners, mids]),
+            np.array([[0, 1, 2]], dtype=np.int64),
+            np.array([[3, 4, 5]], dtype=np.int64),
+        )
+
+    @pytest.mark.parametrize("x0", [0.0, 1e3, 1e5, 1e7])
+    @pytest.mark.parametrize("swap", [(0, 1), (1, 2), (2, 3), (3, 5), (4, 5)])
+    def test_a_swapped_tet10_slot_is_refused_however_far_from_the_origin(
+        self, x0: float, swap: tuple[int, int]
+    ) -> None:
+        from app.mesh.gmsh_mesher import _assert_midside_ordering
+        from app.mesh.types import TetMesh
+
+        nodes, tets, midside = self._tet10(x0)
+        broken = midside.copy()
+        broken[0, list(swap)] = broken[0, list(reversed(swap))]
+
+        with pytest.raises(MeshError, match="unexpected order"):
+            _assert_midside_ordering(TetMesh(nodes=nodes, tets=tets, midside=broken))
+
+    @pytest.mark.parametrize("x0", [0.0, 1e3, 1e5, 1e7])
+    @pytest.mark.parametrize("swap", [(0, 1), (0, 2), (1, 2)])
+    def test_a_swapped_tri6_slot_is_refused_however_far_from_the_origin(
+        self, x0: float, swap: tuple[int, int]
+    ) -> None:
+        from app.mesh.gmsh_mesher import _assert_tri_midside_ordering
+        from app.mesh.planar import TriMesh
+
+        nodes, tris, midside = self._tri6(x0)
+        broken = midside.copy()
+        broken[0, list(swap)] = broken[0, list(reversed(swap))]
+
+        with pytest.raises(MeshError, match="unexpected order"):
+            _assert_tri_midside_ordering(TriMesh(nodes=nodes, tris=tris, midside=broken))
+
+    @pytest.mark.parametrize("x0", [0.0, 1e5, 1e7])
+    def test_a_correctly_ordered_mesh_still_passes_out_there(self, x0: float) -> None:
+        """The other half. A tolerance tightened until nothing passes is not a
+        guard, and `atol` is scaled by the element's own diagonal precisely so
+        that this keeps working."""
+        from app.mesh.gmsh_mesher import (
+            _assert_midside_ordering,
+            _assert_tri_midside_ordering,
+        )
+        from app.mesh.planar import TriMesh
+        from app.mesh.types import TetMesh
+
+        nodes, tets, midside = self._tet10(x0)
+        _assert_midside_ordering(TetMesh(nodes=nodes, tets=tets, midside=midside))
+
+        nodes, tris, midside = self._tri6(x0)
+        _assert_tri_midside_ordering(TriMesh(nodes=nodes, tris=tris, midside=midside))
+
+    def test_neither_assertion_leaves_the_relative_tolerance_defaulted(self) -> None:
+        """Read from the source, because the behaviour it causes is only visible
+        at a coordinate magnitude no fixture in this suite uses by default.
+        `np.allclose`'s `rtol` defaults to 1e-5 and must be passed as 0."""
+        import inspect
+
+        from app.mesh import gmsh_mesher
+
+        for name in (
+            "_assert_midside_ordering",
+            "_assert_tri_midside_ordering",
+            "_assert_shell_midside_ordering",
+        ):
+            source = inspect.getsource(getattr(gmsh_mesher, name))
+            assert "rtol=0.0" in source, name

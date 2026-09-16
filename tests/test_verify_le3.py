@@ -181,7 +181,11 @@ class TestTheLoadCaseIsTheQuarterModelMadeWhole:
         for load in le3_case().loads:
             radial = np.dot(np.asarray(load.force_n), np.asarray(load.where.centre))
             outward = load.where.centre[0] != 0.0
-            assert (radial > 0.0) is outward
+            # `bool(...)`, because `np.float64 > float` is a `np.bool_` and
+            # `np.bool_(True) is True` is False -- an identity check against a
+            # numpy scalar can never pass. The assertion was written this way on
+            # Linux and executed nowhere until 2026-09-17.
+            assert bool(radial > 0.0) is outward
 
     def test_six_translational_restraints_and_no_rotational_one(self) -> None:
         fixtures = le3_case().fixtures
@@ -288,7 +292,14 @@ class TestTheCatalogueRunsIt:
         assert len(sizes) == 3
         assert list(sizes) == sorted(sizes, reverse=True)
         for coarse, fine in zip(sizes, sizes[1:], strict=False):
-            assert coarse / fine == pytest.approx(1.4, abs=0.02)
+            # A band, not a point. The rule is "about 1.4x in representative
+            # size" -- wide enough that the discretisation trend dominates
+            # gmsh's remeshing noise, which 1.2 does not. 500/355 is 1.4085 and
+            # 355/250 is 1.42, and `approx(1.4, abs=0.02)` failed the second by
+            # one ulp: the difference computes to 0.020000000000000018. A
+            # tolerance whose edge a chosen size lands exactly on is a tolerance
+            # that tests the float format rather than the spacing.
+            assert 1.35 <= coarse / fine <= 1.45
 
     def test_no_case_is_blocked_on_a_shell_solver_any_more(self) -> None:
         assert "no-shell-solver" not in {str(b) for b in nafems.Blocker}

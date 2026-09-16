@@ -15,55 +15,56 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-16 04:12 — six targets closed, and Chrono actually ran.**
-> Linux writes code and tests and **runs no pytest, ruff or mypy** (the user's rule; Windows
-> runs them, and the frontend's vitest too). A turn takes at least six tasks (the user's rule,
-> 2026-09-15 21:38). Every test named below was **written on Linux and not run as pytest** —
-> but every assertion in them was measured first by one-off scripts against the real modules,
-> and E9.1's physics was measured against the real engine.
-> **Closed this turn, each committed as it closed:** **P6.6** (`0e2a200` backend, `7ed2e5b`
-> frontend — a picked triangle becomes a predicate, and one selection model across tree/3D/spec),
-> **P6.3** (`feb4787` — the renderer decision's criteria, threshold and date, adopting nothing),
-> **P7.3 + P7.4** (`2a1a8de` frontend, `3e3fda8` plan — deep links, notifications and offline
-> capability, with the Rust half deliberately left to QUEUE G5), **E9.1** (`aa379b7`, `96255a9` —
-> Project Chrono across a container boundary), **P6.1's assembly half** (`9fae90a` — a product
-> structure served as one GLB scene).
-> **E9.1 is the one to read.** The image built here, so the oracle runs did not need the seat:
-> a pendulum gives 29.4156 N against 3mg = 29.4200 N, a spun mass 20.00083 N against m ω² r =
-> 20.0 N, a prismatic travels exactly the millimetres asked for. **All three found defects the
-> unit tests had happily agreed with** — Chrono's default iterative solver does not satisfy a
-> revolute constraint (the same pendulum read **4286 N**, the rod stretching 0.5 → 0.74 m);
-> `GetReaction2` is the load on the *parent*, equal and opposite and therefore the right
-> magnitude with the wrong sign; and reaction 1 is in frame 1, which the code rotated by frame 2,
-> giving a constant force vector where it should sweep. All five traps are now in CLAUDE.md.
-> **Still not claimed for Chrono:** joint **moments** against any closed form, and every case the
-> engine exists for — closed loops, contact, friction, springs, end stops. `engines()` keeps it
-> behind `KinematicEngine`, and that ordering is now **permanent**: where both can answer, the
-> kinematic engine is exact and this one integrates.
-> **THE QUEUE gained G6** (Chrono on Windows, the moments, and a four-bar against
-> `closures.py`) and G4/G5 from earlier in the turn. G1 grew the reference-assembly property
-> table, and G3's stale claim that "E2 task 1's face predicate is unwritten" was corrected — it
-> is `DONE (2026-09-05)`; what was missing was its *inverse*, which P6.6 wrote.
-> **Board: 21/34 phases · 170.0/194 tasks = 87.6%.**
+> **Continuation, 2026-09-16 07:40 — six targets, and four of them were found by *running*
+> something rather than by reading it.**
+> Linux writes code and tests and **runs no pytest, ruff or mypy** (the user's rule; Windows runs
+> them, and the frontend's vitest too). A turn takes at least six tasks (the user's rule,
+> 2026-09-15 21:38). Every test named below was **written on Linux and not run as pytest** — and
+> every one was evaluated assertion-by-assertion by a one-off harness first.
+> **Closed this turn, each committed as it closed:** **E9.6** (`aff8edc` — inertia tensors in the
+> mass roll-up), **P9.6** (`77176c6` — the restore drill run for the first time), **P9.7**
+> (`f5c15f7` — secret scanning blocking in CI, release notes wired to a tag), **E23.2**
+> (`88a2da1` — the competitor register's judgement half), **E6.3** (`da8a3dc` — a midside guard
+> that was not guarding), **P9.4** (`918b8db` — the demo seed).
+> **The three findings worth reading.** (1) The restore drill's `alembic upgrade head` migrated
+> `DATABASE_URL`, not the restore target — *in production, production* — while reporting
+> "migrations: ok"; proved by aiming `DATABASE_URL` at a bystander database and finding all 38
+> tables there. And the application role **cannot take the backup at all**: 14 of 38 tables carry
+> `FORCE ROW LEVEL SECURITY` and the role is `NOBYPASSRLS` by design, so `pg_dump` stops on
+> `approval_gates`; `--enable-row-security` works *only* because every policy here has an
+> unset-means-everything branch. (2) `docs/LOCAL_POSTGRES.md` created the local role with a fixed
+> literal password, and that literal **is** the password this machine's `kryova` role uses —
+> checked against `.env.local`, not assumed. Not a leak, an *instruction*. (3) The tet10 and tri6
+> midside assertions left `np.allclose`'s `rtol` defaulted, so a sweep of every slot swap found
+> **tet10's 1↔2 and 3↔5, and tri6's 1↔2, pass silently from x = 1e5 outwards** — the ordinary
+> CATIA case of a part in assembly coordinates.
+> **One premise of mine was wrong and the correction is the useful half:** the drill's unqualified
+> table names looked broken and counted correctly, because `search_path`'s `"$user"` resolves to
+> the `kryova` schema — role and schema share a name. A fragility, not a defect.
+> **Two targets were taken and could not move, and that is recorded rather than faked: E21.6
+> (QIF) and E21.5 (fatigue data).** Every open item on both is a document fetch, a vendor form or
+> a question for counsel, and **this machine has no outbound network** (`curl
+> https://ntrs.nasa.gov/` times out). E23.4 and P4.3, the next substitutes, are blocked the same
+> way. P9.4 and a known-unfixed defect in `app/mesh/gmsh_mesher.py` were taken in their place.
+> **Board: 21/34 phases · 171.0/195 tasks = 87.7%.** Five of the six moved a PARTIAL forward
+> without closing it, which is the honest shape of a turn spent on residuals.
+> **Left running on this machine, and easy to remove:** a `demo-engineering` organisation in the
+> local `kryova` database (6 users, 3 projects, **0 results**), from `scripts/seed_demo.py`.
 > **Already stale on arrival, and not caused here:** `venv/bin/python -m app.verify.recorded
-> --check` fails. The re-record is the Windows machine's **last** step, after the suite —
-> re-recording in the middle measures a tree somebody is still editing.
-> **Next targets, and the continuation prompt carries all six:** (1) **E9.2's inertia
-> tensors** — the roll-up has none, QUEUE G6 needs one, and `metrology.inertia_tensor_mm5`
-> already measures the geometric half (a plan change, adding a task to E9); (2) **P9.6**, the
-> restore drill that has never been run, against this machine's local PostgreSQL and a scratch
-> database; (3) **P9.7**'s backend SBOM and pinning halves, the desktop SBOM being Rust and
-> not Linux's; (4) **E21.6** QIF; (5) **E21.5** fatigue-data entitlements; (6) **E23.2**'s
-> unwritten judgement. Substitutes in order: **P9.4** (staging), **E23.4** (BenchCAD's
-> arithmetic), **P4.3** (drawing understanding). Do not attempt E3, E8, E9.5, E13, E15, E17,
-> E18 — each needs a seat, a document or an engineer.
-> **Next continuation fires 2026-09-16 06:52**, held by **`kryova-backend-9f`** (job
-> `0f417f89`). **The handover failed and that is worth recording:** four peers —
-> `kryova-backend-26`, `-43`, `-df`, `-78` — were asked in turn and all four replied
-> `not empty`. Every `kryova-backend-*` session on this machine is a day old and in use, so the
-> token saving CLAUDE.md's handover rule buys is not available this morning; budget one or two
-> attempts, not fourteen. **The job lives only in this session's memory** — close this editor
-> and the chain stops, and the next session starts from this block.
+> --check` fails. The re-record is the Windows machine's **last** step, after the suite.
+> **Next targets, and the continuation prompt carries all six:** (1)–(4) **E18.4, E18.5, E18.7,
+> E18.8** — M4 gearbox, M5 stamping press, M7 robot arm, M8 motorcycle chassis. E18 is the only
+> phase left with genuinely NOT STARTED tasks, they share one harness
+> (`app/design/missions.py`), and M7's stated wait on E9's multibody is over. (5) one **P6**
+> viewer PARTIAL whose residual is code rather than an unmeasured fps target, and (6) one **P7**
+> desktop PARTIAL — P7.4's offline verdicts exist with no surface showing them. Substitutes:
+> **E22.1**, **E22.4**, **P4.6**. Do not attempt E3, E8, E9.5, E13, E15, E17, or E21/E23's
+> network-blocked tasks.
+> **Next continuation fires 2026-09-16 10:07**, held by **this session** (job `1fa3f575`). Peers
+> were not asked: four were asked at 04:12 and all four replied `not empty`, and every
+> `kryova-backend-*` session on this machine is a day old and in use. **The job lives only in
+> this session's memory** — close this editor and the chain stops, and the next session starts
+> from this block.
 
 > **Handoff, 2026-09-15 (morning) — the user is driving phases to 100% interactively, and on
 > Linux nothing is run.** "Write the code and the tests, don't launch pytest; Windows tests."
@@ -406,6 +407,53 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-16 (mid) — six targets: E9.6, P9.6, P9.7, E23.2, E6.3, P9.4. Four of them were
+  found by *running* something rather than by reading it.**
+  **P9.6** (`77176c6`): the restore drill had never been run. Run against local PostgreSQL
+  16.15 it produced four defects: `alembic upgrade head` migrated `DATABASE_URL` rather than
+  the restore target — in production, production — while reporting "migrations: ok" (proved by
+  aiming `DATABASE_URL` at a bystander database and finding all 38 tables there); the
+  application role **cannot take the backup at all**, because 14 of 38 tables carry
+  `FORCE ROW LEVEL SECURITY` and the role is `NOBYPASSRLS` by design, so `pg_dump` stops on
+  `approval_gates` and `--enable-row-security` works *only* because every policy here has an
+  unset-means-everything branch; a blob query that failed rendered as "0 referenced blob(s)
+  missing"; and `report()` printed the password. A fifth was mine and was wrong — unqualified
+  table names counted correctly because `search_path`'s `"$user"` resolves to the `kryova`
+  schema, role and schema sharing a name. A fragility, hardened anyway.
+  **P9.7** (`f5c15f7`): `scripts/scan_secrets.py`, blocking in CI. Its first run found that
+  `docs/LOCAL_POSTGRES.md` created the local role with a fixed literal password — and that
+  literal is the password this machine's `kryova` role actually uses, checked against
+  `.env.local` rather than assumed. Not a leak, an *instruction*: every machine following the
+  recipe shares one credential. The recipe now generates one; `psql -c` turned out not to
+  interpolate (`:'pw'` answers `syntax error at or near ":"`), so it goes in on stdin. The
+  `url-with-password` rule fired **25 times out of 25 on placeholders** in its first form, so
+  it now asks whether the host is reachable at all — RFC 2606 makes that decidable. Allowances
+  are pinned to (path, rule, sha256): change the value and the finding returns *and* the
+  allowance reports stale. `.github/workflows/release.yml` finally runs
+  `scripts/release_notes.py`, which had existed since 2026-09-10 with nothing calling it.
+  **E6.3** (`da8a3dc`): CLAUDE.md said the tet and plane midside assertions had the shell
+  one's `rtol=0.0` fix unmade. They did, and a sweep of every slot swap showed what that
+  costs: tet10's **1↔2 and 3↔5, and tri6's 1↔2, pass silently from x = 1e5 outwards** —
+  exactly the pairs whose midpoints differ only in the coordinates the offset does not
+  inflate, which is why one hand-picked swap makes the guard look fine. A part authored in
+  assembly coordinates is the ordinary CATIA case.
+  **E23.2** (`88a2da1`): the competitor register recorded observations and nothing recorded
+  the answer. `Assessment` gives the judgement somewhere to live and **nothing computes one** —
+  a verdict derived by code from quotes would be one nobody reached wearing the authority of a
+  measurement. It is refused without an author, a date, a reason, and citations the register
+  actually holds; it may not rest on a claim that was not re-read (two of the fourteen carry
+  no quote); and it expires with the register. `ASSESSMENTS` is empty and `answer()` says so.
+  **P9.4** (`918b8db`): `scripts/seed_demo.py` — one organisation, six people, three projects,
+  run twice against real PostgreSQL. It writes **no result of any kind**, held by a test that
+  reads its imports, because a demo database carrying a stress nobody solved for puts a
+  fabricated number behind the product's own provenance machinery.
+  **E9.6** (`aff8edc`, from the start of the turn): inertia tensors in the mass roll-up.
+  **E21.6 and E21.5 were taken and could not move**: every open item on both is a document
+  fetch, a vendor form or a question for counsel, and this machine has no outbound network
+  (`curl https://ntrs.nasa.gov/` times out). Recorded rather than faked. E23.4 and P4.3, the
+  next substitutes, are blocked the same way — the BenchCAD dataset and a Donut/Florence-2
+  class model.
+
 - **2026-09-16 (early) — six targets closed: P6.6, P6.3, P7.3, P7.4, E9.1, P6.1's assembly half.**
   **P6.6** (`0e2a200`, `7ed2e5b`): the *inverse* of face resolution. `app/kernel/occt/propose.py`
   turns a picked face into predicates the agent can use, generated liberally and verified by

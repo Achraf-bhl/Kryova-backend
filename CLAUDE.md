@@ -668,6 +668,33 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
 5. `expire_on_commit=False` is load-bearing; endpoints read ORM attributes after `commit()`.
 6. **`~250 ms` per round trip on Neon, `~0.14 ms` locally.** The DB suite was four minutes of
    almost pure latency and is now well under one.
+7. **The application role cannot take a `pg_dump`, and it is right not to be able to.** 14 of
+   the 38 tables carry `FORCE ROW LEVEL SECURITY` and the role is `NOBYPASSRLS` by design
+   (item 3), so a plain `pg_dump` stops on the first of them — `ERROR: query would be affected
+   by row-level security policy for table "approval_gates"`. `--enable-row-security` succeeds,
+   and the backup is *complete* **only because every policy here has an "unset means
+   everything" branch**: with no `SET LOCAL` in force the policies admit every row. That is a
+   property of these policies, not of the flag. A policy written without that branch would
+   silently start producing partial backups, which is the worst possible shape of backup.
+   Measured 2026-09-16, the first time the drill was ever run.
+8. **`search_path` resolves to the `kryova` schema only because the role is also called
+   `kryova`.** `"$user", public` expands the first entry to the connecting role's name, and it
+   happens to match the schema. So unqualified SQL in a script works today and reads another
+   schema's rows the day either is renamed. Qualify it; do not conclude from a working count
+   that the query was right. (Recorded because the opposite conclusion was reached first: the
+   unqualified names in `scripts/restore_drill.py` were diagnosed as a defect and were not one.)
+9. **Alembic's `env.py` reads `DATABASE_URL` from the settings, so `alembic upgrade head` in a
+   subprocess migrates whatever the ambient environment points at** — not the database the
+   caller has in hand. `scripts/restore_drill.py` ran it against a restore target and migrated
+   the *production* URL instead, reporting "migrations: ok" the whole time; proved by aiming
+   `DATABASE_URL` at a bystander database and finding all 38 tables in it. Pass the target
+   through the child's environment explicitly (`_alembic_env`). Any script that shells out to
+   alembic has this bug until it does.
+10. **`psql -c` does not interpolate `psql` variables.** `-v pw=… -c "… PASSWORD :'pw'"` sends
+   the string to the server verbatim and answers `syntax error at or near ":"`. Interpolation
+   happens only in what psql parses itself, so pass the statement on **stdin** (a heredoc).
+   `:'pw'` quotes the value as a literal, which is what makes a generated password safe to
+   pass. Measured 2026-09-16 while fixing `docs/LOCAL_POSTGRES.md`.
 
 ## Testing
 
@@ -860,6 +887,21 @@ depends on which repo you are in. This has already produced a build of the wrong
 right tag.
 
 **Read only the files you need.** `rg` to locate first; avoid loading large files wholesale.
+
+**There is no outbound network from this machine.** `curl https://ntrs.nasa.gov/` times out
+(measured 2026-09-16). So every plan task whose remainder is "fetch the page", "read the
+judgement", "ask the vendor's form" is not a Linux task however much it looks like one —
+E21.5, E21.6, E23.1 and E23.4 are all in that state and were taken and returned once. Check
+before planning a turn around one.
+
+**`venv/bin/python -m scripts.scan_secrets` is a blocking CI step, and it will catch your test
+fixtures.** A connection URL with a reachable-looking host, or anything shaped like an issued
+API key, is a finding wherever it is written — including in the test that asserts the scanner
+works. Build such fixtures from concatenated pieces (`"AKIA" + "IOSFODNN7EXAMPLE"`, AWS's own
+documented example). It caught its own author three times in one turn. An accepted match is
+pinned to `(path, rule, sha256)`, so changing the value at an allowlisted line makes the
+finding return *and* reports the allowance stale — allowlisting by path alone is what it is
+built not to do.
 
 **A flat scan of `app.routes` finds nothing, and it looks exactly like an unwired router.** This
 FastAPI version wraps each `include_router` in a `fastapi.routing._IncludedRouter`, so routes are
@@ -1298,9 +1340,14 @@ Three of the four pieces exist and the missing one is a seam, not a capability (
   to the absolute *coordinate*, so a part authored far from the origin — a small component in
   assembly coordinates, the ordinary CATIA export — gets a tolerance that grows with its
   position and swallows the swap. A deliberately exchanged midside slot is caught at x = 0 and
-  x = 1e3 and passes silently at x = 1e5. **`_assert_midside_ordering` (tet) and
-  `_assert_tri_midside_ordering` (plane) still have the defaulted `rtol` and are unfixed** —
-  same one-line change, not made here because it belongs with its own test.
+  x = 1e3 and passes silently at x = 1e5. **The tet and plane siblings were fixed on
+  2026-09-16** (they carried the defaulted `rtol` until then), and sweeping *every* slot swap
+  rather than picking one is what made the cost legible: of the fifteen tet10 pairs only
+  **1↔2 and 3↔5** escaped, and of tri6's three only **1↔2** — precisely the pairs whose
+  midpoints differ in the coordinates the offset does *not* inflate. So a single hand-picked
+  swap catches, the guard looks healthy, and two orderings still pass. **When testing a
+  tolerance, sweep the whole space of the thing it discriminates**; one example proves the
+  tolerance is not infinite and nothing more.
 - **`app/solve/shell_loads.py` is the tributary-area rule for a 2-D region**, the residual E6.3
   named. The fact to carry: **an S8R face's four corners take −1/12 of the area each**, not a
   positive share. The serendipity corner shape functions integrate negative, so distributing by

@@ -675,6 +675,27 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       `venv/bin/python -m app.verify.recorded --check` belongs in
       CI: it re-runs nothing and fails the moment a solver change orphans the published evidence.
 
+- [ ] **C4 — E21.5, E21.6, E23.1 and E23.4: four tasks whose whole remainder is a fetch, a form
+      or counsel, and this machine has no outbound network (added 2026-09-16).** Measured that
+      morning: `curl https://ntrs.nasa.gov/` times out. They were taken as targets, could not
+      move, and are recorded here so the next session does not take them again.
+      **E21.5** (fatigue-data entitlements) needs NTRS's and IIW's terms, FKM's terms (not on
+      the shop page — EUR 320.00 incl. VAT, 232 pp., read on vdmashop.de), and the C-588/21 P
+      judgment itself rather than the Court's reproduced summary. The unanswerable half —
+      whether *encoding* a standard's table is a method or an expression, which TRIPS Art. 9(2)
+      does not settle — is a question for counsel and will not be settled by any machine.
+      **E21.6** (QIF) needs DMSC's form for the unmodified QIF 3.0 schemas (the QIF Community
+      copies are **modified** — `QIFDocument.xsd` differs by 1,272 diff lines including key
+      selectors — so validating against them is not validating against QIF 3.0), ISO 23952's
+      current status (iso.org refused the fetch), and MBC and DMIS, unread. Its *writer* half is
+      blocked differently again: it writes E17.5's inspection plans, and E17 needs a seat.
+      **E23.1** re-quotes competitor pages by exact string against the fetched page — the method
+      is `curl` plus tag-stripping, never a summarising fetch tool, which paraphrases and will
+      say a quote matches when it does not. **E23.4** needs the BenchCAD dataset (code MIT, data
+      CC-BY-4.0) and a local model to run 106 families against.
+      Settles: nothing about hardware. What it needs is a machine with a network, or a person
+      with a browser and ten minutes per item.
+
 ### D. Needs a model this machine does not host
 
 - [ ] **D1 — The visual check against a real vision model.** `ollama pull llava`, set

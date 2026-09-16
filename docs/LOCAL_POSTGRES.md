@@ -37,7 +37,21 @@ the official binaries, run as an ordinary user process.
 |---|---|
 | Binaries | `%USERPROFILE%\pg\pgsql` |
 | Data directory | `%USERPROFILE%\pgdata` |
-| Server log | `%USERPROFILE%\pgdata\server.log` |
+| Server log | `%USERPROFILE%\pgdata.log` — beside the data directory, never inside it |
+
+**The log must not be inside the data directory.** It used to be
+(`pgdata\server.log`), and every start after a reboot cost 30 s: crash recovery
+fsyncs every file under the data directory, the postmaster holds its own log
+open, and Windows answers with a sharing violation Postgres retries for half a
+minute. Measured 2026-09-14.
+
+**You no longer start it by hand after a reboot.** With `LOCAL_POSTGRES_BIN_DIR`
+and `LOCAL_POSTGRES_DATA_DIR` in `.env.local`, the API server runs `pg_ctl start`
+itself when `DATABASE_URL` points at this machine and nothing is running
+(`app/core/local_postgres.py`) — so launching the desktop app is enough. A start
+that fails stops the server with the end of the log quoted, rather than booting
+against a database that is not there. The suite does not do this: `pytest`
+still needs the server up, so run step 3 below first after a reboot.
 
 **The data directory must not be under OneDrive.** OneDrive syncs open files;
 a synced Postgres data directory is a corrupted one. `%USERPROFILE%\pgdata` is
@@ -53,9 +67,10 @@ Expand-Archive postgresql-18.6-1-windows-x64-binaries.zip -DestinationPath $env:
 $env:USERPROFILE\pg\pgsql\bin\initdb.exe -D $env:USERPROFILE\pgdata `
     -U postgres --pwfile=pw.txt -E UTF8 --locale=C
 
-# 3. Start it. This is also how it is started after a reboot.
+# 3. Start it. The API server does this itself once step 5 names the install;
+#    by hand, it is only needed before `pytest`.
 $env:USERPROFILE\pg\pgsql\bin\pg_ctl.exe -D $env:USERPROFILE\pgdata `
-    -l $env:USERPROFILE\pgdata\server.log -w start
+    -l $env:USERPROFILE\pgdata.log -w start
 
 # 4. Role and BOTH databases. NOBYPASSRLS, not SUPERUSER -- see the warning below.
 psql -U postgres -h localhost -d postgres -c "CREATE ROLE kryova LOGIN PASSWORD '...' CREATEDB CREATEROLE NOBYPASSRLS;"
@@ -66,6 +81,8 @@ psql -U postgres -h localhost -d postgres -c "CREATE DATABASE kryova_test OWNER 
 #    (Settings.model_config reads (".env", ".env.local")).
 #    DATABASE_URL=postgresql://kryova:...@localhost:5432/kryova?sslmode=disable
 #    TEST_DATABASE_URL=postgresql://kryova:...@localhost:5432/kryova_test?sslmode=disable
+#    LOCAL_POSTGRES_BIN_DIR=C:\Users\<you>\pg\pgsql\bin
+#    LOCAL_POSTGRES_DATA_DIR=C:\Users\<you>\pgdata
 
 # 6. Schema. migrations/env.py creates the `kryova` schema itself.
 venv\Scripts\python.exe -m alembic upgrade head

@@ -703,6 +703,16 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
 4. **`sslmode=disable` in the local URL is required, not a shortcut.** A stock local Postgres has
    `ssl = off` and refuses the handshake. `app/core/database.py::sslmode_for` reads the mode out
    of the URL rather than hardcoding it.
+4a. **The server starts the local Postgres itself; the suite does not.** It does not survive a
+   reboot, and before 2026-09-14 that meant every desktop launch after one showed "The API server
+   is not reachable" — because **psycopg on Windows waits forever on a refused port** unless
+   `connect_timeout` is set, so uvicorn hung in lifespan and never bound. Now `connect_args_for`
+   always sets it, and `app/core/local_postgres.py` runs `pg_ctl start` from lifespan when
+   `LOCAL_POSTGRES_BIN_DIR`/`LOCAL_POSTGRES_DATA_DIR` are set and `DATABASE_URL` is loopback.
+   `pytest` still needs it up first. **Keep the server log outside the data directory**
+   (`%USERPROFILE%\pgdata.log`): inside it, crash recovery's fsync collides with the open log
+   and every post-reboot start costs 30 s. If the desktop app shows that setup page anyway, read
+   `%LOCALAPPDATA%\Kryova\logs\backend.log` — it now says why.
 5. `expire_on_commit=False` is load-bearing; endpoints read ORM attributes after `commit()`.
 6. **`~250 ms` per round trip on Neon, `~0.14 ms` locally.** The DB suite was four minutes of
    almost pure latency and is now well under one.

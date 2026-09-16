@@ -10,6 +10,7 @@ happily restore over production, and a migration with no rollback note.
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -249,6 +250,133 @@ class TestTheRestoreDrill:
         over = DrillResult(target="t", dry_run=False, restore_seconds=RTO_MINUTES * 60 + 1)
         assert not over.within_rto
         assert "OVER" in over.report()
+
+
+class TestWhatTheFirstRealDrillRunFound:
+    """Five defects the drill had while its refusals were all tested (P9 task 6).
+
+    P9.6 stood at PARTIAL saying "the drill is written and its refusals are
+    tested; it has never been run". It was run for the first time on 2026-09-16,
+    against a real local PostgreSQL 16.15 with two scratch databases, and every
+    one of these is something reading the code had not produced. They are pinned
+    here so the fixes cannot quietly come undone.
+
+    **Written on Linux and not run as pytest**; each assertion was evaluated once
+    by a one-off script, and the behaviours they pin were measured against the
+    real server first.
+    """
+
+    def test_the_migration_subprocess_is_pointed_at_the_target(self) -> None:
+        """The worst of the five: `alembic upgrade head` migrated production.
+
+        The subprocess inherited the environment, so `migrations/env.py` read
+        `settings.database_url` and migrated whatever `DATABASE_URL` named rather
+        than the database just restored. Measured by pointing `DATABASE_URL` at a
+        bystander database: all 38 tables appeared there, none in the target, and
+        the drill reported "migrations: ok". On a server, `DATABASE_URL` is
+        production.
+        """
+        from scripts.restore_drill import _alembic_env
+
+        env = _alembic_env("postgresql://u:p@host/restored")
+        assert env["DATABASE_URL"] == "postgresql://u:p@host/restored"
+
+    def test_the_test_database_url_is_cleared_too(self) -> None:
+        """It resolves ahead of DATABASE_URL in some configurations.
+
+        A drill that quietly migrated the test schema would collide with whatever
+        suite is running — the two-concurrent-pytest-runs failure CLAUDE.md
+        records, arriving from a direction nobody would look in.
+        """
+        import os
+        from unittest import mock
+
+        from scripts.restore_drill import _alembic_env
+
+        with mock.patch.dict(os.environ, {"TEST_DATABASE_URL": "postgresql:///kryova_test"}):
+            assert "TEST_DATABASE_URL" not in _alembic_env("postgresql:///restored")
+
+    def test_a_password_never_reaches_the_report(self) -> None:
+        """A drill report is the likeliest thing in this repo to be pasted into a ticket."""
+        from scripts.restore_drill import DrillResult
+
+        result = DrillResult(
+            target="postgresql://kryova:hunter2@localhost:5432/kryova_restore?sslmode=disable",
+            dry_run=True,
+        )
+        assert "hunter2" not in result.report()
+        assert "hunter2" not in json.dumps(result.to_dict())
+        # Redacted, not destroyed: which machine a drill ran against is the half
+        # a reader needs.
+        assert "localhost:5432/kryova_restore" in result.redacted_target
+        assert "kryova:***@" in result.redacted_target
+
+    def test_a_url_with_no_credential_passes_through_unchanged(self) -> None:
+        from scripts.restore_drill import _redact
+
+        assert _redact("postgresql:///kryova_restore_drill") == "postgresql:///kryova_restore_drill"
+        assert _redact("postgresql://localhost/db") == "postgresql://localhost/db"
+
+    def test_a_table_that_could_not_be_counted_is_not_a_zero(self) -> None:
+        """`_count_rows` omits a table whose query failed, so the caller must notice.
+
+        Before this, "no such table" and "no rows" were the same answer: the
+        counts came back empty and the drill still said PASSED. It only ever
+        worked because the role and the schema are both named `kryova`, so
+        `search_path`'s `"$user"` resolved — set `DB_SCHEMA` to anything else and
+        every count silently vanished.
+        """
+        from scripts.restore_drill import COUNTED_TABLES, Finding
+
+        counted = {"users": 3}
+        unreadable = [table for table in COUNTED_TABLES if table not in counted]
+        finding = Finding("row counts", not unreadable, "")
+        assert not finding.ok
+        assert len(unreadable) == len(COUNTED_TABLES) - 1
+
+    def test_the_count_query_is_schema_qualified(self) -> None:
+        from scripts.restore_drill import _qualified
+
+        assert _qualified("users", "kryova") == '"kryova"."users"'
+
+    def test_a_blob_check_that_could_not_run_is_not_a_pass(self) -> None:
+        """The one outcome worse than no check: a check that failed, reporting a tick.
+
+        `_check_blobs` returned two empty lists when its query failed, and the
+        caller rendered that as "0 referenced blob(s) missing" — indistinguishable
+        from a clean store. It returns a third value now, and `None` is the only
+        value that means it ran.
+        """
+        from pathlib import Path as _Path
+
+        from scripts.restore_drill import _check_blobs
+
+        missing, orphans, why = _check_blobs(
+            "postgresql://127.0.0.1:1/nothing-here", _Path("/nonexistent"), "kryova"
+        )
+        assert why is not None
+        assert missing == [] and orphans == []
+
+    def test_the_preflight_asks_whether_a_backup_can_be_taken_at_all(self) -> None:
+        """The question the drill could not ask, because it started from a file.
+
+        14 of 38 tables FORCE row-level security and the application role is
+        NOBYPASSRLS — which the architecture requires (CLAUDE.md *Database* item
+        3) — so a plain `pg_dump` exits non-zero and there is no backup. Measured
+        2026-09-16. `--enable-row-security` succeeds, and is complete only
+        because every current policy permits an unscoped session; a policy
+        written without that branch would make the same command write a backup
+        missing every row of those tables.
+        """
+        from scripts.restore_drill import check_dumpable
+
+        findings = check_dumpable("postgresql://127.0.0.1:1/nothing-here", "kryova")
+        names = [finding.name for finding in findings]
+        assert "role can read past RLS" in names
+        assert "tables forcing RLS" in names
+        # Unreachable server: the bypass question cannot be answered, so it must
+        # not answer "yes".
+        assert not findings[0].ok
 
 
 class TestMigrationRollbackNotes:

@@ -6626,6 +6626,49 @@ scene in the Tauri app.
 
 6. **Backups and restore *drills***: PITR verified by actually restoring; blob-store backup with
    refcount integrity check; a written RTO/RPO and a quarterly drill that proves it.
+   > PARTIAL (2026-09-16) — **the drill has now been run, for the first time, against a real
+   > PostgreSQL (16.15, local), and running it found four defects that reading it had not.** All
+   > four are fixed; the residual is unchanged and is stated at the end.
+   > 1. **`alembic upgrade head` migrated `DATABASE_URL`, not the restore target.** Alembic's
+   >    `env.py` reads the setting, and the drill ran it with the ambient environment — so on a
+   >    machine where `DATABASE_URL` points at production, the drill's "migrations: ok" tick
+   >    meant *production* had been migrated. Proved rather than reasoned about: with
+   >    `DATABASE_URL` aimed at a bystander database, the bystander came back holding all 38
+   >    tables while the restore target held none and the drill reported success. `_alembic_env`
+   >    now passes the target through the environment, and the bystander stays at 0 tables.
+   > 2. **The application role cannot take the backup at all.** 14 of the 38 tables carry
+   >    `FORCE ROW LEVEL SECURITY` and the role is `NOBYPASSRLS` by design (Database item 3), so
+   >    plain `pg_dump` stops on the first of them: `query would be affected by row-level
+   >    security policy for table "approval_gates"`. A drill that restores a dump nobody can take
+   >    proves nothing. `--enable-row-security` succeeds, and it is complete **only** because
+   >    every policy here has an "unset means everything" branch — with no `SET LOCAL` in force
+   >    the policies admit every row. That is a property of these policies, not of the flag, so
+   >    `check_dumpable` states it and a policy that loses that branch silently starts taking
+   >    partial backups.
+   > 3. **A blob check that could not run rendered as a tick.** The query failed and the report
+   >    said `0 referenced blob(s) missing`, which reads as "nothing is lost". `_check_blobs` now
+   >    returns why it could not answer, and the drill records a finding instead of a zero.
+   > 4. **`report()` and `to_dict()` printed the database password**, in the output whose whole
+   >    purpose is to be pasted into a ticket. Redacted at both, verified by grepping the
+   >    password out of both forms: 0 occurrences, and `--json` shows
+   >    `postgresql://kryova:***@localhost:5432/kryova_drill_restore?sslmode=disable`.
+   >
+   > **A fifth finding was mine and was wrong, and it is recorded because the correction is the
+   > useful part.** Unqualified table names in the count queries looked broken; the real run
+   > counted correctly (`organisations: 2`, `users: 3`), because `search_path`'s `"$user"`
+   > resolves to the `kryova` schema — role and schema happen to share a name. So it is a
+   > fragility, not a defect: rename either and every count silently reads another schema's
+   > rows. `_qualified` now qualifies them explicitly.
+   > **Still open, and unchanged by this run: a real backup, a real PITR restore, and a quarterly
+   > cadence somebody owns.** What ran was a `pg_dump`/`pg_restore` round trip on a scratch
+   > database. PITR needs an archive, and there is not one yet.
+   > Tests were written on Linux and not run as pytest (the user's rule); the drill itself was
+   > run, which is where all five findings came from.
+   > Tested by: `tests/test_delivery.py::TestTheRestoreDrill` (6),
+   > `tests/test_delivery.py::TestWhatTheFirstRealDrillRunFound` (8). Code:
+   > `scripts/restore_drill.py`.
+
+   <!-- superseded 2026-09-16 -->
    > PARTIAL (2026-09-10) — **the drill is written and its refusals are tested; it has never
    > been run against a real backup, because there is no backup to run it against yet.**
    > `scripts/restore_drill.py`. Not a script that checks a dump exists: it restores one into a

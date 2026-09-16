@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 15/24 | 118/132 = 89% | 135/151 eng-months = 89% |
-| Product — P1–P10 | 6/10 | 51/62 = 82% | 31/38 eng-months = 81% |
-| **Programme** | 21/34 | 168/194 = 87% | 165/189 eng-months = 88% |
+| Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
+| **Programme** | 21/34 | 170/194 = 87% | 166/189 eng-months = 88% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -6214,10 +6214,82 @@ scene in the Tauri app.
 3. **Desktop-only powers, used sparingly**: local file open/save into the attachment pipeline, OS
    notifications for long-run completion, deep links (`kryova://run/...`) from CI or email into the
    app.
+   > PARTIAL (2026-09-16) — **the decidable half is written and the native half is not.**
+   > `../Kryova-frontend/src/lib/desktop-powers.ts`. Tests written on Linux and **not run**
+   > as vitest (the user's rule); `tsc --noEmit` and `eslint` clean, and all 23 claims were
+   > executed against the real module with a one-off script.
+   > **The deep link is the security half of this task, and it is treated as one.** The link
+   > arrives from an email or a CI comment, the person clicking it cannot read it first, and
+   > the app it opens is already signed in — the threat `safe-redirect.ts` handles for
+   > `?next=`, arriving through the operating system instead of the browser, and worse in one
+   > way because there is no URL bar. So `parseDeepLink` is an **allow-list of shapes**: three
+   > read targets (`run`, `conversation`, `project`), exactly one id segment, every other
+   > scheme and target refused by name. **Nothing a link reaches performs an action** — a link
+   > that ran a simulation or accepted an invitation would be a one-click cross-site request
+   > against an open session, so a link opens a page and the user presses the button.
+   > **Two parsing facts measured against node's WHATWG `URL` rather than assumed:**
+   > `kryova://run/x` parses with host `run` and path `/x` while `kryova:/run/x` has an empty
+   > host and path `/run/x` — both spellings occur, so segments are read from the two joined;
+   > and **`%2e%2e%2f` survives in `pathname` un-decoded**, so the id is decoded *before* it
+   > is validated, or a check sees a harmless token and the app navigates to `../`.
+   > **A notification is only for someone who walked away** — unfocused window *and* over 30 s
+   > — because an app that produces noise gets its notifications switched off at the OS level,
+   > after which the one that mattered never arrives. A cancellation is never notified, and no
+   > result number goes in the body: a stress figure with no mesh, material or load case beside
+   > it is the unqualified number `app/verify/` exists to prevent, and a notification has no
+   > room for the qualification.
+   > **Not done here, and it needs the Windows machine:** every native call. `src-tauri` has
+   > only `tauri-plugin-shell`, and this needs `dialog`, `fs`, `notification` and `deep-link`
+   > added to `Cargo.toml`, the `default.json` capability widened, and the `kryova` scheme
+   > registered in `tauri.conf.json`. **Deliberately not written blind** — Rust cannot be
+   > compiled or checked here, and an unbuildable `src-tauri` would block the Windows session
+   > rather than help it. QUEUE G5.
+   > **Interface change:** none; nothing existing is touched.
+   > Tested by: `../Kryova-frontend/src/lib/desktop-powers.test.ts` (23, written on Linux and
+   > not run).
+
+   <!-- superseded 2026-09-16 -->
    > NOT STARTED.
 
 4. **Offline honesty**: what works without the backend (viewing cached designs, reading docs) and
    what does not (everything else), stated in the UI rather than discovered by timeout.
+   > PARTIAL (2026-09-16) — **the table and the verdicts exist; no surface shows them yet.**
+   > `../Kryova-frontend/src/lib/offline-capability.ts`. Tests written on Linux and **not
+   > run** as vitest (the user's rule); `tsc --noEmit` and `eslint` clean, and all 20 claims
+   > were executed against the real module with a one-off script.
+   > **"Does this work offline" is a fact somebody knows when they build the feature and
+   > nobody can infer afterwards**, so it is a table of ten capabilities written in advance
+   > rather than a guess made at the call site. One table, not one decision per screen —
+   > that is how two screens come to disagree about the same feature and the user meets both.
+   > **A capability the table does not list reads as *unavailable*.** Defaulting a missing row
+   > to "works offline" would turn forgetting to add one into a promise the app cannot keep,
+   > which is the exact failure the module was written to remove.
+   > **Three states kept apart that are usually collapsed into one:**
+   > - `unknown` is the startup state and is **not** offline. Before the first probe the
+   >   honest position is that the backend is probably fine, and greying the interface out on
+   >   launch would make every cold start look like an outage.
+   > - `unreachable` (nothing answered) and `failing` (a 5xx) get different sentences, because
+   >   "no connection" invites checking the network and "the server is having trouble" invites
+   >   waiting, and swapping them wastes the user's time in both directions.
+   > - `cached` is enabled **and marked degraded**, so a short list cannot read as the whole
+   >   list. "Your last three designs" is honest; an empty list captioned "designs" is not.
+   > **`navigator.onLine` is a fast negative only** — `true` on a captive-portal wifi reaches
+   > nothing — and **a 401 or 404 is not offline**: the server is up and answering correctly
+   > about something else, and switching the whole interface off because one probe was
+   > unauthorised is the obvious wrong reading. Only 5xx is `failing`.
+   > **Nothing is queued for later, and the refusals say so.** An offline queue is a real
+   > feature with real consequences (a design edit replayed against a part that moved
+   > underneath), and pretending to accept a write is worse than refusing it.
+   > **The banner counts rather than adjectives** — "7 of 10 features need the server" is
+   > checkable and "limited functionality" is not.
+   > **Not done here:** no component renders any of it — no banner, no per-control disabling,
+   > no capability panel — and nothing probes, so no caller ever moves the state off
+   > `unknown`. The probe belongs beside `api-client.fetchWithRefresh`. QUEUE G5.
+   > **Interface change:** none.
+   > Tested by: `../Kryova-frontend/src/lib/offline-capability.test.ts` (20, written on Linux
+   > and not run).
+
+   <!-- superseded 2026-09-16 -->
    > NOT STARTED.
 
 5. **The Windows installer.**

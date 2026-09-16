@@ -1010,6 +1010,34 @@ this file drives the ladder, with a screenshot each.
       Settles: whether a click becomes the right face, and whether the ambiguous case is
       visible to a user rather than only to a test.
 
+- [ ] **G5 — P7.3 and P7.4, the desktop halves that need Rust and a window (added 2026-09-16).**
+      The decidable halves are written and unit-tested on Linux
+      (`../Kryova-frontend/src/lib/desktop-powers.ts`, 23 tests;
+      `offline-capability.ts`, 20 — none run, all 43 claims executed against the real modules
+      by a one-off script). **Every native call and every pixel is still missing.**
+      1. `npm run test -- src/lib/desktop-powers.test.ts src/lib/offline-capability.test.ts`,
+         then `npm run type-check` and `npm run lint`.
+      2. **Add the Tauri plugins.** `src-tauri/Cargo.toml` has only `tauri-plugin-shell`;
+         P7.3 needs `dialog`, `fs`, `notification` and `deep-link`. Widen
+         `src-tauri/capabilities/default.json` (it is a deliberate least-privilege set — add
+         the four permissions explicitly, do not switch to a broad default), and register the
+         `kryova` scheme in `tauri.conf.json`. **This was deliberately not written on Linux**:
+         Rust cannot be compiled or checked there and an unbuildable `src-tauri` would block
+         this machine rather than help it.
+      3. **Click a `kryova://run/<id>` link from outside the app** — from an email client and
+         from a terminal — with the app closed and with it already open. Both must land on the
+         run. Then click `kryova://admin/1` and confirm it refuses visibly rather than
+         silently doing nothing, which is what an unhandled scheme looks like.
+      4. **Pull the network cable** (not a backend stop — a stop is `unreachable` and this
+         should be too, but the cable also exercises `navigator.onLine`). Confirm the banner
+         names a count, the seven server-bound features are switched off with sentences, and a
+         cached design still opens and is marked as cached. Then stop only the backend and
+         confirm the sentence changes from "cannot be reached" to the error form.
+      5. Start a long simulation, move the window behind something else, and confirm the
+         notification arrives — then repeat with the window focused and confirm it does not.
+      Settles: whether the three desktop powers work at all, and whether offline is *stated*
+      rather than discovered by timeout, which is the whole of P7.4.
+
 ---
 
 ## Expect failures on the first run, and that is the point

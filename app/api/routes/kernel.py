@@ -371,6 +371,97 @@ def measure_one_element(
     }
 
 
+@router.get("/conversations/{conversation_id}/selection/face")
+def name_a_picked_face(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+    face: Annotated[
+        int | None,
+        Query(ge=0, description="A face ordinal, from the display mesh's partition."),
+    ] = None,
+    triangle: Annotated[
+        int | None,
+        Query(ge=0, description="A triangle index, when the pick came from the mesh."),
+    ] = None,
+    level: Annotated[
+        int, Query(ge=0, le=2, description="Which display level the triangle indexes.")
+    ] = 0,
+) -> dict[str, Any]:
+    """What to call the face the user just clicked — master plan P6.6.
+
+    The 3D → name direction. `GET .../measure/element` takes an element *name*
+    and there was no way to get one from a pick; this is that way, and it is the
+    reason P6.4's measure could not be reached from the viewer.
+
+    **It offers, it does not decide.** Several predicates can name one face and
+    the choice is the user's, so the payload is a ranked list. `best` is the one
+    to preselect and is **null** when nothing describes the face by what it is —
+    two identical bores being the everyday case. A client must show that rather
+    than quietly using `positional`, which names a region of space and stops
+    being true when the part is resized.
+
+    Either `face` or `triangle` — a triangle is what a viewer actually has, and
+    `level` says which mesh it indexed, because the partition differs per level.
+    """
+    _owned_conversation(db, current_user, conversation_id)
+    document = _live_document(conversation_id)
+
+    if (face is None) == (triangle is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Give exactly one of 'face' (an ordinal) or 'triangle' (a pick from "
+                "the display mesh). Passing both would let them disagree."
+            ),
+        )
+
+    from app.kernel.errors import KernelError
+    from app.kernel.occt.propose import propose_face
+    from app.render import display
+
+    shape = document.shape
+    try:
+        if triangle is not None:
+            # Through `display.display_mesh`, which is the same call that built the GLB
+            # the client is holding -- see its docstring for why a second tessellation
+            # here would land the pick on the wrong face without erroring.
+            mesh, _, _ = display.display_mesh(shape, display.level(level))
+            ordinal = mesh.face_of(triangle)
+        else:
+            ordinal = int(face)  # type: ignore[arg-type]
+        proposal = propose_face(shape, ordinal, document=document)
+    except KernelError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Naming a picked face failed for %s", conversation_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"That face could not be named: {exc}",
+        ) from exc
+
+    def _render(item: Any) -> dict[str, Any]:
+        return {
+            "argument": item.as_argument(),
+            "words": item.words,
+            "matches": item.matches,
+            "stable": item.stable,
+        }
+
+    return {
+        "backend": backends.selected_backend(),
+        "face": proposal.face_index,
+        "best": _render(proposal.best) if proposal.best is not None else None,
+        "positional": (
+            _render(proposal.positional) if proposal.positional is not None else None
+        ),
+        "offered": [_render(item) for item in proposal.offered],
+        "explanation": proposal.describe(),
+    }
+
+
 class RequirementCheck(BaseModel):
     """A requirements document to check the conversation's part against.
 

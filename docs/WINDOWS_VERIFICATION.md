@@ -966,12 +966,36 @@ this file drives the ladder, with a screenshot each.
          back, not just the camera.
       4. Drive the measure route from a real conversation with the agent's element names
          (`slab#top`, a bare face word) and check the number against the part's own dimensions.
-      Blocked underneath, and worth knowing before starting: **a pick cannot become an element
-      name yet.** Turning a click on a triangle into `Pad.1#top` is E2 task 1's face predicate
-      and is unwritten, so measure is reachable from the agent's vocabulary and not from the
-      mouse. Wiring the other four does not wait on it.
+      **No longer blocked underneath (2026-09-16).** This row said a pick could not become an
+      element name because "E2 task 1's face predicate is unwritten". E2 task 1 was done on
+      2026-09-05; what was missing was the *inverse*, and P6.6 has now written it —
+      `GET /kernel/conversations/{id}/selection/face` turns a triangle index into a predicate.
+      So measure **is** reachable from the mouse, via G4, and step 4 below can be driven by
+      clicking rather than by typing element names.
       Settles: whether these interactions are usable rather than merely correct, and whether
       the section convention is the one a person expects.
+
+- [ ] **G4 — P6.6, the selection round trip in a browser (added 2026-09-16).**
+      The selection model and the face proposer are built and unit-tested on Linux
+      (`../Kryova-frontend/src/lib/selection-model.ts`, 19 tests; `app/kernel/occt/propose.py`
+      with `tests/test_kernel_propose.py`, 15; the route with 10 — none run). **No surface
+      calls any of it.**
+      1. `npm run test -- src/lib/selection-model.test.ts`, then
+         `venv\Scripts\python -m pytest tests/test_kernel_propose.py tests/test_kernel_routes.py -q`,
+         `ruff` and `mypy`.
+      2. **Check the pick lands on the face you clicked**, on a part with a bore. Click the
+         top face, the side wall and the inside of the bore in turn and read `face` back. This
+         is the one thing Linux cannot check: the triangle index comes from the renderer's own
+         ray cast, and every ordinal exists, so a wrong mapping returns a plausible face rather
+         than an error. Do it at **each of the three display levels** — the partition differs
+         per level and `display_mesh` is what keeps client and server on the same mesh.
+      3. Click one of **two identical bores** and confirm the UI says the face cannot be
+         described rather than showing the box silently. That is the state the whole
+         `best`/`positional` split exists for and it is the one a hurried wiring collapses.
+      4. Take an offered argument into an operation from the UI and confirm the part changes
+         the way the highlight said it would.
+      Settles: whether a click becomes the right face, and whether the ambiguous case is
+      visible to a user rather than only to a test.
 
 ---
 

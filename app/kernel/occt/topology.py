@@ -103,6 +103,21 @@ def census(shape: Any) -> dict[str, int]:
     }
 
 
+def index_map(shape: Any, kind: str) -> Any:
+    """The same map `explore` builds, kept so a caller can ask it for one index.
+
+    `explore(shape, kind)[i]` and `index_map(shape, kind).FindIndex(s) - 1` are the same
+    numbering, which is the point: `tessellate` walks faces with `explore_oriented` (it
+    needs the orientation) but must label each triangle with the ordinal `resolve` and
+    every predicate use — the de-duplicated one. Counting off the oriented walk instead
+    agrees on a solid and comes apart on a shape where one face has two parents.
+    """
+    require()
+    mapping = symbol("TopTools_IndexedMapOfShape")()
+    symbol("TopExp").MapShapes_s(shape, _enum(kind), mapping)
+    return mapping
+
+
 def faces(shape: Any) -> list[Any]:
     cast = symbol("TopoDS").Face_s
     return [cast(s) for s in explore(shape, FACE)]

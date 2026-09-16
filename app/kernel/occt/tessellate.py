@@ -21,6 +21,11 @@ Three facts it rests on, each checked on this OCP build on 2026-09-15:
 Nodes are not welded across faces: a vertex on a shared edge appears once per face. That is what
 a flat-shaded viewer wants (glTF computes flat normals when none are given) and it keeps the
 indices of one face independent of every other.
+
+**Every triangle records the face it came from** (`TriangleMesh.face_of_triangle`, added 2026-09-16
+with P6.6). That is what makes a pick answerable: a ray hits a triangle, and the question anyone
+then asks -- measure this, fillet this, what is this called -- is about the *face*. Without it the
+mesh is a picture you cannot point at. `app/kernel/occt/propose.py` is the other half.
 """
 
 from __future__ import annotations
@@ -32,7 +37,7 @@ import numpy as np
 
 from app.kernel.errors import KernelError
 from app.kernel.occt.binding import require, symbol
-from app.kernel.occt.topology import FACE, explore_oriented
+from app.kernel.occt.topology import FACE, explore_oriented, index_map
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,19 @@ class TriangleMesh:
     linear_deflection_mm: float
     angular_deflection_rad: float
 
+    #: Which B-rep face each triangle came from: an (m,) int64 array of ordinals into
+    #: `topology.faces()` -- the de-duplicated map order, which is the list
+    #: `app/kernel/occt/resolve.py` filters. So an ordinal here and a face a predicate
+    #: resolved to are the same numbering. It is deliberately *not* the order of the
+    #: `explore_oriented` walk the loop below uses; see the comment there.
+    #:
+    #: This is what turns a click on a triangle into a face, which is the half of P6.4's
+    #: measure and P6.6's selection that the mesh alone cannot answer. It is `None` on a
+    #: mesh nobody tessellated -- a hand-built one in a test -- and `face_of` refuses such
+    #: a mesh by name rather than guessing an ordinal, because a wrong face is a wrong
+    #: measurement that looks like a right one.
+    face_of_triangle: np.ndarray | None = None
+
     @property
     def vertex_count(self) -> int:
         return int(self.positions.shape[0])
@@ -51,6 +69,32 @@ class TriangleMesh:
     @property
     def triangle_count(self) -> int:
         return int(self.indices.shape[0])
+
+    @property
+    def face_count(self) -> int:
+        """How many B-rep faces contributed triangles, or 0 when the partition is absent."""
+        if self.face_of_triangle is None or self.face_of_triangle.size == 0:
+            return 0
+        return int(self.face_of_triangle.max()) + 1
+
+    def face_of(self, triangle_index: int) -> int:
+        """The face ordinal a picked triangle belongs to.
+
+        The whole point of the pick: a viewer knows which triangle the ray hit and needs
+        the face, because every predicate in `app/kernel/selection.py` is about faces and
+        none of them is about triangles.
+        """
+        if self.face_of_triangle is None:
+            raise KernelError(
+                "This mesh carries no face partition, so a triangle cannot be traced back to "
+                "a face. Meshes from `tessellate` carry one; a hand-built mesh does not."
+            )
+        if not 0 <= triangle_index < self.triangle_count:
+            raise KernelError(
+                f"Triangle {triangle_index} is not in this mesh, which has "
+                f"{self.triangle_count} triangles (0..{self.triangle_count - 1})."
+            )
+        return int(self.face_of_triangle[triangle_index])
 
     @property
     def bounds_mm(self) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
@@ -101,9 +145,28 @@ def tessellate(
 
     positions: list[tuple[float, float, float]] = []
     triangles: list[tuple[int, int, int]] = []
+    face_of_triangle: list[int] = []
     untriangulated = 0
+    # The ordinal is the face's index in `topology.faces()` order -- the de-duplicated
+    # map -- because that is the list `resolve.py` filters and therefore the only
+    # numbering a predicate can be checked against.
+    #
+    # This walk has to be `explore_oriented`, which is a *different* list: it keeps the
+    # orientation the flip below needs, and it keeps duplicates.
+    #
+    # **The two agreed on every shape tried on 2026-09-16** -- a bored plate (7 faces),
+    # a compound of two disjoint boxes (12), two touching boxes compounded (12), their
+    # fuse (10) and a sewing of both (12, not 11: sewing joins edges into a shell and
+    # leaves the two coincident interface faces distinct). So the map lookup below is
+    # **defensive rather than demonstrated**: no shape here proves it is needed, and it
+    # is used anyway because `explore` de-duplicates by design and the day one face has
+    # two parents, counting off this walk shifts every later ordinal by one with nothing
+    # raising. Cheap insurance against a silent wrong face; not a pinned guard, and the
+    # test file says so rather than implying a break was watched.
+    face_map = index_map(copy, FACE)
     for face_shape in explore_oriented(copy, FACE):
         face = as_face(face_shape)
+        ordinal = face_map.FindIndex(face_shape) - 1
         location = location_type()
         triangulation = tool.Triangulation_s(face, location)
         if triangulation is None:
@@ -120,6 +183,7 @@ def tessellate(
             if flip:
                 n2, n3 = n3, n2
             triangles.append((base + n1 - 1, base + n2 - 1, base + n3 - 1))
+            face_of_triangle.append(ordinal)
     if untriangulated:
         raise KernelError(
             f"{untriangulated} face(s) came back with no triangulation, so the display mesh would "
@@ -132,6 +196,7 @@ def tessellate(
         indices=np.asarray(triangles, dtype=np.int64),
         linear_deflection_mm=linear_deflection_mm,
         angular_deflection_rad=angular_deflection_rad,
+        face_of_triangle=np.asarray(face_of_triangle, dtype=np.int64),
     )
 
 

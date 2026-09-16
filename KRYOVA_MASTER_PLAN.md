@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 15/24 | 118/132 = 89% | 135/151 eng-months = 89% |
-| Product — P1–P10 | 6/10 | 50/62 = 81% | 30/38 eng-months = 79% |
-| **Programme** | 21/34 | 168/194 = 87% | 165/189 eng-months = 87% |
+| Product — P1–P10 | 6/10 | 51/62 = 82% | 31/38 eng-months = 81% |
+| **Programme** | 21/34 | 168/194 = 87% | 165/189 eng-months = 88% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -6078,6 +6078,81 @@ client renders what it is sent, at the detail the view deserves.
 6. **Tree ↔ 3D ↔ spec, one selection model**: click a part in the tree, it highlights in 3D and the
    spec panel scrolls to its feature; select a face in 3D, the predicate that would name it (E2
    task 1) is offered.
+   > PARTIAL (2026-09-16) — **both directions have their logic and the 3D → name half is
+   > built end to end; no surface calls any of it yet.** Frontend
+   > `../Kryova-frontend/src/lib/selection-model.ts`; backend
+   > `app/kernel/occt/propose.py`, the face partition in `app/kernel/occt/tessellate.py`,
+   > and `GET /kernel/conversations/{id}/selection/face`.
+   >
+   > **The decision this task asked for, and the premise it was given was wrong.** The
+   > continuation prompt said the 3D → name half was blocked on "E2 task 1's face
+   > predicate, which does not exist". E2 task 1 is `DONE (2026-09-05)` and predicate
+   > *selection* very much exists (`app/kernel/selection.py`, `occt/resolve.py`). What did
+   > not exist is the **inverse**: given a face, the predicate that names it. So the
+   > blocker was real and it was a different thing, and it is written here rather than
+   > closed silently. It is now built, which also unblocks **P6.4's measure from a pick** —
+   > that route takes an element *name* and there was no way to get one from a click.
+   >
+   > **A pick is answerable because every triangle now records its face.**
+   > `TriangleMesh.face_of_triangle` labels each triangle with an ordinal into
+   > `topology.faces()` — deliberately the de-duplicated map order that `resolve.py`
+   > filters, not the order of the `explore_oriented` walk the mesher itself uses, so a
+   > pick and a predicate are the same numbering. Verified geometrically rather than by
+   > bookkeeping: each face's triangles reconstruct that face's own area (exact on the six
+   > planes, within the chord error on the bore). Shifting the ordinal by one makes
+   > `test_each_faces_triangles_reconstruct_that_faces_area` fail with face 0 reporting the
+   > bore's 752.1 mm² instead of its 800.0 — watched, then restored and re-checked by hash.
+   >
+   > **The proposer generates liberally and verifies by resolving**, so it holds no
+   > geometric reasoning of its own and cannot drift from `resolve.py`. A candidate that
+   > does not select the pick is dropped, not corrected.
+   >
+   > **Four things it refuses to get plausibly wrong**, each measured on 2026-09-16:
+   > - **A curved face is never named by a direction.** `face_normal` reads the normal at
+   >   the parametric centre, which on a cylinder is wherever the seam fell — the bore of a
+   >   60×40×20 plate reports (1, 0, 0) and is caught by `normal: "+x"` alongside the +x
+   >   wall. On a part with no +x wall that candidate would verify as *unique* and be
+   >   offered as the best name for a bore.
+   > - **A face nothing describes says so.** `best` is `None` for one of two identical
+   >   bores; the ambiguity is reported with its count ("selects 2 faces including this
+   >   one") rather than a name meaning both.
+   > - **A positional name is separated from a durable one.** An `inside` box always
+   >   resolves uniquely, so a `best` that accepted one would never be `None` and the
+   >   ambiguity would never surface. `best` requires `stable`; `positional` is its own
+   >   property and carries the caveat.
+   > - **The name offered is the engineer's, never the kernel's.** It offered
+   >   `of: "Pad.1"` for a pad the user called `slab` until fixed — the positional
+   >   fragility `app/design/` exists to remove, arriving through the UI instead of a plan.
+   >   Found by probing the real runner: `_feature_owning` called `document.features()`,
+   >   which does not exist, so `getattr(..., lambda: [])()` returned `[]` for every
+   >   document and no feature name was ever offered. Nothing went red.
+   >
+   > **`display.display_mesh` is now the one definition of "the mesh at level N"**, because
+   > a pick is a triangle index into the mesh the client was served; tessellating a second
+   > time with deflections computed a second way lands the pick on a different face,
+   > silently, since every index still exists.
+   >
+   > **The round trip is proved, not assumed:** the offered argument for the top face goes
+   > straight into `catia_shell_faces` as `open_faces` and builds an 11-face shell.
+   >
+   > **Unpinned and labelled rather than claimed:** the ordinal is looked up in the map
+   > instead of counted off the walk, which matters only where one face has two parents.
+   > Five shapes were tried on 2026-09-16 (bored plate, two compounds, a fuse, a sewing)
+   > and none produces that, so no test fails when the lookup is replaced by a counter.
+   >
+   > **Not done here, and it is the larger half:** no surface calls any of this. There is
+   > no tree component, no spec panel wiring and no pick handler in the viewer — the same
+   > open half P6.2, P6.4 and P6.5 carry, and QUEUE G4 is where it is measured.
+   > **Interface change:** a new route, and `TriangleMesh` gains a field (defaulted, so a
+   > hand-built mesh stays valid and refuses a pick by name).
+   > Tests written on Linux and **not run** as pytest or vitest (the user's rule); the
+   > claims were each checked against the real kernel by one-off script first, and
+   > `py_compile`, `tsc --noEmit` and `eslint` are clean.
+   > Tested by: `tests/test_kernel_propose.py` (15),
+   > `tests/test_kernel_routes.py::TestNamingAPickedFace` (10),
+   > `../Kryova-frontend/src/lib/selection-model.test.ts` (19).
+
+   <!-- superseded 2026-09-16 -->
    > NOT STARTED.
 
 **Phase proof:** M5's full assembly — structure paint <2 s, orbit at 30+ fps on the reference

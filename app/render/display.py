@@ -96,8 +96,16 @@ def diagonal_mm(shape: Any) -> float:
     return math.dist((x0, y0, z0), (x1, y1, z1))
 
 
-def display_glb(shape: Any, display_level: DisplayLevel, *, name: str) -> tuple[bytes, dict[str, Any]]:
-    """The GLB for one level, and what it was made with (for the media row's `meta`)."""
+def display_mesh(shape: Any, display_level: DisplayLevel) -> tuple[Any, float, float]:
+    """The triangles a viewer is sent for one level, with the deflections used.
+
+    **The one definition of "the mesh at level N", and it has to be one.** A pick arrives
+    as a triangle index into the mesh the client was served, and `propose.py` turns that
+    into a face through the partition. Tessellating a second time with deflections
+    computed a second way would hand back a different triangle count for the same level,
+    and the pick would land on the wrong face — silently, because every index still
+    exists. So `display_glb` and the selection route both come through here.
+    """
     diagonal = diagonal_mm(shape)
     linear = display_level.relative_deflection * diagonal
     mesh = tessellate(
@@ -105,6 +113,12 @@ def display_glb(shape: Any, display_level: DisplayLevel, *, name: str) -> tuple[
         linear_deflection_mm=linear,
         angular_deflection_rad=display_level.angular_deflection_rad,
     )
+    return mesh, diagonal, linear
+
+
+def display_glb(shape: Any, display_level: DisplayLevel, *, name: str) -> tuple[bytes, dict[str, Any]]:
+    """The GLB for one level, and what it was made with (for the media row's `meta`)."""
+    mesh, diagonal, linear = display_mesh(shape, display_level)
     data = write_glb(part_scene(name, mesh))
     return data, {
         "diagonal_mm": diagonal,

@@ -13,6 +13,7 @@ artefact people trust without checking.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -647,3 +648,157 @@ class TestMeasuringOneElement:
         theirs = _conversation(db_session, other.id)
 
         assert self._item(auth_client, theirs.id).status_code == 404
+
+
+class TestNamingAPickedFace:
+    """P6.6's 3D → name direction: a click becomes a predicate the agent can use.
+
+    Every payload below was read off the real runner on 2026-09-16 before it was
+    written here. The plate is `_build_plate`'s: a 60×40×20 pad named `slab`, six
+    faces, twelve triangles at display level 0.
+    """
+
+    @staticmethod
+    def _name(client: Any, conversation_id: str, **params: Any) -> Any:
+        return client.get(
+            f"/api/v1/kernel/conversations/{conversation_id}/selection/face",
+            params=params,
+        )
+
+    def test_the_top_face_is_offered_as_the_top_of_the_feature(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        body = self._name(auth_client, mine.id, face=5).json()
+
+        assert body["best"]["argument"] == {
+            "type": "face",
+            "of": "slab",
+            "axis": "z",
+            "side": "max",
+        }
+        assert body["best"]["matches"] == 1
+        assert body["best"]["stable"] is True
+
+    def test_the_name_offered_is_the_one_the_engineer_chose(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """`slab`, never `Pad.1`.
+
+        Both resolve, so both would verify. Putting the kernel's invented name in
+        front of a user is the positional fragility `app/design/` exists to remove,
+        arriving through the UI instead of through a plan.
+        """
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        body = self._name(auth_client, mine.id, face=5).json()
+
+        assert body["best"]["argument"]["of"] == "slab"
+        assert "Pad.1" not in json.dumps(body)
+
+    def test_a_triangle_from_the_viewer_reaches_the_same_answer(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """The pick a viewer actually has is a triangle index, not a face ordinal."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        body = self._name(auth_client, mine.id, triangle=0, level=0).json()
+
+        assert body["face"] == 0
+        assert body["best"]["argument"] == {
+            "type": "face",
+            "of": "slab",
+            "axis": "y",
+            "side": "min",
+        }
+
+    def test_the_offered_name_is_an_argument_an_operation_takes(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """The point of the whole task: the pick becomes a `faces:` argument that works.
+
+        A name that cannot be handed straight to an operation is a label, not a
+        selection.
+        """
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        argument = self._name(auth_client, mine.id, face=5).json()["best"]["argument"]
+
+        runner = backends.session_for(mine.id)
+        result = runner(
+            "catia_shell_faces", {"thickness_mm": 2.0, "open_faces": argument}
+        )
+
+        # A 60x40x20 box opened on its top face and walled at 2 mm: the five original
+        # walls become ten, plus the floor's inner face. Measured 2026-09-16.
+        assert result["face_count"] == 11
+        assert result["has_solid"] is True
+
+    def test_giving_both_a_face_and_a_triangle_is_refused(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """They could disagree, and then one of them is silently wrong."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        response = self._name(auth_client, mine.id, face=1, triangle=1)
+
+        assert response.status_code == 400
+        assert "exactly one" in response.json()["detail"]
+
+    def test_giving_neither_is_refused(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        assert self._name(auth_client, mine.id).status_code == 400
+
+    def test_a_face_that_is_not_on_the_part_is_refused_with_the_count(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        response = self._name(auth_client, mine.id, face=99)
+
+        assert response.status_code == 400
+        assert "6 faces" in response.json()["detail"]
+
+    def test_every_offered_name_reports_what_it_would_select(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """A client showing a menu has to be able to say "this one picks 3 faces"."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        offered = self._name(auth_client, mine.id, face=5).json()["offered"]
+
+        assert offered
+        for item in offered:
+            assert item["matches"] >= 1
+            assert set(item) == {"argument", "words", "matches", "stable"}
+
+    def test_nothing_has_been_built_is_a_409_that_says_what_to_do(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+
+        response = self._name(auth_client, mine.id, face=0)
+
+        assert response.status_code == 409
+        assert "Ask for a part first" in response.json()["detail"]
+
+    def test_someone_elses_conversation_is_404_never_403(
+        self, auth_client: Any, db_session: Session
+    ) -> None:
+        other = User(email="selection-other@kryova.dev", hashed_password="x")
+        db_session.add(other)
+        db_session.flush()
+        theirs = _conversation(db_session, other.id)
+
+        assert self._name(auth_client, theirs.id, face=0).status_code == 404

@@ -77,6 +77,21 @@ class OcctRunner:
         return self._context.document
 
     @property
+    def assembly(self) -> Any:
+        """The assembly being composed, or None before `catia_product_create`.
+
+        An `app.kernel.occt.operations.assembly_ops.AssemblyState`, typed `Any` for the
+        reason `BuildContext.assembly` is: that module reaches `app.assembly`, which
+        reaches `app.dynamics.pose`, and a runner that imported it at module scope would
+        drag the whole chain into every geometry test.
+
+        A *property* rather than a reach into `_context` from a caller: the assembly is
+        the second thing a conversation can hold, and a route that read a private slot
+        would be the first place outside this class to know the runner's shape.
+        """
+        return self._context.assembly
+
+    @property
     def detail(self) -> Detail:
         return self._context.detail
 

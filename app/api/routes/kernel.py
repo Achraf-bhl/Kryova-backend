@@ -462,6 +462,139 @@ def name_a_picked_face(
     }
 
 
+def _live_assembly(conversation_id: str) -> Any:
+    """The assembly this conversation is composing, or an explained refusal.
+
+    Deliberately not `_live_runner`: that one refuses when no *part* is open, and a
+    conversation with a finished assembly has **no part open at all**. Taking a
+    component hands the document to the assembly and leaves the context empty on purpose
+    (`assembly_ops`'s docstring says why), so routing an assembly request through the
+    part's guard would refuse every assembly that had been assembled.
+    """
+    if not backends.is_local():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This assembly is being built on a CATIA seat, so there is nothing in "
+                "this process to draw. Set GEOMETRY_BACKEND=occt to build in-process."
+            ),
+        )
+    if backends.was_evicted(conversation_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The assembly this conversation was composing is no longer in memory — "
+                "too many documents were open at once and this one was closed. Nothing "
+                "was saved. Ask the agent to build it again."
+            ),
+        )
+    runner = backends.peek_session(conversation_id)
+    assembly = getattr(runner, "assembly", None) if runner is not None else None
+    if assembly is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "No assembly has been started in this conversation. Ask the agent for "
+                "one first — it records each part as a component and places instances "
+                "of them."
+            ),
+        )
+    return assembly
+
+
+@router.get(
+    "/conversations/{conversation_id}/assembly/scene",
+    responses={200: {"content": {"model/gltf-binary": {}}}},
+    response_class=Response,
+)
+def assembly_scene(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+    level: Annotated[int, Query(ge=0, description="0 is the finest level.")] = 1,
+) -> Response:
+    """The whole assembly as one GLB scene, at one display level (P6.1).
+
+    The half of P6.1 that `scene_for` could do and no route offered: a product structure
+    drawn as one file, each leaf component tessellated once and each occurrence a node
+    on it. **Forty bolts are one bolt's bytes** — that is the instancing the task asks
+    for, and it falls out of the glTF node graph rather than being extracted afterwards.
+
+    **The level means exactly what it means for a part, and that is a decision.** Each
+    component is tessellated by `display.display_mesh` against *its own* bounding-box
+    diagonal, so a bolt at level 1 is as smooth relative to itself as the frame is. The
+    alternative — deflecting everything against the *assembly's* diagonal — would make a
+    5 mm bolt in a 3 m machine coarser than the bolt, which is not a level of detail but
+    a different part. The consequence is stated rather than hidden: **an assembly GLB at
+    level N is the union of its distinct components at level N**, so its triangle count
+    grows with how many *different* parts there are, and this route does not make a
+    2,000-part machine cheap. Choosing a different level per component, by how much of
+    the screen it covers, is P6.2's streaming question and lives in the client.
+    `X-Assembly-Triangles` is here so a caller can see the number rather than infer it.
+
+    **Nothing is cached, and that is also deliberate.** The part route keys its GLB on
+    the stored file's sha256; an assembly held in memory has no stored bytes to key on,
+    and a key computed from the meshes would cost the tessellation it was meant to save.
+    A cache arrives with persistence, which `assembly_ops` records as needing a model and
+    a migration.
+    """
+    from app.kernel.errors import KernelError
+    from app.kernel.occt.operations import assembly_ops
+    from app.render import display
+    from app.render.gltf import GltfError, scene_for, write_glb
+
+    _owned_conversation(db, current_user, conversation_id)
+    state = _live_assembly(conversation_id)
+
+    try:
+        definition = display.level(level)
+    except KernelError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    try:
+        structure, shapes = assembly_ops.product_of(state, "the assembly scene")
+    except Exception as exc:  # noqa: BLE001 -- GeometryError and StructureError alike
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+    meshes: dict[str, Any] = {}
+    triangles = 0
+    try:
+        for name, shape in shapes.items():
+            mesh, _diagonal, _linear = display.display_mesh(shape, definition)
+            meshes[name] = mesh
+            triangles += mesh.triangle_count
+        scene = scene_for(structure, meshes)
+        data = write_glb(scene)
+    except GltfError as exc:
+        # The one that matters: a component with no geometry. `scene_for` names it, and
+        # its message already says why a machine drawn without it is worse than none.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Building an assembly scene failed for %s", conversation_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"That assembly could not be drawn: {exc}",
+        ) from exc
+
+    return Response(
+        content=data,
+        media_type=display.GLB_CONTENT_TYPE,
+        headers={
+            "X-Display-Level": str(level),
+            "X-Assembly-Name": structure.root,
+            "X-Assembly-Components": str(len(meshes)),
+            "X-Assembly-Occurrences": str(len(scene.placements)),
+            "X-Assembly-Triangles": str(triangles),
+        },
+    )
+
+
 class RequirementCheck(BaseModel):
     """A requirements document to check the conversation's part against.
 

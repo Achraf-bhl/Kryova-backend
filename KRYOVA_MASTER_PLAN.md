@@ -5933,6 +5933,46 @@ client renders what it is sent, at the detail the view deserves.
    (BOLTS parts repeat thousands of times — one mesh, N transforms). Cached in the
    content-addressed store keyed on geometry digest + tessellation params, so a part is tessellated
    once ever.
+   > PARTIAL (2026-09-16) — **the assembly half is served too: a product structure is now one GLB
+   > scene.** `GET /kernel/conversations/{id}/assembly/scene?level=0|1|2` draws the assembly a
+   > conversation is composing — each leaf component tessellated once, each occurrence a node on
+   > it, so **forty bolts are one bolt's bytes**. That is the instancing extraction the task asks
+   > for, and it falls out of the glTF node graph rather than being a pass over it: measured on a
+   > real bench assembly, eight further occurrences of an existing component grew the file by
+   > **908 bytes**. `scene_for` had existed since 2026-09-15 with no caller anywhere outside a
+   > test — the same integration gap `app/api/routes/kernel.py` was created for one layer down.
+   > **The level means what it means for a part, and that is a decision**: each component is
+   > tessellated by `display.display_mesh` against *its own* bounding-box diagonal, so a bolt is
+   > as smooth relative to itself as the frame is. Deflecting everything against the assembly's
+   > diagonal would make a 5 mm bolt in a 3 m machine coarser than the bolt — not a level of
+   > detail but a different part. The stated consequence is that **an assembly GLB at level N is
+   > the union of its distinct components at level N**, so this route does not make a 2,000-part
+   > machine cheap; choosing a level per component by screen coverage is P6.2's streaming
+   > question and lives in the client. `X-Assembly-Triangles` reports the number so a caller sees
+   > it rather than infers it. Measured on a bench of one flat rail and two identical bushings:
+   > **512 / 228 / 108 triangles** at levels 0 / 1 / 2, in 14,148 / 7,344 / 4,464 bytes, and the
+   > same assembly draws to the same bytes twice.
+   > **Refused by name:** a conversation with no assembly (a part is not an assembly of one);
+   > an assembly with nothing placed in it (with no instances the walk yields the root as its own
+   > leaf occurrence); a component with no geometry, named — a machine drawn without a part looks
+   > complete and is not; a level outside 0–2; the CATIA backend; another user's conversation,
+   > 404 rather than 403.
+   > **Not cached, deliberately**: the part route keys its GLB on the stored file's sha256, and an
+   > assembly held in memory has no stored bytes to key on — a key computed from the meshes would
+   > cost the tessellation it was meant to save. A cache arrives with persistence, which
+   > `assembly_ops` records as needing a model and a migration.
+   > **Interface changes:** a new route; `OcctRunner.assembly` (a conversation can hold two things
+   > now, and a route reading `_context` directly would be the first caller outside the class to
+   > know its shape); `assembly_ops.product_of` as the public way to a validated structure.
+   > **Still open:** Draco and meshopt (not installed, unmeasured on real parts); a miss builds
+   > the GLB in memory; display rows outlive a deleted project's files; display rows appear in
+   > `GET /media`; no assembly is persisted, so the scene dies with the conversation.
+   > **Not run here**: tests written on Linux on 2026-09-16 and not executed as pytest, at the
+   > user's instruction; all 40 claims were measured first against the real kernel and the real
+   > route function. Tested by: `tests/test_kernel_routes.py::TestDrawingAWholeAssembly`,
+   > `tests/test_render_gltf.py`, `tests/test_geometry.py::TestTheDisplayMesh`.
+
+   <!-- superseded 2026-09-16 -->
    > PARTIAL (2026-09-15, afternoon) — **a stored STEP version is now served as a GLB, made once
    > per file and level; compression is still unmeasured.** The route is
    > `GET /projects/{id}/geometry/{n}/display?level=0|1|2`. `app/render/display.py` defines three

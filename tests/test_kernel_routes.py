@@ -802,3 +802,227 @@ class TestNamingAPickedFace:
         theirs = _conversation(db_session, other.id)
 
         assert self._name(auth_client, theirs.id, face=0).status_code == 404
+
+
+def _build_bench(conversation_id: str) -> Any:
+    """A two-component assembly: one flat rail on two identical bushings.
+
+    Both halves matter. The **rail is flat**, so its triangle count is the same at every
+    display level; the **bushing is curved**, so its count falls with the level — an
+    assembly of boxes alone would let a level assertion pass while meaning nothing. And
+    the *two* bushings are one component placed twice, which is what makes the instancing
+    claim measurable rather than asserted.
+    """
+    runner = backends.session_for(conversation_id)
+    runner("catia_product_create", {"name": "bench"})
+
+    runner("catia_new_part", {"name": "Rail"})
+    runner("catia_sketch_create", {"support": "XY", "name": "profile"})
+    runner("catia_sketch_rectangle", {"sketch": "profile", "width_mm": 300.0, "height_mm": 40.0})
+    runner("catia_pad", {"name": "beam", "sketch": "profile", "length_mm": 20.0})
+    runner("catia_assembly_component", {"name": "rail"})
+
+    runner("catia_new_part", {"name": "Bushing"})
+    runner("catia_sketch_create", {"support": "XY", "name": "round"})
+    runner("catia_sketch_circle", {"sketch": "round", "diameter_mm": 30.0})
+    runner("catia_pad", {"name": "boss", "sketch": "round", "length_mm": 25.0})
+    runner("catia_assembly_component", {"name": "bushing"})
+
+    runner("catia_assembly_place", {"component": "rail", "at": [0.0, 0.0, 25.0]})
+    for x in (0.0, 270.0):
+        runner("catia_assembly_place", {"component": "bushing", "at": [x, 0.0, 0.0]})
+    return runner
+
+
+class TestDrawingAWholeAssembly:
+    """P6.1's open half: a product structure served as one GLB scene.
+
+    `scene_for` has existed since 2026-09-15 and no route had ever called it, which is
+    the same integration gap this whole module was written for one layer down. Every
+    number below was read off the real kernel on 2026-09-16 before it was written here:
+    the bench is 512 triangles at level 0, 228 at level 1 and 108 at level 2, in 14,148 /
+    7,344 / 4,464 bytes.
+
+    **Written on Linux and not run as pytest**, at the user's instruction.
+    """
+
+    @staticmethod
+    def _scene(client: Any, conversation_id: str, **params: Any) -> Any:
+        return client.get(
+            f"/api/v1/kernel/conversations/{conversation_id}/assembly/scene",
+            params=params,
+        )
+
+    def test_the_assembly_comes_back_as_a_glb(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_bench(mine.id)
+
+        response = self._scene(auth_client, mine.id, level=1)
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("model/gltf-binary")
+        body = response.content
+        # The glTF 2.0 header: magic 'glTF', version 2, and a length that is the file's.
+        assert body[:4] == b"glTF"
+        assert int.from_bytes(body[4:8], "little") == 2
+        assert int.from_bytes(body[8:12], "little") == len(body)
+
+    def test_it_says_what_it_drew(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """Counts in headers so a caller can see the cost rather than infer it."""
+        mine = _conversation(db_session, current_user_id)
+        _build_bench(mine.id)
+
+        headers = self._scene(auth_client, mine.id, level=1).headers
+
+        assert headers["X-Assembly-Name"] == "bench"
+        assert headers["X-Assembly-Components"] == "2"
+        assert headers["X-Assembly-Occurrences"] == "3"
+        assert headers["X-Assembly-Triangles"] == "228"
+        assert headers["X-Display-Level"] == "1"
+
+    def test_two_bushings_are_one_bushings_bytes(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """The instancing P6.1 asks for, and it falls out of the glTF node graph.
+
+        Two occurrences of one component, two meshes in the file rather than three.
+        Measured separately at the library level: eight *further* occurrences of an
+        existing component grow the file by 908 bytes, because each is a node and a
+        transform and no geometry at all.
+        """
+        mine = _conversation(db_session, current_user_id)
+        _build_bench(mine.id)
+
+        headers = self._scene(auth_client, mine.id, level=1).headers
+
+        assert headers["X-Assembly-Occurrences"] == "3"
+        assert headers["X-Assembly-Components"] == "2"
+
+    def test_a_coarser_level_really_is_coarser(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """On a *curved* component. An assembly of boxes would pass this meaning nothing."""
+        mine = _conversation(db_session, current_user_id)
+        _build_bench(mine.id)
+
+        counts = [
+            int(self._scene(auth_client, mine.id, level=n).headers["X-Assembly-Triangles"])
+            for n in (0, 1, 2)
+        ]
+
+        assert counts == [512, 228, 108]
+
+    def test_the_same_assembly_draws_to_the_same_bytes(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """Determinism, the same guarantee `app/render/` gives a rendered view."""
+        mine = _conversation(db_session, current_user_id)
+        _build_bench(mine.id)
+
+        first = self._scene(auth_client, mine.id, level=1).content
+        second = self._scene(auth_client, mine.id, level=1).content
+
+        assert first == second
+
+    def test_a_level_that_does_not_exist_is_refused_naming_the_ones_that_do(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_bench(mine.id)
+
+        response = self._scene(auth_client, mine.id, level=7)
+
+        assert response.status_code == 400
+        assert "0 to 2" in response.json()["detail"]
+
+    def test_a_conversation_with_no_assembly_says_so_rather_than_drawing_the_part(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """A part is not an assembly of one. Answering with it would be a wrong picture."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+
+        response = self._scene(auth_client, mine.id)
+
+        assert response.status_code == 409
+        assert "No assembly has been started" in response.json()["detail"]
+
+    def test_an_assembly_with_nothing_placed_in_it_is_refused(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """With no instances the walk yields the root as its own leaf occurrence."""
+        mine = _conversation(db_session, current_user_id)
+        runner = backends.session_for(mine.id)
+        runner("catia_product_create", {"name": "bench"})
+
+        response = self._scene(auth_client, mine.id)
+
+        assert response.status_code == 409
+        assert "nothing has been placed" in response.json()["detail"]
+
+    def test_a_component_with_no_geometry_is_named_rather_than_left_out(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """A machine drawn without a part looks complete and is not."""
+        mine = _conversation(db_session, current_user_id)
+        runner = _build_bench(mine.id)
+
+        class _Ghost:
+            shape = None
+            name = "ghost"
+            material = ""
+
+        runner.assembly.documents["ghost"] = _Ghost()
+        runner("catia_assembly_place", {"component": "ghost", "at": [0.0, 0.0, 0.0]})
+
+        response = self._scene(auth_client, mine.id)
+
+        assert response.status_code == 409
+        assert "ghost" in response.json()["detail"]
+
+    def test_the_backend_that_holds_the_assembly_is_the_one_that_draws_it(
+        self, auth_client: Any, db_session: Session, current_user_id: str, monkeypatch: Any
+    ) -> None:
+        mine = _conversation(db_session, current_user_id)
+        _build_bench(mine.id)
+        monkeypatch.setattr(settings, "geometry_backend", "catia")
+
+        response = self._scene(auth_client, mine.id)
+
+        assert response.status_code == 409
+        assert "CATIA seat" in response.json()["detail"]
+
+    def test_someone_elses_assembly_is_404_never_403(
+        self, auth_client: Any, db_session: Session
+    ) -> None:
+        other = User(email="assembly-other@kryova.dev", hashed_password="x")
+        db_session.add(other)
+        db_session.flush()
+        theirs = _conversation(db_session, other.id)
+
+        assert self._scene(auth_client, theirs.id).status_code == 404
+
+
+class TestTheRunnerOffersTheAssemblyItHolds:
+    """A conversation can hold two things now, and the route may reach both."""
+
+    def test_a_fresh_runner_is_composing_nothing(self) -> None:
+        runner = backends.session_for("assembly-accessor-empty")
+        assert runner.assembly is None
+
+    def test_taking_a_component_leaves_no_part_open_and_an_assembly_that_holds_it(
+        self,
+    ) -> None:
+        """Why the scene route cannot go through `_live_runner`: there is no part.
+
+        `catia_assembly_component` hands the open document to the assembly on purpose —
+        without the hand-off a conversation could build exactly one part.
+        """
+        runner = _build_bench("assembly-accessor-bench")
+
+        assert runner.document is None
+        assert sorted(runner.assembly.documents) == ["bushing", "rail"]

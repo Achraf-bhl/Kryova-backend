@@ -343,6 +343,27 @@ def _restricted_to(chosen: frozenset[str]) -> Callable[[Any, Any], str]:
     return rule
 
 
+def product_of(state: AssemblyState, tool: str) -> tuple[Any, dict[str, Any]]:
+    """The `ProductStructure` this state describes, and the shape behind each component.
+
+    The public way in for a reader outside this module — the viewer's assembly scene
+    route (P6.1) is the first. It is deliberately the *same* two functions the
+    operations use rather than a second walk over `state`: a scene built from a
+    structure this module did not validate could place a component that is no longer
+    there, and the drawing would simply be missing a part with nothing saying so.
+
+    `tool` names the caller in any refusal, because the message is read by whoever
+    asked — an agent calling `catia_clash` and an HTTP client asking for a GLB need to
+    see their own name in it.
+
+    Placements are required here for `_require_placements`'s reason: with no instances
+    the walk yields the root as its own leaf occurrence, so the scene would demand
+    geometry for a component that *is* the assembly.
+    """
+    _require_placements(state, tool)
+    return _structure(state, tool), _shapes(state)
+
+
 # -- the operations ----------------------------------------------------------
 
 
@@ -672,4 +693,5 @@ __all__ = [
     "component",
     "place",
     "product_create",
+    "product_of",
 ]

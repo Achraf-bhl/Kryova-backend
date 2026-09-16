@@ -381,6 +381,22 @@ class Settings(BaseSettings):
     # size as the lever, so a runaway mesh cannot hold a worker for ever.
     openfoam_timeout_s: float = 3600.0
 
+    # How a multibody run reaches Project Chrono (E9.1). Chrono is BSD and could be
+    # linked in-process, unlike OpenFOAM -- the process boundary here is not a licence
+    # boundary but a packaging one: PyChrono ships through conda only, and Decision 1
+    # keeps conda out of this deployment. So it runs in a container that has its own
+    # conda, and this venv never grows one. `pychrono` must never enter any
+    # requirements file: the PyPI name belongs to an unrelated timing utility and
+    # installing it would make the availability probe report an engine that is not there.
+    chrono_launcher: Literal["docker", "local"] = "docker"
+    # The image is the version pin, and it is built rather than pulled: no published
+    # image ships PyChrono, so `scripts/chrono_image.sh` makes one from micromamba.
+    # Never built during a run, for `openfoam_image`'s reason.
+    chrono_image: str = "kryova-chrono:9.0.1"
+    # A multibody run that has not finished by then is stopped and refused, naming the
+    # step size and the duration as the levers.
+    chrono_timeout_s: float = 1800.0
+
     # CATIA desktop bridge. The daemon dials out to this service over a
     # WebSocket; see docs/CATIA_BRIDGE_PROTOCOL.md for the wire format.
     # Off switches the tools out of the agent's vocabulary entirely rather than

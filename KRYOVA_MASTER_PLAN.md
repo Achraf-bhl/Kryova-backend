@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 118/132 = 89% | 135/151 eng-months = 89% |
+| Engineering — E1–E23 | 15/24 | 118/132 = 89% | 135/151 eng-months = 90% |
 | Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 21/34 | 170/194 = 87% | 166/189 eng-months = 88% |
+| **Programme** | 21/34 | 170/194 = 88% | 167/189 eng-months = 88% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 60%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
+| in flight | E8 92%, E9 70%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2280,6 +2280,37 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 1. **Project Chrono** (BSD-3, UW-Madison) — multibody + FEA + FSI, Python API, template-based
    `Chrono::Vehicle` with ready suspension templates. Rejected: MBDyn (GPL; stronger on
    rotor/aeroelastic — kept in reserve for exactly that).
+   > PARTIAL (2026-09-16) — **Chrono now runs, across a container boundary.** `app/dynamics/chrono/`
+   > copies `app/solve/openfoam/`'s shape: `run.py` is the process boundary, `payload.py` the JSON
+   > wire, `_entrypoint.py` the translation that executes *inside* the container (importing
+   > nothing from `app`, shipped per run rather than baked into the image so a result's provenance
+   > is this commit), `engine.py` the `DynamicsEngine`. The boundary is a **packaging** boundary,
+   > not a licence one — Chrono is BSD-3; what forces it is that PyChrono ships through conda only,
+   > and Decision 1 keeps conda out of this deployment. There is no published image, so
+   > `scripts/chrono_image.sh` builds `kryova-chrono:9.0.1` from `mambaorg/micromamba:1.5.10`
+   > once, never during a run. The engine is **named before it runs**, by the image's content id
+   > and not its tag.
+   > **What is not claimed, and it is the important half.** No answer this engine produces has been
+   > checked against a closed-form result: the tests pin Kryova's *translation* (a millimetre
+   > becomes a metre exactly once, a prismatic driver is scaled and a revolute one is not, a child
+   > is initialised before its parent, what the entry point writes is exactly what `from_result`
+   > reads) and prove nothing about Chrono's *semantics*. So every result carries
+   > `engine.UNVERIFIED_NOTE`, and **`engines()` deliberately puts this engine behind
+   > `KinematicEngine`**, which covers less and is checked against closed form — a prescribed
+   > serial chain must not silently start coming from an unverified integrator. It is reached by
+   > name only. THE QUEUE G6 carries the oracle runs that would settle it and move it forward.
+   > Also not claimed: spherical joints (refused by name), inertia tensors from the mass roll-up
+   > (a body with none is sent as a point mass and the container substitutes a negligible isotropic
+   > tensor, saying so in the warnings, because a *zero* tensor is a singular mass matrix rather
+   > than a point mass), and a harmonic driver with a non-zero offset (refused, because Chrono's
+   > sine carries no offset term and dropping it would shift the whole motion silently).
+   > `app.dynamics.engine.ChronoEngine` — the in-process route — stays shut and unchanged: its
+   > refusal is about `pip` and is still true.
+   > **Not run here**: written on Linux on 2026-09-16, tests written and not executed, at the
+   > user's instruction. Every assertion was measured first by a one-off script against the real
+   > modules (87 checks). Tested by: `tests/test_dynamics_chrono.py`.
+
+   <!-- superseded 2026-09-16 -->
    > BLOCKED — **`pip install pychrono` installs an unrelated package and succeeds.** The engine
    > probe checks the module really is Chrono. So there is no dynamics engine and the docstrings
    > say so.

@@ -5,7 +5,7 @@ same seam `app.solve.Solver` is, for the same reason -- a surrogate solver must 
 without the API knowing, and a contact-resolving multibody engine must drop in here
 without a caller knowing either.
 
-**Two implementations, and the difference between them is the whole of Phase 9's honest
+**Three implementations, and the difference between them is the whole of Phase 9's honest
 status.**
 
 * `KinematicEngine` -- **implemented and verified against closed form.** Exact
@@ -15,10 +15,19 @@ status.**
   stops, closed loops, or any case where the motion is an output rather than an input.
 * `ChronoEngine` -- **a seam, not a capability, and it says so at every entry point.**
   Its `availability()` probe is real, tested and load-bearing; its `simulate()` refuses.
-  See that class's docstring for why, and for the PyPI finding behind it.
+  See that class's docstring for why, and for the PyPI finding behind it. This is the
+  *in-process* route and it is still shut: the finding is about `pip`, and it is still
+  true.
+* `ContainerChronoEngine` (`app.dynamics.chrono`) -- **the route that exists, and it is
+  unverified.** A container with its own conda, a JSON file in and a JSON file out. It
+  runs, and no answer it has produced has been checked against a closed-form result on
+  this deployment, so every result carries a warning saying exactly that and `engines()`
+  deliberately will not fall through to it.
 
 `resolve()` picks the best available engine and is the function callers should use. It
-never returns an engine that cannot run, so nothing downstream has to check.
+never returns an engine that cannot run, so nothing downstream has to check. **It also
+never returns an unverified engine by fall-through** -- see `engines()` for why that
+ordering is the honest one rather than the capable one.
 """
 
 from __future__ import annotations
@@ -262,12 +271,32 @@ class ChronoEngine(DynamicsEngine):
 
 
 def engines() -> tuple[DynamicsEngine, ...]:
-    """Every engine this build knows about, best-covered first.
+    """Every engine this build knows about, in the order `resolve()` falls through them.
 
-    Order is by capability, not by preference: Chrono covers strictly more than the
-    kinematic engine, so it leads and `resolve()` falls through to what actually runs.
+    **This order is not by capability, and the exception is the whole of E9.1's honest
+    status.** `ContainerChronoEngine` covers strictly more than `KinematicEngine` —
+    closed loops, contact, friction, springs, end stops — and it is nevertheless **last**,
+    behind an engine that covers less. The reason is that it has never been checked
+    against a closed-form answer on this deployment while `KinematicEngine` has, so a
+    prescribed serial chain must not start silently coming from an unverified integrator
+    the day somebody builds the image. Ask for it by name (`resolve("chrono-container")`)
+    and you get it, with `UNVERIFIED_NOTE` on every result; let `resolve()` choose and you
+    get the exact evaluator wherever it can answer.
+
+    That inversion is **temporary and has an owner**: `docs/WINDOWS_VERIFICATION.md`
+    carries the Chrono oracle runs. When they agree, this engine moves ahead of the
+    kinematic one and this paragraph goes with it.
+
+    `ChronoEngine` leads and is never available: it is the in-process route, and its
+    refusal is about `pip`. See its docstring.
+
+    The import is function-local so that importing this seam does not import a subprocess
+    launcher, `tempfile` and a JSON wire — `availability()` is meant to be cheap enough
+    that a caller probes every engine to choose one.
     """
-    return (ChronoEngine(), KinematicEngine())
+    from app.dynamics.chrono.engine import ContainerChronoEngine
+
+    return (ChronoEngine(), KinematicEngine(), ContainerChronoEngine())
 
 
 def resolve(name: str | None = None) -> DynamicsEngine:

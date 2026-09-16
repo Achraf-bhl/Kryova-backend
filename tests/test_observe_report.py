@@ -267,6 +267,15 @@ class TestTheCatalogueContract:
         assembles a matrix over every element and factorises it, so it is a
         heavy step, and a heavy step nobody timed is one nobody can explain.
         Its call site is `SteadyConductionSolver.solve`.
+
+        `dynamics.chrono.run` joined on 2026-09-16 with E9.1, and it is a
+        *container* step rather than an in-process one, which is exactly why it
+        is timed: like `solve.openfoam.run` it spends its time in a subprocess
+        this server cannot see into, so without a span the whole of a multibody
+        run is an unexplained gap between two log lines. Its `launcher` field is
+        the half of the question that matters -- `docker` and `local` are not
+        the same cost and a report that could not tell them apart would show the
+        difference as noise.
         """
         assert catalogue.wired_names() == {
             "mesh.gmsh.wait",
@@ -278,6 +287,7 @@ class TestTheCatalogueContract:
             "jobs.run",
             "solve.calculix.run",
             "solve.openfoam.run",
+            "dynamics.chrono.run",
             "solve.linear_static",
             "solve.plane",
             "solve.conduction",

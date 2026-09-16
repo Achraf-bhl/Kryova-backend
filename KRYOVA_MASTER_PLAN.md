@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 118/132 = 89% | 135/151 eng-months = 90% |
+| Engineering — E1–E23 | 15/24 | 119/133 = 89% | 136/151 eng-months = 90% |
 | Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 21/34 | 170/194 = 88% | 167/189 eng-months = 88% |
+| **Programme** | 21/34 | 171/195 = 88% | 167/189 eng-months = 88% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 70%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 50%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2391,6 +2391,41 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
+
+6. **Inertia tensors in the mass roll-up, so a joint MOMENT has something to be computed
+   from.** *(Task added 2026-09-16. It was not in the plan because task 2 recorded the gap in
+   its own status — "the roll-up has none, so bodies are point masses and the notes say so" —
+   and a gap recorded only inside a `DONE` is a gap nobody is going to close. It became
+   load-bearing when E9.1 shipped: THE QUEUE G6 asks for a joint moment against a closed form,
+   and moments are the one quantity neither dynamics engine has ever had verified.)*
+   > DONE (2026-09-16) — `app/assembly/inertia.py` rolls the tensor up the way `mass.py` rolls
+   > up the mass: each component measured once at `Detail.INERTIA`, placed by its occurrence's
+   > frame, and assembled about any point by the parallel-axis theorem.
+   > `dynamics.assembly.derive` takes a second measurer, `measure_inertia`, and gives each body
+   > the diagonal about its own centre of mass in world axes at the assembled pose — a separate
+   > argument from `measure` because that one answers at `Detail.FULL`, and a mass budget must
+   > not silently start paying for a fourth integration per component.
+   > **Four things measured against the real kernel before any test asserted them**, each of
+   > which gives a plausible wrong moment rather than an error: OCCT's `MatrixOfInertia` is
+   > about the **centre of mass** (a 60x40x20 box reports `V(b²+c²)/12`, not the corner value
+   > four times larger); its off-diagonals are the **negated** products of inertia (`-∫xy dV` —
+   > an L-plate whose analytic integral is `-2.0833e7` reports `+2.0833e7`); the conversion from
+   > mm⁵ to kg.mm² is the component's own `mass_kg / volume_mm3`, so a mixed-material assembly
+   > stays right and no `1e-9` constant sits in the code unchecked; and two boxes assembled by
+   > parallel axis reproduce the tensor OCCT measures on the shape they fuse into, to 1e-15 of
+   > its magnitude, while flipping the product sign moves `xy` from `+2.08e7` to `-2.08e7`.
+   > **Refused rather than approximated**: `Body.inertia_kg_mm2` carries only the diagonal, and
+   > an ordinary L-shaped link couples 18% of its largest moment into the other two axes, so
+   > `body_diagonal` refuses above `MAX_PRODUCT_FRACTION` (1%) and `derive` records it as a note
+   > — that body stays a point mass, the other bodies keep their tensors, and the note names the
+   > two ways out. A caller's own tensor still wins over a measured one.
+   > **Not claimed**: a full tensor on `Body` (the follow-up, and what would let a coupled link
+   > carry its real inertia), and the moment itself against a closed form, which is THE QUEUE
+   > G6 and needs the Chrono container on Windows.
+   > **The tests were written on Linux and not run as pytest**, at the user's instruction; each
+   > assertion was evaluated once by a one-off script and the closed forms were checked against
+   > the real OCCT kernel. Tested by: `tests/test_assembly_inertia.py` (29),
+   > `tests/test_dynamics_assembly.py::TestInertiaCanComeFromTheGeometryToo` (7).
 
 ##### Phase E10 — Thermal, flow, and optimisation #####
 

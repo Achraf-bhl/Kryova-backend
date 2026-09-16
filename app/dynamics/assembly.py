@@ -37,10 +37,26 @@ is q = 0 for every joint**, and a driver's offset moves it from there.
 * a joint naming an occurrence that is not a declared body (or ground);
 * a body with no joint, or with two, because a serial chain gives each body one parent.
 
-**Inertia is not derived.** The roll-up carries a mass and a centre and no inertia tensor,
-so every body is a point mass, and `reactions.py` marks the joint moments approximated and
-names the body. The forces are exact. A tensor supplied by the caller in world axes is
-accepted and used, and the note says where it came from.
+**Inertia is derived when, and only when, you pass a measurer for it.** `measure` alone
+answers at `Detail.FULL`, which carries a mass and a centre and **no tensor** — the tensor
+is a fourth integration and `Detail.INERTIA` is a higher level that nothing computes
+speculatively. So `derive` takes a second, optional measurer, `measure_inertia`, and:
+
+* without it, every body is a point mass exactly as before, `reactions.py` marks the joint
+  moments approximated and names the body, and the forces stay exact;
+* with it, `app.assembly.inertia.roll_up_inertia` measures every component's tensor and
+  assembles each body's own sub-tree by the parallel-axis theorem, about that body's
+  centre of mass, in world axes at the assembled pose — which is the frame `Body` wants,
+  because at q = 0 every body frame is parallel to the world (see above);
+* a tensor the caller supplies in `inertia_kg_mm2` **wins over a measured one** for that
+  body, because a caller who has measured a real part on a scale knows something this
+  does not, and the note says which body came from where.
+
+**A body whose products of inertia are large stays a point mass, and says so.** `Body`
+carries only the diagonal, and an L-shaped link couples 18% of its largest moment into the
+other two axes; `inertia.body_diagonal` refuses that rather than halving a bearing moment
+silently, and `derive` records the refusal as a note instead of raising — one awkward link
+must not cost the other eleven their inertia.
 """
 
 from __future__ import annotations
@@ -48,6 +64,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
+from app.assembly.inertia import InertiaError, body_diagonal, roll_up_inertia
 from app.assembly.mass import ComponentMeasurer, MassRollup, roll_up
 from app.assembly.structure import PATH_SEPARATOR, ProductStructure
 from app.dynamics.errors import MechanismError
@@ -96,6 +113,52 @@ def _body_name(path: str) -> str:
     return path.replace(PATH_SEPARATOR, "__").replace(".", "_")
 
 
+def _measure_inertia(
+    structure: ProductStructure,
+    measure_inertia: ComponentMeasurer,
+    body_paths: Sequence[str],
+    masses: Mapping[str, tuple[float, Vec3]],
+) -> tuple[dict[str, Vec3], list[str]]:
+    """Each body's principal diagonal from its own geometry, and what could not be had.
+
+    The tensor is assembled about the body's **own** centre of mass — the one the mass
+    roll-up already computed for it, not the whole machine's — because that is the point
+    `Body.inertia_kg_mm2` is about and shifting to the wrong one is a parallel-axis term
+    of exactly the wrong size.
+
+    Nothing here raises. A body with a missing tensor, or one whose products of inertia
+    are too large for a diagonal to represent, is left out of the mapping and named in a
+    note: it becomes a point mass, which is what it was before this function existed, and
+    the note says which of the two reasons applied. Raising would let one awkward link
+    cost the other eleven their inertia, which is the trade `mass.roll_up` already refuses
+    to make for one pathological part.
+    """
+    rollup = roll_up_inertia(structure, measure_inertia)
+    diagonals: dict[str, Vec3] = {}
+    notes: list[str] = []
+    for path in body_paths:
+        own = rollup.under(path)
+        if own.missing:
+            listing = "; ".join(str(m) for m in own.missing[:3])
+            more = "" if len(own.missing) <= 3 else f" and {len(own.missing) - 3} more"
+            notes.append(
+                f"{path} has no measured inertia: {len(own.missing)} occurrence(s) under "
+                f"it carry no tensor ({listing}{more})."
+            )
+            continue
+        if not own.weighed:
+            notes.append(
+                f"{path} has no measured inertia: no occurrence under it was measured."
+            )
+            continue
+        tensor = own.about(masses[path][1])
+        try:
+            diagonals[path] = body_diagonal(tensor, body=path)
+        except InertiaError as exc:
+            notes.append(f"{path} stays a point mass. {exc}")
+    return diagonals, notes
+
+
 def derive(
     structure: ProductStructure,
     joints: Sequence[JointDeclaration],
@@ -105,13 +168,21 @@ def derive(
     name: str | None = None,
     gravity_mm_s2: Vec3 = GRAVITY_DOWN_MM_S2,
     inertia_kg_mm2: Mapping[str, Vec3] | None = None,
+    measure_inertia: ComponentMeasurer | None = None,
 ) -> DerivedMechanism:
     """Build a `Mechanism` whose bodies are occurrences of `structure`.
 
     Each joint's `child` is a body. `drivers` name joints exactly as `joints` does.
     `inertia_kg_mm2` maps a child occurrence path to a principal diagonal about the
     centre of mass **in world axes at the assembled pose**; bodies not in it are point
-    masses, and the module docstring says what that costs.
+    masses unless `measure_inertia` supplies one, and the module docstring says what a
+    point mass costs.
+
+    `measure_inertia` is a `ComponentMeasurer` answering at `Detail.INERTIA` —
+    `app.assembly.inertia.from_document` builds one. It is a *separate* argument from
+    `measure` rather than a flag on it because the two ask the kernel different questions
+    at different cost, and a mass budget must not silently start paying for a fourth
+    integration per component.
     """
     if not joints:
         raise MechanismError(
@@ -193,29 +264,46 @@ def derive(
             "the child occurrence path of a joint."
         )
     notes: list[str] = []
+    measured_inertia: dict[str, Vec3] = {}
+    if measure_inertia is not None:
+        measured_inertia, inertia_notes = _measure_inertia(
+            structure, measure_inertia, body_paths, masses
+        )
+        notes.extend(inertia_notes)
+
     bodies: list[Body] = []
     built_joints: list[Joint] = []
     for joint in joints:
         path = joint.child
         mass, centre = masses[path]
         own = positions[path]
+        # The caller's tensor wins: somebody who weighed the real part on a bench knows
+        # something the geometry does not, and silently preferring the measured one would
+        # discard it with nothing said.
+        tensor = inertia.get(path, measured_inertia.get(path))
         bodies.append(
             Body(
                 name=_body_name(path),
                 mass_kg=mass,
                 centre_of_mass_mm=sub(centre, own),
-                inertia_kg_mm2=inertia.get(path),
+                inertia_kg_mm2=tensor,
             )
         )
-        if path not in inertia:
-            notes.append(
-                f"{path} is a point mass: the roll-up carries no inertia tensor, so the joint "
-                "moments above it omit the I*alpha and omega x I*omega terms. Forces are exact."
-            )
-        else:
+        if path in inertia:
             notes.append(
                 f"{path}'s inertia is the caller's, in world axes at the assembled pose; "
                 "nothing here measured it."
+            )
+        elif path in measured_inertia:
+            notes.append(
+                f"{path}'s inertia was measured from its geometry: the parallel-axis sum "
+                "over every leaf under it, about its centre of mass, in world axes at the "
+                "assembled pose."
+            )
+        else:
+            notes.append(
+                f"{path} is a point mass: no inertia tensor reached it, so the joint "
+                "moments above it omit the I*alpha and omega x I*omega terms. Forces are exact."
             )
         parent_position = positions[joint.parent] if joint.parent is not None else (0.0, 0.0, 0.0)
         built_joints.append(

@@ -226,3 +226,174 @@ class TestWhatItRefuses:
                 _measure,
                 inertia_kg_mm2={"machine/base.1": (1.0, 1.0, 1.0)},
             )
+
+
+class TestInertiaCanComeFromTheGeometryToo:
+    """The gap E9.2 recorded, closed: a body's tensor measured rather than typed.
+
+    Until 2026-09-16 the roll-up carried no inertia at all, so every body was a point
+    mass and every joint *moment* omitted the `I*alpha` and `omega x I*omega` terms.
+    `derive` now takes a second measurer answering at `Detail.INERTIA` — a separate
+    argument from `measure`, because that one answers at `Detail.FULL` and a mass budget
+    must not start paying for a fourth integration per component without being asked.
+
+    The oracle is arithmetic: a solid box `a x b x c` of mass `m` has principal moments
+    `m(b²+c²)/12` and its cyclic partners about its own centre. The same numbers were
+    checked against the real OCCT kernel on 2026-09-16 and agreed to 1e-15.
+
+    **Written on Linux and not run as pytest**; the assertions were each evaluated once
+    by a one-off script, and the Windows machine runs the suite.
+    """
+
+    #: A 200 x 40 x 20 link. Kept as numbers rather than a payload so the closed form
+    #: below is visibly the same arithmetic the fixture is built from.
+    LENGTH, WIDTH, HEIGHT = 200.0, 40.0, 20.0
+    DENSITY_KG_MM3 = 7850.0e-9
+
+    def _inertia_measure(self, component: str) -> dict[str, object]:
+        """`Detail.INERTIA` payloads — mass, volume, centre and the mm^5 tensor."""
+        volume = self.LENGTH * self.WIDTH * self.HEIGHT
+        link = {
+            "mass_kg": volume * self.DENSITY_KG_MM3,
+            "volume_mm3": volume,
+            "centre_of_mass_mm": [RADIUS, 0.0, 0.0],
+            "inertia_tensor_mm5": [
+                [volume * (self.WIDTH**2 + self.HEIGHT**2) / 12.0, 0.0, 0.0],
+                [0.0, volume * (self.LENGTH**2 + self.HEIGHT**2) / 12.0, 0.0],
+                [0.0, 0.0, volume * (self.LENGTH**2 + self.WIDTH**2) / 12.0],
+            ],
+        }
+        base = dict(link, mass_kg=50.0, centre_of_mass_mm=[0.0, 0.0, 0.0])
+        return {"base": base, "rotor": link}[component]
+
+    def _mass_measure(self, component: str) -> dict[str, object]:
+        """What `Detail.FULL` gives: the same masses and centres, and no tensor."""
+        payload = dict(self._inertia_measure(component))
+        payload.pop("inertia_tensor_mm5")
+        return payload
+
+    def test_a_body_with_no_inertia_measurer_is_still_a_point_mass(self) -> None:
+        derived = derive(_machine(at()), [_shaft()], self._mass_measure)
+        body = derived.mechanism.bodies[0]
+        assert body.is_point_mass
+        assert body.inertia_kg_mm2 is None
+        assert any("is a point mass" in note for note in derived.notes)
+
+    def test_a_measured_body_carries_its_closed_form_inertia(self) -> None:
+        derived = derive(
+            _machine(at()),
+            [_shaft()],
+            self._mass_measure,
+            measure_inertia=self._inertia_measure,
+        )
+        body = derived.mechanism.bodies[0]
+        assert body.inertia_kg_mm2 is not None
+        mass = self.LENGTH * self.WIDTH * self.HEIGHT * self.DENSITY_KG_MM3
+        assert body.inertia_kg_mm2[0] == pytest.approx(
+            mass * (self.WIDTH**2 + self.HEIGHT**2) / 12.0, rel=1e-12
+        )
+        assert body.inertia_kg_mm2[1] == pytest.approx(
+            mass * (self.LENGTH**2 + self.HEIGHT**2) / 12.0, rel=1e-12
+        )
+        assert body.inertia_kg_mm2[2] == pytest.approx(
+            mass * (self.LENGTH**2 + self.WIDTH**2) / 12.0, rel=1e-12
+        )
+        assert not body.is_point_mass
+
+    def test_the_note_says_the_inertia_was_measured_not_supplied(self) -> None:
+        """A number's origin travels with it, the way every provenance record here does."""
+        derived = derive(
+            _machine(at()),
+            [_shaft()],
+            self._mass_measure,
+            measure_inertia=self._inertia_measure,
+        )
+        assert any("measured from its geometry" in note for note in derived.notes)
+        assert not any("is the caller's" in note for note in derived.notes)
+
+    def test_a_caller_who_measured_the_real_part_beats_the_geometry(self) -> None:
+        """Somebody who put the part on a bench knows something the model does not.
+
+        Silently preferring the measured-from-geometry tensor would discard that with
+        nothing said, so the caller's wins and the note records which body came from
+        where.
+        """
+        derived = derive(
+            _machine(at()),
+            [_shaft()],
+            self._mass_measure,
+            measure_inertia=self._inertia_measure,
+            inertia_kg_mm2={"machine/rotor.1": (11.0, 22.0, 33.0)},
+        )
+        assert derived.mechanism.bodies[0].inertia_kg_mm2 == (11.0, 22.0, 33.0)
+        assert any("is the caller's" in note for note in derived.notes)
+
+    def test_a_measurer_that_carries_no_tensor_leaves_a_point_mass_and_says_so(self) -> None:
+        """`Detail.FULL` passed where `Detail.INERTIA` was wanted is the likely mistake.
+
+        It must not produce a body with zero inertia — zero is not unknown, it is a body
+        that resists no angular acceleration, which makes every moment above it smaller.
+        """
+        derived = derive(
+            _machine(at()),
+            [_shaft()],
+            self._mass_measure,
+            measure_inertia=self._mass_measure,
+        )
+        assert derived.mechanism.bodies[0].is_point_mass
+        assert any("no measured inertia" in note for note in derived.notes)
+
+    def test_a_link_whose_products_of_inertia_are_large_stays_a_point_mass(self) -> None:
+        """An L-shaped link couples 18% of its largest moment into the other two axes.
+
+        `Body.inertia_kg_mm2` is a diagonal, so handing it over would under-report the
+        bearing moment. It is refused, recorded as a note rather than raised — one
+        awkward link must not cost the other eleven their inertia — and the note names
+        the way out.
+        """
+
+        def coupled(component: str) -> dict[str, object]:
+            payload = dict(self._inertia_measure(component))
+            volume = float(payload["volume_mm3"])  # type: ignore[arg-type]
+            rows = [list(row) for row in payload["inertia_tensor_mm5"]]  # type: ignore[index]
+            biggest = max(rows[i][i] for i in range(3))
+            rows[0][1] = rows[1][0] = 0.2 * biggest
+            payload["inertia_tensor_mm5"] = rows
+            assert volume > 0.0
+            return payload
+
+        derived = derive(
+            _machine(at()), [_shaft()], self._mass_measure, measure_inertia=coupled
+        )
+        assert derived.mechanism.bodies[0].is_point_mass
+        assert any("stays a point mass" in note for note in derived.notes)
+        assert any("principal axes" in note for note in derived.notes)
+
+    def test_one_body_losing_its_inertia_does_not_cost_the_other(self) -> None:
+        """Two links, one coupled and one not: the clean one keeps its tensor."""
+
+        def mixed(component: str) -> dict[str, object]:
+            payload = dict(self._inertia_measure(component))
+            if component == "base":
+                rows = [list(row) for row in payload["inertia_tensor_mm5"]]  # type: ignore[index]
+                rows[0][1] = rows[1][0] = 0.5 * max(rows[i][i] for i in range(3))
+                payload["inertia_tensor_mm5"] = rows
+            return payload
+
+        joints = [
+            _shaft(),
+            JointDeclaration(
+                name="pin",
+                kind="revolute",
+                child="machine/base.1",
+                parent="machine/rotor.1",
+                at_mm=(0.0, 0.0, 0.0),
+                axis=(0.0, 0.0, 1.0),
+            ),
+        ]
+        derived = derive(
+            _machine(at()), joints, self._mass_measure, measure_inertia=mixed
+        )
+        bodies = {body.name: body for body in derived.mechanism.bodies}
+        assert not bodies[body_name("machine/rotor.1")].is_point_mass
+        assert bodies[body_name("machine/base.1")].is_point_mass

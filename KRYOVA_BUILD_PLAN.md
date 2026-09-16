@@ -48,12 +48,22 @@ happened.
 > **Already stale on arrival, and not caused here:** `venv/bin/python -m app.verify.recorded
 > --check` fails. The re-record is the Windows machine's **last** step, after the suite —
 > re-recording in the middle measures a tree somebody is still editing.
-> **Next targets, in order:** (1) **P6.3's remaining half** or **P9** (delivery: CI/CD and
-> operational surface, 4 tasks open and the phase is 57%), (2) **P10**/**E20** as substitutes,
-> (3) **E9.2's inertia tensors**, which QUEUE G6 now needs and which would let a moment be
-> checked at all. Do not attempt E3, E8, E9.5, E13, E15, E17, E18 — each needs a seat, a
-> document or an engineer.
-> **Next continuation fires 2026-09-16 06:43** — held by the session named on the next line.
+> **Next targets, and the continuation prompt carries all six:** (1) **E9.2's inertia
+> tensors** — the roll-up has none, QUEUE G6 needs one, and `metrology.inertia_tensor_mm5`
+> already measures the geometric half (a plan change, adding a task to E9); (2) **P9.6**, the
+> restore drill that has never been run, against this machine's local PostgreSQL and a scratch
+> database; (3) **P9.7**'s backend SBOM and pinning halves, the desktop SBOM being Rust and
+> not Linux's; (4) **E21.6** QIF; (5) **E21.5** fatigue-data entitlements; (6) **E23.2**'s
+> unwritten judgement. Substitutes in order: **P9.4** (staging), **E23.4** (BenchCAD's
+> arithmetic), **P4.3** (drawing understanding). Do not attempt E3, E8, E9.5, E13, E15, E17,
+> E18 — each needs a seat, a document or an engineer.
+> **Next continuation fires 2026-09-16 06:52**, held by **`kryova-backend-9f`** (job
+> `0f417f89`). **The handover failed and that is worth recording:** four peers —
+> `kryova-backend-26`, `-43`, `-df`, `-78` — were asked in turn and all four replied
+> `not empty`. Every `kryova-backend-*` session on this machine is a day old and in use, so the
+> token saving CLAUDE.md's handover rule buys is not available this morning; budget one or two
+> attempts, not fourteen. **The job lives only in this session's memory** — close this editor
+> and the chain stops, and the next session starts from this block.
 
 > **Handoff, 2026-09-15 (morning) — the user is driving phases to 100% interactively, and on
 > Linux nothing is run.** "Write the code and the tests, don't launch pytest; Windows tests."

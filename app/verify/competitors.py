@@ -20,6 +20,7 @@ serves an anti-scraping challenge (Anubis) aimed at AI crawlers, and the FreeCAD
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -269,13 +270,175 @@ def is_current(today: date) -> bool:
     return today <= REVIEW_BY
 
 
+
+
+# --------------------------------------------------------------------------
+# The judgement the register feeds (E23 task 2)
+#
+# The register above is observations. This half is the *answer* — and the
+# reason it is a separate shape rather than a function is the whole of the
+# task: "is nobody selling credibility?" is a judgement about a market, and a
+# judgement derived by code from quotes would be a verdict nobody reached
+# wearing the authority of a measurement. `app/verify/` already refuses that
+# in two places: `Target` refuses a published basis with no source, and
+# `core/status.py` refuses to infer "degraded" from a failure rate. This is
+# the third.
+#
+# So nothing here computes an answer. What it does is give the answer
+# somewhere to live, with the rules that keep it honest, and report that it is
+# **unanswered** until a person writes one — which is a different thing from
+# the plan quietly assuming an unoccupied niche for four years.
+# --------------------------------------------------------------------------
+
+#: The exact question an assessment answers. Written down so a later one
+#: cannot drift onto an easier question and still read as an answer to this.
+_DATE_RE: Final = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+THE_QUESTION: Final = (
+    "Is it still true that nobody in the funded competition is selling credibility — "
+    "verification, validation, or a defensible engineering record?"
+)
+
+
+class Verdict(StrEnum):
+    #: The gap the plan aims at is still open.
+    OPEN = "open"
+    #: Somebody has started selling it; the plan's differentiator is narrowing.
+    NARROWING = "narrowing"
+    #: Somebody is selling it properly. The plan needs rewriting, not renewing.
+    OCCUPIED = "occupied"
+    #: The register does not settle it either way, and the reader is told so
+    #: rather than being handed the last quarter's answer.
+    UNCLEAR = "unclear"
+
+
+@dataclass(frozen=True)
+class Assessment:
+    """One person's dated answer, resting on claims anybody can re-read.
+
+    Every field is required for a reason that has bitten this repository
+    somewhere: a verdict with no author is one nobody can be asked about; a
+    verdict with no citations is an opinion presented as a reading; and a
+    citation the register does not hold is reasoning resting on a page nobody
+    sourced.
+    """
+
+    verdict: Verdict
+    #: Who reached it. A name, because the point of this field is that
+    #: somebody can be asked what they meant.
+    author: str
+    #: The date they reached it, `YYYY-MM-DD`, as `READ_ON` is spelled.
+    written_on: str
+    #: Why, in their words. Not a summary of the quotes — the step from the
+    #: quotes to the verdict, which is the part no quote contains.
+    reasoning: str
+    #: `(subject, claim)` pairs that must appear in `REGISTER`.
+    cites: tuple[tuple[str, str], ...]
+    question: str = THE_QUESTION
+
+    def __post_init__(self) -> None:
+        if not self.author.strip():
+            raise ValueError("An assessment names who reached it.")
+        if not _DATE_RE.match(self.written_on):
+            raise ValueError(
+                f"An assessment is dated YYYY-MM-DD; got {self.written_on!r}."
+            )
+        if len(self.reasoning.strip()) < 40:
+            raise ValueError(
+                "An assessment says why. The quotes are in the register; what is "
+                "wanted here is the step from them to the verdict."
+            )
+        if not self.cites:
+            raise ValueError(
+                "An assessment cites the claims it rests on. Without them it is an "
+                "opinion presented as a reading of the register."
+            )
+        for subject, claim in self.cites:
+            matching = [
+                entry
+                for entry in REGISTER
+                if entry.subject == subject and entry.claim == claim
+            ]
+            if not matching:
+                raise ValueError(
+                    f"{subject}: the register holds no claim {claim!r}. A verdict may "
+                    "only rest on something a reader can go and re-read."
+                )
+            if not matching[0].quote:
+                raise ValueError(
+                    f"{subject}: {claim!r} was not re-read, so it carries no quote. A "
+                    "position built on a page nobody could open is the failure this "
+                    "task exists to prevent."
+                )
+
+
+#: Empty, and that is the current honest state of E23 task 2.
+#:
+#: The register was read on 2026-09-15 and its observations are above. **No
+#: person has written the answer**, so the product says the question is
+#: unanswered rather than repeating the plan's four-year-old assumption back
+#: as a finding. The first entry is owed by whoever does the quarterly
+#: re-reading before `REVIEW_BY`; appending one is the whole of the work, and
+#: the rules above are what stop it from being written by a machine out of the
+#: quotes it already has.
+ASSESSMENTS: Final[tuple[Assessment, ...]] = ()
+
+
+def current_assessment(today: date) -> Assessment | None:
+    """The newest assessment still inside the register's review window.
+
+    An assessment does not outlive the reading it rests on. A verdict quoted
+    from a register whose sources nobody has checked for six months is exactly
+    the "plan that assumes an unoccupied niche" this task names.
+    """
+    if not is_current(today):
+        return None
+    inside = sorted(
+        (entry for entry in ASSESSMENTS if entry.question == THE_QUESTION),
+        key=lambda entry: entry.written_on,
+    )
+    return inside[-1] if inside else None
+
+
+def answer(today: date) -> str:
+    """What a reader is told today, verdict or no verdict.
+
+    Never an empty string and never a default verdict: a page that silently
+    printed `OPEN` when nobody had looked would be the most convincing wrong
+    sentence in the product.
+    """
+    found = current_assessment(today)
+    if found is None:
+        if not is_current(today):
+            return (
+                f"Unanswered: the competitor register was read on {READ_ON} and is "
+                f"past its review date of {REVIEW_BY.isoformat()}. Re-read every "
+                "source, then write the assessment."
+            )
+        return (
+            f"Unanswered: the register was read on {READ_ON} and holds the "
+            "observations, but nobody has written the judgement they feed. "
+            "It is owed before " + REVIEW_BY.isoformat() + "."
+        )
+    return (
+        f"{found.verdict.value} — {found.author}, {found.written_on}, "
+        f"on {len(found.cites)} cited claim(s)."
+    )
+
+
 __all__ = [
+    "ASSESSMENTS",
     "READ_ON",
     "REGISTER",
     "REVIEW_BY",
+    "THE_QUESTION",
+    "Assessment",
     "Claim",
     "ReadAs",
     "Standing",
+    "Verdict",
+    "answer",
     "claims_about",
+    "current_assessment",
     "is_current",
 ]

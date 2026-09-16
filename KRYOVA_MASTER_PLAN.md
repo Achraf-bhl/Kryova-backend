@@ -4840,6 +4840,38 @@ them?
    That is the gap Decision 3 already aims at, and this task is the discipline of re-checking
    quarterly whether it is still open — because a plan that assumes an unoccupied niche for four
    years without looking is how a differentiator becomes an assumption.
+   > PARTIAL (2026-09-16) — **the judgement now has somewhere to live and the product says it is
+   > unanswered; the first verdict is still owed, by a person, before 2026-12-15.**
+   > Everything the superseded status records still holds. What is new is the other half of the
+   > task: `competitors.Assessment`, `THE_QUESTION`, `Verdict` and `answer(today)`.
+   > **Nothing computes a verdict, and that is the design rather than an omission.** "Is nobody
+   > selling credibility?" is a judgement about a market; one derived by code from the register's
+   > quotes would be a verdict nobody reached wearing the authority of a measurement. `app/verify/`
+   > already refuses that twice — `Target` refuses a published basis with no source, and
+   > `core/status.py` refuses to infer "degraded" from a failure rate — and this is the third.
+   > An `Assessment` is refused unless it names **who** reached it, carries a date in the
+   > register's own spelling, says **why** (the step from the quotes to the verdict, which is the
+   > part no quote contains), and cites `(subject, claim)` pairs the register actually holds. Two
+   > further rules, each with a test: a verdict **may not rest on a claim that was not re-read** —
+   > two of the fourteen carry no quote, and a position built on a page nobody could open is the
+   > failure this task names — and an assessment **does not outlive the reading it rests on**,
+   > expiring with `REVIEW_BY` rather than being handed on as last quarter's answer.
+   > **`ASSESSMENTS` is empty, and `answer()` says so in words.** A page that silently printed
+   > `open` because nobody had looked would be the most convincing wrong sentence in the product:
+   > the plan's four-year-old assumption read back as a finding. Past the review date the text
+   > changes to "re-read every source, then write the assessment" — never move the date alone.
+   > `Verdict.UNCLEAR` exists because without it the only way to record "the register does not
+   > settle it" is to pick a side, which is how a register stops being read.
+   > **Still open, and it is one sentence now rather than a silent gap: a person must write the
+   > first assessment.** It is not code, it recurs every quarter, and the machinery now demands it
+   > and reports its absence.
+   > Tests written on Linux and not run as pytest (the user's rule); the refusals were exercised
+   > against the real register by a one-off script, which is how the not-re-read rule was checked
+   > to have two live claims to fire on.
+   > Tested by: `tests/test_verify_competitors.py::TestTheJudgementTheRegisterFeeds` (13),
+   > `tests/test_verify_competitors.py`. Code: `app/verify/competitors.py`.
+
+   <!-- superseded 2026-09-16 -->
    > PARTIAL (2026-09-15) — **the quarterly re-check is enforced; the judgement it feeds is not
    > recorded anywhere.** `competitors.REVIEW_BY` is 2026-12-15, a quarter after the reading, and
    > `is_current` plus a test that fails the day after tell whoever sees it to re-read every

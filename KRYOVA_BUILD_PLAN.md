@@ -15,6 +15,56 @@ happened.
 
 ## Now
 
+> **Continuation, 2026-09-16 11:07 — three mission rungs, and the ladder gained a fourth kind
+> of rung to hold the third.**
+> Linux writes code and tests and **runs no pytest, ruff or mypy** (the user's rule; Windows runs
+> them). Every test named below was **written on Linux and not run as pytest**, and every one was
+> evaluated assertion-by-assertion by a one-off harness first — and, more to the point, every
+> number in them was measured by building the real machine through the real OCCT kernel before
+> any test asserted it.
+> **Closed this turn, each committed as it closed:** **E18.4** (`a2261c9` — M4, the gearbox),
+> **E18.5** (`3a6a4c4` — M5, the stamping press), **E18.7** (`f7157c9` — M7, the robot arm, and
+> `MovingDesign`). **Ladder 4/9 → 7/9. Board 21/34 phases · 174.0/195 tasks = 89.2%.**
+> **The findings, in the order they cost the most.** (1) **An `AssemblyDesign`'s `parameters` are
+> the *bound* side of an assertion and never the measured side** — measures come from the payload,
+> which is geometry the kernel reported. M5's formability claim was written as an assertion and
+> came back NOT CHECKED, because the kernel never sees a fold tree. It is a construction-time
+> refusal now, which is stronger than a claim: the press cannot be built with a guard that will
+> not fold. (2) **A payload key containing a dot is not a path.** M7's motion numbers were first
+> published as flat keys spelled `"motion.total_mass_kg"` and every motion claim came back NOT
+> CHECKED against a payload that visibly contained them — the resolver reads `.` as a separator.
+> (3) **M5's crank pin was drawn as a block and weighed as a cylinder**, and the roll-up
+> disagreed with the closed form by 2.16 kg in 5,691 — 0.04%, far too small to see by eye, and
+> exactly what the mass claim exists to catch.
+> **Two numbers worth keeping.** M5's guard is declared twice — a fold tree and a hand-drawn
+> radiused section — and the kernel's solid and `app/sheetmetal/fold.py`'s closed form agree to
+> **9.1e-09 mm³ out of 1,588,106**. M7 held still is a statics problem with one answer, and its
+> ground joint carries **3635.9075824256697 N against a weight of 3635.90758242567 N**; moving,
+> it peaks 11.3% higher.
+> **What each rung refuses to say.** M5 cannot state a tonnage: there is no shear strength in
+> this repository and it is not even a property the material vocabulary can name, so the press
+> states the greatest shear strength its rating covers and says it cannot tell you whether the
+> strip is inside it. M7 is rigid, so two of the three things its `hard` column promises are
+> there and stiffness is not. Thirty-one caveats across the three rungs reach the public gallery.
+> **Next targets — at least seven, per the user's rule of 2026-09-16 11:07 (raised from six):**
+> (1) **E18.8** — M8, the motorcycle chassis + swingarm, which is the second user of
+> `MovingDesign` and the one that meets `app/fatigue/duty.py`; **never sum per-mode counts over a
+> duty cycle**, and a brute-force count of the expanded history is the oracle. (2) one **P6**
+> viewer PARTIAL whose residual is code rather than an unmeasured fps target. (3) one **P7**
+> desktop PARTIAL — P7.4's offline verdicts exist with no surface showing them. (4) **E22.1**,
+> (5) **E22.4**, (6) **P4.6**, (7) **E18.6/E18.9** or the next phase in plan order. Do not attempt
+> E3, E8, E9.5, E13, E15, E17, or E21/E23's network-blocked tasks — **this machine has no
+> outbound network**.
+> **Already stale on arrival, and not caused here:** `venv/bin/python -m app.verify.recorded
+> --check` fails. The re-record is the Windows machine's **last** step, after the suite.
+> **No continuation job is scheduled, and that is deliberate.** The user stopped every cron job
+> on this machine at 11:07 on 2026-09-16 and asked for the chain to be handed to the **Windows**
+> session instead, which is the machine that can close THE QUEUE — and especially its section E,
+> which is unwritten code. CLAUDE.md's *"Ending every turn"* now carries a Windows block saying
+> the Windows session schedules its own chain, keeps **one** conversation rather than opening a
+> new one per turn, takes **at least seven tasks** a turn, and uses CATIA and the GUI only where
+> a claim actually needs them.
+
 > **Continuation, 2026-09-16 07:40 — six targets, and four of them were found by *running*
 > something rather than by reading it.**
 > Linux writes code and tests and **runs no pytest, ruff or mypy** (the user's rule; Windows runs
@@ -407,6 +457,58 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-16 (late) — three mission rungs: E18.4, E18.5, E18.7. The ladder went 4/9 to 7/9
+  and gained a fourth kind of rung to hold the last one.**
+  **E18.4** (`a2261c9`): M4, the gearbox. Three claims that must agree and only one is
+  geometry — the mesh, declared as an `Interface` both gears are built from and closed by a
+  measurement *between the built solids* (the gap between the root cylinders is `2.5 x module`
+  exactly when the centre distance is `m(z1+z2)/2`, tooth counts cancelling); the axial chain,
+  five dimensions and five tolerances through `app/rules/stackup.py`, asserted against the
+  built housing rather than the drawing it came from; and the bought parts, which the product
+  **declines** — `app.parts.bearings.select` considers every 6-series bearing that fits the
+  35 mm shaft and refuses all of them, because the shipped table is ISO 15 boundary dimensions
+  and a load rating is the maker's number. There is no gear-profile operation in the OCCT
+  backend and `refusals.py` answers `catia_sketch_gear_profile` with "not needed", so each gear
+  is its root cylinder and the 136,459 mm³ of tooth material is published as an exact bound.
+  26.805 kg, 13 occurrences, mesh gap measured 7.5000 mm.
+  **E18.5** (`3a6a4c4`): M5, the stamping press — the plan's own "honest mid-point milestone".
+  The whole vertical layout is derived downward from the crank axis, so the gap between the die
+  shoes at bottom dead centre **is** the strip being stamped; a connecting rod 1 mm long closes
+  the dies through the work and 1 mm short never cuts, and both were built and both failed the
+  named claim. **The tonnage claim had to be inverted and nothing here can close it**: there is
+  no shear strength in this repository and `shear_strength_mpa` is not even a property the
+  material vocabulary can name, so the press states the greatest shear strength its 400 kN
+  rating covers over its blank (500 MPa, needing no material property) and says it cannot tell
+  you whether the strip is inside it. The guard is declared twice — a fold tree that unfolds to
+  a 991.74 mm blank, and the same radiused section drawn by hand and extruded — and the two
+  agree to **9.1e-09 mm³ out of 1,588,106**. 5,689.491 kg, 12 occurrences, 0 clashes.
+  **E18.7** (`f7157c9`): M7, the robot arm, and **`MovingDesign`**, the ladder's fourth kind of
+  rung. Every rung below M7 asks how big something is; what an engineer buys a robot for is
+  what its shoulder bearing carries while it is moving, and geometry does not contain that
+  number. The joints are declared against the product graph — each `JointDeclaration.child` is
+  an occurrence path in the same `ProductStructure` the roll-up walks — so the mass a reaction
+  is computed against *is* the mass the geometry claims were checked against. Held still, the
+  mechanism is a statics problem with one answer and the ground joint carries
+  **3635.9075824256697 N against a weight of 3635.90758242567 N**; moving, it peaks at 4048.43 N,
+  11.3% harder. Free-body residual 9.1e-13 N over 41 exact samples with no time integration.
+  Chrono is never started — `engines()` keeps it behind `KinematicEngine` because where both can
+  answer the kinematic engine is exact, which is also what keeps these tests offline.
+  **Three findings, none of which errors.** (1) **An `AssemblyDesign`'s `parameters` are the
+  bound side of an assertion and never the measured side**, because measures come from the
+  payload, which is geometry the kernel reported — so M5's formability claim came back NOT
+  CHECKED and is a construction-time refusal now, which is stronger than a claim. (2) **A
+  payload key containing a dot is not a path**: M7's motion numbers published flat as
+  `"motion.total_mass_kg"` made every motion claim NOT CHECKED against a payload that visibly
+  held them, because the resolver reads `.` as a separator. They nest now, as `clash` does.
+  (3) **M5's crank pin was drawn as a block and weighed as a cylinder** — 2.16 kg in 5,691,
+  0.04%, far too small to see and exactly what the mass claim exists to catch.
+  Seventeen guards were broken across the three rungs and each named claim was watched to fail.
+  Two breaks were more informative than predicted: M5's upside-down gearbox fails the clash
+  check as well as the centre of mass, and declaring M7's base a moving body fails the
+  point-mass claim as well as the mass claim, because ground needs no tensor. Thirty-one
+  caveats reach the public gallery. Tests written on Linux and not run there:
+  `tests/test_mission_m4.py` (38), `tests/test_mission_m5.py` (54), `tests/test_mission_m7.py`
+  (51).
 - **2026-09-16 (mid) — six targets: E9.6, P9.6, P9.7, E23.2, E6.3, P9.4. Four of them were
   found by *running* something rather than by reading it.**
   **P9.6** (`77176c6`): the restore drill had never been run. Run against local PostgreSQL

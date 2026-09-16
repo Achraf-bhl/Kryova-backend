@@ -75,9 +75,10 @@ stops without scheduling one stops the project. The order is fixed:
 
 1. **Finish the batch and run its checks.** That means tests, `ruff`, `mypy`, and breaking the
    guard to watch it fail; the V&V re-record comes last.
-   **A turn takes at least six tasks** (*the user's rule, 2026-09-15 21:38*, replacing "one
-   unit per turn"). Tasks that close together, such as P4.7 with P4.6's composer piece, count
-   as one. When fewer than six Linux-closable tasks are left, take all of them. The 2 h 30 min
+   **A turn takes at least seven tasks** (*the user's rule, 2026-09-16 11:07*, raised from
+   six, which replaced "one unit per turn" on 2026-09-15). Tasks that close together, such as
+   P4.7 with P4.6's composer piece, count as one. When fewer than seven closable tasks are
+   left, take all of them. The 2 h 30 min
    pause in step 3 is unchanged. Two rules keep a long turn from losing work or the chain:
    - **Commit each task as it closes, with its status line and plan_progress re-stamp.** A turn
      cut off by the usage limit then loses only the task in flight. The *Done* line, the *Now*
@@ -141,9 +142,9 @@ stops without scheduling one stops the project. The order is fixed:
    Say that the job dies if that session is closed.
 
 **Write the prompt fresh every time; never copy the last one.** It briefs a session that
-remembers nothing of this one, so it follows this shape. **Every prompt names at least six
-targets and states the six-task rule in its own text, step 4 included**, so the rule reaches the
-turn after next even through a session that reads no CLAUDE.md:
+remembers nothing of this one, so it follows this shape. **Every prompt names at least seven
+targets and states the seven-task rule in its own text, step 4 included**, so the rule reaches
+the turn after next even through a session that reads no CLAUDE.md:
 
 ```
 Kryova continuation — written <date time>, after <what this turn finished>.
@@ -166,12 +167,12 @@ Attempt <n> at the targets below.
    tokens. The one exception is a session older than the file's last change
    (stat -c %y CLAUDE.md); that session reads only what changed, with git log -p and
    git diff on CLAUDE.md. Then run the dirty-tree checks from "Subagents" item 11.
-2. Targets, in order, at least six: <phase.task> each with <what exactly remains, which files
+2. Targets, in order, at least seven: <phase.task> each with <what exactly remains, which files
    already exist, which test file will prove it, which status line it moves and to what, and
    the traps already known>. Commit each as it closes.
 3. If a target is already done or blocked: <the next ones to take in its place>.
 4. End per CLAUDE.md "Ending every turn": documents first, then a new prompt of this shape,
-   with at least six targets and this same rule repeated in its step 4.
+   with at least seven targets and this same rule repeated in its step 4.
 ```
 
 **How to choose the target.** Finish a started phase before opening a new one. The order is:
@@ -259,6 +260,43 @@ session.**
    An integration claim between gates is unproven and is written as unproven.
 
 **On Windows (the machine with CATIA and the bridge — proving the product):**
+
+> ### The Windows session runs the same self-scheduling chain as Linux
+>
+> **The user's rule, 2026-09-16 11:07.** Everything under *"Ending every turn"* above applies
+> on this machine exactly as it does on Linux. Five points, because they are the ones a
+> Windows session has historically got wrong:
+>
+> 1. **Schedule the next turn yourself, every turn, with `CronCreate`.** Same shape as Linux:
+>    one job, **`recurring: false`**, at least **2 h 30 min** out
+>    (`date -d '+151 min' '+%M %H %d %m'` — or PowerShell
+>    `(Get-Date).AddMinutes(151).ToString('mm HH dd MM')`), plus a minute if the minute lands
+>    on `00` or `30`. A turn that ends without scheduling the next one stops the project, and
+>    on this machine there is no peer session to hand the chain to.
+> 2. **Do not open a new conversation for each turn.** The cron job fires *into the session
+>    that created it*, and that session's loaded context is the point — it already holds
+>    CLAUDE.md, the plan's shape and what the last turn learned. Starting a fresh conversation
+>    each time throws that away and pays to reload it. Keep one session open and let the job
+>    wake it. The job dies if the session is closed, so closing the editor is what ends the
+>    chain, not finishing a turn.
+> 3. **Keep coding until the master plan is finished.** This machine is not only a gate. It is
+>    the machine that can *close* the tasks Linux cannot: everything in THE QUEUE, and
+>    especially **section E, which is unwritten code** — the CATIA side of sheet metal (E1),
+>    the four stop gates (E2), the conduction oracle against ccx (E3). Work the same order
+>    Linux does: `IN PROGRESS`, then `PARTIAL` that this machine can close, then the next
+>    phase in plan order. The three exits in *"Ending every turn"* are the only three.
+> 4. **At least seven tasks per turn**, the same rule as Linux and for the same reason.
+>    Commit each as it closes, with its status line and a `plan_progress` re-stamp, so a turn
+>    cut off by the usage limit loses only the task in flight.
+> 5. **Use CATIA and the GUI only where the claim needs them, and do not spend a turn on
+>    them otherwise.** A seat session and a ladder run are expensive — four to seven minutes
+>    per prompt — so they are for claims that *cannot* be settled any other way: a COM
+>    operation, a real document, an end-to-end path through the chatbot. Everything else —
+>    writing code, writing tests, running `pytest`, `ruff`, `mypy`, re-recording V&V — is
+>    cheaper and settles more per minute. **Unlike Linux, this machine may and must run
+>    `pytest`, `ruff` and `mypy`**, and the V&V re-record (`venv/bin/python -m
+>    app.verify.recorded`) is this machine's job and comes last, after the suite is green.
+
 
 > **The Linux stretch stopped on 2026-09-09 at phase E7**, with ten of twenty-nine phases
 > complete, the suite green, and everything closed that could be closed without hardware. If
@@ -963,6 +1001,38 @@ closes the loop. `names` and `params` are usable alone.
    same buildable plan cannot change the outcome, so it ends the loop and is not counted as an
    attempt; a plan already tried is a cycle. A repair that *does not compile* is a normal attempt
    on purpose — the compiler's error names the feature and says what to do.
+
+### The mission ladder (`app/design/missions.py`) — four kinds of rung, and two traps
+
+A rung carries exactly one of `spec` (a part), `assembly` (a product graph), `folded` (a sheet
+part, which is two descriptions that must agree) or **`moving`** (a product graph plus the
+joints between its parts — added 2026-09-16 with M7, because the load at a joint is a
+consequence of the geometry *and* the mechanism and neither half alone can state it). A moving
+rung runs through `_run_assembly` via its `augment` hook, so its builds, clash, roll-up and
+contracts are an assembly rung's and cannot drift from them.
+
+Three facts that each cost a build to find, and none of which errors:
+
+1. **A payload key containing a dot is not a path — it is a key containing a dot.** The
+   assertion resolver reads `.` as a separator, so a flat key spelled `"motion.total_mass_kg"`
+   makes every claim on it come back **NOT CHECKED** against a payload that visibly contains
+   it. Nest the namespace (`{"motion": {...}}`) the way `_combined_payload` nests `clash`.
+2. **An `AssemblyDesign`'s `parameters` are the *bound* side of an assertion and never the
+   measured side.** `bound="=mass_closed_form_kg"` resolves; `measure="my_parameter"` does not,
+   because measures come from the payload, which is geometry the kernel reported. So anything
+   the kernel cannot see — a formability finding, a fold tree, a material property — **cannot
+   be asserted on** and belongs in a construction-time refusal instead, which is stronger than
+   a claim anyway. M5's guard is the worked example.
+3. **A rung moves when its stated prerequisites are met, not when someone decides.** M6's rule,
+   applied four times now: a rung held pending on the half of a prerequisite it does not use is
+   a ladder that has stopped measuring anything. And a rung that builds must carry `unproven`,
+   because `app/handbook/gallery.py` publishes it — a gallery printing the passes and dropping
+   the caveats would be the most misleading page in the product precisely because it is the
+   most convincing one.
+
+`app/dynamics` refuses an **undriven revolute joint** by name rather than integrating: its
+motion would be an output of the forces on it, which is a different question needing an
+integrator and a contact model. Declare a joint `fixed` if it is meant to be ground.
 
 ## The geometry kernel (`app/kernel/`)
 

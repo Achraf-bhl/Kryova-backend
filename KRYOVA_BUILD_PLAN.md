@@ -15,39 +15,45 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-16 00:34 — six targets closed, and P6 is the phase with momentum.**
+> **Continuation, 2026-09-16 04:12 — six targets closed, and Chrono actually ran.**
 > Linux writes code and tests and **runs no pytest, ruff or mypy** (the user's rule; Windows
 > runs them, and the frontend's vitest too). A turn takes at least six tasks (the user's rule,
-> 2026-09-15 21:38). Every test named below was **written on Linux and not run**.
-> **Closed this turn, each committed as it closed:** **P4.7 + P4.6** (`e86b50b`, `7acf199` —
-> attachments reach the agent's turn and the composer uploads them), **E22.3** (`ccbd963` — the
-> horizon-reliability harness), **E23.4** (`3c94caa` — BenchCAD recorded and scored),
-> **P6.2** (`2038676` — the streaming scene's ordering), **P6.5** (`5c5c131` — any scalar field
-> with an honest colour scale), **P6.4** (`71255ff`, `987e806` — the measure routes and the four
-> client-side interactions). Plan statuses `39c86b8` and `f85fd94`.
-> **P6 is now 1 DONE-equivalent short of interesting:** tasks 1, 2, 4 and 5 are PARTIAL, task 3
-> is PARTIAL (the single-part WebGL viewer), and **task 6 — tree ↔ 3D ↔ spec, one selection
-> model — is NOT STARTED and is the next target.** It is also the blocker under P6.4's measure:
-> a click on a triangle cannot become an element name until something names faces, which is
-> **E2 task 1's face predicate**.
-> **THE QUEUE gained section G** — "needs the product in a browser on real hardware" — with G1
-> (P6.2's 2 s / 30 fps targets, and the reference assembly that does not exist), G2 (P6.5's
-> palettes looked at with eyes), G3 (P6.4's controls, and the section convention checked once).
-> The existing six sections are ccx, a seat, an input, a model, a seat to write against, and
-> Docker; a GPU-and-browser measurement fits none of them.
+> 2026-09-15 21:38). Every test named below was **written on Linux and not run as pytest** —
+> but every assertion in them was measured first by one-off scripts against the real modules,
+> and E9.1's physics was measured against the real engine.
+> **Closed this turn, each committed as it closed:** **P6.6** (`0e2a200` backend, `7ed2e5b`
+> frontend — a picked triangle becomes a predicate, and one selection model across tree/3D/spec),
+> **P6.3** (`feb4787` — the renderer decision's criteria, threshold and date, adopting nothing),
+> **P7.3 + P7.4** (`2a1a8de` frontend, `3e3fda8` plan — deep links, notifications and offline
+> capability, with the Rust half deliberately left to QUEUE G5), **E9.1** (`aa379b7`, `96255a9` —
+> Project Chrono across a container boundary), **P6.1's assembly half** (`9fae90a` — a product
+> structure served as one GLB scene).
+> **E9.1 is the one to read.** The image built here, so the oracle runs did not need the seat:
+> a pendulum gives 29.4156 N against 3mg = 29.4200 N, a spun mass 20.00083 N against m ω² r =
+> 20.0 N, a prismatic travels exactly the millimetres asked for. **All three found defects the
+> unit tests had happily agreed with** — Chrono's default iterative solver does not satisfy a
+> revolute constraint (the same pendulum read **4286 N**, the rod stretching 0.5 → 0.74 m);
+> `GetReaction2` is the load on the *parent*, equal and opposite and therefore the right
+> magnitude with the wrong sign; and reaction 1 is in frame 1, which the code rotated by frame 2,
+> giving a constant force vector where it should sweep. All five traps are now in CLAUDE.md.
+> **Still not claimed for Chrono:** joint **moments** against any closed form, and every case the
+> engine exists for — closed loops, contact, friction, springs, end stops. `engines()` keeps it
+> behind `KinematicEngine`, and that ordering is now **permanent**: where both can answer, the
+> kinematic engine is exact and this one integrates.
+> **THE QUEUE gained G6** (Chrono on Windows, the moments, and a four-bar against
+> `closures.py`) and G4/G5 from earlier in the turn. G1 grew the reference-assembly property
+> table, and G3's stale claim that "E2 task 1's face predicate is unwritten" was corrected — it
+> is `DONE (2026-09-05)`; what was missing was its *inverse*, which P6.6 wrote.
+> **Board: 21/34 phases · 170.0/194 tasks = 87.6%.**
 > **Already stale on arrival, and not caused here:** `venv/bin/python -m app.verify.recorded
-> --check` fails. E10.2, E15.2, E7.1/E8.5 and E21.4 each touched a fingerprinted file. The
-> re-record is the Windows machine's **last** step, after the suite — re-recording in the middle
-> measures a tree somebody is still editing.
-> **Next targets, in order:** (1) **P6.6** tree ↔ 3D ↔ spec selection, (2) **P6.3** the renderer
-> decision with its criteria written now, (3) **P7.3**, (4) **P7.4**, (5) **E9.1** Chrono across
-> a container boundary, (6) **P6.1's assembly GLB** (a route that serves the product structure
-> as one scene). Do not attempt E3, E8, E9.5, E13, E15, E17, E18 — each needs a seat, a document
-> or an engineer.
-> **Next continuation fires 2026-09-16 03:05** — held by the session named on the next line.
-> **Held by `kryova-backend-9f`**, which confirmed `scheduled 2026-09-16 03:05` at 00:37.
-> `kryova-backend-f1` (the session that ran this turn) holds nothing and can be closed; the
-> job dies if `kryova-backend-9f` is closed.
+> --check` fails. The re-record is the Windows machine's **last** step, after the suite —
+> re-recording in the middle measures a tree somebody is still editing.
+> **Next targets, in order:** (1) **P6.3's remaining half** or **P9** (delivery: CI/CD and
+> operational surface, 4 tasks open and the phase is 57%), (2) **P10**/**E20** as substitutes,
+> (3) **E9.2's inertia tensors**, which QUEUE G6 now needs and which would let a moment be
+> checked at all. Do not attempt E3, E8, E9.5, E13, E15, E17, E18 — each needs a seat, a
+> document or an engineer.
+> **Next continuation fires 2026-09-16 06:43** — held by the session named on the next line.
 
 > **Handoff, 2026-09-15 (morning) — the user is driving phases to 100% interactively, and on
 > Linux nothing is run.** "Write the code and the tests, don't launch pytest; Windows tests."
@@ -390,6 +396,56 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-16 (early) — six targets closed: P6.6, P6.3, P7.3, P7.4, E9.1, P6.1's assembly half.**
+  **P6.6** (`0e2a200`, `7ed2e5b`): the *inverse* of face resolution. `app/kernel/occt/propose.py`
+  turns a picked face into predicates the agent can use, generated liberally and verified by
+  resolving — the proposer holds no geometric reasoning of its own. `tessellate` now partitions
+  triangles by face, so a click in the viewer becomes a face at all; the ordinal is keyed to the
+  de-duplicated map order `resolve` filters, because `explore_oriented` is a *different* walk
+  (they agreed on every shape tried, so that mapping is labelled defensive rather than
+  demonstrated, in the code and in the test docstring). Two defects found by probing the real
+  runner rather than by reading: a **curved** face was being offered a direction name, because
+  `face_normal` reads the parametric centre and a bore's lands on (1, 0, 0); and
+  `document.features()` does not exist, so `getattr(..., lambda: [])()` had been returning `[]`
+  for every document and no feature name was ever offered. `best` now requires *stable* as well
+  as unique, so a positional name cannot masquerade as a good one. Frontend: one `Selection`
+  discriminated union across tree, 3D and spec, with `FaceNaming` kept separate.
+  **P6.3** (`feb4787`): `docs/RENDERER_DECISION.md` — criteria C1–C6 with a deliberately wide
+  marginal band, the reference assembly's property table, a threshold, a date (2027-03-16) and
+  two early triggers. **Nothing was adopted**, which is the point. Two findings recorded rather
+  than papered over: M5's stamping press is unbuilt and M6 has **three** components, so the
+  reference assembly is synthetic until E13 lands; and **no reference laptop is named anywhere**,
+  which turned a citation this file had written into a stated prerequisite and a QUEUE step.
+  **P7.3 + P7.4** (`2a1a8de`, `3e3fda8`): `desktop-powers.ts` (deep links parsed with WHATWG
+  `URL`, decode-then-validate, refusals that are visible) and `offline-capability.ts` (ten
+  capabilities, each *stated* as works/cached/unavailable rather than discovered by timeout;
+  unknown reachability enables everything). **The Rust half was deliberately not written**: Tauri
+  plugins cannot be compiled or checked on Linux, and an unbuildable `src-tauri` would block the
+  Windows machine rather than help it. QUEUE G5.
+  **E9.1** (`aa379b7`, `96255a9`): Project Chrono across a container boundary — a **packaging**
+  boundary, not a licence one (Chrono is BSD-3; what forces it is that PyChrono ships through
+  conda only). The image built here, so the oracle runs happened here, and **all three found
+  defects the unit tests had agreed with**: Chrono's default iterative solver does not satisfy a
+  revolute constraint (a pendulum whose closed form is 29.42 N read **4286 N**, its rod
+  stretching 0.5 → 0.74 m); `GetReaction2` is the load on the *parent*, equal and opposite, so
+  taking it publishes every joint load sign-reversed at exactly the right magnitude; and
+  reaction 1 is expressed in frame 1, which the code rotated by frame 2, giving a *constant*
+  force vector where the exact evaluator had one sweeping round a circle — at a magnitude
+  agreeing to 0.004% throughout. After the fixes: pendulum 29.4156 N vs 3mg = 29.4200 N, spun
+  mass 20.00083 N vs m ω² r = 20.0 N, prismatic scale exact. Two more traps recorded rather than
+  hit: a chained `GetReaction1().force` returns a dangling reference (it printed `-4.86e188`),
+  and a near-zero inertia tensor is a singular mass matrix rather than a point mass. `engines()`
+  keeps Chrono behind `KinematicEngine` — not because it is unverified but because where both can
+  answer the kinematic one is *exact*.
+  **P6.1's assembly half** (`9fae90a`): `GET /kernel/conversations/{id}/assembly/scene` serves a
+  product structure as one GLB. `scene_for` had existed since 2026-09-15 with no caller outside a
+  test. The premise in the plan was half right — nothing *persists* a structure — but a
+  conversation's `BuildContext` already holds one, so no model and no migration were needed.
+  Forty bolts are one bolt's bytes: eight further occurrences of an existing component grow the
+  file by **908 bytes**, measured. Each component is deflected against its *own* diagonal, so an
+  assembly GLB at level N is the union of its distinct components at level N — stated, because
+  this route does not make a 2,000-part machine cheap, and choosing a level per component is
+  P6.2's job in the client.
 - **2026-09-16 — six targets closed in one turn: P4.7 with P4.6, E22.3, E23.4, P6.2, P6.5, P6.4.**
   **P4.7 + P4.6** (`e86b50b`, `7acf199`): what was attached now reaches the agent's turn.
   `app/ai/attached.py` gathers a conversation's attachments, `quoted.quote_for_user_turn` renders

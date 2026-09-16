@@ -42,7 +42,13 @@ from enum import StrEnum
 from typing import Any, Final
 
 from app.manufacture.errors import ManufactureError
-from app.rules.gdt import Category, Characteristic, FeatureControlFrame, MaterialCondition, Tolerancing
+from app.rules.gdt import (
+    Category,
+    Characteristic,
+    FeatureControlFrame,
+    MaterialCondition,
+    Tolerancing,
+)
 from app.rules.processes import Limit
 
 Vec3 = tuple[float, float, float]

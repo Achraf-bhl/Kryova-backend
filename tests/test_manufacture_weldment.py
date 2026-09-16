@@ -19,9 +19,9 @@ from app.manufacture.weldment import (
     EndCut,
     FilletWeld,
     Member,
+    WeldmentError,
     WeldSide,
     WeldStrength,
-    WeldmentError,
     weldment,
 )
 from app.rules.processes import Limit

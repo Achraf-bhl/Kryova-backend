@@ -792,9 +792,8 @@ class TestTheRungInTheLadder:
         assert entry.rung == "M5"
 
     def test_the_ladder_now_stands_at_six_of_nine(self) -> None:
-        from app.kernel import OcctRunner
-
         from app.design.missions import run_ladder
+        from app.kernel import OcctRunner
 
         report = run_ladder(OcctRunner)
 

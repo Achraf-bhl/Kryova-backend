@@ -46,14 +46,28 @@ from app.ai.providers.ollama import (
     OllamaProvider,
     _answer_budget,
 )
-from app.ai.schemas import LoadCaseDraft, LoadCaseSketch, ResultInterpretation, VisualCheck
+from app.ai.schemas import (
+    ImageReading,
+    LoadCaseDraft,
+    LoadCaseSketch,
+    ResultInterpretation,
+    VisualCheck,
+)
 
 #: The schemas the product actually sends. `LoadCaseDraft` is deliberately
 #: absent: it is what comes *back* from drafting, built in Python.
+#:
+#: `ImageReading` was missing until 2026-09-17 and is a vision model's decoding
+#: grammar — `vision.py` hands it to `provider.look(schema=ImageReading)` — so it
+#: had shipped without ever being measured against the budget this file exists
+#: to enforce. The guard caught it the first time it was ever executed, which is
+#: the whole argument for the unaccounted-schema test sitting beside the budget
+#: one: the budget only checks the list, and the list is what goes stale.
 SENT_TO_A_PROVIDER: tuple[type[BaseModel], ...] = (
     ResultInterpretation,
     VisualCheck,
     LoadCaseSketch,
+    ImageReading,
 )
 
 

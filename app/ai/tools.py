@@ -29,7 +29,7 @@ import json
 import logging
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -416,6 +416,16 @@ class ToolBox:
     provider: Any = None
     _tools: dict[str, Tool] = field(default_factory=dict, init=False)
 
+    #: Tools that need something this box may not have been given, and the
+    #: attribute each one needs. A tool here is **withheld** rather than offered
+    #: and refused, because the vocabulary is what the caller reasons over: an
+    #: MCP client shown `draft_load_case` will spend a turn calling it and get a
+    #: refusal, where an absent tool costs nothing and misleads nobody. This is
+    #: `app/api/routes/mcp.py`'s docstring made true — it claimed the withholding
+    #: happened from the day the route shipped, and it did not until 2026-09-17,
+    #: which `tests/test_mcp.py` caught the first time it was executed.
+    _NEEDS: ClassVar[dict[str, str]] = {"draft_load_case": "provider"}
+
     def __post_init__(self) -> None:
         for tool in [
             *self._build(),
@@ -423,6 +433,9 @@ class ToolBox:
             *self._build_knowledge(),
             *self._build_catia_reference(),
         ]:
+            needed = self._NEEDS.get(tool.name)
+            if needed is not None and getattr(self, needed, None) is None:
+                continue
             self._tools[tool.name] = tool
 
     # -- lookup helpers -----------------------------------------------------

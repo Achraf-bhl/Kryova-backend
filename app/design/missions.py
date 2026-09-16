@@ -116,9 +116,11 @@ from app.design.compile import compile_spec
 from app.design.errors import SpecError
 from app.design.execute import BuildReport, CallRunner, execute_plan
 from app.design.params import Parameter, ParameterSet, Unit
+from app.design.spec import DesignSpec, FeatureSpec, expr, ref
 from app.dynamics.assembly import JointDeclaration, body_name, derive
 from app.dynamics.kinematics import evaluate as evaluate_motion
-from app.dynamics.reactions import compute as compute_reactions, free_body_check
+from app.dynamics.reactions import compute as compute_reactions
+from app.dynamics.reactions import free_body_check
 from app.dynamics.types import (
     GRAVITY_DOWN_MM_S2,
     Driver,
@@ -128,7 +130,6 @@ from app.dynamics.types import (
     MotionRange,
     Vec3,
 )
-from app.design.spec import DesignSpec, FeatureSpec, expr, ref
 from app.parts.bearings import CATALOGUE, Bearing, Duty, Refusal, Selection, select
 from app.rules.stackup import Contributor, Method, StackVerdict, check, stack, symmetric
 from app.sheetmetal import (

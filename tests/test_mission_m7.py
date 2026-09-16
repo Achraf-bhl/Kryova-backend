@@ -64,12 +64,12 @@ import math
 
 import pytest
 
+from app.assembly.errors import StructureError
 from app.design import missions as m
 from app.design.errors import SpecError
 from app.design.missions import Mission, MissionResult, mission, run_mission
-from app.assembly.errors import StructureError
 from app.dynamics.errors import MechanismError
-from app.dynamics.types import Driver, MotionRange
+from app.dynamics.types import Driver
 
 # --------------------------------------------------------------------------
 # The arm, written out here from its own drawing.
@@ -695,9 +695,8 @@ class TestTheRungInTheLadder:
         assert entry.rung == "M7"
 
     def test_the_ladder_now_stands_at_seven_of_nine(self) -> None:
-        from app.kernel import OcctRunner
-
         from app.design.missions import run_ladder
+        from app.kernel import OcctRunner
 
         report = run_ladder(OcctRunner)
 

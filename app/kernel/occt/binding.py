@@ -63,7 +63,6 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
         BRepBuilderAPI_Transform,
     )
     from OCP.BRepCheck import BRepCheck_Analyzer
-    from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.BRepExtrema import BRepExtrema_DistShapeShape
     from OCP.BRepFill import BRepFill_TypeOfContact
     from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer, BRepFilletAPI_MakeFillet
@@ -71,6 +70,7 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.BRepIntCurveSurface import BRepIntCurveSurface_Inter
     from OCP.BRepLib import BRepLib
     from OCP.BRepLProp import BRepLProp_SLProps
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.BRepOffset import BRepOffset_MakeOffset, BRepOffset_Mode
     from OCP.BRepOffsetAPI import (
         BRepOffsetAPI_DraftAngle,
@@ -147,8 +147,8 @@ try:  # pragma: no cover - which branch runs depends on the machine, not the tes
     from OCP.TDocStd import TDocStd_Application, TDocStd_Document
     from OCP.TNaming import TNaming_Builder, TNaming_Selector, TNaming_Tool
     from OCP.TopAbs import TopAbs_Orientation, TopAbs_ShapeEnum, TopAbs_State
-    from OCP.TopLoc import TopLoc_Location
     from OCP.TopExp import TopExp, TopExp_Explorer
+    from OCP.TopLoc import TopLoc_Location
     from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Edge, TopoDS_Iterator
     from OCP.TopTools import (
         TopTools_IndexedDataMapOfShapeListOfShape,

@@ -458,3 +458,282 @@ class TestMigrationRollbackNotes:
             "these migrations drop something and do not say what a rollback would cost: "
             + ", ".join(missing)
         )
+
+
+class TestTheSecretScan:
+    """P9.7. This repository committed a live `.env` once — the note at the top
+    of `.gitignore` records it, and records that the credentials had to be
+    rotated rather than removed. The scanner is what says so before the push."""
+
+    def test_the_tracked_tree_is_clean(self) -> None:
+        """The check itself, and the reason it is blocking in CI while
+        `pip-audit` is advisory: a CVE is somebody else's clock running, a
+        credential in the tree is this repository's own mistake."""
+        from scripts.scan_secrets import scan
+
+        result = scan()
+
+        assert result.clean, report_of(result)
+
+    def test_it_actually_read_the_tree_it_calls_clean(self) -> None:
+        """The guard on the guard. A scanner that read nothing reports clean and
+        looks exactly like a clean result — the shape `TestTheSBOM` guards the
+        licence scan against."""
+        from scripts.scan_secrets import scan
+
+        result = scan()
+
+        assert result.scanned > 500, f"only {result.scanned} files were read"
+
+    def test_what_it_did_not_read_is_counted_rather_than_silent(self) -> None:
+        """`data/bm25/` alone is ~450 MB of tracked PDFs. A scanner that skipped
+        in silence would report clean about a tree it had not looked at."""
+        from scripts.scan_secrets import scan
+
+        result = scan()
+
+        assert result.skipped, "nothing was skipped, and the PDFs are tracked"
+        assert all(entry.why for entry in result.skipped)
+
+    def test_a_planted_aws_key_is_found(self) -> None:
+        """AWS's own documented example key, so this file carries no credential.
+        Built from two pieces for the same reason: a literal here would be a
+        finding in the very tree the test above asserts is clean."""
+        from scripts.scan_secrets import scan_text
+
+        planted = "AKIA" + "IOSFODNN7EXAMPLE"
+
+        found = scan_text("planted.env", f"AWS_ACCESS_KEY_ID={planted}\n")
+
+        assert [f.rule for f in found] == ["aws-access-key-id"]
+
+    def test_a_planted_private_key_header_is_found(self) -> None:
+        from scripts.scan_secrets import scan_text
+
+        header = "-----BEGIN RSA " + "PRIVATE KEY-----"
+
+        found = scan_text("planted.pem", header)
+
+        assert [f.rule for f in found] == ["private-key-block"]
+
+    def test_a_url_whose_host_nobody_can_reach_is_not_a_finding(self) -> None:
+        """Twenty-five of twenty-five hits on the first run were fixtures and
+        setup examples. A rule that is wrong every time is one people learn to
+        skip, so the rule asks whether the host is reachable at all."""
+        from scripts.scan_secrets import scan_text
+
+        for url in (
+            "postgresql://kryova:hunter2@localhost:5432/kryova",
+            "postgresql://u:p@db.example.com/db",
+            "postgresql://u:p@host/db",
+            "postgresql://u:p@127.0.0.1/db",
+        ):
+            assert scan_text("fixture.py", url) == [], url
+
+    def test_a_url_whose_host_is_real_is_a_finding(self) -> None:
+        """The other half of the same rule — otherwise it passes by never
+        matching anything."""
+        from scripts.scan_secrets import scan_text
+
+        url = "postgresql://kryova:" + "pw" + "@db.kryova.example-host.co/kryova"
+
+        found = scan_text("x.py", url)
+
+        assert [f.rule for f in found] == ["url-with-password"]
+
+    def test_a_password_written_into_a_role_statement_is_a_finding(self) -> None:
+        """How the live local password reached `docs/LOCAL_POSTGRES.md`: not as
+        a leak, as an instruction. Every machine that followed it shared one
+        credential — P1.4's default-secret failure arriving through the docs."""
+        from scripts.scan_secrets import scan_text
+
+        statement = "CREATE ROLE kryova LOGIN PASSWORD " + "'fixed-in-a-doc'" + ";"
+
+        found = scan_text("docs/x.md", statement)
+
+        assert [f.rule for f in found] == ["sql-role-password"]
+
+    def test_an_elision_is_not_a_password(self) -> None:
+        """`PASSWORD '...'` is how the docs write the field. No password policy
+        anywhere issues a credential with no alphanumeric character in it, so
+        this is a fact about issuers rather than a guess about the text."""
+        from scripts.scan_secrets import scan_text
+
+        assert scan_text("docs/x.md", "CREATE ROLE kryova PASSWORD '...';") == []
+        assert scan_text("docs/x.md", "CREATE ROLE kryova PASSWORD '***';") == []
+
+    def test_the_setup_recipe_generates_its_password_rather_than_printing_one(
+        self,
+    ) -> None:
+        """The finding the first real run produced, fixed. Until 2026-09-16 the
+        Linux recipe created the role with a fixed literal."""
+        recipe = (REPO / "docs" / "LOCAL_POSTGRES.md").read_text(encoding="utf-8")
+
+        assert "kryova_dev_local" not in recipe
+        assert "secrets.token_urlsafe" in recipe
+        assert "PASSWORD :'pw'" in recipe
+
+    def test_the_recipe_warns_that_an_older_install_still_holds_the_old_one(
+        self,
+    ) -> None:
+        """Changing the instruction does not rotate a password already set, and
+        it is in this repository's history where the scanner cannot reach."""
+        recipe = (REPO / "docs" / "LOCAL_POSTGRES.md").read_text(encoding="utf-8")
+
+        assert "before 2026-09-16" in recipe
+        assert "ALTER ROLE kryova" in recipe
+
+    def test_an_allowance_is_pinned_to_the_text_it_accepted(self) -> None:
+        """Keying on the path alone would turn one justified exception into a
+        permanent blind spot over a whole file. Verified by changing the value
+        at an allowlisted path: the finding comes back."""
+        from scripts.scan_secrets import ALLOWED, scan_text
+
+        entry = next(e for e in ALLOWED if e.rule == "url-with-password")
+        changed = "postgresql://USER:" + "s3cr3t" + "@ep-xxxx-pooler.REGION.aws.neon.tech/DB"
+
+        found = scan_text(entry.path, changed)
+
+        assert [f.rule for f in found] == ["url-with-password"]
+        assert found[0].digest != entry.digest
+
+    def test_every_allowance_states_a_reason(self) -> None:
+        from scripts.scan_secrets import ALLOWED
+
+        assert ALLOWED
+        for entry in ALLOWED:
+            assert len(entry.why) > 30, entry
+
+    def test_an_allowance_nothing_matches_any_more_is_reported_not_ignored(
+        self,
+    ) -> None:
+        """Or the list becomes permanent by going stale — the same rule the
+        fourteen grandfathered migration names are held to."""
+        from scripts.scan_secrets import scan
+
+        result = scan()
+
+        assert result.stale_allowances == ()
+
+    def test_a_forbidden_path_is_refused_whatever_it_contains(self) -> None:
+        """An empty `.env` is still a mistake: the next person to fill it in
+        will not notice it is committed."""
+        from scripts.scan_secrets import forbidden_findings
+
+        found = forbidden_findings([".env", "certs/server.pem", "app/main.py"])
+
+        assert [path for path, _ in found] == [".env", "certs/server.pem"]
+        assert all(why for _, why in found)
+
+    def test_no_forbidden_path_is_tracked_today(self) -> None:
+        from scripts.scan_secrets import scan
+
+        assert scan().forbidden == ()
+
+    def test_the_report_never_prints_the_whole_match(self) -> None:
+        """CI logs are a place secrets get copied to, not a place they stop."""
+        from scripts.scan_secrets import scan_text
+
+        planted = "AKIA" + "IOSFODNN7EXAMPLE"
+        finding = scan_text("x.env", planted)[0]
+
+        assert planted not in finding.redacted()
+        assert planted not in str(finding.as_dict())
+
+    def test_the_report_states_what_it_cannot_see(self) -> None:
+        """History is where this repository's one real leak is, and a scanner
+        silent about its own limit would read as covering it."""
+        from scripts.scan_secrets import LIMIT, ScanResult, report
+
+        text = report(ScanResult((), (), (), 10, ()))
+
+        assert LIMIT in text
+        assert "never git history" in text
+
+    def test_ci_runs_it_and_does_not_let_it_fail_quietly(self) -> None:
+        """`pip-audit` is `continue-on-error` by a stated decision; this must
+        not inherit it."""
+        workflow = (REPO / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+
+        assert "scripts.scan_secrets" in workflow
+        step = workflow[workflow.index("Secret scan") : workflow.index("Generate SBOM")]
+        assert "continue-on-error" not in step
+
+
+def report_of(result: object) -> str:
+    """The scanner's own report, for a failure message worth reading."""
+    from scripts.scan_secrets import report
+
+    return report(result)  # type: ignore[arg-type]
+
+
+class TestTheReleaseNotesWorkflow:
+    """P9.7's other half: `scripts/release_notes.py` existed since 2026-09-10
+    and nothing ran it. A step that never runs proves nothing."""
+
+    def _workflow(self) -> dict:
+        import yaml
+
+        return yaml.safe_load(
+            (REPO / ".github" / "workflows" / "release.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def test_it_runs_the_generator_on_a_version_tag(self) -> None:
+        workflow = self._workflow()
+
+        # `on` is the YAML 1.1 boolean True once parsed, which is why this is
+        # not spelled "on".
+        triggers = workflow[True] if True in workflow else workflow["on"]
+        assert triggers["push"]["tags"] == ["v[0-9]*"]
+
+        steps = workflow["jobs"]["notes"]["steps"]
+        assert any("scripts.release_notes" in str(step.get("run", "")) for step in steps)
+
+    def test_it_checks_out_the_whole_history(self) -> None:
+        """The generator reads the first-parent log between two tags. A shallow
+        clone would silently describe a shorter release than happened."""
+        steps = self._workflow()["jobs"]["notes"]["steps"]
+
+        checkout = next(s for s in steps if "checkout" in str(s.get("uses", "")))
+
+        assert checkout["with"]["fetch-depth"] == 0
+        assert checkout["with"]["fetch-tags"] is True
+
+    def test_the_date_comes_from_the_tag_and_not_from_today(self) -> None:
+        """A release regenerated a week later must produce the same document,
+        or "the notes changed" stops meaning "the history changed"."""
+        steps = self._workflow()["jobs"]["notes"]["steps"]
+        runs = " ".join(str(step.get("run", "")) for step in steps)
+
+        assert "git log -1 --format=%cs" in runs
+        assert "date +" not in runs
+
+    def test_every_action_is_pinned_to_a_sha(self) -> None:
+        """A tag is a moving pointer, and CI is the one place a silently
+        updated third-party action runs with the repository checked out."""
+        import re
+
+        steps = self._workflow()["jobs"]["notes"]["steps"]
+
+        for step in steps:
+            uses = step.get("uses")
+            if uses:
+                assert re.search(r"@[0-9a-f]{40}$", uses), uses
+
+    def test_it_publishes_notes_and_not_an_artefact(self) -> None:
+        """P9 task 5 is BLOCKED — an MSI built on a runner starts nothing on a
+        customer machine — and attaching a binary here would look like it was
+        not."""
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        steps = self._workflow()["jobs"]["notes"]["steps"]
+
+        uploads = [s for s in steps if "upload-artifact" in str(s.get("uses", ""))]
+        assert [s["with"]["path"] for s in uploads] == ["release-notes.md"]
+        assert ".msi" not in text.lower()
+        assert "notes, not artefacts" in text

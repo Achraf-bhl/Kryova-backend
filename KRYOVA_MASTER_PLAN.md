@@ -6697,6 +6697,69 @@ scene in the Tauri app.
 
 7. **Secrets and supply chain**: no default secrets boot (P1 task 4), dependency pinning + audit in
    CI, SBOM for the desktop app (enterprise buyers ask), release notes generated from the merge log.
+   > PARTIAL (2026-09-16) — **secret scanning exists and is blocking in CI, the release notes
+   > are wired to a tag, and the scan's first run found a live credential published in this
+   > repository.** The desktop SBOM is the only thing left on this line and it is not waiting on
+   > effort — see the end.
+   > **`scripts/scan_secrets.py`, and it earned its place on the first run.**
+   > `docs/LOCAL_POSTGRES.md` created the local application role with a fixed literal password,
+   > and that literal is the password this machine's `kryova` role actually uses — checked
+   > against `.env.local` rather than assumed. It is not a leak, it is an *instruction*: every
+   > machine that followed the recipe shares one credential, which is P1 task 4's
+   > default-secret failure arriving through the documentation instead of through a config
+   > default. The recipe now generates one with `secrets.token_urlsafe(24)` and passes it as a
+   > psql variable. Two things measured while writing that: **`psql -c` does not interpolate**
+   > (`:'pw'` in a `-c` string reaches the server verbatim and answers `syntax error at or near
+   > ":"`), so the statement goes in on stdin; and changing the instruction rotates nothing, so
+   > the file now says in words that an install made before today still holds the old password
+   > and names the one `ALTER ROLE` that fixes it.
+   > **Rules are stated, and there is no entropy threshold** — a high-entropy string is not a
+   > secret, and a rule nobody agreed to is one people route around (`app/core/status.py` makes
+   > the same argument about inferring "degraded"). Two of the seven rules needed real work:
+   > - `url-with-password` fired **25 times out of 25 on placeholders** in its first form. A
+   >   rule that is wrong every time teaches people to skip it. It now asks whether the host
+   >   could be a machine anybody can reach — RFC 2606's reserved names, loopback, and
+   >   single-label compose service names are not — which is a *decidable* question rather than
+   >   a guess about intent, because RFC 2606 exists precisely so documentation can name a host
+   >   without naming one.
+   > - `sql-role-password` matches a literal in a role-creation statement, which is what caught
+   >   the finding above, and requires one alphanumeric character in the value: `PASSWORD '...'`
+   >   is an elision, and no issuer anywhere produces a credential with no alphanumeric in it.
+   >   That is a fact about issuers, not a placeholder dictionary.
+   > **An accepted match is pinned to the text somebody read** — (path, rule, sha256), never the
+   > path alone, so one justified fixture cannot become a blind spot over a whole file. Verified
+   > by changing the value on an allowlisted line: the finding comes back **and** the allowance
+   > is reported stale. Six allowances today, each with its reason. It **says what it cannot
+   > see**: it reads the tracked working tree, never history, and this repository's one real
+   > leak (the `.env` noted at the top of `.gitignore`) is in history where no working-tree
+   > scanner reaches.
+   > **Blocking in CI while `pip-audit` stays advisory**, and the asymmetry is the point: a new
+   > CVE in a transitive dependency is somebody else's clock running, and a credential in the
+   > tree is this repository's own mistake, public from the push.
+   > **Release notes now run** (`.github/workflows/release.yml`) on a `v*` tag and on
+   > `workflow_dispatch` so a failed run can be repeated without moving the tag. Full history and
+   > tags are fetched, because the generator reads the first-parent log between two tags and a
+   > shallow clone would describe a shorter release than happened; the date comes from the tag's
+   > own commit (`git log -1 --format=%cs`), so regenerating a week later produces the same
+   > document. It publishes with `gh`, which is on the runner, rather than adding a fourth
+   > third-party action SHA to keep current — and it publishes **notes, not artefacts**, because
+   > task 5 is BLOCKED and attaching a binary here would read as though it were not.
+   > **Still open: the SBOM for the desktop app, and it is not this task's to take.** There is no
+   > desktop artefact to describe — task 5 records why an MSI built on a runner starts nothing on
+   > a customer machine — so this is a missing capability rather than a missing hour, and it is
+   > recorded where CLAUDE.md puts that: on task 5, which owns it. No row in THE QUEUE: nothing
+   > here is stopped by hardware.
+   > Guards verified by breaking them (a planted AWS example key and a private-key header are
+   > both found; an allowlisted value changed fires again). Tests were written on Linux and not
+   > run as pytest (the user's rule); the scanner itself was run against the real tree, which is
+   > where the finding came from.
+   > Tested by: `tests/test_delivery.py::TestTheSecretScan` (17),
+   > `tests/test_delivery.py::TestTheReleaseNotesWorkflow` (5),
+   > `tests/test_delivery_release.py` (20), `tests/test_delivery.py::TestTheSBOM` (6). Code:
+   > `scripts/scan_secrets.py`, `.github/workflows/release.yml`, `.github/workflows/ci.yml`,
+   > `docs/LOCAL_POSTGRES.md`.
+
+   <!-- superseded 2026-09-16 -->
    > PARTIAL (2026-09-10) — **release notes are generated now; the desktop SBOM still waits on
    > task 5.** `scripts/release_notes.py` reads the first-parent log between two tags, so a
    > merged branch appears once, as its merge commit. Commits are grouped by the prefixes this

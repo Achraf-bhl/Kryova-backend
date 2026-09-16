@@ -1,0 +1,88 @@
+# Release notes, generated from the merge log when a tag is pushed (P9 task 7).
+#
+# `scripts/release_notes.py` has existed since 2026-09-10 and nothing ran it,
+# which is the same shape as an `importorskip` on a package nobody installs: a
+# step that never runs proves nothing about the thing it checks. This is the
+# wiring.
+#
+# It publishes **notes, not artefacts**. P9 task 5 (the desktop release
+# pipeline) is BLOCKED for a reason recorded in the master plan — an MSI built
+# on a runner ships paths baked in at build time and starts nothing on a
+# customer machine — and attaching a binary here would quietly look like that
+# task had been done.
+#
+# Actions are pinned to a commit SHA with the tag alongside, matching ci.yml.
+# `gh` is preinstalled on GitHub-hosted runners, so publishing needs no
+# third-party action and therefore no fourth SHA to keep current.
+
+name: Release notes
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+  # So a tag whose run failed can be re-notesd without moving the tag. Moving a
+  # release tag is the thing that makes "which build is this" unanswerable.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The existing tag to generate notes for
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    name: Generate and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          # The whole first-parent history, and the tags: the generator reads
+          # the log between this tag and the nearest earlier one, and a shallow
+          # clone would silently describe a shorter release than happened.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Resolve the tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+          # The tag's own commit date, not today's. A release regenerated a
+          # week later must produce the same document, or "the notes changed"
+          # stops meaning "the history changed".
+          echo "date=$(git log -1 --format=%cs "$TAG")" >> "$GITHUB_OUTPUT"
+
+      - name: Generate
+        run: |
+          python -m scripts.release_notes \
+            --tag "${{ steps.tag.outputs.name }}" \
+            --date "${{ steps.tag.outputs.date }}" \
+            --out release-notes.md
+          cat release-notes.md
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+      # Create the release if the tag push is what made it, edit it if somebody
+      # drafted one first. Either way the notes come from the log rather than
+      # from whatever was typed into the box.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" --verify-tag \
+              --title "$TAG" --notes-file release-notes.md
+          fi

@@ -290,6 +290,16 @@ jobs:
           pip install -r requirements.txt
           pip install pip-audit
 
+      # Blocking, unlike pip-audit below, and the asymmetry is the point: a
+      # new CVE in a transitive dependency is somebody else's clock running,
+      # while a credential in the tree is this repository's own mistake and is
+      # public the moment it is pushed. This repository has committed a live
+      # `.env` once (see the note at the top of `.gitignore`); the credentials
+      # had to be rotated, because deleting them in the next commit does not
+      # un-publish them. The scanner reads the tracked tree only and says so.
+      - name: Secret scan
+        run: python -m scripts.scan_secrets
+
       # Generated from the *installed environment*, not from requirements.txt:
       # a vulnerability lives in a transitive dependency, and the file lists
       # only direct ones. See `scripts/sbom.py`.

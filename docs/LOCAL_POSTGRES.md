@@ -105,19 +105,40 @@ hand as on Windows. Ubuntu 24.04 ships PostgreSQL 16.
 sudo apt install postgresql            # if it is not already there
 pg_isready                             # /var/run/postgresql:5432 - accepting connections
 
+# Generate the password; do not copy one out of this file. A password written
+# down in a tracked document is shared by every machine that follows the
+# instruction, and this repository is meant to be cloned -- see the note under
+# the block. It is printed once, here, because .env.local is what keeps it.
+KRYOVA_DB_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+
 # Peer auth over the unix socket means the shell user needs no password. Create
 # the role WITHOUT superuser -- see the note below, it is the whole point.
-psql -d postgres -c "CREATE ROLE kryova LOGIN PASSWORD 'kryova_dev_local' CREATEDB CREATEROLE NOBYPASSRLS;"
+# Through stdin, not -c: psql interpolates :'pw' only in what it parses
+# itself, and `-c` hands the string to the server verbatim -- measured
+# 2026-09-16, it answers `syntax error at or near ":"`. :'pw' quotes the
+# value as a literal, so a generated password needs no escaping.
+psql -d postgres -v pw="$KRYOVA_DB_PASSWORD" <<'SQL'
+CREATE ROLE kryova LOGIN PASSWORD :'pw' CREATEDB CREATEROLE NOBYPASSRLS;
+SQL
 psql -d postgres -c "CREATE DATABASE kryova      OWNER kryova ENCODING 'UTF8';"
 psql -d postgres -c "CREATE DATABASE kryova_test OWNER kryova ENCODING 'UTF8';"
 
 # .env.local (gitignored, read after .env, so both lines win)
-#   DATABASE_URL=postgresql://kryova:kryova_dev_local@localhost:5432/kryova?sslmode=disable
-#   TEST_DATABASE_URL=postgresql://kryova:kryova_dev_local@localhost:5432/kryova_test?sslmode=disable
+cat >> .env.local <<EOF
+DATABASE_URL=postgresql://kryova:$KRYOVA_DB_PASSWORD@localhost:5432/kryova?sslmode=disable
+TEST_DATABASE_URL=postgresql://kryova:$KRYOVA_DB_PASSWORD@localhost:5432/kryova_test?sslmode=disable
+EOF
 
 venv/bin/python -m alembic upgrade head
 venv/bin/python -m alembic check       # expect "No new upgrade operations detected"
 ```
+
+**An install made before 2026-09-16 has the password this file used to print.**
+The recipe named one fixed password, so every machine that followed it
+shares one credential, and it is in this repository's history where no working-
+tree scanner can reach it. Rotating is one `ALTER ROLE kryova
+PASSWORD` with a freshly generated value, followed by the two lines in
+`.env.local`. Worth doing on any machine reachable from anything but itself.
 
 **`TEST_DATABASE_URL` must name a different database, and `conftest.py` refuses
 one that resolves to the same host and database as `DATABASE_URL`** — the

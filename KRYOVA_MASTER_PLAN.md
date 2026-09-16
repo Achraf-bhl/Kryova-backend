@@ -65,7 +65,7 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-16** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-17** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
@@ -2450,6 +2450,41 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
 **~9 engineer-months.**
 
 1. **Steady/transient conduction, convection BCs, thermal-stress coupling.**
+   > DONE (2026-09-17) — **the steady conduction solver is now cross-checked against CalculiX,
+   > not only against mathematics.** The status below closed the task and named one residual in
+   > its *Not claimed* line — "CalculiX thermal-stress or transient decks (E3 in THE QUEUE owns
+   > the conduction oracle against ccx)". THE QUEUE **E3** is closed: `app/solve/calculix/
+   > conduction.py` writes a `*HEAT TRANSFER, STEADY STATE` deck, `CalculiXConductionSolver`
+   > runs it, and `oracle.compare_conduction` puts the two solvers on one case. **Five cases ran
+   > on ccx 2.23 on the Windows seat and all five agreed**, including a convection film — which
+   > is the one boundary that cannot be handed over as a vector, because a film puts
+   > `integral h N_i N_j dA` into the matrix and not only into the load. `CONDUCTION_BACKEND=calculix`
+   > is therefore a valid deployment now, and the registry's old refusal ("that step is not
+   > written") is gone rather than loosened.
+   > **What the run settled that nothing offline could.** The step needs no data line; the
+   > temperature degree of freedom is 11; `*INITIAL CONDITIONS, TYPE=TEMPERATURE` is required and
+   > does not reach the answer; the `.frd` carries `NDTEMP` and `RFL` for every node; and a
+   > 100 mm bar held at 300 K and 400 K reproduces `T(x) = 300 + x` with a **maximum nodal error
+   > of exactly 0.0**.
+   > **The defect the oracle found, which is the argument for having one.** Read raw,
+   > CalculiX's `RFL` block gave **−21.5 W** where the held face must remove all **22.5 W** that
+   > entered — exactly 1.0 W apart, the volumetric source's own share of the material tributary
+   > to the held nodes. `RFL` is the *pure* reaction and excludes the `*CFLUX` applied at the
+   > same node; `fixed_temperature_heat_w` does not. Published raw it would have been 4.4% wrong
+   > on every model with a source or a flux, with nothing in either run looking unhealthy.
+   > **`TetMesh.surface_face_owners` is new and is what made `*FILM` possible at all**: CalculiX
+   > names a surface as `<element>, F<n>`, so a film could otherwise only have been written as a
+   > node list (no such card) or as an equivalent flux (a different question, which is what the
+   > oracle exists to rule out). The face-label mapping is **derived by matching corner sets**,
+   > never typed — it comes out as the identity, and a test checks the derivation rather than the
+   > constant. Both new guards verified by breaking them: a rotated face map fails five named
+   > tests, and dropping the `RFL` correction fails one.
+   > **Still not claimed**: CalculiX *transient* conduction or thermal-stress decks, and any GUI
+   > surface for a conduction run.
+   > Tested by: `tests/test_calculix_conduction.py` (24, of which 7 run the real `ccx` and skip
+   > loudly without it), `tests/test_solver_registry.py`.
+
+   <!-- superseded 2026-09-17 -->
    > DONE (2026-09-14) — **transient conduction reaches the product, and a structural run can
    > carry a thermal run's temperatures.** The earlier status below shipped the solver and said
    > in words that it was wired to nothing; this closes that.

@@ -358,10 +358,11 @@ class Settings(BaseSettings):
     # Which solver runs a *conduction* job, and it is deliberately its own
     # setting. `SOLVER_BACKEND` names a structural solver: a deployment that had
     # set it to `calculix` and then asked for a temperature field would be asking
-    # a name chosen for a different analysis to answer this one, and today that
-    # is refused by name rather than quietly handed the in-house solver. When
-    # ccx's `*HEAT TRANSFER` step is federated behind the seam, this is the knob
-    # that selects it -- separately, because the two choices are independent.
+    # a name chosen for a different analysis to answer this one, and that is
+    # refused by name rather than quietly handed the in-house solver. Since
+    # 2026-09-17 ccx's `*HEAT TRANSFER, STEADY STATE` step is federated behind
+    # the seam, so `calculix` is a valid value here -- selected separately,
+    # because the two choices are independent.
     conduction_backend: str = "internal"
     # Which solver steps a *transient* conduction job forward in time. Its own
     # setting for the reason `conduction_backend` is: a steady solver and a

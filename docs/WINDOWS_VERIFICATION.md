@@ -863,7 +863,7 @@ master plan's status line in the same commit.
       `docs/verification-2026-09-10-night/`. **Fix E7.7 before attempting G1 again**, or the
       gate will re-measure a known failure.
 
-- [ ] **E3 — The conduction analysis through the GUI, and against CalculiX once A2 passes.**
+- [x] **E3 — The conduction analysis through the GUI, and against CalculiX once A2 passes.**
       Added 2026-09-09 with the work. `analysis: "thermal-conduction"` now reaches a request
       and is verified against three closed forms on Linux (linear bar to 6.6e-12 K, the
       logarithmic tube wall, the convecting-bar Biot tip temperature). What Linux cannot do
@@ -872,6 +872,24 @@ master plan's status line in the same commit.
       thermal case — that turns the in-house conduction solver from *verified against
       mathematics* into *cross-checked against another implementation*, which is the stronger
       claim and the one `CONDUCTION_BACKEND` was given its own setting to make possible.
+
+      **CLOSED 2026-09-17, ccx 2.23 on this seat.** `app/solve/calculix/conduction.py` writes
+      the `*HEAT TRANSFER, STEADY STATE` deck and `oracle.compare_conduction` puts the two
+      solvers on one case. **Five cases ran and all five agreed** — a bar held at both ends on
+      tet4 and on tet10, a convecting tip through `*FILM`, a flux plus a volumetric source, and
+      films alone with nothing held. `CONDUCTION_BACKEND=calculix` is a valid deployment now.
+      Measured facts that were not guessable: the step takes no data line; the temperature DOF
+      is **11**; `*INITIAL CONDITIONS, TYPE=TEMPERATURE` is required and does not reach the
+      answer; the `.frd` carries `NDTEMP` and `RFL` **for every node**; and the linear bar comes
+      back with a **maximum nodal error of exactly 0.0**.
+      **The oracle earned its keep on the first run.** `RFL` is the pure reaction and excludes
+      the `*CFLUX` applied at the same node, where `fixed_temperature_heat_w` does not — raw, it
+      read **−21.5 W** against the in-house **−22.5 W**, the 1.0 W being the source's own share
+      of the material tributary to the held face. Published unread it would have been 4.4% wrong
+      on every model with a source or a flux.
+      **Still open, and not this item's**: CalculiX *transient* conduction and thermal-stress
+      decks, and a GUI surface for a conduction run.
+      Tested by: `tests/test_calculix_conduction.py` (24; 7 run the real `ccx`).
 
 - [ ] **E4 — E15 task 1's CATIA half: run one `as_catscript` output on the seat.** Added
       2026-09-15. `app/design/batch.py::as_catscript` emits a compiled plan as one CATScript

@@ -68,6 +68,7 @@ _BACKEND_OF: Final[Mapping[str, str]] = {
     "steady-conduction": INTERNAL,
     "transient-conduction": INTERNAL,
     "calculix": CALCULIX,
+    "calculix-conduction": CALCULIX,
     "openfoam": OPENFOAM,
 }
 
@@ -133,6 +134,17 @@ def _internal_conduction(
     return SteadyConductionSolver()
 
 
+def _calculix_conduction(
+    executable: str | os.PathLike[str] | None = None,
+) -> ConductionSolver:
+    # Lazy for `_calculix`'s reason: importing the CalculiX conduction module
+    # pulls in the deck writer and the whole in-house conduction package, which
+    # a deployment that only ever runs static solves should not pay for.
+    from app.solve.calculix.conduction import CalculiXConductionSolver
+
+    return CalculiXConductionSolver(executable)
+
+
 #: Conduction backends, in a table of their own.
 #:
 #: **This is a parallel lookup and not an entry in `_FACTORIES`, and that is the
@@ -156,6 +168,7 @@ def _internal_conduction(
 #: will be the same `ccx` binary reporting the same version.
 _CONDUCTION_FACTORIES: Final[Mapping[str, Callable[..., ConductionSolver]]] = {
     INTERNAL: _internal_conduction,
+    CALCULIX: _calculix_conduction,
 }
 
 
@@ -217,29 +230,21 @@ def build_conduction_solver(
     Same contract as `build_solver` and the same refusal: never automatic, never
     a `KeyError`, never a silent substitution.
 
-    **No setting names this yet, and saying so is part of the honesty.** There
-    is a `SOLVER_BACKEND` and no `CONDUCTION_BACKEND`, so a deployment that had
-    set `SOLVER_BACKEND=calculix` and then asked for a conduction solve would be
-    refused here rather than quietly handed the in-house one. That refusal is
-    the correct behaviour under Decision 3 — a result computed by a solver
-    nobody chose cannot be relied on — and adding the separate setting is a
-    change to `app/core/config.py`, which this lane does not own. It is worth
-    making only when the second backend exists; one table with one entry does
-    not need a dedicated environment variable to disambiguate it.
+    **`CONDUCTION_BACKEND` names this, and `SOLVER_BACKEND` does not** — the two
+    are separate settings because `SOLVER_BACKEND` names a *structural* solver,
+    and a deployment that federated its stress runs to CalculiX must not thereby
+    change what answers a temperature field. Since 2026-09-17 there are two
+    backends to choose between: `internal`, and `calculix` through a
+    `*HEAT TRANSFER, STEADY STATE` step. They agree — five cases, including a
+    convection film, measured against ccx 2.23 on the seat — which is why the
+    choice is now a preference rather than a risk.
     """
     key = (name or "").strip().lower()
     factory = _CONDUCTION_FACTORIES.get(key)
     if factory is None:
         known = ", ".join(conduction_available())
-        federated = (
-            " CalculiX can solve steady conduction with a *HEAT TRANSFER step, but that "
-            "step is not written and nothing is federated behind this seam yet, so asking "
-            "for it is refused rather than answered by a different solver."
-            if key == CALCULIX
-            else ""
-        )
         raise SolverError(
-            f"No conduction solver called {name!r}. This build has: {known}.{federated} "
+            f"No conduction solver called {name!r}. This build has: {known}. "
             "It is never chosen automatically, because a result computed by a solver "
             "nobody selected cannot be relied on."
         )

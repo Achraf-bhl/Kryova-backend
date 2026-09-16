@@ -108,7 +108,7 @@ class TestTheConductionRegistry:
         assert isinstance(build_conduction_solver(INTERNAL), ConductionSolver)
 
     def test_the_conduction_table_is_stable_and_sorted(self) -> None:
-        assert conduction_available() == (INTERNAL,)
+        assert conduction_available() == (CALCULIX, INTERNAL)
 
     def test_the_two_tables_do_not_answer_for_each_other(self) -> None:
         """The point of keeping them apart. A `Solver` is not a conduction
@@ -117,17 +117,17 @@ class TestTheConductionRegistry:
         assert not isinstance(build_solver(INTERNAL), ConductionSolver)
         assert not isinstance(build_conduction_solver(INTERNAL), Solver)
 
-    def test_calculix_is_refused_by_name_and_says_why(self) -> None:
-        """`ccx` really does solve steady conduction — `*HEAT TRANSFER` — and
-        nothing here writes that step yet. Answering the request with the
-        in-house solver would be exactly the silent substitution Decision 3
-        forbids, so it is refused and the refusal names the gap."""
-        with pytest.raises(SolverError) as refused:
-            build_conduction_solver(CALCULIX)
+    def test_calculix_now_builds_a_conduction_solver(self) -> None:
+        """Superseding `test_calculix_is_refused_by_name_and_says_why`, which
+        pinned the absence of this backend until 2026-09-17.
 
-        message = str(refused.value)
-        assert "HEAT TRANSFER" in message
-        assert "internal" in message
+        The refusal it asserted was right for its day — answering a request for
+        CalculiX with the in-house solver is the silent substitution Decision 3
+        forbids — and the honest way past it was to write the `*HEAT TRANSFER`
+        step rather than to loosen the refusal. `app/solve/calculix/conduction.py`
+        is that step, measured against ccx 2.23 on the seat.
+        """
+        assert isinstance(build_conduction_solver(CALCULIX), ConductionSolver)
 
     def test_an_unknown_name_names_what_there_is(self) -> None:
         with pytest.raises(SolverError) as refused:

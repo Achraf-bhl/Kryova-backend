@@ -54,6 +54,7 @@ class TetMesh:
     midside: NDArray[np.int64] | None = None  # (n_tets, 6), see TET10_EDGES
     _surface: NDArray[np.int64] | None = field(default=None, repr=False, compare=False)
     _surface_midside: NDArray[np.int64] | None = field(default=None, repr=False, compare=False)
+    _surface_owner: NDArray[np.int64] | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.nodes = np.ascontiguousarray(self.nodes, dtype=np.float64)
@@ -136,6 +137,26 @@ class TetMesh:
         self._extract_surface()
         return self._surface_midside
 
+    @property
+    def surface_face_owners(self) -> NDArray[np.int64]:
+        """(n_faces, 2): the tet each boundary triangle belongs to, and which of
+        its four local faces it is — as an index into `_TET_FACES`.
+
+        Row-aligned with `surface_triangles`. A boundary triangle belongs to
+        exactly one tet by definition, so this is a function and not a choice.
+
+        It exists because a federated solver names a surface the way its own
+        element library does: CalculiX's `*FILM` and `*DFLUX` take
+        `<element>, F<n>` rather than a list of nodes, so a convection film that
+        must act on *the same triangles* the in-house solver integrates over can
+        only be written once this mapping exists. Falling back to a node list
+        there would ask the two solvers different questions, which is the one
+        thing `app/solve/oracle.py` exists to rule out.
+        """
+        self._extract_surface()
+        assert self._surface_owner is not None
+        return self._surface_owner
+
     def _extract_surface(self) -> None:
         if self._surface is not None:
             return
@@ -145,6 +166,12 @@ class TetMesh:
         _, index, counts = np.unique(keys, axis=0, return_index=True, return_counts=True)
         boundary = index[counts == 1]
         self._surface = faces[boundary]
+        # `faces` is the tets' four local faces flattened in order, so the flat
+        # index divides into (element, local face) exactly. Recovered here rather
+        # than searched for afterwards: matching a triangle back to its parent by
+        # node set is a second, slower implementation of the join that already
+        # happened one line above.
+        self._surface_owner = np.stack([boundary // 4, boundary % 4], axis=1)
         if self.midside is not None:
             self._surface_midside = self.midside[:, _TET_FACE_MIDSIDES].reshape(-1, 3)[boundary]
 

@@ -737,3 +737,114 @@ class TestTheReleaseNotesWorkflow:
         assert [s["with"]["path"] for s in uploads] == ["release-notes.md"]
         assert ".msi" not in text.lower()
         assert "notes, not artefacts" in text
+
+
+class TestTheDemoSeed:
+    """P9.4's Linux half. Staging needs an environment this deployment has not
+    got; a seeded demo organisation does not, and it is useful on its own."""
+
+    def test_it_writes_no_result_of_any_kind(self) -> None:
+        """Decision 3: an unmeasured claim is never a pass. A demo database
+        carrying a stress figure nobody solved for puts a fabricated number
+        behind the product's own provenance machinery, where every surface
+        downstream is built to trust it. Read from the imports rather than from
+        a run, so the guarantee holds without a database."""
+        source = (REPO / "scripts" / "seed_demo.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        imported = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+
+        for forbidden in (
+            "app.models.simulation",
+            "app.solve.types",
+            "app.verify.benchmarks",
+            "app.verify.register",
+        ):
+            assert forbidden not in imported, forbidden
+
+    def test_it_says_in_its_output_that_it_seeded_no_results(self) -> None:
+        """Somebody reading the terminal is the person who would otherwise
+        wonder why the projects are empty."""
+        from scripts.seed_demo import PEOPLE, SeedResult
+
+        said = SeedResult("id", "slug", (), tuple(p.email for p in PEOPLE), (), False).report()
+
+        assert "nobody computed" in said
+
+    def test_both_role_axes_are_exercised(self) -> None:
+        """P2.2 split `OrgRole` from `DomainRole` because an owner is not
+        automatically a reviewer. A demo where everybody is an owner shows none
+        of it."""
+        from app.models.organisation import DomainRole, OrgRole
+        from scripts.seed_demo import PEOPLE
+
+        assert {person.role for person in PEOPLE} == set(OrgRole)
+        assert DomainRole.REVIEWER in {person.domain_role for person in PEOPLE}
+
+    def test_exactly_one_reviewer_and_they_are_not_an_admin(self) -> None:
+        """The case the split exists for. If the only reviewer were also the
+        owner, a walkthrough could not tell the two columns apart."""
+        from app.models.organisation import DomainRole, OrgRole
+        from scripts.seed_demo import PEOPLE
+
+        reviewers = [p for p in PEOPLE if p.domain_role is DomainRole.REVIEWER]
+
+        assert len(reviewers) == 1
+        assert not reviewers[0].role.at_least(OrgRole.ADMIN)
+
+    def test_somebody_has_no_domain_role_at_all(self) -> None:
+        """`None` means *not stated*, and P5.5 refuses a sign-off from such a
+        member. A seed where the state cannot occur hides the rule the column's
+        own docstring states."""
+        from scripts.seed_demo import PEOPLE
+
+        unset = [p for p in PEOPLE if p.domain_role is None]
+
+        assert unset, "nothing demonstrates the nullable domain role"
+        assert all(p.why for p in PEOPLE)
+
+    def test_a_project_is_owned_by_someone_who_is_not_the_org_owner(self) -> None:
+        """Access comes from membership, never from `Project.owner_id` — the
+        comment on that column since P2. A demo has to be able to show it."""
+        from scripts.seed_demo import PEOPLE, PROJECTS
+        from app.models.organisation import OrgRole
+
+        owner = next(p for p in PEOPLE if p.role is OrgRole.OWNER)
+        holders = {project.owner_email for project in PROJECTS}
+
+        assert holders - {owner.email}
+        assert owner.email in holders
+
+    def test_every_seeded_address_is_in_a_reserved_domain(self) -> None:
+        """RFC 2606 reserves `.test`. A demo account at a domain somebody owns
+        is a password-reset mail to a stranger the first time production
+        settings reach this script."""
+        from scripts.seed_demo import PEOPLE
+
+        assert all(person.email.endswith(".test") for person in PEOPLE)
+
+    def test_it_refuses_a_database_it_was_not_pointed_at_deliberately(self) -> None:
+        """`create_admin.py`'s guard, for the same reason: the blast radius is
+        rows in somebody's tenant."""
+        from scripts.seed_demo import LOCAL_HOSTS, _host_of
+
+        # Built from pieces, like the fixtures above: a literal here is a
+        # finding in the very tree `TestTheSecretScan` asserts is clean.
+        remote = "postgresql://u:" + "pw" + "@ep-prod.aws.neon.tech/db"
+        local = "postgresql://u:" + "pw" + "@localhost:5432/kryova"
+
+        assert _host_of(remote) not in LOCAL_HOSTS
+        assert _host_of(local) in LOCAL_HOSTS
+
+    def test_the_guard_reads_the_host_not_the_whole_url(self) -> None:
+        """So a password containing the word `localhost` cannot talk its way
+        past it."""
+        from scripts.seed_demo import LOCAL_HOSTS, _host_of
+
+        sneaky = "postgresql://u:" + "localhost" + "@ep-prod.aws.neon.tech/db"
+
+        assert _host_of(sneaky) not in LOCAL_HOSTS

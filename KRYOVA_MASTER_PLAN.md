@@ -6634,6 +6634,43 @@ scene in the Tauri app.
 
 4. **Environments**: staging with seeded demo orgs and the mission suite running nightly against
    it; production migrations gated on `alembic check` and a rollback note per migration.
+   > PARTIAL (2026-09-16) — **the seeded demo organisation exists and has been run against a real
+   > database; staging itself still has nowhere to go.** Everything the superseded status records
+   > still holds.
+   > `scripts/seed_demo.py`. The task's phrase is "staging with seeded demo orgs", and the two
+   > halves have different blockers: staging needs an environment this deployment has not got,
+   > and the seed needs nothing — it is useful on a fresh clone, before a GUI ladder run, and for
+   > a walkthrough. Run against local PostgreSQL: one organisation, six people, three projects,
+   > and re-running reports `0 created, 6 reconciled` rather than duplicating anything.
+   > **It seeds people and structure and deliberately writes no result of any kind** — no
+   > simulation row, no `StaticResult`, no benchmark outcome, no verification standing. Decision
+   > 3 says an unmeasured claim is never a pass, and a demo database carrying a stress nobody
+   > solved for would put a fabricated number *behind the product's own provenance machinery*,
+   > where every surface downstream is built to trust it. A demo that ends at "here is a project,
+   > now run something" is honest; one that opens on a green result is a lie with a screenshot.
+   > The guarantee is held by a test that reads the script's imports rather than a run, so it
+   > holds with no database: `app.models.simulation`, `app.solve.types`, `app.verify.benchmarks`
+   > and `app.verify.register` are all absent. Confirmed against the real database too —
+   > `simulation_jobs` is 0 after seeding.
+   > **Both role axes are populated, because one of them is the point.** P2.2 split `OrgRole`
+   > from `DomainRole` so that an owner is not automatically a reviewer, and a demo where
+   > everybody is an owner shows none of it. All four `OrgRole` rungs appear; the only reviewer
+   > is a plain member, so the two columns can be told apart; and **two members have no domain
+   > role at all**, which is the "not stated" the column's docstring insists on and the state
+   > P5.5's gates refuse. One project is owned by someone other than the organisation owner, so
+   > a walkthrough can show access coming from membership and not from `Project.owner_id`.
+   > Every address is under a `.test` domain (RFC 2606), so a demo account cannot become a
+   > password-reset mail to a stranger, and the non-local-`DATABASE_URL` refusal is
+   > `create_admin.py`'s, host-matched rather than string-matched.
+   > **Still open: staging itself**, and it is unchanged — seeded demo orgs and a nightly run
+   > *against a deployed environment* still need an environment.
+   > Tests were written on Linux and not run as pytest (the user's rule); the seed itself was run
+   > twice against real PostgreSQL and the row counts read back out of the database.
+   > Tested by: `tests/test_delivery.py::TestTheDemoSeed` (9),
+   > `tests/test_delivery.py::TestMigrationRollbackNotes` (2). Code: `scripts/seed_demo.py`,
+   > `.github/workflows/nightly.yml`.
+
+   <!-- superseded 2026-09-16 -->
    > PARTIAL (2026-09-10) — **the nightly suite and the rollback-note rule exist; staging does
    > not, because there is nowhere to deploy it to.**
    > `.github/workflows/nightly.yml` builds the fleet image, health-checks it, and runs the

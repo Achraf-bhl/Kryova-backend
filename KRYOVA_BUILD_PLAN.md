@@ -64,6 +64,13 @@ happened.
 > the Windows session schedules its own chain, keeps **one** conversation rather than opening a
 > new one per turn, takes **at least seven tasks** a turn, and uses CATIA and the GUI only where
 > a claim actually needs them.
+> **The brief itself is written down**, so it survives the chat window it was pasted into:
+> **[docs/WINDOWS_CONTINUATION_PROMPT.md](docs/WINDOWS_CONTINUATION_PROMPT.md)** holds the
+> prompt handed to the Windows session on 2026-09-16, with its seven targets — run the 143
+> unrun tests, re-record V&V, THE QUEUE **E1** (sheet metal through the bridge), **E3**
+> (conduction against ccx, unblocked now A1/A2 are ticked), **E7.7 then E2** (the gates; the
+> gate fails at L4 on E7.7 until that is fixed), **E18.8** (M8), and **E6** (DMU Kinematics).
+> Update that file when the brief changes; do not let it drift from this block.
 
 > **Continuation, 2026-09-16 07:40 — six targets, and four of them were found by *running*
 > something rather than by reading it.**

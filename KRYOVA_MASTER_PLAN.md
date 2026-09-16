@@ -2290,15 +2290,27 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
    > `scripts/chrono_image.sh` builds `kryova-chrono:9.0.1` from `mambaorg/micromamba:1.5.10`
    > once, never during a run. The engine is **named before it runs**, by the image's content id
    > and not its tag.
-   > **What is not claimed, and it is the important half.** No answer this engine produces has been
-   > checked against a closed-form result: the tests pin Kryova's *translation* (a millimetre
-   > becomes a metre exactly once, a prismatic driver is scaled and a revolute one is not, a child
-   > is initialised before its parent, what the entry point writes is exactly what `from_result`
-   > reads) and prove nothing about Chrono's *semantics*. So every result carries
-   > `engine.UNVERIFIED_NOTE`, and **`engines()` deliberately puts this engine behind
-   > `KinematicEngine`**, which covers less and is checked against closed form — a prescribed
-   > serial chain must not silently start coming from an unverified integrator. It is reached by
-   > name only. THE QUEUE G6 carries the oracle runs that would settle it and move it forward.
+   > **The image was built here and the oracle runs were done here** — the five in THE QUEUE G6(b)
+   > — and they agree with closed form: a pendulum released from horizontal gives a peak pivot
+   > reaction of **29.4156 N against 3mg = 29.4200 N (0.015%)**; a 2 kg mass spun at 10 rad/s on a
+   > 100 mm crank gives **20.00083 N against m ω² r = 20.0 N (0.004%)** and its force *vector*
+   > tracks `KinematicEngine`'s to about 1%; a prismatic driven at 50 mm/s travels exactly 50 mm
+   > in a second, so the millimetre-to-metre scale is right rather than plausible.
+   > **Three defects were found by those runs and none was visible to the tests**, which is the
+   > entry worth reading before trusting any of this: Chrono's **default iterative solver does not
+   > satisfy a revolute constraint** here (the same pendulum reported **4286 N** and its rod
+   > stretched from 0.5 m to 0.74 m) so a direct solver is now mandatory and its absence is a loud
+   > warning; **`GetReaction2` was the wrong reaction** (it is the load on the parent — equal,
+   > opposite, and the same magnitude, so every joint load would have been published
+   > sign-reversed at exactly the right size); and reaction 1 is expressed in **frame 1**, which
+   > the code rotated by frame 2, giving a constant force vector where the exact evaluator had one
+   > sweeping round a circle — again at a magnitude agreeing to 0.004%.
+   > **What is still not claimed:** joint **moments** against any closed form, and every case this
+   > engine actually exists for — closed loops, contact, friction, springs, end stops. So
+   > `engine.UNVERIFIED_NOTE` now states precisely what was checked and what was not, and
+   > **`engines()` still puts this engine behind `KinematicEngine`** — not because Chrono is
+   > unverified but because where both can answer the kinematic one is *exact* and this one
+   > integrates. That ordering is permanent, not provisional. It is reached by name.
    > Also not claimed: spherical joints (refused by name), inertia tensors from the mass roll-up
    > (a body with none is sent as a point mass and the container substitutes a negligible isotropic
    > tensor, saying so in the warnings, because a *zero* tensor is a singular mass matrix rather
@@ -2306,9 +2318,10 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
    > sine carries no offset term and dropping it would shift the whole motion silently).
    > `app.dynamics.engine.ChronoEngine` — the in-process route — stays shut and unchanged: its
    > refusal is about `pip` and is still true.
-   > **Not run here**: written on Linux on 2026-09-16, tests written and not executed, at the
-   > user's instruction. Every assertion was measured first by a one-off script against the real
-   > modules (87 checks). Tested by: `tests/test_dynamics_chrono.py`.
+   > **Not run here**: the tests were written on Linux on 2026-09-16 and not executed as pytest,
+   > at the user's instruction; every assertion in them was measured first by one-off scripts
+   > against the real modules, and the physics was measured against the real engine as above.
+   > Tested by: `tests/test_dynamics_chrono.py`.
 
    <!-- superseded 2026-09-16 -->
    > BLOCKED — **`pip install pychrono` installs an unrelated package and succeeds.** The engine

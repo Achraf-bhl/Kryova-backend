@@ -49,10 +49,15 @@ from app.dynamics.types import Mechanism, MechanismResult, MotionRange
 #: `warnings` entry rather than prose in a docstring because it has to travel with the
 #: numbers -- a caveat only a developer reads is not a caveat on a result.
 UNVERIFIED_NOTE = (
-    "This result came from Project Chrono through Kryova's container boundary, and "
-    "Kryova's translation into a Chrono system has never been checked against a "
-    "closed-form answer on this deployment. Treat the numbers as unverified until "
-    "docs/WINDOWS_VERIFICATION.md's Chrono oracle runs have been done."
+    "This result came from Project Chrono through Kryova's container boundary. What has "
+    "been checked against closed form on this deployment (2026-09-16, image "
+    "kryova-chrono:9.0.1) is forces and motion on single-degree-of-freedom joints: a "
+    "pendulum's peak pivot reaction against 3mg to 0.015%, a spun mass against m w^2 r "
+    "to 0.004% and agreeing in direction with Kryova's exact evaluator, and a driven "
+    "prismatic travelling the millimetres it was asked for. What has NOT been checked is "
+    "everything this engine exists for beyond that: joint MOMENTS against any closed "
+    "form, closed loops, contact, friction, springs and end stops. Treat a moment, or "
+    "any result from a mechanism the kinematic engine would refuse, as unverified."
 )
 
 #: Every body is a point mass: `app.assembly.mass.roll_up` carries no inertia tensor, so

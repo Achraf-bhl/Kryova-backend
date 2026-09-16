@@ -273,19 +273,19 @@ class ChronoEngine(DynamicsEngine):
 def engines() -> tuple[DynamicsEngine, ...]:
     """Every engine this build knows about, in the order `resolve()` falls through them.
 
-    **This order is not by capability, and the exception is the whole of E9.1's honest
-    status.** `ContainerChronoEngine` covers strictly more than `KinematicEngine` —
+    **This order is not by capability, and the reason is permanent rather than
+    provisional.** `ContainerChronoEngine` covers strictly more than `KinematicEngine` —
     closed loops, contact, friction, springs, end stops — and it is nevertheless **last**,
-    behind an engine that covers less. The reason is that it has never been checked
-    against a closed-form answer on this deployment while `KinematicEngine` has, so a
-    prescribed serial chain must not start silently coming from an unverified integrator
-    the day somebody builds the image. Ask for it by name (`resolve("chrono-container")`)
-    and you get it, with `UNVERIFIED_NOTE` on every result; let `resolve()` choose and you
-    get the exact evaluator wherever it can answer.
+    behind an engine that covers less, because where both can answer the kinematic one is
+    **exact** and Chrono *integrates*. Measured 2026-09-16 on a mass spun at 10 rad/s on a
+    100 mm crank: the kinematic engine returns `m w^2 r` to machine precision and Chrono
+    returns it to 0.004%. Agreeing to 0.004% is what makes Chrono trustworthy; it is not
+    a reason to prefer it over a closed form for the cases a closed form covers.
 
-    That inversion is **temporary and has an owner**: `docs/WINDOWS_VERIFICATION.md`
-    carries the Chrono oracle runs. When they agree, this engine moves ahead of the
-    kinematic one and this paragraph goes with it.
+    So this ordering does not expire when the oracle runs pass — two of them already have.
+    What would move Chrono up is a mechanism `KinematicEngine` *refuses*, and `resolve()`
+    already handles that correctly: ask by name (`resolve("chrono-container")`) for a
+    closed loop or a contact, and the exact evaluator answers everything else.
 
     `ChronoEngine` leads and is never available: it is the in-process route, and its
     refusal is about `pip`. See its docstring.

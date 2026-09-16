@@ -1971,12 +1971,34 @@ difference between the two machines hides in whatever neither one has to state o
    `neondb_owner` outranks them. **CI was the other half of this entry until 2026-09-08** and is
    now fixed; a claim that CI cannot enforce RLS is out of date, and the assertions in
    `TestContinuousIntegration` are what keep it that way.
-4. **`pip install pychrono` installs an unrelated package and succeeds.** The engine probe checks
-   the module really is Chrono. There is no dynamics engine and the docstrings say so.
-   **The real Chrono does install from conda-forge** (measured 2026-09-14): `pychrono` 9.0.1 in
-   `mambaorg/micromamba:1.5.10` with Python 3.12, `ChSystemNSC` and `ChVector3d` present. It is
-   conda-only, and so cannot join this venv. The route is a process boundary in a container, the
-   shape `app/solve/openfoam/` already has.
+4. **`pip install pychrono` installs an unrelated package and succeeds**, so the in-process
+   `ChronoEngine` is still shut and still right to be. **The container route now exists and
+   works** (`app/dynamics/chrono/`, E9.1, 2026-09-16): `scripts/chrono_image.sh` builds
+   `kryova-chrono:9.0.1` from `mambaorg/micromamba:1.5.10` in ~20 min / ~8 GB, and three closed
+   forms agree (pendulum 3mg to 0.015%, `m ω² r` to 0.004%, prismatic scale exact). **Five
+   things about PyChrono that each give a plausible wrong number rather than an error**, all
+   measured that day and all written up in `_entrypoint.py`:
+   - **Chrono's default (iterative) solver does not satisfy a revolute constraint** on this
+     class of model. A pendulum whose closed-form peak pivot reaction is 29.42 N reported
+     **4286 N**, with the rod stretching from 0.5 m to 0.74 m. `SetSolverType(Type_SPARSE_QR)`
+     — a direct solver — gives 29.4156 N. A mechanism is a handful of bodies, so always use the
+     direct one; `APGD` drifts too.
+   - **`GetReaction1` is the load on the child and `GetReaction2` the load on the parent.** They
+     have *identical magnitude* and opposite sign, so taking the wrong one publishes every joint
+     load sign-reversed at exactly the right size, and a magnitude check passes.
+   - **Reaction *n* is expressed in frame *n*.** Rotating reaction 1 by `GetFrame2Abs` (the
+     parent's, which on a joint to ground never moves) leaves a vector of the right magnitude
+     pointing the wrong way — a *constant* force on a mass going round a circle.
+   - **Never chain `link.GetReaction1().force`.** The wrench is a temporary; freed at the end of
+     the expression, the vector read from it is garbage (`-4.86e188`, measured). Bind it first.
+     The same shape as the OCP handle-by-value trap in the kernel section.
+   - **A near-zero inertia tensor is not a point mass, it is a singular mass matrix.** `1e-6`
+     with the default solver made the radius wander 100 → 46 → 114 mm; with a realistic tensor
+     the same solver is exact. The direct solver survives either.
+   Two image traps: `mambaorg/micromamba` needs **`ARG MAMBA_DOCKERFILE_ACTIVATE=1`** or a bare
+   `RUN python` in the Dockerfile dies with `python: command not found` *after* the
+   fourteen-minute conda solve; and `docker run IMAGE python …` works anyway, because the
+   image's entrypoint activates the environment.
 5. **The in-memory rate-limiter backend is per-process.** `RedisBackend` exists in
    `api/rate_limit.py`; with `InMemoryBackend` selected, multiple workers each enforce their own
    budget. Check which backend is configured before reasoning about a limit. **Since P1.6 the

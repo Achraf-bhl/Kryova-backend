@@ -38,17 +38,24 @@ file can be held to. Reading a `ChMatrix33`'s elements is not: how a SWIG-wrappe
 matrix indexes from Python is exactly the kind of thing that differs by build, and getting
 it wrong would fill `frames` with plausible nonsense rather than raising.
 
-**Two things this file states rather than assumes**, because neither can be settled
-without an oracle run and a wrong guess is invisible:
+**Three things were measured against the real engine on 2026-09-16** (image
+`kryova-chrono:9.0.1`), and each was written the other way first — so the comments naming
+them are the record of a wrong guess corrected, not decoration:
 
-* Chrono reports a joint reaction **in the joint's own frame**. `JointReaction` is a
-  world-frame vector, so each is rotated into world coordinates through the link's
-  absolute frame. Where that rotation cannot be obtained, the raw value is returned with
-  a caveat saying it is in the joint frame — never silently as though it were world.
-* Chrono's `GetReaction2` is the wrench on the link's second body. Kryova's convention is
-  *the load the parent applies to the child*, and which of Chrono's two reactions that is
-  has not been checked against a known answer here, so `moment_caveat` carries the
-  question rather than a claim.
+* **The solver must be direct.** See `SOLVER_TYPE`. Chrono's default iterative solver
+  does not satisfy a revolute constraint here, and reports a pendulum reaction 146x too
+  large while looking like an ordinary number.
+* **`GetReaction1` is the load on the child**, which is Kryova's convention;
+  `GetReaction2` is the equal and opposite load on the parent. Both have the right
+  magnitude, so taking the wrong one publishes every joint load sign-reversed at exactly
+  the right size. See `_reaction`.
+* **A reaction arrives in the joint's frame** and is rotated into world coordinates
+  through the link's absolute frame. Where that rotation cannot be obtained the raw value
+  comes back with `JOINT_FRAME_CAVEAT` — never silently as though it were world.
+
+And one trap that is about the binding rather than the physics: **never chain
+`link.GetReaction1().force`**. The wrench is a temporary; freed at the end of the
+expression, the vector read out of it is garbage (`-4.86e188`, measured). Bind it first.
 """
 
 from __future__ import annotations
@@ -75,6 +82,18 @@ STEPS_PER_SAMPLE = 20
 
 #: And never a step longer than this, however coarse the sampling.
 MAX_STEP_S = 1e-3
+
+#: **A direct solver, and this is not a preference — it is the difference between an
+#: answer and noise.** Measured 2026-09-16 in `kryova-chrono:9.0.1`, a 1 kg point mass on
+#: a 0.5 m revolute released from horizontal: with `SPARSE_QR` the peak pivot reaction is
+#: **29.4199 N** against the closed-form 3mg = 29.4200 N and the radius holds 0.500000; with
+#: Chrono's default iterative solver (PSOR) the same model reports **4286.1 N** — 146x too
+#: large — and the radius drifts to 0.7359, because the constraint is never satisfied. A
+#: mechanism is a handful of bodies, so a direct factorisation is cheap, and it removes an
+#: iteration count that would otherwise silently decide whether a load case is real.
+#: `APGD` was also measured and also drifts; `BARZILAIBORWEIN` and `MINRES` happened to
+#: converge on the spin test and are not relied on.
+SOLVER_TYPE = "SPARSE_QR"
 
 
 def _symbol(module: Any, *names: str) -> Any:
@@ -292,9 +311,21 @@ def _make_link(chrono: Any, kind: str) -> Any:
     raise RuntimeError(f"Unknown joint kind {kind!r}.")
 
 
-def _build(chrono: Any, spec: dict[str, Any]) -> tuple[Any, dict[str, Any], dict[str, Any]]:
-    """The Chrono system, its bodies by name, and its links by name."""
+def _use_direct_solver(chrono: Any, system: Any) -> bool:
+    """Ask for `SOLVER_TYPE`. True when this build had it. See that constant."""
+    solver_enum = getattr(chrono, "ChSolver", None)
+    wanted = getattr(solver_enum, f"Type_{SOLVER_TYPE}", None) if solver_enum else None
+    setter = getattr(system, "SetSolverType", None)
+    if wanted is None or setter is None:
+        return False
+    setter(wanted)
+    return True
+
+
+def _build(chrono: Any, spec: dict[str, Any]) -> tuple[Any, dict[str, Any], dict[str, Any], bool]:
+    """The Chrono system, its bodies by name, its links by name, and whether it is direct."""
     system = _symbol(chrono, "ChSystemNSC")()
+    direct = _use_direct_solver(chrono, system)
     gravity = spec.get("gravity_mm_s2") or [0.0, 0.0, -9806.65]
     _call(
         system,
@@ -360,36 +391,73 @@ def _build(chrono: Any, spec: dict[str, Any]) -> tuple[Any, dict[str, Any], dict
         _call(system, ("AddLink", "Add"), link)
         links[name] = link
 
-    return system, bodies, links
+    return system, bodies, links, direct
 
 
-#: The part of a reaction caveat that is true on every build. See the module docstring.
-REACTION_CAVEAT = (
-    "Chrono reports the wrench on the second body of the link. Kryova's convention is "
-    "the load the parent applies to the child; which of Chrono's two reactions that is "
-    "has not been checked against a known answer on this deployment."
+#: Said when the reaction could not be rotated into world coordinates. It is **not** the
+#: general caveat it used to be: which of Chrono's two reactions Kryova wants, and which
+#: frame it arrives in, are both measured now — see `_reaction`.
+JOINT_FRAME_CAVEAT = (
+    "This reaction is stated in the joint's own frame rather than in world coordinates: "
+    "this PyChrono build offered no way to rotate it."
 )
 
 
 def _reaction(link: Any) -> tuple[list[float], list[float], list[float], str]:
-    """One joint's (location mm, force N, moment N·mm, caveat), in world coordinates."""
-    caveat = REACTION_CAVEAT
+    """One joint's (location mm, force N, moment N·mm, caveat), in world coordinates.
 
-    wrench = _maybe(link, ("GetReaction2",))
+    **`GetReaction1`, not `GetReaction2`, and that is measured rather than reasoned.**
+    `_build` calls `Initialize(child, parent, frame)`, so body 1 is the child. On a 2 kg
+    mass spun at 10 rad/s on a 100 mm crank (2026-09-16, `kryova-chrono:9.0.1`), both
+    reactions have magnitude 20.0008 N — the closed-form `m w^2 r` — and they point
+    opposite ways: `GetReaction1` is **inward**, the centripetal force holding the mass
+    on its circle, and `GetReaction2` is outward, the load the mass puts on the ground.
+    Kryova's `JointReaction` is *the load the parent applies to the child*, which is the
+    first. Taking the second would have published every joint load with the sign
+    reversed, at exactly the right magnitude — the most believable kind of wrong number
+    there is.
+
+    **The wrench is bound to a name before `.force` is read, and that is load-bearing.**
+    `link.GetReaction2().force` chained in one expression returns a dangling reference on
+    this build: the wrench is a temporary, it is freed the moment the expression ends, and
+    the vector read out of it is garbage. Measured the same day, it printed
+    `-4.86e188` — not a small error, and not one that looks like a memory bug either,
+    because a plausible value would have been indistinguishable from a real answer.
+
+    **The reaction arrives in the joint frame.** A horizontal rod at rest under gravity
+    along -z reports `(0, -4e-5, 0)` and rotates to `(0, 0, -4e-5)`; the world answer must
+    be along z, so the rotation is necessary and not a precaution.
+    """
+    caveat = ""
+
+    wrench = _maybe(link, ("GetReaction1",))
     force = getattr(wrench, "force", None) if wrench is not None else None
     torque = getattr(wrench, "torque", None) if wrench is not None else None
     if force is None:
         force = _maybe(link, ("Get_react_force",))
         torque = _maybe(link, ("Get_react_torque",))
+        if force is not None:
+            caveat = (
+                "This build has no GetReaction1, so the reaction came from the Chrono 8 "
+                "accessors, whose sign convention has not been checked here."
+            )
     if force is None:
         return (
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
-            caveat + " This build reported no reaction at all, so it reads as zero here.",
+            "This PyChrono build reported no reaction at all, so it reads as zero here. "
+            "A joint carrying nothing and a joint whose load is unknown are opposites.",
         )
 
-    frame = _maybe(link, ("GetFrame2Abs", "GetLinkAbsoluteCoords"))
+    # **Frame 1, to match reaction 1.** `GetReaction1` is expressed in the link's *first*
+    # frame, which is the child's and therefore turns with it. Rotating it by
+    # `GetFrame2Abs` — the parent's, which on a joint to ground never moves — leaves a
+    # vector of the right magnitude pointing the wrong way, and it was written that way
+    # first: the spun mass then reported a constant (-19.9998, 0.2, 0) at every sample
+    # while the exact evaluator had it sweeping round the circle. The magnitudes agreed
+    # to 0.004% throughout, so a check on |F| alone would have passed.
+    frame = _maybe(link, ("GetFrame1Abs", "GetLinkAbsoluteCoords"))
     location = [0.0, 0.0, 0.0]
     position = _maybe(frame, ("GetPos",))
     if position is not None:
@@ -402,10 +470,7 @@ def _reaction(link: Any) -> tuple[list[float], list[float], list[float], str]:
         else None
     )
     if world_force is None:
-        caveat += (
-            " It is stated in the joint's own frame rather than in world coordinates: "
-            "this build offered no way to rotate it."
-        )
+        caveat = (caveat + " " + JOINT_FRAME_CAVEAT).strip()
         world_force, world_torque = force, torque
 
     moment = (
@@ -418,7 +483,7 @@ def _reaction(link: Any) -> tuple[list[float], list[float], list[float], str]:
 
 def simulate(chrono: Any, spec: dict[str, Any]) -> dict[str, Any]:
     """Build the system, step it, and collect motion and reactions at each sample."""
-    system, bodies, links = _build(chrono, spec)
+    system, bodies, links, direct = _build(chrono, spec)
 
     duration = float(spec["motion"]["duration_s"])
     samples = int(spec["motion"]["samples"])
@@ -505,8 +570,33 @@ def simulate(chrono: Any, spec: dict[str, Any]) -> dict[str, Any]:
             "carries its position and the identity rotation. A clearance sweep placing "
             "geometry by these frames would not see a body turn."
         )
-    if links:
-        warnings.append(REACTION_CAVEAT)
+    if not direct:
+        # Loud, because the numbers stay plausible. See `SOLVER_TYPE`: the same pendulum
+        # reads 29.42 N with a direct solver and 4286 N without, and nothing in the
+        # result itself would tell them apart.
+        warnings.append(
+            f"This PyChrono build has no {SOLVER_TYPE} solver, so Chrono's default "
+            "iterative solver answered. Measured on 2026-09-16, that solver does not "
+            "satisfy a revolute constraint on this class of model: a pendulum whose "
+            "closed-form peak pivot reaction is 29.42 N reported 4286 N, with the rod "
+            "stretching from 0.5 m to 0.74 m. Treat every number here as unusable until "
+            "the image is rebuilt with a direct solver."
+        )
+    if links and any(
+        not any(reactions[name]["force_n"][0]) for name in reactions
+    ):
+        # Chrono has no constraint force until it has taken a step, so the first sample
+        # reads zero. That is "not computed yet", not "carries nothing", and the two are
+        # opposites — measured 2026-09-16, where the exact evaluator gives the full
+        # 20 N at t=0 and Chrono gives (0, 0, 0).
+        warnings.append(
+            "The reaction at the first sample (t = 0) is zero because Chrono forms no "
+            "constraint force until it has taken a step, not because the joint carries "
+            "nothing. Read the first sample as unmeasured; every later one is a "
+            "computed load."
+        )
+    seen = {reactions[name]["moment_caveat"] for name in reactions}
+    warnings.extend(sorted(note for note in seen if note))
 
     return {
         "wire_version": WIRE_VERSION,
@@ -515,7 +605,8 @@ def simulate(chrono: Any, spec: dict[str, Any]) -> dict[str, Any]:
         "reactions": reactions,
         "warnings": warnings,
         "method": (
-            "Project Chrono time integration (ChSystemNSC, fixed step "
+            "Project Chrono time integration (ChSystemNSC, "
+            f"{SOLVER_TYPE if direct else 'default iterative'} solver, fixed step "
             f"{step:g} s, {STEPS_PER_SAMPLE} per reported sample)"
         ),
         "chrono_version": str(getattr(chrono, "__version__", "unknown")),

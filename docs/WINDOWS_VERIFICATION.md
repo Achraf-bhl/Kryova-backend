@@ -1038,52 +1038,41 @@ this file drives the ladder, with a screenshot each.
       Settles: whether the three desktop powers work at all, and whether offline is *stated*
       rather than discovered by timeout, which is the whole of P7.4.
 
-- [ ] **G6 — E9.1, the Chrono container on this machine (added 2026-09-16).**
-      `app/dynamics/chrono/` runs Project Chrono in a container, and `ContainerChronoEngine`
-      is deliberately **behind** `KinematicEngine` in `app.dynamics.engine.engines()` until the
-      oracle runs below agree. This item is what moves it forward. Two halves, and they fail
-      for different reasons.
+- [ ] **G6 — E9.1, the Chrono container on Windows, and the moments (added 2026-09-16).**
+      **Part (b) of this item, the five closed-form oracle runs, was done on Linux the day it
+      was written** — the image built there, so they did not need this machine. They are
+      recorded in E9.1's status line and in `_entrypoint.py`'s comments, and they found three
+      defects the unit tests could not see (the default solver violating a revolute constraint
+      and reporting 4286 N where 3mg is 29.42 N; `GetReaction2` being the load on the *parent*,
+      equal and opposite at exactly the right magnitude; and reaction 1 rotated by frame 2,
+      giving a constant force vector where it should sweep). What is left is what Linux could
+      not do.
 
-      **(a) Does it run here at all?** This is the sibling of F1, and the same three things
-      bite: the bind mount is a **Windows path** (`-v C:\...:/work`), there is no
-      `os.getuid`, so `run_mechanism` sends no `--user` and the container writes as root into
-      a directory this server must delete, and the entry point must arrive with **LF**
-      endings (it is written with an explicit `newline="\n"` for exactly that, and a test pins
-      it). Build the image once with `bash scripts/chrono_image.sh` under WSL or Git Bash —
-      it needs `MAMBA_DOCKERFILE_ACTIVATE=1`, which is already in the Dockerfile after a
-      fourteen-minute conda solve came back `python: command not found` on 2026-09-16 and
-      looked like a broken image rather than an unactivated environment.
-
-      **(b) The oracle runs — the part that actually settles the status.** Every one is a
-      closed form, because agreement with a recorded number is not verification (Decision 3).
-      Drive them with a one-off script through `resolve("chrono-container")`, never through
-      pytest, and compare against `KinematicEngine` on the same mechanism where it can answer:
-      1. **A simple pendulum** released from horizontal: period against the small-angle
-         `2π√(L/g)` for a small release, and the peak pivot reaction at the bottom of the
-         swing against `3mg` for a rod released from horizontal. Settles gravity's sign and
-         magnitude having crossed the boundary — a factor of 1000 here is the single most
-         likely defect in the whole package and it looks entirely plausible on a drawing.
-      2. **A mass on a driven revolute at constant rate** — `m ω² r` at the pin, which
-         `tests/test_dynamics_assembly.py` already holds `KinematicEngine` to. **The two
-         engines must agree**, and that comparison is the single most valuable number this
-         item produces: it is the only check that Kryova's translation means what Kryova's
-         exact evaluator means.
-      3. **A driven prismatic** at a known rate: confirm the slider travels the millimetres
-         asked for, not 1/1000 of them. The scale is applied to the driver's parameters and
-         only for a prismatic (`_entrypoint._scaled`), so this is where that asymmetry is
-         checked against something real.
-      4. **The reaction convention.** `_entrypoint.REACTION_CAVEAT` says in as many words that
-         it is not known whether Chrono's `GetReaction2` is the load the parent applies to the
-         child, which is Kryova's convention. Settle it on the pendulum, where the sign is
-         unambiguous, then delete the caveat or flip the reading — **and do not delete it
-         without having measured it.**
-      5. **Is the reaction in world coordinates?** It is rotated through the link's absolute
-         frame on the assumption that Chrono reports in the joint frame. Check on a joint whose
-         axis is *not* +z, where the two differ; a joint on +z would agree either way and
-         settle nothing.
-      Settles: whether E9.1 is `PARTIAL` or `DONE`, and whether `engines()` may put the
-      container engine ahead of the kinematic one. Until (b) passes, every result carries
-      `engine.UNVERIFIED_NOTE` and that is correct rather than cautious.
+      1. **Does it run here at all?** This is the sibling of F1 and the same three things bite:
+         the bind mount is a **Windows path** (`-v C:\...:/work`); there is no `os.getuid`, so
+         `run_mechanism` sends no `--user` and the container writes as root into a directory
+         this server must then delete; and the entry point must arrive with **LF** endings (it
+         is written with an explicit `newline="\n"` and a test pins it). Build the image once
+         with `bash scripts/chrono_image.sh` under WSL or Git Bash — expect ~20 minutes and
+         ~8 GB. It needs `MAMBA_DOCKERFILE_ACTIVATE=1`, already in the Dockerfile after a
+         fourteen-minute conda solve came back `python: command not found` and looked like a
+         broken image rather than an unactivated environment.
+      2. **Joint moments against a closed form.** The forces are checked and the moments are
+         not, on either engine. A uniform rod rotating about one end at constant rate needs a
+         driving torque of zero and carries a bending moment at the pivot of `m g L / 2` at
+         rest — but Kryova sends **point masses** (the mass roll-up has no inertia tensor,
+         E9.2), so the honest first step is to check the moment on a body that *has* a tensor,
+         which `Body.inertia_kg_mm2` now carries across the wire. Until this is done, treat
+         every `moment_n_mm` as unverified; `UNVERIFIED_NOTE` says so.
+      3. **The cases the engine actually exists for.** Everything above is a
+         single-degree-of-freedom joint, which `KinematicEngine` could already answer exactly.
+         Chrono is here for **closed loops, contact, friction, springs and end stops**, and not
+         one of those has been run. A four-bar whose closure `app/dynamics/closures.py` solves
+         in closed form is the obvious first: the two must agree on the coupler curve.
+      Settles: whether the container works on the machine the product ships on, and whether
+      anything beyond a driven hinge can be trusted. Until (3), the engine stays behind
+      `KinematicEngine` in `engines()` — though note that ordering is now justified by the
+      kinematic engine being *exact*, not by Chrono being unverified, so it does not expire.
 
 ---
 

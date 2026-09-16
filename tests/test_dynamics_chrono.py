@@ -1,26 +1,31 @@
 """Project Chrono across a container boundary — master plan E9.1.
 
-**Written on Linux on 2026-09-16 and not run**: the user's rule for this stretch is that
-this machine writes code and tests and the Windows machine runs them. Every assertion
-here was nevertheless *measured* before it was written, by a one-off script driving the
-real modules — the discipline CLAUDE.md's testing item 7 asks for, applied to a whole
-package rather than one symbol. 57 checks, all agreeing, including the round trip in
-`TestAResultChronoWroteIsReadBackWhole`.
+**Written on Linux on 2026-09-16 and not run as pytest**: the user's rule for this stretch
+is that this machine writes code and tests and the Windows machine runs them. Every
+assertion here was measured first by one-off scripts driving the real modules, and — once
+the image existed — the real engine.
 
-**What these tests can and cannot prove.** They pin *Kryova's translation*: that a
-millimetre becomes a metre exactly once, that a prismatic driver is scaled and a revolute
-one is not, that a child is passed to `Initialize` before its parent, that what the entry
-point writes is exactly what `payload.from_result` reads. They prove nothing about
-*Chrono's semantics* — whether `GetReaction2` is the load the parent applies to the child,
-whether a `ChLinkLockRevolute` initialised this way spins about the axis intended. A stub
-agrees with whatever it was written to agree with, which is the trap
-`app/ai/providers/ollama.py` fell into and CLAUDE.md names as "a mock of a wire format is a
-copy of what you believed it to be".
+**What these tests prove, and what the oracle runs proved instead.** These pin *Kryova's
+translation*: a millimetre becomes a metre exactly once, a prismatic driver is scaled and a
+revolute one is not, a child is passed to `Initialize` before its parent, what the entry
+point writes is exactly what `payload.from_result` reads. A stub agrees with whatever it
+was written to agree with — the trap `app/ai/providers/ollama.py` fell into, which
+CLAUDE.md names as "a mock of a wire format is a copy of what you believed it to be" — so
+every *physical* claim was settled against the real `kryova-chrono:9.0.1` image instead,
+and three of those runs found real defects that this file's stub had happily agreed with:
 
-So the stub is deliberately **not** a Chrono simulator: it is a recorder. It never returns
-a number that a physics assertion here depends on; every physical claim is left to
-`docs/WINDOWS_VERIFICATION.md`'s Chrono oracle runs, and until those are done every result
-this engine produces carries `engine.UNVERIFIED_NOTE`.
+* **The solver.** Chrono's default iterative solver does not satisfy a revolute
+  constraint here: a pendulum whose closed-form peak pivot reaction is 29.42 N reported
+  **4286 N**, the rod stretching from 0.5 m to 0.74 m. With `SPARSE_QR` it reads 29.4156 N.
+* **The reaction.** `GetReaction1` is the load on the child, which is Kryova's convention;
+  the code took `GetReaction2`, the equal and opposite load on the parent. Same magnitude,
+  reversed sign — so a magnitude check would have passed.
+* **The frame.** Reaction 1 is expressed in frame 1, and the code rotated it by frame 2.
+  The spun mass then reported a *constant* force vector while the exact evaluator had it
+  sweeping round the circle, again at a magnitude agreeing to 0.004%.
+
+The stub was updated to tell reaction 1 and 2 apart precisely so those cannot come back
+silently. What no stub can prove is left in `docs/WINDOWS_VERIFICATION.md` G6.
 
 One thing the stub *does* prove that no oracle run would: `_symbol` and `_call` resolve
 both the Chrono 8 and the Chrono 9 spelling. A real build has one of them, so a real run
@@ -193,10 +198,15 @@ class _Link:
     def SetName(self, n: str) -> None:  # noqa: N802
         self.name = n
 
-    def GetReaction2(self) -> _Wrench:  # noqa: N802
+    def GetReaction1(self) -> _Wrench:  # noqa: N802
+        """The load on the CHILD — measured, see `_entrypoint._reaction`."""
         return _Wrench(_Vec(1.0, 2.0, 3.0), _Vec(0.4, 0.5, 0.6))
 
-    def GetFrame2Abs(self) -> _Frame:  # noqa: N802
+    def GetReaction2(self) -> _Wrench:  # noqa: N802
+        """The equal and opposite load on the parent. Taking this one was the bug."""
+        return _Wrench(_Vec(-1.0, -2.0, -3.0), _Vec(-0.4, -0.5, -0.6))
+
+    def GetFrame1Abs(self) -> _Frame:  # noqa: N802
         return _Frame(_Vec(0.1, 0.2, 0.3))
 
 
@@ -228,6 +238,12 @@ class _Interp:
         self.points.append((t, v))
 
 
+class _Solver:
+    """Chrono's solver-type enum, with the one name `_entrypoint.SOLVER_TYPE` asks for."""
+
+    Type_SPARSE_QR = "sparse-qr"  # noqa: N815
+
+
 class _System:
     #: Every system the stub has built, newest last. `simulate` builds its own, so this
     #: is how a test reaches the one that actually ran.
@@ -235,11 +251,15 @@ class _System:
 
     def __init__(self) -> None:
         _System.built.append(self)
+        self.solver: Any = None
         self.t = 0.0
         self.bodies: list[Any] = []
         self.links: list[Any] = []
         self.gravity: Any = None
         self.steps: list[float] = []
+
+    def SetSolverType(self, kind: Any) -> None:  # noqa: N802
+        self.solver = kind
 
     def SetGravitationalAcceleration(self, g: Any) -> None:  # noqa: N802
         self.gravity = g
@@ -273,6 +293,7 @@ class _Chrono:
     """A PyChrono-shaped module spelled the Chrono 9 way."""
 
     __version__ = "9.0.1-stub"
+    ChSolver = _Solver
     ChSystemNSC = _System
     ChBody = _Body
     ChVector3d = _Vec
@@ -293,6 +314,7 @@ class _Chrono8:
     """The same module spelled the Chrono 8 way, to prove `_call` resolves both."""
 
     __version__ = "8.0.0-stub"
+    ChSolver = _Solver
 
     class _Body8(_Body):
         SetFixed = None  # type: ignore[assignment]
@@ -385,37 +407,37 @@ class TestTheContainerIsSentSI:
     """`_build`: every length divided by 1000 exactly once, and nothing else touched."""
 
     def test_gravity_arrives_in_metres_per_second_squared(self) -> None:
-        system, _, _ = entrypoint._build(_Chrono(), _spec())
+        system, _, _, _ = entrypoint._build(_Chrono(), _spec())
         assert system.gravity.z == pytest.approx(-9.80665)
 
     def test_a_centre_of_mass_in_millimetres_arrives_in_metres(self) -> None:
-        _, bodies, _ = entrypoint._build(_Chrono(), _spec())
+        _, bodies, _, _ = entrypoint._build(_Chrono(), _spec())
         assert bodies["arm"].pos.x == pytest.approx(0.05)
 
     def test_a_joint_origin_in_millimetres_arrives_in_metres(self) -> None:
-        _, _, links = entrypoint._build(_Chrono(), _spec())
+        _, _, links, _ = entrypoint._build(_Chrono(), _spec())
         assert links["slide"].init[2].pos.x == pytest.approx(0.1)
 
     def test_a_tensor_that_was_sent_is_used_and_one_that_was_not_is_substituted(self) -> None:
         """A zero tensor is a singular mass matrix, not a point mass."""
-        _, bodies, _ = entrypoint._build(_Chrono(), _spec())
+        _, bodies, _, _ = entrypoint._build(_Chrono(), _spec())
         assert bodies["slider"].inertia.x == pytest.approx(1e-3)
         assert bodies["arm"].inertia.x == pytest.approx(entrypoint.NEGLIGIBLE_INERTIA_KG_M2)
 
     def test_the_child_is_initialised_before_its_parent(self) -> None:
         """Swapping them builds a mechanism that runs and moves the wrong body."""
-        _, bodies, links = entrypoint._build(_Chrono(), _spec())
+        _, bodies, links, _ = entrypoint._build(_Chrono(), _spec())
         assert links["slide"].init[0] is bodies["slider"]
         assert links["slide"].init[1] is bodies["arm"]
 
     def test_a_joint_to_ground_is_joined_to_the_fixed_body(self) -> None:
-        system, _, links = entrypoint._build(_Chrono(), _spec())
+        system, _, links, _ = entrypoint._build(_Chrono(), _spec())
         ground = system.bodies[0]
         assert ground.fixed is True
         assert links["pivot"].init[1] is ground
 
     def test_a_driven_joint_becomes_a_motor_of_its_own_kind(self) -> None:
-        _, _, links = entrypoint._build(_Chrono(), _spec())
+        _, _, links, _ = entrypoint._build(_Chrono(), _spec())
         assert isinstance(links["pivot"], _RotationMotor)
         assert isinstance(links["slide"], _LinearMotor)
 
@@ -425,7 +447,7 @@ class TestTheContainerIsSentSI:
         A revolute's coordinate is radians on both sides; a prismatic's is millimetres
         here and metres there.
         """
-        _, _, links = entrypoint._build(_Chrono(), _spec())
+        _, _, links, _ = entrypoint._build(_Chrono(), _spec())
         assert (links["pivot"].function.y0, links["pivot"].function.m) == (0.0, 10.0)
         assert links["slide"].function.y0 == pytest.approx(0.2)
         assert links["slide"].function.m == pytest.approx(0.05)
@@ -486,11 +508,58 @@ class TestWhatComesBackIsKryovasUnitsAgain:
         assert any("arm" in w and "negligible" in w for w in out["warnings"])
         assert not any("slider" in w for w in out["warnings"])
 
-    def test_the_reaction_convention_is_carried_as_a_question_not_a_claim(self) -> None:
-        """It has not been checked against a known answer, so it is not asserted."""
+    def test_the_reaction_read_is_the_load_on_the_child(self) -> None:
+        """`GetReaction1`, not `GetReaction2`, and the stub makes the two tell apart.
+
+        Measured on the real engine (2026-09-16): both have magnitude `m w^2 r` and they
+        point opposite ways, so taking the wrong one publishes every joint load
+        sign-reversed at exactly the right size. The stub returns `(1, 2, 3)` from
+        reaction 1 and `(-1, -2, -3)` from reaction 2 for that reason.
+        """
         out = entrypoint.simulate(_Chrono(), _spec())
-        assert entrypoint.REACTION_CAVEAT in out["warnings"]
-        assert out["reactions"]["pivot"]["moment_caveat"] == entrypoint.REACTION_CAVEAT
+        assert out["reactions"]["pivot"]["force_n"][0] == [1.0, 2.0, 3.0]
+
+    def test_nothing_is_caveated_when_everything_resolved(self) -> None:
+        """The convention and the frame are settled now, so there is no question to carry."""
+        out = entrypoint.simulate(_Chrono(), _spec())
+        assert out["reactions"]["pivot"]["moment_caveat"] == ""
+
+    def test_a_build_with_no_direct_solver_says_the_numbers_are_unusable(self) -> None:
+        """Loud, because the numbers stay plausible: 29.42 N becomes 4286 N.
+
+        Measured 2026-09-16. Chrono's default iterative solver does not satisfy a
+        revolute constraint on this class of model, and nothing in the result itself
+        would tell the two apart.
+        """
+
+        class _NoSolverChoice(_Chrono):
+            ChSolver = None
+
+        out = entrypoint.simulate(_NoSolverChoice(), _spec())
+        assert any("4286" in w for w in out["warnings"])
+        assert "default iterative" in out["method"]
+
+    def test_a_direct_solver_is_named_in_the_method(self) -> None:
+        out = entrypoint.simulate(_Chrono(), _spec())
+        assert entrypoint.SOLVER_TYPE in out["method"]
+
+    def test_the_first_sample_is_flagged_as_unmeasured_rather_than_zero(self) -> None:
+        """Chrono forms no constraint force until it has stepped. Zero is not 'no load'."""
+
+        class _QuietRotation(_RotationMotor):
+            def GetReaction1(self) -> _Wrench:  # noqa: N802
+                return _Wrench(_Vec(0.0, 0.0, 0.0), _Vec(0.0, 0.0, 0.0))
+
+        class _QuietLinear(_LinearMotor):
+            def GetReaction1(self) -> _Wrench:  # noqa: N802
+                return _Wrench(_Vec(0.0, 0.0, 0.0), _Vec(0.0, 0.0, 0.0))
+
+        class _Build(_Chrono):
+            ChLinkMotorRotationAngle = _QuietRotation
+            ChLinkMotorLinearPosition = _QuietLinear
+
+        out = entrypoint.simulate(_Build(), _spec())
+        assert any("t = 0" in w and "unmeasured" in w for w in out["warnings"])
 
     def test_a_build_with_no_readable_rotation_says_so_rather_than_sending_the_identity(
         self,
@@ -526,7 +595,7 @@ class TestBothChronoSpellingsResolve:
             entrypoint._call(object(), ("GetPosDt", "GetPos_dt"))
 
     def test_an_optional_reading_that_is_absent_is_none_rather_than_an_error(self) -> None:
-        assert entrypoint._maybe(object(), ("GetFrame2Abs",)) is None
+        assert entrypoint._maybe(object(), ("GetFrame1Abs",)) is None
         assert entrypoint._maybe(None, ("GetPos",)) is None
 
 
@@ -630,7 +699,6 @@ class TestAResultChronoWroteIsReadBackWhole:
     def test_the_caveats_travel_with_the_numbers(self) -> None:
         result = self._round_trip()
         assert any("negligible" in w for w in result.warnings)
-        assert result.reaction("pivot").moment_caveat == entrypoint.REACTION_CAVEAT
 
 
 class TestTheWireRefusesWhatItCannotRead:

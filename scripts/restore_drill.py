@@ -244,9 +244,25 @@ def _run(
 ) -> tuple[int, str]:
     if dry_run:
         return 0, "(dry run) " + " ".join(command)
-    completed = subprocess.run(
-        command, capture_output=True, text=True, check=False, env=env
-    )
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, check=False, env=env
+        )
+    except FileNotFoundError:
+        # **A missing binary is a check that could not run, not a crash.** Every
+        # caller here reads the return code and reports a finding; letting
+        # `FileNotFoundError` escape turns "psql is not on PATH" into a
+        # traceback, and a drill that dies on its first check has told the
+        # operator nothing about their backups. Found on Windows 2026-09-17,
+        # where the PostgreSQL client tools live in an install directory rather
+        # than on PATH -- and the class that caught it is named
+        # `TestWhatTheFirstRealDrillRunFound`, which is the point: a check that
+        # could not run is never a pass, and this is the last way one could
+        # still avoid saying so.
+        return 127, (
+            f"{command[0]!r} is not on PATH, so this check did not run. Install the "
+            "PostgreSQL client tools, or put their bin directory on PATH."
+        )
     return completed.returncode, (completed.stdout + completed.stderr).strip()
 
 

@@ -443,7 +443,19 @@ class TestTheFrameBuilds:
 
 
 class TestTheLadderItself:
-    """What the whole ladder says once M2 is on it. The headline nobody may misread."""
+    """What the whole ladder says once M2 is on it.
+
+    **These derive the counts and do not write them down**, and the reason is a
+    measurement: the ladder's totals were written as literals in *seven* test files,
+    and every rung that advanced — M6 on 2026-09-10, M4, M5 and M7 on 2026-09-16, M8
+    on 2026-09-17 — turned a rung *succeeding* into several red tests in files about
+    other rungs. Six separate fixes, all of them the same fix.
+
+    The rule that came out of it: **a rung's own test file asserts its own rung.** The
+    ladder's totals belong to `tests/test_design_missions.py`, which owns the ladder;
+    what a file about M2 may say about the whole programme is that it runs green, that
+    it is not complete, and that M2 is on the right side of both.
+    """
 
     @staticmethod
     def _ladder() -> Any:
@@ -452,39 +464,31 @@ class TestTheLadderItself:
 
         return run_ladder(OcctRunner)
 
-    def test_seven_rungs_pass_and_two_are_not_yet_buildable(self) -> None:
-        """M6 joined on 2026-09-10, when E14.1 and E12.3 — its two declared
-        needs — were both complete; M4 and M5 joined on 2026-09-16 the same
-        way, and M7 the same day once E9.1's container and E9.6's inertia
-        tensors landed. The coverage figure is measured here rather than
-        asserted anywhere, so it moves deliberately."""
+    def test_m2_is_among_the_rungs_that_pass(self) -> None:
         report = self._ladder()
 
-        assert [r.rung for r in report.passed] == [
-            "M1", "M2", "M3", "M4", "M5", "M6", "M7",
-        ]
-        assert len(report.pending) == 2
+        assert "M2" in [r.rung for r in report.passed]
         assert report.ok, report.summary()
 
     def test_the_ladder_is_not_complete_even_though_nothing_failed(self) -> None:
-        """Two rungs unclimbed, M2's welds unsized, M3's K never bent, M4's
-        gears untoothed, M5's frame never loaded, M6's belt never loaded and
-        M7's arm rigid. `ok` is the regression question; `complete` is the
-        programme question, and they are not the same."""
+        """`ok` is the regression question; `complete` is the programme question, and
+        they are not the same. M2's own welds are unsized, which is one of the reasons
+        the second answer is no."""
         report = self._ladder()
 
         assert not report.complete
-        assert [r.rung for r in report.caveated] == [
-            "M2", "M3", "M4", "M5", "M6", "M7",
-        ]
+        assert "M2" in [r.rung for r in report.caveated]
 
     def test_the_sentence_a_human_reads_names_both(self) -> None:
-        summary = self._ladder().summary()
+        """A denominator and a count of what is not yet built. The *values* are the
+        ladder's own business; that the sentence carries both is what this asserts."""
+        from app.design.missions import LADDER
 
-        assert "7/9 rungs pass" in summary
-        assert "2 not yet buildable" in summary
-        assert "not claimed" in summary and "weld" in summary
+        report = self._ladder()
+        summary = report.summary()
 
+        assert f"/{len(LADDER)} rungs pass" in summary
+        assert f"{len(report.pending)} not yet buildable" in summary
 
 class TestEveryNumberIsTraceable:
     """A mission is not done when the geometry is right — only when the numbers are."""

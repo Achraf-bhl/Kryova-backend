@@ -876,7 +876,18 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    as `<quoted attachment block: 2000 attachment(s), 11994 chars>` and holds the real text in
    `_block`. Perfectly reasonable, and it cost ten minutes of believing a probe had produced a
    58-character block. Check `dir()` before concluding a builder returned nothing.
-15. **A change to a *shared vocabulary* has a blast radius bigger than its files, and only the
+15. **A test about one thing must not assert the total of the set it belongs to.** Measured
+   the hard way: the mission ladder's counts — "7/9 rungs pass", the buildable list, the
+   pending set, the runner count — were written as literals in **seven** test files, and
+   every rung that *advanced* turned a success into several red tests in files about other
+   rungs. M6 on 2026-09-10, M4, M5 and M7 on 2026-09-16, M8 on 2026-09-17: six separate
+   fixes, all of them the same fix, and each one arriving as a failure that reads exactly
+   like a regression. **The rule: a rung's own file asserts its own rung**, and the ladder's
+   totals belong to the one file that owns the ladder (`tests/test_design_missions.py`),
+   where moving them is deliberate and the message says so. The same applies to
+   `app/verify/nafems.py`'s blocked-case count, which made unblocking a case look like a
+   regression twice. **Derive a total, or do not assert it where it is not the subject.**
+16. **A change to a *shared vocabulary* has a blast radius bigger than its files, and only the
    full suite knows it.** Item 7 under *Subagents* says to run everything after integrating
    parallel lanes; this is the same rule with no lanes in it, and it is the commoner case.
    Measured 2026-09-17, twice in one turn. Withholding one tool inside `ToolBox` touched two

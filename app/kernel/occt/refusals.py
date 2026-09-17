@@ -71,6 +71,37 @@ def _not_needed(instead: str = "") -> str:
 
 #: Operation name → why the open kernel does not implement it.
 REASONS: Final[dict[str, str]] = {
+    # -- Sheet metal, where the two backends genuinely differ ----------------
+    #
+    # The open kernel *does* build sheet metal (`app/kernel/occt/sheetmetal.py`, and
+    # `app/sheetmetal/fold.py` computes the blank and the folded solid as one
+    # calculation). What it does not have is CATIA's *parameter set*: a thickness, a
+    # bend radius and a K-factor living on the document and inherited by every feature
+    # added afterwards. On the open kernel those numbers are arguments to a
+    # `SheetMetalPart`, so there is nothing document-scoped to set or read.
+    #
+    # Refused rather than faked for the reason the whole refusal table exists: an
+    # operation that answered with the last part's numbers, or with a default nobody
+    # chose, would be a plausible answer to a question about a document that does not
+    # hold one.
+    "catia_sheetmetal_start": (
+        "the open kernel has no document-scoped sheet-metal parameter set. Thickness, "
+        "bend radius and K are arguments to app/sheetmetal/fold.py's SheetMetalPart, "
+        "set per part rather than once on the document"
+    ),
+    "catia_sheetmetal_parameters": (
+        "there is no parameter set on an open-kernel document to read. The numbers live "
+        "on the SheetMetalPart the caller supplied, which the caller already has"
+    ),
+    "catia_sheetmetal_bends": (
+        "an open-kernel fold tree is the input rather than something to interrogate: the "
+        "bends are what app/sheetmetal/fold.py was handed, not something CATIA adjusted"
+    ),
+    "catia_sheetmetal_export_flat": (
+        "this writes CATIA's own unfold, which is the point of it — an independent second "
+        "arithmetic to check app/sheetmetal/unfold.py against. Served by the open kernel "
+        "it would write Kryova's unfold back to Kryova and check nothing"
+    ),
     # -- CATIA's interface ---------------------------------------------------
     "catia_capture_view": (
         f"{_CATIA_INTERFACE}. It screenshots CATIA's window; the open kernel's part is "

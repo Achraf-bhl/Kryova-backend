@@ -2965,6 +2965,230 @@ class CatiaCom(
             "note": note,
         }
 
+    # -- Sheet Metal Design ---------------------------------------------------
+    #
+    # Written against the type library rather than the documentation, and the
+    # difference is the whole of THE QUEUE E1. `CATShfInterfaces`
+    # ({AEDE231A-8E0E-11D3-827B-006094EB7FE4}) declares four classes and **no
+    # creation method**: there is no `AddNewWall` and no `AddNewFlange` in V5's
+    # automation API, whatever the documentation says. So walls are not here and
+    # cannot be; what is here is everything COM does reach.
+    #
+    # Three facts measured on a French V5-R33 seat on 2026-09-17:
+    #
+    #   * `CreateSheetMetalParameters()` works on an **empty** part, so the
+    #     parameters are set before the first wall rather than corrected after.
+    #   * `SheetMetalParameters` has `GetThickness()` and **no setter**; the same
+    #     quantities are writable through knowledge-ware as `part.Parameters`.
+    #     Set 3.5 there, `GetThickness()` returns 3.5 -- the round trip is proved.
+    #   * Those parameter names are **localised**. On this seat they are
+    #     `Epaisseur`, `Rayon pli`, `Facteur perte au pli`. A table keyed on
+    #     "Thickness" finds nothing here and the operation silently does nothing,
+    #     so `_sheetmetal_parameter` searches every known spelling and refuses by
+    #     name when none matches.
+
+    def _sheetmetal_factory(self):  # pragma: no cover - Windows only
+        """The sheet-metal factory for the open part.
+
+        `GetCustomerFactory` rather than `GetTechnologicalObject`: the latter is
+        refused on a Part for this name (measured), and the difference is not
+        guessable from either method's own signature.
+        """
+        try:
+            return self._part().GetCustomerFactory("SheetMetalFactory")
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"This workstation could not open the Sheet Metal Design factory ({exc}). "
+                "Check that the Sheet Metal Design workbench is licensed on this seat."
+            ) from exc
+
+    def _sheetmetal_parameter(self, quantity: str):  # pragma: no cover - Windows only
+        """One sheet-metal parameter, found across every interface language.
+
+        The names translate -- `Epaisseur` here, `Thickness` on an English seat --
+        so the lookup is by suffix over a table of spellings. A miss is refused
+        with the spellings that were tried, because the alternative is an
+        operation that appears to succeed and changes nothing.
+        """
+        from app.catia.ops.sheet_metal import PARAMETER_NAMES
+
+        spellings = PARAMETER_NAMES[quantity]
+        parameters = self._part().Parameters
+        for index in range(1, parameters.Count + 1):
+            item = parameters.Item(index)
+            name = str(item.Name)
+            if any(name.endswith(spelling) for spelling in spellings):
+                return item
+        raise CatiaOperationError(
+            f"This part has no sheet-metal {quantity.replace('_', ' ')} parameter. "
+            f"Looked for a name ending in: {', '.join(spellings)}. Either the part is not "
+            "a sheet-metal part yet -- call catia_sheetmetal_start first -- or this seat's "
+            "interface language spells it some third way, which is worth reporting."
+        )
+
+    def sheetmetal_start(  # pragma: no cover - Windows only
+        self,
+        *,
+        thickness_mm: float,
+        bend_radius_mm: float | None = None,
+        k_factor: float | None = None,
+    ) -> dict[str, Any]:
+        """Make the open part a sheet-metal part and set its parameters."""
+        factory = self._sheetmetal_factory()
+        try:
+            parameters = factory.CreateSheetMetalParameters()
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA could not create the sheet-metal parameters ({exc})."
+            ) from exc
+
+        self._sheetmetal_parameter("thickness").Value = float(thickness_mm)
+        if bend_radius_mm is not None:
+            self._sheetmetal_parameter("bend_radius").Value = float(bend_radius_mm)
+
+        formula_was_active = None
+        if k_factor is not None:
+            # The K-factor is computed by CATIA's DIN formula and a write is
+            # REFUSED while that formula is active -- "La methode Value a
+            # echoue". Deactivating the formula releases it. Measured, and the
+            # reason this is not simply a third `.Value =` like the two above.
+            activity = self._sheetmetal_parameter("din_formula_active")
+            formula_was_active = bool(activity.Value)
+            activity.Value = False
+            self._sheetmetal_parameter("k_factor").Value = float(k_factor)
+
+        self._part().Update()
+        return {
+            "thickness_mm": float(parameters.GetThickness()),
+            "bend_radius_mm": float(self._sheetmetal_parameter("bend_radius").Value),
+            "k_factor": float(self._sheetmetal_parameter("k_factor").Value),
+            "din_formula_active": bool(
+                self._sheetmetal_parameter("din_formula_active").Value
+            ),
+            "din_formula_was_deactivated": formula_was_active is True,
+        }
+
+    def sheetmetal_parameters(self) -> dict[str, Any]:  # pragma: no cover - Windows only
+        """Read the part's sheet-metal parameters, and who chose the K-factor.
+
+        `din_formula_active` is reported because it is the difference between a
+        K somebody chose and one CATIA computed, and comparing a blank against
+        another calculation is meaningless without knowing which.
+        """
+        factory = self._sheetmetal_factory()
+        try:
+            parameters = factory.CreateSheetMetalParameters()
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"This part has no sheet-metal parameters to read ({exc}). Call "
+                "catia_sheetmetal_start first."
+            ) from exc
+        return {
+            "thickness_mm": float(parameters.GetThickness()),
+            "bend_radius_mm": float(self._sheetmetal_parameter("bend_radius").Value),
+            "k_factor": float(self._sheetmetal_parameter("k_factor").Value),
+            "din_formula_active": bool(
+                self._sheetmetal_parameter("din_formula_active").Value
+            ),
+        }
+
+    def sheetmetal_bends(self) -> dict[str, Any]:  # pragma: no cover - Windows only
+        """Every bend in the part, with the angle and radius CATIA holds.
+
+        Read from the part rather than from what was asked for: a bend the
+        workbench adjusted -- to a minimum radius, or to fit a relief -- reports
+        what it became. `Bend` exposes `GetBendAngle`, `GetBendRadius` and
+        `GetBreakAxis` and nothing else; there is no setter, so this is a
+        reading and never a correction.
+        """
+        part = self._part()
+        bends: list[dict[str, Any]] = []
+        body = part.MainBody
+        for index in range(1, body.Shapes.Count + 1):
+            shape = body.Shapes.Item(index)
+            # A bend answers `GetBendAngle`; anything else in the tree does not.
+            # Asked rather than filtered by name, because a shape's name is the
+            # engineer's and translates, while the method does not.
+            try:
+                angle = float(shape.GetBendAngle())
+                radius = float(shape.GetBendRadius())
+            except Exception:  # noqa: BLE001, S112
+                continue
+            bends.append(
+                {"name": str(shape.Name), "angle_deg": angle, "radius_mm": radius}
+            )
+        return {"bend_count": len(bends), "bends": bends}
+
+    def sheetmetal_export_flat(  # pragma: no cover - Windows only
+        self,
+        *,
+        tolerance_mm: float | None = None,
+        as_dwg: bool = False,
+        max_inline_bytes: int | None = None,
+    ) -> dict[str, Any]:
+        """Write CATIA's own flat pattern and hand back the bytes.
+
+        `CreateManufacturingFace(tolerance)` then `SaveAsDXF(path, tolerance,
+        version)` -- the only two creation-shaped calls in the whole sheet-metal
+        API, and both of them produce the *unfolded* view rather than geometry
+        on the part.
+
+        No path comes from the caller. The bridge runs on an engineer's
+        workstation and `tests/test_catia_protocol.py` refuses any tool that
+        takes one; the file is written into the bridge's own workdir and
+        returned, exactly as `export_step` does.
+        """
+        part = self._part()
+        part.Update()
+        factory = self._sheetmetal_factory()
+        try:
+            sheet_part = factory.GetItem("SheetMetalPart")
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"This part is not a sheet-metal part, so it has no flat pattern ({exc}). "
+                "Call catia_sheetmetal_start and add at least one wall first."
+            ) from exc
+
+        tolerance = 0.1 if tolerance_mm is None else float(tolerance_mm)
+        suffix = "dwg" if as_dwg else "dxf"
+        path = self.workdir / f"flat-{uuid.uuid4().hex[:8]}.{suffix}"
+        try:
+            sheet_part.CreateManufacturingFace(tolerance)
+            # The third argument is the DXF/DWG version. 0 is the translator's
+            # own default; it is passed explicitly because the signature makes
+            # it required rather than optional.
+            if as_dwg:
+                sheet_part.SaveAsDWG(str(path), tolerance, 0)
+            else:
+                sheet_part.SaveAsDXF(str(path), tolerance, 0)
+        except Exception as exc:  # noqa: BLE001
+            raise CatiaOperationError(
+                f"CATIA could not write the flat pattern ({exc}). A part whose bends "
+                "cannot be unfolded -- overlapping flanges, or a bend the workbench "
+                "refused -- fails here rather than producing a wrong blank."
+            ) from exc
+
+        if not path.is_file():
+            raise CatiaOperationError(
+                "CATIA reported a successful flat-pattern export and wrote no file."
+            )
+        try:
+            data = path.read_bytes()
+        finally:
+            path.unlink(missing_ok=True)
+        if max_inline_bytes is not None and len(data) > max_inline_bytes:
+            raise CatiaOperationError(
+                f"The flat pattern is {len(data) // (1024 * 1024)} MB, larger than the "
+                "bridge can transfer in one piece."
+            )
+        return {
+            "filename": f"{_safe_filename(str(self._document().Name))}-flat.{suffix}",
+            "size_bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "content_b64": base64.b64encode(data).decode("ascii"),
+            "tolerance_mm": tolerance,
+        }
+
     def checkpoint(  # pragma: no cover - Windows only
         self, *, label: str, max_inline_bytes: int | None = None
     ) -> dict[str, Any]:

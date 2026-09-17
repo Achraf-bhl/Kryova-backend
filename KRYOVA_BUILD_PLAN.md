@@ -450,6 +450,38 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-17 (evening) — THE QUEUE E1 ANSWERED on the seat, and the answer is a measured
+  refusal.** Suite green: **10,538 passed / 38 skipped / 1 xpassed / 0 failed** in 12 min 38 s;
+  `ruff` clean, `mypy` clean across 493 files.
+  **`AddNewWall` and `AddNewFlange` do not exist.** `CATShfInterfaces`
+  (`{AEDE231A-8E0E-11D3-827B-006094EB7FE4}`, invisible to late binding like DMU Kinematics)
+  declares four classes — `SheetMetalFactory`, `SheetMetalParameters`, `SheetMetalPart`,
+  `Bend` — and **not one creation method**. The type library was read before anything was
+  called, which is the discipline the `AddJoint` crash bought the same day. So E17.3's
+  residual was right for the wrong reason: the COM calls behind a wall were not unwritten,
+  three of them are unwritable.
+  **Shipped** (`app/catia/ops/sheet_metal.py`, four COM methods in
+  `scripts/catia_bridge/catia_com.py`, four refusals on the open kernel,
+  `tests/test_catia_sheet_metal.py` — 23): `catia_sheetmetal_start`, `_parameters`, `_bends`,
+  `_export_flat`. What COM cannot reach is recorded **as data** in `UNREACHABLE_OVER_COM`,
+  because an absent operation reads as "nobody got to it yet" and invites somebody to write
+  one blind.
+  **Two traps, either of which silently produces a wrong blank.** The parameter names are
+  **localised** (`Epaisseur`, `Rayon pli`, `Facteur perte au pli` here) — CLAUDE.md's "the COM
+  API is not localised" is about *method* names and holds; a parameter's name is user-visible
+  data. And **CATIA computes the K-factor and refuses a write while its DIN formula is
+  active**; solved exactly against three measured points as `K = (0.5 + 0.5 log10(2r/t))/2`,
+  DIN 6935 halved with the **unrounded** constant — the printed 0.65 is off by a constant
+  **2.575e-4** at every ratio, exactly the size of an unexplainable disagreement between two
+  unfold implementations.
+  **Three product rules caught the first draft**, each worth carrying: no tool may take a
+  filesystem path (the bridge runs on the engineer's workstation — the export attaches bytes
+  like `catia_export_step`); the registry has a size budget because the whole schema reaches
+  the local model every turn (raised 208,000 → 210,000 with the reason written down, since
+  four genuinely new tools landed); and every new operation owes the open kernel a handler or
+  a named refusal.
+  **Still open, now properly scoped**: building a wall at all needs the Win32 UI bridge, and
+  so therefore does the end-to-end blank comparison.
 - **2026-09-17 (midday) — E18 COMPLETE. M8 lands, the ladder reaches 8/9, and the DMU
   Kinematics API is measured.** Suite green: **10,499 passed / 38 skipped / 1 xpassed / 0
   failed** in 9 min 56 s.

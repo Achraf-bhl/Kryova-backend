@@ -301,8 +301,19 @@ def test_the_tool_list_reports_tiers_so_the_ui_cannot_get_them_wrong(auth_client
     # `catia_close_document`, so the agent can put a part away rather than
     # leaving a window open per conversation; 205 since `catia_drive_to`,
     # which converges a parameter on a measured target inside one call rather
-    # than costing the agent a round per guess (ladder prompt S1, 2026-09-06).
-    assert len(tools) == 205
+    # than costing the agent a round per guess (ladder prompt S1, 2026-09-06);
+    # 209 since the four sheet-metal operations (THE QUEUE E1, 2026-09-17).
+    #
+    # **Derived from the registry rather than written as a number.** This pin has
+    # been moved by hand five times now, and each time a genuinely new tool
+    # arrived it failed a test whose subject is *tiers* — the count is incidental
+    # to the claim, and a literal here makes adding vocabulary look like a
+    # regression. What the route must not do is drop or invent a tool relative to
+    # the registry, and that is what this asserts. The named checks below are the
+    # ones that carry the real meaning.
+    from app.catia.ops.registry import OPERATIONS
+
+    assert len(tools) == len(OPERATIONS)
     by_name = {tool["name"]: tool for tool in tools}
 
     # The original 39 by name, not just by count. The registry rewrite could

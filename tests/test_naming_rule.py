@@ -134,17 +134,27 @@ class TestTheSchemasStayedUsable:
                     assert prop.get("description"), f"{spec.name}.{name} lost its description"
 
     def test_the_registry_is_smaller_than_it_was(self) -> None:
-        """The measurement itself, pinned. 220k -> 215k -> 206k.
+        """The measurement itself, pinned. 220k -> 215k -> 206k -> 208k.
 
         This is the test that earned its keep: set at 215,000 on 2026-09-06, it
         went red on 2026-09-07 at 215,365 after E14 and E16 added assembly and
         knowledge vocabulary. Nothing added was wrong -- the payload had simply
-        drifted back, which is exactly what a budget with no guard does. The
-        ceiling is 208,000 rather than the measured 206,337 so that a genuinely
-        new tool is not a test failure, and low enough that the next few
-        sentences of drift are.
+        drifted back, which is exactly what a budget with no guard does.
+
+        **Moved to 210,000 on 2026-09-17, measured 208,292.** The previous
+        ceiling of 208,000 sat above a measured 206,337 with 1,663 of headroom,
+        and its own note says that was "so that a genuinely new tool is not a
+        test failure". THE QUEUE E1 added **four** -- the sheet-metal
+        operations -- for 1,955 bytes, and four is more than the allowance was
+        sized for. So the ceiling moves, and the distinction is worth stating
+        because it is the one that keeps a budget honest: this is not a
+        threshold loosened to make a run pass, it is a budget re-sized for
+        deliberately added vocabulary, with the new measurement recorded. The
+        summaries were cut to the minimum first -- twice -- and the sibling test
+        above is what stops that going too far. Headroom is kept at the same
+        ~1,700 so the next few sentences of drift are still a failure.
         """
-        assert len(REGISTRY_JSON) < 208_000
+        assert len(REGISTRY_JSON) < 210_000
 
     def test_pad_still_describes_its_sketch_and_length(self) -> None:
         pad = next(s for s in CATIA_TOOL_SPECS if s.name == "catia_pad")

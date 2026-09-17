@@ -5915,6 +5915,66 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         },
         (),
     ),
+    "catia_sheetmetal_start": (
+        WRITE,
+        {
+            "type": "object",
+            "properties": {
+                "thickness_mm": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10000.0,
+                    "description": "Sheet thickness. Millimetres.",
+                },
+                "bend_radius_mm": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10000.0,
+                    "description": "Default inner bend radius. Millimetres.",
+                },
+                "k_factor": {
+                    "type": "number",
+                    "minimum": 0.001,
+                    "maximum": 100.0,
+                    "description": "Neutral-axis position, 0 to 1. A ratio, where 1.0 leaves the size unchanged.",
+                },
+            },
+            "required": ["thickness_mm"],
+            "additionalProperties": False,
+        },
+        (),
+    ),
+    "catia_sheetmetal_parameters": (
+        READ,
+        {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        (),
+    ),
+    "catia_sheetmetal_bends": (
+        READ,
+        {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        (),
+    ),
+    "catia_sheetmetal_export_flat": (
+        WRITE,
+        {
+            "type": "object",
+            "properties": {
+                "tolerance_mm": {
+                    "type": "number",
+                    "minimum": -10000.0,
+                    "maximum": 10000.0,
+                    "description": "Chord tolerance. Default 0.1 mm. Millimetres; negative reverses the direction.",
+                },
+                "as_dwg": {
+                    "type": "boolean",
+                    "description": "Write DWG instead of DXF. Default false.",
+                },
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        ("max_inline_bytes",),
+    ),
     "catia_drawing_create": (
         WRITE,
         {
@@ -7312,6 +7372,10 @@ TOOL_METHODS: dict[str, str] = {
     "catia_assembly_clash": "assembly_clash",
     "catia_bill_of_materials": "bill_of_materials",
     "catia_scene_explode": "scene_explode",
+    "catia_sheetmetal_start": "sheetmetal_start",
+    "catia_sheetmetal_parameters": "sheetmetal_parameters",
+    "catia_sheetmetal_bends": "sheetmetal_bends",
+    "catia_sheetmetal_export_flat": "sheetmetal_export_flat",
     "catia_drawing_create": "drawing_create",
     "catia_sheet_add": "sheet_add",
     "catia_sheet_frame": "sheet_frame",
@@ -7351,4 +7415,6 @@ TOOL_METHODS: dict[str, str] = {
 }
 
 #: Tools whose result the server should wait longer for.
-LONG_RUNNING: frozenset[str] = frozenset(["catia_export", "catia_export_step", "catia_import"])
+LONG_RUNNING: frozenset[str] = frozenset(
+    ["catia_export", "catia_export_step", "catia_import", "catia_sheetmetal_export_flat"]
+)

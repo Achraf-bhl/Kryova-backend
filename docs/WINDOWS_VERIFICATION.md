@@ -824,7 +824,66 @@ Treat each one as a normal task under this repo's rules: write the tests with th
 `pytest`/`ruff`/`mypy`, verify each new guard by breaking what it guards, and update the
 master plan's status line in the same commit.
 
-- [ ] **E1 — Sheet metal on the CATIA side (E17.3 task 3, written 2026-09-09).** A
+- [x] **E1 — Sheet metal on the CATIA side (E17.3 task 3).** **ANSWERED 2026-09-17, and the
+      headline is a refusal that is now measured rather than assumed.**
+
+      **`AddNewWall` and `AddNewFlange` do not exist.** `CATShfInterfaces`
+      (`{AEDE231A-8E0E-11D3-827B-006094EB7FE4}` — late binding does not see it, exactly as
+      with DMU Kinematics) declares **four** classes and not one creation method:
+
+      | class | members |
+      |---|---|
+      | `SheetMetalFactory` | `CreateSheetMetalParameters`, `GetItem` |
+      | `SheetMetalParameters` | `GetThickness` — a getter; **there is no setter** |
+      | `SheetMetalPart` | `CreateManufacturingFace`, `SaveAsDXF`, `SaveAsDWG` |
+      | `Bend` | `GetBendAngle`, `GetBendRadius`, `GetBreakAxis` |
+
+      So the registry was right to carry no wall operation and **still carries none**: over
+      COM it is a promise the bridge cannot keep. Creating walls needs the Win32 UI bridge,
+      and that is now a separate, properly-scoped task rather than an assumption.
+      Read off the type library **before** anything was called — the discipline the
+      `AddJoint` crash bought earlier the same day.
+
+      **E1's other two questions, answered.** *Can the parameters be set before the first
+      wall?* Yes: `CreateSheetMetalParameters()` works on an **empty** part. But not
+      through the COM object, which has no setter — through knowledge-ware, where
+      `part.Parameters` carries them. Set thickness 3.5 there and `GetThickness()` returns
+      3.5: the round trip is proved, not assumed. *Does a CATIA part unfold to the same
+      blank?* Now answerable, and **only if both use the same K** — see below.
+
+      **Two traps found, either of which silently produces a wrong blank.**
+      1. **The parameter names are LOCALISED.** On this French seat they are `Epaisseur`,
+         `Rayon pli`, `Facteur perte au pli`. CLAUDE.md's "the COM API is not localised" is
+         about *method* names and holds; a parameter's name is user-visible data and
+         translates. A table keyed on `"Thickness"` finds nothing here and the operation
+         appears to succeed while changing nothing.
+      2. **CATIA computes the K-factor and refuses a write to it.** The default is
+         `0.40051499783199057` — not a number anybody typed — and `Value =` is refused
+         while `…\Formule norme DIN\Activity` is true. Deactivate the formula and the
+         write takes. The formula depends on `r/t` alone and was **solved exactly** against
+         three measured points: `K = (0.5 + 0.5·log10(2r/t)) / 2`, which is DIN 6935's
+         factor halved **with the unrounded constant** — the printed standard says 0.65 and
+         CATIA uses `0.5 + 0.5·log10 2 = 0.650515…`. Using the printed value is wrong by a
+         constant **2.575e-4** at every ratio: small, plausible, and exactly the size of
+         disagreement between two unfold implementations that nobody can explain.
+         `app/sheetmetal/` takes K as a free input, so a comparison must hand CATIA
+         Kryova's K or read CATIA's — **it may not let each use its own**.
+
+      **Shipped**: `app/catia/ops/sheet_metal.py` (four operations, plus
+      `UNREACHABLE_OVER_COM` recording what cannot be declared and why), the four COM
+      methods in `scripts/catia_bridge/catia_com.py`, refusals for all four on the open
+      kernel, and `tests/test_catia_sheet_metal.py` (23). Three product rules caught the
+      first draft and are worth knowing: **no tool may take a filesystem path** (the bridge
+      runs on the engineer's workstation — the export attaches its result the way
+      `catia_export_step` does), the **registry has a size budget** because the whole
+      schema reaches the local model every turn, and every new operation owes the open
+      kernel a handler or a named refusal.
+
+      **Still open, and it is the half that needs the UI bridge**: building a wall or a
+      flange at all, and therefore the end-to-end blank comparison — which needs a part
+      with bends in it, and nothing here can make one over COM.
+
+      **Original entry follows.** A
       `SheetMetalPart` now builds as an OCCT solid (`app/kernel/occt/sheetmetal.py`), which is
       the open-kernel half and is verified against closed-form volumes here. The seat half —
       CATIA's SheetMetal Design workbench through the bridge, so a folded part *lands* where

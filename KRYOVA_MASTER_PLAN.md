@@ -3654,9 +3654,16 @@ here"* has an answer in six months — from the artefact.
 
 ##### Phase E17.3 — Sheet metal (pulled forward to run with Era IV) #####
 
-> ✅ PHASE COMPLETE (2026-09-09) — all three tasks done and tested, with one residual named
-> rather than hidden: **there is still no sheet-metal operation in the CATIA registry**, and
-> there deliberately is not one. The registry is what the *seat* can be told to do, and a
+> ✅ PHASE COMPLETE (2026-09-09) — all three tasks done and tested. **The residual named here
+> was settled on the seat on 2026-09-17 (THE QUEUE E1) and the answer was not the one anybody
+> expected: the CATIA registry now carries four sheet-metal operations and still carries no
+> wall, because `CATShfInterfaces` declares no creation method of any kind. `AddNewWall` and
+> `AddNewFlange` do not exist in V5's automation API.** So the reasoning below was right and
+> its premise was wrong — the COM calls were not merely unwritten, three of them are
+> unwritable. See task 3.
+>
+> **The superseded reasoning, kept because it is how the decision was made:** there is still
+> no sheet-metal operation in the CATIA registry, and there deliberately is not one. The registry is what the *seat* can be told to do, and a
 > `catia_sheetmetal_wall` declared here would be a promise the bridge cannot keep — CATIA's
 > SheetMetal Design workbench is real, the COM calls behind it are unwritten, and neither
 > half can be verified on a machine with no seat. That work is **E1 in THE QUEUE**
@@ -3683,6 +3690,45 @@ reference implementation.
    > which moves a 90° bend in 2 mm by 0.24 mm — the distinction is real and is carried.
 
 3. **Wall, bend, flange as authoring operations wired to geometry.**
+   > DONE (2026-09-17) — **the CATIA half is now settled, on the seat, and the headline is a
+   > measured refusal.** THE QUEUE E1 asked whether `AddNewWall`/`AddNewFlange` behave as the
+   > COM documentation says on V5-R33. They do not behave any way at all: **they do not
+   > exist.** `CATShfInterfaces` (`{AEDE231A-8E0E-11D3-827B-006094EB7FE4}`, invisible to late
+   > binding like DMU Kinematics) declares four classes — `SheetMetalFactory`,
+   > `SheetMetalParameters`, `SheetMetalPart`, `Bend` — and **not one creation method** among
+   > them. The type library was read *before* anything was called, which is the discipline the
+   > `AddJoint` crash bought earlier the same day.
+   >
+   > So the registry gains the half COM does reach and **still declares no wall**:
+   > `catia_sheetmetal_start` (thickness, bend radius, K-factor),
+   > `catia_sheetmetal_parameters`, `catia_sheetmetal_bends`, and
+   > `catia_sheetmetal_export_flat` — CATIA's own unfold, via `CreateManufacturingFace` +
+   > `SaveAsDXF`, which is the independent second arithmetic `app/sheetmetal/unfold.py` can be
+   > checked against. What cannot be declared is recorded **as data** in
+   > `sheet_metal.UNREACHABLE_OVER_COM` with the reason, because "the registry has no wall
+   > operation" is indistinguishable from "nobody got to it yet" when it is simply absent, and
+   > the first is a measured fact while the second invites somebody to write one blind.
+   >
+   > **Two traps found, either of which silently produces a wrong blank.** The parameter names
+   > are **localised** — `Epaisseur`, `Rayon pli`, `Facteur perte au pli` on this French seat —
+   > so a table keyed on `"Thickness"` finds nothing and the operation appears to succeed while
+   > changing nothing; every lookup is by suffix across a language table and a miss is refused
+   > by name. And **CATIA computes the K-factor and refuses a write to it** while its DIN
+   > formula is active; the formula was solved exactly against three measured points as
+   > `K = (0.5 + 0.5·log10(2r/t))/2`, which is DIN 6935's factor halved **with the unrounded
+   > constant** — the printed 0.65 is wrong by a constant **2.575e-4** at every ratio, exactly
+   > the size of an unexplainable disagreement between two unfold implementations. A blank
+   > comparison must therefore hand CATIA Kryova's K or read CATIA's; it may not let each use
+   > its own.
+   >
+   > **Still open and now properly scoped**: building a wall or a flange at all needs the Win32
+   > UI bridge, and therefore so does the end-to-end blank comparison, which needs a part with
+   > bends in it. That is a task with a named route rather than an assumption.
+   > Tested by: `tests/test_catia_sheet_metal.py` (23). Code: `app/catia/ops/sheet_metal.py`,
+   > `scripts/catia_bridge/catia_com.py`, `app/kernel/occt/refusals.py`.
+
+   <!-- superseded 2026-09-17 -->
+
    > DONE (2026-09-09) — **a `SheetMetalPart` now builds as an OCCT solid, and the blank and the
    > solid are one calculation rather than two sets of numbers somebody typed twice.**
    >

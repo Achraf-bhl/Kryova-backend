@@ -385,6 +385,14 @@ session.**
    Dropping the window to 16k only reaches 86% — the weights are the bulk, not the KV cache — so
    the full window is kept. A truncated prompt is refused loudly by `app/ai/providers/ollama.py`
    and would end a long run.
+5a. **The 9B is back, at the user's instruction, 2026-09-17, and it is not close.** Warm
+   tool calls on `qwen3.5:9b` measured **6.3 s and 3.7 s** against `qwen3.6:27b`'s 13.4 s at
+   two tools and 31.7 s at thirty-eight — and generation is not even the main cost, because
+   the 27B re-reads ~9,500 prompt tokens a step (testing item 11) and a turn that is fine at
+   step 3 is unusable at step 17. Residency checked the way item 6 demands rather than by the
+   percentage: `ollama ps` says 6.1 GB / 100% GPU / `num_ctx` 32768 **and** `nvidia-smi` says
+   **7038 MiB of 8151** — the two agree, so this is real residency and not the thrashing
+   signature. `AI_GPU_LAYERS=all` is correct for this model and only this model.
 6. **Confirm Ollama is actually on the GPU before a gate**: `ollama ps` for the CPU/GPU split,
    `nvidia-smi` for resident bytes. A gate run on the CPU measures patience, not the product.
    **But `ollama ps` saying `100% GPU` is not evidence of anything on Windows, and on a model
@@ -397,6 +405,16 @@ session.**
    `CUDA0 model buffer size = 15364.44 MiB` on an 8 GB card and the run never appearing in
    `ollama ps` at all while it thrashed. So **read the server log's `CUDA0 model buffer size`
    against `nvidia-smi`'s total**, and treat the two numbers, not the percentage, as the answer.
+6a. **`.env.local` has THREE `AI_PROVIDER`/`AI_MODEL` blocks and the LAST one wins.** The
+   file is a history of every model this seat has tried, each block commented with its own
+   measurements, and dotenv takes the last assignment — so editing the block whose comment
+   you happen to be reading changes nothing at all, silently. Found 2026-09-17 switching
+   back to the 9B: the file's *first* live block already said `qwen3.5:9b`, and the
+   effective model was `qwen3.6:27b` from 100 lines further down. **Check what the app
+   resolves, never what the file appears to say**:
+   `venv/bin/python -c "from app.core.config import settings; print(settings.ai_model)"`.
+   And when you change it, change the **last** block and repeat `AI_GPU_LAYERS` there, for
+   the same reason.
 7. **`AI_GPU_LAYERS` is a per-model value and nothing checks that the model fits.** `all` in
    `.env.local` was measured on `qwen3.5:9b`, which does fit; it is actively harmful on anything
    larger, for the reason above. Re-decide it whenever `AI_MODEL` changes. And note that an

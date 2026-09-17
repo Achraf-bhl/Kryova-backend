@@ -6383,11 +6383,18 @@ client renders what it is sent, at the detail the view deserves.
    > that the code does not have" — and it had cost a session twice before. THE QUEUE **G1**
    > step 1 was "run `npm run test -- src/lib/scene-streaming.test.ts`", which could never
    > have passed.
-   > **What is real as of today**: the reference assembly the targets are measured against now
-   > exists (`app/render/reference.py`, 2,000 occurrences over 120 components, 99% instanced,
-   > 5 deep, digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab`), which was G1's other blocker. The
-   > ordering module is being written to the design the superseded status describes — that
-   > design is detailed and is the one thing salvaged from it.
+   > **What is real as of today, and it was written and run here rather than claimed.**
+   > `../Kryova-frontend/src/lib/scene-streaming.ts` exists now (`77e7a80`), built to the
+   > design the superseded status describes — that design is detailed and is the one thing
+   > salvaged from it. **23 tests, all executed**: vitest, `tsc --noEmit` and eslint clean,
+   > and the whole frontend suite green at 443. Every one of the five decisions is held by a
+   > test naming the failure it prevents — levels in part radii (a 3 mm nut at 60 mm and a
+   > 2 m weldment at 40 m get the same mesh), a part already finer left alone, the ~8 px
+   > cutoff dropping most of a 2,000-part scene, half-space culling with its cost stated, and
+   > a total comparator that returns −1 rather than NaN for two parts containing the camera.
+   > The reference assembly the targets are measured against also exists now
+   > (`app/render/reference.py`, 2,000 occurrences over 120 components, 99% instanced, 5 deep,
+   > digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab`), which was G1's other blocker.
    > **Still unmeasured and still a hardware job**: first paint of a 2,000-part machine under
    > 2 s and interaction never below 30 fps, and **no reference laptop is named anywhere in
    > this repository** — this workstation has a discrete card and is the opposite of the

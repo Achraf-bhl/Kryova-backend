@@ -6484,16 +6484,32 @@ client renders what it is sent, at the detail the view deserves.
    animated), measure (point-point, edge, face-face — against real geometry via a backend query,
    not against the decimated mesh), hide/isolate by subtree, camera bookmarks per conversation
    ("the view we were talking about").
+   > PARTIAL (2026-09-17, evening) — **both halves exist now, and both were run.**
+   > Frontend `../Kryova-frontend/src/lib/viewer-interactions.ts` (`3bf776d`), 27 tests through
+   > vitest, `tsc --noEmit` and eslint clean, whole frontend suite green at 583. Backend
+   > `GET /kernel/conversations/{id}/measure/between` and `.../measure/element`, which were
+   > always real. Rebuilt after the audit below found the frontend half had never been
+   > committed; the four traps that status recorded are the design it was rebuilt to, and each
+   > is now held by a test that names the *picture* it prevents rather than the branch.
+   > **The four traps.** A section plane's normal points at the material **removed**
+   > (`catia_split`'s convention — two conventions for one question is how a part ends up
+   > mirrored with every test green). Sides are decided on the box's **corners**: a long member
+   > through the cut reads as wholly on one side from its centre and then vanishes from the
+   > section view it exists to appear in. A component centred on the assembly's centre **does
+   > not move** when exploded, because normalising a zero vector is `NaN` and a `NaN`
+   > translation removes the part silently — on a symmetric machine that part is the main
+   > shaft. **Hide wins over isolate**, and an isolated root not in the tree shows *nothing*
+   > rather than the whole machine. Bookmarks deep-copy both ways, tested by mutating the live
+   > state after saving.
+   > **Still not done, and it is the larger half:** no control exists for any of it — no
+   > section UI, no explode animation, no tree gutter, no bookmark panel — and bookmarks are
+   > persisted nowhere. Measure still has one direction only: a name in, a number out; turning
+   > a click into that name is P6.6's proposer, which is built. QUEUE G3.
+
+   <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-17) — **the backend half is real; the frontend half never existed.**
-   > **Found by an audit on 2026-09-17**: every `../Kryova-frontend/...` path the plan names
-   > was checked against the frontend repository, and **ten claimed files have never existed
-   > in any commit on any branch** (`git log --all` over each path, all empty). Six task
-   > statuses written on 2026-09-16 rest on them. The Linux session either left the work
-   > uncommitted on a machine that has since stopped, or wrote the statuses for work it did
-   > not do; there is no way to tell from here and it does not matter, because the record
-   > was wrong either way. Superseded rather than rewritten, so the false claim stays
-   > visible with its correction attached.
-   > `../Kryova-frontend/src/lib/viewer-interactions.ts` and its 33 tests are among the ten.
+   > `../Kryova-frontend/src/lib/viewer-interactions.ts` and its 33 tests are among the ten
+   > files the audit found missing.
    > **What is real**: `GET /kernel/conversations/{id}/measure/between` and `.../measure/element`
    > are in `app/api/routes/kernel.py` and are tested. So this task keeps its `PARTIAL` on the
    > backend's strength alone, and the frontend logic has to be written from scratch.
@@ -6630,11 +6646,23 @@ client renders what it is sent, at the detail the view deserves.
    > not do; there is no way to tell from here and it does not matter, because the record
    > was wrong either way. Superseded rather than rewritten, so the false claim stays
    > visible with its correction attached.
-   > `../Kryova-frontend/src/lib/selection-model.ts` and its 19 tests are among the ten.
-   > **What is real**: `app/kernel/occt/propose.py`, the face partition in
-   > `app/kernel/occt/tessellate.py` and `GET /kernel/conversations/{id}/selection/face`. So the
-   > 3D → name direction genuinely is built end to end on the server, which is what this task
-   > keeps its `PARTIAL` for; the name → 3D direction and every surface are unwritten.
+   > **Corrected again the same evening: the frontend half exists now and was run.**
+   > `../Kryova-frontend/src/lib/selection-model.ts` (`3bf776d`), 26 tests through vitest,
+   > `tsc --noEmit` and eslint clean. **One selection, not three** — a tree with its own
+   > highlighted row, a viewer with its own mesh and a panel with its own scrolled-to feature
+   > are three states that drift, and the user meets the disagreement rather than the bug.
+   > Four decisions: a face selection **is** a part selection, so the tree has something to
+   > highlight; clicking the selected row again keeps it, because a toggle makes a double-click
+   > clear the panel; **a part the spec does not own gets a sentence, not a scroll**, since
+   > scrolling to the top puts the first feature under the user's eye and looks exactly like an
+   > answer; and a selection whose part a rebuild removed is **dropped with its reason**, while
+   > a face renumbered past the end narrows to the part — the half that survived.
+   > The predicate a picked face offers comes from the server and is never recomputed in the
+   > browser: the proposer verifies by *resolving*, so it cannot drift from `resolve.py`.
+   > **What was always real**: `app/kernel/occt/propose.py`, the face partition in
+   > `app/kernel/occt/tessellate.py` and `GET /kernel/conversations/{id}/selection/face`.
+   > **Still not done**: no surface calls any of it — no tree gutter, no highlight in the
+   > viewer, no spec scroll — which is this task's remaining half.
 
    <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **both directions have their logic and the 3D → name half is

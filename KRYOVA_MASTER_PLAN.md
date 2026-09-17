@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 16/24 | 123/133 = 92% | 139/151 eng-months = 92% |
-| Product — P1–P10 | 6/10 | 50/62 = 81% | 30/38 eng-months = 79% |
-| **Programme** | 22/34 | 174/195 = 89% | 169/189 eng-months = 90% |
+| Product — P1–P10 | 6/10 | 52/62 = 83% | 31/38 eng-months = 81% |
+| **Programme** | 22/34 | 174/195 = 89% | 170/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -6714,6 +6714,25 @@ scene in the Tauri app.
 3. **Desktop-only powers, used sparingly**: local file open/save into the attachment pipeline, OS
    notifications for long-run completion, deep links (`kryova://run/...`) from CI or email into the
    app.
+   > PARTIAL (2026-09-17, evening) — **the decidable half is written, and this time it was
+   > run.** `../Kryova-frontend/src/lib/desktop-powers.ts` (`7b7e7f0`), 27 tests through
+   > vitest, `tsc --noEmit` and eslint clean, whole frontend suite green at 498.
+   > **The deep link is the security half and is tested as the attacks it refuses.** An
+   > allow-list of shapes: one scheme, three **read-only** targets, one id segment against a
+   > conservative pattern, everything else refused *by name* so a refusal can be shown rather
+   > than swallowed — a link that silently does nothing reads as a broken app. Traversal,
+   > percent-encoded traversal, separators in the id, extra segments, `javascript:` and
+   > `file:` are each refused by a named test, and one test asserts **no route names a verb**,
+   > because adding a target to that list is a security decision and not a routing one.
+   > Also here: a local-open filter that refuses an unreadable format before the upload rather
+   > than after it, and a notification that stays silent under a minute — noise is how
+   > notifications get switched off, after which the twenty-minute solve is silent too. A
+   > cancellation is kept apart from a failure, as `app/core/interruption.py` keeps it.
+   > **Still not done, and it needs `src-tauri` work**: every native call. `dialog`, `fs`,
+   > `notification` and `deep-link` are not in `Cargo.toml`, the `default.json` capability is
+   > not widened, and the `kryova` scheme is not registered in `tauri.conf.json`. QUEUE G5.
+
+   <!-- superseded 2026-09-17 -->
    > NOT STARTED (corrected 2026-09-17) — **neither half exists.**
    > **Found by an audit on 2026-09-17**: every `../Kryova-frontend/...` path the plan names
    > was checked against the frontend repository, and **ten claimed files have never existed
@@ -6769,6 +6788,25 @@ scene in the Tauri app.
 
 4. **Offline honesty**: what works without the backend (viewing cached designs, reading docs) and
    what does not (everything else), stated in the UI rather than discovered by timeout.
+   > PARTIAL (2026-09-17, evening) — **the table and the verdicts exist now, and were run.**
+   > `../Kryova-frontend/src/lib/offline-capability.ts` (`7b7e7f0`), 28 tests through vitest,
+   > `tsc --noEmit` and eslint clean.
+   > Ten capabilities in **one** table written in advance, because a decision per screen is
+   > how two screens come to disagree about the same feature and the user meets both. **A
+   > capability the table does not list reads as unavailable** — defaulting a missing row to
+   > "works offline" would turn forgetting to add one into a promise the app cannot keep.
+   > Three states kept apart: `unknown` is the startup state and is **not** offline;
+   > `unreachable` and `failing` get different sentences because one invites checking the
+   > network and the other invites waiting; `cached` is enabled *and marked degraded*, so a
+   > short list cannot read as the whole list. `navigator.onLine` is a fast negative only and
+   > **a 401 or a 404 is not offline** — only a 5xx is `failing`. Nothing is queued for later
+   > and every refusal says so. The banner **counts** — "7 of 10 features need the server" —
+   > and a test refuses the word "limited".
+   > **Still not done**: no component renders any of it, and nothing probes, so no caller ever
+   > moves the state off `unknown`. The probe belongs beside `api-client.fetchWithRefresh`.
+   > QUEUE G5.
+
+   <!-- superseded 2026-09-17 -->
    > NOT STARTED (corrected 2026-09-17) — **the table and the verdicts do not exist.**
    > **Found by an audit on 2026-09-17**: every `../Kryova-frontend/...` path the plan names
    > was checked against the frontend repository, and **ten claimed files have never existed

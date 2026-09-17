@@ -25,8 +25,11 @@ by the router, which is what the spec asks of a modern server receiving legacy t
 
 **`draft_load_case` is not offered here.** It calls Kryova's own model to turn a sentence into a
 load case; an MCP caller brings its own model, and building the provider would put a health
-check against Ollama in front of every `tools/list`. `ToolBox` withholds that tool when it has
-no provider, so it is absent rather than offered and refused.
+check against Ollama in front of every `tools/list`. `ToolBoxHost` therefore drops every tool
+`ToolBox.missing_dependency` names, so it is absent rather than offered and refused. **`ToolBox`
+does not withhold it** — this docstring said it did, and was wrong from the day the route
+shipped until 2026-09-17 — because the agent's own box must offer it and refuse at call time,
+which is a refusal the agent can act on and an MCP client cannot.
 """
 
 from __future__ import annotations
@@ -87,7 +90,23 @@ class ToolBoxHost:
     def __init__(self, toolbox: ToolBox, db: Any) -> None:
         self._toolbox = toolbox
         self._db = db
-        self._tools = {tool.name: tool for tool in toolbox.every_tool()}
+        # A tool whose dependency this box was not given is **withheld from this
+        # surface**, not offered and refused. `ToolBox` itself does offer it —
+        # the agent gets "No model is available to draft a load case here" and
+        # can act on that — but an MCP client brings its own model and would
+        # spend a turn discovering the same thing. The vocabulary is what the
+        # caller reasons over, so an absent tool costs nothing and misleads
+        # nobody.
+        #
+        # This module's docstring claimed `ToolBox` did the withholding from the
+        # day the route shipped. It did not, and `draft_load_case` was in every
+        # `tools/list` until 2026-09-17 — caught by `tests/test_mcp.py` the first
+        # time it was executed.
+        self._tools = {
+            tool.name: tool
+            for tool in toolbox.every_tool()
+            if toolbox.missing_dependency(tool.name) is None
+        }
 
     def list_tools(self) -> list[dict[str, Any]]:
         return [

@@ -417,14 +417,33 @@ class ToolBox:
     _tools: dict[str, Tool] = field(default_factory=dict, init=False)
 
     #: Tools that need something this box may not have been given, and the
-    #: attribute each one needs. A tool here is **withheld** rather than offered
-    #: and refused, because the vocabulary is what the caller reasons over: an
-    #: MCP client shown `draft_load_case` will spend a turn calling it and get a
-    #: refusal, where an absent tool costs nothing and misleads nobody. This is
-    #: `app/api/routes/mcp.py`'s docstring made true — it claimed the withholding
-    #: happened from the day the route shipped, and it did not until 2026-09-17,
-    #: which `tests/test_mcp.py` caught the first time it was executed.
-    _NEEDS: ClassVar[dict[str, str]] = {"draft_load_case": "provider"}
+    #: attribute each one needs. **Read by callers that publish a vocabulary, not
+    #: applied here**: this box offers `draft_load_case` whether or not it has a
+    #: provider, and the tool refuses at call time with "No model is available" —
+    #: which `tests/test_load_case_drafting.py` pins deliberately, because a
+    #: toolbox with no model must *say so* rather than return an empty draft that
+    #: reads like an answer.
+    #:
+    #: A surface that cannot recover from that refusal wants the tool absent
+    #: instead, and `app/api/routes/mcp.py` is the one that does: an MCP client
+    #: brings its own model, so it would spend a turn calling a tool that can
+    #: only fail. It filters on this map. Withholding here instead — tried on
+    #: 2026-09-17 — is the same fix applied one layer too low, and it silently
+    #: removed the tool from the agent's own vocabulary in every context that
+    #: builds a box without a provider.
+    NEEDS: ClassVar[dict[str, str]] = {"draft_load_case": "provider"}
+
+    def missing_dependency(self, name: str) -> str | None:
+        """The attribute `name` needs and this box was not given, or None.
+
+        The question `NEEDS` exists to answer, asked rather than the map read, so
+        a caller never has to know that `getattr` is how a box reports what it
+        holds.
+        """
+        needed = self.NEEDS.get(name)
+        if needed is None or getattr(self, needed, None) is not None:
+            return None
+        return needed
 
     def __post_init__(self) -> None:
         for tool in [
@@ -433,9 +452,6 @@ class ToolBox:
             *self._build_knowledge(),
             *self._build_catia_reference(),
         ]:
-            needed = self._NEEDS.get(tool.name)
-            if needed is not None and getattr(self, needed, None) is None:
-                continue
             self._tools[tool.name] = tool
 
     # -- lookup helpers -----------------------------------------------------

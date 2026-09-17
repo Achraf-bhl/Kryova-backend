@@ -15,13 +15,18 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-17 01:56 — the Windows chain's first turn. Nine tasks, THE QUEUE E3
-> closed, and the suite is **3 failed / 10,457 passed** — measured, not estimated.**
+> **Continuation, 2026-09-17 09:30 — the Windows chain's first turn. Thirteen tasks, THE QUEUE
+> E3, E8 and E9 closed, and **the suite is GREEN: 10,463 passed / 38 skipped / 1 xpassed / 0
+> failed** in 10 min 02 s — the first time this codebase has been green on a machine that ran it.
+> `ruff`, `mypy` and `app.verify.recorded --check` all clean.**
 > **This machine now holds the chain.** Linux stopped scheduling on 2026-09-16 at the user's
 > instruction and every cron job there is deleted. Windows runs `pytest`, `ruff` and `mypy`, and
 > it schedules its own next turn — one `CronCreate`, `recurring: false`, at least 2 h 30 min out,
 > into **this same session**, because the loaded context is the point.
-> **Next continuation fires: 2026-09-17 04:27.**
+> **Next continuation fires: 2026-09-17 11:51.** (The 04:27 job never fired: a one-shot cron
+> only fires while the REPL is idle, so one whose time passes while the session is busy or
+> waiting on the user is dead and its date is in the past forever. **Check `CronList` on every
+> wake** and reschedule if the pending time has gone by.)
 > **Closed this turn, each committed as it closed:** THE QUEUE **E3** (`c055558`), the four
 > new-test defects (`16592f0`), mypy clean with four real findings (`5732fa7`), the handbook
 > gallery and four ladder-literal tests (`22e246d`), the quoted-turn budget (`a5add88`), two
@@ -48,21 +53,38 @@ happened.
 > surface that has the requirement. And `test_the_conduction_backend_setting_is_what_selects_the_solver`
 > used `"calculix"` as its example of a backend that does not exist, which E3 made false the
 > same turn. **Neither showed up in the targeted runs; both showed up in the full one.**
-> **Still red, and both recorded in THE QUEUE rather than left to be rediscovered:** **E8** —
-> `machined.undercuts` comes back `unmeasured` through `POST /kernel/…/rules` when the test says
-> it must not, with a live runner and `scans_needed == ["draft"]`; and **E9** —
-> `TestDropCutterNeverGouges` fails on both cutters, which is the safety claim a CAM path rests
-> on and must be read rather than adjusted. Neither is Windows-specific.
-> **Next targets — at least seven, per the user's rule of 2026-09-16 11:07:**
-> (1) **THE QUEUE E8**, the undercut scan — start at whether `app/rules/processes.py` names a
-> measurement key `catia_analysis_part(kind="draft")` does not produce. (2) **THE QUEUE E9**,
-> the drop-cutter gouge. (3) **THE QUEUE E1** — sheet metal on the CATIA side, which is the
-> biggest unwritten gap left and needs the seat. (4) **E7 task 7 then THE QUEUE E2** — the
-> verdict stated from a single-grid solve whose own record says `converged: false`; fix the code
-> first, because a gate attempted before it re-measures a known failure. (5) **E18.8**, M8, the
-> motorcycle chassis and swingarm — `MovingDesign`'s second user, and **never sum per-mode counts
-> over a duty cycle**. (6) **THE QUEUE E6**, DMU Kinematics, which closes E9. (7) **P6/P7's
-> PARTIALs**, which need a GPU and a browser this machine has and Linux did not.
+> **Both of the failures left open are now closed, and E8 is the most serious thing this session
+> found.** `catia_analysis_part` declares `direction` as an origin **plane**; the rules route's
+> public API takes a **vector**, which its own 422 teaches. The route passed the vector through,
+> the kernel refused it, and the route's broad handler turned that into *"the draft scan failed,
+> so its rules are unmeasured"* — so **every draft and undercut rule on every part came back
+> UNMEASURED**, beside a note a reader had no cause to doubt. A part with a real undercut was
+> reported unchecked rather than bad. Every piece worked; one adapter line was missing.
+> **E9 was the opposite kind of answer**: the gouge assertion — the safety claim a CAM path rests
+> on — passed on all 80 cases for both cutters, and the test died one line later on `np.cross`
+> with 2-D vectors, which numpy 2 removed. No other 2-D use exists in `app/` or `tests/`.
+> **Two stale documents corrected**, both the class that sends a session to repair working code:
+> THE QUEUE **E2** said "fix E7.7 before attempting G1 again" when E7 task 7 has been DONE since
+> 2026-09-11 with 23 tests, so **G1 is attemptable now**; and the master plan said "Ladder
+> standing at 5/9" three rungs after that stopped being true (7/9, checked against `LADDER`).
+> **Next targets — at least seven, per the user's rule of 2026-09-16 11:07.** The suite is green,
+> so the next turn starts from capability rather than from repair:
+> (1) **E18.8 — M8**, the motorcycle chassis and swingarm, the LAST task in E18 and the biggest
+> single plan item left. `MovingDesign`'s second user and the one rung that is genuinely a
+> mechanism *and* a fatigue case, so E8's duty-cycle counting and E9's reactions meet on it.
+> `app/fatigue/duty.py` already handles the trap and says so at length — **never sum per-mode
+> counts over a duty cycle** — with brute-force expansion as its oracle and 19 tests. Budget it
+> as a whole turn: M4, M5 and M7 were each one.
+> (2) **THE QUEUE E2 — run gate G1**, now that its blocker is gone. Prompt ladder as METHOD: one
+> prompt per level, a screenshot every time, no moving up until the level passes properly.
+> (3) **THE QUEUE E1** — sheet metal on the CATIA side, the biggest unwritten gap, and seat work.
+> (4) **THE QUEUE E10** (new) — a draft analysis can only be asked about the three positive axes;
+> a mould pulled the other way is an ordinary thing to want, and widening it changes the
+> operation schema the CATIA daemon also reads, so it needs the seat and both backends together.
+> (5) **THE QUEUE E6**, DMU Kinematics, which closes phase E9. (6) **P6/P7's PARTIALs**, which
+> need a GPU and a browser this machine has and Linux did not. (7) **E7.7's own residual** —
+> element *size* still takes no account of a part's thinnest section, which its status line names
+> as the thing tet10 made survivable rather than correct.
 > **Two things to know before starting.** `alembic upgrade head` was needed on arrival and the
 > venv needed `pip install -r requirements-dev.txt` (openpyxl was missing and broke collection).
 > And **do not edit `app/` while a full `pytest` is running** — the first run here was started
@@ -517,9 +539,10 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
-- **2026-09-17 (early) — the first Windows session of the new chain: nine tasks, and the suite
-  went from 48 failures to 3 (measured: 3 failed / 10,457 passed / 38 skipped / 1 xpassed,
-  9 min 53 s). THE QUEUE E3 closed.**
+- **2026-09-17 — the first Windows session of the new chain: thirteen tasks, and the suite went
+  from 48 failures to GREEN (measured: 10,463 passed / 38 skipped / 1 xpassed / 0 failed,
+  10 min 02 s, exit 0) — the first time this codebase has been green on a machine that ran
+  it. THE QUEUE E3, E8 and E9 closed; E10 opened.**
   **THE QUEUE E3** (`c055558`): steady conduction federated to CalculiX. `app/solve/calculix/
   conduction.py` writes a `*HEAT TRANSFER, STEADY STATE` deck, `CalculiXConductionSolver` runs
   it, and `oracle.compare_conduction` puts both solvers on one case. **Five cases ran on ccx
@@ -567,6 +590,20 @@ needs a different extraction stated up front rather than chosen after the sweep.
   the agent's own vocabulary wherever a box has no provider (it belongs in `ToolBoxHost`, the MCP
   surface with the requirement), and a test using `"calculix"` as its example of a conduction
   backend that does not exist was made false by E3 the same turn.
+  **THE QUEUE E8 and E9** (`c1e87f1`), the two left open, and E8 is the session's most serious
+  finding. `catia_analysis_part` declares `direction` as an origin **plane**; the rules route's
+  public API takes a **vector**, which its own 422 teaches. The route passed it through unchanged,
+  the kernel refused it, and the route's broad handler turned that into "the draft scan failed, so
+  its rules are unmeasured" — so **every draft and undercut rule on every part came back
+  UNMEASURED**, beside a note a reader had no cause to doubt. A part with a real undercut was
+  reported unchecked rather than bad. `_pull_plane` is the translation the adapter always owed and
+  refuses a pull it cannot express rather than guessing; verified by breaking it. E9 was the
+  opposite kind of answer: the gouge assertion passed on all 80 cases for both cutters, and the
+  test died one line later on `np.cross` with 2-D vectors, which numpy 2 removed.
+  **Two stale documents corrected**, both of the class that sends a session to repair working
+  code: THE QUEUE E2 said "fix E7.7 before attempting G1" when E7 task 7 has been DONE since
+  2026-09-11 (so G1 is attemptable), and the plan said "Ladder standing at 5/9" three rungs after
+  that stopped being true.
   Board unchanged at 21/34 phases · 174.0/195 tasks = 89.2% — every task here was a defect or a
   QUEUE item rather than a plan task, which is what a first verification run is for.
 

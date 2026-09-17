@@ -863,6 +863,24 @@ master plan's status line in the same commit.
       `docs/verification-2026-09-10-night/`. **Fix E7.7 before attempting G1 again**, or the
       gate will re-measure a known failure.
 
+      **THAT BLOCKER IS GONE — checked 2026-09-17, and the sentence above is why this was
+      checked rather than believed.** Master plan **E7 task 7 is DONE (2026-09-11)**: a verdict
+      may not be stated from a solve holding no evidence about itself, and
+      `tests/test_unconverged_verdict.py` (23 tests) pins it, with the element order defaulted
+      to **2 in both entry points** — the route and the agent tool default independently, and
+      the tool is the one the agent calls. The measurement behind that default is in the status
+      line: linear tets got the cantilever's deflection wrong by 3.6x systematically and
+      scattered peak stress 2.8x across identical inputs, 50 to 141 MPa, every one of them
+      reported as a verdict against a stated 150 MPa limit.
+      **So G1 is attemptable now**, and the next session should run it rather than re-fixing
+      E7.7. A stale blocker sends somebody to repair working code, which is exactly what
+      CLAUDE.md's *Known landmines* preamble says a stale entry does.
+      **What is still true and still unmeasured**: L4 has not been re-driven since the fix, so
+      "L1-L3 pass, L4 does not" describes 2026-09-10 and nothing since. The residual E7.7 names
+      is also still open — element *size* takes no account of the part's thinnest section, so a
+      slender part still gets very few elements through it; tet10 makes that survivable rather
+      than correct.
+
 - [x] **E3 — The conduction analysis through the GUI, and against CalculiX once A2 passes.**
       Added 2026-09-09 with the work. `analysis: "thermal-conduction"` now reaches a request
       and is verified against three closed forms on Linux (linear bar to 6.6e-12 K, the

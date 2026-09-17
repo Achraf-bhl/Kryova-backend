@@ -308,7 +308,13 @@ session.**
 > **Five standing rules, the user's, 2026-09-16 11:07.** (1) *Schedule the next turn yourself,
 > every turn* — one `CronCreate`, `recurring: false`, at least 2 h 30 min out; run `CronList`
 > first and delete any earlier continuation so exactly one exists. A turn that ends without
-> scheduling the next one stops the project. (2) *Do not open a new conversation per turn* — the
+> scheduling the next one stops the project. **And a scheduled job is not a live job.** A
+> one-shot cron fires only while the REPL is *idle*, so one whose time passes while the session
+> is mid-turn or waiting on the user never fires at all — and its date is then in the past
+> forever, so it will not fire later either. Measured 2026-09-17: a 04:27 job was still sitting
+> in `CronList`, unfired, at 09:20. **So `CronList` on every wake, before anything else, and if
+> the pending job's time has gone by, delete it and schedule a fresh one.** This is the one
+> failure mode that ends the chain silently — everything else leaves a trace. (2) *Do not open a new conversation per turn* — the
 > job fires into the session that created it, and that session's loaded context is the whole
 > point. (3) *Keep coding until the master plan is finished*; you are not only a gate. (4) *At
 > least seven tasks a turn*, each committed as it closes with its status line and

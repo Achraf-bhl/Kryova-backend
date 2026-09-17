@@ -3940,7 +3940,10 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
 8. **M8 — motorcycle chassis + swingarm.**
    > NOT STARTED — PENDING.
 
-**Ladder standing at 5/9** (M1, M2, M3, M4, M6).
+**Ladder standing at 7/9** (M1, M2, M3, M4, M5, M6, M7); M8 and M9 are the two pending.
+*Was written as 5/9 until 2026-09-17, three rungs after it stopped being true —* the same
+trap four mission tests fell into from the other side, and the reason the docs gallery
+derives its headline instead of stating one.
 **Gate G5 opens after M2 upward.**
 
 ## ERA VIII — THE WORLD THIS HAS TO SURVIVE CONTACT WITH

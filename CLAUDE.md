@@ -2067,6 +2067,19 @@ Server specs in `app/catia/tool_specs.py`, resolution in `app/catia_kb/ui.py`, d
    the bridge is right to be Win32 rather than COM. The daemon still tries the **live menu
    first** and falls back to `StartCommand` with `verified: false`; never report an unverified
    `StartCommand` as success, and never send one without a way to dismiss what it may put up.
+3a. **A COM call with the wrong argument *types* can kill the seat outright, not refuse.**
+   Measured 2026-09-17: `Mechanism.AddJoint` (DMU Kinematics) declares
+   `((16392, 1), (8204, 3))` — a **string** by reference and an **array of doubles** — and
+   called with a non-empty doubles array it took `CNEXT` down. The first sign was
+   *"Échec de l'appel de procédure distante"*, the second *"Le serveur RPC n'est pas
+   disponible"*, and by then CATIA was gone. There is no dialog to dismiss and nothing to
+   recover; every open document goes with it. This is worse than item 3's wedge.
+   **So read the parameter flags before calling an unfamiliar COM method**: the generated
+   type-library wrapper in `%LOCALAPPDATA%\Temp\gen_py\` states them exactly
+   (`16392 = VT_BYREF|VT_BSTR`, `8204 = VT_ARRAY|VT_R8`, `9 = VT_DISPATCH`), and guessing
+   an integer where a string is wanted is what produced six identical French COM errors
+   that read like a missing licence. **Never sweep an unknown signature by brute force on
+   a live seat.**
 4. **Command labels are localised; internal command ids are not, and are undocumented.**
    `COMMAND_IDS` holds only ids with a published source. Do not add one from memory.
 5. **Buttons are pressed by role, never by label.** `ButtonRole` + `BUTTON_LABELS` resolve

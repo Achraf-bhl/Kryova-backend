@@ -966,11 +966,35 @@ master plan's status line in the same commit.
       mechanism whose declared joints leave a different number of degrees of freedom than
       `app/dynamics/` thinks it has is a disagreement about the machine, not about
       arithmetic, and it is available before anything is driven.
-      **Not yet measured**: what `iJointType` and `iListElem` want concretely (the
-      enumeration's values, and whether the elements are `Reference`s to geometry or
-      published axis systems), and what `ioMotion` is filled with. Those need one more
-      seat session and they are the whole of what is left before the engine can be
-      written. `MechanismDOF`, `DOF` and `Laws` do **not** exist; `NbDof` is the spelling.
+      **⚠ `Mechanism.AddJoint` CRASHED CATIA, and the next session must not repeat the way
+      it was probed.** Measured 2026-09-17, second sitting. Read off the type library, its
+      parameter flags are `((16392, 1), (8204, 3))` — **16392 is `VT_BYREF|VT_BSTR`, so
+      `iJointType` is a *string*, not an integer**, and **8204 is `VT_ARRAY|VT_R8`, an
+      in/out array of *doubles*, not COM objects.** Every attempt passing an integer and a
+      list of `Reference`s failed identically, which reads like a licence problem and is
+      not one.
+      With the string form, `AddJoint("Revolute", [])` **returns `(None, ())` and does not
+      raise** — so the name is accepted and an empty element list simply makes no joint.
+      But `AddJoint("Revolute", [0.0, 0.0])` raised a COM error, `[1.0, 2.0]` answered
+      *"Échec de l'appel de procédure distante"*, and `[0.0] * 12` answered **"Le serveur
+      RPC n'est pas disponible"** — which is not an error message, it is CATIA being gone.
+      `CNEXT` was no longer running. **Feeding a non-empty doubles array to `AddJoint` on
+      V5-R33 kills the seat**, in the same family as the `StartCommand` wedge this
+      repository already documents, and worse because nothing is left to dismiss.
+      **So: do not brute-force this signature again.** An array of doubles is not a
+      plausible way to name two pieces of geometry, which suggests the automation route is
+      not the interactive one — in V5 a DMU joint is normally made by *Assembly Constraints
+      Conversion* from existing assembly constraints. The next attempt should build the
+      constraints first and convert them, or drive the conversion command through the
+      existing Win32 bridge, rather than calling `AddJoint` with guessed arguments.
+      **Also unmeasured**: what `ioMotion` is filled with — `GetProductMotion` refused at
+      12, 16 and 9 doubles on a mechanism with no joints, which may only mean it needs a
+      valid mechanism first. `MechanismDOF`, `DOF` and `Laws` do **not** exist; `NbDof` is
+      the spelling.
+      **Housekeeping learned the same sitting**: a probe that fails part-way leaves its
+      `CATProduct` and `CATPart` documents open, and the next `Documents.Add("Product")`
+      then fails on `PartNumber`. Close products before parts and **test that the count
+      fell**, never that `Close()` succeeded — the loop this repository already documents.
 - [ ] **E7 — E17 tasks 1 and 2 on the seat: FTA annotations and export from CATIA.** Added
       2026-09-15. `app/manufacture/drawing.py` now carries a part's `Tolerancing` and
       `dxf.py` tabulates it; nothing puts the same frames into CATIA's Functional Tolerancing &

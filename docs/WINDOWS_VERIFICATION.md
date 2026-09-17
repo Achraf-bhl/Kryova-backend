@@ -933,6 +933,44 @@ master plan's status line in the same commit.
       match `kinematics.evaluate` pose for pose. Also settles whether CATIA's assembly
       constraints can be read as joint declarations, which is the one input E9.2 still takes
       by hand. Settles: E9.5 `NOT STARTED` → `DONE`.
+
+      **THE API IS MEASURED, 2026-09-17 — this item is no longer a guess, only a build.**
+      DMU Kinematics is **licensed on this seat** (V5-R33): `product.GetTechnologicalObject
+      ("Mechanisms")` answers, and `Mechanisms.Add()` creates a mechanism (`Mécanisme.1`,
+      French seat). Two traps found on the way, both of which would have cost a session:
+
+      * **Late binding sees none of it.** `win32com.client.GetActiveObject` returns the
+        `Joints` collection as `<COMObject <unknown>>` and *every* method name fails with
+        `AttributeError` — including the `AddJointRevolute`, `AddJointPrismatic` … family
+        the V5 documentation lists. Probing that way reads as "DMU automation does not
+        exist on this seat", and it is wrong.
+      * **Those `AddJoint<Type>` methods do not exist at all.** The real interface is a
+        *generic* `AddJoint`. A session that went looking for the documented per-type
+        methods, found none, and concluded the licence was missing would be wrong twice.
+
+      The way in is the type library: **`CATIA V5 KinematicsInterfaces Object Library`,
+      `{6652FDA0-BA01-11D2-88A1-0008C7194E6A}`**, via
+      `win32com.client.gencache.EnsureModule(...)`. With it generated, the interface is:
+
+      | object | members |
+      |---|---|
+      | `Mechanisms` | `Add()`, `Item(i)`, `GetItem(name)`, `Count` |
+      | `Mechanism` | `AddJoint(iJointType, iListElem)`, `AddCommand(iCmdType, iJoint)`, `PutCommandValues(iCmdValues)`, **`PutCommandValuesWithMultiSteps(iCmdValues, iNbSteps)`**, `GetCommandValues(ioCmdValues)`, **`GetProductMotion(iProduct, ioMotion)`**, `Update()`, `GetProduct(i)`, `FixedPart`, `NbDof`, `NbJoints`, `NbCommands`, `NbProducts` |
+      | `Joint` | `Type`, `CurrentValue1/2`, `LowerLimit1/2`, `UpperLimit1/2`, `Name` |
+      | `MechanismCommand` | `Type`, `CurrentValue`, `Orientation`, `Name` |
+
+      So the engine's shape is settled: build the product, `Mechanisms.Add()`, one
+      `AddJoint` per `JointDeclaration`, one `AddCommand` per `Driver`, drive with
+      `PutCommandValuesWithMultiSteps` over the `MotionRange`, and read each body's pose
+      back through `GetProductMotion`. **`NbDof` is the free check nothing else gives**: a
+      mechanism whose declared joints leave a different number of degrees of freedom than
+      `app/dynamics/` thinks it has is a disagreement about the machine, not about
+      arithmetic, and it is available before anything is driven.
+      **Not yet measured**: what `iJointType` and `iListElem` want concretely (the
+      enumeration's values, and whether the elements are `Reference`s to geometry or
+      published axis systems), and what `ioMotion` is filled with. Those need one more
+      seat session and they are the whole of what is left before the engine can be
+      written. `MechanismDOF`, `DOF` and `Laws` do **not** exist; `NbDof` is the spelling.
 - [ ] **E7 — E17 tasks 1 and 2 on the seat: FTA annotations and export from CATIA.** Added
       2026-09-15. `app/manufacture/drawing.py` now carries a part's `Tolerancing` and
       `dxf.py` tabulates it; nothing puts the same frames into CATIA's Functional Tolerancing &

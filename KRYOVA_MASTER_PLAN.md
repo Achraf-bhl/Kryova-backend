@@ -71,17 +71,17 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 122/133 = 92% | 138/151 eng-months = 92% |
+| Engineering — E1–E23 | 16/24 | 123/133 = 92% | 139/151 eng-months = 92% |
 | Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 21/34 | 174/195 = 89% | 170/189 eng-months = 90% |
+| **Programme** | 22/34 | 175/195 = 90% | 170/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 88%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -3725,6 +3725,17 @@ reference implementation.
 
 ##### Phase E18 — The machine missions #####
 
+> ✅ PHASE COMPLETE (2026-09-17) — all tasks done and tested.
+>
+> **But read what the phase's own preamble asks for before reading that marker.** It
+> says each mission "runs end-to-end **in the product**, is reviewed by a real
+> engineer". Every rung here is built and checked by `run_mission` through the real
+> kernel and none has been driven through the chatbot, and no engineer outside this
+> repository has reviewed one. Those two are the GUI ladder's (`docs/GUI_PROMPT_LADDER.md`,
+> level 6) and E18's phase proof respectively, and they are still owed. The eight tasks
+> are done; the phase's *proof* is not, and saying otherwise would be the kind of claim
+> this plan exists to refuse.
+
 **~12 engineer-months across the ladder.**
 
 Not new capability — **proof of it**, and the discovery of the twenty things nobody predicted. Each
@@ -3938,7 +3949,40 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
    > NOT STARTED — PENDING, waiting on E9's multibody.
 
 8. **M8 — motorcycle chassis + swingarm.**
-   > NOT STARTED — PENDING.
+   > DONE (2026-09-17) — **the rung where E8, E9 and E17.3 have to agree about one
+   > machine**, and the one M7's own `unproven` asked for: *"no fatigue. The reactions
+   > this rung computes are the input `app/fatigue/duty.py` wants. Nothing has joined
+   > them up."* Joined up here.
+   > **Three descriptions of one machine, and they agree.** Six CHS tubes built and
+   > weighed through the real kernel; the same tubes as a `Weldment` cut list; and the
+   > swingarm as a `MovingDesign` swung about its pivot. The cut list and the specs both
+   > total **2654.9175 mm** — a tube drawn at one length and cut at another is the only
+   > thing that makes them disagree. Mass **8.9404 kg**, twelve claims, all passing.
+   > **The finding is the transition cycle, and it is a number.** Counting the life gives
+   > **17,449,999 cycles**, of which **19,999** close only because one mode follows
+   > another. Those carry an amplitude of **6.474 MPa** where the widest any single mode
+   > contains is **2.266** — a factor of **2.857**. Sum the per-mode counts, as the
+   > obvious reading of a duty cycle does, and the widest cycle of the whole life is not
+   > in the answer at all. `app/fatigue/duty.py` opens by saying exactly this; M8 is the
+   > machine it is true of.
+   > **Two things the first real run found.** A tube meeting a cylinder at an angle is
+   > *coped*, and a square end drawn to the tangent plane buries itself: the down tube's
+   > tilted face reached 14.8 mm inside a headstock whose surface is at 25 mm, and the
+   > clash check found **13.529 mm³** of overlap on a machine holding 1.1e6 mm³ of steel.
+   > And **a duty cycle whose worst mode holds both extremes demonstrates nothing** — the
+   > first spectrum gave the pothole the highest peak and the lowest trough, and the
+   > transition cycles came out exactly equal to that mode's own. The arithmetic was
+   > right and the rung was silent. The means straddle now, which is also what a swingarm
+   > really sees: loaded one way under braking, reversed over a pothole.
+   > **What it refuses to say.** Homologation — a third of what the `hard` column names —
+   > is not attempted at all, and the rung says so first. The frame is **never solved as
+   > a structure**, so the stress is a hand calculation `σ = F L / (2 Z)` and nominal in
+   > the strict sense. The road spectrum is **assumed, not measured**, and every number in
+   > it carries that sentence in its own source string. **No EN 1993-1-9 verdict is
+   > stated**: §8 needs a γFf that `app/fatigue/eurocode3.py` records as not being in the
+   > pages that were read, and inventing one is what M5 refused to do about tonnage. Ten
+   > caveats reach the public gallery.
+   > Tested by: `tests/test_mission_m8.py` (36, of which 4 build the real machine).
 
 **Ladder standing at 7/9** (M1, M2, M3, M4, M5, M6, M7); M8 and M9 are the two pending.
 *Was written as 5/9 until 2026-09-17, three rungs after it stopped being true —* the same

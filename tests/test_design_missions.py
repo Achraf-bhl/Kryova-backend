@@ -91,7 +91,7 @@ class TestTheLadderIsTheMasterPlansLadder:
         `unproven` and the rung builds.
         """
         buildable = [m.rung for m in LADDER if m.buildable]
-        assert buildable == ["M1", "M2", "M3", "M4", "M5", "M6", "M7"], (
+        assert buildable == ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8"], (
             "If a rung became buildable, give it a spec, an assembly or a folded "
             "design and its assertions, and update this test deliberately — it is the "
             "coverage figure."
@@ -232,13 +232,16 @@ class TestAPendingRungIsNeverAPass:
 
         run_ladder(counting)
 
-        assert calls == ["made"] * 35, (
+        assert calls == ["made"] * 41, (
             "one runner for M1, one for each of M2's two members, one for M3's single "
             "folded solid, one for each of M4's ten part designs, one for each of M5's "
             "eleven, one for each of M6's three — stringer, leg and the bought roller — "
-            "one for each of M7's seven links, and none for the two pending rungs. A "
-            "moving rung builds its product exactly as an assembly rung does; the "
-            "mechanism is derived from what was built and starts no runner of its own."
+            "one for each of M7's seven links, one for each of M8's six tube designs, "
+            "and none for the one pending rung. A moving rung builds its product exactly "
+            "as an assembly rung does; the mechanism is derived from what was built and "
+            "starts no runner of its own. **Six for M8 and not eight**: a runner is made "
+            "per *design*, and its two pivot bosses and two arms are each one component "
+            "instanced twice, which is the whole reason the product is a graph."
         )
 
     def test_pending_rungs_do_not_make_the_report_red(self) -> None:
@@ -246,7 +249,10 @@ class TestAPendingRungIsNeverAPass:
         report = run_ladder(lambda: _runner_returning(_payload()), _harness_ladder())
 
         assert report.ok
-        assert len(report.pending) == 2
+        # Derived from the harness ladder rather than written as a number: this said 2
+        # until M8 moved on 2026-09-17, so a rung *advancing* failed a test whose subject
+        # is that pending rungs do not make the report red.
+        assert len(report.pending) == sum(1 for rung in _harness_ladder() if not rung.buildable)
 
     def test_but_the_ladder_is_not_complete(self) -> None:
         """`ok` is the regression question; `complete` is the programme question."""
@@ -260,11 +266,15 @@ class TestAPendingRungIsNeverAPass:
             lambda: _runner_returning(_payload()), _harness_ladder()
         ).summary()
 
-        # M6 left the pending set on 2026-09-10, and M4, M5 and M7 on 2026-09-16,
-        # so the harness ladder — M1 plus everything nobody can build — is four
-        # rungs shorter than it was.
-        assert "1/3 rungs pass" in summary
-        assert "2 not yet buildable" in summary
+        # Derived, for the reason above: the harness ladder is M1 plus whatever nobody
+        # can build, and it shrinks every time a rung moves. M6 left on 2026-09-10, M4,
+        # M5 and M7 on 2026-09-16 and M8 on 2026-09-17, so a literal here has been wrong
+        # four times. What the test is actually about is that the sentence carries a
+        # denominator at all.
+        harness = _harness_ladder()
+        pending = sum(1 for rung in harness if not rung.buildable)
+        assert f"1/{len(harness) - pending + 1} rungs pass" in summary
+        assert f"{pending} not yet buildable" in summary
 
 
 class TestARungThatClaimsToBuildAndDoesNotIsAFailure:

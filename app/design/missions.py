@@ -97,7 +97,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from itertools import product as _cross
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from app.assembly.clash import (
     ClashReport,
@@ -111,6 +111,15 @@ from app.assembly.contracts import check as check_contract
 from app.assembly.mass import MassRollup, roll_up
 from app.assembly.placement import Box, at, compose, turned
 from app.assembly.structure import ProductStructure, StructureBuilder
+
+if TYPE_CHECKING:  # pragma: no cover - names for annotations only
+    # Imported for types alone. `m8_weldment` and the duty-cycle helpers import
+    # these lazily inside their own bodies, so that `app/manufacture/` and
+    # `app/fatigue/` are not pulled into a package whose tests run offline in under
+    # a second — the same reason `app.kernel` is banned here outright.
+    from app.fatigue.duty import CountedDuty, DutyCycle
+    from app.manufacture.weldment import Weldment
+
 from app.design.assertions import Assertion, AssertionReport, check_assertions
 from app.design.compile import compile_spec
 from app.design.errors import SpecError
@@ -7114,6 +7123,976 @@ _M7_UNPROVEN: Final = (
 )
 
 
+
+# --- M8: motorcycle chassis + swingarm ---------------------------------------
+#
+# **The rung where E8, E9 and E17.3 have to agree about one machine**, which is why
+# Decision 5 put it after the robot arm rather than beside it. M7 asked what a
+# mechanism *carries*; this asks what carrying it for a life does.
+#
+# Three things meet here and none of them is new:
+#
+# * **E17.3's weldment** describes the frame the way a fabricator reads it — a cut list
+#   and the welds — while the same tubes are built as solids and weighed. Two
+#   independent arithmetics over one frame, in exactly M5's sense: a tube drawn at one
+#   length and cut at another makes them disagree, and nothing else does.
+# * **E9's inverse dynamics** turns the swingarm's travel into a pivot reaction, the way
+#   M7 turned the arm's motion into joint loads.
+# * **E8's duty cycle** turns that reaction into a life. This is the half M7's `unproven`
+#   names as missing — "the reactions this rung computes are the input it wants, nothing
+#   has joined them up" — and it is joined up here.
+#
+# **The trap this rung exists to demonstrate is the transition cycle.**
+# `app/fatigue/duty.py` states it at length: count each mode alone, multiply by its
+# repetitions and add, and the largest cycle the machine ever sees is in no mode's count.
+# It runs from one mode's trough to another's peak and closes once per pass of the
+# sequence. A motorcycle is the textbook case — a kerb taken between two motorway miles
+# is a wider range than anything either mode contains — so this rung asserts that the
+# transition cycles exist and that their range beats every mode's own.
+#
+# **What it refuses to say is as much of the point as what it says.** The `hard` column
+# names homologation and nothing here homologates anything; the frame is never solved as
+# a structure, so the stress history is a hand calculation from the pivot reaction and a
+# stated section modulus rather than a field off a mesh; and **no EN 1993-1-9 verdict is
+# stated**, because §8 needs a γFf that `app/fatigue/eurocode3.py` records as *not in the
+# pages that were read*. Inventing one to produce a verdict is precisely what M5 refused
+# to do about tonnage.
+
+_M8_DENSITY_KG_M3: Final = _M2_DENSITY_KG_M3
+_M8_ROOT: Final = "motorcycle"
+
+#: Every tube as (outside diameter, wall). CHS throughout: a trellis is round tube
+#: because a round tube has no weak axis, and a mitred tube-to-tube joint needs no
+#: gusset. Stated as OD and wall because that is how a stockist sells it and how
+#: `Member.stock()` names it — so the cut list and the solid come from one pair of
+#: numbers rather than two that can disagree.
+_M8_HEADSTOCK_TUBE: Final = (50.0, 6.0)
+_M8_SPINE_TUBE: Final = (60.0, 3.0)
+_M8_DOWN_TUBE: Final = (38.0, 2.5)
+_M8_PIVOT_BOSS_TUBE: Final = (45.0, 10.0)
+_M8_ARM_TUBE: Final = (45.0, 3.0)
+_M8_BRACE_TUBE: Final = (30.0, 2.0)
+
+#: The layout in the side view: +X rearward, +Z up, +Y across to the left.
+_M8_HEADSTOCK_RADIUS_MM: Final = _M8_HEADSTOCK_TUBE[0] / 2.0
+_M8_HEADSTOCK_BOTTOM_MM: Final = 620.0
+_M8_HEADSTOCK_LENGTH_MM: Final = 180.0
+_M8_SPINE_Z_MM: Final = 780.0
+_M8_SPINE_LENGTH_MM: Final = 520.0
+_M8_PIVOT_X_MM: Final = _M8_HEADSTOCK_RADIUS_MM + _M8_SPINE_LENGTH_MM
+_M8_PIVOT_Z_MM: Final = 300.0
+_M8_ARM_HALF_TRACK_MM: Final = 110.0
+_M8_PIVOT_BOSS_LENGTH_MM: Final = 30.0
+_M8_ARM_LENGTH_MM: Final = 560.0
+_M8_AXLE_X_MM: Final = _M8_PIVOT_X_MM + _M8_ARM_LENGTH_MM
+_M8_BRACE_LOCAL_X_MM: Final = _M8_ARM_LENGTH_MM / 2.0
+
+#: The brace spans between the arms' *inner faces* and stops there. It abuts them
+#: rather than running through them: two members that overlap are an interference and
+#: two that meet are a weld, and this frame is welded. Same reason the pivot bosses
+#: stop at the same faces from the other side.
+_M8_BRACE_LENGTH_MM: Final = 2.0 * (_M8_ARM_HALF_TRACK_MM - _M8_ARM_TUBE[0] / 2.0)
+
+#: The down tube's two ends. Its **length is derived from them and never typed**: a
+#: diagonal member whose stated length and stated endpoints disagree is a tube that does
+#: not reach, and a cut list alone cannot catch it — the list is right and the frame is
+#: wrong. It starts at the back of the headstock so the two abut rather than overlap.
+#: It starts **one tube radius clear of the headstock**, not against it. A tube meeting
+#: a cylinder at an angle is coped, and `app/manufacture/weldment.py` is explicit that a
+#: cope is a fitting decision it will not compute — so the alternative to standing the
+#: tube off is to draw a square end buried in the headstock. Measured on the first real
+#: build, 2026-09-17: started at the tangent plane, the tilted end face reaches back to
+#: x = 14.8 mm inside a headstock whose surface is at 25 mm, and the clash check found
+#: **13.529 mm^3** of interference. Small enough to miss by eye on a 1.1e6 mm^3 machine,
+#: and exactly what the interference claim is for.
+_M8_DOWN_START_MM: Final = (
+    _M8_HEADSTOCK_RADIUS_MM + _M8_DOWN_TUBE[0] / 2.0,
+    0.0,
+    _M8_HEADSTOCK_BOTTOM_MM + 10.0,
+)
+_M8_DOWN_END_MM: Final = (_M8_PIVOT_X_MM, 0.0, _M8_PIVOT_Z_MM)
+_M8_DOWN_LENGTH_MM: Final = math.dist(_M8_DOWN_START_MM, _M8_DOWN_END_MM)
+#: The angle that turns a tube built along +Z onto the down tube's line. `atan2` of the
+#: run over the rise, so a member that falls has a rise that is negative and an angle
+#: past 90 degrees — which is the case a hand-written `atan` gets wrong by pi.
+_M8_DOWN_ANGLE_RAD: Final = math.atan2(
+    _M8_DOWN_END_MM[0] - _M8_DOWN_START_MM[0], _M8_DOWN_END_MM[2] - _M8_DOWN_START_MM[2]
+)
+
+#: The suspension sweep the rung evaluates, as the swingarm's angle about its pivot.
+#: A real bike's travel is bump stop to droop; this is the middle of it.
+_M8_TRAVEL_DEG: Final = 12.0
+_M8_DURATION_S: Final = 1.0
+_M8_SAMPLES: Final = 41
+
+#: How close two parts may sit before the clash check looks at the pair. Wider than
+#: M7's 20 mm would be pointless here and narrower would be blind: a fabrication's
+#: members meet, so the interesting number is the interference volume and not the gap.
+_M8_INSPECTION_MM: Final = 15.0
+
+_M8_DESCRIPTIONS: Final[Mapping[str, str]] = {
+    "headstock": "Steering head bearing housing. Ground: the frame is not a body.",
+    "spine": "Top tube, headstock to over the pivot.",
+    "down_tube": "The one diagonal member, headstock to pivot.",
+    "pivot_boss": "Swingarm pivot boss, one each side, abutting the arm's inner face.",
+    "swingarm_arm": "Pivot to axle, one each side. Moves.",
+    "swingarm_brace": "Across the arms. Moves with them.",
+}
+
+#: Every tube: its section, its cut length, and whether it moves. **One table**, read by
+#: the geometry, the mass closed form, the cut list and the structure — so a tube cannot
+#: be built at one length and cut at another, which is the disagreement the cut-list
+#: claim below exists to be able to find.
+_M8_TUBES: Final[tuple[tuple[str, tuple[float, float], float, bool], ...]] = (
+    ("headstock", _M8_HEADSTOCK_TUBE, _M8_HEADSTOCK_LENGTH_MM, False),
+    ("spine", _M8_SPINE_TUBE, _M8_SPINE_LENGTH_MM, False),
+    ("down_tube", _M8_DOWN_TUBE, _M8_DOWN_LENGTH_MM, False),
+    ("pivot_boss", _M8_PIVOT_BOSS_TUBE, _M8_PIVOT_BOSS_LENGTH_MM, False),
+    ("swingarm_arm", _M8_ARM_TUBE, _M8_ARM_LENGTH_MM, True),
+    ("swingarm_brace", _M8_BRACE_TUBE, _M8_BRACE_LENGTH_MM, True),
+)
+
+#: How many of each. `pivot_boss` and `swingarm_arm` are one component instanced twice,
+#: which is the whole reason the product is a graph rather than a list.
+_M8_COUNTS: Final[Mapping[str, int]] = {
+    "headstock": 1,
+    "spine": 1,
+    "down_tube": 1,
+    "pivot_boss": 2,
+    "swingarm_arm": 2,
+    "swingarm_brace": 1,
+}
+
+_M8_OCCURRENCE_COUNT: Final = sum(_M8_COUNTS.values())
+
+
+def _m8_path(component: str) -> str:
+    return f"{_M8_ROOT}/{component}.1"
+
+
+def _m8_tube_area_mm2(outside_mm: float, wall_mm: float) -> float:
+    """The cross-section of a CHS: the annulus, exactly.
+
+    `pi/4 (D^2 - d^2)` with `d = D - 2t`, from the two numbers a stockist quotes. A bore
+    written beside a wall would be a third number that can disagree with the other two.
+    """
+    bore_mm = outside_mm - 2.0 * wall_mm
+    if bore_mm <= 0.0:
+        raise SpecError(
+            f"A {outside_mm:g} mm tube with a {wall_mm:g} mm wall has no bore — two walls "
+            "already meet in the middle. That is a bar, and a bar is drawn by a different "
+            "helper, because a bar weighed as a tube is out by the bore."
+        )
+    return math.pi / 4.0 * (outside_mm * outside_mm - bore_mm * bore_mm)
+
+
+def _m8_tube(name: str) -> tuple[tuple[float, float], float, bool]:
+    return next((s, length, moves) for tube, s, length, moves in _M8_TUBES if tube == name)
+
+
+def m8_tube_mass_kg(name: str) -> float:
+    """One tube's mass in closed form: annulus area, times length, times density."""
+    section, length_mm, _ = _m8_tube(name)
+    return _m8_tube_area_mm2(*section) * length_mm * 1e-9 * _M8_DENSITY_KG_M3
+
+
+def m8_mass_kg() -> float:
+    """Frame and swingarm together, from the closed form — what the roll-up must equal."""
+    return sum(m8_tube_mass_kg(name) * count for name, count in _M8_COUNTS.items())
+
+
+def m8_swingarm_mass_kg() -> float:
+    """Everything that moves: two arms and the brace between them."""
+    return sum(
+        m8_tube_mass_kg(name) * _M8_COUNTS[name] for name, _, _, moves in _M8_TUBES if moves
+    )
+
+
+def m8_cut_length_mm() -> float:
+    """Total stock length as a cut list sums it. The second arithmetic over one frame."""
+    return sum(_m8_tube(name)[1] * count for name, count in _M8_COUNTS.items())
+
+
+def m8_pivot_to_axle_mm() -> float:
+    """Pivot to rear axle. **Not the wheelbase**: there are no forks and no front wheel."""
+    return _M8_ARM_LENGTH_MM
+
+
+#: A point in machine coordinates. Spelled locally rather than imported from
+#: `app.dynamics.pose` so this section adds no import to a package whose tests run
+#: offline in under a second.
+_Point = tuple[float, float, float]
+
+
+def _m8_tube_spec(name: str, section: tuple[float, float], length_mm: float) -> DesignSpec:
+    """One length of round hollow section, built along its own +Z from its own origin.
+
+    Six calls, the shape M2's rectangular member has and for the same reasons: the outer
+    profile padded to the cut length, then the bore pocketed through it. **A tube drawn as
+    a solid cylinder weighs two to three times what it should**, and every mass, reaction
+    and stress downstream is wrong by that factor while every dimension on the drawing is
+    right — the same error `_solid_cylinder_spec` records from the other direction.
+
+    Built at the origin in its own coordinates and placed by the product structure, so the
+    two pivot bosses and the two swingarm arms are each *one* component instanced twice.
+    """
+    outside_mm, wall_mm = section
+    return DesignSpec.of(
+        name,
+        material="steel-1018",
+        description=f"CHS {outside_mm:g}x{wall_mm:g}, {length_mm:.1f} mm long.",
+        parameters=[
+            Parameter("outside_diameter_mm", Unit.MM, value=outside_mm),
+            Parameter("wall_mm", Unit.MM, value=wall_mm),
+            Parameter("length_mm", Unit.MM, value=length_mm, description="Cut length."),
+        ],
+        features=[
+            FeatureSpec("tube.profile", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "tube.outline",
+                "catia_sketch_circle",
+                {"sketch": ref("tube.profile"), "diameter_mm": expr("outside_diameter_mm")},
+            ),
+            FeatureSpec(
+                "tube.body",
+                "catia_pad",
+                {"sketch": ref("tube.profile"), "length_mm": expr("length_mm")},
+                note="Extrude the section to the cut length.",
+            ),
+            FeatureSpec("tube.bore_sketch", "catia_sketch_create", {"support": "XY"}),
+            FeatureSpec(
+                "tube.bore_outline",
+                "catia_sketch_circle",
+                {
+                    "sketch": ref("tube.bore_sketch"),
+                    "diameter_mm": expr("outside_diameter_mm - 2 * wall_mm"),
+                },
+            ),
+            FeatureSpec(
+                "tube.bore",
+                "catia_pocket",
+                {"sketch": ref("tube.bore_sketch"), "limit": "up_to_last"},
+                note="Hollow it out, through — this is a tube, not a bar.",
+            ),
+        ],
+    )
+
+
+def _m8_structure(*, brace_at_mm: float = _M8_BRACE_LOCAL_X_MM) -> ProductStructure:
+    """The machine as a graph: a frame that is ground, and a swingarm that is one body.
+
+    **The swingarm is a sub-assembly and not three loose tubes**, and that is what makes
+    the mechanism expressible: `derive` collects every occurrence under a body's path, so
+    `motorcycle/swingarm.1` weighs both arms and the brace together. Declared as three
+    occurrences of the root, the joint would have to name one of them and the other two
+    would be missing mass — which makes every reaction *smaller*, the direction nothing
+    downstream complains about.
+
+    `brace_at_mm` is a break knob: moving the brace along the arms changes the swingarm's
+    centre of mass and its inertia about the pivot, and no tube changes size with it.
+    """
+    builder = StructureBuilder()
+    builder.define(_M8_ROOT, description="Tubular motorcycle chassis with a swinging-arm rear end.")
+    builder.define(
+        "swingarm",
+        description="The rear suspension arm: two tubes and the brace between them. One body.",
+    )
+    for name, _, _, _ in _M8_TUBES:
+        builder.define(
+            name,
+            design=f"M8 {name.replace('_', ' ')}",
+            material="steel-1018",
+            description=_M8_DESCRIPTIONS[name],
+        )
+
+    builder.add(
+        _M8_ROOT,
+        "headstock",
+        placement=at(0.0, 0.0, _M8_HEADSTOCK_BOTTOM_MM),
+        note="Vertical on this rung — the rake is a stated omission, not an oversight.",
+    )
+    builder.add(
+        _M8_ROOT,
+        "spine",
+        placement=compose(
+            at(_M8_HEADSTOCK_RADIUS_MM, 0.0, _M8_SPINE_Z_MM),
+            turned((0.0, 1.0, 0.0), math.pi / 2.0),
+        ),
+        note="Top tube, from the back of the headstock to over the pivot.",
+    )
+    builder.add(
+        _M8_ROOT,
+        "down_tube",
+        placement=compose(at(*_M8_DOWN_START_MM), turned((0.0, 1.0, 0.0), _M8_DOWN_ANGLE_RAD)),
+        note="The one diagonal member; its length comes from its two ends.",
+    )
+    inner_face_mm = _M8_ARM_HALF_TRACK_MM - _M8_ARM_TUBE[0] / 2.0
+    for side in (1.0, -1.0):
+        start_y = inner_face_mm - _M8_PIVOT_BOSS_LENGTH_MM if side > 0.0 else -inner_face_mm
+        builder.add(
+            _M8_ROOT,
+            "pivot_boss",
+            placement=compose(
+                at(_M8_PIVOT_X_MM, start_y, _M8_PIVOT_Z_MM),
+                turned((1.0, 0.0, 0.0), -math.pi / 2.0),
+            ),
+            note="Abuts the arm's inner face; a boss that ran through it would be an interference.",
+        )
+
+    for side in (1.0, -1.0):
+        builder.add(
+            "swingarm",
+            "swingarm_arm",
+            placement=compose(
+                at(0.0, side * _M8_ARM_HALF_TRACK_MM, 0.0),
+                turned((0.0, 1.0, 0.0), math.pi / 2.0),
+            ),
+            note="Pivot to axle, in the swingarm's own coordinates.",
+        )
+    builder.add(
+        "swingarm",
+        "swingarm_brace",
+        placement=compose(
+            at(brace_at_mm, -_M8_BRACE_LENGTH_MM / 2.0, 0.0),
+            turned((1.0, 0.0, 0.0), -math.pi / 2.0),
+        ),
+        note="Across the arms, abutting their inner faces.",
+    )
+    builder.add(
+        _M8_ROOT,
+        "swingarm",
+        placement=at(_M8_PIVOT_X_MM, 0.0, _M8_PIVOT_Z_MM),
+        note="The swingarm's own origin is the pivot, so the joint sits at its (0, 0, 0).",
+    )
+    return builder.build(_M8_ROOT)
+
+
+def _m8_tube_inertia_axial_kg_mm2(section: tuple[float, float], mass_kg: float) -> float:
+    """A tube about its own axis: `m/2 (Ro^2 + Ri^2)`."""
+    outer = section[0] / 2.0
+    inner = outer - section[1]
+    return 0.5 * mass_kg * (outer * outer + inner * inner)
+
+
+def _m8_tube_inertia_transverse_kg_mm2(
+    section: tuple[float, float], length_mm: float, mass_kg: float
+) -> float:
+    """A tube about a diameter through its centre: `m/12 (3(Ro^2 + Ri^2) + L^2)`."""
+    outer = section[0] / 2.0
+    inner = outer - section[1]
+    return mass_kg / 12.0 * (3.0 * (outer * outer + inner * inner) + length_mm * length_mm)
+
+
+def m8_swingarm_inertia_kg_mm2() -> tuple[float, float, float]:
+    """The swingarm's principal diagonal about its own centre of mass, in world axes.
+
+    The parallel-axis theorem over three tubes, and it is worth writing out because the
+    axis each one is *axial* about differs: the arms lie along X and the brace along Y, so
+    the brace puts its axial term into Iyy and its transverse term into Ixx and Izz while
+    each arm does the opposite. Swap those and the swingarm's resistance to being swung —
+    Iyy, the only one the pivot actually feels — comes out wrong by the ratio of a tube's
+    axial to transverse inertia, which for a 45x3 at 560 long is a factor of about 900.
+
+    Diagonal in world axes because every tube is axis-aligned at the assembled pose, the
+    condition `MovingDesign.inertia_kg_mm2` states and the shortcut M7 uses. The brace
+    sits at the arms' mid-span, so the body's centre of mass is there too and the offsets
+    are pure y.
+    """
+    arm_mass = m8_tube_mass_kg("swingarm_arm")
+    brace_mass = m8_tube_mass_kg("swingarm_brace")
+    arm_axial = _m8_tube_inertia_axial_kg_mm2(_M8_ARM_TUBE, arm_mass)
+    arm_transverse = _m8_tube_inertia_transverse_kg_mm2(_M8_ARM_TUBE, _M8_ARM_LENGTH_MM, arm_mass)
+    brace_axial = _m8_tube_inertia_axial_kg_mm2(_M8_BRACE_TUBE, brace_mass)
+    brace_transverse = _m8_tube_inertia_transverse_kg_mm2(
+        _M8_BRACE_TUBE, _M8_BRACE_LENGTH_MM, brace_mass
+    )
+    shift = arm_mass * _M8_ARM_HALF_TRACK_MM * _M8_ARM_HALF_TRACK_MM
+    return (
+        2.0 * (arm_axial + shift) + brace_transverse,
+        2.0 * arm_transverse + brace_axial,
+        2.0 * (arm_transverse + shift) + brace_transverse,
+    )
+
+
+def _m8_joints() -> tuple[JointDeclaration, ...]:
+    """One revolute: the swingarm on its pivot, about the machine's Y axis.
+
+    `at_mm` is the origin because the swingarm sub-assembly's own origin *is* the pivot,
+    which is why the structure places the sub-assembly there rather than placing each tube
+    in machine coordinates. A joint stated in the child's own frame cannot drift from the
+    geometry when the assembly moves.
+    """
+    return (
+        JointDeclaration(
+            name="swingarm_pivot",
+            kind="revolute",
+            child=_m8_path("swingarm"),
+            parent=None,
+            at_mm=(0.0, 0.0, 0.0),
+            axis=(0.0, 1.0, 0.0),
+        ),
+    )
+
+
+def _m8_drivers() -> tuple[Driver, ...]:
+    """Suspension travel as a harmonic, not a ramp.
+
+    A road input is not a ramp, and a ramp's acceleration at its ends is either zero or
+    infinite depending on how it is written — neither of which is what a swingarm sees.
+    One hertz is the order of a motorcycle's loaded rear-end natural frequency.
+    """
+    return (
+        Driver(
+            joint="swingarm_pivot",
+            kind="harmonic",
+            amplitude=math.radians(_M8_TRAVEL_DEG),
+            frequency_hz=1.0,
+        ),
+    )
+
+
+#: Where every tube runs, in machine coordinates, as the fabricator's drawing gives it:
+#: start and end of the centreline. **Derived from the same constants the structure
+#: places the solids with**, so the cut list and the geometry are one description read
+#: two ways rather than two descriptions that happen to agree today.
+def _m8_member_lines() -> tuple[tuple[str, _Point, _Point], ...]:
+    inner_face_mm = _M8_ARM_HALF_TRACK_MM - _M8_ARM_TUBE[0] / 2.0
+    lines: list[tuple[str, Vec3, Vec3]] = [
+        (
+            "headstock",
+            (0.0, 0.0, _M8_HEADSTOCK_BOTTOM_MM),
+            (0.0, 0.0, _M8_HEADSTOCK_BOTTOM_MM + _M8_HEADSTOCK_LENGTH_MM),
+        ),
+        (
+            "spine",
+            (_M8_HEADSTOCK_RADIUS_MM, 0.0, _M8_SPINE_Z_MM),
+            (_M8_HEADSTOCK_RADIUS_MM + _M8_SPINE_LENGTH_MM, 0.0, _M8_SPINE_Z_MM),
+        ),
+        ("down_tube", _M8_DOWN_START_MM, _M8_DOWN_END_MM),
+    ]
+    for index, side in enumerate((1.0, -1.0), start=1):
+        start_y = inner_face_mm - _M8_PIVOT_BOSS_LENGTH_MM if side > 0.0 else -inner_face_mm
+        lines.append(
+            (
+                f"pivot_boss_{index}",
+                (_M8_PIVOT_X_MM, start_y, _M8_PIVOT_Z_MM),
+                (_M8_PIVOT_X_MM, start_y + _M8_PIVOT_BOSS_LENGTH_MM, _M8_PIVOT_Z_MM),
+            )
+        )
+    for index, side in enumerate((1.0, -1.0), start=1):
+        y = side * _M8_ARM_HALF_TRACK_MM
+        lines.append(
+            (
+                f"swingarm_arm_{index}",
+                (_M8_PIVOT_X_MM, y, _M8_PIVOT_Z_MM),
+                (_M8_AXLE_X_MM, y, _M8_PIVOT_Z_MM),
+            )
+        )
+    brace_x = _M8_PIVOT_X_MM + _M8_BRACE_LOCAL_X_MM
+    lines.append(
+        (
+            "swingarm_brace",
+            (brace_x, -_M8_BRACE_LENGTH_MM / 2.0, _M8_PIVOT_Z_MM),
+            (brace_x, _M8_BRACE_LENGTH_MM / 2.0, _M8_PIVOT_Z_MM),
+        )
+    )
+    return tuple(lines)
+
+
+def _m8_n1_for(start: _Point, end: _Point) -> _Point:
+    """A direction square to the member, for the section's axis 1.
+
+    A round tube has no weak axis, so the *value* changes no answer this rung reads —
+    but `BeamSection` requires it and refuses one parallel to the member, deliberately
+    (`n1` is "the half people forget, and it silently halves or doubles the answer" for
+    every section that is not round). Chosen here as whichever global axis is least
+    aligned with the member, which cannot be parallel to it.
+    """
+    direction = (end[0] - start[0], end[1] - start[1], end[2] - start[2])
+    length = math.dist(start, end)
+    unit = tuple(component / length for component in direction)
+    axis = min(range(3), key=lambda index: abs(unit[index]))
+    return tuple(1.0 if index == axis else 0.0 for index in range(3))  # type: ignore[return-value]
+
+
+def m8_weldment() -> "Weldment":
+    """The frame and swingarm as a fabricator reads them: members, welds, a cut list.
+
+    **The second arithmetic over one machine.** Every member here is drawn from
+    `_M8_TUBES` and `_m8_member_lines`, the same constants the solids are built and
+    placed from — so `Weldment.cut_list()` summing stock length and the product
+    structure's roll-up summing mass are two routes out of one description. A tube
+    drawn at one length and cut at another makes them disagree and nothing else does,
+    which is what `tests/test_mission_m8.py` holds them to.
+
+    The welds declared are the six tube-to-tube joints a trellis of this shape has. Their
+    throat is stated, not derived: `Weldment.sizing` needs a design shear strength that
+    depends on the parent, the electrode, the standard and its national annex, and
+    `app/manufacture/weldment.py` is explicit that this is **the caller's number with its
+    source**. This rung does not have one, so it declares welds and does not size them —
+    the same refusal M5 makes about tonnage.
+    """
+    from app.manufacture.weldment import FilletWeld, Member, WeldSide, weldment
+    from app.solve.sections import BeamSection, PipeProfile
+
+    sections = {name: section for name, section, _, _ in _M8_TUBES}
+    members = []
+    for name, start, end in _m8_member_lines():
+        tube = name.rsplit("_", 1)[0] if name[-1].isdigit() else name
+        outside_mm, wall_mm = sections[tube]
+        members.append(
+            Member(
+                name=name,
+                section=BeamSection(
+                    profile=PipeProfile(radius_mm=outside_mm / 2.0, wall_mm=wall_mm),
+                    n1=_m8_n1_for(start, end),
+                ),
+                start_mm=start,
+                end_mm=end,
+            )
+        )
+    welds = (
+        FilletWeld(
+            name="headstock_to_spine",
+            members=("headstock", "spine"),
+            throat_mm=4.0,
+            length_mm=160.0,
+            side=WeldSide.BOTH,
+        ),
+        FilletWeld(
+            name="headstock_to_down_tube",
+            members=("headstock", "down_tube"),
+            throat_mm=4.0,
+            length_mm=120.0,
+            side=WeldSide.BOTH,
+        ),
+        FilletWeld(
+            name="spine_to_boss_1",
+            members=("spine", "pivot_boss_1"),
+            throat_mm=5.0,
+            length_mm=140.0,
+            side=WeldSide.BOTH,
+        ),
+        FilletWeld(
+            name="spine_to_boss_2",
+            members=("spine", "pivot_boss_2"),
+            throat_mm=5.0,
+            length_mm=140.0,
+            side=WeldSide.BOTH,
+        ),
+        FilletWeld(
+            name="brace_to_arm_1",
+            members=("swingarm_brace", "swingarm_arm_1"),
+            throat_mm=4.0,
+            length_mm=94.0,
+            side=WeldSide.BOTH,
+        ),
+        FilletWeld(
+            name="brace_to_arm_2",
+            members=("swingarm_brace", "swingarm_arm_2"),
+            throat_mm=4.0,
+            length_mm=94.0,
+            side=WeldSide.BOTH,
+        ),
+    )
+    return weldment(
+        "M8 chassis and swingarm",
+        members,
+        welds,
+        density_kg_m3=_M8_DENSITY_KG_M3,
+        density_source=(
+            "steel-1018 as `app/solve/materials.py` records it; the same density the "
+            "solids are weighed with, so the cut list and the roll-up cannot disagree "
+            "about the material"
+        ),
+    )
+
+
+#: The swingarm arm's elastic section modulus, `pi (D^4 - d^4) / (32 D)`, in mm^3. The
+#: one geometric number the stress history rests on, and it is exact for the tube drawn.
+_M8_ARM_SECTION_MODULUS_MM3: Final = (
+    math.pi
+    * (_M8_ARM_TUBE[0] ** 4 - (_M8_ARM_TUBE[0] - 2.0 * _M8_ARM_TUBE[1]) ** 4)
+    / (32.0 * _M8_ARM_TUBE[0])
+)
+
+#: What each mode does to the pivot reaction, as a multiple of the reaction this rung
+#: computes for its own suspension sweep.
+#:
+#: **These are assumed, not measured, and the source string says so in those words.**
+#: Real road-load factors come from a strain-gauged bike over an instrumented route, and
+#: this repository has no such data — the same position M5 took on shear strength. They
+#: are here because a duty cycle needs *some* spectrum to demonstrate the counting on,
+#: and the thing being demonstrated is the arithmetic rather than the numbers.
+#: `(name, amplitude factor, mean factor, blocks per pass)`, each factor a multiple of
+#: the nominal stress the computed pivot reaction produces.
+#:
+#: **The means straddle and that is the whole point.** Under drive and under braking the
+#: swingarm is loaded one way about a high mean; over a pothole the rear unloads and
+#: reverses. So the machine's highest stress is in `braking` and its lowest is in
+#: `pothole`, and **neither mode contains both** — the widest cycle of the whole life
+#: runs from one to the other and closes once per pass of the sequence, in no mode's own
+#: count. A first draft of this table gave the pothole both extremes, and the transition
+#: cycles then came out exactly equal to that mode's own: the arithmetic was right and
+#: the rung demonstrated nothing, which is worth recording because it is the easy way to
+#: write a duty cycle that cannot show the error it exists to show.
+_M8_MODES: Final[tuple[tuple[str, float, float, float], ...]] = (
+    ("town", 0.55, 0.85, 900.0),
+    ("motorway", 0.30, 0.95, 2400.0),
+    ("braking", 0.60, 1.80, 150.0),
+    ("pothole", 0.70, -0.90, 40.0),
+)
+
+_M8_ASSUMED: Final = (
+    "assumed for this rung and not measured: no strain-gauged road-load data exists in "
+    "this repository, so these amplitudes and counts demonstrate the counting rather "
+    "than describe a real route"
+)
+
+
+def m8_nominal_stress_mpa(force_n: float) -> float:
+    """The arm's nominal bending stress at the pivot, from a vertical reaction.
+
+    `sigma = F L / (2 Z)`: the reaction is shared by two arms, each a cantilever of the
+    arm's length about the pivot. **A hand calculation, not a solve** — there is no mesh
+    and no stress field anywhere in this rung, and `_M8_UNPROVEN` says so first. It is
+    *nominal*: a weld toe at the pivot sees a structural stress higher than this by a
+    concentration nothing here computes.
+    """
+    return force_n * _M8_ARM_LENGTH_MM / (2.0 * _M8_ARM_SECTION_MODULUS_MM3)
+
+
+def m8_duty_cycle(peak_reaction_n: float) -> "DutyCycle":
+    """The life, as four modes in the order a rider meets them.
+
+    Ordered town, motorway, kerb, pothole on purpose: the transition cycles this rung
+    exists to show are made at the joins, so the sequence is part of the statement and
+    not a presentation choice. Each mode's block is one full reversal about its own mean
+    — trough, peak, trough — which is the smallest history that closes a cycle.
+    """
+    from app.fatigue.duty import DutyCycle, Mode
+    from app.fatigue.history import LoadHistory, SignConvention, StressBasis
+
+    base = m8_nominal_stress_mpa(peak_reaction_n)
+    modes = []
+    for name, factor, mean_fraction, repetitions in _M8_MODES:
+        amplitude = base * factor
+        mean = base * mean_fraction
+        modes.append(
+            Mode(
+                name=name,
+                history=LoadHistory.from_values(
+                    f"M8 {name}",
+                    (mean - amplitude, mean + amplitude, mean - amplitude),
+                    basis=StressBasis.NOMINAL,
+                    sign=SignConvention.SIGNED,
+                    source=(
+                        f"nominal bending at the swingarm pivot, sigma = F L / (2 Z) with "
+                        f"F the computed peak reaction and Z the arm's section modulus; "
+                        f"the {name} factor is {_M8_ASSUMED}"
+                    ),
+                ),
+                repetitions=repetitions,
+                source=f"{name} blocks per pass; {_M8_ASSUMED}",
+            )
+        )
+    return DutyCycle(
+        name="M8 road life",
+        modes=tuple(modes),
+        passes=5000.0,
+        source=f"5 000 passes of the sequence taken as the design life; {_M8_ASSUMED}",
+    )
+
+
+def m8_counted_life(peak_reaction_n: float) -> "CountedDuty":
+    """Every cycle of the life, counted exactly without expanding it.
+
+    `app/fatigue/duty.py` does the work and checks its own decomposition on every call;
+    what this adds is the machine's numbers. The finding worth reading is
+    `CountedDuty.transitions`: cycles that close **only** because one mode follows
+    another, and which no per-mode count contains.
+    """
+    from app.fatigue.duty import count
+
+    return count(m8_duty_cycle(peak_reaction_n))
+
+
+def _m8_assembly(*, structure: ProductStructure | None = None) -> AssemblyDesign:
+    """The machine's geometry: the graph, and a design per tube."""
+    return AssemblyDesign(
+        structure=_m8_structure() if structure is None else structure,
+        parts={
+            name: _m8_tube_spec(f"M8 {name.replace('_', ' ')}", section, length_mm)
+            for name, section, length_mm, _ in _M8_TUBES
+        },
+        clearance_mm=_M8_INSPECTION_MM,
+        parameters=ParameterSet.of(
+            [
+                Parameter("mass_closed_form_kg", Unit.KG, value=m8_mass_kg()),
+                Parameter(
+                    "swingarm_mass_closed_form_kg",
+                    Unit.KG,
+                    value=m8_swingarm_mass_kg(),
+                    description=(
+                        "Everything above the pivot. The frame is ground and is "
+                        "deliberately not a body: declaring it one would put the whole "
+                        "chassis into the swinging mass and make every pivot reaction "
+                        "larger, which is the direction nothing downstream complains "
+                        "about."
+                    ),
+                ),
+                Parameter(
+                    "cut_length_mm",
+                    Unit.MM,
+                    value=m8_cut_length_mm(),
+                    description=(
+                        "Total stock length as the cut list sums it — the fabricator's "
+                        "arithmetic over the same tubes the solids are built from."
+                    ),
+                ),
+                Parameter("occurrence_count", Unit.NONE, value=float(_M8_OCCURRENCE_COUNT)),
+                Parameter("joint_count", Unit.NONE, value=1.0),
+                Parameter("sample_count", Unit.NONE, value=float(_M8_SAMPLES)),
+                Parameter("pivot_to_axle_mm", Unit.MM, value=m8_pivot_to_axle_mm()),
+                Parameter(
+                    "machine_length_mm",
+                    Unit.MM,
+                    value=_M8_AXLE_X_MM + _M8_HEADSTOCK_RADIUS_MM,
+                    description="Headstock's front face to the axle end of the arms.",
+                ),
+                Parameter(
+                    "machine_width_mm",
+                    Unit.MM,
+                    value=2.0 * (_M8_ARM_HALF_TRACK_MM + _M8_ARM_TUBE[0] / 2.0),
+                    description="Across the swingarm arms' outer faces, the widest thing here.",
+                ),
+                Parameter(
+                    "static_reaction_n",
+                    Unit.NEWTON,
+                    value=m8_swingarm_weight_n(),
+                    description=(
+                        "The swingarm's own weight. Held still the pivot carries exactly "
+                        "this; swinging it about the static pose can only add."
+                    ),
+                ),
+                Parameter(
+                    "free_body_tolerance_n",
+                    Unit.NEWTON,
+                    value=1e-6,
+                    description=(
+                        "What the Newton-Euler balance may fail to close by. Not physical "
+                        "slack: the recursion is closed form, so anything above rounding "
+                        "is a missing term."
+                    ),
+                ),
+            ]
+        ),
+    )
+
+
+def _m8_design(
+    *,
+    structure: ProductStructure | None = None,
+    joints: tuple[JointDeclaration, ...] | None = None,
+    drivers: tuple[Driver, ...] | None = None,
+    inertia_kg_mm2: Mapping[str, tuple[float, float, float]] | None = -1,  # type: ignore[assignment]
+    samples: int = _M8_SAMPLES,
+) -> MovingDesign:
+    """The machine, its one joint and its suspension sweep.
+
+    `inertia_kg_mm2` takes the sentinel default M7's does, so a test can ask for the
+    swingarm as a point mass — a different thing from "use the rung's own tensor", and
+    otherwise unsayable.
+    """
+    return MovingDesign(
+        assembly=_m8_assembly(structure=structure),
+        joints=_m8_joints() if joints is None else joints,
+        drivers=_m8_drivers() if drivers is None else drivers,
+        motion=MotionRange(duration_s=_M8_DURATION_S, samples=samples),
+        inertia_kg_mm2=(
+            {_m8_path("swingarm"): m8_swingarm_inertia_kg_mm2()}
+            if inertia_kg_mm2 == -1
+            else inertia_kg_mm2
+        ),
+    )
+
+
+_M8_ASSERTIONS: Final = (
+    Assertion(
+        name="the roll-up equals the closed form over every tube",
+        measure="mass_kg",
+        comparison="==",
+        bound="=mass_closed_form_kg",
+        tolerance=1e-6,
+        note=(
+            "The claim a tube drawn as a solid bar fails by a factor of two or three "
+            "while every dimension on the drawing stays right."
+        ),
+    ),
+    Assertion(
+        name="every occurrence was weighed",
+        measure="unmeasured_occurrence_count",
+        comparison="==",
+        bound=0.0,
+        note="A tube left out of the roll-up makes the machine lighter, which every budget passes.",
+    ),
+    Assertion(
+        name="the graph holds exactly the tubes the bill of materials counts",
+        measure="clash.occurrence_count",
+        comparison="==",
+        bound="=occurrence_count",
+    ),
+    Assertion(
+        name="no two members occupy the same space",
+        measure="clash." + _INTERFERENCE_VOLUME_MM3,
+        comparison="<=",
+        bound=0.0,
+        tolerance=1e-6,
+        note=(
+            "Members that *meet* are welds and are expected — the brace abuts the arms' "
+            "inner faces and each boss abuts one from the other side. What this refuses "
+            "is overlap, which is a tube passing through another and a frame nobody can "
+            "fabricate."
+        ),
+    ),
+    Assertion(
+        name="every pair was measured, excluded or soundly rejected",
+        measure="clash.unchecked_pair_count",
+        comparison="==",
+        bound=0.0,
+        note="A check that skipped pairs reports a roomier machine than there is.",
+    ),
+    Assertion(
+        name="the machine is as long as the headstock, spine and swingarm add up to",
+        measure="envelope_mm.size[0]",
+        comparison="==",
+        bound="=machine_length_mm",
+        tolerance=1e-3,
+    ),
+    Assertion(
+        name="the machine is as wide as its swingarm track",
+        measure="envelope_mm.size[1]",
+        comparison="==",
+        bound="=machine_width_mm",
+        tolerance=1e-3,
+        note="Nothing on this frame is wider than the arms' outer faces.",
+    ),
+    Assertion(
+        name="the frame is symmetric about its own centre plane",
+        measure="centre_of_mass_mm[1]",
+        comparison="==",
+        bound=0.0,
+        tolerance=1e-6,
+        note=(
+            "A boss welded on one side and not the other moves this and no dimension on "
+            "the drawing."
+        ),
+    ),
+    Assertion(
+        name="the mechanism resolved every body it was given",
+        measure="motion.unavailable_reaction_count",
+        comparison="==",
+        bound=0.0,
+        note=(
+            "Asserted before any claim about the reaction, because a peak over the joints "
+            "that answered is a lower bound wearing the name of a peak."
+        ),
+    ),
+    Assertion(
+        name="the chain's free-body balance closes",
+        measure="motion.free_body_residual_n",
+        comparison="<=",
+        bound="=free_body_tolerance_n",
+        note=(
+            "Newton-Euler consistency: the swingarm's `ma` is accounted for by the pivot "
+            "load on it. **Not a claim that the answer is right** — a claim that it is "
+            "self-consistent, which is the strongest thing an inverse-dynamics run says "
+            "about itself, and what would catch a mass, an inertia or a gravity term "
+            "dropped on the way."
+        ),
+    ),
+    Assertion(
+        name="the swingarm is the mass the closed form says it is",
+        measure="motion.total_mass_kg",
+        comparison="==",
+        bound="=swingarm_mass_closed_form_kg",
+        tolerance=1e-6,
+        note=(
+            "The mechanism's mass is the roll-up's, restricted to what hangs off the "
+            "pivot. It is asserted separately from the machine's total because the two "
+            "differ by the frame, and a rung that only checked the total would pass with "
+            "the whole chassis swinging."
+        ),
+    ),
+    Assertion(
+        name="the pivot carries more moving than standing",
+        measure="motion.peak_reaction_force_n",
+        comparison=">=",
+        bound="=static_reaction_n",
+        note=(
+            "The one claim that would fail if the motion were not being applied at all. A "
+            "swingarm held still is a statics problem with one answer; swinging it can "
+            "only add to the pivot load, never subtract, over a sweep symmetric about the "
+            "static pose."
+        ),
+    ),
+)
+
+
+def m8_swingarm_weight_n() -> float:
+    """What the pivot carries with the machine standing still."""
+    return m8_swingarm_mass_kg() * abs(GRAVITY_DOWN_MM_S2[2]) * 1e-3
+
+
+_M8_UNPROVEN: Final = (
+    "E19 — **nothing here homologates anything**, and homologation is a third of what "
+    "the `hard` column says this rung is about. There is no type approval, no noise or "
+    "emissions case, no lighting or braking requirement and no construction-and-use "
+    "check of any kind. A motorcycle frame that passed every claim below would not be "
+    "road legal anywhere and this rung does not say otherwise",
+    "E6 — **the frame is never solved as a structure.** No load case has been run on any "
+    "tube, so there is no stress field, no deflection and no buckling check anywhere in "
+    "this rung. The nominal stress the duty cycle is counted on is a hand calculation "
+    "from the pivot reaction and the arm's section modulus, `sigma = F L / (2 Z)`, and "
+    "it is nominal in the strict sense: a weld toe at the pivot sees a structural stress "
+    "higher than it by a concentration nothing here computes",
+    "E8 — the road-load spectrum is **assumed and not measured**. Real factors come from "
+    "a strain-gauged machine over an instrumented route and this repository holds no "
+    "such data, so the four modes demonstrate the counting rather than describe a "
+    "route. Every number in them carries that sentence in its own source string",
+    "E8 — **no EN 1993-1-9 verdict is stated.** Section 8's verification needs a partial "
+    "factor gamma_Ff that `app/fatigue/eurocode3.py` records as not being in the pages "
+    "that were read, and the detail category for a tube-to-tube fillet at a swingarm "
+    "pivot is a classification judgement nobody here has made. The cycles are counted "
+    "exactly; what they do to the machine is not claimed",
+    "E17.3 — the welds are **declared and not sized**. `Weldment.sizing` needs a design "
+    "shear strength that depends on the parent, the electrode, the standard and its "
+    "national annex, and `app/manufacture/weldment.py` is explicit that this is the "
+    "caller's number with its source. This rung has no such source, so it names six "
+    "welds and their throats and does not check that any of them is big enough",
+    "E17.3 — the weldment is **not built as a solid**. The tubes are built and placed as "
+    "separate bodies that abut; nothing mitres them, copes them or fuses them, so the "
+    "mass omits every weld bead and the geometry has no fillet anywhere. A frame's welds "
+    "are a real fraction of a percent of its mass and all of its fatigue life",
+    "E9 — the steering head is **vertical**. A real chassis rakes it 24 to 27 degrees, "
+    "which sets the trail, changes how the front loads the frame, and is the single "
+    "number a motorcycle's handling is discussed in. Nothing here is affected by it "
+    "because nothing here turns, which is itself the admission",
+    "E9 — there is **no suspension**. The swingarm's travel is a prescribed function of "
+    "time with no spring, no damper, no linkage and no bump stop, so the motion is an "
+    "input rather than a consequence and no force in it comes from a real road. A shock "
+    "absorber is the component that decides what the pivot actually sees",
+    "E9 — **no rider, no engine, no wheels, no fuel.** The machine weighs what six steel "
+    "tubes weigh, which is a small fraction of a motorcycle, so every reaction here is "
+    "correspondingly small. The numbers are right for the machine described and the "
+    "machine described is a bare frame",
+    "E12.3 — there is not one bearing, bolt or bush in this bill of materials. The pivot "
+    "is a kinematic declaration; a real swingarm pivot is a bearing pair, a spindle and "
+    "a torque figure, and `app.parts` would refuse to size them anyway because the "
+    "shipped tables carry no load ratings",
+)
+
+
 #: The ladder, in tractability order. Every rung of Decision 5's table appears
 #: here; `tests/test_design_missions.py` asserts that, so a rung cannot be
 #: dropped from the programme by being deleted from a list.
@@ -7208,11 +8187,16 @@ LADDER: Final[Sequence[Mission]] = (
         title="Motorcycle chassis + swingarm",
         era="VI",
         hard="Fatigue under real duty cycles, MBD loads, homologation",
-        needs=(
-            "E8 — fatigue and durability (pyLife)",
-            "E9.4 — joint-load extraction feeding FEA",
-            "E17.3 — tubular weldments",
-        ),
+        # Its three declared needs are met: E8 has the duty-cycle counting the
+        # `hard` column is about, E9.4 closed the joint-load loop on 2026-09-15,
+        # and E17.3's weldment describes a tubular frame as a cut list. M6's
+        # rule then applies — a rung whose stated prerequisites are met and
+        # which is still marked pending is a ladder that has stopped measuring
+        # anything — so it moved on 2026-09-17. Homologation, the third of the
+        # three things `hard` names, is in `_M8_UNPROVEN` first and is E19's.
+        moving=_m8_design(),
+        assertions=_M8_ASSERTIONS,
+        unproven=_M8_UNPROVEN,
     ),
     Mission(
         rung="M9",

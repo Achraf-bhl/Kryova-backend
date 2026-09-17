@@ -750,11 +750,12 @@ class TestTheRungInTheLadder:
         pending = [rung.rung for rung in LADDER if not rung.buildable]
 
         assert "M5" not in pending
-        # M5's own membership, not the whole pending list. It read
-        # `pending == ["M7", "M8", "M9"]` until 2026-09-17, so M7 landing
-        # afterwards failed a test about M5 — the ladder's total belongs to
-        # whichever rung last moved it, never to every rung that ever moved.
-        assert {"M8", "M9"} <= set(pending)
+        # M5's own membership, and nothing else. It read `pending == ["M7", "M8", "M9"]`
+        # until 2026-09-17, then `{"M8", "M9"} <= set(pending)` for the few hours before
+        # M8 moved too — which is the same mistake made smaller. The ladder's total
+        # belongs to whichever rung last moved it, never to every rung that ever moved,
+        # and the only thing a test about M5 may assert is where M5 is.
+        assert "M9" in pending
 
     def test_it_carries_what_it_does_not_claim(self) -> None:
         rung = mission("M5")

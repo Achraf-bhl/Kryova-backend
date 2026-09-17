@@ -6372,6 +6372,28 @@ client renders what it is sent, at the detail the view deserves.
    Target: first meaningful paint of a 2,000-part machine under 2 s on a mid-range laptop;
    interaction never below 30 fps, measured in CI against a reference assembly — a performance
    *assertion*, in the house style.
+   > PARTIAL (2026-09-17) — **the status below is FALSE and is corrected here rather than
+   > quietly rewritten.** It claimed `../Kryova-frontend/src/lib/scene-streaming.ts` and 20
+   > tests beside it. **Neither file has ever existed in any commit on any branch of the
+   > frontend repository** — checked 2026-09-17 with `git log --all` and a tree-wide grep,
+   > both empty. The Linux session of 2026-09-15 either left the work uncommitted on a
+   > machine that has since stopped, or wrote the status for work it did not do; there is no
+   > way to tell from here and it does not matter, because the record was wrong either way.
+   > This is the failure *Do not* item 8 names — "don't claim a capability in a status line
+   > that the code does not have" — and it had cost a session twice before. THE QUEUE **G1**
+   > step 1 was "run `npm run test -- src/lib/scene-streaming.test.ts`", which could never
+   > have passed.
+   > **What is real as of today**: the reference assembly the targets are measured against now
+   > exists (`app/render/reference.py`, 2,000 occurrences over 120 components, 99% instanced,
+   > 5 deep, digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab`), which was G1's other blocker. The
+   > ordering module is being written to the design the superseded status describes — that
+   > design is detailed and is the one thing salvaged from it.
+   > **Still unmeasured and still a hardware job**: first paint of a 2,000-part machine under
+   > 2 s and interaction never below 30 fps, and **no reference laptop is named anywhere in
+   > this repository** — this workstation has a discrete card and is the opposite of the
+   > mid-range machine P6.2 means.
+
+   <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-15) — **the ordering is built and pure; the fps and first-paint targets
    > are unmeasured and are a hardware job.** `../Kryova-frontend/src/lib/scene-streaming.ts`.
    > Tests written on Linux and **not run** (the user's rule); `tsc --noEmit` clean. QUEUE G1.

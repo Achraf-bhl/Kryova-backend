@@ -413,6 +413,53 @@ class TestCheckingDesignRulesAgainstTheLivePart:
         assert response.status_code == 422
         assert "pull_direction" in response.json()["detail"]
 
+    def test_the_route_translates_the_vector_into_the_plane_the_tool_declares(
+        self,
+    ) -> None:
+        """The adapter's whole job, and it was missing until 2026-09-17.
+
+        `catia_analysis_part`'s registry schema takes an origin *plane* — a CATIA
+        user says "pulled off the XY plane" — and this route's public API takes a
+        *vector*, which its own 422 message teaches. The route sent the vector
+        straight through, the kernel refused it, the broad handler turned that
+        into "the draft scan failed, so its rules are unmeasured", and every
+        draft and undercut rule on every part came back unmeasured with a note
+        nobody had a reason to disbelieve.
+        """
+        from app.api.routes.kernel import _pull_plane
+
+        assert _pull_plane([0.0, 0.0, 1.0]) == "XY"
+        assert _pull_plane([1.0, 0.0, 0.0]) == "YZ"
+        assert _pull_plane([0.0, 1.0, 0.0]) == "ZX"
+        assert _pull_plane(None) == "XY"
+
+    def test_the_two_spellings_of_a_pull_direction_cannot_drift(self) -> None:
+        """`_PULL_PLANES` here is the inverse of `_PULL_NORMALS` in the kernel.
+
+        Spelled twice on purpose — importing the OCCT inspection module into a
+        route pulls OCP in behind it — so this is what keeps them one table, the
+        way `app/assembly/inertia.py`'s payload keys are held to
+        `app.kernel.measurement`'s.
+        """
+        from app.api.routes.kernel import _PULL_PLANES
+        from app.kernel.occt.operations.inspection import _PULL_NORMALS
+
+        assert _PULL_PLANES == {normal: name for name, normal in _PULL_NORMALS.items()}
+
+    def test_a_pull_this_analysis_cannot_be_asked_is_refused_by_name(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """A pull along −Z is a different question from a pull along +Z, and the
+        analysis has no way to be asked it. Answering the +Z question instead
+        would report a plausible number for the wrong direction."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(auth_client, mine.id, pull_direction=[0.0, 0.0, -1.0])
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "origin plane" in detail
+        assert "[0.0, 0.0, 1.0] (XY)" in detail
+
     def test_an_unknown_process_is_refused(
         self, auth_client: Any, db_session: Session, current_user_id: str
     ) -> None:

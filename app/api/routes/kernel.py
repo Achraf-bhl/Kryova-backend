@@ -35,7 +35,8 @@ agent works gets a 304 until the part actually changes.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from collections.abc import Sequence
+from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -115,6 +116,64 @@ def _live_runner(conversation_id: str) -> Any:
             ),
         )
     return runner
+
+
+#: Pull direction as this route's clients give it -> the origin plane
+#: `catia_analysis_part` declares. **The tool takes a plane name, not a vector**:
+#: its registry schema is `vocab.origin_plane`, because a CATIA user says "pulled
+#: off the XY plane". This route's own 422 teaches a vector (`[0, 0, 1]`), which
+#: is the right vocabulary for an API — a pull direction is a tool axis — so the
+#: translation belongs here, in the adapter between the two.
+#:
+#: **It was not here until 2026-09-17, and the consequence was silent.** The
+#: route sent the vector straight through, `_pull_direction` refused it as "not
+#: a pull direction", the broad handler below turned that into "The draft scan
+#: failed, so its rules are unmeasured", and **every draft and undercut rule on
+#: every part came back `unmeasured`** with a note nobody had a reason to
+#: disbelieve. `tests/test_kernel_routes.py` caught it the first time it ran.
+#:
+#: Spelled here rather than imported for `app/assembly/inertia.py`'s reason —
+#: importing `app.kernel.occt.operations.inspection` pulls OCP into a route
+#: module — and held equal to that module's `_PULL_NORMALS` by a test, so the
+#: two cannot drift.
+_PULL_PLANES: Final[dict[tuple[float, float, float], str]] = {
+    (0.0, 0.0, 1.0): "XY",
+    (1.0, 0.0, 0.0): "YZ",
+    (0.0, 1.0, 0.0): "ZX",
+}
+
+
+def _pull_plane(direction: Sequence[float] | None) -> str:
+    """The origin plane whose normal is `direction`, or an explained refusal.
+
+    **Only the three positive axes, and the refusal says so rather than
+    guessing.** `catia_analysis_part` analyses draft against an origin plane's
+    normal, so a pull along −Z or along [1, 1, 0] is a question it cannot be
+    asked — and answering the +Z question instead would report a plausible
+    number for the wrong direction, which is the failure `_PULL_NORMALS`'
+    own comment exists to prevent. A 400 naming what can be asked is the honest
+    answer; widening the kernel to take a vector is a change to the operation
+    schema the CATIA daemon also reads, and is recorded in THE QUEUE rather than
+    made blind.
+    """
+    if direction is None:
+        return "XY"
+    key = tuple(float(v) for v in direction)
+    plane = _PULL_PLANES.get(key)  # type: ignore[arg-type]
+    if plane is None:
+        allowed = ", ".join(
+            f"{list(vector)} ({name})" for vector, name in _PULL_PLANES.items()
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Draft and undercut are analysed against an origin plane's normal, so "
+                f"pull_direction must be one of: {allowed}. {list(key)} is not one of "
+                "them — a pull along a negative axis or an arbitrary vector is not "
+                "something this analysis can be asked yet."
+            ),
+        )
+    return plane
 
 
 def _live_document(conversation_id: str) -> Any:
@@ -813,7 +872,7 @@ def check_conversation_rules(
             continue
         arguments: dict[str, Any] = {"kind": kind}
         if kind == "draft":
-            arguments["direction"] = list(body.pull_direction or ())
+            arguments["direction"] = _pull_plane(body.pull_direction)
         try:
             scanned = dict(runner("catia_analysis_part", arguments))
         except Exception as exc:  # noqa: BLE001 - a failed scan leaves its rules unmeasured

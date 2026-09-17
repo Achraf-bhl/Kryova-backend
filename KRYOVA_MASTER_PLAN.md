@@ -2969,6 +2969,29 @@ answerable meaning.
 1. **Design rules as assertions** — minimum wall by process, draft angles, bolt torque and preload,
    thread engagement, weld sizing, machining access — attached automatically from feature type +
    declared process, running in the E5 engine. **DFM becomes a red build.**
+   > DONE (2026-09-17), superseding DONE (2026-09-15) — **the route ran the scans and threw every
+   > result away, and nothing said so.** Everything the status below describes is built and
+   > correct; what was not was the one line joining it to the kernel.
+   > `catia_analysis_part`'s registry schema declares `direction` as an **origin plane**
+   > (`vocab.origin_plane` — a CATIA user says "pulled off the XY plane"), and the route's public
+   > API takes a **vector**, which its own 422 teaches (`[0, 0, 1]`). The route passed the vector
+   > through unchanged. `_pull_direction` refused it, the route's broad handler turned that into
+   > *"The draft scan failed, so its rules are unmeasured"*, and **every draft and undercut rule
+   > on every part came back `UNMEASURED`** — with a note beside it that a reader had no reason
+   > to disbelieve. The rule set, the attachment, the scan and the analysis all worked; a part
+   > with a real undercut would have been reported as unchecked rather than as bad.
+   > Fixed by `_pull_plane`, the translation the adapter always owed: it maps the three positive
+   > axes onto their planes and **refuses anything else by name** rather than guessing, because
+   > a pull along −Z is a different question and answering the +Z one would report a plausible
+   > number for the wrong direction. Held to the kernel's own `_PULL_NORMALS` by a test, so the
+   > two spellings cannot drift. Verified by breaking it: restoring the pass-through fails two
+   > named tests.
+   > **Still open and now recorded** (THE QUEUE E10): the analysis cannot be asked about a
+   > negative axis or an arbitrary vector at all. Widening it is a change to the operation schema
+   > the CATIA daemon also reads, so it is a task rather than something done blind.
+   > Tested by: `tests/test_kernel_routes.py` (+3).
+
+   <!-- superseded 2026-09-17 -->
    > DONE (2026-09-15) — rules are attached from the declared process and the part's own feature
    > tools (`app/rules/processes.py`: a pocket brings the cutter-radius rule, a plain plate does
    > not), become `Assertion`s for the E5 loop through `Attachment.assertions()`, and run as a red

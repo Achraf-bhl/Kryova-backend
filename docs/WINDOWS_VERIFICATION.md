@@ -923,9 +923,18 @@ master plan's status line in the same commit.
       export the part as STEP AP242 and the drawing as DXF from CATIA, and read both back with
       `app/manufacture/export.read_step` and ezdxf. Settles: E17.2's open item, and E17.1's FTA
       item (the leader attachment and the reserved table zones remain Linux work).
-- [ ] **E8 — The undercut rule reads no scan through `POST /kernel/…/rules`.** Found on this
-      machine 2026-09-17 and **not** closed, so it is written down rather than left to be
-      rediscovered. `tests/test_kernel_routes.py::TestCheckingDesignRulesAgainstTheLivePart::
+- [x] **E8 — The undercut rule reads no scan through `POST /kernel/…/rules`.** **CLOSED
+      2026-09-17: it was the adapter, and the effect was silent.**
+      `catia_analysis_part` declares `direction` as an **origin plane** and this route's public
+      API takes a **vector**, which its own 422 teaches. The route passed the vector through,
+      `_pull_direction` refused it, and the route's broad handler turned that into "the draft
+      scan failed, so its rules are unmeasured" — so **every draft and undercut rule on every
+      part came back UNMEASURED**, beside a note a reader had no cause to doubt. A part with a
+      real undercut would have been reported unchecked rather than bad. `_pull_plane` is the
+      translation the adapter always owed, and it refuses a pull it cannot express rather than
+      guessing. Master plan E13 task 1 superseded; verified by breaking it.
+      **Original entry follows.** Found on this machine 2026-09-17 and not closed at the time,
+      so it was written down rather than left to be rediscovered. `tests/test_kernel_routes.py::TestCheckingDesignRulesAgainstTheLivePart::
       test_a_plate_too_long_for_the_machine_is_a_red_build_naming_the_rule` asserts
       `machined.undercuts` comes back as something other than `unmeasured`, and it comes back
       `unmeasured`. What is already known: a runner *is* live (the same route's
@@ -938,13 +947,29 @@ master plan's status line in the same commit.
       promise. **This is not a Windows-only defect** — nothing in it depends on the platform —
       it is simply the first machine that ran the test. Owner: E13 (design rules), which is
       already `PARTIAL`.
-- [ ] **E9 — `TestDropCutterNeverGouges` fails on both cutters.** Found 2026-09-17, **not**
-      investigated. `tests/test_manufacture_cam.py::TestDropCutterNeverGouges::
+- [x] **E9 — `TestDropCutterNeverGouges` fails on both cutters.** **CLOSED 2026-09-17, and the
+      gouge assertion was never the one failing.** The safety claim — the exact drop is never
+      below a sampled surface point — **passed on all 80 cases for both cutters**. The test died
+      one line later, in the helper for its weaker second assertion: `np.cross` on two length-2
+      vectors returned the scalar z-component for years and **numpy 2 removed it**. Written out
+      as `u[0]*v[1] - u[1]*v[0]`. Checked that no other 2-D `np.cross` exists in `app/` or
+      `tests/` — every other use is on (n, 3) mesh coordinates, so this was the only site.
+      **Original entry follows.** Found 2026-09-17, not investigated at the time. `tests/test_manufacture_cam.py::TestDropCutterNeverGouges::
       test_the_exact_drop_is_never_below_a_sampled_surface_point` fails for `flat` and `ball`.
       The claim is the safety one a CAM path rests on — the exact drop must never be below a
       sampled surface point, i.e. the cutter must not gouge — so this is worth reading
       properly rather than adjusting. Written on Linux, executed nowhere until here. Owner:
       E17 (manufacturing output).
+
+- [ ] **E10 — A draft analysis can only be asked about the three positive axes.** Recorded
+      2026-09-17 while closing E8. `catia_analysis_part`'s `direction` is an origin plane, so a
+      pull along **−Z**, or along an arbitrary vector, is a question the analysis has no way to
+      be asked — and a mould pulled the other way is an ordinary thing to want. `_pull_plane`
+      refuses those by name rather than guessing, which is the honest stopgap and not the
+      answer. Widening it means changing the operation schema **the CATIA daemon also reads**,
+      so it needs the seat: decide whether `direction` becomes a vector on both backends, or
+      gains the three negative planes as names. CLAUDE.md's testing item 9 applies — close it on
+      both backends in the same commit and mirror the test file. Owner: E13 task 1.
 
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 

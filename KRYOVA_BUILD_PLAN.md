@@ -15,137 +15,48 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-17 09:30 — the Windows chain's first turn. Thirteen tasks, THE QUEUE
-> E3, E8 and E9 closed, and **the suite is GREEN: 10,463 passed / 38 skipped / 1 xpassed / 0
-> failed** in 10 min 02 s — the first time this codebase has been green on a machine that ran it.
-> `ruff`, `mypy` and `app.verify.recorded --check` all clean.**
-> **This machine now holds the chain.** Linux stopped scheduling on 2026-09-16 at the user's
-> instruction and every cron job there is deleted. Windows runs `pytest`, `ruff` and `mypy`, and
-> it schedules its own next turn — one `CronCreate`, `recurring: false`, at least 2 h 30 min out,
-> into **this same session**, because the loaded context is the point.
-> **Next continuation fires: 2026-09-17 11:51.** (The 04:27 job never fired: a one-shot cron
-> only fires while the REPL is idle, so one whose time passes while the session is busy or
-> waiting on the user is dead and its date is in the past forever. **Check `CronList` on every
-> wake** and reschedule if the pending time has gone by.)
-> **Closed this turn, each committed as it closed:** THE QUEUE **E3** (`c055558`), the four
-> new-test defects (`16592f0`), mypy clean with four real findings (`5732fa7`), the handbook
-> gallery and four ladder-literal tests (`22e246d`), the quoted-turn budget (`a5add88`), two
-> Chrono POSIX tests (`dfab8f4`), the V&V re-record and two LE3 slips (`1ed220e`), the restore
-> drill and the secret scan (`d91b392`), and the two regressions this turn's own work caused
-> (`cf87651`).
-> **The headline finding is the conduction oracle, and it earned its keep on the first run.**
-> CalculiX's `RFL` block is the *pure* reaction and excludes the `*CFLUX` applied at the same
-> node, where `fixed_temperature_heat_w` does not: raw it read **−21.5 W** against the in-house
-> **−22.5 W**, exactly the volumetric source's own share of the material tributary to the held
-> face. Published unread it would have been 4.4% wrong on every model with a source or a flux,
-> with nothing in either run looking unhealthy. Five cases agree now, including a `*FILM`.
-> **The second finding is what "written on Linux, never executed" is worth knowing about.** 143
-> mission tests pass unchanged — every number in them was measured against the real kernel
-> before it was asserted, and they hold on the other machine. What did *not* hold was almost
-> entirely tests being wrong about how they checked a true thing, plus three real product
-> defects nobody would have found by reading: a tool offered to every MCP client that could only
-> be refused, a public page calling the robot arm unbuildable, and an omission note that was
-> itself omitted.
-> **The turn's own regressions, and why the full suite is not optional.** Withholding
-> `draft_load_case` inside `ToolBox` was the right fix one layer too low — it removed the tool
-> from the agent's own vocabulary wherever a box is built with no provider, which
-> `tests/test_load_case_drafting.py` pins deliberately. It belongs in `ToolBoxHost`, the MCP
-> surface that has the requirement. And `test_the_conduction_backend_setting_is_what_selects_the_solver`
-> used `"calculix"` as its example of a backend that does not exist, which E3 made false the
-> same turn. **Neither showed up in the targeted runs; both showed up in the full one.**
-> **Both of the failures left open are now closed, and E8 is the most serious thing this session
-> found.** `catia_analysis_part` declares `direction` as an origin **plane**; the rules route's
-> public API takes a **vector**, which its own 422 teaches. The route passed the vector through,
-> the kernel refused it, and the route's broad handler turned that into *"the draft scan failed,
-> so its rules are unmeasured"* — so **every draft and undercut rule on every part came back
-> UNMEASURED**, beside a note a reader had no cause to doubt. A part with a real undercut was
-> reported unchecked rather than bad. Every piece worked; one adapter line was missing.
-> **E9 was the opposite kind of answer**: the gouge assertion — the safety claim a CAM path rests
-> on — passed on all 80 cases for both cutters, and the test died one line later on `np.cross`
-> with 2-D vectors, which numpy 2 removed. No other 2-D use exists in `app/` or `tests/`.
-> **Two stale documents corrected**, both the class that sends a session to repair working code:
-> THE QUEUE **E2** said "fix E7.7 before attempting G1 again" when E7 task 7 has been DONE since
-> 2026-09-11 with 23 tests, so **G1 is attemptable now**; and the master plan said "Ladder
-> standing at 5/9" three rungs after that stopped being true (7/9, checked against `LADDER`).
-> **Next targets — at least seven, per the user's rule of 2026-09-16 11:07.** The suite is green,
-> so the next turn starts from capability rather than from repair:
-> (1) **E18.8 — M8**, the motorcycle chassis and swingarm, the LAST task in E18 and the biggest
-> single plan item left. `MovingDesign`'s second user and the one rung that is genuinely a
-> mechanism *and* a fatigue case, so E8's duty-cycle counting and E9's reactions meet on it.
-> `app/fatigue/duty.py` already handles the trap and says so at length — **never sum per-mode
-> counts over a duty cycle** — with brute-force expansion as its oracle and 19 tests. Budget it
-> as a whole turn: M4, M5 and M7 were each one.
-> (2) **THE QUEUE E2 — run gate G1**, now that its blocker is gone. Prompt ladder as METHOD: one
-> prompt per level, a screenshot every time, no moving up until the level passes properly.
-> (3) **THE QUEUE E1** — sheet metal on the CATIA side, the biggest unwritten gap, and seat work.
-> (4) **THE QUEUE E10** (new) — a draft analysis can only be asked about the three positive axes;
-> a mould pulled the other way is an ordinary thing to want, and widening it changes the
-> operation schema the CATIA daemon also reads, so it needs the seat and both backends together.
-> (5) **THE QUEUE E6**, DMU Kinematics, which closes phase E9. (6) **P6/P7's PARTIALs**, which
-> need a GPU and a browser this machine has and Linux did not. (7) **E7.7's own residual** —
-> element *size* still takes no account of a part's thinnest section, which its status line names
-> as the thing tet10 made survivable rather than correct.
-> **Two things to know before starting.** `alembic upgrade head` was needed on arrival and the
-> venv needed `pip install -r requirements-dev.txt` (openpyxl was missing and broke collection).
-> And **do not edit `app/` while a full `pytest` is running** — the first run here was started
-> before the editing began and part of its result was measuring a tree that moved underneath it.
-
-> **Continuation, 2026-09-16 11:07 — three mission rungs, and the ladder gained a fourth kind
-> of rung to hold the third.**
-> Linux writes code and tests and **runs no pytest, ruff or mypy** (the user's rule; Windows runs
-> them). Every test named below was **written on Linux and not run as pytest**, and every one was
-> evaluated assertion-by-assertion by a one-off harness first — and, more to the point, every
-> number in them was measured by building the real machine through the real OCCT kernel before
-> any test asserted it.
-> **Closed this turn, each committed as it closed:** **E18.4** (`a2261c9` — M4, the gearbox),
-> **E18.5** (`3a6a4c4` — M5, the stamping press), **E18.7** (`f7157c9` — M7, the robot arm, and
-> `MovingDesign`). **Ladder 4/9 → 7/9. Board 21/34 phases · 174.0/195 tasks = 89.2%.**
-> **The findings, in the order they cost the most.** (1) **An `AssemblyDesign`'s `parameters` are
-> the *bound* side of an assertion and never the measured side** — measures come from the payload,
-> which is geometry the kernel reported. M5's formability claim was written as an assertion and
-> came back NOT CHECKED, because the kernel never sees a fold tree. It is a construction-time
-> refusal now, which is stronger than a claim: the press cannot be built with a guard that will
-> not fold. (2) **A payload key containing a dot is not a path.** M7's motion numbers were first
-> published as flat keys spelled `"motion.total_mass_kg"` and every motion claim came back NOT
-> CHECKED against a payload that visibly contained them — the resolver reads `.` as a separator.
-> (3) **M5's crank pin was drawn as a block and weighed as a cylinder**, and the roll-up
-> disagreed with the closed form by 2.16 kg in 5,691 — 0.04%, far too small to see by eye, and
-> exactly what the mass claim exists to catch.
-> **Two numbers worth keeping.** M5's guard is declared twice — a fold tree and a hand-drawn
-> radiused section — and the kernel's solid and `app/sheetmetal/fold.py`'s closed form agree to
-> **9.1e-09 mm³ out of 1,588,106**. M7 held still is a statics problem with one answer, and its
-> ground joint carries **3635.9075824256697 N against a weight of 3635.90758242567 N**; moving,
-> it peaks 11.3% higher.
-> **What each rung refuses to say.** M5 cannot state a tonnage: there is no shear strength in
-> this repository and it is not even a property the material vocabulary can name, so the press
-> states the greatest shear strength its rating covers and says it cannot tell you whether the
-> strip is inside it. M7 is rigid, so two of the three things its `hard` column promises are
-> there and stiffness is not. Thirty-one caveats across the three rungs reach the public gallery.
-> **Next targets — at least seven, per the user's rule of 2026-09-16 11:07 (raised from six):**
-> (1) **E18.8** — M8, the motorcycle chassis + swingarm, which is the second user of
-> `MovingDesign` and the one that meets `app/fatigue/duty.py`; **never sum per-mode counts over a
-> duty cycle**, and a brute-force count of the expanded history is the oracle. (2) one **P6**
-> viewer PARTIAL whose residual is code rather than an unmeasured fps target. (3) one **P7**
-> desktop PARTIAL — P7.4's offline verdicts exist with no surface showing them. (4) **E22.1**,
-> (5) **E22.4**, (6) **P4.6**, (7) **E18.6/E18.9** or the next phase in plan order. Do not attempt
-> E3, E8, E9.5, E13, E15, E17, or E21/E23's network-blocked tasks — **this machine has no
-> outbound network**.
-> **Already stale on arrival, and not caused here:** `venv/bin/python -m app.verify.recorded
-> --check` fails. The re-record is the Windows machine's **last** step, after the suite.
-> **No continuation job is scheduled, and that is deliberate.** The user stopped every cron job
-> on this machine at 11:07 on 2026-09-16 and asked for the chain to be handed to the **Windows**
-> session instead, which is the machine that can close THE QUEUE — and especially its section E,
-> which is unwritten code. CLAUDE.md's *"Ending every turn"* now carries a Windows block saying
-> the Windows session schedules its own chain, keeps **one** conversation rather than opening a
-> new one per turn, takes **at least seven tasks** a turn, and uses CATIA and the GUI only where
-> a claim actually needs them.
-> **The brief itself is written down**, so it survives the chat window it was pasted into:
-> **[docs/WINDOWS_CONTINUATION_PROMPT.md](docs/WINDOWS_CONTINUATION_PROMPT.md)** holds the
-> prompt handed to the Windows session on 2026-09-16, with its seven targets — run the 143
-> unrun tests, re-record V&V, THE QUEUE **E1** (sheet metal through the bridge), **E3**
-> (conduction against ccx, unblocked now A1/A2 are ticked), **E7.7 then E2** (the gates; the
-> gate fails at L4 on E7.7 until that is fixed), **E18.8** (M8), and **E6** (DMU Kinematics).
-> Update that file when the brief changes; do not let it drift from this block.
+> **Continuation, 2026-09-17 15:00 — E18 complete, the ladder at 8/9, and the suite green.**
+> **This machine holds the chain.** Linux stopped scheduling on 2026-09-16; Windows runs
+> `pytest`, `ruff` and `mypy` and schedules its own next turn. The user's instruction of
+> 2026-09-17 is to **keep going until the master plan is 100%**, not to stop at seven tasks.
+> **Next continuation fires: 2026-09-17 17:28.**
+> **A one-shot cron fires only while the REPL is idle**, so two jobs (04:27 and 11:51) never
+> fired at all — the session was working through both, and a passed date never comes round
+> again. **Run `CronList` first on every wake** and reschedule if the pending time has gone by.
+> That is the one failure mode that ends this chain silently.
+> **Board: 22/34 phases · 175.0/195 tasks = 89.7% · 170.5/189 eng-months = 90.2%.** Suite
+> **10,499 passed / 38 skipped / 1 xpassed / 0 failed**; `ruff`, `mypy` and
+> `app.verify.recorded --check` all clean.
+> **Closed across this session, each committed as it closed:** THE QUEUE **E3** (`c055558`),
+> four new-test defects (`16592f0`), mypy clean with four real findings (`5732fa7`), the
+> handbook gallery (`22e246d`), the quoted-turn budget (`a5add88`), two Chrono platform tests
+> (`dfab8f4`), the V&V re-record (`1ed220e`), the restore drill and secret scan (`d91b392`),
+> two self-caused regressions (`cf87651`), THE QUEUE **E8** and **E9** (`c1e87f1`),
+> **E18.8 — M8** (`42ff6b4`), THE QUEUE **E6**'s API measurement (`36fcf99`), and the ladder
+> literals (`49df886`).
+> **The three findings that mattered most.** (1) **Every draft and undercut rule on every part
+> came back UNMEASURED** — `catia_analysis_part` declares `direction` as an origin *plane* and
+> the rules route sends a *vector*, which its own 422 teaches; the refusal became "the draft
+> scan failed, so its rules are unmeasured", beside a note a reader had no cause to doubt. A
+> part with a real undercut was reported unchecked rather than bad. (2) **The conduction
+> oracle earned its keep on its first run**: CalculiX's `RFL` excludes the `*CFLUX` applied at
+> the same node, so raw it read −21.5 W against −22.5 W — 4.4% wrong on any model with a
+> source or a flux. (3) **M8's transition cycles carry 2.857× the widest amplitude any mode
+> contains**, and summing per-mode counts leaves them out entirely.
+> **Next targets, in order — take as many as the runway allows:**
+> (1) **THE QUEUE E6 / E9.5 — `DmuKinematicsEngine`**, which closes phase E9. The API is
+> written into THE QUEUE; what is still unmeasured is what `iJointType` and `iListElem` want
+> concretely and what `ioMotion` is filled with — one seat probe settles it.
+> (2) **THE QUEUE E2 — run gate G1**, whose blocker is gone: E7 task 7 has been DONE since
+> 2026-09-11 with 23 tests.
+> (3) **THE QUEUE E1** — sheet metal on the CATIA side, the biggest unwritten gap left.
+> (4) **THE QUEUE E10** — a draft analysis can only be asked about the three positive axes;
+> widening it touches the schema the CATIA daemon reads, so both backends in one commit.
+> (5) **E17 and E13's PARTIALs**, most of which need no seat. (6) **E15's two and P4's two.**
+> (7) **P6 and P7**, which need the GPU and browser this machine has and Linux did not.
+> **Not takeable by any machine, and they are not going to become so:** E21's five and E23's
+> two open items are document purchases, vendor licence forms and questions for counsel. They
+> are ~7 of the ~20 task-halves left. Marking them done would be false.
 
 > **Continuation, 2026-09-16 07:40 — six targets, and four of them were found by *running*
 > something rather than by reading it.**
@@ -539,6 +450,36 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-17 (midday) — E18 COMPLETE. M8 lands, the ladder reaches 8/9, and the DMU
+  Kinematics API is measured.** Suite green: **10,499 passed / 38 skipped / 1 xpassed / 0
+  failed** in 9 min 56 s.
+  **E18.8** (`42ff6b4`): M8, the motorcycle chassis and swingarm — the rung where E8, E9 and
+  E17.3 have to agree about one machine, and the one M7's own `unproven` asked for. Six CHS
+  tubes built through the real kernel, the same tubes as a `Weldment` cut list, the swingarm
+  as a `MovingDesign`. Cut list and specs both total **2654.9175 mm**. Twelve claims pass.
+  **The finding is the transition cycle as a number**: the life counts to 17,449,999 cycles,
+  of which **19,999 close only because one mode follows another**, carrying 6.474 MPa where
+  the widest any single mode contains is 2.266 — a factor of **2.857**. Sum the per-mode
+  counts and the widest cycle of the whole life is absent from the answer.
+  **Two things the first real build found.** A tube meeting a cylinder at an angle is
+  *coped*: drawn to the tangent plane the down tube's tilted face reached 14.8 mm inside a
+  headstock whose surface is at 25 mm — **13.529 mm³** of overlap on a machine holding
+  1.1e6 mm³ of steel. And **a duty cycle whose worst mode holds both extremes demonstrates
+  nothing**: the first spectrum gave the pothole the highest peak *and* the lowest trough
+  and the transition cycles came out exactly equal to it. The means straddle now, which is
+  also what a swingarm really sees.
+  **THE QUEUE E6** (`36fcf99`): the DMU Kinematics API measured rather than guessed. DMU is
+  licensed on this seat; **late binding sees none of it** (the `Joints` collection comes back
+  `<COMObject <unknown>>` with every method missing) and **the documented `AddJointRevolute`
+  family does not exist** — the real interface is a generic `Mechanism.AddJoint`. The way in
+  is the `KinematicsInterfaces` type library. `AddJoint`, `AddCommand`,
+  `PutCommandValuesWithMultiSteps`, `GetProductMotion`, `Update` and `NbDof` are all there,
+  so E9.5 is a build now rather than a guess.
+  **`49df886`**: the seventh file writing the ladder's totals as literals, and the sixth time
+  the same fix. CLAUDE.md gains the rule — a test about one thing must not assert the total
+  of the set it belongs to.
+  Board 22/34 phases · 175.0/195 tasks = 89.7% · 170.5/189 eng-months = 90.2%. Ladder 8/9.
+
 - **2026-09-17 — the first Windows session of the new chain: thirteen tasks, and the suite went
   from 48 failures to GREEN (measured: 10,463 passed / 38 skipped / 1 xpassed / 0 failed,
   10 min 02 s, exit 0) — the first time this codebase has been green on a machine that ran

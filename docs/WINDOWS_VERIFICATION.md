@@ -1084,6 +1084,24 @@ this file drives the ladder, with a screenshot each.
       interaction never below 30 fps.**
       1. `npm run test -- src/lib/scene-streaming.test.ts`, then `npm run type-check` and
          `npm run lint`.
+      **STEP 2 IS DONE, 2026-09-17.** `app/render/reference.py` generates the synthetic
+      reference assembly §4 specifies and `tests/test_render_reference.py` holds it to every
+      row: **2,000 occurrences, 120 distinct components, 99% instanced, 5 deep**, pinned by
+      digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab` so two runs a month apart compare. Nothing
+      in it is random — the varied transforms are arithmetic on the index, because a random
+      transform satisfies §4's wording and destroys the artefact.
+      **The stale half of §4 is corrected too**: it said "M5 is not built and is blocked on
+      E13". M5 landed 2026-09-16 and M8 on 2026-09-17, and it changes nothing — M5 is eleven
+      parts and M8 eight occurrences against a 2,000-part target.
+      **One row this scene cannot meet, and it is written down rather than fudged**: the
+      parts are boxes, a box is twelve triangles at every deflection, so the 8-12 M triangle
+      band is unreachable here by three orders of magnitude. This scene measures ordering,
+      streaming, instancing and tree depth; it does **not** measure the triangle budget, and
+      a run log quoting that row off it is quoting the wrong scene.
+      **Still open on G1**: steps 1 (`npm run test` on the frontend), 2b (naming the
+      reference laptop — this workstation has a discrete card and is the opposite of
+      mid-range, so it cannot be it) and 3 (wiring the module to the viewer and measuring).
+
       2. **Build a reference assembly.** There is none, and that is the blocker under the
          blocker: the target is meaningless without a fixed scene to measure it on. 2,000
          parts with real repetition (a frame, a few hundred distinct components, thousands of

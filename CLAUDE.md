@@ -870,6 +870,20 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    as `<quoted attachment block: 2000 attachment(s), 11994 chars>` and holds the real text in
    `_block`. Perfectly reasonable, and it cost ten minutes of believing a probe had produced a
    58-character block. Check `dir()` before concluding a builder returned nothing.
+15. **A change to a *shared vocabulary* has a blast radius bigger than its files, and only the
+   full suite knows it.** Item 7 under *Subagents* says to run everything after integrating
+   parallel lanes; this is the same rule with no lanes in it, and it is the commoner case.
+   Measured 2026-09-17, twice in one turn. Withholding one tool inside `ToolBox` touched two
+   files and broke four tests in a third, because the *agent's* box and the *MCP route's* box
+   want opposite behaviour from the same object — the agent can act on "no model is available"
+   and an MCP client can only waste a turn on it, so the filter belongs at the surface with the
+   requirement and not in the shared builder. And adding `calculix` to the conduction registry
+   broke a test that used that exact name as its example of a backend which does not exist.
+   **The two shapes to watch for**: a change that *narrows* something many callers read, and a
+   change that *fills an absence* some test pins. Both pass every targeted run. Neither is
+   findable by grep, because what broke was a test asserting the old world, not a caller.
+   **A test pinning an absence has to be re-read the day the absence is filled, not edited
+   until it passes.**
 
 ## Subagents — never more than one at a time
 

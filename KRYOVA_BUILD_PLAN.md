@@ -15,8 +15,8 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-17 01:56 — the Windows chain's first turn. Eight tasks, THE QUEUE E3
-> closed, and the suite went from 48 failures to 6.**
+> **Continuation, 2026-09-17 01:56 — the Windows chain's first turn. Nine tasks, THE QUEUE E3
+> closed, and the suite is **3 failed / 10,457 passed** — measured, not estimated.**
 > **This machine now holds the chain.** Linux stopped scheduling on 2026-09-16 at the user's
 > instruction and every cron job there is deleted. Windows runs `pytest`, `ruff` and `mypy`, and
 > it schedules its own next turn — one `CronCreate`, `recurring: false`, at least 2 h 30 min out,
@@ -26,7 +26,8 @@ happened.
 > new-test defects (`16592f0`), mypy clean with four real findings (`5732fa7`), the handbook
 > gallery and four ladder-literal tests (`22e246d`), the quoted-turn budget (`a5add88`), two
 > Chrono POSIX tests (`dfab8f4`), the V&V re-record and two LE3 slips (`1ed220e`), the restore
-> drill and the secret scan (`d91b392`).
+> drill and the secret scan (`d91b392`), and the two regressions this turn's own work caused
+> (`cf87651`).
 > **The headline finding is the conduction oracle, and it earned its keep on the first run.**
 > CalculiX's `RFL` block is the *pure* reaction and excludes the `*CFLUX` applied at the same
 > node, where `fixed_temperature_heat_w` does not: raw it read **−21.5 W** against the in-house
@@ -40,6 +41,13 @@ happened.
 > defects nobody would have found by reading: a tool offered to every MCP client that could only
 > be refused, a public page calling the robot arm unbuildable, and an omission note that was
 > itself omitted.
+> **The turn's own regressions, and why the full suite is not optional.** Withholding
+> `draft_load_case` inside `ToolBox` was the right fix one layer too low — it removed the tool
+> from the agent's own vocabulary wherever a box is built with no provider, which
+> `tests/test_load_case_drafting.py` pins deliberately. It belongs in `ToolBoxHost`, the MCP
+> surface that has the requirement. And `test_the_conduction_backend_setting_is_what_selects_the_solver`
+> used `"calculix"` as its example of a backend that does not exist, which E3 made false the
+> same turn. **Neither showed up in the targeted runs; both showed up in the full one.**
 > **Still red, and both recorded in THE QUEUE rather than left to be rediscovered:** **E8** —
 > `machined.undercuts` comes back `unmeasured` through `POST /kernel/…/rules` when the test says
 > it must not, with a live runner and `scans_needed == ["draft"]`; and **E9** —
@@ -509,8 +517,9 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
-- **2026-09-17 (early) — the first Windows session of the new chain: eight tasks, and the suite
-  went from 48 failures to 6. THE QUEUE E3 closed.**
+- **2026-09-17 (early) — the first Windows session of the new chain: nine tasks, and the suite
+  went from 48 failures to 3 (measured: 3 failed / 10,457 passed / 38 skipped / 1 xpassed,
+  9 min 53 s). THE QUEUE E3 closed.**
   **THE QUEUE E3** (`c055558`): steady conduction federated to CalculiX. `app/solve/calculix/
   conduction.py` writes a `*HEAT TRANSFER, STEADY STATE` deck, `CalculiXConductionSolver` runs
   it, and `oracle.compare_conduction` puts both solvers on one case. **Five cases ran on ccx
@@ -553,6 +562,11 @@ needs a different extraction stated up front rather than chosen after the sweep.
   first check instead of reporting a finding, in the class called
   `TestWhatTheFirstRealDrillRunFound`; and two fixture URLs are assembled from pieces so the
   blocking secret scan stops reading them as leaks.
+  **Two regressions this turn caused itself** (`cf87651`), both invisible to the targeted runs and
+  both caught by the full suite: withholding `draft_load_case` inside `ToolBox` removed it from
+  the agent's own vocabulary wherever a box has no provider (it belongs in `ToolBoxHost`, the MCP
+  surface with the requirement), and a test using `"calculix"` as its example of a conduction
+  backend that does not exist was made false by E3 the same turn.
   Board unchanged at 21/34 phases · 174.0/195 tasks = 89.2% — every task here was a defect or a
   QUEUE item rather than a plan task, which is what a first verification run is for.
 

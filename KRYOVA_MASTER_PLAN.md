@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 16/24 | 123/133 = 92% | 139/151 eng-months = 92% |
-| Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 22/34 | 175/195 = 90% | 170/189 eng-months = 90% |
+| Product — P1–P10 | 6/10 | 50/62 = 81% | 30/38 eng-months = 79% |
+| **Programme** | 22/34 | 174/195 = 89% | 169/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -5869,8 +5869,10 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    > **Still open here, and unchanged:** "insert as parameter / requirement / load case" stays
    > unbuilt for task 3's reason (the values are candidate readings), and inline previews are
    > P6's viewer. Drag-and-drop still reaches only the geometry path.
-   > Tested by: `../Kryova-frontend/src/components/chat/attach-pill.test.tsx` (9, written on
-   > Linux and not run), `../Kryova-frontend/src/components/attachments/attachment-panel.test.tsx` (9).
+   > Tested by: `../Kryova-frontend/src/components/attachments/attachment-panel.test.tsx` (9).
+   > *(Corrected 2026-09-17: this line also cited `src/components/chat/attach-pill.test.tsx`,
+   > which has never existed in any commit on any branch — one of ten such paths found by the
+   > audit recorded on P6 tasks 4-6 and P7 tasks 3-4. The panel test is real and does run.)*
 
    <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-15) — **correction: the composer never creates a document attachment.**
@@ -6482,6 +6484,21 @@ client renders what it is sent, at the detail the view deserves.
    animated), measure (point-point, edge, face-face — against real geometry via a backend query,
    not against the decimated mesh), hide/isolate by subtree, camera bookmarks per conversation
    ("the view we were talking about").
+   > PARTIAL (2026-09-17) — **the backend half is real; the frontend half never existed.**
+   > **Found by an audit on 2026-09-17**: every `../Kryova-frontend/...` path the plan names
+   > was checked against the frontend repository, and **ten claimed files have never existed
+   > in any commit on any branch** (`git log --all` over each path, all empty). Six task
+   > statuses written on 2026-09-16 rest on them. The Linux session either left the work
+   > uncommitted on a machine that has since stopped, or wrote the statuses for work it did
+   > not do; there is no way to tell from here and it does not matter, because the record
+   > was wrong either way. Superseded rather than rewritten, so the false claim stays
+   > visible with its correction attached.
+   > `../Kryova-frontend/src/lib/viewer-interactions.ts` and its 33 tests are among the ten.
+   > **What is real**: `GET /kernel/conversations/{id}/measure/between` and `.../measure/element`
+   > are in `app/api/routes/kernel.py` and are tested. So this task keeps its `PARTIAL` on the
+   > backend's strength alone, and the frontend logic has to be written from scratch.
+
+   <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **all five interactions have their logic, on both sides of the wire;
    > none of them has a control in the viewer.** Frontend
    > `../Kryova-frontend/src/lib/viewer-interactions.ts` (33 tests, written on Linux and not
@@ -6531,6 +6548,23 @@ client renders what it is sent, at the detail the view deserves.
 5. **Results on geometry**: the existing stress-field rendering generalised — scalar fields
    (stress, displacement, thickness, fatigue damage) on the streamed meshes, shared colour-scale
    legend, probe-a-value. The `surface-field` code is the seed.
+   > NOT STARTED (corrected 2026-09-17) — **nothing of this task exists.**
+   > **Found by an audit on 2026-09-17**: every `../Kryova-frontend/...` path the plan names
+   > was checked against the frontend repository, and **ten claimed files have never existed
+   > in any commit on any branch** (`git log --all` over each path, all empty). Six task
+   > statuses written on 2026-09-16 rest on them. The Linux session either left the work
+   > uncommitted on a machine that has since stopped, or wrote the statuses for work it did
+   > not do; there is no way to tell from here and it does not matter, because the record
+   > was wrong either way. Superseded rather than rewritten, so the false claim stays
+   > visible with its correction attached.
+   > This task's status claimed `../Kryova-frontend/src/lib/scalar-field.ts` and 24 tests, and
+   > named no other artefact. Both are among the ten that have never existed, so there is no
+   > half to keep: the honest status is the one this task had before 2026-09-16.
+   > `surface-field.ts` — the "seed" the task description mentions — does exist, and is a wire
+   > format rather than presentation, which is why the superseded status called the missing
+   > module its sibling and not a widening of it.
+
+   <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **any per-node scalar field colours, with a legend that states its
    > own bounds and a probe that can say "not measured"; nothing is wired to the viewer yet.**
    > `../Kryova-frontend/src/lib/scalar-field.ts`. Tests written on Linux and **not run** (the
@@ -6563,6 +6597,22 @@ client renders what it is sent, at the detail the view deserves.
 6. **Tree ↔ 3D ↔ spec, one selection model**: click a part in the tree, it highlights in 3D and the
    spec panel scrolls to its feature; select a face in 3D, the predicate that would name it (E2
    task 1) is offered.
+   > PARTIAL (2026-09-17) — **the backend half is real; the frontend half never existed.**
+   > **Found by an audit on 2026-09-17**: every `../Kryova-frontend/...` path the plan names
+   > was checked against the frontend repository, and **ten claimed files have never existed
+   > in any commit on any branch** (`git log --all` over each path, all empty). Six task
+   > statuses written on 2026-09-16 rest on them. The Linux session either left the work
+   > uncommitted on a machine that has since stopped, or wrote the statuses for work it did
+   > not do; there is no way to tell from here and it does not matter, because the record
+   > was wrong either way. Superseded rather than rewritten, so the false claim stays
+   > visible with its correction attached.
+   > `../Kryova-frontend/src/lib/selection-model.ts` and its 19 tests are among the ten.
+   > **What is real**: `app/kernel/occt/propose.py`, the face partition in
+   > `app/kernel/occt/tessellate.py` and `GET /kernel/conversations/{id}/selection/face`. So the
+   > 3D → name direction genuinely is built end to end on the server, which is what this task
+   > keeps its `PARTIAL` for; the name → 3D direction and every surface are unwritten.
+
+   <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **both directions have their logic and the 3D → name half is
    > built end to end; no surface calls any of it yet.** Frontend
    > `../Kryova-frontend/src/lib/selection-model.ts`; backend
@@ -6664,6 +6714,22 @@ scene in the Tauri app.
 3. **Desktop-only powers, used sparingly**: local file open/save into the attachment pipeline, OS
    notifications for long-run completion, deep links (`kryova://run/...`) from CI or email into the
    app.
+   > NOT STARTED (corrected 2026-09-17) — **neither half exists.**
+   > **Found by an audit on 2026-09-17**: every `../Kryova-frontend/...` path the plan names
+   > was checked against the frontend repository, and **ten claimed files have never existed
+   > in any commit on any branch** (`git log --all` over each path, all empty). Six task
+   > statuses written on 2026-09-16 rest on them. The Linux session either left the work
+   > uncommitted on a machine that has since stopped, or wrote the statuses for work it did
+   > not do; there is no way to tell from here and it does not matter, because the record
+   > was wrong either way. Superseded rather than rewritten, so the false claim stays
+   > visible with its correction attached.
+   > The superseded status says "the decidable half is written and the native half is not", and
+   > the decidable half *is* `../Kryova-frontend/src/lib/desktop-powers.ts` — one of the ten.
+   > With it absent there is nothing here at all. The deep-link security argument it records is
+   > worth rebuilding to: an allow-list of three read-only shapes, every other scheme and target
+   > refused by name, and nothing a link reaches performing an action.
+
+   <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **the decidable half is written and the native half is not.**
    > `../Kryova-frontend/src/lib/desktop-powers.ts`. Tests written on Linux and **not run**
    > as vitest (the user's rule); `tsc --noEmit` and `eslint` clean, and all 23 claims were
@@ -6703,6 +6769,22 @@ scene in the Tauri app.
 
 4. **Offline honesty**: what works without the backend (viewing cached designs, reading docs) and
    what does not (everything else), stated in the UI rather than discovered by timeout.
+   > NOT STARTED (corrected 2026-09-17) — **the table and the verdicts do not exist.**
+   > **Found by an audit on 2026-09-17**: every `../Kryova-frontend/...` path the plan names
+   > was checked against the frontend repository, and **ten claimed files have never existed
+   > in any commit on any branch** (`git log --all` over each path, all empty). Six task
+   > statuses written on 2026-09-16 rest on them. The Linux session either left the work
+   > uncommitted on a machine that has since stopped, or wrote the statuses for work it did
+   > not do; there is no way to tell from here and it does not matter, because the record
+   > was wrong either way. Superseded rather than rewritten, so the false claim stays
+   > visible with its correction attached.
+   > `../Kryova-frontend/src/lib/offline-capability.ts` and its 20 tests are among the ten, and
+   > the superseded status names no other artefact. The design it records is worth rebuilding
+   > to — a table of capabilities written in advance rather than a guess per screen, a missing
+   > row reading as *unavailable*, `unknown` kept apart from `unreachable` and `failing`, and a
+   > banner that counts rather than uses adjectives.
+
+   <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **the table and the verdicts exist; no surface shows them yet.**
    > `../Kryova-frontend/src/lib/offline-capability.ts`. Tests written on Linux and **not
    > run** as vitest (the user's rule); `tsc --noEmit` and `eslint` clean, and all 20 claims

@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 16/24 | 123/133 = 92% | 139/151 eng-months = 92% |
-| Product — P1–P10 | 6/10 | 52/62 = 83% | 31/38 eng-months = 81% |
-| **Programme** | 22/34 | 174/195 = 89% | 170/189 eng-months = 90% |
+| Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
+| **Programme** | 22/34 | 175/195 = 90% | 170/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -6548,6 +6548,30 @@ client renders what it is sent, at the detail the view deserves.
 5. **Results on geometry**: the existing stress-field rendering generalised — scalar fields
    (stress, displacement, thickness, fatigue damage) on the streamed meshes, shared colour-scale
    legend, probe-a-value. The `surface-field` code is the seed.
+   > PARTIAL (2026-09-17, evening) — **it exists now, and it was run.**
+   > `../Kryova-frontend/src/lib/scalar-field.ts` (`b36d82a`), 32 tests through vitest,
+   > `tsc --noEmit` and eslint clean, whole frontend suite green at 530. Rebuilt to the design
+   > the false status recorded — that design was the one thing worth keeping from it.
+   > **A sibling of `surface-field.ts`, not a widening of it**: that module is a wire format
+   > and this one is presentation, and merging them would put a palette in a decoder and a
+   > byte offset in a legend. Five kinds differ by a name, a unit and a palette direction,
+   > never by a second renderer; `magnitudeField` is the bridge from what a solve returns
+   > (xyz per node) to what a colour bar can show.
+   > **The three honesty rules, each preventing a picture that would otherwise look entirely
+   > plausible.** An unmeasured node is `NaN`, gets `ABSENT` grey and is left out of the fitted
+   > range — the bottom of the scale is a reading and "nobody computed this" is not one, and
+   > `probeNode` answers `measured: false` rather than 0 and **refuses** a node index outside
+   > the field rather than clamping to the nearest. A fitted range carries `auto: true` and the
+   > legend prints the caveat, because two screenshots at different auto ranges look like two
+   > different results. **Damage is never fitted** — pinned 0–1, since fitting 0–0.02 across
+   > the palette paints a part that will last fifty lifetimes in the same red as one about to
+   > crack. Thickness's ramp is reversed as a property of the *kind*, not a flag at the call
+   > site, and a test asserts it is the only kind that reverses.
+   > **Still not done**: the viewer does not call it — no legend component, no probe UI — and
+   > nothing routes a thickness or damage field to the frontend (thickness is sampled, and
+   > `app/fatigue/` has no per-node route). That is the wiring half. QUEUE G2.
+
+   <!-- superseded 2026-09-17 -->
    > NOT STARTED (corrected 2026-09-17) — **nothing of this task exists.**
    > **Found by an audit on 2026-09-17**: every `../Kryova-frontend/...` path the plan names
    > was checked against the frontend repository, and **ten claimed files have never existed

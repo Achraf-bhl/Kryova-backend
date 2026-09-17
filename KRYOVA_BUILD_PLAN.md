@@ -15,6 +15,51 @@ happened.
 
 ## Now
 
+> **Continuation, 2026-09-17 01:56 — the Windows chain's first turn. Eight tasks, THE QUEUE E3
+> closed, and the suite went from 48 failures to 6.**
+> **This machine now holds the chain.** Linux stopped scheduling on 2026-09-16 at the user's
+> instruction and every cron job there is deleted. Windows runs `pytest`, `ruff` and `mypy`, and
+> it schedules its own next turn — one `CronCreate`, `recurring: false`, at least 2 h 30 min out,
+> into **this same session**, because the loaded context is the point.
+> **Next continuation fires: 2026-09-17 04:27.**
+> **Closed this turn, each committed as it closed:** THE QUEUE **E3** (`c055558`), the four
+> new-test defects (`16592f0`), mypy clean with four real findings (`5732fa7`), the handbook
+> gallery and four ladder-literal tests (`22e246d`), the quoted-turn budget (`a5add88`), two
+> Chrono POSIX tests (`dfab8f4`), the V&V re-record and two LE3 slips (`1ed220e`), the restore
+> drill and the secret scan (`d91b392`).
+> **The headline finding is the conduction oracle, and it earned its keep on the first run.**
+> CalculiX's `RFL` block is the *pure* reaction and excludes the `*CFLUX` applied at the same
+> node, where `fixed_temperature_heat_w` does not: raw it read **−21.5 W** against the in-house
+> **−22.5 W**, exactly the volumetric source's own share of the material tributary to the held
+> face. Published unread it would have been 4.4% wrong on every model with a source or a flux,
+> with nothing in either run looking unhealthy. Five cases agree now, including a `*FILM`.
+> **The second finding is what "written on Linux, never executed" is worth knowing about.** 143
+> mission tests pass unchanged — every number in them was measured against the real kernel
+> before it was asserted, and they hold on the other machine. What did *not* hold was almost
+> entirely tests being wrong about how they checked a true thing, plus three real product
+> defects nobody would have found by reading: a tool offered to every MCP client that could only
+> be refused, a public page calling the robot arm unbuildable, and an omission note that was
+> itself omitted.
+> **Still red, and both recorded in THE QUEUE rather than left to be rediscovered:** **E8** —
+> `machined.undercuts` comes back `unmeasured` through `POST /kernel/…/rules` when the test says
+> it must not, with a live runner and `scans_needed == ["draft"]`; and **E9** —
+> `TestDropCutterNeverGouges` fails on both cutters, which is the safety claim a CAM path rests
+> on and must be read rather than adjusted. Neither is Windows-specific.
+> **Next targets — at least seven, per the user's rule of 2026-09-16 11:07:**
+> (1) **THE QUEUE E8**, the undercut scan — start at whether `app/rules/processes.py` names a
+> measurement key `catia_analysis_part(kind="draft")` does not produce. (2) **THE QUEUE E9**,
+> the drop-cutter gouge. (3) **THE QUEUE E1** — sheet metal on the CATIA side, which is the
+> biggest unwritten gap left and needs the seat. (4) **E7 task 7 then THE QUEUE E2** — the
+> verdict stated from a single-grid solve whose own record says `converged: false`; fix the code
+> first, because a gate attempted before it re-measures a known failure. (5) **E18.8**, M8, the
+> motorcycle chassis and swingarm — `MovingDesign`'s second user, and **never sum per-mode counts
+> over a duty cycle**. (6) **THE QUEUE E6**, DMU Kinematics, which closes E9. (7) **P6/P7's
+> PARTIALs**, which need a GPU and a browser this machine has and Linux did not.
+> **Two things to know before starting.** `alembic upgrade head` was needed on arrival and the
+> venv needed `pip install -r requirements-dev.txt` (openpyxl was missing and broke collection).
+> And **do not edit `app/` while a full `pytest` is running** — the first run here was started
+> before the editing began and part of its result was measuring a tree that moved underneath it.
+
 > **Continuation, 2026-09-16 11:07 — three mission rungs, and the ladder gained a fourth kind
 > of rung to hold the third.**
 > Linux writes code and tests and **runs no pytest, ruff or mypy** (the user's rule; Windows runs
@@ -464,6 +509,53 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-17 (early) — the first Windows session of the new chain: eight tasks, and the suite
+  went from 48 failures to 6. THE QUEUE E3 closed.**
+  **THE QUEUE E3** (`c055558`): steady conduction federated to CalculiX. `app/solve/calculix/
+  conduction.py` writes a `*HEAT TRANSFER, STEADY STATE` deck, `CalculiXConductionSolver` runs
+  it, and `oracle.compare_conduction` puts both solvers on one case. **Five cases ran on ccx
+  2.23 and all five agreed**, including a convection film — the one boundary that cannot be
+  handed over as a vector, because a film puts `integral h N_i N_j dA` into the matrix and not
+  only into the load. `CONDUCTION_BACKEND=calculix` is a valid deployment now. The oracle found
+  a defect on its first run: `RFL` is the *pure* reaction and excludes the `*CFLUX` applied at
+  the same node, so raw it read −21.5 W against the in-house −22.5 W — exactly the volumetric
+  source's share of the material tributary to the held face, and 4.4% wrong on any model with a
+  source or a flux.
+  **The four defects the new tests found** (`16592f0`): `draft_load_case` was offered to every
+  MCP client and could only be refused, while `app/api/routes/mcp.py` had claimed since it
+  shipped that `ToolBox` withheld it; `ImageReading` was never in the local-schema budget's sent
+  list though `vision.py` hands it to a provider; four settings were undocumented in
+  `.env.example`; and a register test demanded a citation to an empty string.
+  **mypy, run on a machine for the first time** (`5732fa7`): 12 errors, three of them Windows
+  platform facts (`os.killpg`, `signal.SIGKILL`, `os.getgid` do not exist there, and `hasattr`
+  cannot narrow a module attribute) and four real — an assert narrowing `maximum_mm` while the
+  line below subtracted `minimum_mm`; an unguarded `peek_session` where both siblings guard;
+  `load.force_n` read off a five-member union; and a `bool` where a `TypeGuard` was meant.
+  **The handbook called the robot arm pending** (`22e246d`): `Mission.buildable` learned about
+  `MovingDesign` and `gallery._builds` did not, so a public page published M7 as unbuildable
+  with nothing in `waiting_on`, and the headline undercounted. Four tests that wrote the
+  ladder's state as a literal failed because a rung *advanced*; each now asserts what its own
+  subject may claim. **All 143 mission tests written on Linux and never executed anywhere pass.**
+  **The note saying attachments were omitted was itself omitted** (`a5add88`): the turn budget
+  counted extract text and never the per-item citation header, so hundreds of small fragments
+  ran three times over the cap and the outer fence cut the tail — which held the omission note.
+  Plus: a harmonic peak expected at 1/32 s where its own comment derives 1/16; a "same file
+  uploaded again" test that uploaded two different files, because **OCCT's STEP writer names the
+  product with a per-process counter and is not deterministic across two writes**; and a Linux
+  measurement (1.14x the convex bound) written as a 1.2 theorem, where this machine's local
+  optimum is 1.2325x.
+  **Chrono** (`dfab8f4`): two tests asserting POSIX-only container facts.
+  **V&V re-recorded** (`1ed220e`): 4/5 agreed, and eleven failures across three test files that
+  were one stale fingerprint wearing three names went green. Two never-run LE3 slips with it —
+  an `is True` against a `np.bool_`, which can never pass, and a tolerance whose edge a chosen
+  size lands on by one ulp.
+  **The drill and the scanner** (`d91b392`): a missing `psql` killed the restore drill on its
+  first check instead of reporting a finding, in the class called
+  `TestWhatTheFirstRealDrillRunFound`; and two fixture URLs are assembled from pieces so the
+  blocking secret scan stops reading them as leaks.
+  Board unchanged at 21/34 phases · 174.0/195 tasks = 89.2% — every task here was a defect or a
+  QUEUE item rather than a plan task, which is what a first verification run is for.
+
 - **2026-09-16 (late) — three mission rungs: E18.4, E18.5, E18.7. The ladder went 4/9 to 7/9
   and gained a fourth kind of rung to hold the last one.**
   **E18.4** (`a2261c9`): M4, the gearbox. Three claims that must agree and only one is

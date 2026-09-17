@@ -923,6 +923,28 @@ master plan's status line in the same commit.
       export the part as STEP AP242 and the drawing as DXF from CATIA, and read both back with
       `app/manufacture/export.read_step` and ezdxf. Settles: E17.2's open item, and E17.1's FTA
       item (the leader attachment and the reserved table zones remain Linux work).
+- [ ] **E8 — The undercut rule reads no scan through `POST /kernel/…/rules`.** Found on this
+      machine 2026-09-17 and **not** closed, so it is written down rather than left to be
+      rediscovered. `tests/test_kernel_routes.py::TestCheckingDesignRulesAgainstTheLivePart::
+      test_a_plate_too_long_for_the_machine_is_a_red_build_naming_the_rule` asserts
+      `machined.undercuts` comes back as something other than `unmeasured`, and it comes back
+      `unmeasured`. What is already known: a runner *is* live (the same route's
+      `_live_document` resolved one two lines earlier, so this is not the None case the
+      neighbouring guard now covers), and the same response reports `scans_needed == ["draft"]`
+      — so the undercut rule is expected to be satisfied by the draft scan's payload and is
+      not. The question to answer first is whether `app/rules/processes.py` names a
+      measurement key that `catia_analysis_part(kind="draft")` does not produce, which is
+      CLAUDE.md's testing item 9 in a new place: a parameter the schema advertises is a
+      promise. **This is not a Windows-only defect** — nothing in it depends on the platform —
+      it is simply the first machine that ran the test. Owner: E13 (design rules), which is
+      already `PARTIAL`.
+- [ ] **E9 — `TestDropCutterNeverGouges` fails on both cutters.** Found 2026-09-17, **not**
+      investigated. `tests/test_manufacture_cam.py::TestDropCutterNeverGouges::
+      test_the_exact_drop_is_never_below_a_sampled_surface_point` fails for `flat` and `ball`.
+      The claim is the safety one a CAM path rests on — the exact drop must never be below a
+      sampled surface point, i.e. the cutter must not gouge — so this is worth reading
+      properly rather than adjusting. Written on Linux, executed nowhere until here. Owner:
+      E17 (manufacturing output).
 
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 

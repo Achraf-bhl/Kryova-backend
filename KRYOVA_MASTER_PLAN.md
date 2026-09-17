@@ -7103,6 +7103,20 @@ scene in the Tauri app.
 
 2. **The docs site**: task-oriented docs, the mission gallery (every ladder mission as a worked,
    forkable example), API reference from the OpenAPI schema that already exists.
+   > DONE (2026-09-17), superseding DONE (2026-09-10) — **the derivation had a hole in it for a
+   > day, and a public page carried the consequence.** Everything the status below says about
+   > deriving rather than writing twice stands, and it is not enough on its own: `_builds` in
+   > `app/handbook/gallery.py` enumerated the three design kinds a mission could carry, and when
+   > `MovingDesign` landed with M7 on 2026-09-16 `Mission.buildable` learned about it and
+   > `_builds` did not. So the handbook published the **seven-part robot arm as `pending`**, with
+   > an empty `waiting_on` to explain why, and `headline()` undercounted the ladder by one. A
+   > derived page is only as derived as its last branch. Fixed by a fifth kind, `moving`, and
+   > **pinned by `test_the_gallery_agrees_with_the_ladder_about_what_builds`**, which holds the
+   > two definitions of "buildable" — one per module — to each other for every rung, so a sixth
+   > kind cannot diverge silently. Found the first time this suite ran on Windows.
+   > Tested by: `tests/test_docs.py`.
+
+   <!-- superseded 2026-09-17 -->
    > DONE (2026-09-10) — `app/handbook/` + `GET /handbook/*` + `/docs`, unauthenticated for the
    > same reason `trust` is: documentation behind a login can only be read by people who already
    > bought, and the reader it needs — an engineer working out whether this does what they need —

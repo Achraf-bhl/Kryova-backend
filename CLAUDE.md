@@ -298,13 +298,29 @@ session.**
 >    app.verify.recorded`) is this machine's job and comes last, after the suite is green.
 
 
-> **The Linux stretch stopped on 2026-09-09 at phase E7**, with ten of twenty-nine phases
-> complete, the suite green, and everything closed that could be closed without hardware. If
-> you are reading this on the Windows machine, **you are the next session, and your brief is
-> the top of [docs/WINDOWS_VERIFICATION.md](docs/WINDOWS_VERIFICATION.md)** — read it before
-> anything else. Three jobs, in order: verify what Linux wrote, **finish THE QUEUE** (sections
-> A–D are measurements, **section E is code you have to write on that machine**), and drive
-> the product through the GUI with `docs/GUI_PROMPT_LADDER.md`.
+> **Linux stopped scheduling on 2026-09-16 at the user's instruction, and every cron job there
+> is deleted. This machine holds the chain.** It is the only one that can close what is left,
+> because almost all of it needs CATIA, a GUI, or a test run. The board stood at 21/34 phases ·
+> 89.2% when the chain moved. Three jobs, in order: verify what Linux wrote, **finish THE QUEUE**
+> (sections A–D are measurements, **section E is code you have to write on that machine**), and
+> drive the product through the GUI with `docs/GUI_PROMPT_LADDER.md`.
+>
+> **Five standing rules, the user's, 2026-09-16 11:07.** (1) *Schedule the next turn yourself,
+> every turn* — one `CronCreate`, `recurring: false`, at least 2 h 30 min out; run `CronList`
+> first and delete any earlier continuation so exactly one exists. A turn that ends without
+> scheduling the next one stops the project. (2) *Do not open a new conversation per turn* — the
+> job fires into the session that created it, and that session's loaded context is the whole
+> point. (3) *Keep coding until the master plan is finished*; you are not only a gate. (4) *At
+> least seven tasks a turn*, each committed as it closes with its status line and
+> `plan_progress --write` in the same commit, so a turn cut off loses only the task in flight —
+> and `git add` by path, never `-A`. (5) *Use CATIA and the GUI only where the claim needs them*;
+> a seat prompt is four to seven minutes and `pytest` is not. **Unlike Linux, this machine may
+> and must run `pytest`, `ruff` and `mypy`.**
+>
+> **Your brief is the top of [docs/WINDOWS_VERIFICATION.md](docs/WINDOWS_VERIFICATION.md)** and
+> the *Now* block of [KRYOVA_BUILD_PLAN.md](KRYOVA_BUILD_PLAN.md), which names the next targets
+> and when the continuation fires. Read both by line range; neither big file is ever opened
+> whole.
 
 0. **Start from THE QUEUE at the top of [docs/WINDOWS_VERIFICATION.md](docs/WINDOWS_VERIFICATION.md)** —
    a checkbox list of every item a Linux session was stopped on by missing hardware, grouped by
@@ -639,6 +655,17 @@ to *materialise* the id before you read it.
 **Two concurrent full-suite runs drop each other's tables.** The `kryova_test` schema is created
 and dropped per run. Run the suite once at a time.
 
+**And do not edit `app/` while a full run is going, even though nothing forbids it.** Editing is
+not a second `pytest` and feels free; it is not, because a ten-minute run imports modules as it
+reaches them, so a file changed at minute four is measured in its new state by everything
+collected after it and its old state by everything before. Worse, anything fingerprinting source
+— `verify.recorded`, the job cache's `source_identity` — is then comparing a hash of a tree that
+no longer exists. Seen 2026-09-17: the first Windows run came back **48 failed**, and
+`test_simulation_cache` and two others were in it purely because `app/solve/oracle.py` changed
+mid-run; a quiet re-run cleared them and the real number was 10. That is the same class as the
+poisoned-backup trap above — a measurement taken on a tree that moved. **Start the run, then read
+code, drive the GUI or write notes until it finishes.**
+
 **And it is not only *full* runs — it is any second `pytest` that touches the database.** The
 teardown drops the schema whatever selected it, so a one-file run started "just to check
 something" while a full run is going kills the full run from underneath. Measured 2026-09-11:
@@ -825,6 +852,24 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    recovers cleanly from three other refusals in the same transcript — and it had no way back
    from two independent confirmations. When triaging a ladder failure, do not stop at the first
    defect: ask what *confirmed* it.
+13. **A test written and never executed fails for one of four reasons, and three of them are the
+   test.** 143 mission tests and roughly forty others were written on Linux under the
+   no-pytest rule and first ran here on 2026-09-17. **Every mission test passed unchanged** —
+   their numbers had been measured against the real kernel before being asserted, which is why.
+   Of the rest, the split is worth knowing before you start triaging: *a real product defect*
+   (three of them, and none findable by reading — a tool offered to every MCP client that could
+   only be refused, a public page calling a buildable rung pending, an omission note the outer
+   fence truncated away); *a claim about the platform* (`--user` on a docker line, a `#!` fake
+   solver, `os.getgid`); *a literal that was a measurement* (a Linux compliance ratio written as
+   a theorem, a ladder count, a tolerance whose edge a chosen size lands on by one ulp); and *an
+   assertion that could never have passed anywhere* (`np.bool_(True) is True` is False; a
+   "same file uploaded again" test that called a non-deterministic writer twice). **Read the
+   failure before touching either side** — the second and third kinds look identical to a
+   regression, and the fourth looks like a broken feature.
+14. **`str()` on a result object is often a summary, not its content.** `UserTurnBlock` renders
+   as `<quoted attachment block: 2000 attachment(s), 11994 chars>` and holds the real text in
+   `_block`. Perfectly reasonable, and it cost ten minutes of believing a probe had produced a
+   58-character block. Check `dir()` before concluding a builder returned nothing.
 
 ## Subagents — never more than one at a time
 
@@ -1164,6 +1209,16 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
 17. **Every declared operation must be in `HANDLERS`, `LOCALLY_SERVED` or `refusals.REASONS`**, and
    a reason may only name a served tool (`tests/test_kernel_refusals.py`). When you implement
    one, delete its reason in the same change, or the partition test fails.
+18. **OCCT's STEP writer is not deterministic across two writes in one process.** It names the
+   product `'Open CASCADE STEP translator 7.8 N'` with **N incrementing per process**, so
+   exporting the same shape twice gives two files that differ on two lines and hash
+   differently. Measured 2026-09-17. Nothing downstream is wrong — the geometry is identical —
+   but any test or cache that expects "the same part exported again is the same bytes" is
+   expecting something this writer does not offer, and `tests/test_geometry.py`'s display-cache
+   test was built on exactly that and could never have passed. **Content-addressed identity for
+   an exported STEP has to come from one export reused, never from two exports compared.**
+   Contrast `app/render/`, where byte-identical output *is* guaranteed and is defended at every
+   cheap place to lose it — that is a property somebody built, not one OCCT hands you.
 
 ## Sheet metal reaches geometry (`app/sheetmetal/fold.py`, `app/kernel/occt/sheetmetal.py`)
 
@@ -2040,9 +2095,20 @@ earlier and never removed from here. That is worse than an empty section: a stal
 you to re-fix something that works, and it teaches you to skim the ones that are real. **Verify an
 entry before acting on it, and delete it the moment it stops being true.**
 
-**Five that only bite on Windows** — the first three measured 2026-09-09, the last two
-2026-09-10. Each was invisible on Linux by construction, which is the pattern worth carrying: a
-difference between the two machines hides in whatever neither one has to state out loud.
+**Six that only bite on Windows** — the first three measured 2026-09-09, then two on
+2026-09-10 and one on 2026-09-17. Each was invisible on Linux by construction, which is the
+pattern worth carrying: a difference between the two machines hides in whatever neither one has
+to state out loud.
+
+- **`os.getuid`, `os.getgid`, `os.killpg` and `signal.SIGKILL` do not exist on Windows at all,
+  and `hasattr` does not narrow a module attribute for mypy.** So `if hasattr(os, "getuid"):
+  os.getuid()` is correct at runtime and a type error here, in code that never runs. It was in
+  three places (`solve/openfoam/run.py`, `dynamics/chrono/run.py`, `verify/corpora.py`) and all
+  three now go through `getattr(os, "getuid", None)`. The consequence that is *not* a typing
+  detail and is worth knowing: **a container Kryova starts on Windows runs as its own user**, so
+  it can write files the server may not be able to delete — THE QUEUE F1 records that for
+  OpenFOAM and it is the same for Chrono. Write a test that asserts `--user` conditionally, or
+  it claims a POSIX fact about the machine the product ships on.
 
 - **Never mutate a source file with PowerShell's `Set-Content` when you are about to measure the
   result.** `Set-Content -Encoding utf8` writes a **BOM** on PowerShell 5.1, and `-NoNewline`

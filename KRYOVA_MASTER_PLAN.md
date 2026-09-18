@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 16/24 | 123/133 = 92% | 139/151 eng-months = 92% |
+| Engineering — E1–E23 | 16/24 | 124/133 = 93% | 140/151 eng-months = 93% |
 | Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 22/34 | 175/195 = 90% | 170/189 eng-months = 90% |
+| **Programme** | 22/34 | 176/195 = 90% | 171/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -3634,6 +3634,35 @@ here"* has an answer in six months — from the artefact.
 
 2. **Export**: STEP AP242 (the one that carries PMI), IGES, JT, 3MF/STL, DXF flat patterns —
    mostly native OCCT.
+   > DONE (2026-09-18) — **run on the seat, both directions, and it found a defect in the
+   > refusal rather than in the export.** Every format the bridge declares was written from a
+   > live V5-R33 document and the bytes checked:
+   >
+   > | from | formats written |
+   > |---|---|
+   > | `PartDocument` | `stp` 8,966 B (`ISO-10303-21`, CATIA V5 STEP Exchange, CAx-IF Rec.Pracs.) · `igs` 12,393 B · `stl` 3,244 B (ASCII `solid CATIA STL`) · `3dxml` 6,057 B (a zip) · **`dxf` REFUSED** |
+   > | `DrawingDocument` | `dxf` 75,363 B (`AC1027`, AutoCAD 2013) · `dwg` 12,357 B · **`stp` REFUSED** |
+   >
+   > **The defect: the bridge blamed the licence for both refusals, and this seat holds the
+   > licence.** `ExportData` answers the same `La méthode ExportData a échoué` whether a
+   > licence is missing or the document is the wrong kind, and `_FORMAT_LICENCE` turned that
+   > into *"This needs the DXF/DWG (D2/DW1) licence on this workstation"* — while the same seat
+   > wrote 75 kB of valid DXF from a drawing seconds later. That is the most expensive wrong
+   > answer available: it sends an engineer to a licence server for a licence they already
+   > hold, and never mentions the one thing that works, which is to draw the part first.
+   > `wrong_kind_of_document` now refuses first, by the cause, and the licence message is
+   > narrowed to the failures that are actually about a licence.
+   > **It refuses only the two directions measured** and passes an unclassifiable document
+   > through to CATIA, because over-refusal is the failure mode `app/catia/` warns about — the
+   > agent's recovery from a refusal is to try something else, which becomes a wrongly built
+   > part. Verified by breaking it: disabling the drawing-format branch fails six named tests.
+   > **Still open and belonging elsewhere**: CATIA FTA annotations are THE QUEUE **E7**, and
+   > the kernel's own STEP-tolerance units limit is the landmine in CLAUDE.md, not this.
+   > Tested by: `tests/test_catia_export_formats.py` (46), `tests/test_manufacture_export.py`.
+   > Code: `scripts/catia_bridge/com/infrastructure.py`, `app/manufacture/dxf.py`,
+   > `app/manufacture/export.py`.
+
+   <!-- superseded 2026-09-18 -->
    > PARTIAL (2026-09-06) — DXF and STEP export tested through OCCT. **Open: STEP/DXF export from
    > a live CATIA seat.** Tested by: `tests/test_manufacture_export.py`. Code:
    > `app/manufacture/dxf.py`, `app/manufacture/export.py`.

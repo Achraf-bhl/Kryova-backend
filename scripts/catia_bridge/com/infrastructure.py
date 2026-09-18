@@ -79,6 +79,62 @@ _FORMAT_LICENCE = {
     "pdf3d": "3D PDF (built in on R21 and later)",
 }
 
+#: The two formats that are **drawings**, not geometry. Measured on a V5-R33 seat on
+#: 2026-09-18, in both directions, which is the only reason this table exists:
+#:
+#:     PartDocument    -> stp 8,966 B | igs 12,393 B | stl 3,244 B | 3dxml 6,057 B | dxf REFUSED
+#:     DrawingDocument -> dxf 75,363 B (AC1027) | dwg 12,357 B     | stp REFUSED
+#:
+#: **The refusal below used to blame the licence, and that was wrong in the most expensive
+#: direction.** `ExportData` answers the same `La methode ExportData a echoue` whether a
+#: licence is missing or the document is simply the wrong kind, and `_FORMAT_LICENCE` turned
+#: that into "This needs the DXF/DWG (D2/DW1) licence on this workstation" — sending an
+#: engineer to the licence server for a licence this seat demonstrably **has**, since the
+#: same seat wrote 75 kB of DXF from a drawing seconds later. The cause was that a 3D part
+#: has no 2D view to write.
+_DRAWING_FORMATS = frozenset({"dxf", "dwg"})
+
+
+def _document_kind(document: Any) -> str:  # pragma: no cover - Windows only
+    """`drawing`, `product`, `part`, or `unknown` — by what the document answers.
+
+    Asked of the object rather than parsed out of its name, because a name is the
+    engineer's and translates while these members do not.
+    """
+    for member, kind in (("Sheets", "drawing"), ("Product", "product"), ("Part", "part")):
+        try:
+            if getattr(document, member) is not None:
+                return kind
+        except Exception:  # noqa: BLE001 - a document simply lacks the member
+            continue
+    return "unknown"
+
+
+def wrong_kind_of_document(format: str, kind: str) -> str | None:  # noqa: A002
+    """Why this document cannot be written as this format, or None to let CATIA answer.
+
+    **Refuses only the two directions that were measured**, and deliberately not more.
+    An `unknown` kind is never refused: over-refusal is the failure mode `app/catia/`
+    warns about, and a document this cannot classify is one CATIA may well export fine.
+    """
+    if kind == "unknown":
+        return None
+    if format in _DRAWING_FORMATS and kind != "drawing":
+        return (
+            f"{format.upper()} is a drawing format and this document is a {kind}, which has "
+            f"no 2D views to write. This is not a licence problem: make a drawing of the "
+            f"{kind} first, then export that. (CATIA answers the same 'ExportData failed' "
+            f"either way, which is why this says which it is.)"
+        )
+    if format not in _DRAWING_FORMATS and kind == "drawing":
+        return (
+            f"{format.upper()} is a geometry format and this document is a drawing, which "
+            f"holds views rather than solids. Export the part or product it was drawn from. "
+            f"Drawings write {', '.join(sorted(_DRAWING_FORMATS))}."
+        )
+    return None
+
+
 #: What each import mode asks CATIA to keep. `reference` links to the file
 #: rather than copying it in, so the part follows the source when it changes.
 _IMPORT_MODES = {"solid": 1, "surface": 2, "wireframe": 3, "reference": 0}
@@ -228,6 +284,12 @@ class InfrastructureMixin:
                 f"{format!r} is not a format this can write. Use one of: "
                 f"{', '.join(sorted(_FORMAT_TOKENS))}."
             )
+
+        # Before the translator, not after: `ExportData` cannot tell these apart and the
+        # licence message below is wrong for this case. Measured 2026-09-18.
+        mismatch = wrong_kind_of_document(format, _document_kind(document))
+        if mismatch is not None:
+            raise CatiaOperationError(mismatch)
 
         _apply_export_settings(self._app, format, step_schema, tolerance_mm, binary)
         path = self.workdir / f"export-{uuid.uuid4().hex[:8]}{_FORMAT_SUFFIX[format]}"

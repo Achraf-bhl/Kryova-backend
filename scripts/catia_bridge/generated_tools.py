@@ -422,9 +422,12 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
                     "description": "Which analysis to run.",
                 },
                 "direction": {
-                    "type": "string",
-                    "enum": ["XY", "YZ", "ZX"],
-                    "description": "Pulling direction, for a draft analysis. One of: XY, YZ, ZX.",
+                    "type": ["array", "string"],
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {"type": "number", "minimum": -1000000.0, "maximum": 1000000.0},
+                    "nonZero": True,
+                    "description": "Mould opening direction, for a draft analysis. Default [0, 0, 1]. A direction vector such as [0, 0, 1] or [0, 0, -1] — the same one catia_draft takes — or a plane name: XY, YZ, ZX, -XY, -YZ, -ZX. The vector's length is not used.",
                 },
                 "minimum_mm": {
                     "type": "string",

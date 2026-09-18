@@ -1100,15 +1100,41 @@ master plan's status line in the same commit.
       properly rather than adjusting. Written on Linux, executed nowhere until here. Owner:
       E17 (manufacturing output).
 
-- [ ] **E10 — A draft analysis can only be asked about the three positive axes.** Recorded
-      2026-09-17 while closing E8. `catia_analysis_part`'s `direction` is an origin plane, so a
-      pull along **−Z**, or along an arbitrary vector, is a question the analysis has no way to
-      be asked — and a mould pulled the other way is an ordinary thing to want. `_pull_plane`
-      refuses those by name rather than guessing, which is the honest stopgap and not the
-      answer. Widening it means changing the operation schema **the CATIA daemon also reads**,
-      so it needs the seat: decide whether `direction` becomes a vector on both backends, or
-      gains the three negative planes as names. CLAUDE.md's testing item 9 applies — close it on
-      both backends in the same commit and mirror the test file. Owner: E13 task 1.
+- [x] **E10 — A draft analysis can only be asked about the three positive axes.** **CLOSED
+      2026-09-18, and the choice this row offered was the wrong pair.** It asked whether
+      `direction` should become a vector or gain three more names. It is the vector — and the
+      reason is a defect the row did not name: **`catia_draft`, the operation that *creates* the
+      taper, has always taken `pulling_direction` as a vector**, so the product carried two
+      vocabularies for one physical quantity and an agent could draft along `[0, 0, -1]` and
+      then be unable to ask about what it had just built. A fourth name would have entrenched
+      that.
+
+      `direction` is now that same vector (new `vocab.pull_direction`), with the six plane names
+      — `XY`, `YZ`, `ZX` and their minus forms — declared **beside** it as a union rather than
+      kept as a quiet accept-list. **That distinction is the finding.**
+      `app/catia/validation.py` checks arguments against the operation's document *before* any
+      backend sees them, so names accepted only in the handler are unreachable code: the first
+      draft did exactly that, every test passed because they call the runner directly, and
+      `"XY"` through the product answered `direction must be array, got str`. CLAUDE.md's
+      testing item 8 in miniature, caught before shipping.
+      The schema carries **no `enum`** on purpose — `validate` applies one to whatever it is
+      handed, so listing the names would have refused every vector as "not one of: XY, YZ, …",
+      the union's other arm rejected by its own constraint.
+
+      **Two things measured that corrected the work in progress.** Flipping the pull changes
+      *nothing* in the report: `draft.py` reports `min(|draft|)` — the sign says which half of
+      the tool takes a face, not how much draft it has — and `find_undercuts` already tests both
+      halves, so a straight-pull tool is symmetric and the report says so. The half of E10 that
+      moves numbers is the **arbitrary** direction: one drafted block reads 5° along +Z and
+      3.533° along [0, 1, 1]. Both are pinned, the undercut half non-vacuously against a part
+      with two real undercuts.
+
+      **No CATIA half was owed after all**, which is why this needed no seat in the end:
+      `scripts/catia_bridge/com/inspection.py` refuses every kind but `validity`, because
+      CATIA's draft analysis is a screen overlay with no automation API, so `direction` has
+      never reached a seat. A test states that so the day it changes the claim is in front of
+      whoever changes it. Tested by: `tests/test_kernel_draft_directions.py` (28),
+      `tests/test_kernel_routes.py` (+4). Owner: E13 task 1, now DONE.
 
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 

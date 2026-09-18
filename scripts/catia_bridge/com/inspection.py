@@ -145,7 +145,7 @@ class InspectionMixin:
         self: ComContext,
         *,
         kind: str,
-        direction: str = "",
+        direction: str | list[float] = "",
         minimum_mm: str = "",
         faces: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -156,6 +156,14 @@ class InspectionMixin:
         model on screen and expose no numbers — so asking for them here returns
         an honest refusal that names the route that does work, rather than a
         plausible number this bridge did not actually measure.
+
+        **`direction` is never read on this backend**, and its type widened to a
+        union on 2026-09-17 (THE QUEUE E10) only so the annotation does not lie
+        about what the schema now sends. The `draft` kind is refused on the line
+        below, before anything looks at it. The day CATIA's draft analysis grows
+        an automation API, this parameter arrives as a three-component vector or
+        as one of `XY`, `YZ`, `ZX`, `-XY`, `-YZ`, `-ZX` — the open kernel's
+        `_pull_direction` is the reference implementation.
         """
         if kind != "validity":
             raise CatiaOperationError(

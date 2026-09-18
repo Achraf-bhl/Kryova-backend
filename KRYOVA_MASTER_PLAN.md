@@ -65,7 +65,7 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-17** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-18** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
@@ -2969,6 +2969,44 @@ answerable meaning.
 1. **Design rules as assertions** — minimum wall by process, draft angles, bolt torque and preload,
    thread engagement, weld sizing, machining access — attached automatically from feature type +
    declared process, running in the E5 engine. **DFM becomes a red build.**
+   > DONE (2026-09-18) — **THE QUEUE E10 closed, and the fix was not the one the entry below
+   > proposed.** That entry left the analysis unable to be asked about a negative axis or an
+   > arbitrary vector, and recorded the choice as "a vector on both backends, or the three
+   > negative planes as names". It is the first, and the reason is a defect neither option
+   > named: **`catia_draft` — the operation that *creates* the taper — has always taken
+   > `pulling_direction` as a vector**, so the product carried two vocabularies for one physical
+   > quantity. An agent could draft along `[0, 0, -1]` and then be unable to ask about what it
+   > had just built. A fourth name would have entrenched that.
+   >
+   > So `direction` is now the same vector, declared through a new `vocab.pull_direction`, with
+   > the six plane names (`XY`, `YZ`, `ZX` and their minus forms) declared **beside** it as a
+   > union — not kept as a quiet accept-list. That distinction is the finding worth carrying:
+   > `app/catia/validation.py` checks arguments against the operation's document *before* any
+   > backend is reached, so names accepted only in the handler are unreachable code. The first
+   > draft did exactly that; every test passed, calling the runner directly, and `"XY"` through
+   > the product answered `direction must be array, got str`. `TestBothSpellingsSurviveTheValidator`
+   > exists so that stays caught. The schema deliberately carries **no `enum`**, because
+   > `validate` applies one to whatever it is handed and six names would have refused every
+   > vector as "not one of: XY, YZ, …".
+   >
+   > `_pull_plane` is gone with the vocabulary it translated; `_pull_vector` replaces it and
+   > keeps the refusal that matters — a zero vector, which is what an arithmetic slip produces,
+   > answered as a 400 rather than as an `unmeasured` note. **Measured, and it corrected a draft
+   > of this work**: flipping the pull changes *nothing* in the report. `draft.py`'s convention
+   > is `asin(n · pull)` signed, where the sign says which half of the tool takes the face, so
+   > `minimum_draft_deg` is `min(|draft|)` and invariant; and `find_undercuts` already tests both
+   > halves. The half of E10 that changes numbers is the **arbitrary** direction — the same
+   > drafted block reads 5° pulled along +Z and 3.533° along [0, 1, 1]. Both facts are pinned,
+   > the second non-vacuously against a part with two real undercuts.
+   > **No CATIA mirror was owed**: `scripts/catia_bridge/com/inspection.py` refuses every kind
+   > but `validity`, because CATIA's draft analysis is a screen overlay with no automation API,
+   > so `direction` has never reached a seat. A test states that, so the day it changes the claim
+   > is in front of whoever changes it.
+   > Verified by breaking it twice: removing the zero-vector guard and flipping `-XY`'s sign each
+   > fail named tests, restores checked byte-for-byte.
+   > Tested by: `tests/test_kernel_draft_directions.py` (28), `tests/test_kernel_routes.py` (+4).
+
+   <!-- superseded 2026-09-18 -->
    > DONE (2026-09-17), superseding DONE (2026-09-15) — **the route ran the scans and threw every
    > result away, and nothing said so.** Everything the status below describes is built and
    > correct; what was not was the one line joining it to the kernel.

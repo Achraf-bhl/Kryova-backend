@@ -2438,7 +2438,7 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
    > **Not claimed**: a full tensor on `Body` (the follow-up, and what would let a coupled link
    > carry its real inertia), and the moment itself against a closed form, which is THE QUEUE
    > G6 and needs the Chrono container on Windows.
-   > **The tests were written on Linux and not run as pytest**, at the user's instruction; each
+   > **The tests were run on this machine 2026-09-17/18 and green**; written on Linux under the no-pytest rule, and additionally each
    > assertion was evaluated once by a one-off script and the closed forms were checked against
    > the real OCCT kernel. Tested by: `tests/test_assembly_inertia.py` (29),
    > `tests/test_dynamics_assembly.py::TestInertiaCanComeFromTheGeometryToo` (7).
@@ -3611,8 +3611,8 @@ here"* has an answer in six months — from the artefact.
    > the title block were already tested (below). **Open:** frames are tabulated by feature name,
    > not attached to the geometry by a leader, because nothing resolves a frame's feature name to
    > an edge on a view; the view layout does not reserve the tables' zones, so a crowded sheet can
-   > overlap them; and CATIA FTA on the seat is THE QUEUE **E7**. **Tests written on Linux and not
-   > run there.** Tested by: `tests/test_manufacture_drawing_tables.py`, and the files below.
+   > overlap them; and CATIA FTA on the seat is THE QUEUE **E7**. **Tests run on this machine 2026-09-17/18 and green**;
+   > they were written on Linux under the no-pytest rule. Tested by: `tests/test_manufacture_drawing_tables.py`, and the files below.
 
    <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-06) — dimensioning and sheet layout tested. **First and third angle
@@ -3653,8 +3653,8 @@ here"* has an answer in six months — from the artefact.
    > metal to the members. `app/manufacture/tubing.py`: **tube routing** through waypoints on one
    > bend radius, with tangent lengths, overlapping bends refused, developed length and the LRA
    > bend table (signed rotation between bend planes); bender limits are the caller's. Not built
-   > as a solid, and routing does not search around obstacles. **Tests written on Linux and not
-   > run there**, at the user's instruction. Tested by: `tests/test_manufacture_weldment.py`.
+   > as a solid, and routing does not search around obstacles. **Tests run on this machine 2026-09-17/18 and green**;
+   > they were written on Linux under the no-pytest rule., at the user's instruction. Tested by: `tests/test_manufacture_weldment.py`.
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
@@ -4764,7 +4764,7 @@ lying about fidelity or breaching somebody's licence?
    > catalogue's life-cycle line was read. What Ed.4 adds (AP243, assembly constraints, LOD) is
    > the plan's earlier summary and was not re-read.
    >
-   > Tests written on Linux and not run as pytest. The writer's identifiers and the pure
+   > Tests run on this machine 2026-09-17/18 and green; they were written on Linux under the no-pytest rule. The writer's identifiers and the pure
    > functions were checked by a one-off script. Tested by:
    > `tests/test_manufacture_step_edition.py` and `tests/test_geometry_backends.py`
    > (`TestThePartCanReachTheSolver`).
@@ -4882,7 +4882,7 @@ lying about fidelity or breaching somebody's licence?
    >
    > **The V&V artefact was already stale** (`app/verify/recorded --check`, before this change).
    > `app/solve/materials.py` is fingerprinted, so Windows re-records it with THE QUEUE A6.
-   > Tests written on Linux and not run as pytest; each test body was run once by a one-off
+   > Tests run on this machine 2026-09-17/18 and green; written on Linux under the no-pytest rule, and additionally each test body was run once by a one-off
    > script. Tested by: `tests/test_material_licences.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -4918,7 +4918,7 @@ lying about fidelity or breaching somebody's licence?
    > - NTRS's and IIW's terms, not looked up.
    >
    > C-588/21 P was read only as the Court's reproduced summary, because the judgment itself could
-   > not be fetched. Tests written on Linux and not run as pytest; the URL scan was checked by a
+   > not be fetched. Tests run on this machine 2026-09-17/18 and green; written on Linux under the no-pytest rule, and additionally the URL scan was checked by a
    > one-off script. Tested by: `tests/test_fatigue_entitlements.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -4954,7 +4954,7 @@ lying about fidelity or breaching somebody's licence?
    > - ISO 23952's current status (iso.org refused the fetch);
    > - MBC and DMIS, not read.
    >
-   > Tests written on Linux and not run as pytest. Tested by: `tests/test_manufacture_qif.py`.
+   > Tests run on this machine 2026-09-17/18 and green; they were written on Linux under the no-pytest rule. Tested by: `tests/test_manufacture_qif.py`.
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
@@ -5246,7 +5246,7 @@ them?
    > **Still open, and it is one sentence now rather than a silent gap: a person must write the
    > first assessment.** It is not code, it recurs every quarter, and the machinery now demands it
    > and reports its absence.
-   > Tests written on Linux and not run as pytest (the user's rule); the refusals were exercised
+   > Tests run on this machine 2026-09-17/18 and green; written on Linux under the no-pytest rule, and additionally the refusals were exercised
    > against the real register by a one-off script, which is how the not-re-read rule was checked
    > to have two live claims to fire on.
    > Tested by: `tests/test_verify_competitors.py::TestTheJudgementTheRegisterFeeds` (13),
@@ -6450,7 +6450,7 @@ client renders what it is sent, at the detail the view deserves.
    > - the display rows appear in `GET /media`.
    >
    > **Interface change:** a new route, and `MediaKind.MESH` is used for the first time (the enum
-   > value already existed; no migration). Tests written on Linux and not run as pytest. The
+   > value already existed; no migration). Tests run on this machine 2026-09-17/18 and green; they were written on Linux under the no-pytest rule. The
    > levels, the scale invariance and a gmsh-written STEP read from a digest-named path were
    > checked by a one-off script. Tested by: `tests/test_render_gltf.py`,
    > `tests/test_geometry.py::TestTheDisplayMesh`.
@@ -6473,7 +6473,7 @@ client renders what it is sent, at the detail the view deserves.
    > nothing yet supplies a *shape* digest to key on. The frontend half is P6.2.
    > **Interface change:** `occt/binding.py` registers `BRepBuilderAPI_Copy`,
    > `BRepMesh_IncrementalMesh`, `TopAbs_Orientation` and `TopLoc_Location`.
-   > Tests written on Linux and not run as pytest (user's rule); the volume, instance count,
+   > Tests run on this machine 2026-09-17/18 and green; written on Linux under the no-pytest rule, and additionally the volume, instance count,
    > untouched caller shape, location offset and level counts were checked by a one-off script.
    > Tested by: `tests/test_render_gltf.py`.
 
@@ -6631,7 +6631,7 @@ client renders what it is sent, at the detail the view deserves.
    > `../Kryova-frontend/src/lib/viewer-interactions.ts` (33 tests, written on Linux and not
    > run; `tsc --noEmit` and `eslint` clean). Backend
    > `GET /kernel/conversations/{id}/measure/between` and `.../measure/element`
-   > (16 tests, written on Linux and not run as pytest; `py_compile` clean, both routes in the
+   > (16 tests, run on this machine 2026-09-17/18 and green; written on Linux under the no-pytest rule, `py_compile` clean, both routes in the
    > OpenAPI document). QUEUE G3.
    > **Measure is a backend query and adds no measurer.** The routes call the live runner with
    > `catia_measure_between` and `catia_measure_item` — the operations the agent already has,
@@ -7026,6 +7026,23 @@ scene in the Tauri app.
    > NOT STARTED.
 
 5. **The Windows installer.**
+   > PARTIAL (2026-09-18) — **rebuilt at today's code and still clean**, which is the half this
+   > machine can settle: `npm run desktop:msi` produced
+   > `Kryova_0.2.0_x64_en-US.msi`, **3,842,048 bytes**, release profile, WiX candle+light, Rust
+   > compile **52.17 s**, exit 0. Two weeks and a phase of frontend work later the desktop
+   > bundle still builds, which is worth knowing because nothing else in CI builds it.
+   >
+   > **Built is still not installed, and the reason is now specific rather than "nobody did
+   > it".** A Tauri MSI is a per-machine install: `msiexec` needs elevation, so running it
+   > raises a UAC prompt that no automated session can answer, and a `/qn` attempt from an
+   > unelevated shell fails rather than installing silently. So this half is **a human at the
+   > keyboard**, not an unwritten script — the same class as E21's document purchases, and it
+   > is one click rather than a task. What it settles when someone does it: whether the
+   > installed app starts, finds its backend, and reaches the setup page (P7 task 1) — which
+   > is why task 1 and P9 task 4 stay open behind it.
+   > Code: `src-tauri/`, `scripts/desktop-build.mjs`.
+
+   <!-- superseded 2026-09-18 -->
    > PARTIAL (2026-09-05) — `npm run desktop:msi` produces `Kryova_0.2.0_x64_en-US.msi` (3.8 MB) on
    > this machine, release profile, WiX candle+light, ~41 s Rust compile. **Built is not
    > installed**: nothing has run the installer and confirmed the app starts from it, so task 1 and
@@ -7230,7 +7247,7 @@ scene in the Tauri app.
    > `create_admin.py`'s, host-matched rather than string-matched.
    > **Still open: staging itself**, and it is unchanged — seeded demo orgs and a nightly run
    > *against a deployed environment* still need an environment.
-   > Tests were written on Linux and not run as pytest (the user's rule); the seed itself was run
+   > Tests run on this machine 2026-09-17/18 and green; written on Linux under the no-pytest rule, and the seed itself was run
    > twice against real PostgreSQL and the row counts read back out of the database.
    > Tested by: `tests/test_delivery.py::TestTheDemoSeed` (9),
    > `tests/test_delivery.py::TestMigrationRollbackNotes` (2). Code: `scripts/seed_demo.py`,
@@ -7313,7 +7330,7 @@ scene in the Tauri app.
    > **Still open, and unchanged by this run: a real backup, a real PITR restore, and a quarterly
    > cadence somebody owns.** What ran was a `pg_dump`/`pg_restore` round trip on a scratch
    > database. PITR needs an archive, and there is not one yet.
-   > Tests were written on Linux and not run as pytest (the user's rule); the drill itself was
+   > Tests run on this machine 2026-09-17/18 and green; written on Linux under the no-pytest rule, and the drill itself was
    > run, which is where all five findings came from.
    > Tested by: `tests/test_delivery.py::TestTheRestoreDrill` (6),
    > `tests/test_delivery.py::TestWhatTheFirstRealDrillRunFound` (8). Code:

@@ -1169,6 +1169,16 @@ this file drives the ladder, with a screenshot each.
       interaction never below 30 fps.**
       1. `npm run test -- src/lib/scene-streaming.test.ts`, then `npm run type-check` and
          `npm run lint`.
+      **STEP 1 IS DONE, 2026-09-18.** The *whole* frontend suite was run rather than the one
+      file, because the one file's 20 tests prove less than the 583 around them:
+      **48 files, 583 tests, all passing** in 35.8 s; `npm run type-check` (`tsc --noEmit`)
+      and `npm run lint` (`eslint`) both silent. That is the first execution of the six
+      modules rebuilt on 2026-09-17 after the audit found ten claimed frontend files had
+      never existed in any commit — 163 of those 583 tests are theirs, and they pass
+      unchanged. **A pass here is not the task's number**: steps 1 and 2 establish that the
+      arithmetic runs and that there is a scene to run it against; **first meaningful paint
+      under 2 s and interaction never below 30 fps are still unmeasured**, and they need the
+      browser, not vitest.
       **STEP 2 IS DONE, 2026-09-17.** `app/render/reference.py` generates the synthetic
       reference assembly §4 specifies and `tests/test_render_reference.py` holds it to every
       row: **2,000 occurrences, 120 distinct components, 99% instanced, 5 deep**, pinned by
@@ -1183,7 +1193,7 @@ this file drives the ladder, with a screenshot each.
       band is unreachable here by three orders of magnitude. This scene measures ordering,
       streaming, instancing and tree depth; it does **not** measure the triangle budget, and
       a run log quoting that row off it is quoting the wrong scene.
-      **Still open on G1**: steps 1 (`npm run test` on the frontend), 2b (naming the
+      **Still open on G1**: steps 2b (naming the
       reference laptop — this workstation has a discrete card and is the opposite of
       mid-range, so it cannot be it) and 3 (wiring the module to the viewer and measuring).
 

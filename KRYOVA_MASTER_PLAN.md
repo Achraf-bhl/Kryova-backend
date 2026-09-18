@@ -3040,8 +3040,8 @@ answerable meaning.
    > recorded approximated); tightening torque stays a derivation in `fasteners.tightening_torque`,
    > not a rule, because no limit exists to compare it to. **Plan change: weld sizing moves to
    > E17 task 3**, which owns the weldment model it needs, and the `welded` set says so on every
-   > report. `engine.py` now has its consumer. **Tests written on Linux and not run there**, at
-   > the user's instruction; they run on Windows. Tested by: `tests/test_rules_processes.py`,
+   > report. `engine.py` now has its consumer. **Tests run on this machine 2026-09-17/18 and
+   > green**; they were written on Linux under the no-pytest rule and had never executed. Tested by: `tests/test_rules_processes.py`,
    > `tests/test_rules_joints.py`, `tests/test_kernel_routes.py`
    > (`TestCheckingDesignRulesAgainstTheLivePart`).
 
@@ -3063,7 +3063,7 @@ answerable meaning.
    > rejection's reason in numbers. **No deviation ships.** `gdt.py` now has consumers
    > (`app/manufacture/inspection.py`, and the drawing's tolerance table). **Open:** ISO 286's
    > tables are not transcribed (a document), so zones are the caller's; and CATIA FTA is THE
-   > QUEUE **E7**. **Tests written on Linux and not run there.** Tested by:
+   > QUEUE **E7**. **Tests run on this machine 2026-09-17/18 and green** (they were written on Linux under the no-pytest rule and had never executed). Tested by:
    > `tests/test_rules_fits.py`, and the files below.
 
    <!-- superseded 2026-09-15 -->
@@ -3080,7 +3080,7 @@ answerable meaning.
    > recorded `APPROXIMATED`. `CostTools.cost` is what E5's `CostBudget` was waiting on, so a cost
    > budget now passes or fails where rates are given, is `UNMEASURED` where one is missing or the
    > currency differs (nothing converts), and **its value is now recorded approximated** (an
-   > interface change in `machine_checks`). **Tests written on Linux and not run there.** Tested
+   > interface change in `machine_checks`). **Tests run on this machine 2026-09-17/18 and green** (they were written on Linux under the no-pytest rule and had never executed). Tested
    > by: `tests/test_rules_cost.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -3094,7 +3094,7 @@ answerable meaning.
    > (pocket, groove, slot, rib, shell only), undercuts, X/Y/Z travel. Printed: wall, open edges,
    > build volume, with overhang named as not measured yet. Sheet carries no solid rules and names
    > `app/sheetmetal/` as where its checks live; welded checks the parent wall and names E17 task
-   > 3. **Tests written on Linux and not run there.** Tested by: `tests/test_rules_processes.py`.
+   > 3. **Tests run on this machine 2026-09-17/18 and green** (they were written on Linux under the no-pytest rule and had never executed). Tested by: `tests/test_rules_processes.py`.
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
@@ -3646,7 +3646,7 @@ here"* has an answer in six months — from the artefact.
    > from every feature tool; the **cutter** for a pocket as the largest in the caller's list no
    > wider than twice the measured minimum concave radius; **fixturing** by 3-2-1 over the datum
    > scheme; a zig-zag drop-cutter **finishing raster**. Not produced: feeds and speeds, setups by
-   > approach direction, G-code. **Tests written on Linux and not run there.** Tested by:
+   > approach direction, G-code. **Tests run on this machine 2026-09-17/18 and green** (they were written on Linux under the no-pytest rule and had never executed). Tested by:
    > `tests/test_manufacture_cam.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -3661,8 +3661,7 @@ here"* has an answer in six months — from the artefact.
    > **The count is the caller's sampling strategy with its source**; what is fixed is geometry
    > (3 points determine a plane, 5 a cylinder), so a form tolerance at that count is refused as
    > measuring zero on any part. Features with no geometry are unresolved, with no strategy
-   > unset, and either makes the plan incomplete. No DMIS is written. **Tests written on Linux
-   > and not run there.** Tested by: `tests/test_manufacture_inspection.py`.
+   > unset, and either makes the plan incomplete. No DMIS is written. **Tests run on this machine 2026-09-17/18 and green** (they were written on Linux under the no-pytest rule and had never executed). Tested by: `tests/test_manufacture_inspection.py`.
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
@@ -3682,7 +3681,7 @@ here"* has an answer in six months — from the artefact.
    > no field that marks it finished and a `not_written` list of what the manufacturer writes.
    > Digital delivery of instructions for use goes through `instructions.unmet` with the draft's
    > own model (`delivery_gaps`). Annex III's contents are not quoted in the codebase, so they
-   > are not paraphrased here. **Tests written on Linux and not run there.** Tested by:
+   > are not paraphrased here. **Tests run on this machine 2026-09-17/18 and green** (they were written on Linux under the no-pytest rule and had never executed). Tested by:
    > `tests/test_manufacture_documentation.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -3882,8 +3881,9 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
    > and assembling it upside down fails that *and* the clash check, because the 35 mm
    > shaft will not pass the 27 mm cover bore. Four guards were broken and each named claim
    > was watched to fail. **Ladder now 5/9.** **Tests written on Linux on 2026-09-16 and
-   > not run there**, at the user's instruction; every number in them was measured first by
-   > building the real gearbox through the real kernel. Tested by: `tests/test_mission_m4.py`
+   > run on this machine 2026-09-17/18 and green** — written on Linux under the no-pytest
+   > rule and passing unchanged here, which is what every number in them being measured
+   > first, by building the real gearbox through the real kernel, bought. Tested by: `tests/test_mission_m4.py`
    > (38), `tests/test_design_missions.py`, `tests/test_mission_m2.py::TestTheLadderItself`.
 
    <!-- superseded 2026-09-16 -->
@@ -3938,9 +3938,9 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
    > of which **frame stiffness is the one a buyer would ask about first**: a C opens under
    > load and no load case has been run, so "the force path is continuous" is a geometry
    > claim and this rung does not let it be read as a stiffness one. **Ladder now 6/9.**
-   > **Tests written on Linux on 2026-09-16 and not run there**, at the user's instruction;
-   > every number in them was measured first by building the real press through the real
-   > kernel. Tested by: `tests/test_mission_m5.py` (54), `tests/test_design_missions.py`,
+   > **Tests written on Linux on 2026-09-16, run on this machine 2026-09-17/18 and green** —
+   > passing unchanged, which is what every number in them being measured first, by building
+   > the real press through the real kernel, bought. Tested by: `tests/test_mission_m5.py` (54), `tests/test_design_missions.py`,
    > `tests/test_mission_m2.py::TestTheLadderItself`.
 
    <!-- superseded 2026-09-16 -->
@@ -4023,9 +4023,10 @@ and guarding at once. If M5 does not work, the phases before it were decoration.
    > **stiffness is the sharpest**: the `hard` column promises "kinematics, dynamic loads,
    > stiffness under motion" and two of the three are here — the arm is rigid, so there is
    > no deflection at the tool, which is what a repeatability figure is about (E6).
-   > **Ladder now 7/9.** **Tests written on Linux on 2026-09-16 and not run there**, at
-   > the user's instruction; every number was measured first by building the real arm
-   > through the real kernel and running the real dynamics. Tested by:
+   > **Ladder now 7/9.** **Tests written on Linux on 2026-09-16, run on this machine
+   > 2026-09-17/18 and green** — passing unchanged, which is what every number being measured
+   > first, by building the real arm through the real kernel and running the real dynamics,
+   > bought. Tested by:
    > `tests/test_mission_m7.py` (51), `tests/test_design_missions.py`,
    > `tests/test_mission_m2.py::TestTheLadderItself`.
 

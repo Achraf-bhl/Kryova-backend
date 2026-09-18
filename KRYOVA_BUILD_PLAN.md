@@ -15,48 +15,57 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-17 15:00 — E18 complete, the ladder at 8/9, and the suite green.**
+> **Continuation, 2026-09-18 03:00 — E1, E10, E4 and E17.2 settled; the board is 90.0%.**
 > **This machine holds the chain.** Linux stopped scheduling on 2026-09-16; Windows runs
 > `pytest`, `ruff` and `mypy` and schedules its own next turn. The user's instruction of
-> 2026-09-17 is to **keep going until the master plan is 100%**, not to stop at seven tasks.
-> **Next continuation fires: 2026-09-17 17:28.**
-> **A one-shot cron fires only while the REPL is idle**, so two jobs (04:27 and 11:51) never
-> fired at all — the session was working through both, and a passed date never comes round
-> again. **Run `CronList` first on every wake** and reschedule if the pending time has gone by.
-> That is the one failure mode that ends this chain silently.
-> **Board: 22/34 phases · 175.0/195 tasks = 89.7% · 170.5/189 eng-months = 90.2%.** Suite
-> **10,499 passed / 38 skipped / 1 xpassed / 0 failed**; `ruff`, `mypy` and
-> `app.verify.recorded --check` all clean.
-> **Closed across this session, each committed as it closed:** THE QUEUE **E3** (`c055558`),
-> four new-test defects (`16592f0`), mypy clean with four real findings (`5732fa7`), the
-> handbook gallery (`22e246d`), the quoted-turn budget (`a5add88`), two Chrono platform tests
-> (`dfab8f4`), the V&V re-record (`1ed220e`), the restore drill and secret scan (`d91b392`),
-> two self-caused regressions (`cf87651`), THE QUEUE **E8** and **E9** (`c1e87f1`),
-> **E18.8 — M8** (`42ff6b4`), THE QUEUE **E6**'s API measurement (`36fcf99`), and the ladder
-> literals (`49df886`).
-> **The three findings that mattered most.** (1) **Every draft and undercut rule on every part
-> came back UNMEASURED** — `catia_analysis_part` declares `direction` as an origin *plane* and
-> the rules route sends a *vector*, which its own 422 teaches; the refusal became "the draft
-> scan failed, so its rules are unmeasured", beside a note a reader had no cause to doubt. A
-> part with a real undercut was reported unchecked rather than bad. (2) **The conduction
-> oracle earned its keep on its first run**: CalculiX's `RFL` excludes the `*CFLUX` applied at
-> the same node, so raw it read −21.5 W against −22.5 W — 4.4% wrong on any model with a
-> source or a flux. (3) **M8's transition cycles carry 2.857× the widest amplitude any mode
-> contains**, and summing per-mode counts leaves them out entirely.
+> 2026-09-17 stands: **keep going until the master plan is 100%**, not stop at seven tasks.
+> **Next continuation fires: 2026-09-18 05:50.**
+> **A one-shot cron fires only while the REPL is idle**, so a job whose time passes mid-turn
+> never fires and its date never comes round again. **Run `CronList` first on every wake** and
+> reschedule if the pending time has gone by. That is the one failure mode that ends this
+> chain silently, and it has bitten three times.
+> **Board: 22/34 phases · 175.5/195 tasks = 90.0% · 171.0/189 eng-months = 90.5%.** Suite
+> **10,613 passed / 38 skipped / 1 xpassed / 0 failed** in 10 min 56 s; `ruff`, `mypy`
+> (493 files) and `app.verify.recorded --check` all clean. Frontend **583 tests** across
+> 48 files, `tsc` and `eslint` silent.
+>
+> **Closed this turn, each committed as it closed:** THE QUEUE **E1** (`8e30cfe`), **E10**
+> (`3f6aa51`), the first stale-claim sweep and G1 step 1 (`5d1c8ca`), THE QUEUE **E4**'s
+> measurement (`df5e168`), the second sweep with the MSI rebuild (`83a0903`), and **E17.2**
+> on the seat (`5213028`).
+>
+> **The four findings worth carrying.** (1) `AddNewWall`/`AddNewFlange` **do not exist** — the
+> sheet-metal automation API has four classes and no creation method, so the missing CATIA
+> half of E17.3 was never merely unwritten. (2) **A schema is checked two storeys above the
+> backend**: E10's plane names had to be declared, not accepted in the handler, or they were
+> unreachable code behind passing tests. (3) **The CATScript batch route is worth ~2×**, not
+> the order of magnitude `batch.py` assumed, and its output is unrunnable because
+> `KryovaDispatch` exists nowhere. (4) **The bridge blamed a licence this seat holds** — one
+> `ExportData` error covers both a missing licence and a wrong-kind document.
+>
 > **Next targets, in order — take as many as the runway allows:**
-> (1) **THE QUEUE E6 / E9.5 — `DmuKinematicsEngine`**, which closes phase E9. The API is
-> written into THE QUEUE; what is still unmeasured is what `iJointType` and `iListElem` want
-> concretely and what `ioMotion` is filled with — one seat probe settles it.
-> (2) **THE QUEUE E2 — run gate G1**, whose blocker is gone: E7 task 7 has been DONE since
-> 2026-09-11 with 23 tests.
-> (3) **THE QUEUE E1** — sheet metal on the CATIA side, the biggest unwritten gap left.
-> (4) **THE QUEUE E10** — a draft analysis can only be asked about the three positive axes;
-> widening it touches the schema the CATIA daemon reads, so both backends in one commit.
-> (5) **E17 and E13's PARTIALs**, most of which need no seat. (6) **E15's two and P4's two.**
-> (7) **P6 and P7**, which need the GPU and browser this machine has and Linux did not.
-> **Not takeable by any machine, and they are not going to become so:** E21's five and E23's
-> two open items are document purchases, vendor licence forms and questions for counsel. They
-> are ~7 of the ~20 task-halves left. Marking them done would be false.
+> (1) **THE QUEUE E2 — run gate G1 through the GUI.** Its blocker has been gone since
+>     2026-09-11 and it is the oldest untaken item. One prompt per level, a screenshot every
+>     time, no moving up until the level passes. The model is `qwen3.5:9b`.
+> (2) **THE QUEUE E6 / E9.5 — `DmuKinematicsEngine`**, which closes phase E9. ⚠ Brute-forcing
+>     `AddJoint` **killed CATIA** on 2026-09-17; its flags are `((16392,1),(8204,3))`, a string
+>     and an array of doubles. Build assembly constraints and convert them instead.
+> (3) **THE QUEUE E5 — E15.4 crash recovery**: kill `CNEXT.exe` mid-plan and write the path
+>     that recovers.
+> (4) **E13.2 and E8.3's remainders** — both are documents (ISO 286's tables, EC3 rows), so
+>     check whether this machine has network before planning a turn around them.
+> (5) **P6's remaining measurement half** — first meaningful paint under 2 s and 30 fps on the
+>     2,000-part reference scene. Needs the browser, not vitest; step 2b needs a mid-range
+>     laptop this workstation is not.
+> (6) **P4.3/P4.6**, and **E17.1**'s leader-attachment residual.
+> (7) **P9.3** — blocked on Docker, which is **not installed on this machine**; QUEUE F1
+>     (OpenFOAM) is blocked the same way. Installing it is the user's call, not a task.
+>
+> **Two things a human must do, and they are not failures of this chain:** the MSI is built and
+> **installing it needs elevation** (a UAC prompt no automated session can answer), which is
+> what P7.1 and P9.4 wait behind; and E21's five and E23's two are document purchases, vendor
+> licence forms and questions for counsel — about seven of the ~19 task-halves left. Marking
+> any of them done would be false.
 
 > **Continuation, 2026-09-16 07:40 — six targets, and four of them were found by *running*
 > something rather than by reading it.**
@@ -450,6 +459,46 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-18 (early hours) — THE QUEUE E1, E10 and E4 settled, E17.2 closed on the seat, and
+  twenty-four stale "never run" claims corrected.** Board **22/34 phases · 175.5/195 tasks =
+  90.0% · 171.0/189 eng-months = 90.5%**.
+  **THE QUEUE E1** (`8e30cfe`): sheet metal over COM, and the headline is a measured refusal —
+  `AddNewWall` and `AddNewFlange` **do not exist**; `CATShfInterfaces` declares four classes and
+  no creation method. Four operations shipped, what COM cannot reach recorded as data, and two
+  traps found: the parameter names are **localised** (`Epaisseur`, `Rayon pli`, `Facteur perte
+  au pli`) and CATIA **computes** the K-factor, refusing a write while its DIN formula is active
+  — solved exactly as `K = (0.5 + 0.5·log10(2r/t))/2`, DIN 6935 with the **unrounded** constant,
+  so the printed 0.65 is off by 2.575e-4 at every ratio.
+  **THE QUEUE E10** (`3f6aa51`): a mould can be pulled any way now. The fix was not a fourth
+  plane name — `catia_draft` has always taken a *vector* for the identical quantity, so the
+  product carried two vocabularies and an agent could draft along `[0, 0, -1]` and be unable to
+  ask about what it built. **The finding**: the six plane names had to go in the *schema*, not
+  in the handler, because `validation.validate` runs two storeys above the backend — the first
+  draft passed every test and answered `direction must be array, got str` through the real
+  product. Measured on the way: flipping the pull changes *nothing* (the report is
+  `min(|draft|)` and undercuts already test both halves); the half that moves numbers is the
+  arbitrary direction, 5° along +Z against 3.533° along [0, 1, 1].
+  **THE QUEUE E4** (`df5e168`): the CATScript route is worth **~2×**, not an order of magnitude
+  — 200 points 1.022 s → 0.566 s (1.8×), 25 pads 1.826 s → 0.835 s (2.2×). The ratio *rises* on
+  real geometry, refuting the probe's own hypothesis: the saving tracks the **number** of COM
+  calls, not their weight. At 10⁵ that is 2.0 h against 0.9 h. And `as_catscript`'s output is
+  not merely un-run but **unrunnable** — every line calls a `KryovaDispatch` that exists
+  nowhere, and E4's instruction to reuse the bridge's Python mapping from inside CNEXT cannot
+  be followed. Left open with the numbers rather than built blind.
+  **E17.2** (`5213028`): export run from the seat, both directions, and the defect was in the
+  *refusal*. **This seat holds the DXF/DWG licence** and the bridge said it did not, because
+  `ExportData` answers the same error for a missing licence and a wrong-kind document. It now
+  refuses by the cause, only in the two directions measured.
+  **The bookkeeping** (`5d1c8ca`, `83a0903`): twenty-four statuses claimed their tests had
+  never run. All had, under the full suite. The second sweep needed flattening the markdown —
+  the phrase wraps across quoted lines, so grep found nothing — and a second phrasing, "not run
+  as pytest", said the same thing in different words.
+  **Also**: the frontend suite ran for the first time since the rebuild (48 files, **583
+  tests**, `tsc` and `eslint` silent — QUEUE G1 step 1), and the MSI rebuilt at today's code
+  (3,842,048 bytes, 52.17 s).
+  **One hazard created and undone**: `gencache.EnsureDispatch("CATIA.Application")` writes a
+  machine-wide persistent early-binding cache that removes `.Part` from `Documents.Add` in
+  *every* win32com process, the bridge included. Deleted; CLAUDE.md carries it.
 - **2026-09-17 (evening) — THE QUEUE E1 ANSWERED on the seat, and the answer is a measured
   refusal.** Suite green: **10,538 passed / 38 skipped / 1 xpassed / 0 failed** in 12 min 38 s;
   `ruff` clean, `mypy` clean across 493 files.

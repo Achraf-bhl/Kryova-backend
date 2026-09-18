@@ -2147,6 +2147,27 @@ Server specs in `app/catia/tool_specs.py`, resolution in `app/catia_kb/ui.py`, d
    reports unrecognised controls with their class name so the first Windows session produces the
    answer instead of a shrug.
 
+### Exporting from a seat: the refusal used to name the wrong cause
+
+Measured 2026-09-18 (E17 task 2), every declared format written from a live V5-R33 document:
+
+    PartDocument     stp 8,966 B | igs 12,393 B | stl 3,244 B | 3dxml 6,057 B | dxf REFUSED
+    DrawingDocument  dxf 75,363 B (AC1027) | dwg 12,357 B     | stp REFUSED
+
+1. **`ExportData` gives one error for two unrelated causes**, and the bridge used to read it
+   as the wrong one. A missing Data Exchange licence and a document of the wrong *kind* both
+   answer `La méthode ExportData a échoué`, so `_FORMAT_LICENCE` reported "This needs the
+   DXF/DWG (D2/DW1) licence" on a seat that wrote 75 kB of DXF from a drawing seconds later.
+   A 3D part has no 2D views; that is the whole of it. `infrastructure.wrong_kind_of_document`
+   now refuses by the cause first, and **only in the two directions actually measured** —
+   an unclassifiable document is passed through, because over-refusal becomes a wrongly built
+   part.
+2. **`GetWorkbench` is on the document, not the application.** `app.GetWorkbench("SPAWorkbench")`
+   raises `AttributeError ... Did you mean: 'GetWorkbenchId'?`, which reads like a version
+   difference and is not.
+3. **`GetMeasurable` wants a reference, not the object.** Hand it `part.MainBody` and it answers
+   `Le type ne correspond pas`; it needs `part.CreateReferenceFromObject(body)`.
+
 ### Two seat behaviours that cost a restart each — measured, not theorised
 
 1. **`catia_sketch_dimension` fails on this seat far more often than it works** (measured

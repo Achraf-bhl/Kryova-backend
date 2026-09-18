@@ -3194,6 +3194,32 @@ answerable meaning.
 
 1. **Batch compilation** — a `Plan` as one kernel session (OCCT); a CATScript executed once
    (CATIA), never 10⁵ COM calls.
+   > PARTIAL (2026-09-18) — **the CATIA half is now measured on a seat, and the number says the
+   > lever is smaller than this task assumed.** Everything in the superseded status still
+   > stands; what is new is that the premise it rested on has been tested.
+   >
+   > `app/design/batch.py` said "there is no way to lower the cost of a COM round trip; the
+   > only fix is not to make 10⁵ of them". The same work, run twice on the V5-R33 seat, each
+   > route made to prove it built what it claimed: **200 points, 1.022 s over COM against
+   > 0.566 s in one script (1.8×); 25 pads, 1.826 s against 0.835 s (2.2×).** The second is
+   > the surprising one and it refutes what the probe was written to test — the saving was
+   > expected to collapse on a pad, where CATIA has real geometry to build, and it rises
+   > slightly instead. **The saving tracks the number of COM calls, not their weight.** At the
+   > task's own 10⁵ operations that is **2.0 hours against 0.9 hours**: worth having, and not
+   > the order of magnitude the wording implies. A plan intractable interactively stays
+   > intractable batched.
+   >
+   > **And the CATIA half is not merely un-run, it is unrunnable**: every emitted line calls
+   > `KryovaDispatch`, which exists in no file here and on no seat. THE QUEUE **E4** now
+   > carries both the numbers and the contradiction that kept it unwritten — it asks for the
+   > dispatcher to reuse the bridge's COM mapping without re-implementing CATIA's API, and
+   > that mapping is Python, which nothing inside CNEXT can call. The way out that honours
+   > both halves is to *generate* the VBScript dispatcher from the operation registry, as
+   > `scripts/gen_bridge_tools.py` already does for the daemon. Left open deliberately: the
+   > 2× is not worth that until some real plan's call count asks for it.
+   > Tested by: `tests/test_design_batch.py` (17). Code: `app/design/batch.py`.
+
+   <!-- superseded 2026-09-18 -->
    > PARTIAL (2026-09-10) — **the OCCT half is done and driven; the CATIA half is emitted and
    > has never been executed.** `app/design/batch.py`.
    > **What was actually missing on OCCT was the economics, not the session.** `OcctRunner`

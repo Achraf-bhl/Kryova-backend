@@ -969,13 +969,43 @@ master plan's status line in the same commit.
       Tested by: `tests/test_calculix_conduction.py` (24; 7 run the real `ccx`).
 
 - [ ] **E4 — E15 task 1's CATIA half: run one `as_catscript` output on the seat.** Added
-      2026-09-15. `app/design/batch.py::as_catscript` emits a compiled plan as one CATScript
-      calling a `KryovaDispatch` per operation; nothing has ever executed one. Write the
-      dispatcher on the seat (it maps an operation name and literal arguments onto the bridge's
-      existing COM mapping; do not inline CATIA's API a second time). Then run M1's bracket
-      plan as one script and compare `catia_measure` against the per-call build with
-      `scripts/catia_conformance.py`'s `_measured_divergences`. Settles: E15.1 `PARTIAL` →
-      `DONE` if the one-script build measures the same part.
+      2026-09-15. **MEASURED 2026-09-18, and the item is re-priced rather than closed.**
+
+      **The premise it rested on is now a number.** `app/design/batch.py` said "there is no way
+      to lower the cost of a COM round trip; the only fix is not to make 10⁵ of them" — true
+      about the round trip, and it overstates what the fix buys. The same work was run twice on
+      this seat, each route made to prove it built what it claimed:
+
+      | work | over COM | one CATScript | ratio |
+      |---|---|---|---|
+      | 200 points (2 COM calls each) | 1.022 s | 0.566 s | **1.8×** |
+      | 25 pads (~9 COM calls each) | 1.826 s | 0.835 s | **2.2×** |
+
+      The second row is the surprising one and it refutes the hypothesis the probe was written
+      to test: the saving was expected to collapse on a pad, where CATIA has real geometry to
+      build, and it rises slightly instead. **The saving tracks the number of COM calls, not
+      their weight** — V5 builds a 20 mm block faster than the marshalling costs. At the
+      phase's own 10⁵: **2.0 hours over COM against 0.9 hours as one script.**
+
+      **Why it is still open, and it is not "no seat" any more.** Every emitted line calls
+      `KryovaDispatch`, and **that subroutine exists in no file in this repository and on no
+      seat**, so no emitted script has ever been executable — not merely un-run. This row's own
+      instruction is why it stayed unwritten: *write the dispatcher, mapping operation names
+      onto the bridge's existing COM mapping, and do not inline CATIA's API a second time.*
+      Those cannot both hold. The mapping is `scripts/catia_bridge/com/`, which is **Python**,
+      and nothing inside CNEXT can call it.
+
+      **Two ways out, for whoever takes this next.** (a) *Generate* the VBScript dispatcher
+      from the same operation registry the bridge reads (`app/catia/ops/` → `TOOL_METHODS`), so
+      there is one source of truth and two emissions — this is the only version that honours
+      both halves of the instruction, and it is roughly the size of `scripts/gen_bridge_tools.py`.
+      (b) Accept that the lever is ~2× and spend the effort elsewhere; a plan that is
+      intractable interactively stays intractable batched, so nothing becomes *possible* here
+      that was not.
+      **Take (a) only with a reason to want the 2×.** Recorded rather than decided, because
+      whether it is worth it depends on what a real plan's call count turns out to be, and no
+      plan in this repository is near 10⁵ yet.
+      Settles: E15.1 `PARTIAL` → `DONE` if the one-script build measures the same part.
 - [ ] **E5 — E15 task 4: crash recovery against a real seat.** Added 2026-09-15.
       `affinity.Outcome.stranded` names the state. What the product does about it is
       unwritten, and it needs CATIA dying under a live conversation to write against: resume

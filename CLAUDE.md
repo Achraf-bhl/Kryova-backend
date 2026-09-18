@@ -2098,6 +2098,24 @@ Server specs in `app/catia/tool_specs.py`, resolution in `app/catia_kb/ui.py`, d
    an integer where a string is wanted is what produced six identical French COM errors
    that read like a missing licence. **Never sweep an unknown signature by brute force on
    a live seat.**
+3b. **`gencache.EnsureDispatch("CATIA.Application")` breaks the bridge, machine-wide and
+   persistently.** Measured 2026-09-18 while reading `SystemService.ExecuteScript`'s flags.
+   It writes an early-binding wrapper for **INFITF** into `%LOCALAPPDATA%\Temp\gen_py`, and
+   that cache is global, on disk, and consulted by *every* win32com process afterwards — so
+   one read of one signature changes how the daemon binds. The early wrapper types
+   `Documents.Add` as the base `Document`, which **has no `.Part`**, and
+   `CastTo("PartDocument")` is refused because that interface lives in MECMOD rather than
+   INFITF. `win32com.client.dynamic.Dispatch` does not rescue it either: children fetched
+   through a dynamic parent are still re-wrapped from the cache. The symptom is
+   `AttributeError: 'Document' object has no attribute 'Part'. Did you mean: 'Parent'?` in
+   code that worked yesterday and was not touched.
+   **So: never `EnsureDispatch` the Application.** To read a signature, `EnsureModule` the
+   *specific* library (the sheet-metal work does this for `CATShfInterfaces`), or generate,
+   read, and **delete the directory afterwards** — the INFITF one is
+   `gen_py\<python version>F197B2-0771-11D1-A5B1-00A0C9575177x0x0x0`. Deleting it restores
+   late binding immediately, with no CATIA restart. Verify with
+   `Documents.Add("Part").Part is not None` before trusting the seat again.
+
 4. **Command labels are localised; internal command ids are not, and are undocumented.**
    `COMMAND_IDS` holds only ids with a published source. Do not add one from memory.
 5. **Buttons are pressed by role, never by label.** `ButtonRole` + `BUTTON_LABELS` resolve

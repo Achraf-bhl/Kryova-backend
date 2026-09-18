@@ -13,18 +13,50 @@ agent cannot react to a number it was not given. Measuring integrates over the
 part, so at 10⁵ operations that *is* the run. `batch_detail` is the knob, and
 `build` is the entry point that turns it down and says so.
 
-**CATIA: one script, and it is a different program.** There is no way to lower
-the cost of a COM round trip; the only fix is not to make 10⁵ of them.
+**CATIA: one script, and it is worth about 2× — measured, not assumed.** This
+paragraph used to say "there is no way to lower the cost of a COM round trip;
+the only fix is not to make 10⁵ of them", which is true about the round trip and
+overstates what the fix buys. Measured on the V5-R33 seat on 2026-09-18, the
+same work twice, each route made to prove it built what it claimed:
+
+    200 points (2 COM calls each)   1.022 s over COM   0.566 s in one script   1.8×
+    25 pads (~9 COM calls each)     1.826 s over COM   0.835 s in one script   2.2×
+
+So a script is **about twice as fast, on both the cheapest call CATIA has and on
+a real feature**, and the second number is the surprising one: the saving was
+expected to collapse on a pad, where CATIA has actual geometry to build, and it
+does not — because a pad is still nine COM calls and V5 builds a 20 mm block
+faster than the marshalling costs. The saving tracks the *number of calls*, not
+their weight.
+
+What that means for the 10⁵ in the phase's own wording: **2.0 hours over COM
+against 0.9 hours as one script.** A 2× is worth having and it does not change
+what is feasible — a plan that is intractable interactively is intractable
+batched. Anyone reaching for this to make a big plan possible should read that
+pair of numbers first and go and find the other order of magnitude somewhere
+else.
+
 `as_catscript` emits a plan as one CATScript, which the seat runs once. That is
 written here rather than in `app/catia/` because the input is a `Plan` and this
 package is where a plan is turned into something a backend will accept.
 
-**The CATIA half is emitted and not driven.** There is no seat on this machine —
-that is the standing constraint the whole repository is arranged around — so the
-script is generated, its shape is asserted, and it has never been executed. That
-is stated in the phase's status rather than hidden: a batch path that has never
-run on a seat is a batch path nobody should trust yet, and saying so is what
-stops somebody building a release on it.
+**The CATIA half is emitted and still not driven, and the reason is now sharper
+than "there is no seat".** There is a seat, and the timings above were taken on
+it. What is missing is `KryovaDispatch`: every emitted line calls it and **it
+does not exist anywhere in this repository or on the seat**. THE QUEUE E4 says
+to write it, and its own wording contains the contradiction that has kept it
+unwritten — write the dispatcher in CATScript, but do not re-implement CATIA's
+API a second time, when the mapping it would have to reuse (`scripts/catia_bridge/
+com/`) is Python and cannot be called from inside CNEXT. The ways out are to
+*generate* the VBScript dispatcher from the same operation registry the bridge
+reads, so there is one source and two emissions; or to accept that the batch win
+is ~2× and spend the effort elsewhere. That decision is recorded in THE QUEUE
+with the numbers rather than taken quietly here.
+
+So: the script is generated, its shape is asserted, and **no emitted script has
+ever been executed** — it could not be, since the subroutine it calls is
+undefined. A batch path that has never run is one nobody should trust yet, and
+saying so is what stops somebody building a release on it.
 
 **Nothing here changes what gets built.** A plan run in batch and a plan run
 interactively issue the same calls in the same order with the same arguments;
@@ -151,7 +183,11 @@ def as_catscript(plan: Plan, *, dispatcher: str = "KryovaDispatch") -> str:
     nothing to compute at run time, and a script that recomputed them would be a
     second compiler with its own opinion about `wall_mm * 2`.
 
-    This has **never been executed on a seat**; see the module docstring.
+    **No output of this function has ever been executed, and it could not be**:
+    every line calls `KryovaDispatch`, which exists in no file in this repository
+    and on no seat. The `dispatcher` argument names it, so a caller who writes one
+    can point at it. Measured 2026-09-18, one script is worth about 2x the same
+    work over COM — see the module docstring for both numbers.
     """
     lines = [_SCRIPT_HEADER, "Sub CATMain()\n", "    Dim result\n"]
     for call in plan.calls:

@@ -6039,14 +6039,33 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    > unreadable file is reported as unreadable**: the backend answers 201 whatever the reading
    > produced, so a resolved promise is not "it was read", and the composer line says which
    > happened.
-   > **Still open, and the sentence below was wrong about this too**: drag-and-drop does not
-   > reach "only the geometry path" — `onDrop` has never existed anywhere in the frontend, so
-   > there is no drag-and-drop at all. Inline previews remain P6's viewer, and "insert as
-   > parameter / requirement / load case" stays unbuilt for task 3's reason.
-   > Verified by breaking it: dropping `.stl` from the routing table fails a named test.
+   > **Drag-and-drop is the other thing the sentence below was wrong about, and it now exists.**
+   > It did not reach "only the geometry path": `onDrop` had never existed anywhere in the
+   > frontend, in any commit, so there was no drag-and-drop at all. The composer is a drop zone
+   > as of today. Two behaviours are pinned because each is silent when wrong: **a drag of text
+   > must not look like an upload** (only a `dataTransfer` whose `types` contain `Files` lights
+   > the zone, so dragging a selection across the composer stays ordinary), and **drag-depth
+   > counting keeps the highlight steady across child elements** (`dragleave` fires as the
+   > pointer moves onto the textarea, so enters are counted against leaves; a naive handler
+   > clears the ring while the file is still over the box). With no project there is no
+   > `onFilesDropped`, and the zone neither lights up nor takes anything — accepting a file and
+   > silently discarding it would be worse than refusing to glow.
+   > **The pill and the drop share one upload controller** (`hooks/use-attach-upload.ts`), so a
+   > dropped file's progress is visible on the pill; two instances would give it its own
+   > invisible number while the pill still read "Attach". The routing moved to
+   > `lib/attach-routing.ts` for the same reason a second copy is dangerous: one of them would
+   > keep sending everything to `uploadGeometryFile`. A multi-file drop uploads **one at a time,
+   > in order** — each upload drives one progress number and the chunked endpoints are a session
+   > per file, so `Promise.all` would report the last to answer and hide the rest.
+   > **Still open**: inline previews remain P6's viewer, and "insert as parameter / requirement /
+   > load case" stays unbuilt for task 3's reason.
+   > Verified by breaking it twice: dropping `.stl` from the routing table fails a named test,
+   > and replacing the drag-depth decrement with a bare `setDropping(false)` fails exactly
+   > "keeps the highlight while the pointer crosses a child".
    > Tested by: `../Kryova-frontend/src/lib/document-upload.test.ts` (19),
+   > `../Kryova-frontend/src/components/chat/composer-drop.test.tsx` (6),
    > `../Kryova-frontend/src/components/attachments/attachment-panel.test.tsx` (9). Frontend
-   > suite green at **605** across 50 files.
+   > suite green at **611** across 51 files; `tsc` and `eslint` clean.
 
    <!-- superseded 2026-09-20 -->
    > PARTIAL (2026-09-15) — **the composer now creates a document attachment; the insert

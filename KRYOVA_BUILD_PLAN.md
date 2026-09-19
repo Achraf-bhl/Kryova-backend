@@ -15,6 +15,42 @@ happened.
 
 ## Now
 
+> **Continuation, 2026-09-19 16:30 — after the reboot: Docker in use, the image health-checked,
+> OpenFOAM on Windows, CATIA FTA measured end to end.**
+> **This machine holds the chain.** The user's instruction stands: **keep testing on CATIA**
+> and drive the plan closer to 100%. **Next continuation fires: 2026-09-19 19:05.**
+> **`CronList` first on every wake** — a one-shot job whose time passes mid-turn never fires.
+> **Board: 22/34 phases · 176.5/195 tasks = 90.5% · 171.6/189 eng-months = 90.8%.** Suite
+> **10,653 passed / 25 skipped / 1 xpassed / 0 failed** (11:37) with CATIA open; the skip count
+> moves with the seat (39 with CATIA closed), because `TestLiveCatia` reads what is open.
+> `ruff`, `mypy` (494), `app.verify.recorded --check` clean.
+>
+> **After a reboot, two things are not up**: Postgres (`pg_ctl -D C:\Users\achra\pgdata -l
+> %USERPROFILE%\pgdata.log start` — **not** under `Start-Process -Wait`, which waits on the
+> server forever), and CATIA. Docker Desktop starts itself.
+>
+> **One decision is the user's, not the chain's:** whether the image ships the reference
+> manuals. `data/bm25/` is excluded by default because 25 of its PDFs are third-party books,
+> several from a shadow library, and a pushed image redistributes them.
+>
+> **Next targets, in order:**
+> (1) **Make FTA a bridge operation.** Everything is measured; the recipe is in THE QUEUE E7:
+>     `AnnotationSets.Add("ISO")` → `CreateView(planeRef, 0)` → `UserSurfaces.Generate(faceRef)`
+>     → `CreateDatum` → `DatumSimple().Label` → `CreateDatumReferenceFrame()` →
+>     `ReferenceFrame().SetFrame(label,"","")` → `CreateToleranceWithDRF(4, us, drf)`. Declare it
+>     in `app/catia/ops/`, refuse it by name on the open kernel, test both tables (the index is
+>     per family). Needs `EnsureModule` on CATTPSInterfaces only (CLAUDE.md 3b/3c).
+> (2) **THE QUEUE E2 — gate G1 through the GUI.** Still the oldest untaken item.
+> (3) **THE QUEUE E6's engine half** — `AddJoint` killed the seat once; try the Win32 bridge on
+>     the constraints-conversion command. The *reading* half is done (`catia_constraints.py`).
+> (4) **THE QUEUE E5 — crash recovery.** Last in a turn; it costs the seat.
+> (5) **P6's measurement half** — FMP and fps in the browser.
+> (6) **P4.6's drag-and-drop**, which still reaches only the geometry path.
+> (7) **E13.2 / E8.3** — check outbound network first.
+>
+> **Not takeable by any machine:** E21's five and E23's two. **P9.5 stays BLOCKED** for its own
+> reason: the MSI launches a dev server from checkout paths baked in at build time.
+
 > **Continuation, 2026-09-19 04:30 — DOCKER AND THE MSI ARE INSTALLED, AND THE MACHINE IS
 > ABOUT TO REBOOT.** Board **22/34 phases · 176.0/195 tasks = 90.3% · 171.3/189 eng-months =
 > 90.7%**.
@@ -560,6 +596,27 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-19 (afternoon, after the reboot) — Docker in use, the image health-checked, OpenFOAM
+  on Windows, and CATIA FTA measured end to end.** Board **22/34 · 176.5/195 = 90.5%**.
+  **Docker** (after the WSL2 reboot): server 29.8.0, WSL2 `docker-desktop`. **THE QUEUE F1**
+  (`e8b87be`): OpenFOAM runs on Windows — 13 real-engine tests pass, none skip, and the
+  container's files (written as uid 0, since there is no `getuid`) are deletable by the host.
+  **P9.3 DONE** (`e8b87be`): the image builds in 150 s and **passes its own health check for the
+  first time**; the whole app imports inside it (147 paths). Building it found no
+  `.dockerignore` (the context carried `.env.local`) and **25 third-party PDFs in the image,
+  several named `z-library`** — excluded by default as the reversible direction; the image fell
+  3.70 → 2.85 GB. **Shipping the manuals is the user's decision.**
+  **The installer** (`../Kryova-frontend` `c64067e`): the bundle shipped MSI *and* NSIS into one
+  directory, which is how the double uninstall entry happened; NSIS removed and pinned.
+  **Two pointers corrected** (`defcbd0`): P7.1 and P7.5 sent readers to P9 task 4 and P7 task 1;
+  the finding they mean is P9 task 5.
+  **THE QUEUE E7 / E17.1** (`333864b`, `8e0f004`): **a datum and a position frame now exist on the
+  seat.** `iSurf` wants a **`UserSurface`** (`part.UserSurfaces.Generate(ref)`), which a *control*
+  proved — text and flag notes refused exactly as datums did. Then the frame comes back empty
+  and `SetFrame(label, "", "")` fills it: parallelism 3, **position 4**, profiles 7 and 8. The
+  index is per family. Two of this morning's readings were wrong and are kept, marked.
+  **The one extra skip** (39 vs 38) is ambient: `tests/test_catia.py::TestLiveCatia` reads
+  whatever the engineer has open and refuses to mutate the seat to pass.
 - **2026-09-19 (early hours) — a seat day: E6's reading half built, E7's FTA licensing settled,
   and a conclusion of my own corrected within the hour.** Board **22/34 phases · 175.5/195 =
   90.0%**.

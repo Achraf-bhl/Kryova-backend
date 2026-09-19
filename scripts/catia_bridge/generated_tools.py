@@ -5978,6 +5978,64 @@ TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         },
         ("max_inline_bytes",),
     ),
+    "catia_tolerance_datum": (
+        WRITE,
+        {
+            "type": "object",
+            "properties": {
+                "face": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "The face the datum is taken on. Either a bounding-box face name (top, bottom, front, back, left, right) or a face reported by catia_list_faces.",
+                }
+            },
+            "required": ["face"],
+            "additionalProperties": False,
+        },
+        (),
+    ),
+    "catia_tolerance_frame": (
+        WRITE,
+        {
+            "type": "object",
+            "properties": {
+                "face": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "The face the tolerance applies to. Either a bounding-box face name (top, bottom, front, back, left, right) or a face reported by catia_list_faces.",
+                },
+                "characteristic": {
+                    "type": "string",
+                    "enum": [
+                        "straightness",
+                        "flatness",
+                        "parallelism",
+                        "position",
+                        "line_profile",
+                        "surface_profile",
+                    ],
+                    "description": "Which characteristic the frame states.",
+                },
+                "datums": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 120},
+                    "description": "Datum letters, in order: A, then B, then C. Required for position and parallelism; refused for straightness and flatness.",
+                },
+            },
+            "required": ["face", "characteristic"],
+            "additionalProperties": False,
+        },
+        (),
+    ),
+    "catia_tolerance_list": (
+        READ,
+        {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        (),
+    ),
     "catia_drawing_create": (
         WRITE,
         {
@@ -7379,6 +7437,9 @@ TOOL_METHODS: dict[str, str] = {
     "catia_sheetmetal_parameters": "sheetmetal_parameters",
     "catia_sheetmetal_bends": "sheetmetal_bends",
     "catia_sheetmetal_export_flat": "sheetmetal_export_flat",
+    "catia_tolerance_datum": "tolerance_datum",
+    "catia_tolerance_frame": "tolerance_frame",
+    "catia_tolerance_list": "tolerance_list",
     "catia_drawing_create": "drawing_create",
     "catia_sheet_add": "sheet_add",
     "catia_sheet_frame": "sheet_frame",

@@ -51,6 +51,7 @@ from .com import (
     SketchEditMixin,
     SketcherMixin,
     SurfacesMixin,
+    TolerancingMixin,
     WireframeMixin,
 )
 from .com._context import resolve_element
@@ -200,6 +201,7 @@ class CatiaCom(
     ReferenceMixin,
     PartDesignMixin,
     SurfacesMixin,
+    TolerancingMixin,
     WireframeMixin,
     AssemblyMixin,
     AssemblyReviewMixin,

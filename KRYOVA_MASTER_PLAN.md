@@ -65,7 +65,7 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-19** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-20** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
@@ -3635,10 +3635,24 @@ here"* has an answer in six months — from the artefact.
    > exists too**: the frame comes back empty, `datum.DatumSimple().Label` gives `'A'`, and
    > `ReferenceFrame().SetFrame('A', '', '')` fills it — after which `CreateToleranceWithDRF`
    > gives parallelism (3), **position (4)** and both profiles (7, 8). The index is per family,
-   > not global (`3` is flatness without a frame, parallelism with one). **So CATIA FTA is
-   > measured end to end on the seat; what is not done is making it a bridge operation**, and
-   > the leader-attachment and reserved-table-zone items above are Linux-side work that is
-   > unchanged. So this stays PARTIAL.
+   > not global (`3` is flatness without a frame, parallelism with one). **And it is a bridge operation now**
+   > (2026-09-20): `catia_tolerance_datum`, `catia_tolerance_frame` and `catia_tolerance_list`,
+   > declared on a new `Workbench.FTA`, implemented in `scripts/catia_bridge/com/tolerancing.py`
+   > and refused by name on the open kernel. **Driven on the seat through the bridge's own
+   > backend object**, not only unit-tested: a datum on `top` came back lettered `A`
+   > (`Référence.1`), a flatness frame `Planéité.1`, a position frame against A on `front`
+   > `Localisation.1`, and the list read back 1 set, datum `A`, 4 annotations. Both family
+   > refusals fire in words.
+   > **The value is deliberately not a parameter.** Creating a frame was measured; setting its
+   > magnitude was not, so `value_mm` does not exist and both the summary and the result say the
+   > frame carries CATIA's default. A number the bridge silently failed to apply would be a part
+   > that states 0.05 and means something else. `UNIMPLEMENTED` records that, `datum_target` and
+   > `roughness` as data rather than as absence.
+   > The registry budget moved 210,000 → 212,000 (measured 210,536) *after* the summaries were
+   > cut, with the reason written in the test — and it notes that a fourth move should ask
+   > whether 200-odd tools belong in one payload at all.
+   > **Still Linux-side and unchanged**: the leader attachment and the reserved table zones.
+   > So this stays PARTIAL. Tested by: `tests/test_catia_tolerancing.py` (26).
    > **Tests run on this machine 2026-09-17/18 and green**; they were written on Linux under
    > the no-pytest rule. Tested by: `tests/test_manufacture_drawing_tables.py`, and the files
    > below.

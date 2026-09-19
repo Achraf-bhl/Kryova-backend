@@ -27,6 +27,7 @@ from app.catia.ops import (
     sheet_metal,
     sketcher,
     surfaces,
+    tolerancing,
     ui,
     wireframe,
 )
@@ -48,6 +49,7 @@ _MODULES: tuple[ModuleType, ...] = (
     surfaces,
     assembly,
     sheet_metal,
+    tolerancing,
     drafting,
     knowledge,
     ui,

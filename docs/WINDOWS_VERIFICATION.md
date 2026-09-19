@@ -1118,7 +1118,7 @@ master plan's status line in the same commit.
       `CATProduct` and `CATPart` documents open, and the next `Documents.Add("Product")`
       then fails on `PartNumber`. Close products before parts and **test that the count
       fell**, never that `Close()` succeeded — the loop this repository already documents.
-- [ ] **E7 — E17 tasks 1 and 2 on the seat: FTA annotations and export from CATIA.** Added
+- [x] **E7 — E17 tasks 1 and 2 on the seat: FTA annotations and export from CATIA.** Added
       2026-09-15. `app/manufacture/drawing.py` now carries a part's `Tolerancing` and
       `dxf.py` tabulates it; nothing puts the same frames into CATIA's Functional Tolerancing &
       Annotation workbench, and no STEP or DXF has been exported from a live seat. Write the
@@ -1211,11 +1211,15 @@ master plan's status line in the same commit.
       Saved as a 489 KB CATPart. **The index is per family, not global**: `3` is flatness
       without a frame and parallelism with one, so a table keyed on the number alone would put
       the wrong symbol on a drawing and nothing would error.
-      **This row's measurement half is done** — "one datum and one position frame on the
-      bracket through FTA" is exactly what now exists. **What is not done is the bridge
-      side**: none of this is an operation the agent can call, and the whole chain needs
-      `CATTPSInterfaces` generated, which CLAUDE.md item 3c says to do by `EnsureModule` on
-      that library alone. The full recipe, in order: `part.AnnotationSets.Add("ISO")` →
+      **CLOSED 2026-09-20 — the bridge side is written and driven.**
+      `catia_tolerance_datum`, `catia_tolerance_frame` and `catia_tolerance_list` are declared
+      on a new `Workbench.FTA` and implemented in `scripts/catia_bridge/com/tolerancing.py`,
+      which generates `CATTPSInterfaces` **and only that library** (CLAUDE.md 3c). Run through
+      the bridge's own backend object on the seat: datum on `top` → `A` / `Référence.1`,
+      flatness → `Planéité.1`, position against A on `front` → `Localisation.1`, list → 1 set,
+      datum `A`, 4 annotations; both family refusals fire in words. The tolerance *value* is
+      not a parameter, because setting it was never measured — recorded in `UNIMPLEMENTED`
+      with `datum_target` and `roughness`. The full recipe, in order: `part.AnnotationSets.Add("ISO")` →
       `TPSViewFactory.CreateView(planeRef, 0)` → `part.UserSurfaces.Generate(faceRef)` →
       `CreateDatum(us)` → `DatumSimple().Label` → `CreateDatumReferenceFrame()` →
       `ReferenceFrame().SetFrame(label, "", "")` → `CreateToleranceWithDRF(4, us2, drf)`.

@@ -153,8 +153,18 @@ class TestTheSchemasStayedUsable:
         summaries were cut to the minimum first -- twice -- and the sibling test
         above is what stops that going too far. Headroom is kept at the same
         ~1,700 so the next few sentences of drift are still a failure.
+
+        **Moved to 212,000 on 2026-09-20, measured 210,536.** THE QUEUE E7's three
+        tolerancing operations — datum, feature control frame, list — cost 1,699 bytes,
+        which is again more than one tool's headroom. The summaries were cut first and
+        the ceiling moved second, in that order, and the sibling test above is what
+        stops the cutting going too far. Same distinction as the last two moves: a budget
+        re-sized for vocabulary somebody deliberately added, not a threshold loosened to
+        make a run pass. If this happens a fourth time the question stops being the
+        ceiling and starts being whether 200-odd tools all belong in one payload —
+        `app/ai/tool_retrieval.py` exists for exactly that.
         """
-        assert len(REGISTRY_JSON) < 210_000
+        assert len(REGISTRY_JSON) < 212_000
 
     def test_pad_still_describes_its_sketch_and_length(self) -> None:
         pad = next(s for s in CATIA_TOOL_SPECS if s.name == "catia_pad")

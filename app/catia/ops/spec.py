@@ -60,6 +60,7 @@ class Workbench(StrEnum):
     DRAFTING = "Drafting"
     KNOWLEDGE_ADVISOR = "Knowledge Advisor"
     SHEET_METAL = "Sheet Metal Design"
+    FTA = "Functional Tolerancing & Annotation"
     ANALYSIS = "Generative Structural Analysis"
     DMU = "DMU Navigator"
 

@@ -84,6 +84,23 @@ REASONS: Final[dict[str, str]] = {
     # operation that answered with the last part's numbers, or with a default nobody
     # chose, would be a plausible answer to a question about a document that does not
     # hold one.
+    "catia_tolerance_datum": (
+        "a datum is a statement about a face on a CATIA part, held in its annotation set. "
+        "The open kernel has no annotation set and no GD&T on the solid — tolerancing here "
+        "lives in app/rules/gdt.py and reaches paper through app/manufacture/drawing.py, "
+        "which is a different carrier and deliberately so"
+    ),
+    "catia_tolerance_frame": (
+        "a feature control frame is placed in a CATIA annotation set against datums CATIA "
+        "lettered. The open kernel carries tolerances on the design record rather than as "
+        "annotations on the solid, so there is nothing here for a frame to be attached to — "
+        "app/rules/gdt.py holds them and the drawing is what states them"
+    ),
+    "catia_tolerance_list": (
+        "there are no annotations on an open-kernel part to list. What this product knows "
+        "about a part's tolerancing is in its design record, which app/manufacture/ reads "
+        "directly rather than through the geometry"
+    ),
     "catia_sheetmetal_start": (
         "the open kernel has no document-scoped sheet-metal parameter set. Thickness, "
         "bend radius and K are arguments to app/sheetmetal/fold.py's SheetMetalPart, "

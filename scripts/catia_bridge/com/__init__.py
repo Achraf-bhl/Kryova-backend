@@ -25,6 +25,7 @@ from .reference import ReferenceMixin
 from .sketch_edit import SketchEditMixin
 from .sketcher import SketcherMixin
 from .surfaces import SurfacesMixin
+from .tolerancing import TolerancingMixin
 from .wireframe import WireframeMixin
 
 #: Every mixin, in method-resolution order.
@@ -38,6 +39,7 @@ WORKBENCH_MIXINS = (
     AssemblyMixin,
     AssemblyReviewMixin,
     DraftingMixin,
+    TolerancingMixin,
     InfrastructureMixin,
     KnowledgeMixin,
     InspectionMixin,

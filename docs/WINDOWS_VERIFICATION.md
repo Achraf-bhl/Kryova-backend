@@ -1076,6 +1076,40 @@ master plan's status line in the same commit.
       Conversion* from existing assembly constraints. The next attempt should build the
       constraints first and convert them, or drive the conversion command through the
       existing Win32 bridge, rather than calling `AddJoint` with guessed arguments.
+      **HALF OF THIS IS NOW CLOSED, 2026-09-19, and it needed no `AddJoint` at all.** The
+      sub-question — "whether CATIA's assembly constraints can be read as joint declarations,
+      which is the one input E9.2 still takes by hand" — is **answered yes for the pair and no
+      for the axis**, on a two-part product with a coincidence, a 25 mm offset and a fix:
+
+      * **The operands are not `ConstraintElement1`/`ConstraintElement2`.** Those property
+        names do not exist; late binding answers `AttributeError`, and a first sitting read
+        that as "constraints do not expose their operands" and was wrong. The real member is
+        the method **`GetConstraintElement(n)`**, declared in `CATIA V5 MecModInterfaces`
+        (`{0D90A5C9-3B08-11D1-A26C-0000F87546FD}`). Same lesson as the kinematics licence:
+        **read the type library before concluding an API is absent.**
+      * `element.DisplayName` is the prize: `'E6Rig/E6Base.1/!E6Base/Plan xy'` carries the
+        **occurrence path and the geometry**, which is exactly `JointDeclaration.child`.
+      * **`GetConstraintVisuLocation` is not the axis.** It returns cleanly — it did *not*
+        crash the seat, despite taking the same `(8204, 3)` doubles array `AddJoint` died on —
+        and answers `((0,0,0), (0,0,0))`. It is the constraint glyph's location. A zero vector
+        is not a direction, so the axis is genuinely absent and must come from the geometry
+        the DisplayName names.
+      * `Side`, `DistanceConfig`, `DistanceDirection` and `AngleSector` are readable **only on
+        the constraint types they apply to**; on a Coincidence they raise *"Défaillance
+        irrémédiable"*, an alarming message for "not applicable".
+      * A `Fix` is mono-element: `GetConstraintElement(2)` is refused, not empty.
+      * The localised-reference trap **still holds, seventeen days on**: `!Plan xy` and
+        `!Plan yz` resolve, `!PlaneXY` and `!Axe X` are refused, so no axis is nameable.
+
+      Shipped: `app/dynamics/catia_constraints.py` (no COM import — the daemon sends records
+      as data, so the translation is testable with no seat) and
+      `tests/test_dynamics_catia_constraints.py` (21).
+      **What is still open on E6 is the engine itself**: building and driving a mechanism.
+      `AssemblyConvertor` in `ProductStructureInterfaces` is **not** the constraints
+      conversion despite its name — it is the BOM/print convertor (`Print`,
+      `SetCurrentFormat`). The conversion command is still unlocated over COM, so the Win32
+      bridge remains the route to try.
+
       **Also unmeasured**: what `ioMotion` is filled with — `GetProductMotion` refused at
       12, 16 and 9 doubles on a mechanism with no joints, which may only mean it needs a
       valid mechanism first. `MechanismDOF`, `DOF` and `Laws` do **not** exist; `NbDof` is

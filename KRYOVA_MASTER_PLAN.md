@@ -65,7 +65,7 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-18** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-19** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
@@ -2353,11 +2353,22 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
    > twice. Refused by name: an unweighed part under a body (a partial mass gives a reaction
    > that is too small), a body inside a body, a parent that is not a body, a body on two
    > joints. Held to `m ω² r` for a rotor however it is placed and turned, and for a two-link
-   > chain whose elbow distance comes from the graph. **Not claimed**: reading mate
-   > constraints as joints (the product graph holds none; CATIA's are THE QUEUE E6), and
-   > inertia tensors (the roll-up has none, so bodies are point masses and the notes say so).
-   > **Not run here**: written on Linux on 2026-09-15 and not executed, at the user's
-   > instruction. Tested by: `tests/test_dynamics_assembly.py`, `tests/test_dynamics_kinematics.py`.
+   > chain whose elbow distance comes from the graph. **Reading CATIA's mate
+   > constraints as joints landed 2026-09-19** — `app/dynamics/catia_constraints.py`, measured
+   > on the seat (THE QUEUE E6). The answer is **yes for the pair and no for the axis**, which
+   > is why the module refuses rather than defaults. `GetConstraintElement(n).DisplayName`
+   > gives `'E6Rig/E6Base.1/!E6Base/Plan xy'` — the **occurrence path and the geometry**,
+   > exactly `JointDeclaration.child` and what an axis must be resolved from. But
+   > `GetConstraintVisuLocation` returns cleanly and answers a **zero vector**: it is where
+   > CATIA draws the glyph, not the joint's axis. So an axis is genuinely absent from the
+   > constraint, and a joint with none supplied is reported `unresolved` rather than declared
+   > along +Z. Verified by breaking it: defaulting the axis fails three named tests.
+   > **Still not claimed**: inertia tensors (the roll-up has none, so bodies are point masses
+   > and the notes say so), and the daemon side that reads the records — the module takes them
+   > as data and imports no COM, so the translation is testable with no seat.
+   > **Tests run on this machine 2026-09-19 and green.** Tested by:
+   > `tests/test_dynamics_catia_constraints.py` (21), `tests/test_dynamics_assembly.py`,
+   > `tests/test_dynamics_kinematics.py`.
 
    <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-06) — kinematics tested against closed form: slider-crank at both dead

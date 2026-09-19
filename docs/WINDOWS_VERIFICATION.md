@@ -1261,6 +1261,23 @@ master plan's status line in the same commit.
 
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 
+> **DOCKER DESKTOP IS INSTALLED, 2026-09-19** — the user cleared the elevation blocker at the
+> keyboard. `winget install Docker.DockerDesktop` returned 0, **4.91.0**, and the CLI answers
+> `Docker version 29.8.0, build 88096ef` from
+> `C:\Program Files\Docker\Docker\resources\bin\docker.exe`.
+> **It cannot run yet and the reason is recorded rather than rediscovered**: WSL was *not*
+> installed on this machine — `wsl.exe` ships with Windows and the subsystem did not — so
+> `wsl --install --no-distribution` was run first. It enabled the features and left
+> `HKLM:\…\Component Based Servicing\RebootPending` **true**, and until that reboot happens
+> `wsl --status` answers *"WSL2 ne peut pas démarrer, car la virtualisation n'est pas
+> activée"*. Firmware virtualisation itself is on (`VirtualizationFirmwareEnabled: True`), so
+> this is the ordinary staged-feature reboot and not a BIOS problem.
+> **One trap worth carrying**: `Win32_ComputerSystem.HypervisorPresent` was **already `True`**
+> before any of this, which reads as "virtualisation is ready" and is not — it reflects a
+> hypervisor already running (VBS), not that WSL2 can start. Ask `wsl --status`, never that
+> property.
+> **After the reboot**, F1 below is takeable and so is P9 task 3's image build.
+
 - [ ] **F1 — The OpenFOAM flow run through Docker Desktop (E10.2, added 2026-09-14).** On Linux,
       `tests/test_solver_openfoam.py` runs the whole path against `opencfd/openfoam-default:2412`
       and agrees with Hagen–Poiseuille, the rectangular-duct series and both Graetz limits;

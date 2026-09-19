@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 16/24 | 124/133 = 93% | 140/151 eng-months = 93% |
-| Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 22/34 | 176/195 = 90% | 171/189 eng-months = 90% |
+| Product — P1–P10 | 6/10 | 52/62 = 85% | 32/38 eng-months = 83% |
+| **Programme** | 22/34 | 176/195 = 90% | 171/189 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,8 +81,8 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
-| nothing finished yet | P6, P7 |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 57% |
+| nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
 every `DONE` above is proven by the offline suite on Linux; the stop gates in Part 2 are what
@@ -7061,20 +7061,28 @@ scene in the Tauri app.
    > NOT STARTED.
 
 5. **The Windows installer.**
-   > PARTIAL (2026-09-18) — **rebuilt at today's code and still clean**, which is the half this
-   > machine can settle: `npm run desktop:msi` produced
-   > `Kryova_0.2.0_x64_en-US.msi`, **3,842,048 bytes**, release profile, WiX candle+light, Rust
-   > compile **52.17 s**, exit 0. Two weeks and a phase of frontend work later the desktop
-   > bundle still builds, which is worth knowing because nothing else in CI builds it.
+   > DONE (2026-09-19) — **installed, and installing it found a defect that building it could
+   > not.** The user cleared the elevation blocker at the keyboard, so `msiexec /i … /qn`
+   > returned 0 and `C:\Program Files\Kryova\kryova.exe` (11,009,536 B) is on disk.
    >
-   > **Built is still not installed, and the reason is now specific rather than "nobody did
-   > it".** A Tauri MSI is a per-machine install: `msiexec` needs elevation, so running it
-   > raises a UAC prompt that no automated session can answer, and a `/qn` attempt from an
-   > unelevated shell fails rather than installing silently. So this half is **a human at the
-   > keyboard**, not an unwritten script — the same class as E21's document purchases, and it
-   > is one click rather than a task. What it settles when someone does it: whether the
-   > installed app starts, finds its backend, and reaches the setup page (P7 task 1) — which
-   > is why task 1 and P9 task 4 stay open behind it.
+   > **The finding: the machine now carries TWO Kryova uninstall entries, from two different
+   > installer technologies, pointing at one directory.**
+   >
+   > | version | key | uninstall |
+   > |---|---|---|
+   > | 0.1.2 | `Kryova` | `C:\Program Files\Kryova\uninstall.exe` (NSIS) |
+   > | 0.2.0 | `{C7DA910E-1FB4-4098-9C8D-160045EDA316}` | `MsiExec.exe /X{…}` |
+   >
+   > An earlier NSIS bundle registered itself and the MSI does not know it exists, so it was
+   > not superseded. Running the 0.1.2 uninstaller would delete files the MSI believes it owns
+   > and leave the MSI's entry pointing at nothing — and a user in *Apps & features* sees two
+   > identical "Kryova" rows with no way to tell which is live. **This is a packaging defect,
+   > not an artefact of this machine**: any seat that ever installed the NSIS bundle will do
+   > the same. The fix is a WiX `MajorUpgrade`/`UpgradeCode` that also detects and removes the
+   > NSIS registration, and it belongs to P9 task 4's release checklist.
+   > **Still not claimed**: that the installed app *starts* and reaches its setup page — that
+   > is P7 task 1, and it waits on the reboot Docker Desktop's WSL2 features staged in the
+   > same sitting.
    > Code: `src-tauri/`, `scripts/desktop-build.mjs`.
 
    <!-- superseded 2026-09-18 -->

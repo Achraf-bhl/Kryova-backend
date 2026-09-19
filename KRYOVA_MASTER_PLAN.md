@@ -7383,6 +7383,25 @@ scene in the Tauri app.
    > bundle shipped both an MSI and an NSIS installer into one directory, and installing one
    > over the other left two uninstall entries (found by P7.5's first real install). The bundle
    > now builds the MSI only, pinned by `../Kryova-frontend/src/lib/desktop-bundle.test.ts`.
+   > **And a second defect that is release-blocking on its own (2026-09-19): Microsoft Defender
+   > quarantines the installed app.** A clean reinstall of 0.2.0 from a fresh build was detected
+   > on install as `Trojan:Script/Wacatac.H!ml` (severity 5) and quarantined with its shortcuts.
+   > **It is a false positive by every test available here**: the identical `kryova.exe` scans
+   > clean on its own in `target/release/` (`MpCmdRun -Scan` exit 0) and is flagged only inside
+   > the MSI's `app.cab` or once installed, which is a *contextual* ML verdict (`!ml`), not a
+   > signature match on its bytes. The previous 0.2.0 build (18/09 02:29) ran for hours unflagged,
+   > so the verdict is per build hash. **A local path exclusion does not defeat it**: restored
+   > after `Add-MpPreference -ExclusionPath 'C:\Program Files\Kryova'`, the file was re-detected
+   > 11 s later (event 1116/1117, triggered by `explorer.exe` drawing the desktop shortcut) — the
+   > cloud verdict (MAPS level 2) wins, with no `DisableLocalAdminMerge` policy involved. And
+   > `Get-MpThreatDetection` hides a re-detection, because it keeps the threat's *original*
+   > timestamp; read the `Windows Defender/Operational` log (1116/1117) instead.
+   > **What this means for shipping**: an unsigned MSI of this app will be quarantined on
+   > customer machines too. The binary is flagged as `Script` because it is a shell that spawns
+   > `node` and `python` from paths baked in at build time — which is this task's existing
+   > blocker. So the fixes are the ones this task already names: **code signing** (an EV/OV
+   > certificate, which is a purchase) and **bundling the frontend and backend** instead of
+   > launching dev servers; plus a false-positive submission to Microsoft per release until then.
 
 6. **Backups and restore *drills***: PITR verified by actually restoring; blob-store backup with
    refcount integrity check; a written RTO/RPO and a quarterly drill that proves it.

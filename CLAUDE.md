@@ -2206,6 +2206,27 @@ Measured 2026-09-18 (E17 task 2), every declared format written from a live V5-R
 3. **`GetMeasurable` wants a reference, not the object.** Hand it `part.MainBody` and it answers
    `Le type ne correspond pas`; it needs `part.CreateReferenceFromObject(body)`.
 
+### The installed desktop app and Microsoft Defender — measured 2026-09-19
+
+The unsigned 0.2.0 MSI installs cleanly and Defender then quarantines `kryova.exe` as
+`Trojan:Script/Wacatac.H!ml`. Three things that each cost time:
+
+1. **It is a contextual ML verdict, not a signature.** The same bytes scan clean in
+   `src-tauri/target/release/` (`MpCmdRun -Scan -ScanType 3 -File … -DisableRemediation`,
+   exit 0) and are flagged inside the MSI's `app.cab` and in `Program Files`. A rebuild changes
+   the hash and can change the verdict — the 18/09 build ran for hours unflagged.
+2. **A path exclusion does not beat a cloud verdict.** Restored after
+   `Add-MpPreference -ExclusionPath`, the file was re-quarantined 11 s later by real-time
+   protection, triggered by `explorer.exe` rendering the desktop shortcut. Add the exclusion
+   *before* restoring regardless, or the restore undoes itself instantly.
+3. **`Get-MpThreatDetection` hides a re-detection**: it keeps the original
+   `InitialDetectionTime`, so "any detection since T" reads zero while the file is being
+   quarantined again. Read `Microsoft-Windows-Windows Defender/Operational`, events 1116
+   (detected) and 1117 (action taken).
+
+Do **not** "Allow on device" to get past it: that allows the threat ID machine-wide, and
+`Wacatac.H!ml` also covers real malware. The fixes are code signing and P9 task 5's bundling.
+
 ### Two seat behaviours that cost a restart each — measured, not theorised
 
 1. **`catia_sketch_dimension` fails on this seat far more often than it works** (measured

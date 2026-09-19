@@ -2211,10 +2211,14 @@ Measured 2026-09-18 (E17 task 2), every declared format written from a live V5-R
 The unsigned 0.2.0 MSI installs cleanly and Defender then quarantines `kryova.exe` as
 `Trojan:Script/Wacatac.H!ml`. Three things that each cost time:
 
-1. **It is a contextual ML verdict, not a signature.** The same bytes scan clean in
-   `src-tauri/target/release/` (`MpCmdRun -Scan -ScanType 3 -File … -DisableRemediation`,
-   exit 0) and are flagged inside the MSI's `app.cab` and in `Program Files`. A rebuild changes
-   the hash and can change the verdict — the 18/09 build ran for hours unflagged.
+1. **It is an ML verdict per build, not a signature, and a rebuild can clear it.**
+   `target/release/kryova.exe` scans clean while the MSI's copy is flagged — **but they are
+   not the same bytes**: the shipped exe differs in 3 bytes (Tauri's bundle-type stamp), so
+   **never treat `target/release/kryova.exe` as the shipped binary**; extract it with
+   `msiexec /a <msi> /qn TARGETDIR=<dir>` or hash the installed one. A relink (touch
+   `src-tauri/src/main.rs`; cargo will not relink an unchanged tree, and the MSVC linker stamps
+   a fresh PE timestamp) gave a new hash that installed and ran unflagged on 2026-09-19.
+   That is luck, not a fix.
 2. **A path exclusion does not beat a cloud verdict.** Restored after
    `Add-MpPreference -ExclusionPath`, the file was re-quarantined 11 s later by real-time
    protection, triggered by `explorer.exe` rendering the desktop shortcut. Add the exclusion
@@ -2223,6 +2227,10 @@ The unsigned 0.2.0 MSI installs cleanly and Defender then quarantines `kryova.ex
    `InitialDetectionTime`, so "any detection since T" reads zero while the file is being
    quarantined again. Read `Microsoft-Windows-Windows Defender/Operational`, events 1116
    (detected) and 1117 (action taken).
+
+4. **The installed app starts a real backend, and with it a real CATIA bridge daemon.** Close
+   Kryova before a full `pytest` run, or the daemon holds `bridge.lock` and `tests/test_catia_*`
+   can go red for a reason no test caused (see *Known landmines*).
 
 Do **not** "Allow on device" to get past it: that allows the threat ID machine-wide, and
 `Wacatac.H!ml` also covers real malware. The fixes are code signing and P9 task 5's bundling.

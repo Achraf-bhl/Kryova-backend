@@ -25,6 +25,12 @@ happened.
 > moves with the seat (39 with CATIA closed), because `TestLiveCatia` reads what is open.
 > `ruff`, `mypy` (494), `app.verify.recorded --check` clean.
 >
+> **The installed Kryova 0.2.0 app is RUNNING** (started 2026-09-19 17:07). It launches a
+> real backend and a real CATIA bridge daemon, so **close it before the full suite** or
+> `tests/test_catia_*` can go red against its `bridge.lock`. A rebuild cleared Defender's
+> false positive on the previous build; a folder exclusion for `C:\Program Files\Kryova` is
+> still set and did not help — whether to remove it is the user's call.
+>
 > **After a reboot, two things are not up**: Postgres (`pg_ctl -D C:\Users\achra\pgdata -l
 > %USERPROFILE%\pgdata.log start` — **not** under `Start-Process -Wait`, which waits on the
 > server forever), and CATIA. Docker Desktop starts itself.

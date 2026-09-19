@@ -7386,11 +7386,17 @@ scene in the Tauri app.
    > **And a second defect that is release-blocking on its own (2026-09-19): Microsoft Defender
    > quarantines the installed app.** A clean reinstall of 0.2.0 from a fresh build was detected
    > on install as `Trojan:Script/Wacatac.H!ml` (severity 5) and quarantined with its shortcuts.
-   > **It is a false positive by every test available here**: the identical `kryova.exe` scans
-   > clean on its own in `target/release/` (`MpCmdRun -Scan` exit 0) and is flagged only inside
-   > the MSI's `app.cab` or once installed, which is a *contextual* ML verdict (`!ml`), not a
-   > signature match on its bytes. The previous 0.2.0 build (18/09 02:29) ran for hours unflagged,
-   > so the verdict is per build hash. **A local path exclusion does not defeat it**: restored
+   > **It is very likely a false positive**: `target/release/kryova.exe` scans clean
+   > (`MpCmdRun -Scan` exit 0) while the MSI's `app.cab` and the installed copy are flagged, and
+   > the verdict is `!ml`, not a signature. **But those are not quite the same bytes** — measured
+   > afterwards, the shipped exe differs from the `target/release` copy in exactly 3 bytes (offset
+   > 7,887,218, Tauri's bundle-type stamp), so `target/release/kryova.exe` is never the shipped
+   > file and "identical bytes scan clean" was an overstatement. The previous 0.2.0 build (18/09
+   > 02:29) ran for hours unflagged, so the verdict is per build hash.
+   > **And a rebuild cleared it, the same day**: relinked (new PE timestamp, content unchanged),
+   > exe `B163DA2D…` / MSI `A5DF2C36…`, installed as the only Kryova, launched, and ran with **no
+   > Defender detection** — app, backend `/health` 200 on :8000, frontend on :3000. That is a
+   > lottery ticket that paid, not a fix: the next build can be flagged the same way. **A local path exclusion does not defeat it**: restored
    > after `Add-MpPreference -ExclusionPath 'C:\Program Files\Kryova'`, the file was re-detected
    > 11 s later (event 1116/1117, triggered by `explorer.exe` drawing the desktop shortcut) — the
    > cloud verdict (MAPS level 2) wins, with no `DisableLocalAdminMerge` policy involved. And

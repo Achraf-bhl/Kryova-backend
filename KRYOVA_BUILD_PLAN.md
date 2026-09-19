@@ -18,7 +18,7 @@ happened.
 > **Continuation, 2026-09-19 16:30 — after the reboot: Docker in use, the image health-checked,
 > OpenFOAM on Windows, CATIA FTA measured end to end.**
 > **This machine holds the chain.** The user's instruction stands: **keep testing on CATIA**
-> and drive the plan closer to 100%. **Next continuation fires: 2026-09-19 19:05.**
+> and drive the plan closer to 100%. **Next continuation fires: 2026-09-19 18:20.**
 > **`CronList` first on every wake** — a one-shot job whose time passes mid-turn never fires.
 > **Board: 22/34 phases · 176.5/195 tasks = 90.5% · 171.6/189 eng-months = 90.8%.** Suite
 > **10,653 passed / 25 skipped / 1 xpassed / 0 failed** (11:37) with CATIA open; the skip count

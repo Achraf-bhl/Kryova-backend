@@ -3625,16 +3625,16 @@ here"* has an answer in six months — from the artefact.
    > creates `Annotations.1`, the container is `part.AnnotationSets` (not
    > `GetTechnologicalObject`, and no `GetWorkbench` spelling), and it is invisible to late
    > binding without `EnsureModule` on `{88D26C84-D8E9-0000-0280-020CC3000000}`.
-   > `CreateDatumReferenceFrame()` works. **What still blocks a frame is what `CreateDatum(iSurf)` will
-   > accept, and it is not a binding problem**: it refuses a face `Reference` *and* a plane
-   > `Reference` with "Le type ne correspond pas", while the **identical** plane Reference is
-   > accepted by `CreateView`, whose parameter carries the same `(9, 1)` flag — one library,
-   > two methods, one object, so CATIA is refusing the object as a datum *support* rather
-   > than failing to marshal it. `TPSViewFactory.CreateView(planeRef, 0)` does work and sets
-   > `ActiveView` (an annotation needs a view), so that precondition was necessary and is not
-   > sufficient. Next: a `Reference` from a real BRep name, `CreateDatumTarget` /
-   > `CreateEvoluateDatum`, or the Win32 bridge driving the interactive command. Until one
-   > works **no datum has been created on a seat**, so this stays PARTIAL.
+   > `CreateDatumReferenceFrame()` works. **A datum and four form tolerances now exist on the seat** (2026-09-19,
+   > afternoon): `iSurf` wants a **`UserSurface`**, not a `Reference` —
+   > `part.UserSurfaces.Generate(face)` makes one, `CreateDatum` then gives `Référence.1`, and
+   > `CreateToleranceWithoutDRF` gives straightness, flatness and both profiles (indices 1, 3,
+   > 6, 7). A control settled it: plain text and a flag note refused exactly as the datum did,
+   > so the refusal was never about datums. Two earlier readings (binding; the datum rejecting
+   > its support) were wrong and are marked in THE QUEUE E7. **What remains is one step**:
+   > `CreateToleranceWithDRF` refuses at every index because `CreateDatumReferenceFrame()`
+   > returns an *empty* frame, so no position or perpendicularity frame exists yet — and
+   > none of it is a bridge operation yet. So this stays PARTIAL.
    > **Tests run on this machine 2026-09-17/18 and green**; they were written on Linux under
    > the no-pytest rule. Tested by: `tests/test_manufacture_drawing_tables.py`, and the files
    > below.

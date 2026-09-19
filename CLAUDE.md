@@ -1242,14 +1242,19 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
    and it is invisible to late binding without `EnsureModule` on
    `{88D26C84-D8E9-0000-0280-020CC3000000}`. `CreateDatumReferenceFrame()` works, and
    `TPSViewFactory.CreateView(planeRef, 0)` makes `Vue de face.1` and sets `ActiveView` —
-   an annotation needs a view, which is the precondition that is easy to miss. **What is
-   still unidentified is what `CreateDatum(iSurf)` will accept**: it answers
-   `Le type ne correspond pas` on argument 1 for a face `Reference` from
-   `Selection.Search("Topologie.Face,all")` *and* for a plane `Reference` — and **the very
-   same plane Reference is accepted by `CreateView`**, whose `iPlane` carries the identical
-   `(9, 1)` flag. So this is **not** a marshalling or binding problem (a first reading said
-   it was, wrongly); CATIA is refusing the object as a datum *support*, and what it wants
-   instead is not yet known. No datum has been created on a seat. What it does already show is that
+   an annotation needs a view, which is the precondition that is easy to miss. **And
+   `iSurf` is not a `Reference` — it is a `UserSurface`**, which is why every `iSurf` method
+   refused (plain text and a flag note too, not only datums). `part.UserSurfaces.Generate(ref)`
+   makes one (`Surface utilisateur.1`), and then `CreateDatum` gives `Référence.1` —
+   **the first datum created on this seat through automation, 2026-09-19.** Two earlier
+   readings of the refusal were wrong and are recorded so nobody repeats them: it was not
+   late/early binding, and it was not the datum rejecting its support. Form tolerances work
+   too: `CreateToleranceWithoutDRF(i, userSurface)` on a planar face gives 1 straightness,
+   3 flatness, 6 line profile, 7 surface profile; 2, 4, 5 and 8-16 refuse there.
+   `CreateToleranceWithDRF` refuses at **every** index, orientation and location included,
+   because `CreateDatumReferenceFrame()` makes an **empty** frame — filling its datum boxes
+   (the `ReferenceFrame` class) is the unmeasured next step. `part.UserSurfaces.Count` raises
+   on an empty collection; do not probe with it. What it does already show is that
    `interop.measure_metadata_round_trip`'s "names, colours, layers … all carry" is a statement
    about **OCCT talking to itself**, which is exactly the limit B5 was written to expose.
 

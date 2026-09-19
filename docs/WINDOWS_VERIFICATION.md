@@ -1178,6 +1178,35 @@ master plan's status line in the same commit.
       Until one of those works, **no datum or feature control frame has been created on a
       seat**, and E17.1's FTA item stays open.
 
+      **SOLVED 2026-09-19, afternoon: a datum and four form tolerances now exist on the seat.**
+      The discriminating probe was a *control*: `CreateText(face)` and `CreateFlagNote(face)`
+      refused exactly as `CreateDatum` did, so the refusal was never datum-specific — **every
+      `iSurf` parameter wants a `UserSurface`, not a `Reference`.** The library declares the
+      class and nothing declared who hands it out; `part.UserSurfaces` does, by analogy with
+      `part.AnnotationSets`. Then:
+
+          part.UserSurfaces.Generate(faceRef)        -> Surface utilisateur.1
+          AnnotationFactory.CreateDatum(userSurface) -> Référence.1
+          CreateDatumReferenceFrame()                -> Système de références.1
+          CreateToleranceWithoutDRF(i, userSurface):  1 Rectitude  3 Planéité
+                                                      6 Profil d'une ligne quelconque
+                                                      7 Profil d'une surface quelconque
+                                                      2, 4, 5, 8-16 refused on a plane
+
+      Saved as a 480 KB CATPart. The index sweep was over *values* on a signature whose *types*
+      were already read and correct — the `AddJoint` crash came from wrong types — and CATIA
+      survived all 32 calls. That 2, 4 and 5 refuse on a planar face is consistent with their
+      being the circular/cylindrical family, but that is an inference, not a measurement.
+      **Still open, and narrowed to one step**: `CreateToleranceWithDRF` refuses at *every*
+      index, orientation and location ones included, so the fault is the frame, not the
+      tolerance — `CreateDatumReferenceFrame()` returns an **empty** frame, and assigning
+      `Référence.1` to its first box (the `ReferenceFrame` class) is the next thing to read off
+      the type library. Until then no position or perpendicularity frame exists on a seat.
+      Two readings of this refusal earlier today were wrong — first "a binding conflict", then
+      "CATIA refuses it as a datum support" — and both are left above, marked, because the way
+      they were wrong is the lesson: **a control that shares the parameter but not the
+      semantics is what separates the two.**
+
       **A separate and real hazard found on the way** (now CLAUDE.md item 3c): generating
       `MecModInterfaces` so `Reference` would be an early-bound type **breaks
       `part.ShapeFactory.AddNewPad`**, because the wrapper types `ShapeFactory` to the base

@@ -1240,8 +1240,16 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
    `VT_BYREF|VT_BSTR`), and `Add("ISO")` creates `Annotations.1`; the container is
    **`part.AnnotationSets`** — not `GetTechnologicalObject`, and no `GetWorkbench` spelling —
    and it is invisible to late binding without `EnsureModule` on
-   `{88D26C84-D8E9-0000-0280-020CC3000000}`. `CreateDatumReferenceFrame()` works;
-   `CreateDatum`/`CreateToleranceWithDRF` refuse a late-bound `Reference`, which is item 3c. What it does already show is that
+   `{88D26C84-D8E9-0000-0280-020CC3000000}`. `CreateDatumReferenceFrame()` works, and
+   `TPSViewFactory.CreateView(planeRef, 0)` makes `Vue de face.1` and sets `ActiveView` —
+   an annotation needs a view, which is the precondition that is easy to miss. **What is
+   still unidentified is what `CreateDatum(iSurf)` will accept**: it answers
+   `Le type ne correspond pas` on argument 1 for a face `Reference` from
+   `Selection.Search("Topologie.Face,all")` *and* for a plane `Reference` — and **the very
+   same plane Reference is accepted by `CreateView`**, whose `iPlane` carries the identical
+   `(9, 1)` flag. So this is **not** a marshalling or binding problem (a first reading said
+   it was, wrongly); CATIA is refusing the object as a datum *support*, and what it wants
+   instead is not yet known. No datum has been created on a seat. What it does already show is that
    `interop.measure_metadata_round_trip`'s "names, colours, layers … all carry" is a statement
    about **OCCT talking to itself**, which is exactly the limit B5 was written to expose.
 
@@ -2130,10 +2138,11 @@ Server specs in `app/catia/tool_specs.py`, resolution in `app/catia_kb/ui.py`, d
    `part.ShapeFactory` a base `Factory` with **no `AddNewPad`**. Both caches are global, on
    disk, and consulted by every win32com process afterwards, the bridge included.
    **And you cannot simply generate everything**: FTA needs `CATTPSInterfaces` generated to
-   be visible at all, while `CreateDatum` refuses a *late-bound* `Reference` with "Le type ne
-   correspond pas" — so building geometry and annotating it want opposite binding modes in
-   one process. The answer is `win32com.client.CastTo` to the narrow interface at the call
-   site, never a process-wide switch; the bridge is late-bound by design.
+   be visible at all, while generating `MecModInterfaces` alongside it breaks the geometry
+   calls, so a process that both builds and annotates needs `win32com.client.CastTo` to the
+   narrow interface at the call site rather than a process-wide switch — the bridge is
+   late-bound by design. (`CreateDatum`'s own refusal is **not** an instance of this: it
+   rejects a Reference that a sibling method on the same library accepts. See the FTA entry.)
    Deleting the generated file restores late binding immediately, with no CATIA restart —
    `EnsureModule` writes one flat `.py` per library, `EnsureDispatch` a per-class
    *directory*. Verify with `Documents.Add("Part").Part` before trusting the seat again.

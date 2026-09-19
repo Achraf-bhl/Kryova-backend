@@ -1126,6 +1126,43 @@ master plan's status line in the same commit.
       export the part as STEP AP242 and the drawing as DXF from CATIA, and read both back with
       `app/manufacture/export.read_step` and ezdxf. Settles: E17.2's open item, and E17.1's FTA
       item (the leader attachment and the reserved table zones remain Linux work).
+
+      **THE EXPORT HALF IS DONE (2026-09-18, E17.2) AND THE FTA HALF IS MEASURED
+      (2026-09-19).** Export: STEP, IGES, STL and 3DXML from a part and DXF/DWG from a
+      drawing, all checked by their bytes — and it found that the bridge blamed a missing
+      licence for a wrong-kind document, on a seat that holds the licence.
+
+      **FTA is licensed, reachable, and the earlier probe failed on its signature exactly as
+      CLAUDE.md suspected.** Measured:
+
+      * **The container is `part.AnnotationSets`.** Not `GetTechnologicalObject` (that is on
+        `Product` and refuses this name there), and **no** `GetWorkbench` spelling works on a
+        PartDocument — `TPSWorkbench`, `TPSWorkBench`, `FTAWorkbench` and `TPS` are all
+        refused.
+      * **Late binding sees none of it**: it needs `EnsureModule` on **`CATIA V5
+        CATTPSInterfaces`, `{88D26C84-D8E9-0000-0280-020CC3000000}`** — the same trap sheet
+        metal and DMU Kinematics have, now three for three.
+      * **`AnnotationSets.Add(iStandard)` takes a STRING**, flags `((16392, 1),)` =
+        `VT_BYREF|VT_BSTR`. `Add("ISO")` creates `Annotations.1`. An integer there is the
+        "signature failure that reads like a licence failure" CLAUDE.md recorded — **it was
+        never a licence.**
+      * `AnnotationFactory` is reachable from the set, and **`CreateDatumReferenceFrame()`
+        works** with no arguments.
+
+      **What blocks the rest is a binding conflict, not a missing API — and that is the
+      finding worth carrying.** `CreateDatum(iSurf)` and `CreateToleranceWithDRF(iIndex,
+      iSurf, iDRF)` both want `(9, 1)` = `VT_DISPATCH`, and both refuse a Reference obtained
+      late-bound with *"Le type ne correspond pas"* (argument 1 and argument 2 respectively),
+      including one from `Selection.Search("Topologie.Face,all")` — which does find all six
+      faces. Generating `MecModInterfaces` so the `Reference` is a known type **then breaks
+      `part.ShapeFactory.AddNewPad`**, because the early wrapper types `ShapeFactory` to the
+      base `Factory`. So building the geometry and annotating it want *opposite* binding modes
+      in one process. That is the same shape as the INFITF hazard (`Documents.Add` losing
+      `.Part`) and it is now the second instance in one day.
+      **The route to try next is `win32com.client.CastTo`** on the narrower interface at each
+      call site, rather than choosing one binding mode for the whole daemon — the bridge is
+      late-bound by design and must stay so. Until that is written, **no datum or feature
+      control frame has been created on a seat**, and E17.1's FTA item stays open.
 - [x] **E8 — The undercut rule reads no scan through `POST /kernel/…/rules`.** **CLOSED
       2026-09-17: it was the adapter, and the effect was silent.**
       `catia_analysis_part` declares `direction` as an **origin plane** and this route's public

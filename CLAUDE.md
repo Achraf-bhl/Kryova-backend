@@ -1235,7 +1235,13 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
    the file but no such layer appears in CATIA. **Those three are "on this seat's default import
    settings", not proofs**: CATIA's STEP import options and its FTA licensing were not inspected,
    and an `AnnotationSets.Add()` probe failed on its *signature* rather than on a licence, so it
-   settled nothing. Worth ten minutes next seat session. What it does already show is that
+   settled nothing. **SETTLED 2026-09-19: it was never a licence.** FTA is licensed here.
+   `AnnotationSets.Add` takes its standard as a **string** (`((16392,1),)` =
+   `VT_BYREF|VT_BSTR`), and `Add("ISO")` creates `Annotations.1`; the container is
+   **`part.AnnotationSets`** — not `GetTechnologicalObject`, and no `GetWorkbench` spelling —
+   and it is invisible to late binding without `EnsureModule` on
+   `{88D26C84-D8E9-0000-0280-020CC3000000}`. `CreateDatumReferenceFrame()` works;
+   `CreateDatum`/`CreateToleranceWithDRF` refuse a late-bound `Reference`, which is item 3c. What it does already show is that
    `interop.measure_metadata_round_trip`'s "names, colours, layers … all carry" is a statement
    about **OCCT talking to itself**, which is exactly the limit B5 was written to expose.
 
@@ -2115,6 +2121,22 @@ Server specs in `app/catia/tool_specs.py`, resolution in `app/catia_kb/ui.py`, d
    `gen_py\<python version>F197B2-0771-11D1-A5B1-00A0C9575177x0x0x0`. Deleting it restores
    late binding immediately, with no CATIA restart. Verify with
    `Documents.Add("Part").Part is not None` before trusting the seat again.
+
+3c. **Generating a type library can BREAK calls that already worked, and it has twice.**
+   The mechanism is always the same: the early-bound wrapper types a member to a *base*
+   class that lacks what late binding reached. Measured 2026-09-18 and 2026-09-19 —
+   `EnsureDispatch("CATIA.Application")` (INFITF) makes `Documents.Add` return a base
+   `Document` with **no `.Part`**; `EnsureModule` on `MecModInterfaces` makes
+   `part.ShapeFactory` a base `Factory` with **no `AddNewPad`**. Both caches are global, on
+   disk, and consulted by every win32com process afterwards, the bridge included.
+   **And you cannot simply generate everything**: FTA needs `CATTPSInterfaces` generated to
+   be visible at all, while `CreateDatum` refuses a *late-bound* `Reference` with "Le type ne
+   correspond pas" — so building geometry and annotating it want opposite binding modes in
+   one process. The answer is `win32com.client.CastTo` to the narrow interface at the call
+   site, never a process-wide switch; the bridge is late-bound by design.
+   Deleting the generated file restores late binding immediately, with no CATIA restart —
+   `EnsureModule` writes one flat `.py` per library, `EnsureDispatch` a per-class
+   *directory*. Verify with `Documents.Add("Part").Part` before trusting the seat again.
 
 4. **Command labels are localised; internal command ids are not, and are undocumented.**
    `COMMAND_IDS` holds only ids with a published source. Do not add one from memory.

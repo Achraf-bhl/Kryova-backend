@@ -6904,7 +6904,10 @@ scene in the Tauri app.
    written down** (lost key = no more updates for installed apps, ever — key in a hardware token or
    sealed secret store, never CI plaintext); staged rollout channels (stable/beta); `latest.json` +
    signatures published per release (P9's pipeline builds it).
-   > NOT STARTED — blocked behind P9 task 4's finding.
+   > NOT STARTED — blocked behind **P9 task 5**'s finding: the MSI launches a dev server from
+   > checkout paths baked in at build time, so an update channel would ship an app that starts
+   > nothing on any machine but the one that built it. *(Pointer corrected 2026-09-19: this line
+   > said "P9 task 4", which is environments, and a session following it found nothing there.)*
 
 2. **The bridge, integrated**: the CATIA daemon (`scripts/catia_bridge/`) ships with/beside the
    desktop app on workstation installs; the `catia-bridge-panel` grows into a first-class status
@@ -7085,9 +7088,11 @@ scene in the Tauri app.
    > not know each other. NSIS is gone and `src/lib/desktop-bundle.test.ts` pins one Windows
    > installer and the fixed WiX `upgradeCode`. The stale 0.1.2 row on *this* machine remains
    > until someone runs its uninstaller and repairs the MSI.
-   > **Still not claimed**: that the installed app *starts* and reaches its setup page — that
-   > is P7 task 1, and it waits on the reboot Docker Desktop's WSL2 features staged in the
-   > same sitting.
+   > **Still not claimed**: that the installed app *starts* and reaches its setup page on a
+   > machine that did not build it — and **that is not a P7 task 1 question, as this line first
+   > said; it is P9 task 5's blocker.** Launching it on *this* machine would prove nothing: the
+   > MSI starts a dev server from checkout paths baked in at build time, and those paths exist
+   > here and nowhere else.
    > Code: `src-tauri/`, `scripts/desktop-build.mjs`.
 
    <!-- superseded 2026-09-18 -->

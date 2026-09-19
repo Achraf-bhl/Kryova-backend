@@ -1162,11 +1162,19 @@ master plan's status line in the same commit.
       library, two methods, one object: the marshalling is fine, and CATIA is refusing the
       object as a datum *support*. `CreateToleranceWithDRF` refuses the same way on its
       `iSurf` (argument 2). Creating the view first was necessary and is not sufficient.
-      **What to try next**, in order: a `Reference` from `CreateReferenceFromBRepName` against
-      a real BRep name read off the part rather than a synthesised one; `CreateDatumTarget`
-      and `CreateEvoluateDatum`, which take a surface plus coordinates and may want a
-      different support; and the Win32 bridge driving the interactive Datum command, which is
-      what `app/catia_kb/ui.py` exists for when COM will not.
+      **The first route on the list was tried and is closed too.** A `Reference`'s own
+      `DisplayName` comes back as
+      `Selection_RSur:(Face:(Brp:(Pad.1;2);None:();Cf14:());Pad.1_ResultOUT;Z0;G10904)`, and
+      handing it back to `CreateReferenceFromBRepName` fails — with and without the
+      `Selection_` prefix. So **a BRep name CATIA prints is not one CATIA will read back**;
+      the trailing `Z0;G10904` looks session-scoped. That is worth knowing on its own, well
+      beyond FTA: anything that stores a face reference as a string and expects to resolve it
+      later is building on sand, which is exactly why `app/kernel/occt/naming.py` exists and
+      why region selection here is by geometric selector and never by face id.
+      **What is left to try**: `CreateDatumTarget` and `CreateEvoluateDatum`, which take a
+      surface plus coordinates and may want a different support; and the Win32 bridge driving
+      the interactive Datum command, which is what `app/catia_kb/ui.py` exists for when COM
+      will not.
       Until one of those works, **no datum or feature control frame has been created on a
       seat**, and E17.1's FTA item stays open.
 

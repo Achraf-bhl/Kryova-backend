@@ -15,6 +15,57 @@ happened.
 
 ## Now
 
+> **Continuation, 2026-09-19 04:00 — a seat day. E6's reading half is built, E7's FTA
+> licensing is settled, and the board is 90.0%.**
+> **This machine holds the chain.** The user's instruction of 2026-09-19 is to **keep testing
+> on CATIA** and drive the plan closer to 100%.
+> **Next continuation fires: 2026-09-19 06:35.**
+> **A one-shot cron fires only while the REPL is idle.** The 2026-09-18 05:44 job never fired —
+> its slot passed mid-turn, and a passed date never comes round again. **`CronList` first on
+> every wake**, and reschedule if the pending time has gone by. Four misses so far; this is the
+> one failure mode that ends the chain silently.
+> **Board: 22/34 phases · 175.5/195 tasks = 90.0% · 171.0/189 eng-months = 90.5%.** Suite
+> **10,634 passed / 38 skipped / 1 xpassed / 0 failed** in 10 min 28 s; `ruff`, `mypy`
+> (494 files) and `app.verify.recorded --check` all clean.
+>
+> **Closed this turn:** `db88b2f` (E9.2 / QUEUE E6's reading half, 21 tests), `16fcdc6` +
+> `9ed2863` + `d3bca87` + `704c582` (QUEUE E7's FTA measurement and its correction),
+> `fa3b6eb` (E17.1's status), `6fd065d` (the last 26 stale "never run" claims).
+>
+> **Four findings worth carrying.** (1) **`GetConstraintElement(n)` is a method**, not the
+> properties `ConstraintElement1/2` — reading those as absent led to a wrong conclusion that
+> the next type-library read overturned. (2) **`GetConstraintVisuLocation` is a zero vector**,
+> so a joint axis is genuinely absent from a constraint and must not be defaulted. (3) **FTA
+> was never a licence** — `AnnotationSets.Add` wants a *string*, and an annotation needs a TPS
+> view. (4) **A BRep name CATIA prints cannot be read back** by
+> `CreateReferenceFromBRepName`; the trailing `Z0;G10904` is session-scoped, which is CATIA
+> confirming from its own side why this codebase never stores a face id.
+>
+> **Next targets, in order:**
+> (1) **THE QUEUE E2 — gate G1 through the GUI.** Now the oldest untaken item by a wide
+>     margin, and the only one that tests the *product* rather than a tool. Needs the server
+>     (which spawns its own bridge daemon — do not start it while a pytest runs) and Edge over
+>     CDP. One prompt per level, a screenshot every time, no moving up until a level passes.
+> (2) **E7's remaining two routes for a datum**: `CreateDatumTarget` / `CreateEvoluateDatum`,
+>     then the Win32 bridge driving the interactive command. Everything else about FTA works.
+> (3) **THE QUEUE E6's engine half** — building and driving a mechanism. ⚠ `AddJoint` killed
+>     the seat once; its flags are a string and an array of doubles. `AssemblyConvertor` is
+>     **not** the constraints conversion (it is the BOM/print convertor), so the conversion
+>     command is still unlocated over COM and the Win32 bridge is the route to try.
+> (4) **THE QUEUE E5 — E15.4 crash recovery**: kill `CNEXT.exe` mid-plan and write the path
+>     that recovers. Do this last in a turn; it costs the seat.
+> (5) **P6's measurement half** — FMP under 2 s and 30 fps on the 2,000-part scene. Browser,
+>     not vitest. Step 2b needs a mid-range laptop this workstation is not.
+> (6) **P4.6's drag-and-drop**, which still reaches only the geometry path.
+> (7) **E13.2 / E8.3** — both end in a document; check outbound network before planning a turn
+>     around either.
+>
+> **Not takeable by any machine, and saying so is the honest answer:** E21's five and E23's two
+> are document purchases, vendor licence forms and questions for counsel — about seven of the
+> ~19 task-halves left. Installing the MSI needs elevation no automated session can answer
+> (P7.1 and P9.4 wait behind it). Docker is not installed here, so P9.3 and QUEUE F1 are
+> blocked on the user's decision to install it.
+
 > **Continuation, 2026-09-18 03:00 — E1, E10, E4 and E17.2 settled; the board is 90.0%.**
 > **This machine holds the chain.** Linux stopped scheduling on 2026-09-16; Windows runs
 > `pytest`, `ruff` and `mypy` and schedules its own next turn. The user's instruction of
@@ -459,6 +510,40 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-19 (early hours) — a seat day: E6's reading half built, E7's FTA licensing settled,
+  and a conclusion of my own corrected within the hour.** Board **22/34 phases · 175.5/195 =
+  90.0%**.
+  **E9.2 / THE QUEUE E6** (`db88b2f`): `app/dynamics/catia_constraints.py` — CATIA's assembly
+  constraints read as joint declarations, the input E9.2 has taken by hand since it was
+  written. **The first sitting concluded the operands were unreadable and was wrong**:
+  `ConstraintElement1`/`2` are property names that do not exist, and the real member is the
+  method `GetConstraintElement(n)`, declared in `MecModInterfaces`. `DisplayName` then gives
+  `'E6Rig/E6Base.1/!E6Base/Plan xy'` — the occurrence path **and** the geometry. But
+  `GetConstraintVisuLocation` returns a **zero vector**: it is the glyph's location, not the
+  joint's axis, so `read_constraints` refuses a moving joint with no axis rather than
+  defaulting to +Z. 21 tests, guard verified by breaking it.
+  **THE QUEUE E7** (`16fcdc6`, `9ed2863`, `d3bca87`, `704c582`): **FTA is licensed and it was
+  never a licence.** `AnnotationSets.Add` takes its standard as a **string** — `Add("ISO")`
+  gives `Annotations.1` — the container is `part.AnnotationSets` (no `GetWorkbench` spelling
+  works), and it is invisible to late binding without `EnsureModule` on
+  `{88D26C84-D8E9-0000-0280-020CC3000000}`, the third API here with that trap.
+  `CreateView(planeRef, 0)` makes `Vue de face.1` and sets `ActiveView` — an annotation needs
+  a view.
+  **And the correction that matters**: I wrote, and committed, that `CreateDatum` refused its
+  surface because of a late-bound/early-bound conflict. The next measurement refuted it —
+  `CreateView` accepts the **identical** Reference through a parameter with the **identical**
+  `(9,1)` flag. So CATIA is refusing the object as a datum *support*, not failing to marshal
+  it. Two of the three routes out are now closed as well: a `Reference`'s own `DisplayName`
+  (`…;Z0;G10904`) **cannot be read back** by `CreateReferenceFromBRepName`, which is a fact
+  worth more than FTA — anything storing a face reference as a string and resolving it later
+  is building on sand, exactly why selection here is by geometric selector and never by face id.
+  **The bookkeeping** (`6fd065d`): the last **26** "tests written on Linux and not run" claims,
+  which survived two earlier sweeps because the phrase wraps across quoted lines. P4.6's was
+  spot-checked against `git log --all` first, since the 2026-09-17 audit proved a status can
+  name a file that never existed — this one is real and its 9 tests pass.
+  **Two hazards created and undone**: `EnsureModule` on `MecModInterfaces` breaks
+  `ShapeFactory.AddNewPad` the way `EnsureDispatch` on INFITF breaks `Documents.Add`. Every
+  library generated today was removed and the seat re-checked.
 - **2026-09-18 (early hours) — THE QUEUE E1, E10 and E4 settled, E17.2 closed on the seat, and
   twenty-four stale "never run" claims corrected.** Board **22/34 phases · 175.5/195 tasks =
   90.0% · 171.0/189 eng-months = 90.5%**.

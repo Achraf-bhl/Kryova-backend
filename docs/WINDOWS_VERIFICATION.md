@@ -1197,11 +1197,28 @@ master plan's status line in the same commit.
       were already read and correct — the `AddJoint` crash came from wrong types — and CATIA
       survived all 32 calls. That 2, 4 and 5 refuse on a planar face is consistent with their
       being the circular/cylindrical family, but that is an inference, not a measurement.
-      **Still open, and narrowed to one step**: `CreateToleranceWithDRF` refuses at *every*
-      index, orientation and location ones included, so the fault is the frame, not the
-      tolerance — `CreateDatumReferenceFrame()` returns an **empty** frame, and assigning
-      `Référence.1` to its first box (the `ReferenceFrame` class) is the next thing to read off
-      the type library. Until then no position or perpendicularity frame exists on a seat.
+      **And the last step closed the same afternoon: a POSITION frame referencing datum A.**
+      `CreateToleranceWithDRF` refused at every index because `CreateDatumReferenceFrame()`
+      returns an *empty* frame. The datum carries its letter (`datum.DatumSimple().Label` →
+      `'A'`), and `drf.ReferenceFrame().SetFrame('A', '', '')` — three strings, flags
+      `((16392,1),(16392,1),(16392,1))`, read before calling — fills the first box. Then:
+
+          CreateToleranceWithDRF(i, userSurface, drf):  3 Parallélisme   4 Localisation (position)
+                                                        7 Localisation ligne quelconque
+                                                        8 Localisation surface quelconque
+                                                        1, 2, 5, 6, 9-16 refused here
+
+      Saved as a 489 KB CATPart. **The index is per family, not global**: `3` is flatness
+      without a frame and parallelism with one, so a table keyed on the number alone would put
+      the wrong symbol on a drawing and nothing would error.
+      **This row's measurement half is done** — "one datum and one position frame on the
+      bracket through FTA" is exactly what now exists. **What is not done is the bridge
+      side**: none of this is an operation the agent can call, and the whole chain needs
+      `CATTPSInterfaces` generated, which CLAUDE.md item 3c says to do by `EnsureModule` on
+      that library alone. The full recipe, in order: `part.AnnotationSets.Add("ISO")` →
+      `TPSViewFactory.CreateView(planeRef, 0)` → `part.UserSurfaces.Generate(faceRef)` →
+      `CreateDatum(us)` → `DatumSimple().Label` → `CreateDatumReferenceFrame()` →
+      `ReferenceFrame().SetFrame(label, "", "")` → `CreateToleranceWithDRF(4, us2, drf)`.
       Two readings of this refusal earlier today were wrong — first "a binding conflict", then
       "CATIA refuses it as a datum support" — and both are left above, marked, because the way
       they were wrong is the lesson: **a control that shares the parameter but not the

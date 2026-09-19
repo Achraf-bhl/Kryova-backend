@@ -3631,10 +3631,14 @@ here"* has an answer in six months — from the artefact.
    > `CreateToleranceWithoutDRF` gives straightness, flatness and both profiles (indices 1, 3,
    > 6, 7). A control settled it: plain text and a flag note refused exactly as the datum did,
    > so the refusal was never about datums. Two earlier readings (binding; the datum rejecting
-   > its support) were wrong and are marked in THE QUEUE E7. **What remains is one step**:
-   > `CreateToleranceWithDRF` refuses at every index because `CreateDatumReferenceFrame()`
-   > returns an *empty* frame, so no position or perpendicularity frame exists yet — and
-   > none of it is a bridge operation yet. So this stays PARTIAL.
+   > its support) were wrong and are marked in THE QUEUE E7. **And a position frame referencing datum A
+   > exists too**: the frame comes back empty, `datum.DatumSimple().Label` gives `'A'`, and
+   > `ReferenceFrame().SetFrame('A', '', '')` fills it — after which `CreateToleranceWithDRF`
+   > gives parallelism (3), **position (4)** and both profiles (7, 8). The index is per family,
+   > not global (`3` is flatness without a frame, parallelism with one). **So CATIA FTA is
+   > measured end to end on the seat; what is not done is making it a bridge operation**, and
+   > the leader-attachment and reserved-table-zone items above are Linux-side work that is
+   > unchanged. So this stays PARTIAL.
    > **Tests run on this machine 2026-09-17/18 and green**; they were written on Linux under
    > the no-pytest rule. Tested by: `tests/test_manufacture_drawing_tables.py`, and the files
    > below.

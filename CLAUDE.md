@@ -1251,9 +1251,11 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
    late/early binding, and it was not the datum rejecting its support. Form tolerances work
    too: `CreateToleranceWithoutDRF(i, userSurface)` on a planar face gives 1 straightness,
    3 flatness, 6 line profile, 7 surface profile; 2, 4, 5 and 8-16 refuse there.
-   `CreateToleranceWithDRF` refuses at **every** index, orientation and location included,
-   because `CreateDatumReferenceFrame()` makes an **empty** frame — filling its datum boxes
-   (the `ReferenceFrame` class) is the unmeasured next step. `part.UserSurfaces.Count` raises
+   `CreateToleranceWithDRF` refuses at **every** index until the frame is filled —
+   `CreateDatumReferenceFrame()` makes it **empty**. `ReferenceFrame().SetFrame(label, "", "")`
+   with the datum's `DatumSimple().Label` (`'A'`) fills it, and then 3 parallelism,
+   **4 position**, 7 and 8 profiles work. **The index is per family**: 3 is flatness without a
+   frame and parallelism with one, so never key a symbol on the number alone. `part.UserSurfaces.Count` raises
    on an empty collection; do not probe with it. What it does already show is that
    `interop.measure_metadata_round_trip`'s "names, colours, layers … all carry" is a statement
    about **OCCT talking to itself**, which is exactly the limit B5 was written to expose.

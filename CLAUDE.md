@@ -1030,11 +1030,15 @@ right tag.
 
 **Read only the files you need.** `rg` to locate first; avoid loading large files wholesale.
 
-**There is no outbound network from this machine.** `curl https://ntrs.nasa.gov/` times out
-(measured 2026-09-16). So every plan task whose remainder is "fetch the page", "read the
-judgement", "ask the vendor's form" is not a Linux task however much it looks like one —
-E21.5, E21.6, E23.1 and E23.4 are all in that state and were taken and returned once. Check
-before planning a turn around one.
+**There is no outbound network from the LINUX machine** — `curl https://ntrs.nasa.gov/` times
+out there (measured 2026-09-16) — **and there is one from this Windows seat**: `eur-lex.europa.eu`
+answers 200, and `iso.org` answers 403, which is a bot block rather than a dead connection
+(measured 2026-09-20). The distinction matters because this file is read on both machines and
+the sentence used to name neither: a task whose remainder is "fetch the page" or "read the
+judgement" is **not a Linux task and may well be a Windows one**. Check which machine you are
+on before parking one. What network does *not* buy: a purchase (MMPDS is $939 a volume), a
+vendor's licence form, or a judgement the design deliberately refuses to compute — E23 task 2
+owes its first verdict "by a person", and that is the design, not a gap.
 
 **`venv/bin/python -m scripts.scan_secrets` is a blocking CI step, and it will catch your test
 fixtures.** A connection URL with a reachable-looking host, or anything shaped like an issued

@@ -1278,7 +1278,25 @@ master plan's status line in the same commit.
 > property.
 > **After the reboot**, F1 below is takeable and so is P9 task 3's image build.
 
-- [ ] **F1 — The OpenFOAM flow run through Docker Desktop (E10.2, added 2026-09-14).** On Linux,
+- [x] **F1 — The OpenFOAM flow run through Docker Desktop (E10.2, added 2026-09-14).**
+      **MEASURED 2026-09-19 — it runs on Windows, and all three things that differ there hold.**
+      `opencfd/openfoam-default:2412` pulled in 60 s (2.18 GB,
+      `sha256:1ba02114…`). **Every real-engine class passes, and none skipped** — 13 tests:
+      Hagen–Poiseuille and the isothermal Graetz Nusselt number on the pipe (23.6 s), the
+      uniform-flux Nusselt number and its energy balance (26.0 s), the square duct against the
+      series solution (34.0 s), and the whole job path, `TestAFlowRunThroughTheRealEngine`
+      (7.5 s). The wider selection is **87 passed, 0 skipped**; a skip would have been the
+      symptom, so the count was the point.
+      What the three construction differences turned out to be: **the Windows path mount**
+      (`-v C:\…:/case`) works as written; **there is no `os.getuid`, so no `--user`**, and the
+      container runs as **uid 0** — measured with `id -u`; **`Allrun` arrives with LF endings**
+      and runs. The question the row ended on — *can the server delete a finished case?* — was
+      measured directly rather than inferred from pytest's silent temp cleanup: a file the
+      container wrote as root into a Windows bind mount is removed by the host's
+      `shutil.rmtree` without complaint, because Docker Desktop does not carry the container's
+      ownership back to NTFS. So running as root costs nothing *here*; on a Linux host it would,
+      and that is why `run.py` passes `--user` wherever `getuid` exists.
+      **Original entry follows.** On Linux,
       `tests/test_solver_openfoam.py` runs the whole path against `opencfd/openfoam-default:2412`
       and agrees with Hagen–Poiseuille, the rectangular-duct series and both Graetz limits;
       `tests/test_simulations.py::TestAFlowRunThroughTheRealEngine` runs it through the job.

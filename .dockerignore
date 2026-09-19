@@ -1,0 +1,33 @@
+# What `docker build .` must not send (master plan P9 task 3, added 2026-09-19).
+#
+# There was no .dockerignore until the first Windows build, so the build context was the
+# whole checkout — including a Windows virtualenv that cannot run in a Linux image, every
+# __pycache__, and .git. The Dockerfile COPYs only app/, migrations/, scripts/ and data/,
+# so none of these reached the image; they only made every build ship them to the daemon.
+#
+# data/bm25/ is excluded, and that is a decision, not hygiene. Measured 2026-09-19 on the
+# first image built on Windows: `COPY data ./data` put 25 third-party PDFs (462 MB) into
+# the image, several with `z-library` in the filename — shadow-library copies of commercial
+# books. A pushed image redistributes whatever it carries (CLAUDE.md "Known landmines"
+# item 1). Excluding is the reversible direction — delete this line to ship them — and
+# shipping is not, so the default is out. The derived index goes too: it is untracked, so
+# no CI build has it anyway, and it holds the books' text. `search_documentation` is gated
+# on the index existing, so the tool is simply not offered — honest degradation, nothing
+# half-works. data/verify/ stays: the trust page publishes from it.
+data/bm25/
+
+.git
+.gitignore
+venv/
+.venv/
+**/__pycache__/
+**/*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.env
+.env.local
+*.log
+node_modules/
+tests/
+docs/

@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 16/24 | 124/133 = 93% | 140/151 eng-months = 93% |
-| Product — P1–P10 | 6/10 | 52/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 22/34 | 176/195 = 90% | 171/189 eng-months = 91% |
+| Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
+| **Programme** | 22/34 | 176/195 = 91% | 172/189 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 57% |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -7079,7 +7079,12 @@ scene in the Tauri app.
    > identical "Kryova" rows with no way to tell which is live. **This is a packaging defect,
    > not an artefact of this machine**: any seat that ever installed the NSIS bundle will do
    > the same. The fix is a WiX `MajorUpgrade`/`UpgradeCode` that also detects and removes the
-   > NSIS registration, and it belongs to P9 task 4's release checklist.
+   > NSIS registration, and it belongs to P9 task 5, the desktop release pipeline. **Fixed at the root on
+   > 2026-09-19** (`../Kryova-frontend`, `src-tauri/tauri.conf.json`): the bundle listed both
+   > `msi` and `nsis`, both per-machine into one directory — two installer technologies that do
+   > not know each other. NSIS is gone and `src/lib/desktop-bundle.test.ts` pins one Windows
+   > installer and the fixed WiX `upgradeCode`. The stale 0.1.2 row on *this* machine remains
+   > until someone runs its uninstaller and repairs the MSI.
    > **Still not claimed**: that the installed app *starts* and reaches its setup page — that
    > is P7 task 1, and it waits on the reboot Docker Desktop's WSL2 features staged in the
    > same sitting.
@@ -7226,6 +7231,37 @@ scene in the Tauri app.
 3. **Backend images that carry the fleet**: containers with OCCT + gmsh + CalculiX + (later) Chrono
    pinned — the determinism substrate (E1 task 7) and the deploy artefact are the same thing. GPL
    components live in their own layers/processes per Decision 4.
+   > DONE (2026-09-19) — **built on the Windows seat, and it passes its own health check for
+   > the first time.** Docker Desktop was installed at the user's keyboard the same day, so the
+   > image was built here rather than waiting on a nightly: **150 s**, and
+   > `python -m scripts.container_health` inside it answers `ok calculix /usr/bin/ccx`,
+   > `ok gmsh 4.15.2`, `ok occt 7.9.3.1` — the `libgomp1` fix holds. Beyond the health check,
+   > **the whole application imports inside the image** and builds its OpenAPI document
+   > (**147 paths**), which is where the next missing shared object would have surfaced.
+   >
+   > **Building it found two things, and one of them is the user's decision.**
+   > 1. **There was no `.dockerignore`**, so `docker build .` sent the whole checkout: a Windows
+   >    virtualenv that cannot run in a Linux image, `.git`, and `.env`/`.env.local` carrying
+   >    the database password. The Dockerfile's `COPY`s are selective, so none reached the
+   >    image — they only travelled to the daemon on every build. Now excluded.
+   > 2. **`COPY data ./data` put 25 third-party PDFs (462 MB) into the image, several with
+   >    `z-library` in the filename** — shadow-library copies of commercial books. A pushed image
+   >    redistributes whatever it carries (CLAUDE.md *Known landmines* item 1). `data/bm25/` is
+   >    now excluded as the **reversible default** — one line to delete to ship them, whereas
+   >    shipping cannot be undone — and the image fell from **3.70 GB to 2.85 GB**, with health
+   >    and the full import still green. `search_documentation` is gated on the index existing,
+   >    so the tool is simply not offered in the image. **Whether the product ships the manuals,
+   >    only a derived index, or neither is the user's call**; the default only stops it
+   >    happening by accident. `data/verify/` still ships, because the trust page publishes
+   >    from it, and a test holds both halves of that.
+   > **Not claimed**: that a container *serves* against a database (it was run as a health
+   > check and an import, not as a deployment), and Chrono, which the task marks "(later)" and
+   > which has its own image. Verified by breaking it: removing the `data/bm25/` line fails
+   > `test_the_manuals_do_not_ship_in_the_image`.
+   > Tested by: `tests/test_delivery.py::TestTheBuildContext` (6), `::TestTheContainerHealthCheck`,
+   > `::TestTheDockerfile`. Code: `Dockerfile`, `.dockerignore`, `scripts/container_health.py`.
+
+   <!-- superseded 2026-09-19 -->
    > PARTIAL (2026-09-15) — everything the superseded status below records, **plus the first
    > thing the nightly build found.** Run 34822694239 (2026-09-14) built the image and its health
    > check failed honestly: `gmsh will not import: libgomp.so.1: cannot open shared object file`.
@@ -7334,6 +7370,10 @@ scene in the Tauri app.
    > frontend statically and packaging the backend (task 3), not with a release workflow. Meanwhile
    > `../Kryova-frontend/.github/workflows/desktop.yml` type-checks the Rust shell on Windows
    > (`workflow_dispatch` only, no artefact, gates nothing) so `src-tauri/` cannot rot silently.
+   > **Still BLOCKED for that reason, with one release defect removed on 2026-09-19**: the
+   > bundle shipped both an MSI and an NSIS installer into one directory, and installing one
+   > over the other left two uninstall entries (found by P7.5's first real install). The bundle
+   > now builds the MSI only, pinned by `../Kryova-frontend/src/lib/desktop-bundle.test.ts`.
 
 6. **Backups and restore *drills***: PITR verified by actually restoring; blob-store backup with
    refcount integrity check; a written RTO/RPO and a quarterly drill that proves it.

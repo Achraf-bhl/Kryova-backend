@@ -3625,13 +3625,16 @@ here"* has an answer in six months — from the artefact.
    > creates `Annotations.1`, the container is `part.AnnotationSets` (not
    > `GetTechnologicalObject`, and no `GetWorkbench` spelling), and it is invisible to late
    > binding without `EnsureModule` on `{88D26C84-D8E9-0000-0280-020CC3000000}`.
-   > `CreateDatumReferenceFrame()` works. **What still blocks a frame on the part is a binding
-   > conflict rather than a missing API**: `CreateDatum` and `CreateToleranceWithDRF` refuse a
-   > late-bound `Reference`, and generating the library that would type it breaks
-   > `ShapeFactory.AddNewPad` — building geometry and annotating it want opposite binding modes
-   > in one process. `CastTo` at the call site is the route; until it is written **no datum has
-   > been created on a seat**, so this task stays PARTIAL with a named route instead of a
-   > suspicion.
+   > `CreateDatumReferenceFrame()` works. **What still blocks a frame is what `CreateDatum(iSurf)` will
+   > accept, and it is not a binding problem**: it refuses a face `Reference` *and* a plane
+   > `Reference` with "Le type ne correspond pas", while the **identical** plane Reference is
+   > accepted by `CreateView`, whose parameter carries the same `(9, 1)` flag — one library,
+   > two methods, one object, so CATIA is refusing the object as a datum *support* rather
+   > than failing to marshal it. `TPSViewFactory.CreateView(planeRef, 0)` does work and sets
+   > `ActiveView` (an annotation needs a view), so that precondition was necessary and is not
+   > sufficient. Next: a `Reference` from a real BRep name, `CreateDatumTarget` /
+   > `CreateEvoluateDatum`, or the Win32 bridge driving the interactive command. Until one
+   > works **no datum has been created on a seat**, so this stays PARTIAL.
    > **Tests run on this machine 2026-09-17/18 and green**; they were written on Linux under
    > the no-pytest rule. Tested by: `tests/test_manufacture_drawing_tables.py`, and the files
    > below.

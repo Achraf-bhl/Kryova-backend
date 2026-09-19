@@ -1149,20 +1149,34 @@ master plan's status line in the same commit.
       * `AnnotationFactory` is reachable from the set, and **`CreateDatumReferenceFrame()`
         works** with no arguments.
 
-      **What blocks the rest is a binding conflict, not a missing API — and that is the
-      finding worth carrying.** `CreateDatum(iSurf)` and `CreateToleranceWithDRF(iIndex,
-      iSurf, iDRF)` both want `(9, 1)` = `VT_DISPATCH`, and both refuse a Reference obtained
-      late-bound with *"Le type ne correspond pas"* (argument 1 and argument 2 respectively),
-      including one from `Selection.Search("Topologie.Face,all")` — which does find all six
-      faces. Generating `MecModInterfaces` so the `Reference` is a known type **then breaks
-      `part.ShapeFactory.AddNewPad`**, because the early wrapper types `ShapeFactory` to the
-      base `Factory`. So building the geometry and annotating it want *opposite* binding modes
-      in one process. That is the same shape as the INFITF hazard (`Documents.Add` losing
-      `.Part`) and it is now the second instance in one day.
-      **The route to try next is `win32com.client.CastTo`** on the narrower interface at each
-      call site, rather than choosing one binding mode for the whole daemon — the bridge is
-      late-bound by design and must stay so. Until that is written, **no datum or feature
-      control frame has been created on a seat**, and E17.1's FTA item stays open.
+      * **An annotation needs a view, and that is the precondition that is easy to miss.**
+        `TPSViewFactory.CreateView(planeReference, 0)` creates `Vue de face.1` and sets
+        `AnnotationSet.ActiveView` — which *raises* before a view exists, then answers it.
+
+      **What is still unidentified is what `CreateDatum(iSurf)` will accept, and it is NOT a
+      binding problem.** A first reading of this said it was, and the next measurement
+      refuted it: `CreateDatum` answers *"Le type ne correspond pas"* on argument 1 for a face
+      `Reference` from `Selection.Search("Topologie.Face,all")` (which finds all six faces)
+      **and** for a plane `Reference` — while **the identical plane Reference is accepted by
+      `CreateView`**, whose `iPlane` carries the same `(9, 1)` = `VT_DISPATCH` flag. One
+      library, two methods, one object: the marshalling is fine, and CATIA is refusing the
+      object as a datum *support*. `CreateToleranceWithDRF` refuses the same way on its
+      `iSurf` (argument 2). Creating the view first was necessary and is not sufficient.
+      **What to try next**, in order: a `Reference` from `CreateReferenceFromBRepName` against
+      a real BRep name read off the part rather than a synthesised one; `CreateDatumTarget`
+      and `CreateEvoluateDatum`, which take a surface plus coordinates and may want a
+      different support; and the Win32 bridge driving the interactive Datum command, which is
+      what `app/catia_kb/ui.py` exists for when COM will not.
+      Until one of those works, **no datum or feature control frame has been created on a
+      seat**, and E17.1's FTA item stays open.
+
+      **A separate and real hazard found on the way** (now CLAUDE.md item 3c): generating
+      `MecModInterfaces` so `Reference` would be an early-bound type **breaks
+      `part.ShapeFactory.AddNewPad`**, because the wrapper types `ShapeFactory` to the base
+      `Factory` — the same shape as the INFITF hazard, and the reason a daemon that both
+      builds and annotates needs `CastTo` at the call site rather than one binding mode for
+      the whole process. It is *not*, as first written, the cause of `CreateDatum`'s refusal.
+
 - [x] **E8 — The undercut rule reads no scan through `POST /kernel/…/rules`.** **CLOSED
       2026-09-17: it was the adapter, and the effect was silent.**
       `catia_analysis_part` declares `direction` as an **origin plane** and this route's public

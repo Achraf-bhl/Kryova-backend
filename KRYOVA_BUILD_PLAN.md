@@ -15,6 +15,56 @@ happened.
 
 ## Now
 
+> **Continuation, 2026-09-19 04:30 — DOCKER AND THE MSI ARE INSTALLED, AND THE MACHINE IS
+> ABOUT TO REBOOT.** Board **22/34 phases · 176.0/195 tasks = 90.3% · 171.3/189 eng-months =
+> 90.7%**.
+>
+> **READ THIS FIRST IF YOU ARE A FRESH SESSION AFTER THE REBOOT.** The cron chain is **dead**:
+> jobs live in the session's memory and the reboot ends them. Nothing is scheduled. Re-arm it
+> per CLAUDE.md's *"Ending every turn"* once you have a target.
+>
+> **What the reboot was for.** The user cleared both elevation blockers at the keyboard on
+> 2026-09-19, so two items that were "not takeable by any machine" are now takeable:
+> * **Docker Desktop 4.91.0** is installed, CLI **29.8.0** at
+>   `C:\Program Files\Docker\Docker\resources\bin\docker.exe`. **WSL was not installed on this
+>   machine at all** (`wsl.exe` ships with Windows; the subsystem did not), so
+>   `wsl --install --no-distribution` ran first and left CBS `RebootPending` true. Until the
+>   reboot, `wsl --status` says virtualisation is not enabled. Firmware virtualisation *is* on.
+>   **Trap:** `Win32_ComputerSystem.HypervisorPresent` was already `True` beforehand and means
+>   nothing here — ask `wsl --status`.
+> * **Kryova 0.2.0 is installed** at `C:\Program Files\Kryova\kryova.exe`, closing **P7.5** —
+>   and installing it found what building it could not: **two uninstall entries from two
+>   installer technologies pointing at one directory** (0.1.2 NSIS `uninstall.exe`, 0.2.0
+>   `MsiExec /X{C7DA910E-…}`). A packaging defect for P9.4's release checklist, not an artefact
+>   of this machine.
+>
+> **First things after the reboot, in order:**
+> 1. `wsl --status` and `docker version` — confirm the daemon starts. Docker Desktop may need
+>    launching once (`C:\Program Files\Docker\Docker\Docker Desktop.exe`) and it prompts for
+>    its licence terms on first run.
+> 2. **THE QUEUE F1 — the OpenFOAM flow run**, which has never run on Windows. Three things
+>    differ there by construction: the mount is a Windows path, there is no `os.getuid`, and
+>    `Allrun` must arrive with LF endings. `docker pull opencfd/openfoam-default:2412`, then
+>    `pytest tests/test_solver_openfoam.py tests/test_simulations.py -k Flow` — **the
+>    Docker-backed classes skip when the image is absent, and a skip is not a pass.**
+> 3. **P9 task 3's image build**, whose last nightly failed honestly on `libgomp.so.1`; nothing
+>    has built the image since that fix.
+> 4. **P7 task 1** — does the installed app start and reach its setup page? It is what the
+>    install unblocked. Postgres does not survive a reboot; the server starts it itself from
+>    lifespan, but `pytest` needs it up first
+>    (`C:\Users\achra\pg\pgsql\bin\pg_ctl.exe -D C:\Users\achra\pgdata start`).
+> 5. **THE QUEUE E2 — gate G1 through the GUI**, still the oldest untaken item and the only one
+>    that tests the product rather than a tool. CATIA must be restarted for it.
+> 6. **E7's last two routes for a datum** (`CreateDatumTarget`, `CreateEvoluateDatum`, then the
+>    Win32 bridge) and **E6's engine half**.
+>
+> **State at the reboot:** suite **10,634 passed / 38 skipped / 1 xpassed / 0 failed**;
+> `ruff`, `mypy` (494 files), `app.verify.recorded --check`, `tsc` and `eslint` all clean;
+> frontend 583 tests across 48 files. Working tree clean, everything pushed to `main`.
+>
+> **Still not takeable by any machine:** E21's five and E23's two — document purchases, vendor
+> licence forms and questions for counsel, about seven of the ~19 task-halves left.
+
 > **Continuation, 2026-09-19 04:00 — a seat day. E6's reading half is built, E7's FTA
 > licensing is settled, and the board is 90.0%.**
 > **This machine holds the chain.** The user's instruction of 2026-09-19 is to **keep testing

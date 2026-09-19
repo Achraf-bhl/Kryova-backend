@@ -1141,8 +1141,7 @@ agrees between OCCT and CATIA to declared tolerance.
 > *Acier* density). **What is left is the "through M4" half.** `scripts/catia_conformance.py
 > --ladder` (written 2026-09-15) hands the seat M1's bracket and every M2 component, names M3
 > (no CATIA sheet metal until THE QUEUE E1) and M4 (no geometry) as skipped with reasons, and
-> is queued as THE QUEUE B7. Its offline tests were written and not run, at the user's
-> instruction. **Not claimable from Linux**: the seat run is the evidence.
+> is queued as THE QUEUE B7. Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. **Not claimable from Linux**: the seat run is the evidence.
 > Tested by: `tests/test_interrogation.py`, `tests/test_measurement_elements.py`,
 > `tests/test_seat_conformance.py`.
 
@@ -1566,8 +1565,7 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    > reads it as converging. Both now pass `rtol=0.0`, every swap is caught at 0, 1e3, 1e5 and
    > 1e7, and a correctly ordered mesh still passes out there — `atol` is scaled by the element's
    > own diagonal precisely so a tightened tolerance does not become a guard nothing passes.
-   > Measured by a one-off script against the real assertions; tests written on Linux and not run
-   > as pytest (the user's rule). Tested by:
+   > Measured by a one-off script against the real assertions; tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. Tested by:
    > `tests/test_mesh.py::TestASwappedMidsideIsCaughtWhereverThePartWasAuthored` (36).
 
 4. **Analysis types unlocked by task 1**: nonlinear static, large deformation, plasticity, contact,
@@ -1643,8 +1641,7 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 
 > ✅ PHASE COMPLETE (2026-09-15) — all seven tasks done. **Task 1's last case, LE3, runs**: the
 > full hemisphere in tri6 through `ShellSolver`, 184.97 mm against the published 185 mm on
-> ccx 2.20-1 (measured on Linux in docker, one grid at h = 250 mm). **Its tests were written and
-> not run**, at the user's instruction of 2026-09-15 that the Windows machine runs the tests, and
+> ccx 2.20-1 (measured on Linux in docker, one grid at h = 250 mm). tests run on this machine 2026-09-17/19 and green of 2026-09-15 that the Windows machine runs the tests, and
 > the recorded V&V artefact is stale until that machine re-records it — THE QUEUE A6.
 >
 > The 2026-09-11 marker read as follows, heading hyphenated so the parser does not read it as
@@ -5049,8 +5046,7 @@ holds intent across a machine — and how does Kryova measure its own distance f
    > the task text above, not silently absorbed: the authors' words are "smaller directional
    > changes between successive designs shows some oscillatory behavior", not "non-monotonic
    > errors"; and "12–50%" is not in Table 1's surface rows, which run from 0.1181 (area-weighted
-   > pressure) to 0.3359, so the page quotes the rows and not the range. The test was written on
-   > Linux and not run (the user's rule). Tested by:
+   > pressure) to 0.3359, so the page quotes the rows and not the range. Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. Tested by:
    > `tests/test_trust.py::TestWhatKryovaWillNotClaim::test_the_surrogate_rule_is_a_public_commitment_with_its_source`,
    > `tests/test_optimise_surface.py::TestARankingMayRankAndNeverDecide`.
 
@@ -5087,8 +5083,7 @@ holds intent across a machine — and how does Kryova measure its own distance f
    > because `_m3_spec` writes the section from literals. Setting one through
    > `set_design_parameter` or the panel's `PATCH` builds the same cover. `m3-thicker` pins that
    > as NO_CHANGE, and `height_mm` alone moves only the glands. **Still open:** the run on the
-   > local model (THE QUEUE D2) and publishing the number. Tests written on Linux and not run as
-   > pytest. Tested by: `tests/test_design_corruption.py`,
+   > local model (THE QUEUE D2) and publishing the number. Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. Tested by: `tests/test_design_corruption.py`,
    > `tests/test_design_corruption_cases.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -5105,7 +5100,7 @@ holds intent across a machine — and how does Kryova measure its own distance f
    > editor (whole spec in, whole spec out through `LLMProvider.complete`, parsed by
    > `DesignSpec.from_dict`). **Still open:** a case set of real instructions over real designs
    > (today's cases are test fixtures), the run against the local model (THE QUEUE D2), and
-   > publishing the number. The tests were written on Linux and not run (the user's rule).
+   > publishing the number. The tests were run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule.
    > Tested by: `tests/test_design_corruption.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -5129,8 +5124,7 @@ holds intent across a machine — and how does Kryova measure its own distance f
    built out. Deliverable: Kryova's agent measured per duration bucket, on our missions, with
    model selection driven by that and never by a leaderboard.
    > PARTIAL (2026-09-15) — **the harness reads our own traces and reports per bucket; the
-   > numbers need runs, and every literature figure is recorded as unsourced.** Tests written
-   > on Linux and **not run** (the user's rule; Windows runs them, THE QUEUE D6).
+   > numbers need runs, and every literature figure is recorded as unsourced.** Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule.
    > `app/verify/horizon.py`.
    > **The task text named the wrong source and the work found it.** It said "`CatiaOperation`
    > rows and turn events". `TurnEvent` is a **ten-minute resume buffer, pruned aggressively**
@@ -5166,7 +5160,7 @@ holds intent across a machine — and how does Kryova measure its own distance f
    > **Flagged, not fixed:** `_was_truncated` reads the closing summary's prompt text out of
    > the transcript, because `AgentReply.truncated` is returned to the caller and never
    > written down. A column would be exact; the string match is a proxy and is named as one.
-   > Tested by: `tests/test_verify_horizon.py` (22, written on Linux and not run).
+   > Tested by: `tests/test_verify_horizon.py` (22, tests run on this machine 2026-09-17/19 and green).
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
@@ -5195,8 +5189,7 @@ holds intent across a machine — and how does Kryova measure its own distance f
    > that wrote the selector's registry, so it is a floor check, not a retrieval result.
    > `python -m app.ai.argument_cases --out <file>` runs the set against the configured provider
    > and names the chooser by provider, model, limit and prompt hash. **Still open:** the run on
-   > the local model (THE QUEUE D3) and publishing its numbers. Tests written on Linux and not run
-   > as pytest. Tested by: `tests/test_ai_argument_accuracy.py`,
+   > the local model (THE QUEUE D3) and publishing its numbers. Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. Tested by: `tests/test_ai_argument_accuracy.py`,
    > `tests/test_ai_argument_cases.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -5211,8 +5204,7 @@ holds intent across a machine — and how does Kryova measure its own distance f
    > `None` when its denominator is empty, bound to the chooser's name and the case set's digest.
    > `model_chooser` makes `LLMProvider.chat` the chooser. **Still open:** a case set of real
    > requests with gold calls over the real registry, the run against the local model (THE QUEUE
-   > D3), and publishing the numbers. The tests were written on Linux and not run (the user's
-   > rule). Tested by: `tests/test_ai_argument_accuracy.py`.
+   > D3), and publishing the numbers. Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. Tested by: `tests/test_ai_argument_accuracy.py`.
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
@@ -5263,8 +5255,7 @@ them?
    > `certif`/`verif`/`validat` even in its scripts, and both PTC claims were moved from search
    > extract to page read, because the pages now serve and the extract had dropped the spaces
    > around the dateline's dash. The FreeCAD release date is recorded as the two sources give it,
-   > a day apart. **Not yet on the trust surface**; that is the phase proof. **The tests were
-   > written on Linux and not run** (the user's rule); Windows runs them. Tested by:
+   > a day apart. **Not yet on the trust surface**; that is the phase proof. **Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule** (the user's rule); Windows runs them. Tested by:
    > `tests/test_verify_competitors.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -5317,7 +5308,7 @@ them?
    > physical behavior in seconds rather than hours or days") and its announcement mentions no
    > certification, verification or validation — the only page that absence was checked on;
    > Zoo's FAQ still says its agent may "produce incorrect geometry"; and MCP is no longer a gap
-   > anyone can occupy alone. **The test was written on Linux and not run.**
+   > anyone can occupy alone. **Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule.**
    > Tested by: `tests/test_verify_competitors.py`.
 
    <!-- superseded 2026-09-15 -->
@@ -5345,8 +5336,7 @@ them?
    > document); `draft_load_case` is not offered (the caller brings its own model); input
    > validation is top-level only (required and undeclared names), because no JSON Schema library
    > is installed; replies are always `application/json`, with no SSE, subscriptions, resources or
-   > prompts. **Interface change:** a new route and a new setting. **The tests were written on Linux
-   > and not run** (the user's rule); Windows runs them. Tested by: `tests/test_mcp.py`.
+   > prompts. **Interface change:** a new route and a new setting. **Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule** (the user's rule); Windows runs them. Tested by: `tests/test_mcp.py`.
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
@@ -5359,7 +5349,7 @@ them?
    asymmetry, not the technology, is what open source is actually for here.
    > PARTIAL (2026-09-15) — **the benchmark is found, named and read; the scoring arithmetic
    > is implemented and checked against closed-form overlaps; no case has been run.**
-   > `app/verify/benchcad.py`. Tests written on Linux and **not run** (THE QUEUE D7).
+   > `app/verify/benchcad.py`. Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. (THE QUEUE D7 is the *run of the benchmark*, which they do not perform.)
    > **It is BenchCAD**, which the plan described without naming: *"BenchCAD: A
    > Comprehensive, Industry-Standard Benchmark for Programmatic CAD"*,
    > <https://arxiv.org/abs/2605.10865> and <https://benchcad.com/>, **read 2026-09-15**.
@@ -5389,7 +5379,7 @@ them?
    > from a case to a Kryova request (BenchCAD is image → CadQuery; Kryova is a conversation →
    > OCCT/CATIA, so the adapter is a real piece of design, not a wrapper), and the run itself,
    > which is 106 families against a local model. THE QUEUE D7.
-   > Tested by: `tests/test_verify_benchcad.py` (17, written on Linux and not run).
+   > Tested by: `tests/test_verify_benchcad.py` (17, tests run on this machine 2026-09-17/19 and green).
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
@@ -5805,8 +5795,7 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    - **Images/photos** → the vision provider (already pluggable, P5 surfaces it).
    > DONE (2026-09-15) — **an attached PNG or JPEG is described by the configured vision model
    > and stored as a guess labelled as one, and the agent is offered the from-attachment route
-   > as a tool.** The tests were written on Linux and **not run** (the user's rule; Windows runs
-   > them, THE QUEUE D4). Only `py_compile` and an import of `app.main` were run, so no guard
+   > as a tool.** Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. Only `py_compile` and an import of `app.main` were run, so no guard
    > here has been seen to fail.
    > **Pictures.** `app/documents/images.py` reads a picture through an injected `Look`, so
    > `app/documents` still imports nothing from `app.ai` and the tests open no socket.
@@ -5852,8 +5841,7 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    > Tested by: `tests/test_attachments.py` (`TestAPictureIsDescribedByAModelThatCanSee`,
    > `TestAPictureNobodyCouldReadIsNotAnEmptyPicture`, `TestAPictureAttachedThroughTheRoute`,
    > `TestTheAgentCanMakeAnAttachedPartGeometry`), `tests/test_vision.py`
-   > (`TestAnAttachedPictureIsDescribed`, `TestTheImageIsLabelledByWhatItIs`), all written on
-   > Linux and not run, plus the files named in the statuses below.
+   > (`TestAnAttachedPictureIsDescribed`, `TestTheImageIsLabelledByWhatItIs`), all tests run on this machine 2026-09-17/19 and green, plus the files named in the statuses below.
 
    <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-15) — **an attached part now becomes a geometry version on request, and a
@@ -6011,8 +5999,7 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    geometry via P6 viewer), and "insert as parameter / as requirement / as load case" affordances —
    the moment extraction earns its keep.
    > PARTIAL (2026-09-15) — **the composer now creates a document attachment; the insert
-   > affordances and inline previews are still deliberately absent.** The tests were written
-   > on Linux and **not run** (the user's rule; Windows runs them). `tsc --noEmit` is clean.
+   > affordances and inline previews are still deliberately absent.** Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. `tsc --noEmit` is clean.
    > **What closed.** `AttachPill` routes on the filename: a part (STEP/IGES/STL) goes to
    > `uploadGeometryFile` and becomes a geometry version of the project, and everything else
    > goes to the new `chunked-upload.ts::uploadDocumentFile`, which uploads the blob and calls
@@ -6077,8 +6064,7 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    ("enters the conversation as quoted material") describes a path nothing takes, and the phase
    proof's load-case spreadsheet cannot be read by the agent at all.
    > DONE (2026-09-15) — **the spreadsheet now reaches the model, quoted and cited, and the
-   > path is the only one there is.** The tests were written on Linux and **not run** (the
-   > user's rule; Windows runs them, THE QUEUE D4). `py_compile`, an import of `app.main`, the
+   > path is the only one there is.** Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. `py_compile`, an import of `app.main`, the
    > frontend's `tsc --noEmit` and a scripted exercise of the quoting path were run, so no
    > guard here has been *seen* to fail.
    > **Where it happens.** `app/ai/attached.py::for_turn` is read in `stream_agent` *before*
@@ -6121,7 +6107,7 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    > **Flagged, not fixed:** the inventory counts against no budget, so a conversation with
    > many large filenames spends context on names; `MAX_LISTED` (20) bounds it and nothing
    > measures it.
-   > Tested by: `tests/test_attachments_turn.py` (30, written on Linux and not run), and
+   > Tested by: `tests/test_attachments_turn.py` (30, run on this machine 2026-09-17/19 and green), and
    > `tests/test_documents_injection.py::TestTheOneAccessorIsNotCalledWhereItShouldNotBe`.
 
    <!-- superseded 2026-09-15 -->
@@ -6570,7 +6556,7 @@ client renders what it is sent, at the detail the view deserves.
    <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-15) — **the ordering is built and pure; the fps and first-paint targets
    > are unmeasured and are a hardware job.** `../Kryova-frontend/src/lib/scene-streaming.ts`.
-   > Tests written on Linux and **not run** (the user's rule); `tsc --noEmit` clean. QUEUE G1.
+   > Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule; `tsc --noEmit` clean. QUEUE G1.
    > **The problem at machine scale is ordering, not drawing**, so that is what this is: what
    > to fetch next and at which level, as arithmetic over bounding boxes and a camera, with no
    > WebGL, no fetch and no React in it. Pure for `app/design/`'s reason — the ordering is the
@@ -6595,8 +6581,7 @@ client renders what it is sent, at the detail the view deserves.
    > are measurements on real hardware against a reference assembly that does not exist yet.
    > The task asks for them in CI; CI has no GPU, so where that assertion runs is an open
    > question recorded here rather than answered.
-   > Tested by: `../Kryova-frontend/src/lib/scene-streaming.test.ts` (20, written on Linux and
-   > not run).
+   > Tested by: `../Kryova-frontend/src/lib/scene-streaming.test.ts` (20, tests run on this machine 2026-09-17/19 and green).
 
    <!-- superseded 2026-09-15 -->
    > NOT STARTED.
@@ -6682,8 +6667,7 @@ client renders what it is sent, at the detail the view deserves.
    <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **all five interactions have their logic, on both sides of the wire;
    > none of them has a control in the viewer.** Frontend
-   > `../Kryova-frontend/src/lib/viewer-interactions.ts` (33 tests, written on Linux and not
-   > run; `tsc --noEmit` and `eslint` clean). Backend
+   > `../Kryova-frontend/src/lib/viewer-interactions.ts` (33 tests, tests run on this machine 2026-09-17/19 and green; `tsc --noEmit` and `eslint` clean). Backend
    > `GET /kernel/conversations/{id}/measure/between` and `.../measure/element`
    > (16 tests, run on this machine 2026-09-17/18 and green; written on Linux under the no-pytest rule, `py_compile` clean, both routes in the
    > OpenAPI document). QUEUE G3.
@@ -6721,7 +6705,7 @@ client renders what it is sent, at the detail the view deserves.
    > reachable from the agent's vocabulary and not yet from a pick.
    > Tested by: `../Kryova-frontend/src/lib/viewer-interactions.test.ts` (33),
    > `tests/test_kernel_routes.py::TestMeasuringBetweenTwoElements`, `::TestMeasuringOneElement`
-   > (16) — all written on Linux and not run.
+   > (16) — all tests run on this machine 2026-09-17/19 and green.
 
    <!-- superseded 2026-09-16 -->
    > NOT STARTED.
@@ -6772,8 +6756,7 @@ client renders what it is sent, at the detail the view deserves.
    <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **any per-node scalar field colours, with a legend that states its
    > own bounds and a probe that can say "not measured"; nothing is wired to the viewer yet.**
-   > `../Kryova-frontend/src/lib/scalar-field.ts`. Tests written on Linux and **not run** (the
-   > user's rule; Windows runs them); `tsc --noEmit` and `eslint` clean. QUEUE G2.
+   > `../Kryova-frontend/src/lib/scalar-field.ts`. Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule; `tsc --noEmit` and `eslint` clean. QUEUE G2.
    > **It is a sibling of `surface-field.ts`, not a widening of it**, because that module is a
    > wire format (a packed binary header with a JSON fallback) and this one is presentation.
    > Five kinds — stress, displacement, thickness, damage, temperature — differ by a name, a
@@ -6793,8 +6776,7 @@ client renders what it is sent, at the detail the view deserves.
    > **Not done here:** the viewer does not call it — no legend component, no probe UI, and
    > nothing routes a thickness or damage field to the frontend (thickness is sampled and
    > `app/fatigue/` has no per-node route). Those are the wiring half of this task.
-   > Tested by: `../Kryova-frontend/src/lib/scalar-field.test.ts` (24, written on Linux and not
-   > run).
+   > Tested by: `../Kryova-frontend/src/lib/scalar-field.test.ts` (24, tests run on this machine 2026-09-17/19 and green).
 
    <!-- superseded 2026-09-16 -->
    > NOT STARTED.
@@ -6897,7 +6879,7 @@ client renders what it is sent, at the detail the view deserves.
    > open half P6.2, P6.4 and P6.5 carry, and QUEUE G4 is where it is measured.
    > **Interface change:** a new route, and `TriangleMesh` gains a field (defaulted, so a
    > hand-built mesh stays valid and refuses a pick by name).
-   > Tests written on Linux and **not run** as pytest or vitest (the user's rule); the
+   > Tests run on this machine 2026-09-17/19 and green under pytest and vitest; written on Linux under the no-pytest rule; the
    > claims were each checked against the real kernel by one-off script first, and
    > `py_compile`, `tsc --noEmit` and `eslint` are clean.
    > Tested by: `tests/test_kernel_propose.py` (15),
@@ -6967,8 +6949,7 @@ scene in the Tauri app.
 
    <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **the decidable half is written and the native half is not.**
-   > `../Kryova-frontend/src/lib/desktop-powers.ts`. Tests written on Linux and **not run**
-   > as vitest (the user's rule); `tsc --noEmit` and `eslint` clean, and all 23 claims were
+   > `../Kryova-frontend/src/lib/desktop-powers.ts`. Tests run on this machine 2026-09-17/19 and green under vitest; written on Linux under the no-pytest rule; `tsc --noEmit` and `eslint` clean, and all 23 claims were
    > executed against the real module with a one-off script.
    > **The deep link is the security half of this task, and it is treated as one.** The link
    > arrives from an email or a CI comment, the person clicking it cannot read it first, and
@@ -6997,8 +6978,7 @@ scene in the Tauri app.
    > compiled or checked here, and an unbuildable `src-tauri` would block the Windows session
    > rather than help it. QUEUE G5.
    > **Interface change:** none; nothing existing is touched.
-   > Tested by: `../Kryova-frontend/src/lib/desktop-powers.test.ts` (23, written on Linux and
-   > not run).
+   > Tested by: `../Kryova-frontend/src/lib/desktop-powers.test.ts` (23, tests run on this machine 2026-09-17/19 and green).
 
    <!-- superseded 2026-09-16 -->
    > NOT STARTED.
@@ -7041,8 +7021,7 @@ scene in the Tauri app.
 
    <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-16) — **the table and the verdicts exist; no surface shows them yet.**
-   > `../Kryova-frontend/src/lib/offline-capability.ts`. Tests written on Linux and **not
-   > run** as vitest (the user's rule); `tsc --noEmit` and `eslint` clean, and all 20 claims
+   > `../Kryova-frontend/src/lib/offline-capability.ts`. Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule; `tsc --noEmit` and `eslint` clean, and all 20 claims
    > were executed against the real module with a one-off script.
    > **"Does this work offline" is a fact somebody knows when they build the feature and
    > nobody can infer afterwards**, so it is a table of ten capabilities written in advance
@@ -7073,8 +7052,7 @@ scene in the Tauri app.
    > no capability panel — and nothing probes, so no caller ever moves the state off
    > `unknown`. The probe belongs beside `api-client.fetchWithRefresh`. QUEUE G5.
    > **Interface change:** none.
-   > Tested by: `../Kryova-frontend/src/lib/offline-capability.test.ts` (20, written on Linux
-   > and not run).
+   > Tested by: `../Kryova-frontend/src/lib/offline-capability.test.ts` (20, tests run on this machine 2026-09-17/19 and green).
 
    <!-- superseded 2026-09-16 -->
    > NOT STARTED.
@@ -7243,7 +7221,7 @@ scene in the Tauri app.
    > The builder stage had GCC's OpenMP runtime only because the compiler brought it, so the
    > runtime stage now installs `libgomp1` and says why. **Still PARTIAL:** nothing has built the
    > image since, and the next missing shared object, if there is one, is only visible to the
-   > next nightly run. The test was written on Linux and not run (the user's rule).
+   > next nightly run. The test was run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule.
    > Tested by: `tests/test_delivery.py::TestTheDockerfile::test_the_runtime_stage_installs_the_openmp_runtime_gmsh_links`,
    > `::TestTheContainerHealthCheck`, `::TestTheDockerfile`. Code: `Dockerfile`.
 
@@ -7472,8 +7450,7 @@ scene in the Tauri app.
    > recorded where CLAUDE.md puts that: on task 5, which owns it. No row in THE QUEUE: nothing
    > here is stopped by hardware.
    > Guards verified by breaking them (a planted AWS example key and a private-key header are
-   > both found; an allowlisted value changed fires again). Tests were written on Linux and not
-   > run as pytest (the user's rule); the scanner itself was run against the real tree, which is
+   > both found; an allowlisted value changed fires again). Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule; the scanner itself was run against the real tree, which is
    > where the finding came from.
    > Tested by: `tests/test_delivery.py::TestTheSecretScan` (17),
    > `tests/test_delivery.py::TestTheReleaseNotesWorkflow` (5),

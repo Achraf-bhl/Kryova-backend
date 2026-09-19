@@ -3622,8 +3622,22 @@ here"* has an answer in six months — from the artefact.
    > the title block were already tested (below). **Open:** frames are tabulated by feature name,
    > not attached to the geometry by a leader, because nothing resolves a frame's feature name to
    > an edge on a view; the view layout does not reserve the tables' zones, so a crowded sheet can
-   > overlap them; and CATIA FTA on the seat is THE QUEUE **E7**. **Tests run on this machine 2026-09-17/18 and green**;
-   > they were written on Linux under the no-pytest rule. Tested by: `tests/test_manufacture_drawing_tables.py`, and the files below.
+   > overlap them. **CATIA FTA was measured on the seat 2026-09-19 (THE QUEUE E7) and is
+   > licensed** — the long-standing suspicion that `AnnotationSets.Add()` failed on a licence
+   > was wrong. It failed on its *signature*: the standard is a **string**, `Add("ISO")`
+   > creates `Annotations.1`, the container is `part.AnnotationSets` (not
+   > `GetTechnologicalObject`, and no `GetWorkbench` spelling), and it is invisible to late
+   > binding without `EnsureModule` on `{88D26C84-D8E9-0000-0280-020CC3000000}`.
+   > `CreateDatumReferenceFrame()` works. **What still blocks a frame on the part is a binding
+   > conflict rather than a missing API**: `CreateDatum` and `CreateToleranceWithDRF` refuse a
+   > late-bound `Reference`, and generating the library that would type it breaks
+   > `ShapeFactory.AddNewPad` — building geometry and annotating it want opposite binding modes
+   > in one process. `CastTo` at the call site is the route; until it is written **no datum has
+   > been created on a seat**, so this task stays PARTIAL with a named route instead of a
+   > suspicion.
+   > **Tests run on this machine 2026-09-17/18 and green**; they were written on Linux under
+   > the no-pytest rule. Tested by: `tests/test_manufacture_drawing_tables.py`, and the files
+   > below.
 
    <!-- superseded 2026-09-15 -->
    > PARTIAL (2026-09-06) — dimensioning and sheet layout tested. **First and third angle

@@ -6019,6 +6019,36 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    extraction status, an attachment panel per conversation, inline previews (tables, images,
    geometry via P6 viewer), and "insert as parameter / as requirement / as load case" affordances —
    the moment extraction earns its keep.
+   > PARTIAL (2026-09-20) — **the status below was FALSE, and the work it described is done
+   > now.** It said `AttachPill` routed on the filename, that `chunked-upload.ts::uploadDocumentFile`
+   > existed, and that "the `accept` filter was the whole bug and is gone". None of it had
+   > shipped: `git log --all -S uploadDocumentFile` returns **nothing**, the filter was still in
+   > the file, and `api-client.ts::createAttachment` had **no caller anywhere** — which is
+   > exactly what CLAUDE.md's own `app/documents/` item 13 has said since 2026-09-15. The two
+   > documents contradicted each other for five days, and only looking at the file settled it.
+   > Same class as the 2026-09-17 audit, and the third wrong status found this week.
+   >
+   > **What is true as of today.** `uploadDocumentFile` exists and is **always chunked, whatever
+   > the size** — the single-shot route is `uploadGeometry`, which makes a *geometry version* of
+   > the project, the one thing a document must not silently become, and the chunk loop is the
+   > only path yielding a bare media id for `createAttachment`. `DocumentUploadTransport` is a
+   > second interface rather than four more methods on the shared one, so a document can never
+   > reach `attachGeometry`. `AttachPill` routes on the extension, carries the **live**
+   > conversation id (a new chat has none until its first turn, and an attachment posted against
+   > null would reach no conversation), and the `accept` filter is genuinely gone. **An
+   > unreadable file is reported as unreadable**: the backend answers 201 whatever the reading
+   > produced, so a resolved promise is not "it was read", and the composer line says which
+   > happened.
+   > **Still open, and the sentence below was wrong about this too**: drag-and-drop does not
+   > reach "only the geometry path" — `onDrop` has never existed anywhere in the frontend, so
+   > there is no drag-and-drop at all. Inline previews remain P6's viewer, and "insert as
+   > parameter / requirement / load case" stays unbuilt for task 3's reason.
+   > Verified by breaking it: dropping `.stl` from the routing table fails a named test.
+   > Tested by: `../Kryova-frontend/src/lib/document-upload.test.ts` (19),
+   > `../Kryova-frontend/src/components/attachments/attachment-panel.test.tsx` (9). Frontend
+   > suite green at **605** across 50 files.
+
+   <!-- superseded 2026-09-20 -->
    > PARTIAL (2026-09-15) — **the composer now creates a document attachment; the insert
    > affordances and inline previews are still deliberately absent.** Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. `tsc --noEmit` is clean.
    > **What closed.** `AttachPill` routes on the filename: a part (STEP/IGES/STL) goes to

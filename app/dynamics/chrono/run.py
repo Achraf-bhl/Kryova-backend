@@ -170,6 +170,17 @@ def run_mechanism(
     # Written with an explicit LF newline: on Windows the platform default would rewrite
     # every line ending, and this file is read by a Linux interpreter inside the
     # container. Same trap `scripts/plan_progress.py` hit from the other direction.
+    #
+    # **Measured 2026-09-20, and it is weaker than it reads.** Removing the `newline`
+    # argument on Windows writes CRLF and the run still *succeeds*: the entry point is
+    # invoked as `python /work/chrono_run.py`, an argument rather than an executable, so
+    # its shebang is never parsed and CPython accepts CRLF source. Only
+    # `test_the_entry_point_is_written_with_lf` fails. So this line is insurance against
+    # a future caller that execs the file directly -- where a shebang ending in a
+    # carriage return fails with "no such file or directory" naming an interpreter that plainly exists --
+    # and not, today, the difference between a run and no run. Recorded because the
+    # opposite was believed: THE QUEUE G6 listed LF endings as one of three things that
+    # would stop this working on Windows, and it is the one that would not have.
     (directory / ENTRYPOINT).write_text(_entrypoint_source(), encoding="utf-8", newline="\n")
 
     if launcher == "docker":

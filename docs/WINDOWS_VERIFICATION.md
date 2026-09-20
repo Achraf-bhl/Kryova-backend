@@ -1572,7 +1572,25 @@ this file drives the ladder, with a screenshot each.
       giving a constant force vector where it should sweep). What is left is what Linux could
       not do.
 
-      1. **Does it run here at all?** This is the sibling of F1 and the same three things bite:
+      **Step 1 is DONE (2026-09-20). Steps 2 and 3 are open and are the ones that matter.**
+      The image builds here (exit 0) and a mechanism runs in **1.0 s**. Of the three things this
+      item said would bite, two did not bite and the third is **wrong**: the `C:\...:/work` mount
+      resolves; the container writes as root (no `os.getuid`, so no `--user`) and the host deletes
+      the directory anyway, the same answer F1 gave; and **CRLF line endings do not break the
+      run** — removing the explicit `newline="
+"` still succeeds, because the entry point is
+      invoked as `python /work/chrono_run.py`, an argument rather than an executable, so its
+      shebang is never parsed. Only `test_the_entry_point_is_written_with_lf` fails. The line
+      stays as insurance against a caller that execs the file; `run.py` now records which of the
+      two it is.
+      The pendulum oracle reproduces: **29.4190 N against 3mg = 29.4200 N (0.003%)**, radius
+      holding 500.000000-500.000613 mm. `chrono_version` reads `unknown` because the conda-forge
+      package carries **no `__version__` at all**, which is why the image content id is the only
+      identity this engine has. And **every Chrono test before today was against a stub** — 77 of
+      them, two hand-written fakes — so `tests/test_dynamics_chrono_engine.py` (10, real engine,
+      skipped where there is no image) is the first thing here that has touched Chrono.
+
+      1. **Does it run here at all?** ~~This is the sibling of F1 and the same three things bite:~~
          the bind mount is a **Windows path** (`-v C:\...:/work`); there is no `os.getuid`, so
          `run_mechanism` sends no `--user` and the container writes as root into a directory
          this server must then delete; and the entry point must arrive with **LF** endings (it

@@ -2335,6 +2335,43 @@ Today load cases are hand-entered guesses. In reality they are *outputs* of the 
    > at the user's instruction; every assertion in them was measured first by one-off scripts
    > against the real modules, and the physics was measured against the real engine as above.
    > Tested by: `tests/test_dynamics_chrono.py`.
+   >
+   > **UPDATED 2026-09-20 — it runs on Windows, and one of the three things that were supposed
+   > to stop it does not.** THE QUEUE G6 step 1. The image builds here
+   > (`bash scripts/chrono_image.sh`, exit 0) and a mechanism runs in **1.0 s**. All three
+   > Windows-only traps were checked rather than assumed: the `C:\…:/work` bind mount resolves
+   > (the container reads its own `input.json` back); there is no `os.getuid`, so no `--user` is
+   > sent and the container writes as **root** — and the host deletes the directory anyway, the
+   > same answer OpenFOAM's F1 gave on this machine. **The third is wrong.** Removing the
+   > explicit `newline="\n"` writes CRLF and the run still *succeeds*, because the entry point is
+   > invoked as `python /work/chrono_run.py` — an argument, not an executable — so its shebang is
+   > never parsed and CPython accepts CRLF source. Only the one named test fails. The line stays
+   > as insurance against a caller that execs the file, and `run.py` now says which of the two it
+   > is; G6 listed it as a thing that would stop the run working, and it would not have.
+   > **The pendulum oracle reproduces here**: peak pivot reaction **29.4190 N against 3mg =
+   > 29.4200 N (0.003%)**, with the radius holding 500.000000–500.000613 mm — and the radius is
+   > asserted *separately* from the force, because the iterative solver's 4286 N came with a rod
+   > stretched to 736 mm and a force of entirely plausible shape.
+   > **`chrono_version` reads `unknown`, and that is the only reachable answer.** Measured here:
+   > the conda-forge `pychrono` package carries **no `__version__` at all** — `dir()` offers only
+   > `ChMatrix_dense_version_tag`, a matrix format tag. So "the image is the version pin" is
+   > load-bearing rather than stylistic, and `cache.engine_for` keying on the image **content id**
+   > is the only honest identity available for this engine.
+   > **Every Chrono test until today was against a stub.** `tests/test_dynamics_chrono.py`'s 77
+   > tests drive two hand-written fakes, one spelled the Chrono 8 way and one the Chrono 9 way —
+   > the right shape for pinning `_call`'s name resolution and no evidence at all about the
+   > engine, which is `stream_chat`'s lesson exactly. `tests/test_dynamics_chrono_engine.py` is
+   > **10 tests that run the real image**, and they skip where there is none, so CI still learns
+   > nothing from them and neither does Linux.
+   > **Steps 2 and 3 of G6 stay open and are the ones that matter**: joint *moments* against a
+   > closed form, and the cases this engine exists for — closed loops, contact, friction, springs,
+   > end stops. Not one has been run, `UNVERIFIED_NOTE` says so, and the ordering behind
+   > `KinematicEngine` is unaffected either way.
+   > Verified by breaking it: dropping the `newline="\n"` fails
+   > `test_the_entry_point_is_written_with_lf` and nothing else, which is how the CRLF finding
+   > above was made.
+   > Tested by: `tests/test_dynamics_chrono_engine.py` (10, real engine),
+   > `tests/test_dynamics_chrono.py` (77, stub).
 
    <!-- superseded 2026-09-16 -->
    > BLOCKED — **`pip install pychrono` installs an unrelated package and succeeds.** The engine

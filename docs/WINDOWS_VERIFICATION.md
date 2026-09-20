@@ -1348,6 +1348,34 @@ master plan's status line in the same commit.
 
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 
+- [x] **F2 — `docker` launched by its bare name fails inside a running job on Windows
+      (found 2026-09-20, fixed the same day).** The full suite came back **2 failed / 11 errors**,
+      every one of them OpenFOAM, and `pytest tests/test_solver_openfoam.py` alone was **67
+      passed**. The reproducing case was `TestAFlowRunThroughTheRealEngine`, which failed alone in
+      1.7 s with *"The OpenFOAM image … is not present. Pull it once with `docker pull`"* — while
+      `docker images` listed it and `availability("docker")` returned `None` from a plain
+      interpreter, from inside pytest, and from a worker thread.
+      **What it actually is.** Instrumented through the job path: `_image_present` is called twice
+      in one job. The first returns **True**; the second raises **`FileNotFoundError [WinError 2]`**
+      — with `os.getcwd()` unchanged and the directory still existing, `os.environ["PATH"]`
+      identical (same length, still containing the Docker directory), `shutil.which("docker")`
+      still resolving to `C:\Program Files\Docker\Dockeresourcesin\docker.EXE`, and a run
+      of that **absolute path succeeding in the same breath**. So `which` finds it and
+      `CreateProcess` cannot. **The mechanism was not identified and is recorded as unidentified**;
+      the fix does not depend on it.
+      **Two fixes, both in `app/solve/openfoam/run.py` and mirrored into
+      `app/dynamics/chrono/run.py`** (copied from it, and carrying the same bug before it bit):
+      launch the **resolved absolute path**, never the bare name; and let `_image_present` return
+      **`None`** for "docker could not be asked", separately from `False` for "no such image", so
+      the refusal stops telling an operator to pull an image that is already there. That second
+      half is the same correction as the CATIA `ExportData` refusal which blamed a licence for a
+      document of the wrong kind.
+      Verified by breaking both: returning the bare name fails
+      `test_docker_is_launched_by_its_absolute_path` alone, and collapsing the three-state answer
+      fails `test_docker_that_cannot_be_RUN_is_not_the_image_being_absent` alone. 158 pass across
+      the three files; the originally failing job test passes.
+
+
 > **DOCKER DESKTOP IS INSTALLED, 2026-09-19** — the user cleared the elevation blocker at the
 > keyboard. `winget install Docker.DockerDesktop` returned 0, **4.91.0**, and the CLI answers
 > `Docker version 29.8.0, build 88096ef` from

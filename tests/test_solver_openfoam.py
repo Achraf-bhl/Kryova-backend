@@ -370,6 +370,50 @@ class TestNotInstalledIsNotFailed:
         monkeypatch.setattr("app.solve.openfoam.run._image_present", lambda image: False)
         assert "docker pull" in (availability("docker", "example/openfoam:1") or "")
 
+    def test_docker_that_cannot_be_RUN_is_not_the_image_being_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The third answer, and the reason `_image_present` may return None.
+
+        Measured on Windows 2026-09-20: inside a running job
+        `subprocess.run(["docker", ...])` raised `FileNotFoundError [WinError 2]`
+        while `shutil.which` still resolved it. `_image_present` caught the
+        `OSError`, returned a bare `False`, and `availability` told the operator
+        to `docker pull` — advice that is wrong, unactionable, and sends them to
+        fix the one thing that was not broken. It cost a full-suite red of 2
+        failures and 11 errors that reproduced only through the job path.
+        """
+        monkeypatch.setattr("app.solve.openfoam.run.shutil.which", lambda name: "/usr/bin/docker")
+        monkeypatch.setattr("app.solve.openfoam.run._image_present", lambda image: None)
+
+        message = availability("docker", "example/openfoam:1") or ""
+        assert "could not be run" in message
+        assert "Docker daemon" in message
+        assert "docker pull" not in message
+
+    def test_docker_is_launched_by_its_absolute_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Never the bare name — see `run._docker` for the measurement.
+
+        The guard is that nothing hands `subprocess` the string "docker" and
+        asks Windows to search for it again.
+        """
+        import app.solve.openfoam.run as run_module
+
+        seen: list[list[str]] = []
+
+        def spy(command, **kwargs):  # noqa: ANN001, ANN202
+            seen.append(list(command))
+            raise OSError("not actually run")
+
+        monkeypatch.setattr(run_module.shutil, "which", lambda name: "/usr/bin/docker")
+        monkeypatch.setattr(run_module.subprocess, "run", spy)
+
+        run_module._image_present("example/openfoam:1")
+        run_module.image_id("example/openfoam:1")
+
+        assert seen, "subprocess was never called"
+        assert all(command[0] == "/usr/bin/docker" for command in seen)
+
 
 class TestTheEngineIsNamedByItsBytes:
     """What the job cache keys a flow run on. A tag can be re-pushed; the id cannot."""

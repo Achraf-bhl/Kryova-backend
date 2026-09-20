@@ -751,6 +751,47 @@ class TestNotInstalledIsNotFailed:
         assert "scripts/chrono_image.sh" in reason
         assert "no published image to pull" in reason
 
+    def test_docker_that_cannot_be_RUN_is_not_the_image_being_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The third answer `_image_present` may give, and why it exists.
+
+        Measured on the OpenFOAM sibling on Windows 2026-09-20, which this
+        module was copied from: `subprocess.run(["docker", ...])` raised
+        `FileNotFoundError` inside a job while `shutil.which` still resolved it,
+        the `OSError` was swallowed into a bare `False`, and the operator was
+        told to build an image that was already there. Fixed here at the same
+        time rather than waiting for it to bite.
+        """
+        monkeypatch.setattr("app.dynamics.chrono.run.shutil.which", lambda name: "/usr/bin/docker")
+        monkeypatch.setattr("app.dynamics.chrono.run._image_present", lambda image: None)
+
+        reason = availability("docker", "kryova-chrono:9.0.1") or ""
+        assert "could not be run" in reason
+        assert "Docker daemon" in reason
+        assert "scripts/chrono_image.sh" not in reason
+
+    def test_docker_is_launched_by_its_absolute_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Never the bare name — nothing asks Windows to search again."""
+        import app.dynamics.chrono.run as run_module
+
+        seen: list[list[str]] = []
+
+        def spy(command, **kwargs):  # noqa: ANN001, ANN202
+            seen.append(list(command))
+            raise OSError("not actually run")
+
+        monkeypatch.setattr(run_module.shutil, "which", lambda name: "/usr/bin/docker")
+        monkeypatch.setattr(run_module.subprocess, "run", spy)
+
+        run_module._image_present("kryova-chrono:9.0.1")
+        run_module.image_id("kryova-chrono:9.0.1")
+
+        assert seen, "subprocess was never called"
+        assert all(command[0] == "/usr/bin/docker" for command in seen)
+
     def test_a_run_with_no_launcher_refuses_before_it_writes_anything(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -839,7 +880,13 @@ class TestTheBoundaryIsAFileAndNothingElse:
         )
         run_mechanism(tmp_path, _spec(), launcher="docker")
         command = seen[0]
-        assert command[:3] == ["docker", "run", "--rm"]
+        # The *resolved* path, not the bare name: `which` is stubbed to
+        # /usr/bin/docker above, and `run.py` launches what it resolved. A bare
+        # "docker" here would be the Windows defect of 2026-09-20 back again —
+        # subprocess raised FileNotFoundError on the bare name inside a job
+        # while which() still found it. This assertion was written as
+        # `== ["docker", ...]` and is the test pinning the old world.
+        assert command[:3] == ["/usr/bin/docker", "run", "--rm"]
         assert "--network" in command and command[command.index("--network") + 1] == "none"
         # `--user` is POSIX-only and its absence on Windows is the documented
         # behaviour, not a lapse: `os.getuid`/`os.getgid` do not exist there, so

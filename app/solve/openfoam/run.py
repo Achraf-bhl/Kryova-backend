@@ -56,13 +56,47 @@ class FoamRun:
     launcher: str
 
 
-def _image_present(image: str) -> bool:
+
+def _docker() -> str | None:
+    """The absolute path to the `docker` executable, or None.
+
+    **Launch it by this path, never by the bare name `"docker"`.** Measured on
+    Windows 2026-09-20: inside a running job, `subprocess.run(["docker", ...])`
+    raises `FileNotFoundError [WinError 2]` while `shutil.which("docker")` still
+    resolves it and a run of that *absolute* path succeeds in the same breath —
+    PATH unchanged (same length, still containing the Docker directory), same
+    process, same working directory, seconds after an identical bare-name call
+    returned 0. The mechanism was not identified and the fix does not depend on
+    it: the absolute path has never failed, and there is no reason to ask
+    Windows to search for something we have already found.
+
+    It cost a full-suite red of 2 failures and 11 errors that reproduced only
+    through the job path, because the route's own pre-flight call had succeeded.
+    """
+    return shutil.which("docker")
+
+
+def _image_present(image: str) -> bool | None:
+    """True, False, or **None when docker could not be asked**.
+
+    The third answer is the point. This returned a bare `False` for both "docker
+    says there is no such image" and "we could not run docker at all", and
+    `availability` turned the pair into one sentence telling the operator to
+    `docker pull` — advice that is wrong in the second case and unactionable,
+    because pulling is not what is broken. That is the same shape as the CATIA
+    `ExportData` refusal that blamed a missing licence for a document of the
+    wrong kind, fixed on 2026-09-18: **one message for two unrelated causes is a
+    message that misdirects whoever reads it.**
+    """
+    docker = _docker()
+    if docker is None:
+        return None
     try:
         completed = subprocess.run(
-            ["docker", "image", "inspect", image], capture_output=True, text=True, timeout=60, check=False
+            [docker, "image", "inspect", image], capture_output=True, text=True, timeout=60, check=False
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
+        return None
     return completed.returncode == 0
 
 
@@ -72,9 +106,12 @@ def image_id(image: str) -> str | None:
     A tag is a name and can be re-pushed to point at a different build; the id is
     the bytes. This is what a result can be bound to before the run happens.
     """
+    docker = _docker()
+    if docker is None:
+        return None
     try:
         completed = subprocess.run(
-            ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+            [docker, "image", "inspect", "--format", "{{.Id}}", image],
             capture_output=True,
             text=True,
             timeout=60,
@@ -94,7 +131,7 @@ def engine_identity(launcher: str, image: str = DEFAULT_IMAGE) -> str | None:
     is None — and the job cache treats None as "do not reuse", because an
     unidentified engine matching a known one is the claim Decision 3 forbids.
     """
-    if launcher != "docker" or shutil.which("docker") is None:
+    if launcher != "docker" or _docker() is None:
         return None
     found = image_id(image)
     return f"docker {image} {found}" if found else None
@@ -105,12 +142,19 @@ def availability(launcher: str, image: str = DEFAULT_IMAGE) -> str | None:
     if launcher not in LAUNCHERS:
         return f"OPENFOAM_LAUNCHER must be one of {', '.join(LAUNCHERS)}; got {launcher!r}."
     if launcher == "docker":
-        if shutil.which("docker") is None:
+        if _docker() is None:
             return (
                 "OpenFOAM runs in a container here and no `docker` executable is on PATH. "
                 "Install Docker, or set OPENFOAM_LAUNCHER=local on a machine with OpenFOAM installed."
             )
-        if not _image_present(image):
+        present = _image_present(image)
+        if present is None:
+            return (
+                "OpenFOAM runs in a container here and `docker` is on PATH but could not be "
+                "run. Check that the Docker daemon is up (`docker version`). This is not the "
+                "image being absent — pulling it would not help."
+            )
+        if not present:
             return (
                 f"The OpenFOAM image {image} is not present. Pull it once with "
                 f"`docker pull {image}`; it is never pulled during a run, because a run that "
@@ -138,7 +182,11 @@ def run_case(
         raise OpenFoamUnavailable(missing)
     directory = directory.resolve()
     if launcher == "docker":
-        command = ["docker", "run", "--rm", "-v", f"{directory}:/case"]
+        # The resolved absolute path, never the bare name -- see `_docker`.
+        docker = _docker()
+        if docker is None:
+            raise OpenFoamUnavailable(availability(launcher, image) or "docker is not on PATH.")
+        command = [docker, "run", "--rm", "-v", f"{directory}:/case"]
         # `getattr` rather than `hasattr` plus a bare call: `os.getuid` and
         # `os.getgid` do not exist on Windows, so the bare names are a type
         # error there even inside a branch guarded by `hasattr`, which mypy

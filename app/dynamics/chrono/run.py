@@ -76,17 +76,45 @@ class ChronoRun:
     launcher: str
 
 
-def _image_present(image: str) -> bool:
+def _docker() -> str | None:
+    """The absolute path to the `docker` executable, or None.
+
+    **Launch it by this path, never by the bare name `"docker"`.** Measured on
+    Windows 2026-09-20 in `app/solve/openfoam/run.py`, which has the identical
+    shape: inside a running job `subprocess.run(["docker", ...])` raises
+    `FileNotFoundError [WinError 2]` while `shutil.which("docker")` still
+    resolves it and a run of that *absolute* path succeeds in the same breath.
+    The mechanism was not identified; the fix does not depend on it, and there
+    is no reason to ask Windows to search for something already found.
+
+    Fixed here at the same time rather than waiting for it to bite, because
+    this module was copied from that one and carries the same bug.
+    """
+    return shutil.which("docker")
+
+
+def _image_present(image: str) -> bool | None:
+    """True, False, or **None when docker could not be asked**.
+
+    The third answer is the point: a bare `False` for both "no such image" and
+    "could not run docker" makes `availability` tell the operator to build the
+    image, which is not what is broken. Same correction as OpenFOAM's, and the
+    same shape as the CATIA `ExportData` refusal that blamed a licence for a
+    document of the wrong kind.
+    """
+    docker = _docker()
+    if docker is None:
+        return None
     try:
         completed = subprocess.run(
-            ["docker", "image", "inspect", image],
+            [docker, "image", "inspect", image],
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
+        return None
     return completed.returncode == 0
 
 
@@ -96,9 +124,12 @@ def image_id(image: str) -> str | None:
     A tag is a name and can be rebuilt to point at different bytes; the id is the bytes.
     This is what a result can be bound to *before* the run happens.
     """
+    docker = _docker()
+    if docker is None:
+        return None
     try:
         completed = subprocess.run(
-            ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+            [docker, "image", "inspect", "--format", "{{.Id}}", image],
             capture_output=True,
             text=True,
             timeout=60,
@@ -112,7 +143,7 @@ def image_id(image: str) -> str | None:
 
 def engine_identity(launcher: str, image: str = DEFAULT_IMAGE) -> str | None:
     """What will answer a mechanism, identified before it runs — or None when it cannot be."""
-    if launcher != "docker" or shutil.which("docker") is None:
+    if launcher != "docker" or _docker() is None:
         return None
     found = image_id(image)
     return f"docker {image} {found}" if found else None
@@ -123,13 +154,20 @@ def availability(launcher: str, image: str = DEFAULT_IMAGE) -> str | None:
     if launcher not in LAUNCHERS:
         return f"CHRONO_LAUNCHER must be one of {', '.join(LAUNCHERS)}; got {launcher!r}."
     if launcher == "docker":
-        if shutil.which("docker") is None:
+        if _docker() is None:
             return (
                 "Chrono runs in a container here and no `docker` executable is on PATH. "
                 "Install Docker, or set CHRONO_LAUNCHER=local on a machine whose own "
                 "conda environment has PyChrono importable."
             )
-        if not _image_present(image):
+        present = _image_present(image)
+        if present is None:
+            return (
+                "Chrono runs in a container here and `docker` is on PATH but could not be "
+                "run. Check that the Docker daemon is up (`docker version`). This is not the "
+                "image being absent — building it would not help."
+            )
+        if not present:
             return (
                 f"The Chrono image {image} is not present. Build it once with "
                 f"`scripts/chrono_image.sh`; there is no published image to pull, because "
@@ -184,7 +222,11 @@ def run_mechanism(
     (directory / ENTRYPOINT).write_text(_entrypoint_source(), encoding="utf-8", newline="\n")
 
     if launcher == "docker":
-        command = ["docker", "run", "--rm", "-v", f"{directory}:/work", "-w", "/work"]
+        # The resolved absolute path, never the bare name -- see `_docker`.
+        docker = _docker()
+        if docker is None:
+            raise ChronoUnavailable(availability(launcher, image) or "docker is not on PATH.")
+        command = [docker, "run", "--rm", "-v", f"{directory}:/work", "-w", "/work"]
         # `getattr`, not `hasattr` plus a bare call — see the same lines in
         # `app/solve/openfoam/run.py`: these names are absent on Windows, so a
         # bare reference is a type error there however the branch is guarded.

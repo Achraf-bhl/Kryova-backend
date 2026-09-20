@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 16/24 | 124/133 = 93% | 140/151 eng-months = 93% |
+| Engineering — E1–E23 | 16/24 | 124/134 = 92% | 139/151 eng-months = 92% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 22/34 | 176/195 = 91% | 172/189 eng-months = 91% |
+| **Programme** | 22/34 | 176/196 = 90% | 171/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -1591,6 +1591,30 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
    > DONE (2026-09-06). Tested by: `tests/test_solver_registry.py`.
 
 **Gate G1 opens after this phase.**
+> **RUN 2026-09-20 ON THE SEAT, DID NOT PASS — and what it stops on has moved.**
+> `docs/verification-2026-09-20/`, backend `20d1107`, CATIA V5-R33 through the bridge, model
+> `qwen3.5:9b`, driven in the browser. Rung 3 stays discharged and the oracle still passes, so
+> the load-bearing prompt was the whole of what was left.
+> **The regression this gate existed to re-check is closed.** Asked to build a 180 x 50 x 12 mild
+> steel bracket, hang 400 N off the free end and say whether it stays under 120 MPa, the product
+> built it on the seat, exported STEP, drafted the case, solved, and reported 52.09 MPa against my
+> own beam-theory 60.0 MPa, with mass 0.84888 kg matching my arithmetic exactly. **And it refused
+> to call that a verdict**, naming the run as single-grid and saying any pass quoted above is
+> indicative. That is task 7 working, and it is precisely what failed on 2026-09-10.
+> **Then I asked for the convergence study its own footnote tells the user to ask for, and the
+> agent had no `grids` parameter.** `SimulationCreate` has taken it since task 1;
+> `run_simulation` did not. The model invented a `geometry_version_number` argument — a key it
+> read off that tool's own *result* payload — fired three separate single-grid runs, and ran out
+> of steps. Third instance of CLAUDE.md testing item 8, and the worst, because the product
+> *advertises* the missing parameter. **Fixed in `20d1107`** with a guard written against the
+> printed advice rather than a parameter list.
+> **The re-run then stopped somewhere else, and that is the gate's new blocker: the agent cannot
+> wait for a run it started.** `run_simulation` returns `queued` and tells the agent to poll;
+> `MAX_IDENTICAL_READS = 2` refuses the third identical read; no tool of the thirty is a wait. So
+> a solve slower than two steps cannot be reported in its own turn, and turn 1 passed only
+> because its mesh was coarse enough. **New task 8 above**, deliberately not fixed at the end of a
+> gate run because the remedy is a design choice between three shapes.
+>
 > RUN 2026-09-06, DID NOT PASS — rung 3 failed. Rung 3 is carried forward and G1 runs again.
 > See `docs/verification-2026-09-06/`.
 > **The gate is still the only thing that can verify this phase**: tasks 3 and 4 were both
@@ -2096,6 +2120,32 @@ encoded, cited, runs, and its recorded outcome is `unconverged` — the target q
 stress at a corner in a steep gradient and it scatters with where nodes land, so the study
 correctly refuses to state a value from a non-monotone triple. That is a measurement, published
 as one, and the honest state of the case rather than a gap.
+
+8. **The agent must be able to wait for a run it started.** *(added 2026-09-20, by gate G1)*
+   `run_simulation` returns `status: queued` and its own description tells the agent to *"poll
+   get_simulation for the outcome; do not tell the user it succeeded until you have"*.
+   `MAX_IDENTICAL_READS = 2` then refuses the third identical read, and **none of the agent's
+   thirty tools is a wait, a sleep or a poll**. So the product instructs the agent to poll and
+   forbids it from polling, and any solve slower than about two agent steps cannot be reported in
+   the turn that started it. Give it a bounded way to wait.
+   > NOT STARTED — **measured on the seat 2026-09-20, and it is what gate G1 now stops on.**
+   > Asked to build a bracket, load it and say whether it holds *with a convergence study*, the
+   > agent built the part, drafted the load case correctly, submitted a 2 mm run, polled, was
+   > refused by the repeat guard and ran out of steps. The same prompt at a mesh coarse enough to
+   > finish inside the budget answers correctly and honestly, so **every piece works and the
+   > affordance to wait is the only thing missing.**
+   > **The guard is right and is being applied to the one read it does not fit.** Its refusal says
+   > *"reading something does not alter it, and the answer has not changed"* — true of every other
+   > read in this system, and false of a job status, which is the one read whose answer changes
+   > with nobody doing anything. Do not weaken the guard generally; `app/ai/recovery.py` and the
+   > three behavioural bounds exist because an unbounded retry is how a turn dies badly.
+   > **Three defensible shapes, and picking one is the task**: a `wait_for_simulation` tool with a
+   > bounded timeout that returns the terminal status or says it is still running; a blocking
+   > `get_simulation(wait_s=…)`; or exempting a job in `QUEUED`/`RUNNING` from the identical-read
+   > count while keeping it for everything else. The third is the smallest change and the easiest
+   > to get subtly wrong, because the exemption must not survive the job reaching a terminal
+   > state. Whichever is chosen owes a test that a turn can report a run slower than two steps.
+   > Recorded in `docs/verification-2026-09-20/README.md` with the screenshots.
 
 **This is the phase the Linux stretch stops on**, and it is the right place to stop: everything
 here that does not need hardware is closed, and what remains is exactly what the Windows seat

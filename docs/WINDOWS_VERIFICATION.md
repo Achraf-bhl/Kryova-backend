@@ -943,7 +943,29 @@ master plan's status line in the same commit.
       form, so a CATIA-built part can be measured against the same arithmetic.
       Master plan: **E17.3 task 3** carries this residual in its status line.
 
-- [ ] **E2 — Run the four gates the plan defines, in order (master plan Part 2).** G1 ran on
+- [ ] **E2 — Run the four gates the plan defines, in order (master plan Part 2).**
+      **G1 RUN 2026-09-20 ON THIS SEAT — DID NOT PASS, and the blocker has moved.** Full write-up
+      and four screenshots in `docs/verification-2026-09-20/`. Driven in the browser against a
+      live V5-R33 seat, backend `20d1107`, model `qwen3.5:9b`.
+      **What is now settled:** the load-bearing prompt builds, loads and measures correctly
+      (52.09 MPa against my own beam-theory 60.0; mass 0.84888 kg exact), and **it refuses to
+      state a verdict from a single-grid solve** — E7.7 works, and that was the 2026-09-10
+      failure.
+      **Defect found and fixed** (`20d1107`): `run_simulation` had no `grids` parameter while the
+      product's own answer tells the user to ask for `grids: 3`. Third instance of CLAUDE.md
+      testing item 8 and the worst of them, because this one is advertised.
+      **Defect found and NOT fixed — the new blocker, master plan E7 task 8:** the agent cannot
+      wait for a run it started. `run_simulation` returns `queued` and tells it to poll,
+      `MAX_IDENTICAL_READS = 2` refuses the third identical read, and none of the thirty tools is
+      a wait. Any solve slower than about two agent steps cannot be reported in its own turn.
+      **Fix E7.8 before attempting G1 again**, or the gate will re-measure a known failure — the
+      same sentence this item carried about E7.7, which turned out to be right.
+      **Environment notes that cost an hour before a prompt was typed** are in the report: the
+      dev server never hydrates here (use `npm run build && npm start`), `TaskStop` leaves the
+      node process holding the port, and `localhost` vs `127.0.0.1` splits the browser from the
+      CATIA bridge because Python sets `IPV6_V6ONLY` on Windows.
+
+      **Original entry follows.** G1 ran on
       2026-09-06 and did **not** pass (rung 3 failed); it is carried forward and is now also
       the only thing that can verify E6's CalculiX work. G2, G3 and G4 have never run. Each
       gate is driven from `docs/GUI_PROMPT_LADDER.md` through the chatbot in the browser —
@@ -1359,7 +1381,8 @@ master plan's status line in the same commit.
       in one job. The first returns **True**; the second raises **`FileNotFoundError [WinError 2]`**
       — with `os.getcwd()` unchanged and the directory still existing, `os.environ["PATH"]`
       identical (same length, still containing the Docker directory), `shutil.which("docker")`
-      still resolving to `C:\Program Files\Docker\Dockeresourcesin\docker.EXE`, and a run
+      still resolving to `C:\Program Files\Docker\Docker
+esourcesin\docker.EXE`, and a run
       of that **absolute path succeeding in the same breath**. So `which` finds it and
       `CreateProcess` cannot. **The mechanism was not identified and is recorded as unidentified**;
       the fix does not depend on it.

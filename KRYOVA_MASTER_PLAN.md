@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 124/134 = 93% | 140/151 eng-months = 93% |
+| Engineering — E1–E23 | 15/24 | 124/135 = 92% | 139/151 eng-months = 92% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 21/34 | 178/196 = 91% | 172/189 eng-months = 91% |
+| **Programme** | 21/34 | 178/197 = 90% | 171/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E7 100%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
+| in flight | E7 89%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2184,6 +2184,46 @@ as one, and the honest state of the case rather than a gap.
    > to get subtly wrong, because the exemption must not survive the job reaching a terminal
    > state. Whichever is chosen owes a test that a turn can report a run slower than two steps.
    > Recorded in `docs/verification-2026-09-20/README.md` with the screenshots.
+
+9. **The verdict is stated from a centroid stress, and the convergence study certifies it.**
+   *(added 2026-09-20, by gate G1's third run — the first one that got far enough to see it.)*
+   `_recover_element_stress` samples at the element centroid, which **is** the superconvergent
+   point and is the right choice for what it is; `max_von_mises_mpa` and the factor of safety are
+   computed from it, and the agent's pass/fail verdict is computed from those. On a part in
+   bending the centroid of the most-stressed element sits *inboard of the surface*, so the
+   headline is the stress at that depth rather than the peak at the skin — and
+   `_recover_nodal_stress`'s own docstring already says why that reads as convergence rather than
+   as an offset. Report the surface peak, or report both and say which the verdict used.
+   > NOT STARTED — **measured end to end on the seat, 2026-09-20, and the numbers are exact
+   > enough to be worth keeping.** A 180 x 50 x 12 mild steel bar, 400 N at the free end:
+   > * my closed form gives sigma = M*c/I = **60.0 MPa** at the surface and a tip deflection of
+   >   **0.514 mm**;
+   > * the run's **displacement is 0.5176 mm, 0.7% high** — so the model, the mesh and the load
+   >   case are all right, which is what makes the rest of this a clean measurement rather than a
+   >   modelling argument;
+   > * the three-grid study reports **41.03 MPa**, `converged: true`, **GCI 1.03%**, observed
+   >   order 2.85 over 3 grids — every signal of a healthy study;
+   > * a separate **2 mm** run of the same part reports **52.87 MPa**.
+   > **41.03 MPa is beam theory evaluated 1.90 mm inboard of the surface** (sigma(y) = 10y, so
+   > 41.03 -> y = 4.10 of 6); **52.87 is the same line 0.71 mm inboard**. The two runs are not in
+   > conflict and neither is wrong about what it reports: both are the stress at the first
+   > centroid, and the centroid moves towards the skin as the mesh refines. **That is why the GCI
+   > is small and the number is still 32% low** — the three grids of the study agree with each
+   > other because they are all coarse in the same way, and the quantity they agree on is not the
+   > surface stress.
+   > **The conclusion survived here and that is luck, not design**: 41 and 60 are both far below
+   > the 120 MPa limit. A part at 100 MPa of a 120 MPa limit would be certified as passing at
+   > 68 MPa with a converged badge on it.
+   > **E7 task 7's residual is the other half and they compound**: element size takes no account
+   > of the part's thinnest section, so the study's grids put ~979 tets across a 12 mm thickness
+   > and never resolve the skin on any of them.
+   > **Not a defect in the recovery.** The centroid is the superconvergent point and
+   > `nodal_stress` already evaluates at each node's own coordinate for exactly this reason. What
+   > is missing is that the *headline* and the *verdict* use the element value, so the honest fix
+   > is to publish the surface peak beside it and say which one the verdict rests on — which
+   > moves the factor of safety on every part and re-records every benchmark, and is therefore a
+   > deliberate change rather than an end-of-gate patch.
+   > Recorded in `docs/verification-2026-09-20/README.md`.
 
 **This is the phase the Linux stretch stops on**, and it is the right place to stop: everything
 here that does not need hardware is closed, and what remains is exactly what the Windows seat

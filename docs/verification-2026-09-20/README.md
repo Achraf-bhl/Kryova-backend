@@ -189,3 +189,61 @@ in two steps answers correctly and honestly. What is missing is the affordance t
   `127.0.0.1:3000`.
 * The driver must match the app tab on **`127.0.0.1:3000`**, not `localhost:3000`, or
   it attaches to a blank tab and every action times out against an empty page.
+
+
+---
+
+# Run 3 — after E7.8 landed — the study runs, and it exposes the next thing
+
+Screenshot: `G1-PASS-converged.png`. Fresh project, one prompt, `wait_for_simulation` in place:
+
+> …Build it, run the stress **as a three-grid convergence study**, and tell me whether it holds.
+
+**The turn completed.** The agent built the part on the seat, drafted the case, submitted a
+three-grid study, waited for it in one step and answered:
+
+> The maximum stress of 41.0 MPa is well below the 120 MPa limit … and the solution is
+> numerically converged (GCI 1.03% < 5%). The design passes with margin to spare.
+
+So **E7.8 is settled**: a solve slower than two agent steps is now reportable in the turn that
+starts it, which is what the last two runs died of.
+
+## And the number does not survive my own arithmetic
+
+| | |
+|---|---|
+| My closed form, surface | `M·c/I` = **60.0 MPa** |
+| My closed form, tip deflection | **0.514 mm** |
+| The run's deflection | **0.5176 mm** — 0.7% high |
+| The run's headline peak | **41.03 MPa**, `converged: true`, **GCI 1.03%**, order 2.85 |
+| A separate 2 mm run, same part | **52.87 MPa** |
+
+**The deflection being right to 0.7% is what makes this clean.** The geometry, the mesh, the
+material and the load case are all correct; only the reported stress is low.
+
+**41.03 MPa is beam theory evaluated 1.90 mm inboard of the surface.** σ(y) = 10y here, so
+41.03 → y = 4.10 of 6. And 52.87 → y = 5.29, i.e. 0.71 mm inboard. Both runs report the stress at
+the **first element centroid**, and the centroid walks towards the skin as the mesh refines.
+
+That is why the GCI is 1.03% and the number is still 32% low: the study's three grids agree with
+each other because they are coarse in the same way, and **the quantity they agree on is not the
+surface stress**. `app/solve/linear_static.py` says so itself —
+`_recover_element_stress` is *"the number the headline peak stress and the factor of safety are
+computed from"*, and `_recover_nodal_stress` documents that the centroid value *"reads as a
+converging answer rather than as a systematic offset"*.
+
+**The conclusion happened to survive** — 41 and 60 are both far under 120 — **and that is luck.**
+A part at 100 MPa of a 120 MPa limit would be certified as passing at 68 MPa with a converged
+badge on it.
+
+## Verdict
+
+**G1 still does not pass**, and the ladder's rule 6 is why: *never pass a level on a tool result;
+check the number against arithmetic you did yourself*. Mine disagrees by 32%.
+
+What is now discharged, and should not be re-measured: the load-bearing prompt builds, loads and
+answers; E7.7's no-verdict-without-convergence holds; E7.8's waiting works; `grids` is reachable.
+What is left is **E7 task 9** — publish the surface peak beside the centroid one and say which the
+verdict rests on. That moves the factor of safety on every part and re-records every benchmark, so
+it is a deliberate change rather than an end-of-gate patch, and it is the last thing between this
+gate and a pass.

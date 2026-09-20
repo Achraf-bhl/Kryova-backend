@@ -1229,6 +1229,25 @@ class ToolBox:
                                 "stress is not reproducible between runs."
                             ),
                         },
+                        "grids": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": (
+                                "1 (the default) is a single run. 3 or more makes it a "
+                                "**convergence study**: the same case is solved on "
+                                "successively finer meshes and the peak stress is "
+                                "assessed with a Grid Convergence Index, so the answer "
+                                "can say how far it would move on a finer mesh. Use this "
+                                "whenever the user asks whether a number is converged, or "
+                                "wants a pass/fail verdict rather than an indication -- a "
+                                "single grid holds no evidence about its own "
+                                "discretisation error, so no verdict may be stated from "
+                                "one. element_size_mm is then the COARSEST grid, so a "
+                                "study costs more time and never more memory. Capped at "
+                                "5. Two is refused: two grids give a difference and no "
+                                "way to tell a converging answer from a coincidence."
+                            ),
+                        },
                         "load_case": {
                             "type": "object",
                             "description": (
@@ -2517,6 +2536,7 @@ class ToolBox:
         geometry_version: int | None = None,
         element_size_mm: float | None = None,
         element_order: int = 2,
+        grids: int = 1,
         temperature_from: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Queue a real mesh-and-solve run, exactly as the HTTP route does.
@@ -2526,12 +2546,45 @@ class ToolBox:
         that linear tets got a cantilever's tip deflection wrong by 3.6x and
         scattered its peak stress by 2.8x across three identical runs, and this
         is the entry point the agent actually uses.
+
+        **`grids` was missing here until 2026-09-20, and the product advertised
+        it anyway.** `SimulationCreate` has taken it since E7.1, and
+        `app/ai/verification.py` ends every unconverged answer with *"Ask for a
+        convergence study (`grids: 3`) to find out what the number really is"* —
+        advice printed to the user about a parameter the agent could not send.
+        Gate G1 measured what that costs: asked for exactly that, the model
+        submitted **three separate single-grid runs**, invented a
+        `geometry_version_number` argument, looped on `get_simulation` until the
+        repeat guard stopped it, and ran out of steps. Every one of those runs
+        then reported *"not converged (single-grid)"*, so the question could not
+        be answered at all. Third instance of the class in CLAUDE.md's testing
+        item 8 — a capability the tools have and the agent is never offered —
+        and the first where the product *names the missing parameter in its own
+        prose*.
         """
         project = self._project(project_id)
 
         if element_order not in (1, 2):
             raise ToolError(
                 f"element_order must be 1 (linear tets) or 2 (quadratic); got {element_order!r}."
+            )
+
+        # The route's own two rules, refused here by name rather than as a 422
+        # the model has to decode. `_two_grids_cannot_form_a_study` is the
+        # wording in `app/schemas/simulation.py`; keep the two saying the same
+        # thing, because a caller who meets one and then the other reads a
+        # single product.
+        if grids < 1 or grids > 5:
+            raise ToolError(
+                f"grids must be between 1 and 5; got {grids!r}. 1 is a single run and 3 or "
+                "more is a convergence study. The cap is 5 because the finest grid costs "
+                "about 1.4^(3*(grids-1)) times the coarsest, and 5 is already 64x."
+            )
+        if grids == 2:
+            raise ToolError(
+                "A convergence study needs at least three grids: two give a difference "
+                "and no way to tell a converging answer from a coincidence. Ask for 1 "
+                "(a single run) or 3 or more."
             )
 
         # Validate before touching the queue: a Pydantic failure here becomes a
@@ -2563,16 +2616,25 @@ class ToolBox:
             solver=LinearStaticSolver.name,
             load_case=validated.model_dump(),
             element_order=element_order,
+            grids=grids,
             temperature_source=temperature_source,
         )
         return {
             "id": job.id,
             "status": job.status.value,
             "project_id": project.id,
+            # Spelled `geometry_version` here as well as `geometry_version_number`,
+            # because the model feeds a result's keys straight back into the next
+            # call: asked for a convergence study on 2026-09-20 it sent
+            # `geometry_version_number=...` and was refused, having read that name
+            # off this very payload. The long name stays for callers that already
+            # read it.
+            "geometry_version": version.version_number,
             "geometry_version_number": version.version_number,
             "load_case_name": validated.name,
             "element_size_mm": element_size_mm,
             "element_order": element_order,
+            "grids": grids,
             "note": (
                 "Queued. Meshing and solving take minutes; call get_simulation with "
                 "this id to find out how it went. Do not report a result yet."

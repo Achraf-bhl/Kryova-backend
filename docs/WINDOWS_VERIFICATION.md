@@ -751,6 +751,20 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       refreshes without sending a message.
 
 - [ ] **D5 — P4.7 and P4.6, what was attached reaching the agent's turn (added 2026-09-15).**
+      **Steps 1 and 2 are DONE (2026-09-20); steps 3 and 4 are what is left, and they need a
+      model.** Step 1: the seven-file set is **326 passed**, `ruff` and `mypy` clean over 495
+      files, and the frontend suite is 611 across 51 files with `tsc` and `eslint` clean.
+      Step 2: all four guards broken one at a time with the `Edit` tool and each restore
+      confirmed by `git status --short`. Dropping `notes=` fails
+      `test_an_attachment_is_named_even_before_it_is_quoted` **and two siblings**, because the
+      inventory is what every naming claim rests on; `_is_new` always true fails
+      `test_the_content_is_not_repeated_on_the_following_turn` and
+      `test_the_cutoff_is_the_users_last_message`; dropping the owner check fails **exactly**
+      `test_another_users_attachment_is_not_found`; a `raw_for_analysis` call in
+      `app/ai/attached.py` fails `test_nothing_outside_the_boundary_reads_the_payload` with the
+      file and line named. Recorded on P4.7's status line.
+      The original item, for the two steps still open:
+
       Linux wrote the quoting path (`app/ai/attached.py`, `quote_for_tool_result`, the
       `read_attachment` tool, the composer's document route) and **ran no pytest, ruff, mypy or
       vitest**. In order:

@@ -6133,6 +6133,33 @@ photo of a failed weld, a STEP file and a scanned drawing into the conversation.
    returns fragments beyond the turn's budget by locator. Without this, task 4's first sentence
    ("enters the conversation as quoted material") describes a path nothing takes, and the phase
    proof's load-case spreadsheet cannot be read by the agent at all.
+   > DONE (2026-09-20) — **the four guards have now been seen to fail, which the status below
+   > correctly said they had not.** THE QUEUE D5 steps 1 and 2, run on this machine. The test
+   > set (`test_attachments_turn`, `test_attachments`, `test_documents_injection`, `test_agent`,
+   > `test_tool_registry`, `test_ai_tool_selection`, `test_mcp`) is **326 passed**; `ruff` and
+   > `mypy` clean over 495 files. Then each guard broken with the `Edit` tool, one at a time,
+   > and the tree confirmed clean by `git status --short` after each:
+   > * dropping `notes=` from `for_turn`'s `quote_for_user_turn` call fails
+   >   `test_an_attachment_is_named_even_before_it_is_quoted` **and two siblings** —
+   >   `test_a_failed_read_is_named` and `test_but_the_file_is_still_named_on_the_following_turn`,
+   >   which is the right blast radius: the inventory is what keeps a file knowable, so
+   >   *every* claim about naming rests on that one argument.
+   > * `_is_new` returning `True` unconditionally fails
+   >   `test_the_content_is_not_repeated_on_the_following_turn` and
+   >   `test_the_cutoff_is_the_users_last_message`.
+   > * dropping the owner check in `attachments.owned` fails exactly
+   >   `test_another_users_attachment_is_not_found` and nothing else — the narrow result that
+   >   says the refusal is pinned where it belongs rather than as a side effect.
+   > * a `raw_for_analysis` call added to `app/ai/attached.py` fails
+   >   `test_nothing_outside_the_boundary_reads_the_payload`, naming the file and line.
+   > **What is still not settled is the half only a model can settle**: whether a real model
+   > *uses* a citation it was handed, reaches for `read_attachment` once the quote has left the
+   > window, and reports rather than obeys an instruction in a cell. That is D5 steps 3 and 4,
+   > through the GUI, and it stays open in THE QUEUE.
+   > Tested by: `tests/test_attachments_turn.py` (30),
+   > `tests/test_documents_injection.py::TestTheOneAccessorIsNotCalledWhereItShouldNotBe`.
+
+   <!-- superseded 2026-09-20 -->
    > DONE (2026-09-15) — **the spreadsheet now reaches the model, quoted and cited, and the
    > path is the only one there is.** Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule. `py_compile`, an import of `app.main`, the
    > frontend's `tsc --noEmit` and a scripted exercise of the quoting path were run, so no

@@ -27,6 +27,7 @@ so they say *when* to use a tool, not just what it does.
 import difflib
 import json
 import logging
+import time
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Final
@@ -135,6 +136,7 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     "read_attachment": "Reading the attached file",
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
+    "wait_for_simulation": "Waiting for the analysis to finish",
     # Says what it produces, not how. A user watching the step list should
     # read that the loading is being worked out, which is the true and useful
     # description; that a model call turns the sentence into a load case is an
@@ -1150,6 +1152,33 @@ class ToolBox:
                     {"simulation_id": {"type": "string"}}, required=["simulation_id"]
                 ),
                 handler=self._get_simulation,
+            ),
+            Tool(
+                name="wait_for_simulation",
+                description=(
+                    "Wait for a run to finish, then return it. **Call this straight "
+                    "after run_simulation rather than polling get_simulation** -- one "
+                    "call, one step, however long the solve takes. Polling in a loop "
+                    "burns a step per read and is refused once the answer repeats, "
+                    "which is how a turn runs out of steps with the result still "
+                    "queued. Returns the finished run, or, if it is still going when "
+                    "the wait is up, says so with `timed_out: true` -- call it again to "
+                    "keep waiting. A convergence study solves every grid, so give it "
+                    "longer."
+                ),
+                parameters=_object(
+                    {
+                        "simulation_id": {"type": "string"},
+                        "timeout_s": {
+                            "type": "number",
+                            "description": (
+                                "How long to wait, in seconds. Default 120, maximum 600."
+                            ),
+                        },
+                    },
+                    required=["simulation_id"],
+                ),
+                handler=self._wait_for_simulation,
             ),
             Tool(
                 name="draft_load_case",
@@ -2465,6 +2494,77 @@ class ToolBox:
             "result": job.result,
             "error": job.error,
         }
+
+    #: How long `wait_for_simulation` waits when the model does not say, and the
+    #: most it will wait however much it asks for. The cap is not politeness: the
+    #: wait blocks one FastAPI threadpool thread and holds the request session's
+    #: transaction open, so an unbounded one is a worker leak wearing a helpful
+    #: name. Ten minutes is longer than any solve the gate has produced and short
+    #: enough that a wedged job surfaces as a timeout rather than a hung turn.
+    WAIT_DEFAULT_S = 120.0
+    WAIT_MAX_S = 600.0
+
+    #: Re-read the row this often. A second is far below any solve worth waiting
+    #: for and far above the cost of one indexed primary-key SELECT.
+    WAIT_POLL_S = 1.0
+
+    def _wait_for_simulation(
+        self, simulation_id: str, timeout_s: float | None = None
+    ) -> dict[str, Any]:
+        """Block until a run reaches a terminal status, or the wait runs out.
+
+        **Master plan E7 task 8, added because gate G1 could not finish.**
+        `run_simulation` returns `queued` and its own description tells the agent
+        to poll `get_simulation`; `MAX_IDENTICAL_READS` then refuses the third
+        identical read, and no tool offered a way to wait. So the product
+        instructed the agent to poll and forbade it from polling, and any solve
+        slower than about two agent steps could not be reported in the turn that
+        started it. Measured on the seat 2026-09-20: the agent built the part,
+        drafted the case correctly, submitted a 2 mm run, polled, was refused,
+        and ran out of steps with the answer still queued.
+
+        **The repeat guard is right and is not weakened.** Its refusal says
+        *"reading something does not alter it, and the answer has not changed"*,
+        which is true of every other read in this system and false of exactly
+        one: a job status is the read whose answer changes with nobody doing
+        anything. Rather than carve an exception into the guard -- where the
+        exemption would have to stop applying the moment the job went terminal,
+        and would silently stop being tested the day it did -- the waiting
+        happens *inside one tool call*, so the guard never sees a repeat and its
+        rule stays whole.
+
+        **A timeout is not a failure and does not claim one.** It returns the
+        job as it stands with `timed_out: true`, because "still running after
+        ten minutes" and "failed" are different facts and the agent must not
+        report the second when it has the first.
+        """
+        wait_s = self.WAIT_DEFAULT_S if timeout_s is None else float(timeout_s)
+        if wait_s <= 0:
+            raise ToolError(
+                f"timeout_s must be positive; got {timeout_s!r}. Omit it for "
+                f"{self.WAIT_DEFAULT_S:g} seconds."
+            )
+        wait_s = min(wait_s, self.WAIT_MAX_S)
+
+        job = self._simulation(simulation_id)  # ownership check before any waiting
+        deadline = time.monotonic() + wait_s
+        while True:
+            if job.status.is_terminal:
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(self.WAIT_POLL_S)
+            # Expire before re-reading, or SQLAlchemy hands back the identity-mapped
+            # copy this session already loaded and the status never appears to move,
+            # however long the wait. The worker committed its change from a
+            # different session; READ COMMITTED means a fresh SELECT sees it.
+            self.db.expire(job)
+            job = self._simulation(simulation_id)
+
+        answer = self._get_simulation(simulation_id)
+        answer["timed_out"] = not job.status.is_terminal
+        answer["waited_s"] = round(wait_s - max(0.0, deadline - time.monotonic()), 1)
+        return answer
 
     def _draft_load_case(
         self,

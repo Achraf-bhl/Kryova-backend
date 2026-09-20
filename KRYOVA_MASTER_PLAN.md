@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 124/134 = 92% | 139/151 eng-months = 92% |
+| Engineering — E1–E23 | 15/24 | 124/134 = 93% | 140/151 eng-months = 93% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 21/34 | 176/196 = 90% | 171/189 eng-months = 90% |
+| **Programme** | 21/34 | 178/196 = 91% | 172/189 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E7 88%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
+| in flight | E7 100%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2141,6 +2141,31 @@ as one, and the honest state of the case rather than a gap.
    thirty tools is a wait, a sleep or a poll**. So the product instructs the agent to poll and
    forbids it from polling, and any solve slower than about two agent steps cannot be reported in
    the turn that started it. Give it a bounded way to wait.
+   > DONE (2026-09-20) — **`wait_for_simulation`: one call, one step, however long the solve
+   > takes.** Of the three shapes the task named, a *named tool* was chosen over an optional
+   > `wait_s` on `get_simulation` and over exempting a running job from the identical-read count.
+   > The reason is what the seat actually measured: the model's failure was not knowing it *could*
+   > wait, and a tool in the list is discoverable in a way an optional flag on a read tool is not.
+   > The third shape was rejected on merit — it leaves the step budget untouched, so a long solve
+   > still exhausts the turn, and its exemption would have to stop applying the moment the job went
+   > terminal, which is a condition nothing would have tested again.
+   > **The repeat guard is not weakened anywhere.** The waiting happens inside one tool call, so
+   > the guard never sees a repeat and its rule stays whole — which matters, because its
+   > justification is right about every read except this one.
+   > **A timeout is not a failure and does not claim one**: it returns the job as it stands with
+   > `timed_out: true`, because "still running after ten minutes" and "failed" are different facts.
+   > Bounded at 600 s and defaulted to 120, because the wait blocks a FastAPI threadpool thread and
+   > holds the request session's transaction open — an unbounded wait is a worker leak wearing a
+   > helpful name.
+   > **The trap it would have shipped with, caught by breaking the guard:** `Session.get` returns
+   > the identity-mapped copy without touching the database, so without `expire` the status never
+   > appears to move and the tool would time out on every run that had already finished. The first
+   > version of that test passed against the mutant, because a same-session `update()` expires the
+   > object for you; it now uses `synchronize_session=False`, which is what a worker committing
+   > from its own session actually looks like. Removing the `expire` fails it and nothing else.
+   > Tested by: `tests/test_agent.py::TestWaitingForARunItStarted` (6).
+
+   <!-- superseded 2026-09-20 -->
    > NOT STARTED — **measured on the seat 2026-09-20, and it is what gate G1 now stops on.**
    > Asked to build a bracket, load it and say whether it holds *with a convergence study*, the
    > agent built the part, drafted the load case correctly, submitted a 2 mm run, polled, was

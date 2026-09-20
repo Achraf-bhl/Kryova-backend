@@ -151,6 +151,7 @@ TOOL_LABELS: dict[str, str] = {
     "read_attachment": "Reading the attached file",
     "list_simulations": "Reviewing previous runs",
     "get_simulation": "Reading the simulation result",
+    "wait_for_simulation": "Waiting for the analysis to finish",
     "run_simulation": "Preparing the analysis",
     "run_thermal_simulation": "Preparing the thermal analysis",
     "run_flow_simulation": "Preparing the flow analysis",

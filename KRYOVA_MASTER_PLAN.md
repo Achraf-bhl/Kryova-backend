@@ -71,17 +71,17 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 16/24 | 124/134 = 92% | 139/151 eng-months = 92% |
+| Engineering — E1–E23 | 15/24 | 124/134 = 92% | 139/151 eng-months = 92% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 22/34 | 176/196 = 90% | 171/189 eng-months = 90% |
+| **Programme** | 21/34 | 176/196 = 90% | 171/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
+| in flight | E7 88%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -1663,7 +1663,20 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
 
-> ✅ PHASE COMPLETE (2026-09-15) — all seven tasks done. **Task 1's last case, LE3, runs**: the
+> **THE ✅ MARKER IS WITHDRAWN (2026-09-20), and the reason is the phase working rather than
+> failing.** Gate G1, driven on the seat, found that the agent cannot wait for a run it started —
+> `run_simulation` returns `queued` and tells it to poll, `MAX_IDENTICAL_READS` refuses the third
+> identical read, and no tool of the thirty is a wait. So an analysis slower than about two agent
+> steps **cannot be reported in the turn that starts it**, which makes this phase's central claim
+> — a number you can trust, with what it rests on — unreachable for exactly the runs most worth
+> trusting: the fine and the converged ones. That is **new task 8**, and it is unbuilt.
+> A marker naming it as a residual would have been the cheaper move and the wrong one: E1's
+> residual is a *deliberate* 108/201 that Decision 1 says grows only on demand, whereas this is
+> work nobody has done, blocking a gate. The board goes back a phase because the phase went back.
+> **Re-add the marker when task 8 closes and G1 has been re-run.**
+>
+> The 2026-09-15 marker read as follows, heading hyphenated so the parser does not read it as
+> live: *PHASE-COMPLETE (2026-09-15)* — all seven tasks done. **Task 1's last case, LE3, runs**: the
 > full hemisphere in tri6 through `ShellSolver`, 184.97 mm against the published 185 mm on
 > ccx 2.20-1 (measured on Linux in docker, one grid at h = 250 mm). tests run on this machine 2026-09-17/19 and green of 2026-09-15 that the Windows machine runs the tests, and
 > the recorded V&V artefact is stale until that machine re-records it — THE QUEUE A6.

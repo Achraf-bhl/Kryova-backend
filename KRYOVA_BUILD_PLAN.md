@@ -33,8 +33,12 @@ happened.
 > steps cannot be reported in its own turn. Filed as **E7 task 8** with three defensible
 > remedies; picking one is target (1) below.
 >
-> **Board: 22/34 phases - 91.0%.** `ruff` and `mypy` (495) clean, `app.verify.recorded --check`
-> current. Read the backend suite's number from the last commit of this turn.
+> **Board: 21/34 phases - 90.1%, and it went BACKWARDS on purpose.** E7's ✅ marker is withdrawn:
+> gate G1 found task 8's work unbuilt, and a phase with an open task carries no marker. Naming it
+> as a residual would have been the cheaper move and the wrong one — E1's residual is a
+> deliberate 108/201, this is work nobody has done that blocks a gate.
+> Backend suite **10,703 passed / 21 skipped / 1 xpassed / 0 failed**; `ruff` and `mypy` (495)
+> clean; `app.verify.recorded --check` current.
 >
 > **Environment — an hour went into this before a prompt was typed. Do not rediscover it.**
 > * The frontend **dev server never hydrates** here; forms submit natively and React never runs.

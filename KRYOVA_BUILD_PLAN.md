@@ -37,8 +37,10 @@ happened.
 > gate G1 found task 8's work unbuilt, and a phase with an open task carries no marker. Naming it
 > as a residual would have been the cheaper move and the wrong one — E1's residual is a
 > deliberate 108/201, this is work nobody has done that blocks a gate.
-> Backend suite **10,703 passed / 21 skipped / 1 xpassed / 0 failed**; `ruff` and `mypy` (495)
-> clean; `app.verify.recorded --check` current.
+> Backend suite **10,702 passed / 1 failed / 21 skipped / 1 xpassed** (13 min 33 s), the one
+> failure being the marker guard above; it passes in isolation after the fix, so the whole-suite
+> figure with it green is **10,703 derived and not measured in one run** — the next full run is
+> what settles it. `ruff` and `mypy` (495) clean; `app.verify.recorded --check` current.
 >
 > **Environment — an hour went into this before a prompt was typed. Do not rediscover it.**
 > * The frontend **dev server never hydrates** here; forms submit natively and React never runs.

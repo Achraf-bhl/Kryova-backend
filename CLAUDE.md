@@ -812,6 +812,18 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    too tight for one and too loose for the other.
 4. **Verify a new guard by breaking the thing it guards** and watching a named test fail. Say so
    in the commit. A guard nobody has seen fail is a guard nobody knows works.
+   **And read *how much* went red, not only that something did — the blast radius is the second
+   measurement, and it is free.** Both directions carry information, and both were taken on
+   2026-09-20. *Wider than expected is usually right*: dropping `notes=` from
+   `attached.for_turn` failed the named test **and two siblings**, because the inventory line is
+   what every claim about naming rests on — a single failure there would have meant the other
+   two were pinned on something weaker. *Narrower than expected is a documented claim to
+   re-read*: removing the explicit `newline="
+"` in `app/dynamics/chrono/run.py` failed exactly
+   one test **and zero runs**, which is how it was discovered that CRLF does not in fact break a
+   Chrono run on Windows — THE QUEUE had listed it for days as one of three things that would.
+   A guard that fires narrowly is not a weak guard; it is often a strong guard attached to an
+   overstated claim, and the claim is the thing to fix.
 5. `client` overrides the job queue to `InlineJobQueue` so jobs run on the request thread inside
    the test's open transaction — a worker thread would use its own connection and see none of the
    uncommitted data.
@@ -2317,6 +2329,27 @@ to state out loud.
   validation outcome, and published *nothing is validated* on the trust page. It also keyed on
   `str(path)`, which is `app\solve\...` here. **Neither normalisation alone reproduces a Linux
   digest** — both are needed, and both are pinned by their own test.
+- **`subprocess.run(["docker", ...])` by the BARE NAME fails inside a running job here, while
+  `shutil.which("docker")` still resolves it.** Measured 2026-09-20. The full suite came back
+  **2 failed / 11 errors**, all OpenFOAM, and the same file alone was **67 passed** — which reads
+  exactly like the contention trap above and is not: the reproducing test failed alone, in 1.7 s,
+  reporting *"The OpenFOAM image … is not present"* while `docker images` listed it. Instrumented
+  through the job path, `_image_present` runs **twice**: the first returns True, the second raises
+  **`FileNotFoundError [WinError 2]`** with the working directory unchanged and still existing,
+  `PATH` byte-identical and still containing the Docker directory, `which` still resolving
+  Docker Desktop's own `docker.EXE` under `C:\Program Files`, and a run of **that absolute
+  path succeeding in the same breath**. So `which` finds it and `CreateProcess` does not. **The
+  mechanism is unidentified** and is written down as unidentified; the fix does not depend on it.
+  **Launch the resolved absolute path, never the bare name** — `run._docker()` in both
+  `app/solve/openfoam/` and `app/dynamics/chrono/`.
+  **The half that hid it for an hour is the better lesson.** `_image_present` caught `OSError` and
+  returned a bare `False`, so *"docker says no such image"* and *"we could not run docker at all"*
+  arrived as one answer, and the refusal said `docker pull`. Wrong and unactionable: it sends you
+  to fix the one thing that was not broken. It returns `None` for the second case now. **This is
+  the third time one message for two causes has cost a session** — the CATIA `ExportData` refusal
+  blaming a licence for a document of the wrong kind, and `gmsh`'s bare "Error loading" on a valid
+  STL, are the other two. When a refusal is written, ask what *else* reaches that line.
+
 - **A test that reads real machine state answers differently depending on the machine.** Eight
   `test_catia_local_bridge` tests hit a `sys.platform`-guarded `tasklist` probe for the first
   time: the process double is not a context manager, so `subprocess.run` raised inside a broad
@@ -2364,6 +2397,26 @@ to state out loud.
    `RUN python` in the Dockerfile dies with `python: command not found` *after* the
    fourteen-minute conda solve; and `docker run IMAGE python …` works anyway, because the
    image's entrypoint activates the environment.
+   **It runs on Windows (2026-09-20, THE QUEUE G6 step 1), and one of the three things that
+   were supposed to stop it does not exist.** A mechanism runs in 1.0 s; the `C:\…:/work`
+   mount resolves; the container writes as **root** (no `os.getuid`, so no `--user`) and the
+   host deletes the directory anyway — the same answer OpenFOAM gave here. But **CRLF line
+   endings do not break the run**: the entry point is invoked as `python /work/chrono_run.py`,
+   an *argument* rather than an executable, so its shebang is never parsed and CPython accepts
+   CRLF source. Removing `newline="
+"` fails exactly one test and no run. The explicit LF
+   stays as insurance against a caller that execs the file; do not cite it as the reason a
+   Windows run works, because it is not.
+   **`pychrono` carries no `__version__` at all** — `dir()` offers only
+   `ChMatrix_dense_version_tag`, a matrix format tag — so `chrono_version` reads `unknown` and
+   that is the only reachable answer. The image's **content id** is the whole of this engine's
+   identity, which is why `cache.engine_for` keys on it.
+   **And every Chrono test before that day was against a stub.** 77 of them, driving two
+   hand-written fakes (one spelled the Chrono 8 way, one the Chrono 9 way) — exactly right for
+   pinning `_call`'s name resolution and no evidence whatever about the engine. That is
+   `stream_chat`'s lesson in a second package: **a mock of an API is a copy of what its author
+   believed it to be.** `tests/test_dynamics_chrono_engine.py` is the real-engine half, and it
+   skips where there is no image, so CI and Linux still learn nothing from it.
 5. **The in-memory rate-limiter backend is per-process.** `RedisBackend` exists in
    `api/rate_limit.py`; with `InMemoryBackend` selected, multiple workers each enforce their own
    budget. Check which backend is configured before reasoning about a limit. **Since P1.6 the

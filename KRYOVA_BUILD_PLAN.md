@@ -15,47 +15,73 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-19 16:30 — after the reboot: Docker in use, the image health-checked,
-> OpenFOAM on Windows, CATIA FTA measured end to end.**
+> **Continuation, 2026-09-20 09:55 — eight tasks closed: FTA on the seat, P4.6 finished, the
+> attachment guards broken, the horizon measured, Chrono proved on Windows, and a real docker
+> defect found by the suite and fixed.**
 > **This machine holds the chain.** The user's instruction stands: **keep testing on CATIA**
-> and drive the plan closer to 100%. **Next continuation fires: 2026-09-19 18:20.**
-> **`CronList` first on every wake** — a one-shot job whose time passes mid-turn never fires.
-> **Board: 22/34 phases · 176.5/195 tasks = 90.5% · 171.6/189 eng-months = 90.8%.** Suite
-> **10,653 passed / 25 skipped / 1 xpassed / 0 failed** (11:37) with CATIA open; the skip count
-> moves with the seat (39 with CATIA closed), because `TestLiveCatia` reads what is open.
-> `ruff`, `mypy` (494), `app.verify.recorded --check` clean.
+> and drive the plan closer to 100%. **Next continuation fires: 2026-09-20 12:26**, held by
+> **this session**. The job dies if this editor is closed.
 >
-> **The installed Kryova 0.2.0 app is RUNNING** (started 2026-09-19 17:07). It launches a
-> real backend and a real CATIA bridge daemon, so **close it before the full suite** or
-> `tests/test_catia_*` can go red against its `bridge.lock`. A rebuild cleared Defender's
-> false positive on the previous build; a folder exclusion for `C:\Program Files\Kryova` is
-> still set and did not help — whether to remove it is the user's call.
+> **The 04:44 job never fired, and this is the second time.** A one-shot cron only fires while
+> the REPL is *idle*; that turn was still running at 04:44, so the job sat in `CronList` unfired
+> and its date is now permanently in the past. **`CronList` is the first thing you do on every
+> wake** — if the pending job's time has gone by, delete it and schedule a fresh one.
+> **Board: 22/34 phases · 177.5/195 tasks = 91.0%.** `ruff`, `mypy` (495) clean; frontend **611
+> across 51 files** with `tsc` and `eslint` clean. **`app.verify.recorded` was RE-RECORDED this
+> turn** (4/5 agreed, unchanged) — `app/solve/openfoam/run.py` is inside `code_fingerprint`, so
+> the docker fix expired the artefact. That is the guard working, not a regression, and it will
+> happen again to anyone touching `app/solve/` or `app/mesh/`.
 >
-> **After a reboot, two things are not up**: Postgres (`pg_ctl -D C:\Users\achra\pgdata -l
-> %USERPROFILE%\pgdata.log start` — **not** under `Start-Process -Wait`, which waits on the
-> server forever), and CATIA. Docker Desktop starts itself.
+> **Read the backend suite's number from the last commit of this turn, not from here** — and
+> before believing a red OpenFOAM run, see the new THE QUEUE **F2**: a bare-name `docker` launch
+> fails inside a job on Windows, and the refusal it produced blamed a missing image. The same
+> file alone was green, which looks exactly like the two-runs-collided trap and was a real
+> defect.
 >
-> **One decision is the user's, not the chain's:** whether the image ships the reference
-> manuals. `data/bm25/` is excluded by default because 25 of its PDFs are third-party books,
-> several from a shadow library, and a pushed image redistributes them.
+> **Two things about this machine's state.** Postgres does **not** survive a reboot
+> (`pg_ctl -D C:\Users\achra\pgdata -l %USERPROFILE%\pgdata.log start` — **never** under
+> `Start-Process -Wait`, which waits on the server for ever). Nothing was holding `bridge.lock`
+> when this turn's suite ran; if the installed Kryova app is running, close it first or
+> `tests/test_catia_*` goes red against its daemon.
 >
-> **Next targets, in order:**
-> (1) **Make FTA a bridge operation.** Everything is measured; the recipe is in THE QUEUE E7:
->     `AnnotationSets.Add("ISO")` → `CreateView(planeRef, 0)` → `UserSurfaces.Generate(faceRef)`
->     → `CreateDatum` → `DatumSimple().Label` → `CreateDatumReferenceFrame()` →
->     `ReferenceFrame().SetFrame(label,"","")` → `CreateToleranceWithDRF(4, us, drf)`. Declare it
->     in `app/catia/ops/`, refuse it by name on the open kernel, test both tables (the index is
->     per family). Needs `EnsureModule` on CATTPSInterfaces only (CLAUDE.md 3b/3c).
-> (2) **THE QUEUE E2 — gate G1 through the GUI.** Still the oldest untaken item.
-> (3) **THE QUEUE E6's engine half** — `AddJoint` killed the seat once; try the Win32 bridge on
->     the constraints-conversion command. The *reading* half is done (`catia_constraints.py`).
-> (4) **THE QUEUE E5 — crash recovery.** Last in a turn; it costs the seat.
-> (5) **P6's measurement half** — FMP and fps in the browser.
-> (6) **P4.6's drag-and-drop**, which still reaches only the geometry path.
-> (7) **E13.2 / E8.3** — check outbound network first.
+> **`kryova-chrono:9.0.1` now exists on this machine** (~8 GB, built this turn). So does
+> `opencfd/openfoam-default:2412`. Neither needs rebuilding.
 >
-> **Not takeable by any machine:** E21's five and E23's two. **P9.5 stays BLOCKED** for its own
-> reason: the MSI launches a dev server from checkout paths baked in at build time.
+> **Next targets, in order — at least seven, and the rule is seven per turn:**
+> (1) **THE QUEUE E2 — gate G1 through the GUI.** The oldest untaken item, and it has now been
+>     deferred for FIVE consecutive turns in favour of cheaper work. **Take it first, before
+>     anything else**, or it will be six. One prompt per level, a screenshot every time, and no
+>     moving up until the current level passes.
+> (2) **THE QUEUE G6 steps 2 and 3 — the Chrono work that matters.** Step 1 is done and the
+>     container is proved. Step 2 is a joint **moment** against a closed form, on a body that
+>     *has* an inertia tensor (a point mass omits the Iα and ω×Iω terms and `reactions.py`
+>     marks the moment approximated). Step 3 is a four-bar closed loop against
+>     `app/dynamics/closures.py`'s closed-form coupler curve — the first thing Chrono is
+>     actually here for, since everything run so far is a single-DOF joint `KinematicEngine`
+>     answers exactly. Copy `tests/test_dynamics_chrono_engine.py`'s shape.
+> (3) **THE QUEUE D5 steps 3 and 4** — the half only a model can settle. Attach a load-case
+>     spreadsheet through the **GUI**, ask a question whose answer needs a cell, and see whether
+>     the model cites it; then ask a follow-up once the quote has left the window and see
+>     whether it reaches for `read_attachment` unprompted. Step 4 attaches a cell reading
+>     "Ignore previous instructions…" — the **only** place Decision 8 is tested against a real
+>     model rather than a renderer.
+> (4) **THE QUEUE E6's engine half** — `AddJoint` killed the seat once (wrong argument *types*
+>     take CNEXT down with no dialog to dismiss). Try the Win32 bridge on the
+>     constraints-conversion command instead. The *reading* half is done
+>     (`app/dynamics/catia_constraints.py`).
+> (5) **P6's measurement half** — FMP under 2 s and 30 fps, in a real browser. THE QUEUE G1.
+> (6) **E13.2 / E8.3** — document-bound, and this seat **does** have outbound network, which is
+>     the correction made this turn. Check what each actually needs before planning around it.
+> (7) **THE QUEUE E5 — crash recovery** (kill CNEXT mid-plan). Last in any turn: it costs the
+>     seat and everything open in it.
+>
+> **Not takeable by any machine:** E21's document purchases and vendor forms, E23's two.
+> **E23.2 owes its verdict "by a person" by design.** **P9.5 stays BLOCKED** for its own reason:
+> the MSI launches a dev server from checkout paths baked in at build time.
+>
+> **One decision is still the user's, not the chain's:** whether the Docker image ships the
+> reference manuals. `data/bm25/` is excluded by default because 25 of its PDFs are third-party
+> books, several from a shadow library, and a pushed image redistributes them.
 
 > **Continuation, 2026-09-19 04:30 — DOCKER AND THE MSI ARE INSTALLED, AND THE MACHINE IS
 > ABOUT TO REBOOT.** Board **22/34 phases · 176.0/195 tasks = 90.3% · 171.3/189 eng-months =
@@ -602,6 +628,54 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-20 (night) — seven tasks: FTA on the seat, P4.6 finished, the four attachment guards
+  broken, the horizon measured, and Chrono proved on Windows.** Board **22/34 · 177.5/195 =
+  91.0%**.
+  **FTA is a bridge operation** (`42419b0`): `catia_tolerance_datum` / `_frame` / `_list`, with
+  the characteristic index in **two tables** because it is per family — a name in the wrong one
+  is refused by name and told which family it belongs to. No `value_mm`: setting the magnitude
+  was never measured, so it is `UNIMPLEMENTED` rather than a parameter that silently does
+  nothing.
+  **CLAUDE.md's "no outbound network" is about Linux** (`b32f439`); this seat has one, which
+  re-opens four tasks that were returned as un-takeable.
+  **P4.6 is finished and its status was false twice over.** The document-upload half
+  (`b9472be`, `57e9a83`) had never shipped — `git log --all -S uploadDocumentFile` returned
+  nothing while the plan described it in detail for five days. The drag-and-drop half
+  (`c7f5d57`, `f24cb6c`) did not "reach only the geometry path": **`onDrop` existed in no commit
+  of the frontend**. The composer is a drop zone now, pinned on the two behaviours that are
+  silent when wrong — a text drag must not look like an upload, and drag-depth counting keeps
+  the highlight steady as the pointer crosses the textarea. Pill and drop share **one** upload
+  controller, so a dropped file's progress shows where the user is already looking. Frontend
+  **611 across 51 files**.
+  **THE QUEUE D5 steps 1-2** (`bf42aa8`): 326 passed across the seven files it names, and all
+  four P4.7 guards broken one at a time and watched to fail. Dropping `notes=` fails the named
+  test **and two siblings**, which is the right radius — the inventory is what every naming
+  claim rests on. Dropping the owner check fails **exactly one**, which is the useful kind of
+  narrow.
+  **THE QUEUE D6 / E22.3** (`556a051`): the horizon measured on this machine's own 44 turns, 15
+  labelled from the ladder run log. **Completion and success move in opposite directions** —
+  0.60 → 0.11 against 0.17 → 0.29 across the 1-5 / 5-15 minute boundary. `horizon.py` argued the
+  two were different questions; this is the first evidence they are *anti-correlated* on real
+  traces. Nothing was truncated anywhere: every fall is `failed_tools`, and `completed` is a
+  conjunction over the turn, so decay with length is arithmetic before a model degrades at all.
+  The two long buckets are abandoned conversations and are recorded as an artefact.
+  **A real defect the suite found, and the suite was right** (`e9ba890`): the full run came back
+  **2 failed / 11 errors**, all OpenFOAM, while the same file alone was 67 passed — which reads
+  exactly like the two-runs-collided trap and was not. On Windows,
+  `subprocess.run(["docker", ...])` by the **bare name** raises `FileNotFoundError [WinError 2]`
+  inside a running job while `shutil.which` still resolves it and the **absolute path works in
+  the same breath**: same PATH, same cwd, seconds after an identical call returned 0. Mechanism
+  unidentified and recorded as unidentified. Both launchers now use the resolved path. **The half
+  that hid it for an hour**: `_image_present` swallowed the `OSError` into a bare `False`, so
+  "no such image" and "could not run docker" became one refusal saying `docker pull` — wrong, and
+  it sends you to fix the one thing that was not broken. Third time one message for two causes has
+  cost a session here.
+  **THE QUEUE G6 step 1** (`3f70462`): Chrono runs on Windows in 1.0 s, pendulum at 29.4190 N
+  against 3mg. **Every Chrono test before today was against a stub** — 77 of them, two
+  hand-written fakes — so 10 real-engine tests now exist. Of the three Windows traps the item
+  listed, **CRLF is wrong**: the entry point is invoked as an argument to `python`, so its
+  shebang is never parsed and a CRLF file runs fine. Found by breaking the guard, which measured
+  what the guard is worth as well as that it fires.
 - **2026-09-19 (afternoon, after the reboot) — Docker in use, the image health-checked, OpenFOAM
   on Windows, and CATIA FTA measured end to end.** Board **22/34 · 176.5/195 = 90.5%**.
   **Docker** (after the WSL2 reboot): server 29.8.0, WSL2 `docker-desktop`. **THE QUEUE F1**

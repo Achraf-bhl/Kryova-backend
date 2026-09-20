@@ -15,75 +15,59 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-20 09:55 — eight tasks closed: FTA on the seat, P4.6 finished, the
-> attachment guards broken, the horizon measured, Chrono proved on Windows, and a real docker
-> defect found by the suite and fixed.**
-> **This machine holds the chain.** The user's instruction stands: **keep testing on CATIA**
-> and drive the plan closer to 100%. **Next continuation fires: 2026-09-20 12:23**, held by
+> **Continuation, 2026-09-20 18:30 — gate G1 ran on the seat. It did not pass, and that is the
+> most useful outcome it could have had: the blocker it carried for ten days is gone and a
+> sharper one is named.**
+> **This machine holds the chain.** **Next continuation fires: 2026-09-20 20:58**, held by
 > **this session**. The job dies if this editor is closed.
+> **`CronList` is the FIRST thing you do on every wake.** A one-shot cron fires only while the
+> REPL is idle, so a job whose time passes mid-turn never fires and its date is then in the past
+> for ever. That has now happened **three times** — 04:27 on 09-17, and both 04:44 and 12:23 on
+> 09-20, the last because this gate run occupied the whole afternoon.
 >
-> **The 04:44 job never fired, and this is the second time.** A one-shot cron only fires while
-> the REPL is *idle*; that turn was still running at 04:44, so the job sat in `CronList` unfired
-> and its date is now permanently in the past. **`CronList` is the first thing you do on every
-> wake** — if the pending job's time has gone by, delete it and schedule a fresh one.
-> **Board: 22/34 phases · 177.5/195 tasks = 91.0%.** `ruff`, `mypy` (495) clean; frontend **611
-> across 51 files** with `tsc` and `eslint` clean. **`app.verify.recorded` was RE-RECORDED this
-> turn** (4/5 agreed, unchanged) — `app/solve/openfoam/run.py` is inside `code_fingerprint`, so
-> the docker fix expired the artefact. That is the guard working, not a regression, and it will
-> happen again to anyone touching `app/solve/` or `app/mesh/`.
+> **What G1 settled.** The load-bearing prompt builds on the seat, loads, measures and **refuses
+> to state a verdict from a single-grid solve** — 52.09 MPa against my own beam-theory 60.0, mass
+> 0.84888 kg exact. E7.7 works, and that was the 2026-09-10 failure.
+> **What it found.** One advertised-but-missing parameter (`grids`), fixed in `20d1107`. And the
+> new blocker: **the agent cannot wait for a run it started**, so any solve slower than ~2 agent
+> steps cannot be reported in its own turn. Filed as **E7 task 8** with three defensible
+> remedies; picking one is target (1) below.
 >
-> **Backend suite: 10,698 passed / 23 skipped / 1 xpassed / 0 failed** (11 min 44 s, 2026-09-20
-> 09:52, CATIA closed — the skip count moves with the seat because `TestLiveCatia` reads what is
-> open). And
-> before believing a red OpenFOAM run, see the new THE QUEUE **F2**: a bare-name `docker` launch
-> fails inside a job on Windows, and the refusal it produced blamed a missing image. The same
-> file alone was green, which looks exactly like the two-runs-collided trap and was a real
-> defect.
+> **Board: 22/34 phases - 91.0%.** `ruff` and `mypy` (495) clean, `app.verify.recorded --check`
+> current. Read the backend suite's number from the last commit of this turn.
 >
-> **Two things about this machine's state.** Postgres does **not** survive a reboot
-> (`pg_ctl -D C:\Users\achra\pgdata -l %USERPROFILE%\pgdata.log start` — **never** under
-> `Start-Process -Wait`, which waits on the server for ever). Nothing was holding `bridge.lock`
-> when this turn's suite ran; if the installed Kryova app is running, close it first or
-> `tests/test_catia_*` goes red against its daemon.
->
-> **`kryova-chrono:9.0.1` now exists on this machine** (~8 GB, built this turn). So does
-> `opencfd/openfoam-default:2412`. Neither needs rebuilding.
+> **Environment — an hour went into this before a prompt was typed. Do not rediscover it.**
+> * The frontend **dev server never hydrates** here; forms submit natively and React never runs.
+>   Use `npm run build && npm start`, which is what ships anyway.
+> * **`TaskStop` does not kill the server process** — it stops the bash pipeline while node keeps
+>   the port, so the next `npm start` fails EADDRINUSE and the browser talks to the old server.
+>   Free the port by PID.
+> * **`localhost` is not `127.0.0.1` here.** Chromium resolves `localhost` to `::1`; Python sets
+>   IPV6_V6ONLY on Windows, so uvicorn serves one family. Binding `::` fixes the browser and
+>   **breaks the CATIA bridge**, which reaches the API at `127.0.0.1:8000`. Everything is on IPv4
+>   now — frontend `.env.local` to `127.0.0.1:8000`, backend `CORS_ORIGINS` gains
+>   `http://127.0.0.1:3000`, browser driven at `127.0.0.1:3000`. Both files are gitignored.
+> * The CDP driver must match **`127.0.0.1:3000`**, not `localhost:3000`, or it binds a blank tab.
+> * The **bridge spawns on demand** from `dispatch`, not at startup. A backend restart rotates the
+>   token and the old daemon exits 403 — correct, not a fault. Close the app before a full pytest.
 >
 > **Next targets, in order — at least seven, and the rule is seven per turn:**
-> (1) **THE QUEUE E2 — gate G1 through the GUI.** The oldest untaken item, and it has now been
->     deferred for FIVE consecutive turns in favour of cheaper work. **Take it first, before
->     anything else**, or it will be six. One prompt per level, a screenshot every time, and no
->     moving up until the current level passes.
-> (2) **THE QUEUE G6 steps 2 and 3 — the Chrono work that matters.** Step 1 is done and the
->     container is proved. Step 2 is a joint **moment** against a closed form, on a body that
->     *has* an inertia tensor (a point mass omits the Iα and ω×Iω terms and `reactions.py`
->     marks the moment approximated). Step 3 is a four-bar closed loop against
->     `app/dynamics/closures.py`'s closed-form coupler curve — the first thing Chrono is
->     actually here for, since everything run so far is a single-DOF joint `KinematicEngine`
->     answers exactly. Copy `tests/test_dynamics_chrono_engine.py`'s shape.
-> (3) **THE QUEUE D5 steps 3 and 4** — the half only a model can settle. Attach a load-case
->     spreadsheet through the **GUI**, ask a question whose answer needs a cell, and see whether
->     the model cites it; then ask a follow-up once the quote has left the window and see
->     whether it reaches for `read_attachment` unprompted. Step 4 attaches a cell reading
->     "Ignore previous instructions…" — the **only** place Decision 8 is tested against a real
->     model rather than a renderer.
-> (4) **THE QUEUE E6's engine half** — `AddJoint` killed the seat once (wrong argument *types*
->     take CNEXT down with no dialog to dismiss). Try the Win32 bridge on the
->     constraints-conversion command instead. The *reading* half is done
->     (`app/dynamics/catia_constraints.py`).
-> (5) **P6's measurement half** — FMP under 2 s and 30 fps, in a real browser. THE QUEUE G1.
-> (6) **E13.2 / E8.3** — document-bound, and this seat **does** have outbound network, which is
->     the correction made this turn. Check what each actually needs before planning around it.
-> (7) **THE QUEUE E5 — crash recovery** (kill CNEXT mid-plan). Last in any turn: it costs the
->     seat and everything open in it.
+> (1) **E7 task 8 — a bounded way for the agent to wait for its own run.** What G1 now stops on.
+>     Do not weaken `MAX_IDENTICAL_READS` generally; exempt or bypass it only for a job status,
+>     which is the one read whose answer changes with nobody doing anything.
+> (2) **Re-run gate G1** once (1) lands, clean project, one prompt, screenshots, run-log entry.
+>     Expect it to reach a real convergence study now `grids` exists.
+> (3) **THE QUEUE G6 steps 2 and 3** — the joint moment against a closed form, and a four-bar
+>     closed loop against `closures.py`. Everything run so far is a single-DOF joint.
+> (4) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle, including the
+>     one place Decision 8 meets a real model.
+> (5) **THE QUEUE E6's engine half** — Win32 route only; `AddJoint` killed the seat once.
+> (6) **P6's measurement half** — FMP under 2 s and 30 fps in a browser (THE QUEUE G1).
+> (7) **The `PASS` chip** G1 observed: a green PASS in a row headed by the user's limit, sitting
+>     directly above prose saying that pass is not a verdict. Decide it or record why it stays.
 >
-> **Not takeable by any machine:** E21's document purchases and vendor forms, E23's two.
-> **E23.2 owes its verdict "by a person" by design.** **P9.5 stays BLOCKED** for its own reason:
-> the MSI launches a dev server from checkout paths baked in at build time.
->
-> **One decision is still the user's, not the chain's:** whether the Docker image ships the
-> reference manuals. `data/bm25/` is excluded by default because 25 of its PDFs are third-party
-> books, several from a shadow library, and a pushed image redistributes them.
+> **Not takeable by any machine:** E21's purchases and vendor forms, E23's two. **P9.5 stays
+> BLOCKED**: the MSI launches a dev server from checkout paths baked in at build time.
 
 > **Continuation, 2026-09-19 04:30 — DOCKER AND THE MSI ARE INSTALLED, AND THE MACHINE IS
 > ABOUT TO REBOOT.** Board **22/34 phases · 176.0/195 tasks = 90.3% · 171.3/189 eng-months =
@@ -630,6 +614,31 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-20 (afternoon) — GATE G1 RAN ON THE SEAT. It did not pass, and its blocker moved.**
+  THE QUEUE E2, the oldest untaken item, deferred five turns running. Driven in the browser
+  against a live V5-R33 seat, not through `dispatch`. Four screenshots and the write-up in
+  `docs/verification-2026-09-20/`.
+  **The regression the gate existed to re-check is closed.** Asked to build a 180 x 50 x 12 mild
+  steel bracket, hang 400 N off the free end and say whether it stays under 120 MPa, the product
+  built it on the seat, exported STEP, drafted the case, solved, and reported **52.09 MPa against
+  the 60.0 MPa I computed from M·c/I myself**, with mass **0.84888 kg** matching 108,000 mm³ ×
+  7860 exactly. **And it refused to call that a verdict**, naming the run single-grid. That is
+  E7.7 working; stating a verdict from an unconverged solve is exactly what failed on 2026-09-10.
+  **Defect found and fixed** (`20d1107`): asked for the convergence study the product's own
+  footnote tells users to ask for, **the agent had no `grids` parameter**. `SimulationCreate` has
+  taken it since E7.1. The model invented a `geometry_version_number` argument — a key it read off
+  that tool's own *result* payload — fired three separate single-grid runs, and ran out of steps.
+  Third instance of CLAUDE.md testing item 8 and the worst, because this one is **advertised in
+  the product's own prose**. The guard is written against the printed advice rather than a
+  parameter list, and its first version failed its own break (substring match let `gridsXX`
+  through), so it walks the AST now.
+  **Defect found and NOT fixed — the new blocker, E7 task 8:** the agent cannot wait for a run it
+  started. `run_simulation` returns `queued` and tells it to poll, `MAX_IDENTICAL_READS = 2`
+  refuses the third identical read, and **none of the thirty tools is a wait**. Any solve slower
+  than about two agent steps cannot be reported in its own turn; turn 1 passed only because its
+  mesh was coarse enough. The guard is right and is being applied to the one read it does not fit
+  — *"reading something does not alter it"* is true of every other read here and false of a job
+  status. Three defensible remedies are named in the task; picking one is the work.
 - **2026-09-20 (night) — seven tasks: FTA on the seat, P4.6 finished, the four attachment guards
   broken, the horizon measured, and Chrono proved on Windows.** Board **22/34 · 177.5/195 =
   91.0%**.

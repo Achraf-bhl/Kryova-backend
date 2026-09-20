@@ -371,6 +371,33 @@ session.**
    is what keeps the login cookie and the open conversation alive between tool calls.
    **Never call `browser.close()` on a CDP-attached browser** — it shuts Edge down and signs the
    session out; exiting the process is the whole of the detach.
+2a. **Three things stop a gate before a prompt is typed, all measured 2026-09-20.**
+   * **The frontend dev server never hydrates on this machine.** `npm run dev` serves correct
+     HTML and React never attaches: a login form does a *native* GET submit (the URL becomes
+     `/login?`), so nothing a client component does happens. No JS error explains it — only
+     repeated `_next/hmr` websocket failures. **`npm run build && npm start` works**, and a gate
+     should drive the production build anyway, because that is what ships.
+   * **`TaskStop` does not kill the server.** It stops the bash pipeline while node or uvicorn
+     keeps the port, so the next `npm start` dies with `EADDRINUSE` *while the browser carries on
+     talking to the old server* — which reads as "my fix did nothing". Free the port by PID
+     (`Get-NetTCPConnection -LocalPort 3000 -State Listen`), and check the listener rather than
+     the task.
+   * **`localhost` and `127.0.0.1` are not interchangeable, and they split the browser from the
+     bridge.** Chromium resolves `localhost` to `::1`; Python sets `IPV6_V6ONLY` on Windows, so
+     uvicorn serves exactly one family. A backend on `127.0.0.1` shows the browser only
+     *"Failed to fetch"*; binding `::` fixes the browser and **breaks the CATIA bridge**, which
+     reaches the API at `127.0.0.1:8000` (`settings.catia_local_bridge_server`) and whose daemon
+     then cannot register. Put everything on IPv4: `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000/api/v1`,
+     `CORS_ORIGINS` including `http://127.0.0.1:3000`, and drive the browser at `127.0.0.1:3000`.
+     The CDP driver must match the tab on **`127.0.0.1:3000`** too — a filter looking for
+     `localhost:3000` finds nothing, opens a fresh `about:blank`, and every action then times out
+     against an empty page.
+   * **The bridge spawns on demand from `dispatch`, not at startup.** It comes up when the first
+     CATIA tool is called, so an offline device right after a restart is expected. Restarting the
+     backend rotates the device token and any older daemon exits with *"the server rejected this
+     workstation's credentials (403) … exiting rather than retrying a token that cannot become
+     valid again"* — correct behaviour, not a fault.
+
 3. **Scope every DOM read to `main`.** A document-wide text or element scan returns Next.js's RSC
    `self.__next_f.push` payload and floods the context with megabytes of build output.
 4. **The backend spawns its own CATIA bridge.** `app/catia/local_bridge.py` auto-pairs a device
@@ -848,6 +875,25 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    capability, ask separately whether the agent is offered it, and write at least one test that
    goes through `call_catia` — `tests/test_geometry_backends.py::TestThePartCanReachTheSolver` is
    the shape to copy. The ladder exists because this class is only visible from the outside.
+8a. **The third instance of item 8 shipped on 2026-09-20, and this one the product
+   *advertised*.** Every unconverged answer ends with `app/ai/verification.py`'s sentence
+   *"Ask for a convergence study (`grids: 3`) to find out what the number really is"*, and the
+   handbook publishes the same advice. `SimulationCreate` has taken `grids` since E7.1.
+   **`run_simulation`, the tool the agent actually calls, did not.** So the product named a
+   parameter, gate G1's user asked for it, and the one actor able to act on it had no slot for
+   it: the model invented a `geometry_version_number` argument — a key it had read off that
+   tool's own *result* payload, where the spelling differed from the parameter — then submitted
+   three separate single-grid runs, each of which reported "not converged". The question was
+   unanswerable by construction.
+   Two rules follow. **When a server string tells the user to ask for something, a test must
+   check the agent can send it** — `tests/test_tool_registry.py::TestThePromptedParameterIsReachable`
+   reads the printed advice rather than hard-coding a parameter name, so it survives a rewording.
+   And **a tool's result keys should be spelled the way its parameters are**, because the model
+   feeds one straight back into the other; that asymmetry is what produced the invented argument.
+   (Note the guard's own first version failed its break: it matched `grids` as a *substring* of
+   the unparsed schema, so renaming the key to `gridsXX` left three tests green. It walks the AST
+   for property names now — *Testing* item 4's blast-radius rule, applied to the guard itself.)
+
 9. **A parameter the schema advertises is a promise, and honouring it on one backend is half a
    fix.** `catia_list_features` declares `body`, `kind` and `include_sketches`. The gap was found
    on the **CATIA** side on 2026-09-06 (ladder H2) and closed there; **the open kernel was never

@@ -19,7 +19,7 @@ happened.
 > attachment guards broken, the horizon measured, Chrono proved on Windows, and a real docker
 > defect found by the suite and fixed.**
 > **This machine holds the chain.** The user's instruction stands: **keep testing on CATIA**
-> and drive the plan closer to 100%. **Next continuation fires: 2026-09-20 12:26**, held by
+> and drive the plan closer to 100%. **Next continuation fires: 2026-09-20 12:23**, held by
 > **this session**. The job dies if this editor is closed.
 >
 > **The 04:44 job never fired, and this is the second time.** A one-shot cron only fires while
@@ -32,7 +32,9 @@ happened.
 > the docker fix expired the artefact. That is the guard working, not a regression, and it will
 > happen again to anyone touching `app/solve/` or `app/mesh/`.
 >
-> **Read the backend suite's number from the last commit of this turn, not from here** — and
+> **Backend suite: 10,698 passed / 23 skipped / 1 xpassed / 0 failed** (11 min 44 s, 2026-09-20
+> 09:52, CATIA closed — the skip count moves with the seat because `TestLiveCatia` reads what is
+> open). And
 > before believing a red OpenFOAM run, see the new THE QUEUE **F2**: a bare-name `docker` launch
 > fails inside a job on Windows, and the refusal it produced blamed a missing image. The same
 > file alone was green, which looks exactly like the two-runs-collided trap and was a real

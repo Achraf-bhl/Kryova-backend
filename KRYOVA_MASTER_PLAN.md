@@ -5144,6 +5144,61 @@ holds intent across a machine — and how does Kryova measure its own distance f
    memory is now a claim under contest** and must be measured on our own traces before it is
    built out. Deliverable: Kryova's agent measured per duration bucket, on our missions, with
    model selection driven by that and never by a leaderboard.
+   > PARTIAL (2026-09-20) — **the number exists now, and the headline is that completion and
+   > success move in *opposite* directions.** THE QUEUE D6 steps 1–3, run on this machine
+   > against its own conversation history — the only place multi-minute agent turns on this
+   > product exist. `tests/test_verify_horizon.py` 22 passed; `scripts/horizon_report.py`
+   > writes `data/verify/horizon.json`. **44 turns, 15 of them labelled:**
+   >
+   > | bucket | turns | completion | labelled | success |
+   > |---|---|---|---|---|
+   > | under 1 min | 6 | 0.67 | 2 | 1.00 |
+   > | 1–5 min | 15 | 0.60 | 6 | 0.17 |
+   > | 5–15 min | 18 | 0.11 | 7 | 0.29 |
+   > | 15–60 min | 2 | 0.50 | 0 | — |
+   > | over 1 hour | 3 | 0.67 | 0 | — |
+   >
+   > **The two columns disagree, and that is the measurement, not noise in it.** Completion
+   > falls 0.60 → 0.11 from the 1–5 to the 5–15 bucket while success *rises* 0.17 → 0.29. The
+   > separation of those columns was argued for on principle when the harness was written
+   > ("a turn that confidently builds the wrong part completes perfectly"); this is the first
+   > evidence that the two are not merely different definitions but **anti-correlated on real
+   > traces**. A product that had published `completion_rate` as its reliability number would
+   > have reported its long turns as six times worse than its short ones, when by the ladder's
+   > own verdicts they were better.
+   > **What drives the completion decay is not what the literature predicts.** Nothing was
+   > truncated — zero turns in any bucket hit the step budget — and no bucket above a minute
+   > has an unanswered turn. Every fall is `failed_tools`: 6 of 15 turns in the 1–5 bucket and
+   > **16 of 18** in the 5–15. The operation counts say why: 13 failed CATIA operations of 117
+   > in the 1–5 bucket (11%) against 76 of 384 (20%) in the 5–15. `completed` is a conjunction
+   > over every tool the turn touched, so **any** non-zero per-call failure rate produces decay
+   > with length arithmetically, before a model degrades at all. The named offenders are seat
+   > defects this repository already records — `catia_sketch_dimension` among them, which
+   > CLAUDE.md documents as failing on this seat far more often than it works.
+   > **The 15–60 and over-1-hour buckets are an artefact and must not be read.** Durations of
+   > 1,141 / 1,674 / 3,705 / 6,027 / 7,009 s carry 13–58 steps, so they are conversations
+   > somebody walked away from: wall-clock from a user message to the last message before the
+   > next one is the right unit while the user is *waiting* and the wrong one once they are
+   > not. Five turns across both, so nothing rests on them either way — but a bucket boundary
+   > that cannot tell a long turn from an abandoned one is a real defect in the harness, and it
+   > is recorded rather than fixed because fixing it needs a signal (an idle gap) the durable
+   > record does not carry.
+   > **How the labels were made, and what was refused.** The run log quotes each prompt
+   > verbatim and a conversation's title is its first user message, so the match is an exact
+   > prefix, not a resemblance. Three rules in `scripts/horizon_report.py`: only the **first**
+   > turn of a conversation is labelled (the log says nothing about follow-ups, and several of
+   > those are the challenge that got a correct answer out of a run recorded as a failure); a
+   > prompt matching several conversations is labelled only where the log gives **one** outcome
+   > for all of them, so the label does not depend on resolving which attempt is which — the
+   > 2026-09-09 base plate is four attempts in the log against six conversations, all failures
+   > either way; and a **mixed** entry is left unlabelled, which is why the 2026-09-10 L3
+   > bracket and the 2026-09-11 L2 spacer carry no label. Every refusal is listed in the
+   > artefact's `unlabelled` block with the rule that declined it.
+   > **Still open**: the literature figures remain `UNSOURCED` — nobody here has opened those
+   > papers, so the comparison the buckets exist for is still refused — and 15 labels is a
+   > small set. Tested by: `tests/test_verify_horizon.py` (22).
+
+   <!-- superseded 2026-09-20 -->
    > PARTIAL (2026-09-15) — **the harness reads our own traces and reports per bucket; the
    > numbers need runs, and every literature figure is recorded as unsourced.** Tests run on this machine 2026-09-17/19 and green; written on Linux under the no-pytest rule.
    > `app/verify/horizon.py`.

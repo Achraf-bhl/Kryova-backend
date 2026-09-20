@@ -795,7 +795,30 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       for `read_attachment` unprompted once the quote is out of the window, and whether the
       inventory is enough to keep an attachment knowable across a long conversation.
 
-- [ ] **D6 — E22.3, the horizon harness run on real traces (added 2026-09-15).**
+- [x] **D6 — E22.3, the horizon harness run on real traces (added 2026-09-15).**
+      **DONE 2026-09-20.** 22 tests pass; `ruff` and `mypy` clean. `scripts/horizon_report.py`
+      measured **44 turns, 15 labelled**, and writes `data/verify/horizon.json`. Completion by
+      bucket: under 1 min 0.67 (n=6), 1-5 min 0.60 (15), 5-15 min **0.11** (18), 15-60 min 0.50
+      (2), over 1 hour 0.67 (3). Success where labelled: 1.00 (2), **0.17** (6), **0.29** (7).
+      **The two columns move in opposite directions** — completion falls 0.60 to 0.11 across the
+      1-5 to 5-15 boundary while success rises 0.17 to 0.29 — which is the first evidence that
+      the separation `horizon.py` argued for on principle is anti-correlation on real traces,
+      not just a difference of definition. Nothing was truncated anywhere and no turn above a
+      minute went unanswered: every fall is `failed_tools` (16 of 18 turns in the 5-15 bucket),
+      and the operation rate doubles with length, 11% to 20%. `completed` is a conjunction over
+      the turn, so decay with length is arithmetic before any model degrades.
+      **The two long buckets are an artefact and are recorded as one**: 13-58 steps over
+      1,141-7,009 s means somebody walked away, and the durable record carries no idle signal to
+      tell that from a long turn. Five turns, so nothing rests on it.
+      Labels come from `docs/GUI_PROMPT_LADDER.md`'s run log by exact prompt prefix, first turn
+      only, and refuse any entry whose outcome is not unanimous across the conversations
+      matching it; the artefact's `unlabelled` block lists each refusal with its rule.
+      **Left open deliberately:** the literature figures stay `UNSOURCED` — nobody here has
+      opened the papers, so the comparison is still refused. That is C4's kind of work, not
+      this machine's.
+
+      The original item:
+
       `app/verify/horizon.py` groups recorded turns into duration buckets and reports a
       completion rate per bucket. Linux wrote it and ran no pytest.
       1. `venv/bin/python -m pytest tests/test_verify_horizon.py -q`, then `ruff` and `mypy`.

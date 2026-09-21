@@ -71,17 +71,17 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 126/136 = 92% | 139/151 eng-months = 92% |
+| Engineering — E1–E23 | 16/24 | 126/136 = 93% | 140/151 eng-months = 93% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 21/34 | 178/198 = 90% | 171/189 eng-months = 90% |
+| **Programme** | 22/34 | 180/198 = 91% | 172/189 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E7 90%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -1663,7 +1663,21 @@ calls. On CATIA it was minutes of a workstation per probe. This is Decision 1 co
 
 ##### Phase E7 — Verification and validation *(needs an ME)* #####
 
-> **THE ✅ MARKER IS WITHDRAWN (2026-09-20), and the reason is the phase working rather than
+> ✅ PHASE COMPLETE (2026-09-21) — all ten tasks done and tested. **The marker is restored on the
+> condition it was withdrawn under**: task 8 closed, and gate G1 has been driven again.
+> The three tasks the gate added are what this phase was missing and they are built and measured:
+> **8** the agent can wait for a run it started (`wait_for_simulation`); **9** the headline peak
+> reaches the surface — on the gate's own bar, 59.78 MPa against a closed-form 60.00 where it had
+> been 41.03; **10** the convergence study converges on that same number, measured at 60.062
+> against 60.00 where the element quantity converged confidently on 49.104.
+> **What this marker does NOT claim.** Gate G1 has not passed. What is left in it is not an E7
+> task: the model writes a verdict clause in prose above its own footnote saying no verdict may
+> rest on the run, and the study asked for grids further apart at the coarsest size the model
+> chose. Both are recorded in `docs/verification-2026-09-21/README.md` and carried on the gate,
+> where they belong.
+>
+> The 2026-09-20 withdrawal read as follows, heading hyphenated so the parser does not read it as
+> live: *THE ✅ MARKER IS WITHDRAWN (2026-09-20)*, and the reason is the phase working rather than
 > failing.** Gate G1, driven on the seat, found that the agent cannot wait for a run it started —
 > `run_simulation` returns `queued` and tells it to poll, `MAX_IDENTICAL_READS` refuses the third
 > identical read, and no tool of the thirty is a wait. So an analysis slower than about two agent
@@ -2261,6 +2275,32 @@ as one, and the honest state of the case rather than a gap.
    `governing_peak_mpa`, which on a part in bending is the nodal one. **The evidence and the claim
    are about different quantities.** A study can therefore report `converged` about a number the
    verdict does not use, which is a subtler version of exactly what task 9 fixed.
+   > DONE (2026-09-21) — **the study now converges on `governing_peak_mpa`, and the fear that
+   > justified making this a separate task was measured and did not hold.** `_max_von_mises` reads
+   > the governing peak, so the evidence and the claim are about one number.
+   > **Measured before the change, on the bar whose closed-form surface stress is 60.00 MPa**,
+   > three grids at 8.0 / 5.7 / 4.1 mm:
+   >
+   > | quantity | converges to | observed order | fine GCI |
+   > |---|---|---|---|
+   > | element centroid | **49.104 MPa** (−18%) | 2.375 | 0.025% |
+   > | governing (surface) | **60.062 MPa** (+0.1%) | 2.466 | 0.016% |
+   >
+   > So the centroid quantity converged **confidently on a number 18% below the right one** —
+   > gate G1's failure seen from the study's side rather than the answer's. The worry was that a
+   > surface peak, which moves with the *position of a node*, would be noisier across remeshes and
+   > would refuse more often; it converged slightly *more* cleanly. **If a part is ever found
+   > where it does refuse more often, the refusals must be shown to be real before this is
+   > reverted** — that is the standing condition on this change, not a hope.
+   > `governing_peak_mpa` falls back to the element value where no nodal tensor is reported, so
+   > nothing that produces only element stress changes behaviour.
+   > The V&V artefact expired (`app/verify/` is fingerprinted) and re-recorded to the same
+   > **4/5 agreed** — the benchmarks read `nodal_stress` through `stress_component_at` and never
+   > went through this quantity, checked rather than assumed.
+   > Verified by breaking it: pointing the reader back at `max_von_mises_mpa` fails both tests.
+   > Tested by: `tests/test_verify_convergence.py::TestTheStudyConvergesOnTheNumberTheVerdictUses`.
+
+   <!-- superseded 2026-09-21 -->
    > NOT STARTED — **the change is one line and its consequences are not**, which is why it is a
    > task rather than part of task 9. The surface peak moves with the *position of a node*, so it
    > is noisier across remeshes than a centroid value is; converging on it may legitimately refuse

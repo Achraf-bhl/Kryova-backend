@@ -1,5 +1,5 @@
 {
- "code_fingerprint": "sha256:5ad11c36727fdf84f31dfe1529109a589d9ae363ba2b2c2448ea91d994e08e43",
+ "code_fingerprint": "sha256:aa37cef7b926d29b7daad8b898e04269b1f296c91ce3dd417160d3eba37eddd4",
  "outcomes": [
   {
    "analysis": "linear-static",
@@ -196,7 +196,7 @@
     "value": 92.40782637321011
    },
    "relative_deviation": -0.003151819059222107,
-   "seconds": 1.07,
+   "seconds": 1.086,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE1 'Elliptic membrane under a uniformly distributed load', reproducing NAFEMS publication TNSB Rev. 3, 'The Standard NAFEMS Benchmarks', October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le1.htm on 2026-09-08.",
@@ -400,7 +400,7 @@
     "value": 184.97535
    },
    "relative_deviation": -0.000133243243243288,
-   "seconds": 27.952,
+   "seconds": 26.238,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE3 'Hemisphere \u2014 point loads', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le3.htm on 2026-09-08.",
@@ -602,7 +602,7 @@
     "value": -5.358199412881403
    },
    "relative_deviation": -0.004052153739516192,
-   "seconds": 19.769,
+   "seconds": 18.902,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE10 'Thick plate under pressure', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le10.htm on 2026-09-08.",
@@ -803,7 +803,7 @@
     "unit": "MPa"
    },
    "relative_deviation": null,
-   "seconds": 5.682,
+   "seconds": 5.433,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE11 'Solid cylinder/taper/sphere-temperature', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le11.htm on 2026-09-08.",
@@ -817,12 +817,12 @@
   {
    "analysis": "modal",
    "convergence": {
-    "asymptotic_ratio": 0.9892340777615264,
+    "asymptotic_ratio": 0.9892340777615798,
     "cautions": [],
-    "extrapolated_value": 43.258070991329575,
+    "extrapolated_value": 43.25807099133423,
     "failures": [],
-    "fine_value": 43.624024038754925,
-    "gci_fine": 0.010485995259752013,
+    "fine_value": 43.624024038755245,
+    "gci_fine": 0.010485995259627557,
     "gci_threshold": 0.05,
     "levels": [
      {
@@ -832,7 +832,7 @@
       "element_type": "tet10",
       "node_count": 4375,
       "representative_size_mm": 337.9001108651889,
-      "value": 43.624024038754925,
+      "value": 43.624024038755245,
       "volume_mm3": 100000000000.00009
      },
      {
@@ -842,7 +842,7 @@
       "element_type": "tet10",
       "node_count": 1445,
       "representative_size_mm": 506.85016629778306,
-      "value": 44.098788163430186,
+      "value": 44.09878816342812,
       "volume_mm3": 99999999999.99992
      },
      {
@@ -852,11 +852,11 @@
       "element_type": "tet10",
       "node_count": 243,
       "representative_size_mm": 1013.7003325955667,
-      "value": 46.742786798884836,
+      "value": 46.742786798884595,
       "volume_mm3": 100000000000.00012
      }
     ],
-    "observed_order": 2.0513485570183345,
+    "observed_order": 2.051348557027851,
     "quantity": "fundamental flexural frequency (mode 4, after three rigid-body modes)",
     "reason": "The fine-grid GCI is 1.05%, within the 5.00% band, with a monotone observed order of 2.05 over 3 grids.",
     "refinement_ratios": [
@@ -864,23 +864,23 @@
      2.0000000000000013
     ],
     "safety_factor": 1.25,
-    "stated_value": 43.624024038754925,
+    "stated_value": 43.624024038755245,
     "unit": "Hz",
     "verdict": "converged"
    },
    "detail": "43.624 against 44.092 Hz (-1.061%, band \u00b15.000%)",
    "id": "nafems-fv52",
-   "measured_value": 43.624024038754925,
+   "measured_value": 43.624024038755245,
    "outcome": "agreed",
    "provenance": {
     "analysis": "modal",
     "convergence": {
-     "asymptotic_ratio": 0.9892340777615264,
+     "asymptotic_ratio": 0.9892340777615798,
      "cautions": [],
-     "extrapolated_value": 43.258070991329575,
+     "extrapolated_value": 43.25807099133423,
      "failures": [],
-     "fine_value": 43.624024038754925,
-     "gci_fine": 0.010485995259752013,
+     "fine_value": 43.624024038755245,
+     "gci_fine": 0.010485995259627557,
      "gci_threshold": 0.05,
      "levels": [
       {
@@ -890,7 +890,7 @@
        "element_type": "tet10",
        "node_count": 4375,
        "representative_size_mm": 337.9001108651889,
-       "value": 43.624024038754925,
+       "value": 43.624024038755245,
        "volume_mm3": 100000000000.00009
       },
       {
@@ -900,7 +900,7 @@
        "element_type": "tet10",
        "node_count": 1445,
        "representative_size_mm": 506.85016629778306,
-       "value": 44.098788163430186,
+       "value": 44.09878816342812,
        "volume_mm3": 99999999999.99992
       },
       {
@@ -910,11 +910,11 @@
        "element_type": "tet10",
        "node_count": 243,
        "representative_size_mm": 1013.7003325955667,
-       "value": 46.742786798884836,
+       "value": 46.742786798884595,
        "volume_mm3": 100000000000.00012
       }
      ],
-     "observed_order": 2.0513485570183345,
+     "observed_order": 2.051348557027851,
      "quantity": "fundamental flexural frequency (mode 4, after three rigid-body modes)",
      "reason": "The fine-grid GCI is 1.05%, within the 5.00% band, with a monotone observed order of 2.05 over 3 grids.",
      "refinement_ratios": [
@@ -922,7 +922,7 @@
       2.0000000000000013
      ],
      "safety_factor": 1.25,
-     "stated_value": 43.624024038754925,
+     "stated_value": 43.624024038755245,
      "unit": "Hz",
      "verdict": "converged"
     },
@@ -1002,10 +1002,10 @@
      "name": "modal-lanczos"
     },
     "unit": "Hz",
-    "value": 43.624024038754925
+    "value": 43.624024038755245
    },
-   "relative_deviation": -0.010613625175657122,
-   "seconds": 1.661,
+   "relative_deviation": -0.01061362517564987,
+   "seconds": 1.511,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), FV52 'Simply supported \"solid\" square plate', reproducing NAFEMS publication TNSB Rev. 3, 'The Standard NAFEMS Benchmarks', October 1990. Reference row read verbatim \u2014 modes 1-3 rigid body, then 44.092, 106.66, 106.66, 156.23, 193.58, 200.13, 200.13 Hz \u2014 at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-fv52.htm on 2026-09-08.",
@@ -1017,7 +1017,7 @@
    "title": "FV52 \u2014 simply supported \"solid\" square plate"
   }
  ],
- "recorded_at": "2026-09-21T14:02:03.739988+00:00",
+ "recorded_at": "2026-09-21T15:18:26.970622+00:00",
  "schema_version": 2,
  "suite": "nafems-standard-benchmarks"
 }

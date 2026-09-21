@@ -65,15 +65,15 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-21** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-22** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 16/24 | 126/136 = 93% | 140/151 eng-months = 93% |
+| Engineering — E1–E23 | 16/24 | 127/137 = 93% | 139/151 eng-months = 92% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 22/34 | 180/198 = 91% | 172/189 eng-months = 91% |
+| **Programme** | 22/34 | 180/199 = 90% | 171/189 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 86%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -3862,8 +3862,46 @@ here"* has an answer in six months — from the artefact.
 
 1. **Drawings with GD&T**: auto views, sections, details, dimension generation, FTA, BOM tables,
    title blocks. *Without this nothing leaves the building.*
-   > PARTIAL (2026-09-21) — **the sheet now reserves the room its own tables take, and one of
-   > the two open items below is closed.** `LayoutRequest` carries `tolerance_rows` and
+   > PARTIAL (2026-09-22) — **both open items are now closed in code, and the task stays
+   > PARTIAL for one honest reason: nothing populates the binding automatically.**
+   > A frame's leader now reaches the geometry it names. `app/manufacture/anchors.py` is the
+   > chain: **feature identity → geometric entity → projection → anchor → leader.**
+   > * *Identity to entity* is a **`Selector`** per feature, supplied by the caller
+   >   (`LayoutRequest.feature_anchors`). A selector is what `catia_list_faces` already returns
+   >   per face and the one way this codebase names a face **without a face id, which a
+   >   re-export renumbers**. Nothing infers a selector from a name: there is no string match
+   >   from `"base face"` to a downward normal, because a leader pointing confidently at the
+   >   wrong feature is worse than none.
+   > * *Entity to projection* is the face's own `centre_mm` through the **view's own basis**
+   >   (`View.right()`, `View.frame_up()`). **Verified against HLR rather than derived twice**:
+   >   on a 120x80x12 block the eight corners project to exactly the extent `HLRBRep` reports
+   >   for front, top and right. `app/render/project.py` carries two sign corrections that
+   >   cancelled each other for a day, so a second projection was a real risk, not a theoretical
+   >   one.
+   > * *Which view* is the one the surface faces most squarely (`normal · direction < 0`, since
+   >   `View.direction` points eye-to-part). A feature facing away in every view on the sheet
+   >   gets **no leader and a stated reason**, because a leader onto a silhouette the feature is
+   >   behind cannot be told from the real thing.
+   > **Three refusals, each because the alternative is believable and wrong**: a selector
+   > matching several faces is refused by name rather than pointed at whichever came back
+   > first; one matching nothing says so; a selector with no normal is refused with the reason.
+   > An unresolved frame never costs the sheet its other leaders, and a drawing with no
+   > bindings is byte-for-byte what it was.
+   > **Why this is still PARTIAL, and it is architectural rather than unfinished.**
+   > `NameRegistry` (`app/kernel/occt/naming.py`) exists to resolve a design's semantic names
+   > to geometry across a rebuild — and **nothing in `app/` or `tests/` calls its `record()`**,
+   > checked 2026-09-22. No operation records a name for the faces it creates, so there is no
+   > automatic map from a frame's feature to geometry; the caller must supply one. That is the
+   > residual, and it is named in `anchors.py`'s docstring so the next reader does not
+   > rediscover it: when operations start recording, `anchors_for` takes its input from the
+   > registry and nothing else in the chain changes, which is why the seam is a mapping.
+   > Verified by breaking it: swapping the projection basis fails all three renderer-agreement
+   > tests; disabling the ambiguity refusal fails exactly the test that names it.
+   > Tested by: `tests/test_manufacture_anchors.py` (19).
+   >
+   > **The 2026-09-21 half — the sheet reserving the room its own tables take — reads as
+   > follows.** The sheet now reserves the room its own tables take, and one of
+   > the two open items below is closed. `LayoutRequest` carries `tolerance_rows` and
    > `parts_rows`; `_usable` subtracts them so sheet choice accounts for the tables, and `_place`
    > narrows the free band at both ends. Measured: the same 400 x 250 plate chooses **A4 with no
    > tables, A3 with two four-row tables, A2 with two ten-row ones**, and a named A4 that cannot

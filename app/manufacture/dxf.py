@@ -60,7 +60,7 @@ from app.manufacture.drawing import (
     Polyline,
     ViewKind,
 )
-from app.manufacture.errors import ExportError
+from app.manufacture.errors import DrawingError, ExportError
 from app.manufacture.layout import TABLE_ROW_MM
 from app.manufacture.sheet import (
     TITLE_BLOCK_HEIGHT_MM,
@@ -269,6 +269,7 @@ def to_document(drawing: Drawing) -> Any:
         _dimension(space, drawing, dimension)
     _tolerancing_table(space, drawing)
     _parts_table(space, drawing)
+    _leaders(space, drawing)
     return doc
 
 
@@ -469,6 +470,12 @@ def _notes(space: Any, drawing: Drawing) -> None:
 #: disagree the first time either moved, and the symptom would be a drawing
 #: whose views sit over its own parts list.
 
+#: Where a leader leaves its table row, measured in from the table's left edge, and
+#: the radius of the dot it lands on. The dot is what makes a leader readable as
+#: pointing *at* something rather than merely ending near it.
+TABLE_LEADER_INSET_MM: Final = 4.0
+TABLE_LEADER_DOT_MM: Final = 0.8
+
 #: Parts-list columns: heading and width in sheet mm. The widths sum to the title
 #: block's width, so the list sits flush on top of it the way ISO 7200 stacks them.
 PARTS_COLUMNS: Final = (("ITEM", 14.0), ("QTY", 14.0), ("PART", 52.0), ("DESIGN", 60.0), ("MATERIAL", 40.0))
@@ -520,6 +527,47 @@ def _tolerancing_table(space: Any, drawing: Drawing) -> None:
         for width, content in compartments:
             _cell(space, x, y, width, content)
             x += width
+
+
+def _leaders(space: Any, drawing: Drawing) -> None:
+    """One line from each frame's row in the tolerancing table to its feature.
+
+    Master plan E17 task 1. Drawn on the DIMENSION layer rather than on a tenth layer
+    of its own: a leader is the same kind of thing as a dimension line — an annotation
+    pointing at geometry — and a layer nothing else uses is one a reader has to learn
+    about for no gain.
+
+    The row a leader starts from is found by the feature's position in the table, so the
+    line stays attached to its own row when the table grows. The far end is
+    `to_sheet_mm` of the anchor, which is the one conversion every view-space quantity
+    in this writer goes through.
+    """
+    tolerancing = drawing.tolerancing
+    if not drawing.leaders or tolerancing is None:
+        return
+
+    rows = {
+        frame.feature: index for index, frame in enumerate(tolerancing.frames)
+    }
+    x0, _, _, y1 = drawing.sheet.frame
+    left = x0 + 5.0
+    # The table's first frame row: the heading, then one row per datum, then the frames.
+    first_frame_y = y1 - 5.0 - TABLE_ROW_MM - (len(tolerancing.scheme.datums) + 1) * TABLE_ROW_MM
+
+    for leader in drawing.leaders:
+        index = rows.get(leader.feature)
+        if index is None:
+            continue
+        try:
+            view = drawing.view_named(leader.view)
+        except DrawingError:
+            # The view was not placed on this sheet. Nothing to point at, and the
+            # frame keeps its row — the same outcome as a feature with no anchor.
+            continue
+        start = (left + TABLE_LEADER_INSET_MM, first_frame_y - index * TABLE_ROW_MM)
+        end = view.to_sheet_mm(leader.point_mm)
+        space.add_lwpolyline([start, end], dxfattribs={"layer": DIMENSION})
+        space.add_circle(end, TABLE_LEADER_DOT_MM, dxfattribs={"layer": DIMENSION})
 
 
 def _parts_table(space: Any, drawing: Drawing) -> None:

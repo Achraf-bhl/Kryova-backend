@@ -39,6 +39,7 @@ with two numbers that can disagree after an edit.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
@@ -51,6 +52,7 @@ from app.manufacture.drawing import (
     DimensionSource,
     Drawing,
     DrawnView,
+    Leader,
     Polyline,
     TracedDimension,
     Unplaced,
@@ -223,6 +225,21 @@ class LayoutRequest:
     tolerance_rows: int = 0
     parts_rows: int = 0
 
+    #: Which geometry each GD&T feature name refers to, as a selector per feature —
+    #: the form `catia_list_faces` reports and the one thing in this codebase that
+    #: names a face without using a face id, which a re-export renumbers.
+    #:
+    #: **Supplied, never inferred.** `FeatureControlFrame.feature` is free text by
+    #: design and `app/rules/gdt.py` resolves it against nothing; guessing a normal
+    #: from words like "base face" is exactly the leader that points confidently at
+    #: the wrong feature. Left empty, no leaders are drawn and every frame is
+    #: tabulated as it was before E17 task 1.
+    feature_anchors: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+
+    #: The part's faces as `catia_list_faces` reports them, which is what
+    #: `feature_anchors` selectors are matched against.
+    part_faces: tuple[Mapping[str, Any], ...] = ()
+
 
 @dataclass(frozen=True)
 class _Cell:
@@ -326,6 +343,7 @@ def lay_out(
     planes = _cutting_planes(shape, request, cells)
 
     notes = tuple(request.notes) + _rationale_notes(traced)
+    leaders, unanchored = _leaders(request, views)
     return Drawing(
         title=request.title,
         sheet=sheet,
@@ -349,7 +367,53 @@ def lay_out(
         cutting_planes=planes,
         report=report,
         notes=notes,
+        leaders=leaders,
+        unanchored=unanchored,
     )
+
+
+def _leaders(
+    request: LayoutRequest, views: tuple[DrawnView, ...]
+) -> tuple[tuple[Leader, ...], dict[str, str]]:
+    """Where each bound feature's leader lands, and why the others have none.
+
+    Master plan E17 task 1. **Nothing is inferred**: a leader exists only for a feature
+    the caller bound to geometry through `feature_anchors`, and the reason a frame has
+    none travels beside the leaders rather than being dropped, because a silently
+    unannotated frame reads as one nobody thought needed a leader.
+
+    The anchor is projected into each candidate view through the *view's own* basis and
+    kept on the one the surface faces most squarely — a leader onto a view the feature is
+    behind points at a silhouette, which the reader cannot tell from the real thing.
+    """
+    if not request.feature_anchors:
+        return (), {}
+
+    from app.manufacture.anchors import anchors_for, best_view, project_point
+    from app.render.views import view_named
+
+    anchors, unresolved = anchors_for(request.feature_anchors, request.part_faces)
+    placed: dict[str, DrawnView] = {view.name: view for view in views}
+
+    leaders: list[Leader] = []
+    for anchor in anchors:
+        candidates = [view_named(name) for name in placed]
+        chosen = best_view(anchor, candidates)
+        if chosen is None:
+            unresolved[anchor.feature] = (
+                f"{anchor.feature!r} faces away from every view on this sheet "
+                f"({', '.join(sorted(placed))}), so a leader would point at a "
+                "silhouette it is behind rather than at the feature."
+            )
+            continue
+        leaders.append(
+            Leader(
+                feature=anchor.feature,
+                view=chosen.name,
+                point_mm=project_point(anchor.point_mm, chosen),
+            )
+        )
+    return tuple(leaders), unresolved
 
 
 # -- views ------------------------------------------------------------------

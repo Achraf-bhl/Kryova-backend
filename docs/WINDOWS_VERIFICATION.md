@@ -1529,7 +1529,19 @@ this file drives the ladder, with a screenshot each.
          assembly this repository can produce today is M6 at **three** components (measured
          2026-09-16). So this is a synthetic generator until M5 lands, and a run on it is
          labelled synthetic.
-      2b. **Name the reference laptop**, here, with make, GPU, driver version and screen
+      2b. **THE DECISION IS WRITTEN UP AND IS THE USER'S TO TAKE — `docs/REFERENCE_MACHINE_DECISION.md`
+         (2026-09-22).** It states the requirement (integrated GPU, 1920x1080 at 100%, 16 GB, a
+         pinned browser build and driver version, measured on mains not battery), why this
+         workstation is excluded (discrete GPU), what the two numbers are, that the scene to
+         measure them on already exists and is digest-pinned, and the five steps to take the
+         measurement once a machine is named. **It deliberately does not choose the machine**:
+         that is a decision about who the performance is promised to.
+         It also corrects a premise worth carrying: **only P6.2 is blocked by the machine**, and
+         P6.3 only for its re-decision criteria. P6.1, P6.4, P6.5 and P6.6 are blocked by
+         *unbuilt frontend UI* — no legend, no probe, no section control, no tree gutter — which
+         this workstation can build. The machine is needed to *measure* frame times, not to
+         write a surface.
+         **Original item follows.** Name the reference laptop, here, with make, GPU, driver version and screen
          resolution — and then measure on that one. P6.2 says "a mid-range laptop" and the
          phase proof says "the reference laptop"; **no machine is named anywhere in this
          repository** (checked 2026-09-16). A frame-time threshold with no machine behind it

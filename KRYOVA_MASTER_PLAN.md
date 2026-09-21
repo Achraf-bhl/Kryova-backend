@@ -7013,6 +7013,12 @@ client renders what it is sent, at the detail the view deserves.
    > The reference assembly the targets are measured against also exists now
    > (`app/render/reference.py`, 2,000 occurrences over 120 components, 99% instanced, 5 deep,
    > digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab`), which was G1's other blocker.
+   > **The requirement is now a decision record awaiting the user**:
+   > `docs/REFERENCE_MACHINE_DECISION.md` (2026-09-22) states the machine's required properties,
+   > why this workstation is excluded (discrete GPU), the two numbers, the digest-pinned scene
+   > they are measured on, the unresolved "fps in CI with no GPU" question, and the five steps to
+   > take once a machine is named. **It does not choose one** — that is a product decision about
+   > who the performance is promised to.
    > **Still unmeasured and still a hardware job**: first paint of a 2,000-part machine under
    > 2 s and interaction never below 30 fps, and **no reference laptop is named anywhere in
    > this repository** — this workstation has a discrete card and is the opposite of the

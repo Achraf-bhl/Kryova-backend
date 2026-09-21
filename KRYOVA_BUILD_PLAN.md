@@ -22,7 +22,9 @@ happened.
 > **this session**. The job dies if this editor is closed.
 > **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires.
 >
-> **Board: 22/34 phases - 179.5/198 tasks = 90.7%.**
+> **Board: 22/34 phases - 179.5/198 tasks = 90.7%.** Suite **10,718 passed / 23 skipped /
+> 1 xpassed / 0 failed** (12 min 01 s, measured in one run); `ruff` and `mypy` (495) clean;
+> `app.verify.recorded --check` current at 4/5 agreed.
 >
 > **What is left, priced honestly.** The remaining 18.5 tasks are not evenly takeable:
 > * **Needs a document nobody has bought** — E8.3 (BS 7608), E13.2 (ISO 286's tables), most of

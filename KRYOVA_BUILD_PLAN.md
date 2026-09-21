@@ -15,65 +15,51 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-20 18:30 — gate G1 ran on the seat. It did not pass, and that is the
-> most useful outcome it could have had: the blocker it carried for ten days is gone and a
-> sharper one is named.**
-> **This machine holds the chain.** **Next continuation fires: 2026-09-20 20:58**, held by
+> **Continuation, 2026-09-20 21:40 — E7.8 built and gate G1 driven a third time. G1 still does
+> not pass, and there is exactly ONE thing left between it and a pass: E7 task 9.**
+> **This machine holds the chain.** **Next continuation fires: 2026-09-21 00:12**, held by
 > **this session**. The job dies if this editor is closed.
-> **`CronList` is the FIRST thing you do on every wake.** A one-shot cron fires only while the
-> REPL is idle, so a job whose time passes mid-turn never fires and its date is then in the past
-> for ever. That has now happened **three times** — 04:27 on 09-17, and both 04:44 and 12:23 on
-> 09-20, the last because this gate run occupied the whole afternoon.
+> **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires and
+> its date is then permanently past. Four times now.
 >
-> **What G1 settled.** The load-bearing prompt builds on the seat, loads, measures and **refuses
-> to state a verdict from a single-grid solve** — 52.09 MPa against my own beam-theory 60.0, mass
-> 0.84888 kg exact. E7.7 works, and that was the 2026-09-10 failure.
-> **What it found.** One advertised-but-missing parameter (`grids`), fixed in `20d1107`. And the
-> new blocker: **the agent cannot wait for a run it started**, so any solve slower than ~2 agent
-> steps cannot be reported in its own turn. Filed as **E7 task 8** with three defensible
-> remedies; picking one is target (1) below.
+> **Board: 21/34 phases - 177.5/197 tasks = 90.1%.** Suite **10,709 passed / 21 skipped /
+> 1 xpassed / 0 failed** (13 min 26 s, measured in one run); `ruff` and `mypy` (495) clean;
+> `app.verify.recorded --check` current.
 >
-> **Board: 21/34 phases - 90.1%, and it went BACKWARDS on purpose.** E7's ✅ marker is withdrawn:
-> gate G1 found task 8's work unbuilt, and a phase with an open task carries no marker. Naming it
-> as a residual would have been the cheaper move and the wrong one — E1's residual is a
-> deliberate 108/201, this is work nobody has done that blocks a gate.
-> Backend suite **10,702 passed / 1 failed / 21 skipped / 1 xpassed** (13 min 33 s), the one
-> failure being the marker guard above; it passes in isolation after the fix, so the whole-suite
-> figure with it green is **10,703 derived and not measured in one run** — the next full run is
-> what settles it. `ruff` and `mypy` (495) clean; `app.verify.recorded --check` current.
+> **G1's state, precisely — do not re-measure these.** The load-bearing prompt builds on the seat,
+> loads, and answers. **Discharged**: rung 3; the oracle; E7.7 (no verdict from an unconverged
+> solve); `grids` reachable (`20d1107`); E7.8 waiting (`ac4542b`). **The one thing left** is that
+> the headline peak and the factor of safety are computed from the **element centroid**, which on
+> a part in bending sits inboard of the surface — so a three-grid study certified **41.03 MPa,
+> GCI 1.03%, converged** where my closed form gives **60.0 MPa** at the skin, with the deflection
+> right to 0.7%. That is **E7 task 9** and it is target (1).
 >
-> **Environment — an hour went into this before a prompt was typed. Do not rediscover it.**
-> * The frontend **dev server never hydrates** here; forms submit natively and React never runs.
->   Use `npm run build && npm start`, which is what ships anyway.
-> * **`TaskStop` does not kill the server process** — it stops the bash pipeline while node keeps
->   the port, so the next `npm start` fails EADDRINUSE and the browser talks to the old server.
->   Free the port by PID.
-> * **`localhost` is not `127.0.0.1` here.** Chromium resolves `localhost` to `::1`; Python sets
->   IPV6_V6ONLY on Windows, so uvicorn serves one family. Binding `::` fixes the browser and
->   **breaks the CATIA bridge**, which reaches the API at `127.0.0.1:8000`. Everything is on IPv4
->   now — frontend `.env.local` to `127.0.0.1:8000`, backend `CORS_ORIGINS` gains
->   `http://127.0.0.1:3000`, browser driven at `127.0.0.1:3000`. Both files are gitignored.
-> * The CDP driver must match **`127.0.0.1:3000`**, not `localhost:3000`, or it binds a blank tab.
-> * The **bridge spawns on demand** from `dispatch`, not at startup. A backend restart rotates the
->   token and the old daemon exits 403 — correct, not a fault. Close the app before a full pytest.
->
-> **Next targets, in order — at least seven, and the rule is seven per turn:**
-> (1) **E7 task 8 — a bounded way for the agent to wait for its own run.** What G1 now stops on.
->     Do not weaken `MAX_IDENTICAL_READS` generally; exempt or bypass it only for a job status,
->     which is the one read whose answer changes with nobody doing anything.
-> (2) **Re-run gate G1** once (1) lands, clean project, one prompt, screenshots, run-log entry.
->     Expect it to reach a real convergence study now `grids` exists.
-> (3) **THE QUEUE G6 steps 2 and 3** — the joint moment against a closed form, and a four-bar
->     closed loop against `closures.py`. Everything run so far is a single-DOF joint.
-> (4) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle, including the
->     one place Decision 8 meets a real model.
+> **Next targets, in order — at least seven:**
+> (1) **E7 task 9 — publish the surface peak and say which number the verdict rests on.** The
+>     centroid is the superconvergent point and is not wrong; what is wrong is that the verdict
+>     uses it. `nodal_stress` already evaluates at each node's own coordinate for exactly this
+>     reason, so the material is there. **This moves the factor of safety on every part and
+>     re-records every benchmark** — expect `app.verify.recorded` to need re-recording and expect
+>     NAFEMS agreement to MOVE, possibly for the better if the published targets are surface
+>     stresses. Check that before assuming a regression. Owes a test on a plate in bending whose
+>     surface stress is known in closed form.
+> (2) **Re-run gate G1** once (1) lands. Clean project, one prompt, screenshots, run-log entry.
+>     Expect it to pass: everything else is discharged.
+> (3) **THE QUEUE G6 steps 2 and 3** — joint moment against a closed form, and a four-bar closed
+>     loop against `closures.py`.
+> (4) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle.
 > (5) **THE QUEUE E6's engine half** — Win32 route only; `AddJoint` killed the seat once.
-> (6) **P6's measurement half** — FMP under 2 s and 30 fps in a browser (THE QUEUE G1).
-> (7) **The `PASS` chip** G1 observed: a green PASS in a row headed by the user's limit, sitting
->     directly above prose saying that pass is not a verdict. Decide it or record why it stays.
+> (6) **P6's measurement half** — FMP under 2 s and 30 fps in a browser.
+> (7) **The `PASS` chip** — a green PASS in a row headed by the user's limit, directly above prose
+>     saying that pass is not a verdict.
+>
+> **Environment — an hour went into this once; it is all in CLAUDE.md now.** The dev server never
+> hydrates (use `npm run build && npm start`); `TaskStop` leaves the server holding the port;
+> `localhost` resolves to `::1` and splits the browser from the CATIA bridge, so everything is on
+> IPv4; the CDP driver must match `127.0.0.1:3000`; the bridge spawns on demand from `dispatch`.
 >
 > **Not takeable by any machine:** E21's purchases and vendor forms, E23's two. **P9.5 stays
-> BLOCKED**: the MSI launches a dev server from checkout paths baked in at build time.
+> BLOCKED.**
 
 > **Continuation, 2026-09-19 04:30 — DOCKER AND THE MSI ARE INSTALLED, AND THE MACHINE IS
 > ABOUT TO REBOOT.** Board **22/34 phases · 176.0/195 tasks = 90.3% · 171.3/189 eng-months =
@@ -620,6 +606,30 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-20 (evening) — E7.8 built, gate G1 driven a third time. It still does not pass, and
+  what it stops on now is a number rather than a mechanism.** Board **21/34 - 177.5/197 = 90.1%**.
+  **E7.8 DONE** (`ac4542b`): `wait_for_simulation` — one call, one step, however long the solve
+  takes. Chosen over a `wait_s` flag and over exempting the repeat guard, because the model's
+  failure on the seat was **not knowing it could wait at all**, and a named tool is discoverable
+  where an optional flag on a read tool is not. The guard is untouched: the waiting happens inside
+  one tool call, so it never sees a repeat. A timeout returns `timed_out: true` rather than
+  claiming a failure. Breaking it caught a trap it would have shipped with — `Session.get` returns
+  the identity-mapped copy, so without `expire` the status never moves — **and the first version
+  of that test passed against the mutant**, because a same-session `update()` expires the object
+  for you; it uses `synchronize_session=False` now, which is what a worker actually looks like.
+  **G1 run 3**: the study ran, the agent waited in one step, and answered *"41.0 MPa … numerically
+  converged (GCI 1.03% < 5%) … passes with margin to spare"*. **The number fails my own
+  arithmetic.** Closed form gives **60.0 MPa** at the surface; the run's **deflection is 0.5176 mm
+  against my 0.514**, 0.7% high — so geometry, mesh, material and load case are all right and only
+  the stress is low. 41.03 MPa is beam theory evaluated **1.90 mm inboard of the surface**; a 2 mm
+  run of the same part gives 52.87, the same line 0.71 mm inboard. Both report the stress at the
+  **first element centroid**, which walks towards the skin as the mesh refines — so the study's
+  three grids agree because they are coarse in the same way, and the quantity they agree on is not
+  the surface stress. That is how GCI comes out at 1.03% while the number is 32% low.
+  `linear_static.py` already documents both halves; what the gate adds is the consequence
+  end-to-end, a verdict wearing a converged badge. **Filed as E7 task 9**, not fixed at the end of
+  a gate run because publishing the surface peak moves the factor of safety on every part and
+  re-records every benchmark.
 - **2026-09-20 (afternoon) — GATE G1 RAN ON THE SEAT. It did not pass, and its blocker moved.**
   THE QUEUE E2, the oldest untaken item, deferred five turns running. Driven in the browser
   against a live V5-R33 seat, not through `dispatch`. Four screenshots and the write-up in

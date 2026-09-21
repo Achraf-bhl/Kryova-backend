@@ -15,52 +15,53 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-21 16:40 — E7.9 built; gate G1's headline is now 0.4% from closed form.
-> G1 still does not pass, and what stops it is ONE task: E7 task 10.**
-> **This machine holds the chain.** **Next continuation fires: 2026-09-21 18:56**, held by
+> **Continuation, 2026-09-21 — the user parked gate G1 and asked for breadth: "forget the G1 for
+> now, continue on the other aspects to be as close to 100% as possible."** That instruction
+> stands until they say otherwise. **Phase E7 is CLOSED.**
+> **This machine holds the chain.** **Next continuation fires: 2026-09-21 19:59**, held by
 > **this session**. The job dies if this editor is closed.
 > **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires.
 >
-> **Board: 21/34 phases - 178.5/198 tasks = 90.2%.** Suite **10,714 passed / 21 skipped /
-> 1 xpassed / 0 failed** (12 min 37 s, measured in one run); `ruff` and `mypy` (495) clean;
-> `app.verify.recorded --check` current at 4/5 agreed.
+> **Board: 22/34 phases - 179.5/198 tasks = 90.7%.**
 >
-> **G1's state — do not re-measure any of this.** Discharged: rung 3; the oracle; E7.7 (no
-> verdict from an unconverged solve); `grids` reachable (`20d1107`); **E7.8** the agent can wait
-> (`ac4542b`); **E7.9** the headline reaches the surface (`c8737d3`). On the gate's bar, against
-> my closed-form 60.00 MPa: element **51.94**, surface **59.78**, deflection 0.51697 against
-> 0.514. Yesterday the same bar said 41.03 and called it converged.
-> **What stops it**: the study assesses the *element* value while the answer judges the *surface*
-> one — `quantities._max_von_mises`. That is **E7 task 10** and it is target (1).
+> **What is left, priced honestly.** The remaining 18.5 tasks are not evenly takeable:
+> * **Needs a document nobody has bought** — E8.3 (BS 7608), E13.2 (ISO 286's tables), most of
+>   E21. Not takeable by any machine; do not keep re-reading them.
+> * **Needs the seat to *write* against** — B7's blocker is `catia_pocket` advertising `limit`
+>   while the bridge does not implement it (a *known* gap, nineteen tools carry it per
+>   `KNOWN_NARROWER`). Implementing `limit` on pocket and pad is real COM work and unblocks E3's
+>   phase proof.
+> * **Needs a named reference machine** — P6.2's fps and first-paint targets. THE QUEUE G1 step
+>   2b: no machine is named anywhere, and this workstation has a discrete card, so it is
+>   explicitly the wrong one. That is a decision, not a measurement.
+> * **Takeable code, and this is where the next turns should go** — the list below.
 >
 > **Next targets, in order — at least seven:**
-> (1) **E7 task 10 — make the study and the verdict assess the same number.** One line in
->     `quantities._max_von_mises`, and the consequences are the work: a surface peak moves with
->     the position of a node, so it is noisier across remeshes and may refuse to converge more
->     often. **Refusing more often is only correct if the refusals are real** — measure it on a
->     part with a known closed form before adopting, and keep the study's quantity and the
->     verdict's named in one place so they cannot drift again. Expect `app.verify.recorded` to
->     expire (`app/verify/` is fingerprinted) and re-record; the NAFEMS numbers should NOT move,
->     because `stress_component_at` reads `nodal_stress` already — check that rather than assume.
-> (2) **Re-run gate G1** once (1) lands. Clean project, one prompt, screenshots, run-log entry.
->     Note the study wanted "grids further apart" at h=5.0; the model chooses the coarsest size,
->     so watch what it picks.
-> (3) **THE QUEUE G6 steps 2 and 3** — joint moment against a closed form, four-bar closed loop.
-> (4) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle.
-> (5) **THE QUEUE E6's engine half** — Win32 route only; `AddJoint` killed the seat once.
-> (6) **P6's measurement half** — FMP under 2 s and 30 fps in a browser.
-> (7) **The model states a verdict in prose above its own footnote.** Run 5 wrote *"Verdict: …
->     no redesign needed"* with an 8x margin matching neither factor of safety, directly above
->     the footnote saying the run is not converged. Same shape as the green `PASS` chip. The
->     guard holds; the prose does not. Decide whether the loop should suppress a verdict clause
->     when `converged` is false, or record why it stays.
+> (1) **`catia_pocket`'s `limit` on the bridge.** Unblocks THE QUEUE B7 and with it E3's phase
+>     proof, and it is the same gap on `catia_pad`. Read the parameter flags in
+>     `%LOCALAPPDATA%\Temp\gen_py` before calling anything unfamiliar, and never brute-force a
+>     signature on a live seat — `AddJoint` killed it once.
+> (2) **Pace `scripts/catia_conformance.py`.** The seat allows 60 operations a minute and the
+>     script has none, so a ladder-wide run throttles itself out at M4. Not a product defect —
+>     the harness ignoring a product rule.
+> (3) **E17.1's leader attachment.** Frames are tabulated by feature name; nothing resolves that
+>     name to an edge on a view, because the design IR names features and the renderer projects
+>     the whole shape. Building that mapping closes E17 (+1 phase).
+> (4) **THE QUEUE G6 steps 2 and 3** — joint moment against a closed form, four-bar closed loop.
+> (5) **THE QUEUE E5 — crash recovery** (kill CNEXT mid-plan). Closes E15.4. LAST in any turn.
+> (6) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle.
+> (7) **P6.2's reference machine (G1 step 2b)** — name one, or record why the target cannot be
+>     met here and what would satisfy it.
+>
+> **Gate G1, when it is picked up again**: everything is discharged except the model writing a
+> verdict clause above its own footnote, and the study asking for grids further apart at the
+> coarsest size the model chose. `docs/verification-2026-09-21/README.md` has the state.
 >
 > **Environment is all in CLAUDE.md**: the dev server never hydrates (`npm run build && npm
 > start`), `TaskStop` leaves the server holding the port, `localhost` resolves to `::1` and
 > splits the browser from the bridge so everything is on IPv4, the CDP driver must match
-> `127.0.0.1:3000`, and the bridge spawns on demand from `dispatch`.
->
-> **Not takeable by any machine:** E21's purchases and vendor forms, E23's two. **P9.5 BLOCKED.**
+> `127.0.0.1:3000`, the bridge spawns on demand from `dispatch`, and the conformance script must
+> BE the server process (nothing else may hold `bridge.lock`).
 
 > **Continuation, 2026-09-19 04:30 — DOCKER AND THE MSI ARE INSTALLED, AND THE MACHINE IS
 > ABOUT TO REBOOT.** Board **22/34 phases · 176.0/195 tasks = 90.3% · 171.3/189 eng-months =
@@ -607,6 +608,29 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-21 (evening) — G1 parked at the user's instruction; breadth instead. E7 CLOSED,
+  the conformance ladder run and re-priced, and a drawing defect fixed.** Board **22/34 -
+  179.5/198 = 90.7%**.
+  **E7 task 10 DONE and phase E7 COMPLETE** (`1c0b8b8`): the convergence study now converges on
+  `governing_peak_mpa`, the number the verdict uses. **The fear that made it a separate task was
+  measured and did not hold** — on the bar whose closed-form surface stress is 60.00 MPa, the
+  element quantity converged to **49.104 MPa (-18%)** at order 2.375 / GCI 0.025%, and the surface
+  one to **60.062 (+0.1%)** at order 2.466 / GCI 0.016%. The centroid quantity was converging
+  *confidently on the wrong number*. The standing condition is written into the status: if a part
+  is found where the surface peak refuses more often, the refusals must be shown real before
+  reverting. The marker is restored on exactly the condition it was withdrawn under, and says what
+  it does not claim — G1 has still not passed, and what is left in it belongs to the gate.
+  **THE QUEUE B7 run** (`0e5f04f`): Plate and BoredPlate **agree**, reproducing B2 — volume to
+  2.0e-9 relative, mass to the known 0.127% *Acier* density, and the only divergences the two
+  documented ones. Everything else is blocked by **`catia_pocket` advertising `limit` while the
+  bridge does not implement it** (a *known* gap — `KNOWN_NARROWER` lists nineteen such tools) and
+  by the seat's **60-operations-per-minute rate limit**, which the script has no pacing for. One
+  stale claim corrected: M4 *does* have geometry now.
+  **E17.1's second open item fixed** (`b56b9ab`): a sheet reserves the room its own tables take.
+  One 400x250 plate now chooses A4 / A3 / A2 as the tables grow, and a named A4 that cannot fit
+  them is refused rather than drawn with the views over the parts list. **The first version of
+  that test was worthless** — it asserted where views landed, which passes against the mutant on
+  any sheet with room to spare; it asserts sheet choice now.
 - **2026-09-21 — E7.9 built, gate G1 driven twice more. The headline peak now lands 0.4% from
   closed form, and what stops the gate has moved one step further in.** Board **21/34 -
   178.5/198 = 90.2%**.

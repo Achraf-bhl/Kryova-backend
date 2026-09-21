@@ -3862,6 +3862,30 @@ here"* has an answer in six months — from the artefact.
 
 1. **Drawings with GD&T**: auto views, sections, details, dimension generation, FTA, BOM tables,
    title blocks. *Without this nothing leaves the building.*
+   > PARTIAL (2026-09-21) — **the sheet now reserves the room its own tables take, and one of
+   > the two open items below is closed.** `LayoutRequest` carries `tolerance_rows` and
+   > `parts_rows`; `_usable` subtracts them so sheet choice accounts for the tables, and `_place`
+   > narrows the free band at both ends. Measured: the same 400 x 250 plate chooses **A4 with no
+   > tables, A3 with two four-row tables, A2 with two ten-row ones**, and a named A4 that cannot
+   > fit them is **refused by name** rather than drawn with the views over the parts list.
+   > **Neither table moves out of a view's way** — the tolerancing table grows down from the top
+   > frame line, the parts list grows up off the title block — so the layout has to be told, and
+   > it cannot count them itself because it runs before a `Drawing` exists. Both counts default
+   > to zero, so every drawing that carries no tables lays out exactly as it did.
+   > `TABLE_ROW_MM` moved to `layout.py` and `dxf.py` imports it: two constants that agreed once
+   > would disagree the first time either moved, and the symptom would be views sitting on the
+   > tables again.
+   > **Verified by breaking it, and the first version of the test was worthless**: it asserted
+   > where the views landed, and on a sheet with room to spare they never reach the tables whether
+   > anything is reserved or not — it passed against the mutant. It asserts *sheet choice* now,
+   > which is the reservation's observable effect, and removing either half fails it.
+   > **Still open**: frames are still tabulated by feature name rather than attached by a leader,
+   > because nothing resolves a frame's feature name to an edge on a view — the design IR names
+   > features and the renderer projects the whole shape, so that mapping does not exist and
+   > building it is the task, not an oversight.
+   > Tested by: `tests/test_manufacture_drawing_tables.py::TestTheViewsAreKeptOutOfTheTables`.
+
+   <!-- superseded 2026-09-21 -->
    > PARTIAL (2026-09-15) — **GD&T and BOM tables now reach the sheet.** `Drawing` carries the
    > part's `Tolerancing` and its parts list; `dxf.py` draws a geometric-tolerance table (datums,
    > then each feature control frame as its compartments: feature, symbol, zone with Ø and the

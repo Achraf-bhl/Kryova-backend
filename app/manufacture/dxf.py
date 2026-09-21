@@ -61,6 +61,7 @@ from app.manufacture.drawing import (
     ViewKind,
 )
 from app.manufacture.errors import ExportError
+from app.manufacture.layout import TABLE_ROW_MM
 from app.manufacture.sheet import (
     TITLE_BLOCK_HEIGHT_MM,
     TITLE_BLOCK_WIDTH_MM,
@@ -462,8 +463,11 @@ def _notes(space: Any, drawing: Drawing) -> None:
     del x0
 
 
-#: Row height of the drawing's tables, sheet mm.
-TABLE_ROW_MM: Final = 7.0
+#: Row height of the drawing's tables, sheet mm — **imported from `layout`, not
+#: defined here**. `layout` reserves the room these tables take so the views
+#: cannot be placed on top of them; two constants that happened to agree would
+#: disagree the first time either moved, and the symptom would be a drawing
+#: whose views sit over its own parts list.
 
 #: Parts-list columns: heading and width in sheet mm. The widths sum to the title
 #: block's width, so the list sits flush on top of it the way ISO 7200 stacks them.

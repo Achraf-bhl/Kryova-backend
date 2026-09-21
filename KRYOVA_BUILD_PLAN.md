@@ -21,7 +21,9 @@ happened.
 > **this session**. The job dies if this editor is closed.
 > **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires.
 >
-> **Board: 21/34 phases - 178.5/198 tasks = 90.2%.**
+> **Board: 21/34 phases - 178.5/198 tasks = 90.2%.** Suite **10,714 passed / 21 skipped /
+> 1 xpassed / 0 failed** (12 min 37 s, measured in one run); `ruff` and `mypy` (495) clean;
+> `app.verify.recorded --check` current at 4/5 agreed.
 >
 > **G1's state — do not re-measure any of this.** Discharged: rung 3; the oracle; E7.7 (no
 > verdict from an unconverged solve); `grids` reachable (`20d1107`); **E7.8** the agent can wait

@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 16/24 | 127/137 = 93% | 139/151 eng-months = 92% |
+| Engineering — E1–E23 | 16/24 | 126/136 = 93% | 140/151 eng-months = 93% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 22/34 | 180/199 = 90% | 171/189 eng-months = 91% |
+| **Programme** | 22/34 | 180/198 = 91% | 172/189 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 86%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -3862,8 +3862,8 @@ here"* has an answer in six months — from the artefact.
 
 1. **Drawings with GD&T**: auto views, sections, details, dimension generation, FTA, BOM tables,
    title blocks. *Without this nothing leaves the building.*
-   > PARTIAL (2026-09-22) — **both open items are now closed in code, and the task stays
-   > PARTIAL for one honest reason: nothing populates the binding automatically.**
+   > PARTIAL (2026-09-22) — **both open items are now closed in code, and one honest reason
+   > keeps the task open: nothing populates the binding automatically.**
    > A frame's leader now reaches the geometry it names. `app/manufacture/anchors.py` is the
    > chain: **feature identity → geometric entity → projection → anchor → leader.**
    > * *Identity to entity* is a **`Selector`** per feature, supplied by the caller

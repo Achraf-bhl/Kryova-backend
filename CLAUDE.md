@@ -48,6 +48,15 @@ lets the next session start.** Rules:
    intention, not a status.
 4. When every task in a phase is done, add `> ✅ PHASE COMPLETE (date) — all tasks done and
    tested.` under the phase heading. One open task means no marker, however much has shipped.
+4a. **A status line's continuation must never begin with a status word.**
+   `scripts/plan_progress.py` counts every line matching `^ *> (DONE|PARTIAL|…)` as a status,
+   so a sentence that happens to wrap onto `   > PARTIAL for one honest reason: …` is read as a
+   **second task** in that phase. Caught 2026-09-22: E17 jumped from 6 tasks to 7 and the board
+   fell from 90.7% to 90.5% because of where a sentence broke. Nothing else notices — the
+   hygiene tests pass, because the phase genuinely has an extra "open task" as far as the parser
+   can tell. **Check the phase's task count after editing a status**, not just `--check`, which
+   only re-stamps the block it just computed from the same misreading.
+
 5. **Never delete a status; supersede it.** Then append one line to the build plan's *Done*, and
    re-stamp the plan's progress block (`python -m scripts.plan_progress --write`) — it is
    generated from those status lines, and it is the one number in the plan nobody may type.

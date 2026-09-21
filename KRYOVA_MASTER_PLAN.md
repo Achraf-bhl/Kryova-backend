@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 126/135 = 93% | 140/151 eng-months = 93% |
+| Engineering — E1–E23 | 15/24 | 126/136 = 92% | 139/151 eng-months = 92% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 21/34 | 178/197 = 91% | 172/189 eng-months = 91% |
+| **Programme** | 21/34 | 178/198 = 90% | 171/189 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E7 100%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
+| in flight | E7 90%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2253,6 +2253,23 @@ as one, and the honest state of the case rather than a gap.
    > moves the factor of safety on every part and re-records every benchmark, and is therefore a
    > deliberate change rather than an end-of-gate patch.
    > Recorded in `docs/verification-2026-09-20/README.md`.
+
+10. **The convergence study assesses a different number from the one the verdict rests on.**
+   *(added 2026-09-21, the direct consequence of task 9 and named rather than left.)*
+   `quantities._max_von_mises` reads `result.max_von_mises_mpa` — the element value — so
+   `run_study` converges on the centroid stress, while the answer now quotes and judges
+   `governing_peak_mpa`, which on a part in bending is the nodal one. **The evidence and the claim
+   are about different quantities.** A study can therefore report `converged` about a number the
+   verdict does not use, which is a subtler version of exactly what task 9 fixed.
+   > NOT STARTED — **the change is one line and its consequences are not**, which is why it is a
+   > task rather than part of task 9. The surface peak moves with the *position of a node*, so it
+   > is noisier across remeshes than a centroid value is; converging on it may legitimately refuse
+   > more often, and refusing more often is only correct if the refusals are real. Measure it on a
+   > part with a known closed form before adopting, and keep the study's quantity and the verdict's
+   > quantity named in the same place so they cannot drift again.
+   > Gate G1's run of 2026-09-21 is the evidence that they have already drifted: the study
+   > assessed the element value and refused it (observed order 11.08, above the credible ceiling
+   > of 6.0), while the answer quoted a surface peak of 59.78 MPa against a closed form of 60.00.
 
 **This is the phase the Linux stretch stops on**, and it is the right place to stop: everything
 here that does not need hardware is closed, and what remains is exactly what the Windows seat

@@ -15,51 +15,50 @@ happened.
 
 ## Now
 
-> **Continuation, 2026-09-20 21:40 — E7.8 built and gate G1 driven a third time. G1 still does
-> not pass, and there is exactly ONE thing left between it and a pass: E7 task 9.**
-> **This machine holds the chain.** **Next continuation fires: 2026-09-21 00:12**, held by
+> **Continuation, 2026-09-21 16:40 — E7.9 built; gate G1's headline is now 0.4% from closed form.
+> G1 still does not pass, and what stops it is ONE task: E7 task 10.**
+> **This machine holds the chain.** **Next continuation fires: 2026-09-21 18:56**, held by
 > **this session**. The job dies if this editor is closed.
-> **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires and
-> its date is then permanently past. Four times now.
+> **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires.
 >
-> **Board: 21/34 phases - 177.5/197 tasks = 90.1%.** Suite **10,709 passed / 21 skipped /
-> 1 xpassed / 0 failed** (13 min 26 s, measured in one run); `ruff` and `mypy` (495) clean;
-> `app.verify.recorded --check` current.
+> **Board: 21/34 phases - 178.5/198 tasks = 90.2%.**
 >
-> **G1's state, precisely — do not re-measure these.** The load-bearing prompt builds on the seat,
-> loads, and answers. **Discharged**: rung 3; the oracle; E7.7 (no verdict from an unconverged
-> solve); `grids` reachable (`20d1107`); E7.8 waiting (`ac4542b`). **The one thing left** is that
-> the headline peak and the factor of safety are computed from the **element centroid**, which on
-> a part in bending sits inboard of the surface — so a three-grid study certified **41.03 MPa,
-> GCI 1.03%, converged** where my closed form gives **60.0 MPa** at the skin, with the deflection
-> right to 0.7%. That is **E7 task 9** and it is target (1).
+> **G1's state — do not re-measure any of this.** Discharged: rung 3; the oracle; E7.7 (no
+> verdict from an unconverged solve); `grids` reachable (`20d1107`); **E7.8** the agent can wait
+> (`ac4542b`); **E7.9** the headline reaches the surface (`c8737d3`). On the gate's bar, against
+> my closed-form 60.00 MPa: element **51.94**, surface **59.78**, deflection 0.51697 against
+> 0.514. Yesterday the same bar said 41.03 and called it converged.
+> **What stops it**: the study assesses the *element* value while the answer judges the *surface*
+> one — `quantities._max_von_mises`. That is **E7 task 10** and it is target (1).
 >
 > **Next targets, in order — at least seven:**
-> (1) **E7 task 9 — publish the surface peak and say which number the verdict rests on.** The
->     centroid is the superconvergent point and is not wrong; what is wrong is that the verdict
->     uses it. `nodal_stress` already evaluates at each node's own coordinate for exactly this
->     reason, so the material is there. **This moves the factor of safety on every part and
->     re-records every benchmark** — expect `app.verify.recorded` to need re-recording and expect
->     NAFEMS agreement to MOVE, possibly for the better if the published targets are surface
->     stresses. Check that before assuming a regression. Owes a test on a plate in bending whose
->     surface stress is known in closed form.
+> (1) **E7 task 10 — make the study and the verdict assess the same number.** One line in
+>     `quantities._max_von_mises`, and the consequences are the work: a surface peak moves with
+>     the position of a node, so it is noisier across remeshes and may refuse to converge more
+>     often. **Refusing more often is only correct if the refusals are real** — measure it on a
+>     part with a known closed form before adopting, and keep the study's quantity and the
+>     verdict's named in one place so they cannot drift again. Expect `app.verify.recorded` to
+>     expire (`app/verify/` is fingerprinted) and re-record; the NAFEMS numbers should NOT move,
+>     because `stress_component_at` reads `nodal_stress` already — check that rather than assume.
 > (2) **Re-run gate G1** once (1) lands. Clean project, one prompt, screenshots, run-log entry.
->     Expect it to pass: everything else is discharged.
-> (3) **THE QUEUE G6 steps 2 and 3** — joint moment against a closed form, and a four-bar closed
->     loop against `closures.py`.
+>     Note the study wanted "grids further apart" at h=5.0; the model chooses the coarsest size,
+>     so watch what it picks.
+> (3) **THE QUEUE G6 steps 2 and 3** — joint moment against a closed form, four-bar closed loop.
 > (4) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle.
 > (5) **THE QUEUE E6's engine half** — Win32 route only; `AddJoint` killed the seat once.
 > (6) **P6's measurement half** — FMP under 2 s and 30 fps in a browser.
-> (7) **The `PASS` chip** — a green PASS in a row headed by the user's limit, directly above prose
->     saying that pass is not a verdict.
+> (7) **The model states a verdict in prose above its own footnote.** Run 5 wrote *"Verdict: …
+>     no redesign needed"* with an 8x margin matching neither factor of safety, directly above
+>     the footnote saying the run is not converged. Same shape as the green `PASS` chip. The
+>     guard holds; the prose does not. Decide whether the loop should suppress a verdict clause
+>     when `converged` is false, or record why it stays.
 >
-> **Environment — an hour went into this once; it is all in CLAUDE.md now.** The dev server never
-> hydrates (use `npm run build && npm start`); `TaskStop` leaves the server holding the port;
-> `localhost` resolves to `::1` and splits the browser from the CATIA bridge, so everything is on
-> IPv4; the CDP driver must match `127.0.0.1:3000`; the bridge spawns on demand from `dispatch`.
+> **Environment is all in CLAUDE.md**: the dev server never hydrates (`npm run build && npm
+> start`), `TaskStop` leaves the server holding the port, `localhost` resolves to `::1` and
+> splits the browser from the bridge so everything is on IPv4, the CDP driver must match
+> `127.0.0.1:3000`, and the bridge spawns on demand from `dispatch`.
 >
-> **Not takeable by any machine:** E21's purchases and vendor forms, E23's two. **P9.5 stays
-> BLOCKED.**
+> **Not takeable by any machine:** E21's purchases and vendor forms, E23's two. **P9.5 BLOCKED.**
 
 > **Continuation, 2026-09-19 04:30 — DOCKER AND THE MSI ARE INSTALLED, AND THE MACHINE IS
 > ABOUT TO REBOOT.** Board **22/34 phases · 176.0/195 tasks = 90.3% · 171.3/189 eng-months =
@@ -606,6 +605,27 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-21 — E7.9 built, gate G1 driven twice more. The headline peak now lands 0.4% from
+  closed form, and what stops the gate has moved one step further in.** Board **21/34 -
+  178.5/198 = 90.2%**.
+  **E7.9 DONE** (`c8737d3`): `StaticResult` reports `max_von_mises_surface_mpa` and
+  `factor_of_safety_surface` beside the element values, and a verdict rests on
+  `governing_peak_mpa` — **the larger of the two**, with `governing_basis` naming which. Both
+  numbers are kept because they under-read in opposite cases: a centroid misses the skin of a
+  part in bending, a nodal value flatters a sharp concentration. Nothing existing changed meaning,
+  so the 52 test files reading `max_von_mises_mpa` are untouched. **The benchmarks did not move,
+  checked rather than assumed** — `stress_component_at` already read `nodal_stress`, so NAFEMS
+  never went through the headline; the artefact still expired (`app/solve/` is fingerprinted) and
+  re-recorded to the same 4/5.
+  **G1 run 5** (`c23246b`): element 51.94 MPa, **surface 59.78 against my closed-form 60.00**,
+  deflection 0.51697 against 0.514. Yesterday the same bar said 41.03 and called it converged.
+  **Still not a pass**: the study refused to certify — observed order 11.08, above the credible
+  ceiling of 6.0 — and was right to, saying so and saying what to do. That refusal exposed
+  **E7 task 10**: `quantities._max_von_mises` reads the *element* value, so the study converges on
+  one number while the answer judges another. One line to change, and its consequences are not.
+  An earlier attempt was discarded as `FAIL — model` under the ladder's own rule (the model
+  re-created a sketch it had just made, three times, against a refusal that spelled out the fix);
+  checked first that each conversation has its own CATIA document, so nothing was inherited dirty.
 - **2026-09-20 (evening) — E7.8 built, gate G1 driven a third time. It still does not pass, and
   what it stops on now is a number rather than a mechanism.** Board **21/34 - 177.5/197 = 90.1%**.
   **E7.8 DONE** (`ac4542b`): `wait_for_simulation` — one call, one step, however long the solve

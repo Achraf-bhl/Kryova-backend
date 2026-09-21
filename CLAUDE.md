@@ -1519,7 +1519,21 @@ Five things that are easy to get wrong and are pinned by tests:
    stiffness assembly's four-point Gauss rule — that rule is exact only to degree 2 and tet10's
    `N^T N` is quartic, so reusing it would be wrong by a few percent: plausible-looking, and wrong.
 4. **The centroid and the nodes answer different questions, and averaging the first is not the
-   second.** `SolveOutput.nodal_stress` is the full tensor in Voigt order **SXX SYY SZZ SXY SYZ
+   second — and since 2026-09-21 the result reports BOTH.** `max_von_mises_mpa` is the element
+   value at the centroid; `max_von_mises_surface_mpa` is the peak at the nodes, which is where a
+   surface is. **Neither is "the" peak and a verdict rests on `governing_peak_mpa`, the larger of
+   the two**, with `governing_basis` naming which it was. They under-read in opposite cases: a
+   centroid sits inboard of the skin and misses the peak of a part in bending, while the nodal
+   value averages across elements and so flatters a sharp concentration — which is the reason
+   `summarise_static` chose the element value originally, and it was right about concentrations.
+   Gate G1 measured the cost of having only the first: on a 180x50x12 bar at 400 N, closed-form
+   surface stress 60.0 MPa, a three-grid study certified **41.03 MPa** as `converged` at GCI
+   1.03% with the deflection right to 0.7%. The surface peak now reads **59.78**.
+   **The convergence study still assesses the element value** (`quantities._max_von_mises`), so
+   the evidence and the claim are about different numbers until E7 task 10 lands — do not read a
+   `converged` badge as being about the number the answer quoted.
+
+4b. **(The original entry, still true of the two recoveries themselves.)** `SolveOutput.nodal_stress` is the full tensor in Voigt order **SXX SYY SZZ SXY SYZ
    SZX** (CalculiX's own order, so the adapter never permutes), and it is recovered by evaluating
    tet10's gradient at **each node's own natural coordinate** — `_TET10_NATURAL_NODES`, derived
    from `TET10_EDGES` rather than typed out. The element centroid stays the superconvergent point

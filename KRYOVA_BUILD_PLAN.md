@@ -610,6 +610,34 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-22 — an honest audit, then the highest-value unblockable work: E17's leader
+  attachment built, and P6's reference machine written up as a decision the user takes.**
+  Board **22/34 - 179.5/198 = 90.7%**; suite **10,739 passed / 21 skipped / 1 xpassed / 0
+  failed**.
+  **E17.1's leader attachment built** (`c69cc27`): `app/manufacture/anchors.py` is the chain the
+  task named as missing — feature identity → geometric entity → projection → anchor → leader.
+  Identity to entity is a **`Selector`** supplied by the caller, the one way this codebase names
+  a face without a face id; **nothing infers a selector from a name**, because a leader pointing
+  confidently at the wrong feature is worse than none. Entity to projection is the face's own
+  `centre_mm` through the **view's own basis**, verified against HLR — on a 120x80x12 block the
+  eight corners project to exactly the extent `HLRBRep` reports for front, top and right.
+  19 tests; two guards broken to prove them.
+  **Why E17 did not close, and it is architectural**: `NameRegistry` exists to resolve semantic
+  names across a rebuild and **nothing in `app/` or `tests/` calls its `record()`** — no
+  operation records a name for the faces it creates, so the binding must be supplied.
+  **P6's reference machine is now a decision record** (`72b50ae`,
+  `docs/REFERENCE_MACHINE_DECISION.md`): what the machine must be, why this workstation is
+  excluded, the two numbers, the digest-pinned scene, the unresolved "fps in CI with no GPU"
+  question, and the five steps once a machine is named. **It does not choose one.**
+  **And it corrects a premise**: it is *not* true that all six P6 tasks wait on that decision.
+  Only P6.2 does, and P6.3 for its re-decision criteria alone. **P6.1, P6.4, P6.5 and P6.6 are
+  blocked by unbuilt frontend UI** — no legend, no probe, no section control, no tree gutter —
+  which this workstation can build.
+  **One self-inflicted defect found and fixed** (`5441ad5`): a status line that wrapped onto
+  `> PARTIAL for one honest reason…` was counted by `plan_progress` as a **second task**, and
+  the board silently read 90.5% off 199 tasks instead of 90.7% off 198. Nothing catches it —
+  the hygiene tests pass because the parser genuinely sees an extra open task. Recorded in
+  CLAUDE.md beside the supersede rule.
 - **2026-09-21 (evening) — G1 parked at the user's instruction; breadth instead. E7 CLOSED,
   the conformance ladder run and re-priced, and a drawing defect fixed.** Board **22/34 -
   179.5/198 = 90.7%**.

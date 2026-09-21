@@ -65,15 +65,15 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-20** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-09-21** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 15/24 | 124/135 = 92% | 139/151 eng-months = 92% |
+| Engineering — E1–E23 | 15/24 | 126/135 = 93% | 140/151 eng-months = 93% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 21/34 | 178/197 = 90% | 171/189 eng-months = 90% |
+| **Programme** | 21/34 | 178/197 = 91% | 172/189 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E7 89%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
+| in flight | E7 100%, E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -2194,6 +2194,35 @@ as one, and the honest state of the case rather than a gap.
    headline is the stress at that depth rather than the peak at the skin — and
    `_recover_nodal_stress`'s own docstring already says why that reads as convergence rather than
    as an offset. Report the surface peak, or report both and say which the verdict used.
+   > DONE (2026-09-21) — **the headline reaches the surface, and the verdict rests on whichever
+   > peak cannot be optimistic.** `StaticResult` gains `max_von_mises_surface_mpa` and
+   > `factor_of_safety_surface`, computed from the nodal tensor the solver already recovered, plus
+   > `governing_peak_mpa` / `governing_factor_of_safety` / `governing_basis`.
+   > **Both numbers are kept and neither is called "the" peak**, because they under-read in
+   > opposite cases: the centroid misses the skin of a part in bending, the nodal value averages
+   > across elements and so flatters a sharp concentration — which is the reason
+   > `summarise_static`'s docstring gave for choosing the element value in the first place, and it
+   > was right. The verdict takes the **larger**, which is the only choice that is never
+   > optimistic, and `governing_basis` names which it was.
+   > **Measured on the same bar the gate used** (180 x 50 x 12, 400 N, closed-form surface stress
+   > 60.0 MPa): element centroid **46.38 MPa** (-23%), nodal surface **58.15 MPa** (-3.1%),
+   > governing 58.15 with a factor of safety of 6.36 against the centroid's flattering 7.98.
+   > Deflection 0.5173 mm against 0.514.
+   > **Nothing existing changed semantics**, deliberately: `max_von_mises_mpa` and
+   > `factor_of_safety` still mean exactly what they did, so the 52 test files that read them are
+   > untouched. The new fields default to `None`, so a solver reporting no nodal tensor still
+   > summarises and says so.
+   > **The benchmarks did not move**, which was checked rather than assumed: `quantities.
+   > stress_component_at` already reads `nodal_stress`, so NAFEMS never went through the headline.
+   > The V&V artefact still expired — `app/solve/` is inside `code_fingerprint` — and re-recorded
+   > to the same **4/5 agreed**.
+   > `yields` now tests the governing peak: a part whose surface has yielded has yielded, whatever
+   > the centroid says.
+   > Verified by breaking it twice: making `governing_peak_mpa` return the element value fails the
+   > closed-form test alone; skipping the surface computation fails four of the five.
+   > Tested by: `tests/test_solver.py::TestTheHeadlinePeakReachesTheSurface` (5).
+
+   <!-- superseded 2026-09-21 -->
    > NOT STARTED — **measured end to end on the seat, 2026-09-20, and the numbers are exact
    > enough to be worth keeping.** A 180 x 50 x 12 mild steel bar, 400 N at the free end:
    > * my closed form gives sigma = M*c/I = **60.0 MPa** at the surface and a tip deflection of

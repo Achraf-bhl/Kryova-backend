@@ -1,5 +1,5 @@
 {
- "code_fingerprint": "sha256:31ff0e438a48dd61986c1e4e6e2ced9c6c867c7212ba3dcbc4f6efa679cf473c",
+ "code_fingerprint": "sha256:5ad11c36727fdf84f31dfe1529109a589d9ae363ba2b2c2448ea91d994e08e43",
  "outcomes": [
   {
    "analysis": "linear-static",
@@ -196,7 +196,7 @@
     "value": 92.40782637321011
    },
    "relative_deviation": -0.003151819059222107,
-   "seconds": 1.046,
+   "seconds": 1.07,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE1 'Elliptic membrane under a uniformly distributed load', reproducing NAFEMS publication TNSB Rev. 3, 'The Standard NAFEMS Benchmarks', October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le1.htm on 2026-09-08.",
@@ -400,7 +400,7 @@
     "value": 184.97535
    },
    "relative_deviation": -0.000133243243243288,
-   "seconds": 25.555,
+   "seconds": 27.952,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE3 'Hemisphere \u2014 point loads', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le3.htm on 2026-09-08.",
@@ -595,14 +595,14 @@
     },
     "quantity": "sigma_yy at point D on the pressed surface",
     "solver": {
-     "code_digest": "sha256:3013087da8cc16c14778db61da1bcb1d36ad2a0f40013718413001747c28def3",
+     "code_digest": "sha256:15d0bba7fd6e3c3b7cb9ae509580cd28c2e956a914ef7416f97fd8a35d698070",
      "name": "linear-static"
     },
     "unit": "MPa",
     "value": -5.358199412881403
    },
    "relative_deviation": -0.004052153739516192,
-   "seconds": 18.6,
+   "seconds": 19.769,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE10 'Thick plate under pressure', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le10.htm on 2026-09-08.",
@@ -797,13 +797,13 @@
     },
     "quantity": "sigma_zz at point A on the base plane",
     "solver": {
-     "code_digest": "sha256:3013087da8cc16c14778db61da1bcb1d36ad2a0f40013718413001747c28def3",
+     "code_digest": "sha256:15d0bba7fd6e3c3b7cb9ae509580cd28c2e956a914ef7416f97fd8a35d698070",
      "name": "linear-static"
     },
     "unit": "MPa"
    },
    "relative_deviation": null,
-   "seconds": 5.299,
+   "seconds": 5.682,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), LE11 'Solid cylinder/taper/sphere-temperature', reproducing NAFEMS publication TNSB Rev. 3, October 1990. Read at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-le11.htm on 2026-09-08.",
@@ -817,12 +817,12 @@
   {
    "analysis": "modal",
    "convergence": {
-    "asymptotic_ratio": 0.9892340777615783,
+    "asymptotic_ratio": 0.9892340777615264,
     "cautions": [],
-    "extrapolated_value": 43.25807099133389,
+    "extrapolated_value": 43.258070991329575,
     "failures": [],
-    "fine_value": 43.62402403875499,
-    "gci_fine": 0.010485995259630005,
+    "fine_value": 43.624024038754925,
+    "gci_fine": 0.010485995259752013,
     "gci_threshold": 0.05,
     "levels": [
      {
@@ -832,7 +832,7 @@
       "element_type": "tet10",
       "node_count": 4375,
       "representative_size_mm": 337.9001108651889,
-      "value": 43.62402403875499,
+      "value": 43.624024038754925,
       "volume_mm3": 100000000000.00009
      },
      {
@@ -842,7 +842,7 @@
       "element_type": "tet10",
       "node_count": 1445,
       "representative_size_mm": 506.85016629778306,
-      "value": 44.09878816342792,
+      "value": 44.098788163430186,
       "volume_mm3": 99999999999.99992
      },
      {
@@ -852,11 +852,11 @@
       "element_type": "tet10",
       "node_count": 243,
       "representative_size_mm": 1013.7003325955667,
-      "value": 46.742786798884474,
+      "value": 46.742786798884836,
       "volume_mm3": 100000000000.00012
      }
     ],
-    "observed_order": 2.051348557027701,
+    "observed_order": 2.0513485570183345,
     "quantity": "fundamental flexural frequency (mode 4, after three rigid-body modes)",
     "reason": "The fine-grid GCI is 1.05%, within the 5.00% band, with a monotone observed order of 2.05 over 3 grids.",
     "refinement_ratios": [
@@ -864,23 +864,23 @@
      2.0000000000000013
     ],
     "safety_factor": 1.25,
-    "stated_value": 43.62402403875499,
+    "stated_value": 43.624024038754925,
     "unit": "Hz",
     "verdict": "converged"
    },
    "detail": "43.624 against 44.092 Hz (-1.061%, band \u00b15.000%)",
    "id": "nafems-fv52",
-   "measured_value": 43.62402403875499,
+   "measured_value": 43.624024038754925,
    "outcome": "agreed",
    "provenance": {
     "analysis": "modal",
     "convergence": {
-     "asymptotic_ratio": 0.9892340777615783,
+     "asymptotic_ratio": 0.9892340777615264,
      "cautions": [],
-     "extrapolated_value": 43.25807099133389,
+     "extrapolated_value": 43.258070991329575,
      "failures": [],
-     "fine_value": 43.62402403875499,
-     "gci_fine": 0.010485995259630005,
+     "fine_value": 43.624024038754925,
+     "gci_fine": 0.010485995259752013,
      "gci_threshold": 0.05,
      "levels": [
       {
@@ -890,7 +890,7 @@
        "element_type": "tet10",
        "node_count": 4375,
        "representative_size_mm": 337.9001108651889,
-       "value": 43.62402403875499,
+       "value": 43.624024038754925,
        "volume_mm3": 100000000000.00009
       },
       {
@@ -900,7 +900,7 @@
        "element_type": "tet10",
        "node_count": 1445,
        "representative_size_mm": 506.85016629778306,
-       "value": 44.09878816342792,
+       "value": 44.098788163430186,
        "volume_mm3": 99999999999.99992
       },
       {
@@ -910,11 +910,11 @@
        "element_type": "tet10",
        "node_count": 243,
        "representative_size_mm": 1013.7003325955667,
-       "value": 46.742786798884474,
+       "value": 46.742786798884836,
        "volume_mm3": 100000000000.00012
       }
      ],
-     "observed_order": 2.051348557027701,
+     "observed_order": 2.0513485570183345,
      "quantity": "fundamental flexural frequency (mode 4, after three rigid-body modes)",
      "reason": "The fine-grid GCI is 1.05%, within the 5.00% band, with a monotone observed order of 2.05 over 3 grids.",
      "refinement_ratios": [
@@ -922,7 +922,7 @@
       2.0000000000000013
      ],
      "safety_factor": 1.25,
-     "stated_value": 43.62402403875499,
+     "stated_value": 43.624024038754925,
      "unit": "Hz",
      "verdict": "converged"
     },
@@ -1002,10 +1002,10 @@
      "name": "modal-lanczos"
     },
     "unit": "Hz",
-    "value": 43.62402403875499
+    "value": 43.624024038754925
    },
-   "relative_deviation": -0.01061362517565567,
-   "seconds": 1.491,
+   "relative_deviation": -0.010613625175657122,
+   "seconds": 1.661,
    "target": {
     "basis": "published",
     "source": "Abaqus Benchmarks Guide (2017), FV52 'Simply supported \"solid\" square plate', reproducing NAFEMS publication TNSB Rev. 3, 'The Standard NAFEMS Benchmarks', October 1990. Reference row read verbatim \u2014 modes 1-3 rigid body, then 44.092, 106.66, 106.66, 156.23, 193.58, 200.13, 200.13 Hz \u2014 at https://abaqus-docs.mit.edu/2017/English/SIMACAEBMKRefMap/simabmk-c-fv52.htm on 2026-09-08.",
@@ -1017,7 +1017,7 @@
    "title": "FV52 \u2014 simply supported \"solid\" square plate"
   }
  ],
- "recorded_at": "2026-09-20T07:39:11.394781+00:00",
+ "recorded_at": "2026-09-21T14:02:03.739988+00:00",
  "schema_version": 2,
  "suite": "nafems-standard-benchmarks"
 }

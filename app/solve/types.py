@@ -530,6 +530,28 @@ class StaticResult(BaseModel):
     max_von_mises_element: int
     factor_of_safety: float
     yields: bool
+    #: The peak von Mises evaluated **at the nodes**, which is where a surface
+    #: is, and the factor of safety that follows from it. Both `None` when the
+    #: solver reported no nodal tensor.
+    #:
+    #: **Why both numbers exist, and why neither is simply "the" peak.**
+    #: `max_von_mises_mpa` above is the element value at the centroid — the
+    #: superconvergent point, unsmoothed, and therefore the honest number at a
+    #: stress concentration, where averaging across elements would flatter the
+    #: result exactly where it matters. But a centroid sits *inboard of the
+    #: surface*, and a part in bending carries its peak at the skin: gate G1
+    #: measured a three-grid study reporting 41.03 MPa, `converged`, GCI 1.03%,
+    #: on a bar whose closed-form surface stress is 60.0 MPa, with the
+    #: deflection right to 0.7%. The centroid walks towards the skin as the mesh
+    #: refines, so the error shrinks with refinement and reads as convergence
+    #: rather than as the systematic offset it is.
+    #:
+    #: So the two fail in opposite directions — the element value under-reads
+    #: bending, the nodal value smooths a concentration — and the verdict rests
+    #: on **whichever is larger**, which is the one that cannot be wrong by being
+    #: optimistic. `governing_peak_mpa` says which, by name.
+    max_von_mises_surface_mpa: float | None = None
+    factor_of_safety_surface: float | None = None
     mass_kg: float
     volume_mm3: float
     node_count: int
@@ -539,6 +561,35 @@ class StaticResult(BaseModel):
     #: Defaulted so every existing construction site keeps working and none of
     #: them can produce a result that says nothing about its own mesh.
     mesh_convergence: MeshConvergence = Field(default_factory=MeshConvergence)
+
+    @property
+    def governing_peak_mpa(self) -> float:
+        """The larger of the two peaks — what a verdict must be stated against.
+
+        Larger rather than either one on principle: each of the two is known to
+        under-read in a case the other handles, so taking the maximum is the
+        only choice that is never optimistic. Falls back to the element value
+        when no nodal tensor was reported.
+        """
+        if self.max_von_mises_surface_mpa is None:
+            return self.max_von_mises_mpa
+        return max(self.max_von_mises_mpa, self.max_von_mises_surface_mpa)
+
+    @property
+    def governing_basis(self) -> str:
+        """Which number `governing_peak_mpa` came from, for the answer to name."""
+        if self.max_von_mises_surface_mpa is None:
+            return "element centroid (no nodal tensor was reported)"
+        if self.max_von_mises_surface_mpa >= self.max_von_mises_mpa:
+            return "nodal, at the surface"
+        return "element centroid"
+
+    @property
+    def governing_factor_of_safety(self) -> float:
+        """The factor of safety on `governing_peak_mpa`, never the flattering one."""
+        if self.factor_of_safety_surface is None:
+            return self.factor_of_safety
+        return min(self.factor_of_safety, self.factor_of_safety_surface)
 
     def summary(self) -> dict[str, Any]:
         return self.model_dump()

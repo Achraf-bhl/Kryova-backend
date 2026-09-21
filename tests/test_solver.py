@@ -524,6 +524,128 @@ class TestTheNodalStressTensor:
         )
 
 
+class TestTheHeadlinePeakReachesTheSurface:
+    """Master plan E7 task 9, measured by gate G1 on 2026-09-20.
+
+    A three-grid study certified **41.03 MPa**, `converged`, **GCI 1.03%**, on a
+    180 x 50 x 12 mild steel bar carrying 400 N at the free end, whose
+    closed-form surface stress is **60.0 MPa**. The run's deflection was right to
+    0.7%, so the model was correct and only the reported stress was low: 41.03 is
+    beam theory evaluated 1.90 mm inboard of the surface, because the headline
+    came from the element centroid. The centroid walks towards the skin as the
+    mesh refines, so the error shrinks with refinement and reads as convergence
+    rather than as the systematic offset it is -- which is how the GCI came out
+    at 1.03% while the number was 32% low.
+
+    **Neither number is simply right**, which is why both are reported. The
+    element value is unsmoothed and is the honest one at a concentration, where
+    averaging across elements flatters the result. The nodal value reaches the
+    surface. They fail in opposite cases, so the verdict rests on whichever is
+    larger -- the one that cannot be wrong by being optimistic.
+    """
+
+    LENGTH = 180.0
+    WIDTH = 50.0
+    THICKNESS = 12.0
+    FORCE = 400.0
+
+    @property
+    def surface_stress_mpa(self) -> float:
+        """`M*c/I` at the clamp, on the skin. 60.0 MPa for these numbers."""
+        second_moment = self.WIDTH * self.THICKNESS**3 / 12.0
+        return self.FORCE * self.LENGTH * (self.THICKNESS / 2.0) / second_moment
+
+    def _output(self):
+        mesh = promote_to_tet10(
+            box_mesh((self.LENGTH, self.WIDTH, self.THICKNESS), divisions=(18, 5, 3))
+        )
+        case = LoadCase(
+            name="bracket",
+            material=STEEL,
+            fixtures=[Fixture(where=FaceSelector(axis="x", side="min"), kind="clamp")],
+            loads=[
+                ForceLoad(
+                    where=FaceSelector(axis="x", side="max"),
+                    force_n=(0.0, 0.0, -self.FORCE),
+                )
+            ],
+        )
+        return LinearStaticSolver().solve(mesh, case)
+
+    def test_the_surface_peak_is_reported_and_the_centroid_one_under_reads_it(self) -> None:
+        result = self._output().result
+
+        assert result.max_von_mises_surface_mpa is not None
+        assert result.max_von_mises_surface_mpa > result.max_von_mises_mpa, (
+            f"surface {result.max_von_mises_surface_mpa:.2f} MPa is not above the element "
+            f"value {result.max_von_mises_mpa:.2f} MPa -- on a bar in bending it must be, "
+            "because the centroid sits inboard of the skin"
+        )
+
+    def test_the_governing_peak_is_the_one_a_verdict_may_rest_on(self) -> None:
+        """Within 15% of `M*c/I`, where the element value is ~30% under.
+
+        Not tighter: this is a real 3D solve of a clamped bar, so Saint-Venant
+        and the clamp's restraint of the Poisson contraction both move it a
+        little off the beam-theory line, and a mesh three elements through the
+        thickness resolves the skin approximately. The claim is that the
+        headline now reaches the surface, not that it equals a 1-D formula.
+        """
+        result = self._output().result
+        exact = self.surface_stress_mpa
+
+        assert result.governing_peak_mpa == pytest.approx(exact, rel=0.15), (
+            f"governing peak {result.governing_peak_mpa:.2f} MPa against a closed-form "
+            f"surface stress of {exact:.2f} MPa"
+        )
+        assert result.max_von_mises_mpa < exact * 0.85, (
+            "the element value is supposed to be the one that under-reads here; if it no "
+            "longer does, this test has stopped measuring what it was written for"
+        )
+
+    def test_the_governing_factor_of_safety_is_never_the_flattering_one(self) -> None:
+        result = self._output().result
+
+        assert result.factor_of_safety_surface is not None
+        assert result.governing_factor_of_safety == min(
+            result.factor_of_safety, result.factor_of_safety_surface
+        )
+        assert result.governing_factor_of_safety <= result.factor_of_safety
+
+    def test_it_names_which_number_the_verdict_rests_on(self) -> None:
+        """An answer that quoted a peak without saying which basis it came from
+        would be two numbers and no way to tell which was meant."""
+        result = self._output().result
+        assert "surface" in result.governing_basis
+
+    def test_a_solver_reporting_no_nodal_tensor_still_summarises(self) -> None:
+        """The fields are optional because `SolveOutput.nodal_stress` is.
+
+        A solver that reports no tensor -- the seam admits one -- must still
+        produce a result, and its governing peak is then the element value with
+        the basis saying so, rather than a crash or a silent zero.
+        """
+        from app.solve.types import StaticResult
+
+        result = StaticResult(
+            max_displacement_mm=1.0,
+            max_displacement_node=0,
+            max_von_mises_mpa=10.0,
+            max_von_mises_element=0,
+            factor_of_safety=3.0,
+            yields=False,
+            mass_kg=1.0,
+            volume_mm3=1000.0,
+            node_count=4,
+            element_count=1,
+            solve_seconds=0.1,
+        )
+        assert result.max_von_mises_surface_mpa is None
+        assert result.governing_peak_mpa == 10.0
+        assert result.governing_factor_of_safety == 3.0
+        assert "no nodal tensor" in result.governing_basis
+
+
 class TestEveryResultSaysWhatMeshItCameFrom:
     """Gate G1's third open item, from the other side.
 

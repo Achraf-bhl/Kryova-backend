@@ -588,7 +588,32 @@ server inherits and the Git Bash one.
       see the note added to E6 for what would have to be true first.
       Probe scripts are throwaway; the numbers above are the record.
 
-- [ ] **B7 — E3 phase proof through M4: the ladder's own parts on the seat.** Added
+- [ ] **B7 — E3 phase proof through M4: the ladder's own parts on the seat.**
+      **RUN 2026-09-21, and it re-prices the item rather than closing it.** Output:
+      `docs/verification-2026-09-21/B7-ladder.json`, 16 entries.
+      **What it settled.** Plate and BoredPlate **agree**, reproducing B2 exactly: volume equal to
+      0.0 and 2.0e-9 relative, area to 0.0 and 6.8e-9, mass to 0.127% — the known *Acier* density.
+      The only divergences are the two already documented: `solid_count`, which CATIA has no way
+      to report, and one `edge_count` on the bored plate, the seam edge per closed cylinder.
+      **What blocks the rest, and it is not geometry.** Every M1, M2 and M4 part fails on the seat
+      for one of two reasons:
+      1. **`catia_pocket` advertises `limit` and the bridge does not implement it.** The ladder's
+         parts bore with `limit`, so `bracket.bore`, `member.bore` and `housing.cavity` stop at
+         that call. **This is a known, tracked gap, not a new defect** — `backend.narrowed_options`
+         reports it to the server precisely so the model is never offered it, and
+         `tests/test_backend_signatures.py::KNOWN_NARROWER` lists **nineteen** tools carrying it.
+         So B7 cannot be closed until the bridge implements `limit` on pocket (and pad), or the
+         ladder's parts are rewritten not to use it. **The first is the real work and it belongs
+         with section E**, beside the sheet-metal COM half.
+      2. **The seat's own rate limit: 60 CATIA operations per minute.** Everything from M4's
+         pinion onward failed at call 0 with *"This workstation has hit its limit of 60 CATIA
+         operations per minute"*. The conformance script fires as fast as the bridge will answer
+         and has no pacing, so a ladder-wide run throttles itself out. **Pace the script before
+         re-running** — this is not a product defect, it is the harness ignoring a product rule.
+      **One stale claim corrected**: this item and E3's status both say *"M4 has no geometry yet"*.
+      It does. The run built M4's housing, cover, pinion, wheel, both shafts, both bearings and
+      both spacers on OCCT, with measurements. M4 is no longer the reason M4 is skipped.
+      **Original entry follows.** Added
       2026-09-15 on Linux. B2 measured agreement on two plates; E3's proof is "every assertion
       in the ladder through M4 is measurable, and each measurement agrees between OCCT and
       CATIA". `scripts/catia_conformance.py --ladder` now builds **M1's bracket and every

@@ -22,11 +22,14 @@ happened.
 > decision this should be shown as a message on the app for the user to decide what to do."*
 > The earlier instruction — *"forget the G1 for now, continue on the other aspects to be as close
 > to 100% as possible"* — still stands. **Phase E7 is CLOSED. Phase E13 is CLOSED.**
-> **This machine holds the chain. Next continuation fires: see the line at the end of this
-> block.** The job dies if this editor is closed.
+> **This machine holds the chain. Next continuation fires: 2026-09-22 13:18**, held by **this
+> session**. The job dies if this editor is closed.
 > **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires.
 >
-> **Board: 23/34 phases · 180.0/198 tasks = 90.9%.**
+> **Board: 23/34 phases · 180.0/198 tasks = 90.9%.** Suite **10,949 passed / 21 skipped /
+> 1 xpassed / 0 failed** (12 min 25 s, one run); `ruff` and `mypy` (498) clean;
+> `app.verify.recorded --check` current — `app/rules/` and `app/ai/` are outside the
+> fingerprinted set, so this turn needed no re-record.
 >
 > **What this turn settled, and one thing it corrected in the user's own message.**
 > * **E13.2 is DONE and E13 is COMPLETE.** ISO 286-1:2010 is transcribed in

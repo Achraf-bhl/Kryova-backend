@@ -91,11 +91,22 @@ scoring by hand. 16.1's justification is a number; so is its debugging.
 
 from __future__ import annotations
 
+import logging
 import re
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any, Final, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
+
+if TYPE_CHECKING:  # pragma: no cover - import kept out of the runtime path
+    from app.ai.provider import LLMProvider
+
+logger = logging.getLogger(__name__)
+
+#: Given the request and the intent labels available, name one -- or `None` to
+#: decline. Anything raising or returning something unknown leaves the lexical
+#: selection untouched, which is why the contract is this small.
+IntentDecider = Callable[[str, "tuple[str, ...]"], "str | None"]
 
 #: The modelling loop, the measurement, and the document. Never withheld.
 #:
@@ -522,7 +533,7 @@ class Choice:
 
     name: str
     #: A stable code, so a log can be counted: core, prompt, recent, match,
-    #: domain, intent, family.
+    #: domain, intent, decided, family.
     rule: str
     #: The evidence, in words. What a human reads when the offer looks wrong.
     detail: str
@@ -586,6 +597,7 @@ def select(
     recent: Iterable[str] = (),
     context: str = "",
     limit: int = DEFAULT_LIMIT,
+    decide: IntentDecider | None = None,
 ) -> Selection:
     """Choose the tools to show, with a reason for each.
 
@@ -687,6 +699,33 @@ def select(
         for name in tools:
             take(name, "intent", f"{label} ({', '.join(sorted(hit)[:3])})")
 
+    # -- the same question, asked of a model instead of a word list --------
+    # The rule above fires only when the request's words overlap a trigger
+    # table. The failure it is written for -- "a tool the task needs sharing no
+    # vocabulary with the way the task was asked for" -- is therefore exactly
+    # the case it cannot catch: an engineer who writes "make the top face
+    # thinner" names no trigger for the pocket family. A single-pass decision
+    # over the same labels reads intent rather than words, and costs one
+    # constrained call (~700 ms, 6 completion tokens on gemini-2.5-flash).
+    #
+    # **Union only, and injected.** It can add tools and can never remove one,
+    # so its worst case is the tokens this module already trades for recall;
+    # and it arrives as a callable so `select` stays pure, offline and
+    # instant by default -- the same reason `app/design/execute` takes its
+    # runner injected. A decider that fails, times out or declines leaves the
+    # lexical selection exactly as it was.
+    if decide is not None:
+        labels = tuple(INTENT_FAMILIES)
+        decided: str | None
+        try:
+            decided = decide(f"{context} {message}".strip(), labels)
+        except Exception:  # noqa: BLE001 - a decider must never take a turn down
+            logger.exception("the intent decider raised; keeping the lexical selection")
+            decided = None
+        if decided is not None and decided in INTENT_FAMILIES:
+            for name in INTENT_FAMILIES[decided][1]:
+                take(name, "decided", f"{decided} (decided, not from the words used)")
+
     # -- siblings of what matched, while there is room ---------------------
     # A model that wants a loft usually wants a fill or a sew next, and the
     # vocabulary is prefix-clustered, so the family is a cheap recall device.
@@ -755,6 +794,8 @@ __all__ = [
     "DOMAIN_WEIGHT",
     "MIN_MATCH_SLOTS",
     "INTENT_FAMILIES",
+    "IntentDecider",
+    "decider_for",
     "Choice",
     "Selection",
     "describe_selection",
@@ -764,3 +805,41 @@ __all__ = [
     "select",
     "select_tool_names",
 ]
+
+
+def decider_for(provider: LLMProvider) -> IntentDecider:
+    """Bind a provider into the `decide=` seam `select` takes.
+
+    Separate from `select` so the selector keeps no provider import and stays
+    instant offline, and separate from `app/ai/decide.py` so that module knows
+    nothing about tool families. The two meet here, at one function.
+
+    **`none` is a real option, not an absence.** Offering only the families
+    would make "this request needs no tool family at all" unsayable, and a
+    closed option set with no way to decline is how a classifier is pushed into
+    inventing a category -- the same reason `app/design/assertions` has an
+    `UNMEASURED` that is not a pass. A model that picks `none` costs the same
+    one call and adds nothing, which is the correct outcome for "what is the
+    yield strength of 6061-T6".
+    """
+    from app.ai.decide import choose
+
+    def decide(request: str, labels: tuple[str, ...]) -> str | None:
+        if not request.strip() or not labels:
+            return None
+        options = [*labels, "none"]
+        decision = choose(
+            provider,
+            "Which family of CAD or analysis operations will this request need?",
+            options,
+            state=request,
+            # Declining is the safe default: the lexical rules have already run,
+            # and a fallback that named a family would add tools on the strength
+            # of a call that did not happen.
+            fallback="none",
+        )
+        if not decision.decided or decision.value == "none":
+            return None
+        return str(decision.value)
+
+    return decide

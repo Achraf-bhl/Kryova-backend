@@ -15,6 +15,26 @@ happened.
 
 ## Now
 
+> **Continuation, 2026-09-22 (third turn) — the user supplied a Gemini API key, asked to switch
+> off `qwen3.5:9b`, and asked for single-pass decision logic.** Two of the three shipped; the
+> model switch is **built and deliberately not active**, for a measured reason.
+>
+> * **`app/ai/decide.py`** — `choose` / `score` / `judge`, one constrained call each, closed
+>   option set in the schema rather than parsed out of prose. **Confidence is a provenance, not
+>   a float**: Gemini returns no logprobs on any reachable model, Ollama does, so
+>   `Confidence.basis` is MEASURED/STATED/UNAVAILABLE and `probability` is None unless measured.
+>   A fallback is declared by the caller and returned *labelled*, never as a decision.
+> * **`app/ai/providers/gemini.py`** — `AI_PROVIDER=gemini`, a thin subclass of the
+>   OpenAI-compatible provider, adding `reasoning_effort` on structured calls only.
+> * **Wired into `tool_retrieval.select(decide=...)`** as a union-only recall rule, injected so
+>   the selector stays pure and offline by default.
+> * **THE BLOCKER, and it is the user's to clear:** the key is free tier —
+>   **20 requests per day, per model**. One CATIA turn is tens of steps. The Gemini block in
+>   `.env.local` is commented out one line from live, the effective provider is back on
+>   `qwen3.5:9b`, and enabling billing on the Google project is the whole of what is needed.
+>
+> **Next targets are unchanged from the block below** — P6.2's two numbers first.
+
 > **Continuation, 2026-09-22 — the user supplied two standards and asked for a user-intervention
 > surface.** Their message: *"here you go. you can find attached the needed standards so that
 > unblocks E13.2 and E8.3. Rename the reference machine so P6.2 and P6.3 are unblocked and

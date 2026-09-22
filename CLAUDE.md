@@ -1077,6 +1077,48 @@ this faster". Four things from it that are asked most often and answered wrongly
    says measured. Each buys real time and each converts an honest slow answer into a fast
    dishonest one.
 
+## Single-pass decisions (`app/ai/decide.py`) and Gemini — added 2026-09-22
+
+Three primitives — `choose` (categorical), `score` (ordinal), `judge` (boolean) — each one
+constrained call with a closed option set, for the branch decisions that were costing a
+conversational turn. Wired into `tool_retrieval.select(decide=...)` as a **union-only**
+recall rule, injected so the selector stays pure and instant by default.
+
+1. **Confidence is a provenance, not a float, and that is forced by a measurement.**
+   Ollama returns logprobs; **Gemini returns none on any reachable model** — the
+   OpenAI-compatible endpoint rejects `logprobs`/`top_logprobs` as unknown fields and the
+   native one answers `Logprobs is not enabled for models/gemini-2.5-flash`. So
+   `Confidence.basis` is `MEASURED` / `STATED` / `UNAVAILABLE`, and `probability` is
+   **None unless MEASURED**, enforced in `__post_init__`. A model's self-reported
+   certainty is not a probability and there is deliberately no field to put it in.
+2. **`AI_PROVIDER=gemini` exists** (`app/ai/providers/gemini.py`) and is a thin subclass of
+   `OpenAICompatibleProvider` — Gemini serves the OpenAI dialect at
+   `https://generativelanguage.googleapis.com/v1beta/openai`, so nothing else was needed.
+3. **Gemini thinks by default and on a small call it is most of the bill.** Measured: the
+   smallest possible decision was **81 total tokens against 21** with
+   `reasoning_effort: "none"`, on a question whose prompt and answer were 22 of them. At a
+   24-token cap the hidden tokens exhaust the budget and the call returns
+   `finish_reason: length` — which reads as "raise the token limit" and is not that.
+   The flag is toggled around **structured** calls only (a `complete()` output is schema-
+   constrained, so reasoning cannot improve it; a `chat()` turn is the agent and keeps it),
+   copying `NvidiaProvider`'s documented pattern rather than widening `_extra_body`.
+4. **The free tier is 20 requests per day, per model** — `GenerateRequestsPerDayPerProject
+   PerModel-FreeTier = 20`, found by exhausting it. One CATIA turn is tens of steps, so a
+   single gate run spends a day's quota before a part exists. **A free-tier Gemini key
+   cannot drive the agent**, whatever its quality. The quota is per *model*, so a second
+   model still answers while the first is exhausted. `.env.local`'s Gemini block is
+   therefore commented out, one uncomment from live, with this recorded beside it.
+5. **`gemini-2.5-flash` is the one to use**, measured same prompt, same schema, reasoning
+   off: **908 ms**, against 4.9 s (`gemini-3.5-flash`), 20.2 s (`gemini-flash-latest`) and
+   33.0 s (`gemini-3.8-flash`, which also refused the strict `json_schema`). Newer is not
+   faster here and the newest is 36× slower.
+6. **A first structured call against a new endpoint can fail once and then be fine.** Seen
+   that day: the first three live decisions came back `finish_reason: length`, and the same
+   calls were deterministic and correct immediately after. `OpenAICompatibleProvider`
+   negotiates `json_schema` support on first use and remembers it, so treat one cold
+   failure as negotiation rather than as a defect — and note the fallback path is what made
+   it legible, because it returned the declared fallback *labelled* rather than a guess.
+
 ## Reading a standard the user attaches (learned 2026-09-22)
 
 Two arrived in one message, one closed a phase and the other could not, and the difference

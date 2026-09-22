@@ -629,6 +629,26 @@ server inherits and the Git Bash one.
 
 Recorded here because the effect is the same: a Linux session cannot finish it.
 
+- [x] ~~**C0 — E13.2, ISO 286's deviation tables.**~~ **Resolved 2026-09-22.** The user
+      attached ISO 286-1:2010(E) and it is transcribed in `app/rules/iso286.py` with 177 tests.
+      Closed E13.2 and with it **phase E13**. See `KRYOVA_BUILD_PLAN.md`'s *Done* for the
+      single misprint the two-way transcription found.
+- [ ] **C0a — E8.3, BS 7608. A copy arrived on 2026-09-22 and does NOT unblock it.** Assessed
+      that day; do not re-assess it, and do not start transcribing from the file in
+      `~/Downloads`. Three findings, and the second is the one that matters most:
+      1. **Pure scan.** 152 pages, **zero** characters of text layer. One 902×1277 JPEG per
+         page, about **108 dpi**.
+      2. **Legible, and that is the trap.** The body text reads perfectly, so the file looks
+         usable. But §*Fatigue* item 6 of `CLAUDE.md` records that at ~110 dpi an EN 1993-1-9
+         figure label read **"180" when it was 160**, and that the tables needed 300–400 dpi.
+         The source has no more resolution to give, so some BS 7608 rows would be transcribed
+         from pixels that cannot settle a digit — in a register that republishes its sources.
+      3. **Provenance, which is the user's decision and not a session's.** Every page footer:
+         *"Provided by IHS under license with BSI — Uncontrolled Copy"*,
+         *"Licensee=ZHEJIANG INST OF STANDARDIZATION 5956617"*, *"Not for Resale"*.
+      **What would lift it:** a licensed copy of BS 7608:2014+A1:2015 whose tables can be read
+      at 300 dpi or better. Nothing else in E8.3 is open.
+
 - [ ] **C1 — E7.1, LE11's problem *definition*.** The catalogue is written
       (`app/verify/nafems.py`) and all five targets are sourced from vendor verification
       manuals. What is missing for LE11 is its **cylinder/taper/sphere dimensions**, which are

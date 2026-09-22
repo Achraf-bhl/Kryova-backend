@@ -43,7 +43,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.ai import prompts
+from app.ai import intervention, prompts
 from app.ai.attached import for_turn as attachments_for_turn
 from app.ai.context import build_messages, maybe_summarise
 from app.ai.malformed import correction_for, find_written_tool_calls, is_contentless
@@ -561,6 +561,7 @@ def stream_agent(
     #: The gate this turn stopped on, if it raised one (E16 task 5). Empty
     #: string rather than None so the truthiness test below reads plainly.
     awaiting_gate = ""
+    awaiting_gate_title = ""
     #: Why the loop stopped, for the user-facing line at the end of a turn that
     #: did not finish. Two exits reach the same closing code -- falling out of
     #: the step budget, and breaking on repeated blocked calls -- and until
@@ -871,6 +872,7 @@ def stream_agent(
                 # ends the turn — not a note in the prompt asking the model to
                 # stop, which it is free to ignore and has.
                 awaiting_gate = str(result.get("gate_id") or "")
+                awaiting_gate_title = str(result.get("title") or "")
             if not ok:
                 # E16 task 4's missing last word. The three behavioural guards
                 # already bound the retry; this collects what failed so the
@@ -1039,6 +1041,26 @@ def stream_agent(
     _append(db, conversation, MessageRole.ASSISTANT, content=text)
     db.commit()
     yield {"type": "message", "content": text}
+
+    # The same decision, as data rather than as the last paragraph of a long
+    # reply (the user's request, 2026-09-22). The prose above stays and is the
+    # *record* — it is in `ConversationMessage`, so it survives a reload, a
+    # resume gap and the transcript window, and a question that exists only as
+    # a live event is a question that disappears when somebody refreshes. This
+    # is the *surface*. Both are built from one `Failure`, so the button and
+    # the sentence cannot offer different forks.
+    asking = (
+        intervention.for_gate(
+            awaiting_gate,
+            summary=awaiting_gate_title
+            or "The agent reached a checkpoint that needs a person to sign off.",
+        )
+        if awaiting_gate
+        else intervention.from_recovery(recovery)
+    )
+    if asking is not None:
+        yield {"type": "intervention", **asking.to_dict()}
+
     yield {
         "type": "done",
         "conversation_id": conversation.id,
@@ -1048,6 +1070,11 @@ def stream_agent(
         "steps": len(steps),
         "prompt_tokens": usage.prompt_tokens,
         "completion_tokens": usage.completion_tokens,
+        # Repeated on `done` as well as its own event, because a client that
+        # reconnects mid-turn replays from the buffer and may land after the
+        # `intervention` event went past. A decision prompt is the one thing a
+        # dropped event must not lose.
+        "intervention": asking.to_dict() if asking is not None else None,
     }
 
 

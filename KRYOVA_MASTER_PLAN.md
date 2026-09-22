@@ -2391,6 +2391,24 @@ analyst.**
    notes are in `docs/eurocode3-fatigue-reading.md`: Tables 8.3–8.5, the shear curve, γMf, §8's
    range limit and interaction rule. All of that was encoded on 2026-09-15 (status below).
    **BS 7608 has not been read**, and nothing may claim it until someone does.
+   **2026-09-22 — a copy arrived and is NOT usable as it stands; the blocker has changed
+   shape rather than lifted.** The user attached BS 7608:2014+A1:2015 alongside ISO 286-1
+   (which did close E13.2). Assessed the same day and recorded here so nobody re-assesses it:
+   - **It is a pure scan.** 152 pages, **zero characters of text layer** — one 902×1277 JPEG
+     per page, about 108 dpi. The body text is legible; that is not the problem.
+   - **108 dpi is below what this project has already measured as insufficient for the job.**
+     Encoding EN 1993-1-9 needed 300–400 dpi, and at ~110 dpi a Figure 7.1 label read "180"
+     when it was 160. The tables here would have to be read the same way and the source has
+     no more resolution to give, so several rows would be transcribed from pixels that cannot
+     settle a digit. That is the one failure mode `verify/` exists to prevent.
+   - **The provenance is the harder problem, and it is a decision for the user, not for me.**
+     The footer of every page reads *"Provided by IHS under license with BSI — Uncontrolled
+     Copy"*, *"Licensee=ZHEJIANG INST OF STANDARDIZATION 5956617"*, *"Not for Resale"*. It is
+     a real copy issued under somebody else's licence, redistributed. A product whose output
+     is meant to be signed by a licensed engineer, and whose E19 technical file cites its
+     sources by name, should not cite a standard read from that copy.
+   So E8.3's BS 7608 half stays **BLOCKED — needs a licensed copy of BS 7608:2014+A1:2015 at a
+   resolution its tables can be read from**. Everything else in the task is done.
    > PARTIAL (2026-09-15) — **EN 1993-1-9's weld tables are in code, and a joint is classified
    > into the rows it can still be, never into one.** `app/fatigue/weld_catalogue.py` holds 91 rows
    > from Tables 8.3, 8.4, 8.5 and B.1. Each has its category, its details, its page, and its

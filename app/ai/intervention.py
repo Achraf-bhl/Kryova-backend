@@ -55,6 +55,16 @@ cannot disagree about what is being asked.
 `gates.decide`, which re-digests the subject and refuses if it has moved -- this module
 carries the `gate_id` so the surface knows where to send the answer, and carries no
 authority of its own.
+
+**One gap, stated rather than left to be discovered.** `for_gate` is covered at the module
+level and the *repeated-failure* path is covered end to end through `stream_agent`
+(`tests/test_ai_intervention.py::TestTheTurnActuallyEmitsIt`). The **approval** path is
+not driven end to end, because raising a real gate needs `request_approval` to run against
+an organisation, a subject and a digest. So "a checkpoint puts a decision on the stream" is
+believed here and not measured -- which is exactly the distinction `CLAUDE.md`'s testing
+item 8 says to write down rather than assume, since both defects of that class shipped
+green. It is a task, not a footnote: drive `request_approval` through `stream_agent` and
+assert the `intervention` event carries that gate's id.
 """
 
 from __future__ import annotations

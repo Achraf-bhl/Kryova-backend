@@ -68,6 +68,14 @@ happened.
 > (6) **THE QUEUE G6 steps 2 and 3** — joint moment against a closed form, four-bar closed loop.
 > (7) **THE QUEUE E5 — crash recovery** (kill CNEXT mid-plan). Closes E15.4. LAST in any turn.
 > (8) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle.
+> (9) **The intervention surface's approval path, end to end.** The *repeated-failure* path is
+>     driven through `stream_agent` and measured; the **approval** path is covered only at the
+>     module level, because raising a real gate needs `request_approval` to run against an
+>     organisation, a subject and a digest. So "a checkpoint puts a decision on the stream" is
+>     believed and not measured — the exact distinction CLAUDE.md testing item 8 exists for, and
+>     both defects of that class shipped green. Drive `request_approval` through `stream_agent`
+>     and assert the `intervention` event carries that gate's id. Stated in
+>     `app/ai/intervention.py`'s docstring too, so it is not only here.
 >
 > **Still needs a document nobody holds**: E8.3 (a licensed, readable BS 7608), most of E21.
 > Do not keep re-reading them.

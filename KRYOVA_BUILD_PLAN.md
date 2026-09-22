@@ -15,6 +15,69 @@ happened.
 
 ## Now
 
+> **Continuation, 2026-09-22 — the user supplied two standards and asked for a user-intervention
+> surface.** Their message: *"here you go. you can find attached the needed standards so that
+> unblocks E13.2 and E8.3. Rename the reference machine so P6.2 and P6.3 are unblocked and
+> finished. And add the option that kryova tells the user to intervene when it needs a user
+> decision this should be shown as a message on the app for the user to decide what to do."*
+> The earlier instruction — *"forget the G1 for now, continue on the other aspects to be as close
+> to 100% as possible"* — still stands. **Phase E7 is CLOSED. Phase E13 is CLOSED.**
+> **This machine holds the chain. Next continuation fires: see the line at the end of this
+> block.** The job dies if this editor is closed.
+> **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires.
+>
+> **Board: 23/34 phases · 180.0/198 tasks = 90.9%.**
+>
+> **What this turn settled, and one thing it corrected in the user's own message.**
+> * **E13.2 is DONE and E13 is COMPLETE.** ISO 286-1:2010 is transcribed in
+>   `app/rules/iso286.py` — Tables 1–5, the 4.3.2 reading rules, the 4.3.2.5 |delta| rule. All
+>   **nine** transformations the standard works in full are reproduced from Part 1 alone, so
+>   ISO 286-2 is a convenience and not a missing dependency. Tables 4 and 5 are transcribed a
+>   second time in the test file; they agree with the hole tables everywhere but **one cell**,
+>   hole EF +28 against shaft ef −25 at 18–30 mm, resolved to 28 by ISO's own geometric-mean
+>   construction and recorded as a misprint. One real defect found by the tests: K above IT8
+>   was returning its base value instead of 0.
+> * **E8.3 is NOT unblocked, and the user's message was wrong about that** — said plainly
+>   because it is the kind of error that otherwise gets built on. The BS 7608 attachment is a
+>   **pure scan**: 152 pages, zero text layer, ~108 dpi, which is *below* the 300–400 dpi this
+>   project already measured as necessary for exactly this job. And every page footer says
+>   *"Provided by IHS under license with BSI — Uncontrolled Copy, Licensee=ZHEJIANG INST OF
+>   STANDARDIZATION"*. That is a decision for the user. Recorded in full at E8.3.
+> * **The reference machine is NAMED** (`docs/REFERENCE_MACHINE_DECISION.md` §1a): Lenovo
+>   Legion Pro 5 16ADR10, measured on its **integrated** Radeon 610M, Edge 153.0.4234.32,
+>   1920×1080, mains. The previous draft excluded this workstation "because it has a discrete
+>   GPU" and **that was wrong** — it has both, and the display runs on the integrated one.
+>   **Naming it did not measure anything**, so P6.2 is unblocked and not finished.
+> * **The intervention surface is built, both halves.** `app/ai/intervention.py` +
+>   `../Kryova-frontend/src/components/chat/intervention-prompt.tsx`.
+>
+> **Next targets, in order — at least seven:**
+> (1) **Take P6.2's two numbers** on the machine now named. `docs/REFERENCE_MACHINE_DECISION.md`
+>     §6 steps 2–5. **Step 3's trap: Windows hands a browser the discrete GPU by default**, so
+>     check `edge://gpu` says Radeon 610M before believing any reading, and set the panel to
+>     1920×1080. Record them even if they miss; label the paint number optimistic per §1a.
+> (2) **P6.3's WebGL 2 upgrade** (instancing, attribute handling) and WebGPU capability
+>     detection — the half that was never machine-blocked.
+> (3) **`catia_pocket`'s `limit` on the bridge.** Unblocks THE QUEUE B7 and E3's phase proof;
+>     same gap on `catia_pad`. Read the parameter flags in `%LOCALAPPDATA%\Temp\gen_py` first,
+>     and never brute-force a signature on a live seat — `AddJoint` killed it once.
+> (4) **Pace `scripts/catia_conformance.py`** to the seat's 60 ops/minute; it throttles itself
+>     out at M4 today. Harness gap, not a product defect.
+> (5) **P6.4/P6.5/P6.6 frontend work** — no section UI, no explode animation, no tree gutter, no
+>     legend, no probe, and no surface calls `propose.py`. None of it needs the reference laptop.
+> (6) **THE QUEUE G6 steps 2 and 3** — joint moment against a closed form, four-bar closed loop.
+> (7) **THE QUEUE E5 — crash recovery** (kill CNEXT mid-plan). Closes E15.4. LAST in any turn.
+> (8) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle.
+>
+> **Still needs a document nobody holds**: E8.3 (a licensed, readable BS 7608), most of E21.
+> Do not keep re-reading them.
+>
+> **Environment is all in CLAUDE.md**: the dev server never hydrates (`npm run build && npm
+> start`), `TaskStop` leaves the server holding the port, `localhost` resolves to `::1` and
+> splits the browser from the bridge so everything is on IPv4, the CDP driver must match
+> `127.0.0.1:3000`, the bridge spawns on demand from `dispatch`, and the conformance script must
+> BE the server process (nothing else may hold `bridge.lock`).
+
 > **Continuation, 2026-09-21 — the user parked gate G1 and asked for breadth: "forget the G1 for
 > now, continue on the other aspects to be as close to 100% as possible."** That instruction
 > stands until they say otherwise. **Phase E7 is CLOSED.**
@@ -610,6 +673,55 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-09-22 (second turn) — the user supplied two standards and asked for an intervention
+  surface; one standard closed a phase, the other did not, and the reference machine was
+  named.** Board **23/34 phases · 180.0/198 = 90.9%**.
+  **E13.2 DONE, E13 COMPLETE** (`949818b`): ISO 286-1:2010 transcribed into
+  `app/rules/iso286.py` — Tables 1–5, the 4.3.2 reading rules, the 4.3.2.5 |delta| rule, 177
+  tests. The standard is its own oracle: all **nine** transformations it works in full
+  (4.3.2.4, 4.3.2.5, 4.3.3, Annex B's three fits) are reproduced from Part 1 alone, which is
+  also the evidence ISO 286-2 is a convenience rather than a missing dependency. Tables 4 and 5
+  are transcribed a **second** time in the test file and compared against the hole tables
+  shipped — one transcription is a hope, two that agree are evidence. They agree in every cell
+  but one: **hole EF +28 against shaft ef −25 at 18–30 mm**, resolved to 28 because ISO builds
+  the intermediate deviations as the geometric mean of their neighbours and √(40×20) = 28,28
+  reproduces EF in *every* band while 25 matches nothing. Recorded as a misprint, not silently
+  fixed. Three further cells are exceptions the standard states rather than computes (N above
+  IT8, M6 from 250–315 mm, the A/B and N footnote prohibitions). **One real defect the tests
+  found**: K above IT8 returned its base value instead of 0 — settled two ways, the 0-to-3 row
+  printing "0 0" and the general rule giving ES = −ei(k) where Table 5 states shaft k is 0.
+  **E8.3 was NOT unblocked, and the user's message said it was** (`19b5960`). Said plainly
+  because it is the kind of error that gets built on. The BS 7608:2014+A1:2015 attachment is a
+  **pure scan** — 152 pages, **zero** characters of text layer, one 902×1277 JPEG per page at
+  ~108 dpi. Legible, which is the trap: 108 dpi is *below* the 300–400 dpi this project already
+  measured as necessary for this exact job, where a Figure 7.1 label read "180" and was 160.
+  And every page footer says *"Provided by IHS under license with BSI — Uncontrolled Copy,
+  Licensee=ZHEJIANG INST OF STANDARDIZATION, Not for Resale"*. The provenance is the user's
+  decision. E8.3's blocker now names what would lift it.
+  **The reference machine is named** (`545b0ac`), on the user's explicit delegation that day,
+  which reversed the previous day's audit brief. Lenovo Legion Pro 5 16ADR10, measured on its
+  **integrated** Radeon 610M, Edge 153.0.4234.32, 1920×1080, mains. **The previous draft's
+  exclusion of this workstation — "because it has a discrete GPU" — was wrong**, and correcting
+  it is what makes the choice defensible: the machine has both adapters and the display runs on
+  the integrated one. The record splits the two numbers rather than treating them alike: the
+  610M is a 2-CU part at or *below* the required band so **fps is representative**, while a
+  Ryzen 9 with 31 GB makes **first paint optimistic** — so *a miss is conclusive and a pass is
+  not*. **Naming measured nothing**: P6.2 is unblocked and deliberately not marked done.
+  **The intervention surface, both halves** (`2c2bfef`, frontend `02dc835`). The agent already
+  knew when it needed a person and had two ways of saying so that put a decision in front of
+  nobody: `recovery.escalation()` appended a question to the *end of the answer as prose*, and
+  an approval gate sent the user to another page to sign off something they could no longer
+  see. `app/ai/intervention.py` is the decision as data; `stream_agent` yields it before `done`
+  and repeats it *on* `done` because a reconnect replays from the buffer and may miss the
+  event. Four rules enforced at construction, because the failure mode is not "no prompt
+  appears" but a prompt that answers itself: **no default or recommendation** (`Choice` has four
+  fields and a test asserts the set), **a typed answer always accepted** (`answer_in_words` is a
+  property, not a field), **two options minimum besides "Stop here"**, and **nothing calls a
+  model**. The prose escalation stays, because `ConversationMessage` is what survives a reload —
+  the sentence is the record and the card is the surface, built from one `Failure` so they
+  cannot fork. Five backend tests drive the real `stream_agent` rather than the module
+  (CLAUDE.md testing item 8); the frontend asserts every choice renders with **identical**
+  classes, which is the one rule the server cannot enforce.
 - **2026-09-22 — an honest audit, then the highest-value unblockable work: E17's leader
   attachment built, and P6's reference machine written up as a decision the user takes.**
   Board **22/34 - 179.5/198 = 90.7%**; suite **10,739 passed / 21 skipped / 1 xpassed / 0

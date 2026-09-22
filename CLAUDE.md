@@ -1077,6 +1077,42 @@ this faster". Four things from it that are asked most often and answered wrongly
    says measured. Each buys real time and each converts an honest slow answer into a fast
    dishonest one.
 
+## Reading a standard the user attaches (learned 2026-09-22)
+
+Two arrived in one message, one closed a phase and the other could not, and the difference
+was not visible from the message.
+
+1. **A PDF the user attached is recoverable from the session transcript, so a compaction
+   does not lose it.** The attachment is stored base64 in
+   `~/.claude/projects/<slug>/<session>.jsonl` inside a `{"type":"document"}` block. Walk
+   the JSON for `source.media_type == "application/pdf"` and `base64.b64decode(source.data)`.
+   A post-compaction summary will *not* carry it, and it will not say so — the summary that
+   day named one of the two attachments and silently dropped the other. **Check the
+   transcript for `"type":"document"` before concluding the user sent one thing.**
+2. **`pypdf`'s `extract_text` with a `visitor_text` callback gives x/y per fragment, and
+   that is what settles a table's column alignment.** Flat extraction of a merged-cell
+   engineering table reads plausibly and puts values in the wrong column. Reading the
+   **header** row's x-positions and matching data fragments to them is the check; it is how
+   the ISO 286 `K`/"above IT8" cell was found to be *blank* rather than absent, which is a
+   different fact with a different answer.
+3. **A cross-check between two tables that must agree is worth more than care.** ISO 286's
+   Tables 2/3 (holes) and 4/5 (shafts) are negations of each other, so transcribing both and
+   asserting agreement found the single cell where the *standard itself* misprints. One
+   transcription is a hope.
+4. **There is no PDF rasteriser on this machine.** The `Read` tool's PDF path needs
+   `pdftoppm` (poppler), which is not installed; `pymupdf` is a one-line pip install and
+   renders pages fine. **Uninstall it again** — a venv that diverges from
+   `requirements.txt` is the hazard, and nothing in `app/` imports it.
+5. **A scanned standard is legible and still unusable, and legibility is the trap.** The
+   BS 7608 copy reads perfectly at ~108 dpi for *body text*. The fatigue section below
+   records that 110 dpi turned a Figure 7.1 label "160" into "180", and that tables needed
+   300–400 dpi. **Check the embedded image's pixel size** (`page.get_images` →
+   `extract_image` → `width`/`height`), not whether the page looks readable: rendering at
+   200 dpi from a 902×1277 source upsamples and adds nothing.
+6. **Read the page footer before using a standard.** IHS/BSI copies carry
+   *"Uncontrolled Copy"*, a named licensee and *"Not for Resale"*. Whether to build on one is
+   the user's decision, not a session's, and it belongs in the status line either way.
+
 ## Tools
 
 **Use `rg` (ripgrep), not `grep`**, for code search — it respects `.gitignore`, so it will not

@@ -7039,16 +7039,28 @@ client renders what it is sent, at the detail the view deserves.
    > The reference assembly the targets are measured against also exists now
    > (`app/render/reference.py`, 2,000 occurrences over 120 components, 99% instanced, 5 deep,
    > digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab`), which was G1's other blocker.
-   > **The requirement is now a decision record awaiting the user**:
-   > `docs/REFERENCE_MACHINE_DECISION.md` (2026-09-22) states the machine's required properties,
-   > why this workstation is excluded (discrete GPU), the two numbers, the digest-pinned scene
-   > they are measured on, the unresolved "fps in CI with no GPU" question, and the five steps to
-   > take once a machine is named. **It does not choose one** — that is a product decision about
-   > who the performance is promised to.
-   > **Still unmeasured and still a hardware job**: first paint of a 2,000-part machine under
-   > 2 s and interaction never below 30 fps, and **no reference laptop is named anywhere in
-   > this repository** — this workstation has a discrete card and is the opposite of the
-   > mid-range machine P6.2 means.
+   > **The reference machine is NAMED as of 2026-09-22 and the blocker is gone**:
+   > `docs/REFERENCE_MACHINE_DECISION.md` §1a — Lenovo Legion Pro 5 16ADR10 (83LT), measured on
+   > its **integrated** Radeon 610M (driver 32.0.21030.13004), Edge 153.0.4234.32, 1920×1080 at
+   > 100%, on mains. Named by Claude on the user's explicit delegation that day, which reversed
+   > the audit brief's "do not choose the reference machine yourself"; recorded in the document
+   > because who chose the machine a promise rests on is a question somebody will ask.
+   > **The earlier exclusion of this workstation was wrong and the correction is what makes the
+   > choice defensible**: it has *both* adapters and the display is driven by the integrated
+   > one, so a browser pinned to it measures integrated graphics.
+   > **The two numbers are not equally trustworthy on it, and the record says so before either
+   > is taken.** The 610M is a 2-CU part at or below the Iris Xe / 780M band the requirements
+   > ask for, so the **fps number is representative**; the Ryzen 9 and 31 GB are far above the
+   > target class, so the **first-paint number is optimistic**. The reading rule is therefore
+   > *a miss is conclusive and a pass is not* — the same asymmetry a sampled thickness bound
+   > carries in `app/kernel/`.
+   > **Still unmeasured, and that is now the whole of what is left**: first paint of a
+   > 2,000-part machine under 2 s and interaction never below 30 fps. Naming the machine
+   > removed the blocker; it did not take the measurement, and a status line claiming
+   > otherwise would be the failure the 2026-09-21 audit brief named. Steps 2 to 5 of the
+   > record's §6 remain, and step 3 carries the trap that Windows hands a browser the discrete
+   > GPU by default — a frame time taken on the RTX 5070 and filed against the 610M is the
+   > exact number the document exists to prevent. Check `edge://gpu` first.
 
    <!-- superseded 2026-09-17 -->
    > PARTIAL (2026-09-15) — **the ordering is built and pure; the fps and first-paint targets

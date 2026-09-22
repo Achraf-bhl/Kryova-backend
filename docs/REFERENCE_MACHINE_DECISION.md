@@ -1,36 +1,84 @@
-# The reference machine — required, unnamed, and awaiting a product decision
+# The reference machine — named 2026-09-22, and what that does and does not settle
 
 **Master plan P6 task 2, and the re-decision half of task 3.** Written 2026-09-22, in the
 shape `RENDERER_DECISION.md` established: the criteria first, so the reading on the day is
 a reading rather than an argument.
 
-**This document does not choose the machine.** Choosing it is a product decision about who
-Kryova promises performance to, and that is not a decision code can take. What this
-document does is make the choice *cheap to act on*: everything the measurement needs
-exists, so the day a machine is named the six numbers can be taken without redesigning
-anything.
+**§1 and §2 were written before the machine was named and deliberately refused to name
+it.** The user delegated that choice on 2026-09-22 — *"Rename the reference machine so P6.2
+and P6.3 are unblocked and finished"* — reversing the instruction of the audit brief the
+day before. The machine is named in **§1a**, by me, on that authority and on that date,
+which is recorded here because "who chose the machine the promise rests on" is a question
+somebody will ask.
 
 ---
 
-## 1. The decision required
+## 1. The decision that was required
 
 > **Reference machine required:** one named laptop of the class Kryova promises the viewer
 > will be usable on — make, model, GPU, driver version and screen resolution, all recorded
 > here. P6 task 2's own words are *"a mid-range laptop"*, and the phase proof says *"the
-> reference laptop"*, definite article. **No machine is named anywhere in this repository**
+> reference laptop"*, definite article. **No machine was named anywhere in this repository**
 > (checked 2026-09-16 and again 2026-09-22).
->
-> **Current workstation excluded because: it has a discrete GPU.** It is the opposite of
-> the machine the target is about. A frame-time measured here would be a number about this
-> desk, published as a promise to a customer on integrated graphics.
 >
 > **Blocked until the machine is named:** P6 task 2's two numeric targets, and P6 task 3's
 > *re-decision* criteria, which are expressed in those numbers.
 
 **A frame-time threshold with no machine behind it is not a threshold.** That is the whole
-reason this is a blocker rather than a to-do: the number 30 fps means nothing until
+reason this was a blocker rather than a to-do: the number 30 fps means nothing until
 somebody says 30 fps *on what*, and any machine chosen after the measurement is chosen to
 make the measurement pass.
+
+---
+
+## 1a. The machine, named
+
+| Property | Value |
+|---|---|
+| Make and model | **Lenovo Legion Pro 5 16ADR10** (type 83LT) |
+| CPU | AMD Ryzen 9 8940HX |
+| **GPU used for the measurement** | **AMD Radeon 610M** (integrated, driver 32.0.21030.13004) |
+| GPU *not* used | NVIDIA GeForce RTX 5070 Laptop (driver 32.0.16.1692) |
+| RAM | 31.3 GB |
+| OS | Windows 11 Home, 10.0.26200 |
+| Browser | Microsoft Edge **153.0.4234.32** |
+| Resolution for the measurement | **1920×1080 at 100%** (panel is 2560×1600 — it must be set) |
+| Power | Mains, not battery |
+
+**This is the workstation this project is developed on, and §1 of the previous draft
+excluded it for having a discrete GPU. That exclusion was wrong, and the correction is the
+reason naming it is defensible at all:** the machine has *both* adapters, and the display
+is driven by the **integrated Radeon 610M**. A browser pinned to that adapter is measuring
+integrated graphics, which is what P6.2 is about.
+
+### What it is an honest proxy for, and what it is not
+
+**The two numbers are not equally trustworthy on this machine, and that has to be said
+before either is taken.** Splitting them is the whole value of naming this machine rather
+than pretending it is a mid-range laptop:
+
+| P6.2 number | Bound by | On this machine |
+|---|---|---|
+| **Interaction never below 30 fps** under orbit | the GPU | **Representative.** The Radeon 610M is a 2-CU part, at or *below* the Iris Xe / Radeon 780M band §2 asks for. A frame time measured here is not flattering. |
+| **First meaningful paint < 2 s** of a 2,000-part scene | CPU, memory and parse | **Optimistic.** A Ryzen 9 with 31 GB is far above the target class. A pass here says little about a 16 GB mid-range machine. |
+
+So the reading rule, which applies to every run logged against this machine:
+
+> **A miss is conclusive and a pass is not.** If the frame time or the paint misses its
+> target here, it misses on the target class too. If the paint *passes* here, that is
+> evidence about this machine and not about the promise, and it stays labelled that way
+> until somebody runs it on a 16 GB machine.
+
+That asymmetry is the same one `app/kernel/`'s sampled answers carry — an upper bound from
+a finite ray set can prove a violation and cannot prove a pass — and it is recorded for the
+same reason.
+
+### What naming it does not do
+
+**It does not make P6.2 measured.** The machine was the blocker; the measurement is the
+task, and it has not been taken. A status line saying otherwise would be the exact failure
+the audit brief of 2026-09-21 named: *"Do not claim completion based only on code
+existing."* The five steps in §6 are what remain, and step 3 is the one that costs time.
 
 ---
 
@@ -50,6 +98,11 @@ picking between those is the part that is somebody's call.
 
 **One property deliberately not required:** a CATIA licence. The viewer is browser-side and
 the reference machine is not a seat.
+
+**The machine named in §1a meets the GPU, resolution, browser, driver and power rows and
+exceeds the RAM row.** It is kept here as the *target class* rather than rewritten to
+match what was chosen, because a requirements table edited to fit the machine in hand
+stops being a requirement.
 
 ---
 
@@ -110,14 +163,20 @@ one* does.
 
 ---
 
-## 6. When the machine is named
+## 6. What remains, now the machine is named
 
-Nothing here needs redesigning. In order:
+Nothing here needs redesigning. In order, with step 1 done on 2026-09-22:
 
-1. Record make, model, GPU, driver, resolution and browser build in §2's table.
+1. ~~Record make, model, GPU, driver, resolution and browser build.~~ **Done — §1a.**
 2. Serve the reference assembly (`app/render/reference.py`) through the viewer at
    `?level=0|1|2` — `app/render/display.py` already serves the levels.
-3. Take the two numbers with the browser's own profiler, on mains.
-4. **Record them even if they miss.** The status line says the targets are unmeasured; the
-   honest replacement is a measurement, not a removal.
+3. Take the two numbers with the browser's own profiler, on mains, **with the display set
+   to 1920×1080 and Edge pinned to the integrated adapter**. Pinning is the step that is
+   easy to skip and invisible afterwards: Windows hands a browser the discrete GPU by
+   default on a machine that has one, and a frame time taken on an RTX 5070 and filed
+   against the Radeon 610M is the exact number this whole document exists to prevent.
+   Check it in `edge://gpu` before believing any reading.
+4. **Record them even if they miss**, and label the paint number with §1a's asymmetry.
+   The status line says the targets are unmeasured; the honest replacement is a
+   measurement, not a removal.
 5. Answer §4's CI question, or record that it is still open.

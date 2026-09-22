@@ -71,17 +71,17 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 16/24 | 126/136 = 93% | 140/151 eng-months = 93% |
+| Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
 | Product — P1–P10 | 6/10 | 53/62 = 85% | 32/38 eng-months = 83% |
-| **Programme** | 22/34 | 180/198 = 91% | 172/189 eng-months = 91% |
+| **Programme** | 23/34 | 180/198 = 91% | 172/189 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
 
 | | Phases |
 |---|---|
-| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
+| ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -3223,6 +3223,16 @@ answerable meaning.
 
 ##### Phase E13 — Design rules, DFM, tolerance and cost *(needs an ME)* #####
 
+> ✅ PHASE COMPLETE (2026-09-22) — all tasks done and tested. Task 2 was the last, and it was
+> waiting on a **document** rather than on code: ISO 286-1:2010 arrived on 2026-09-22 and is
+> transcribed in `app/rules/iso286.py`.
+>
+> **What the marker does not mean.** The heading's *(needs an ME)* still stands and is not a
+> task in this list: every limit here is the caller's with its source, and no rule in
+> `app/rules/` asserts a number of its own. A mechanical engineer reading the rule set and the
+> transcription is this phase's proof, the way E19's is a lawyer reading `app/compliance/`, and
+> it is still owed.
+
 **~9 engineer-months.**
 
 1. **Design rules as assertions** — minimum wall by process, draft angles, bolt torque and preload,
@@ -3315,6 +3325,22 @@ answerable meaning.
 
 2. **Tolerance and GD&T** — stack-up (worst case and RSS), fit selection, datum schemes, FTA.
    *A drawing without tolerances is not a drawing.*
+   > DONE (2026-09-22) — **both open halves are closed.** The document arrived: ISO 286-1:2010(E)
+   > is transcribed in `app/rules/iso286.py` — Tables 1 to 5, the reading rules of 4.3.2 and the
+   > |delta| rule of 4.3.2.5 — so `zone(90, "F7")` now answers +0,036/+0,071 and a caller no longer
+   > has to supply deviations. **The standard is its own oracle**: all nine transformations it
+   > works in full (4.3.2.4, 4.3.2.5, 4.3.3 and Annex B's three fits) are reproduced from Part 1
+   > alone, which is also the evidence that ISO 286-2 is a convenience here and not a missing
+   > dependency. Tables 4 and 5 are transcribed a second time in the test file and compared against
+   > the hole tables shipped; the two agree in every cell but one, and that one — hole EF +28
+   > against shaft ef -25 at 18 to 30 mm — is resolved to 28 by ISO's own geometric-mean
+   > construction and recorded as a misprint rather than silently corrected. Three further cells
+   > are exceptions the standard states rather than computes (N above IT8, M6 from 250 to 315 mm,
+   > and the A/B and N footnote prohibitions) and each is refused or special-cased by name. CATIA
+   > FTA, the other half, was discharged on the seat 2026-09-19 (THE QUEUE **E7**). Tested by:
+   > `tests/test_rules_iso286.py` (177 tests), `tests/test_rules_fits.py`, and the files below.
+
+   <!-- superseded 2026-09-22 -->
    > PARTIAL (2026-09-15) — **fit selection's arithmetic is in** (`app/rules/fits.py`): a hole
    > and shaft zone, each with its deviations and the source they were read from, give the largest
    > and smallest clearance and the fit's kind; `select_fit` keeps the candidates that always land

@@ -21,4 +21,4 @@
 #      seat runs 3.14, so with these pins in `requirements.txt`,
 #      `scripts/setup.ps1` could not install anything there.
 laya==0.3.11
-torch==2.5.1
+torch==2.14.0  # 2.5.1 has no CPython 3.14 wheel; laya asks only torch>=2.0 (measured on the seat 2026-09-24)

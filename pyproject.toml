@@ -126,6 +126,12 @@ disable_error_code = ["import-untyped"]
 module = ["app.fatigue.backend", "app.optimise.drivers"]
 disable_error_code = ["import-untyped"]
 
+[[tool.mypy.overrides]]
+# `laya` ships no py.typed marker either, and `app/ai/laya_decide.py` is the one
+# place it is imported -- the untyped surface stays in that file.
+module = ["app.ai.laya_decide"]
+disable_error_code = ["import-untyped"]
+
 [tool.ruff.lint.per-file-ignores]
 # The dispatch suite's `wired` fixture is re-exported here so the two files
 # share one scripted seat; every test that takes it as a parameter looks like a

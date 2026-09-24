@@ -484,8 +484,17 @@ def build_messages(
     conversation: Conversation,
     *,
     attached: UserTurnBlock | None = None,
+    state_block: str | None = None,
 ) -> list[dict[str, Any]]:
     """Assemble the transcript for one provider call.
+
+    `state_block`, when given, is used instead of building one: the agent
+    builds it once per turn and passes the same text to every step. The block
+    sits *before* this turn's tool traffic, so rebuilding it per step changed a
+    token early in the prompt on every call and threw away the provider's
+    prompt cache for everything after it -- measured 2026-09-24 on qwen3.8, a
+    hybrid model whose cache can only resume from a checkpoint: the whole
+    ~19k-token prompt re-processed from token 0 on each step, ~80 s a step.
 
     Order is summary, then windowed history, with the state block spliced in
     directly before the newest user turn. That position is chosen for prompt
@@ -507,7 +516,9 @@ def build_messages(
     """
     replayed = replay_messages(conversation)
 
-    state = {"role": "user", "content": build_state_block(db, user, conversation)}
+    if state_block is None:
+        state_block = build_state_block(db, user, conversation)
+    state = {"role": "user", "content": state_block}
     insert_at = len(replayed)
     for index in range(len(replayed) - 1, -1, -1):
         if replayed[index]["role"] == "user":

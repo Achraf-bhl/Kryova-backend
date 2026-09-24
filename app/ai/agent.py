@@ -52,6 +52,7 @@ from app.ai.provider import LLMBusy, LLMError, LLMProvider, TextDelta, TokenUsag
 from app.ai.recovery import Failure as Recovery_Failure
 from app.ai.recovery import Recovery
 from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
+from app.ai.state import build_state_block
 from app.ai.tools import ToolBox, ToolError
 from app.ai.turn_metrics import (
     STOP_CANCELLED,
@@ -572,6 +573,12 @@ def stream_agent(
     folded = maybe_summarise(db, provider, conversation)
     meter.charge(folded, calls=1 if folded.total_tokens else 0)
 
+    # Once per turn, as its preamble says ("read ... at the start of this
+    # turn"). Within the turn the tool results are the fresher record, and a
+    # block rebuilt every step invalidates the prompt cache behind it -- see
+    # `build_messages`.
+    turn_state = build_state_block(db, owner, conversation)
+
     steps: list[AgentStep] = []
     #: Read-only calls made this turn, by fingerprint, so a loop is caught.
     #: Per turn rather than per conversation: re-reading the part on a later
@@ -678,7 +685,9 @@ def stream_agent(
         try:
             for chunk in provider.stream_chat(
                 system=system,
-                messages=build_messages(db, owner, conversation, attached=attached),
+                messages=build_messages(
+                    db, owner, conversation, attached=attached, state_block=turn_state
+                ),
                 tools=schemas,
                 max_tokens=max_tokens,
             ):

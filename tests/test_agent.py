@@ -599,6 +599,41 @@ class TestStateBlock:
         assert "bracket.stl" in provider.last_user_text
         assert "latest_bounding_box_mm" in provider.last_user_text
 
+    def test_within_a_turn_each_step_only_appends_to_the_last(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """The block is read once per turn, so a step never rewrites the prompt
+        behind it. A tool that changes what the block would say (here, the
+        project's name) must not change the block mid-turn: measured 2026-09-24,
+        qwen3.8 re-processed its whole ~19k-token prompt on every step because
+        the block moved under this turn's tool traffic. The next turn still
+        sees the change -- `test_the_state_block_reflects_the_database_...`."""
+        provider = ScriptedProvider(
+            [
+                AssistantTurn(
+                    tool_calls=[
+                        ToolCall(id="a", name="update_project", arguments={"name": "Renamed"})
+                    ]
+                ),
+                AssistantTurn(
+                    tool_calls=[ToolCall(id="b", name="update_project", arguments={"name": "Again"})]
+                ),
+                AssistantTurn(text="done"),
+            ]
+        )
+        run_agent(
+            db=db_session,
+            provider=provider,
+            conversation=conversation,
+            toolbox=_toolbox(db_session, user, project),
+            user_message="rename it twice",
+        )
+
+        calls = provider.seen_transcripts
+        assert len(calls) == 3
+        for earlier, later in zip(calls, calls[1:], strict=False):
+            assert later[: len(earlier)] == earlier, "a step rewrote the prompt behind it"
+
 
 class TestMutationGate:
     def test_mutating_tools_are_hidden_unless_allowed(

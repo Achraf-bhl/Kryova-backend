@@ -52,6 +52,7 @@ from app.catia.connection import (
 )
 from app.catia.geometry_import import GeometryImportError, import_step_export
 from app.catia.ops import no_auto_checkpoint_names
+from app.catia.ops.outline import crossing
 from app.catia.ops.placement import PlacementError, declares_polar, resolve_polar
 from app.catia.sanitize import clean_result, clean_text
 from app.catia.tool_specs import (
@@ -1217,6 +1218,15 @@ def _augment(
             arguments = resolve_polar(arguments)
         except PlacementError as exc:
             raise CatiaError(f"{tool}: {exc}") from exc
+
+    if tool == "catia_sketch_polyline":
+        points = arguments.get("points") or []
+        closes = bool(arguments.get("closed")) or (
+            len(points) > 2 and list(points[0]) == list(points[-1])
+        )
+        reason = crossing(points) if closes else None
+        if reason:
+            raise CatiaError(f"{tool}: {reason}")
 
     if tool == "catia_set_material":
         chosen = MATERIALS.get(str(arguments.get("material", "")))

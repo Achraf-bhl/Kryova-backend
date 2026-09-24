@@ -486,6 +486,24 @@ class TestTheInjectedIntentDecider:
         assert decided == family
         assert spent == [TokenUsage(prompt_tokens=40, completion_tokens=2)]
 
+    def test_the_message_reaches_the_decider_once_when_context_already_holds_it(
+        self,
+    ) -> None:
+        """The agent appends the user's message *before* selecting tools, so
+        `recent_user_messages()` -- the context -- starts with the very message
+        being routed. A decider is a model reading text, not a set of terms:
+        measured 2026-09-24, Laya answers `clearance` for the flanged-bushing
+        prompt and `material` for the same prompt written twice, and `holes`
+        for the L-bracket prompt against `material` doubled."""
+        seen: list[str] = []
+        message = "pocket the face"
+
+        select(self._specs(), message, context=f"{message} earlier words", limit=25,
+               decide=lambda m, _l: seen.append(m) or None)
+
+        assert seen[0].count(message) == 1
+        assert "earlier words" in seen[0]
+
     def test_it_is_not_consulted_when_retrieval_is_a_no_op(self) -> None:
         """Below the limit the selector returns everything, so there is nothing to widen
         and a call would be spent to learn nothing."""

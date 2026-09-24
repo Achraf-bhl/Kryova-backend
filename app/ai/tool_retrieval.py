@@ -727,9 +727,16 @@ def select(
     # lexical selection exactly as it was.
     if decide is not None:
         labels = tuple(INTENT_FAMILIES)
+        # The agent stores the message before it selects, so `context` (newest
+        # first) usually opens with the message itself. Sets make that harmless
+        # to the scorer above; a decider reads text, and a doubled request
+        # changed Laya's answer on two of four ladder prompts (2026-09-24).
+        earlier = context.strip()
+        if earlier.startswith(message.strip()):
+            earlier = earlier[len(message.strip()):].strip()
         decided: str | None
         try:
-            decided = decide(_decider_request(message, context), labels)
+            decided = decide(_decider_request(message, earlier), labels)
         except Exception:  # noqa: BLE001 - a decider must never take a turn down
             logger.exception("the intent decider raised; keeping the lexical selection")
             decided = None

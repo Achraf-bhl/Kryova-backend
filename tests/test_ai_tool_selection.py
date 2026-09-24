@@ -734,6 +734,15 @@ class TestTheIntentRouterIsWired:
 
         assert agent._intent_decider(provider=object()) is None
 
+    def test_the_suite_never_inherits_the_workstations_router(self) -> None:
+        """`conftest._no_real_intent_router` pins this, whatever `.env.local`
+        says. Without it, a machine on the Laya profile ran every agent test
+        through the real 421M checkpoint (147 s against 96 s for three files,
+        measured 2026-09-24) and let its answer shape the scripted offers."""
+        from app.ai import agent
+
+        assert agent._intent_decider(provider=object()) is None
+
 
 class TestItStillNeverNarrowsWhatCanBeCalled:
     """The property that makes any of this safe, checked once against the real

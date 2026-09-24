@@ -251,6 +251,20 @@ def _a_fixed_machine(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _no_real_intent_router(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The suite never asks the real Laya model which tool family a turn needs.
+
+    `settings` reads `.env.local`, and the recommended local profile sets
+    `AI_INTENT_ROUTER=laya` beside a non-zero `AI_TOOL_LIMIT`. Without this,
+    every agent test on such a machine loads a 421M checkpoint (downloading it
+    on first use) and lets its answer change which tools the scripted turn is
+    offered -- a suite whose verdict depends on the workstation's `.env.local`.
+    A test that wants a router sets `ai_intent_router` itself.
+    """
+    monkeypatch.setattr(settings, "ai_intent_router", "none", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _forget_the_maintenance_window() -> Iterator[None]:
     """No test inherits another test's cached maintenance state.
 

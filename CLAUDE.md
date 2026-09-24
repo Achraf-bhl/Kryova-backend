@@ -374,6 +374,22 @@ session.**
    `OAuth2PasswordRequestForm` and imposes no length — so this password can sign in but cannot be
    registered. The script is idempotent (re-running resets a forgotten password) and refuses a
    non-local `DATABASE_URL` without `--i-know`.
+1a. **`scripts/dev_console.py`, added 2026-09-23** — a live client for a running dev backend,
+   for when the question is "did this turn behave correctly" rather than "does this render",
+   which is what item 2's browser is for. `send "<message>" [--mutate] [--conversation ID]
+   [--log <path to the backend's stdout>]` logs in exactly the way the browser does (cookies +
+   `x-csrf-token`, no bypass), streams the real SSE turn, and — if `--log` is given — tails the
+   backend's own log file in the same terminal, interleaved by timestamp with the SSE events.
+   Before this, checking what Laya or the tool-selection log said about a turn meant a second
+   terminal running `tail -f` and manually lining its timestamps up against `curl`'s output by
+   eye; now it is one command. `conversations` lists an account's conversations and `forget
+   <text>` deletes every one whose title contains it — the sidebar's own delete is a
+   hover-revealed icon with no keyboard path, tedious for a loop that starts a new conversation
+   every run. Signs into a dedicated `dev-console@kryova.dev` account (its own
+   `create_admin.py` provisioning, not `admin@admin.com`) precisely so it never resets the
+   password or steals the session out from under whoever is using the GUI account for item 2 at
+   the same time. Refuses to run against a non-local `--server`, same guard and same reason as
+   `create_admin.py`'s `--i-know`. Dev-only: it has no place in a deployed image.
 2. **Browser.** Edge is launched **once**, by hand, with `--remote-debugging-port=9222` and its
    own persistent `--user-data-dir`; the driver attaches with `playwright-core`'s
    `chromium.connectOverCDP` and runs one batch of actions per invocation. The persistent profile

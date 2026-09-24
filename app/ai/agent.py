@@ -186,7 +186,29 @@ def system_prompt() -> str:
     return prompts.AGENT_SYSTEM_DOCS if has_docs else prompts.AGENT_SYSTEM
 
 
-def _shown_tools(toolbox: Any, user_message: str) -> set[str] | None:
+def _intent_decider(provider: LLMProvider | None) -> Any:
+    """Bind `AI_INTENT_ROUTER` to a `decide=` callable, or `None` for lexical-only.
+
+    Three-way rather than a bool, because "on" has two different answers to
+    "who decides": `app/ai/laya_decide.py`'s module docstring has the
+    measurement for why they are not interchangeable on a GPU too small for
+    the conversational provider.
+    """
+    router = getattr(settings, "ai_intent_router", "none")
+    if router == "laya":
+        from app.ai.laya_decide import laya_decider
+
+        return laya_decider()
+    if router == "llm" and provider is not None:
+        from app.ai.tool_retrieval import decider_for
+
+        return decider_for(provider)
+    return None
+
+
+def _shown_tools(
+    toolbox: Any, user_message: str, provider: LLMProvider | None = None
+) -> set[str] | None:
     """Which tools to put in front of the model this turn — master plan 16.1.
 
     `None` means all of them, which is the default and what every deployment did
@@ -221,6 +243,7 @@ def _shown_tools(toolbox: Any, user_message: str) -> set[str] | None:
             recent=toolbox.recent_tool_names(),
             context=toolbox.recent_user_messages(),
             limit=limit,
+            decide=_intent_decider(provider),
         )
         # Logged rather than discarded, because the failure this can cause is
         # silent: a needed tool is absent, the model does something else, and
@@ -533,7 +556,7 @@ def stream_agent(
     #: turn than on more of them.
     blocked = 0
     schemas = toolbox.schemas(
-        include_mutating=allow_mutations, only=_shown_tools(toolbox, user_message)
+        include_mutating=allow_mutations, only=_shown_tools(toolbox, user_message, provider)
     )
     known = set(labels)
     corrections = 0
@@ -786,6 +809,11 @@ def stream_agent(
                     "id": call.id,
                     "type": "function",
                     "function": {"name": call.name, "arguments": call.arguments},
+                    # See `ToolCall.provider_extra`: Gemini 3.x refuses a
+                    # follow-up call that drops `extra_content` from an
+                    # earlier function-call part, so whatever the provider
+                    # handed back rides along on replay too.
+                    **({"extra_content": call.provider_extra} if call.provider_extra else {}),
                 }
                 for call in turn.tool_calls
             ],

@@ -11,6 +11,7 @@ Kept deliberately SDK-free: the wire format is small and stable, and adding the
 
 import base64
 import json
+import time
 from collections.abc import Sequence
 from typing import Any, TypeVar
 
@@ -99,6 +100,26 @@ _RESPONSE_FORMAT_REJECTIONS = (
     "json_schema",
     "response format",
 )
+
+#: Status codes a hosted endpoint uses for "try again," not "this is wrong."
+#: Measured live against Gemini's free tier, 2026-09-23: a tool-calling turn
+#: carrying Kryova's real ~46-tool offer 503'd 5 times running ("This model is
+#: currently experiencing high demand") while the identical account's
+#: no-tool turns answered every time -- the same request tried a few seconds
+#: later routinely succeeds, so this is capacity backpressure, not a rejection
+#: the caller should give up on after one try.
+_RETRYABLE_STATUSES = (429, 503)
+
+#: Backoff between retries of a `_RETRYABLE_STATUSES` response, in seconds.
+#: Four tries total. Gemini's free tier measured live, 2026-09-23: a burst of
+#: 503s on tool-calling turns lasted several seconds to low tens of seconds,
+#: well past what a sub-2s budget could ride out, while a plain non-tool turn
+#: on the same account and same minute answered immediately every time --
+#: so this is a real, sustained capacity shortage on that path, not a
+#: one-request blip, and the budget is sized to have a chance of outlasting
+#: it without turning a turn already in a user-visible stream into a
+#: multi-minute wait.
+_RETRY_BACKOFF_S = (1.0, 3.0, 8.0)
 
 
 def _unfence(content: str) -> str:
@@ -219,32 +240,38 @@ class OpenAICompatibleProvider(LLMProvider):
         return payload
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
-        try:
-            response = httpx.post(
-                f"{self._base_url}/chat/completions",
-                json=payload,
-                headers=self._headers(),
-                timeout=self._timeout,
-            )
-            response.raise_for_status()
-        except httpx.TimeoutException as exc:
-            raise LLMError(f"The model did not respond within {self._timeout:g}s.") from exc
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-            if status in (401, 403):
-                raise LLMUnavailable("The API key was rejected.") from exc
-            body = exc.response.text
-            if (
-                status == 400
-                and "response_format" in payload
-                and any(marker in body.lower() for marker in _RESPONSE_FORMAT_REJECTIONS)
-            ):
-                raise _ResponseFormatUnsupported(body[:200]) from exc
-            raise LLMError(f"Chat completion failed ({status}): {body[:200]}") from exc
-        except httpx.HTTPError as exc:
-            raise LLMError(f"Chat completion request failed: {exc}") from exc
+        attempt = 0
+        while True:
+            try:
+                response = httpx.post(
+                    f"{self._base_url}/chat/completions",
+                    json=payload,
+                    headers=self._headers(),
+                    timeout=self._timeout,
+                )
+                response.raise_for_status()
+            except httpx.TimeoutException as exc:
+                raise LLMError(f"The model did not respond within {self._timeout:g}s.") from exc
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if status in (401, 403):
+                    raise LLMUnavailable("The API key was rejected.") from exc
+                body = exc.response.text
+                if (
+                    status == 400
+                    and "response_format" in payload
+                    and any(marker in body.lower() for marker in _RESPONSE_FORMAT_REJECTIONS)
+                ):
+                    raise _ResponseFormatUnsupported(body[:200]) from exc
+                if status in _RETRYABLE_STATUSES and attempt < len(_RETRY_BACKOFF_S):
+                    time.sleep(_RETRY_BACKOFF_S[attempt])
+                    attempt += 1
+                    continue
+                raise LLMError(f"Chat completion failed ({status}): {body[:200]}") from exc
+            except httpx.HTTPError as exc:
+                raise LLMError(f"Chat completion request failed: {exc}") from exc
 
-        return dict(response.json())
+            return dict(response.json())
 
     def complete(
         self,
@@ -399,6 +426,9 @@ class OpenAICompatibleProvider(LLMProvider):
                     id=raw.get("id") or function.get("name", "call"),
                     name=function.get("name", ""),
                     arguments=arguments or {},
+                    # Gemini-only today (see `ToolCall.provider_extra`); any
+                    # other endpoint simply has no `extra_content` to carry.
+                    provider_extra=raw.get("extra_content") or None,
                 )
             )
         return AssistantTurn(

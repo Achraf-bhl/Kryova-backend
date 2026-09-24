@@ -74,6 +74,17 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
+    #: Opaque, provider-specific data that must be echoed back verbatim on the
+    #: wire entry for this call if the transcript is replayed -- not read by
+    #: anything above the provider layer. Exists for Gemini's
+    #: `extra_content.google.thought_signature`: since 3.x, a follow-up call
+    #: that omits it on a function-call part is refused with a 400 ("Function
+    #: call is missing a thought_signature"), so the two round trips this
+    #: dataclass sits between -- parsed out of the response, replayed into the
+    #: next request -- must carry it through even though `id`/`name`/
+    #: `arguments` are all any other provider needs. `None` for a provider
+    #: that has nothing to say here, which is every provider but this one.
+    provider_extra: dict[str, Any] | None = None
 
 
 @dataclass

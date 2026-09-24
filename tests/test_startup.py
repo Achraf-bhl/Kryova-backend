@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import pytest
 
 from app.core.config import settings
-from app.main import JsonLogFormatter, _fail_orphaned_jobs, docs_urls
+from app.main import JsonLogFormatter, _fail_orphaned_jobs, _warm_intent_router, docs_urls
 from app.models import (
     GeometryVersion,
     JobStatus,
@@ -218,3 +218,61 @@ class TestRequestId:
         first = client.get("/api/v1/materials").headers["x-request-id"]
         second = client.get("/api/v1/materials").headers["x-request-id"]
         assert first != second
+
+
+class TestTheIntentRouterWarmsUpBeforeAnyRequest:
+    """Found live, 2026-09-23: loading Laya lazily inside the first request that
+    needed it took the whole process down, with no traceback -- the identical
+    load run on the main thread, nothing else in the process yet, did not.
+    `_warm_intent_router` is the fix: pay the one-time cost in `lifespan`,
+    before `yield` hands control to the request-handling threadpool.
+    """
+
+    def test_off_by_default_touches_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "ai_intent_router", "none", raising=False)
+        called = []
+        monkeypatch.setattr(
+            "app.ai.laya_decide._get_agent", lambda: called.append(1) or object()
+        )
+
+        _warm_intent_router()
+
+        assert called == []
+
+    def test_laya_loads_it_once_eagerly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "ai_intent_router", "laya", raising=False)
+        calls = []
+        monkeypatch.setattr(
+            "app.ai.laya_decide._get_agent", lambda: calls.append(1) or object()
+        )
+
+        _warm_intent_router()
+
+        assert len(calls) == 1
+
+    def test_a_load_failure_does_not_fail_the_boot(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The whole point: a GPU that never appears must not be the reason
+        the server refuses to start."""
+        monkeypatch.setattr(settings, "ai_intent_router", "laya", raising=False)
+
+        def explode() -> None:
+            raise RuntimeError("no CUDA device")
+
+        monkeypatch.setattr("app.ai.laya_decide._get_agent", explode)
+
+        _warm_intent_router()  # must not raise
+
+    def test_a_get_agent_that_returns_none_is_logged_not_raised(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`_get_agent`'s own contract: `None` means it tried and could not,
+        which is different from raising, and both must leave the boot alone."""
+        monkeypatch.setattr(settings, "ai_intent_router", "laya", raising=False)
+        monkeypatch.setattr("app.ai.laya_decide._get_agent", lambda: None)
+
+        with caplog.at_level(logging.WARNING):
+            _warm_intent_router()
+
+        assert "unavailable" in caplog.text

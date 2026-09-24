@@ -679,6 +679,62 @@ class TestTheWiring:
         assert agent._shown_tools(broken, RUNG3) is None
 
 
+class TestTheIntentRouterIsWired:
+    """`AI_INTENT_ROUTER` reaches `select(decide=...)` through `_shown_tools` --
+    the setting `app/ai/laya_decide.py`'s module docstring is measured against.
+    """
+
+    def _toolbox(self, registry: list[SimpleNamespace]) -> object:
+        return SimpleNamespace(
+            every_tool=lambda: registry, recent_tool_names=list, recent_user_messages=str
+        )
+
+    def test_none_never_binds_a_decider(
+        self, registry: list[SimpleNamespace], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.ai import agent
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "ai_tool_limit", LIMIT, raising=False)
+        monkeypatch.setattr(settings, "ai_intent_router", "none", raising=False)
+
+        assert agent._intent_decider(provider=object()) is None
+
+    def test_laya_binds_laya_decider_without_a_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The whole point: a decision the conversational provider never sees."""
+        from app.ai import agent
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "ai_intent_router", "laya", raising=False)
+
+        decide = agent._intent_decider(provider=None)
+
+        assert decide is not None
+
+    def test_llm_binds_the_providers_own_decider(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.ai import agent
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "ai_intent_router", "llm", raising=False)
+
+        assert agent._intent_decider(provider=None) is None  # nothing to bind to
+        assert agent._intent_decider(provider=object()) is not None
+
+    def test_an_unknown_router_value_is_treated_as_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Never inventing a decider from a typo'd setting: off is the safe
+        reading of anything this module does not recognise."""
+        from app.ai import agent
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "ai_intent_router", "gpt-5000", raising=False)
+
+        assert agent._intent_decider(provider=object()) is None
+
+
 class TestItStillNeverNarrowsWhatCanBeCalled:
     """The property that makes any of this safe, checked once against the real
     toolbox seam rather than only against the synthetic registry."""

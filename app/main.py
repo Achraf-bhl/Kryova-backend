@@ -164,9 +164,45 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _warn_about_insecure_defaults()
     _start_local_postgres()
     _fail_orphaned_jobs()
+    _warm_intent_router()
     yield
     get_job_queue().shutdown()
     _stop_local_catia_bridge()
+
+
+def _warm_intent_router() -> None:
+    """Load Laya before the server accepts its first request, on this thread.
+
+    Found live, 2026-09-23: loading it lazily, inside the request that first
+    needed it, took the whole process down with no Python traceback and no
+    Windows crash log -- and the identical load, run as a standalone script on
+    the main thread with nothing else going on, worked every time. The
+    difference is FastAPI's sync routes running on a worker thread out of
+    `anyio`'s threadpool: a CUDA context's first initialisation happening
+    there, concurrently with the event loop and the CATIA bridge's own COM
+    apartment thread, is where this looked for trouble and stopped -- rather
+    than spend longer proving which of the two was the actual conflict,
+    moving the one-time cost to a point with neither running yet removes both
+    candidates at once.
+
+    Blocking here is deliberate, not an oversight: `_start_local_postgres`
+    above does the same, and a server that can accept a request before its
+    router can answer one is a worse failure than a slower boot. A load
+    failure is logged and swallowed -- `laya_decide._get_agent` caches it, so
+    the router answers `None` (lexical selection only) for the life of the
+    process rather than retrying a GPU that was never going to appear.
+    """
+    if settings.ai_intent_router != "laya":
+        return
+    from app.ai.laya_decide import _get_agent
+
+    try:
+        loaded = _get_agent() is not None
+    except Exception:  # noqa: BLE001 - a warm-up failure must not fail the boot
+        logger.exception("Laya intent router failed to warm up")
+        return
+    if not loaded:
+        logger.warning("Laya intent router unavailable; AI_INTENT_ROUTER=laya has no effect")
 
 
 def _warn_about_insecure_defaults() -> None:

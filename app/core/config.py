@@ -258,6 +258,23 @@ class Settings(BaseSettings):
     #: It narrows the *offer* only. `ToolBox.call` still accepts every tool, so
     #: no setting of this can make a capability unreachable.
     ai_tool_limit: int = 0
+    #: Who names the tool family a request needs before the turn starts, on
+    #: top of the lexical rules `tool_retrieval.select` always runs -- see
+    #: `app/ai/laya_decide.py`'s module docstring for the measurement this is
+    #: based on. `"none"` (default): lexical only, byte-identical to every
+    #: deployment before this existed. `"laya"`: a 421M local decision model
+    #: answers in ~140 ms and adds no load on the conversational provider.
+    #: `"llm"`: the agent's own provider answers, which shares its queue and
+    #: -- on a provider too large for its GPU -- can cost minutes for a single
+    #: decision; kept for a deployment with no GPU to spare for a second
+    #: model. Only matters when `ai_tool_limit` is narrowing the offer at all.
+    ai_intent_router: str = "none"
+    #: Where Laya runs. `"auto"` (default) takes CUDA when torch can see it, else
+    #: the CPU. `"cpu"` keeps a 421M model off the GPU entirely -- the right choice
+    #: when the conversational model already needs the whole card (a 27B on a
+    #: 16 GB GPU spills to system RAM as it is), and it needs no CUDA build of
+    #: torch, which matters on a GPU newer than the pinned wheel supports.
+    ai_intent_router_device: str = "auto"
     #: Layers to put on the GPU, or "all". Ollama's own estimator keeps a
     #: margin against a shared card and leaves a layer or two on the CPU;
     #: measured on the seat, that halved the model's throughput (25.7 -> 59.0

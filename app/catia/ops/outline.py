@@ -56,6 +56,25 @@ def _meeting(a: Point, b: Point, c: Point, d: Point) -> Point | None:
     return None
 
 
+def _overlap(a: Point, b: Point, c: Point, d: Point) -> tuple[Point, Point] | None:
+    """The stretch two collinear segments share, when it has length; else None."""
+    if abs(_orient(a, b, c)) > _EPS or abs(_orient(a, b, d)) > _EPS:
+        return None
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length2 = dx * dx + dy * dy
+    if length2 <= _EPS:
+        return None
+
+    def along(p: Point) -> float:
+        return ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2
+
+    lo = max(0.0, min(along(c), along(d)))
+    hi = min(1.0, max(along(c), along(d)))
+    if (hi - lo) * length2**0.5 <= _EPS * 1e3:
+        return None
+    return (a[0] + lo * dx, a[1] + lo * dy), (a[0] + hi * dx, a[1] + hi * dy)
+
+
 def _same(p: Point, q: Point) -> bool:
     return abs(p[0] - q[0]) <= _EPS and abs(p[1] - q[1]) <= _EPS
 
@@ -84,26 +103,26 @@ def crossing(points: Sequence[Sequence[float]]) -> str | None:
         a, b = edges[i]
         return f"edge {i + 1} {_fmt(a)} -> {_fmt(b)}"
 
+    # Retracing first: it is the commonest mistake (out along a line and back
+    # along it) and "these two edges meet at a point" undersells it -- measured
+    # 2026-09-24, a model told only where two edges touched redrew the same
+    # retracing outline three times.
+    for i in range(n):
+        for j in range(i + 1, n):
+            shared = _overlap(*edges[i], *edges[j])
+            if shared is not None:
+                return (
+                    f"The closed outline runs back over itself: {label(j)} lies along "
+                    f"{label(i)} from {_fmt(shared[0])} to {_fmt(shared[1])}, so the strip "
+                    "between them has no width." + _ADVICE
+                )
     for i in range(n):
         for j in range(i + 1, n):
             (a, b), (c, d) = edges[i], edges[j]
             adjacent = j == i + 1 or (i == 0 and j == n - 1)
             if adjacent:
-                shared, far_i, far_j = (b, a, d) if j == i + 1 else (a, b, c)
-                # Adjacent edges share one vertex; they only fail by folding
-                # back along each other.
-                folds = (
-                    abs(_orient(far_i, shared, far_j)) <= _EPS
-                    and (far_i[0] - shared[0]) * (far_j[0] - shared[0])
-                    + (far_i[1] - shared[1]) * (far_j[1] - shared[1])
-                    > 0
-                )
-                if folds:
-                    return (
-                        f"The closed outline doubles back on itself: {label(i)} and "
-                        f"{label(j)} run over each other at {_fmt(shared)}."
-                        + _ADVICE
-                    )
+                # Adjacent edges share one vertex; folding back along each
+                # other is the only way they fail, and the pass above caught it.
                 continue
             met = _meeting(a, b, c, d)
             if met is not None:
@@ -115,9 +134,10 @@ def crossing(points: Sequence[Sequence[float]]) -> str | None:
 
 
 _ADVICE = (
-    " A pad, pocket or shaft needs one simple loop that never touches itself, so "
-    "it can tell inside from outside. List each corner once, in order around the "
-    "outline, and let `closed` join the last corner back to the first."
+    " A pad, pocket or shaft needs one simple loop around the region it fills, so "
+    "it can tell inside from outside. Walk that region's boundary once: list each "
+    "corner once, in order around the outline, never come back along a line "
+    "already drawn, and let `closed` join the last corner back to the first."
 )
 
 

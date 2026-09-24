@@ -45,7 +45,7 @@ class TestAnOutlineThatIsNotOneLoopIsRefused:
 
         assert reason is not None
         assert "(25, 40)" in reason
-        assert "List each corner once" in reason
+        assert "list each corner once" in reason
 
     def test_a_figure_eight_is_refused(self) -> None:
         assert crossing([[0, 0], [10, 10], [10, 0], [0, 10]]) is not None
@@ -54,7 +54,30 @@ class TestAnOutlineThatIsNotOneLoopIsRefused:
         reason = crossing([[0, 0], [10, 0], [5, 0], [5, 5]])
 
         assert reason is not None
-        assert "doubles back" in reason
+        assert "runs back over itself" in reason
+
+    @pytest.mark.parametrize(
+        ("points", "stretch"),
+        [
+            # Both sent by qwen3.8 on 2026-09-24 (no-Laya run, prompt 3), each
+            # refused three times under the first wording, which named only the
+            # point where two edges touched.
+            (
+                [[0, 0], [35, 0], [35, 8], [25, 8], [25, 40], [15, 40], [15, 0], [0, 0]],
+                "from (0, 0) to (15, 0)",
+            ),
+            ([[0, 0], [35, 0], [35, 8], [25, 8], [25, 0]], "from (0, 0) to (25, 0)"),
+        ],
+    )
+    def test_a_retrace_is_named_as_one_ahead_of_any_touching_point(
+        self, points: list[list[float]], stretch: str
+    ) -> None:
+        reason = crossing(points)
+
+        assert reason is not None
+        assert reason.startswith("The closed outline runs back over itself")
+        assert stretch in reason
+        assert "never come back along a line already drawn" in reason
 
     def test_a_loop_pinched_at_one_vertex_is_refused(self) -> None:
         # Two triangles sharing the point (10, 0).

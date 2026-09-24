@@ -345,6 +345,66 @@ class TestWritesAreFenced:
             assert len(list(db_session.scalars(select(Project)))) == 2
 
 
+class TestABrandNewUsersFirstProjectBootstrapsItsOwnTenant:
+    """The gap `widen_tenant_scope` closes, reproduced through the real path.
+
+    A first-time user has no memberships, so the request they make their first
+    project on publishes `NO_TENANTS` (`app/api/deps.py` ->
+    `organisation_ids_for_user` -> `tenant_scope`) -- exactly `as_tenant(db_session,
+    [])` below. `_assign_owning_organisation`'s `before_flush` hook then creates
+    that user's personal organisation to own the project, and `FORCE ROW LEVEL
+    SECURITY` applies to that INSERT like any other: without widening the scope
+    to include the organisation it just created, the row a user is creating for
+    *themselves* is rejected as somebody else's tenant. Found live, on a real
+    account's first `create_project` tool call, not from reading the code.
+    """
+
+    def test_a_first_project_creates_its_own_organisation_under_no_tenant_context(
+        self, rls: str, db_session: Session
+    ) -> None:
+        newcomer = User(email="newcomer@kryova.dev", hashed_password="x")
+        db_session.add(newcomer)
+        db_session.flush()
+
+        with as_tenant(db_session, []):
+            project = Project(name="First part", owner_id=newcomer.id)
+            db_session.add(project)
+            db_session.flush()
+
+            assert project.organisation_id is not None
+            organisation = db_session.get(Organisation, project.organisation_id)
+            assert organisation is not None and organisation.is_personal is True
+            membership = db_session.scalar(
+                select(Membership).where(
+                    Membership.user_id == newcomer.id,
+                    Membership.organisation_id == organisation.id,
+                )
+            )
+            assert membership is not None and membership.role == OrgRole.OWNER
+
+    def test_a_second_project_the_same_turn_reuses_the_now_visible_organisation(
+        self, rls: str, db_session: Session
+    ) -> None:
+        """The widened scope has to survive for the rest of the transaction, not
+        just the one INSERT it was published for -- a turn that creates two
+        projects is the same session, same flush-eligible transaction, calling
+        `create_project` twice."""
+        newcomer = User(email="newcomer2@kryova.dev", hashed_password="x")
+        db_session.add(newcomer)
+        db_session.flush()
+
+        with as_tenant(db_session, []):
+            first = Project(name="First part", owner_id=newcomer.id)
+            db_session.add(first)
+            db_session.flush()
+
+            second = Project(name="Second part", owner_id=newcomer.id)
+            db_session.add(second)
+            db_session.flush()
+
+            assert first.organisation_id == second.organisation_id
+
+
 class TestTheSetLocalContract:
     """Decision 7's one sanctioned `SET`, and why it is safe here.
 

@@ -39,7 +39,7 @@ from sqlalchemy import (
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
-from app.core.database import Base
+from app.core.database import Base, widen_tenant_scope
 from app.models.base import TimestampMixin, UTCDateTime, UUIDPrimaryKey, new_uuid
 from app.models.project import Project
 
@@ -311,6 +311,13 @@ def personal_organisation(session: Session, user: "User") -> Organisation:
             return existing
 
     organisation = Organisation(
+        # Materialised for the same reason `personal_slug` materialises
+        # `user.id` above: this runs inside `before_flush`, which is earlier
+        # than the Python-side `default=` on `UUIDPrimaryKey`, and the id has
+        # to be a real value *now* for `widen_tenant_scope` below to publish
+        # the id this organisation is actually going to get -- publishing
+        # `None` would widen the tenant context to nothing.
+        id=new_uuid(),
         name=(user.full_name or (user.email or "").split("@")[0] or "Personal"),
         slug=personal_slug(user),
         is_personal=True,
@@ -418,3 +425,13 @@ def _assign_owning_organisation(session: Session, _context: Any, _instances: Any
             # would put the row somewhere nobody asked for.
             continue
         project.organisation = personal_organisation(session, owner)
+        if project.organisation in session.new:
+            # Only when `personal_organisation` just built this row rather
+            # than found it: an organisation the caller already belonged to
+            # was in the tenant context the request began with, and widening
+            # for it would be a round trip that changes nothing. `session.new`
+            # is exactly "added but not yet flushed", which is this hook's own
+            # moment in the flush -- see `widen_tenant_scope` for why a freshly
+            # built one is expected to be missing rather than a bug in
+            # `personal_organisation`.
+            widen_tenant_scope(session, project.organisation.id)

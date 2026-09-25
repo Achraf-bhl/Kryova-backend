@@ -36,8 +36,8 @@ Nothing is recomputed and no result changes.
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '753d57fdd4bb'

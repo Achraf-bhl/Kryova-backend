@@ -44,7 +44,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.security import hash_password
-from app.models.organisation import DomainRole, Membership, OrgRole, Organisation
+from app.models.organisation import DomainRole, Membership, Organisation, OrgRole
 from app.models.project import Project
 from app.models.user import User
 

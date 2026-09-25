@@ -146,6 +146,12 @@ class TestTheCoreIsAlwaysShown:
         assert "catia_measure" in CORE_TOOLS
         assert "catia_surface_loft" not in CORE_TOOLS, "the core is not 'everything useful'"
 
+    def test_a_wrong_feature_can_always_be_taken_back(self) -> None:
+        """Measured 2026-09-25: with no delete in the offer, an agent that padded
+        onto the wrong plane guessed menu labels through catia_run_command until
+        the turn escalated, instead of removing the feature and carrying on."""
+        assert "catia_delete_feature" in CORE_TOOLS
+
 
 class TestItFindsWhatWasAskedFor:
     def test_a_fillet_request_offers_the_fillet(self) -> None:

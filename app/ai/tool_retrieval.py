@@ -147,6 +147,12 @@ CORE_TOOLS: Final[frozenset[str]] = frozenset(
         "catia_capture_view",
         "catia_list_features",
         "catia_update",
+        # Taking back a wrong feature is part of the loop, not a specialty.
+        # Measured 2026-09-25, ladder prompt 4: the agent padded a leg onto the
+        # wrong plane, had no delete in its offer, and spent its remaining
+        # steps guessing menu labels ("Delete", "Supprimer", "Delete Feature")
+        # through catia_run_command until the turn escalated.
+        "catia_delete_feature",
         # Verification is never withheld. Narrowing the offer must not be able to
         # produce a part nobody checked — that is the failure 16.1 would otherwise
         # cause while fixing a different one.

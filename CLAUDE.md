@@ -468,7 +468,7 @@ Migrate       venv/bin/python -m alembic upgrade head
 Drift check   venv/bin/python -m alembic check          # fails if models diverged from migrations
 New revision  venv/bin/python -m alembic revision --autogenerate -m "..."
 Dev server    venv/bin/uvicorn app.main:app --reload    # with --reload also set INLINE_JOBS=true
-Lint          venv/bin/python -m ruff check app/ tests/
+Lint          venv/bin/python -m ruff check .              # what CI runs; app/ tests/ alone missed 16 migrations
 Types         venv/bin/python -m mypy app/
 Test          venv/bin/python -m pytest                 # whole suite, ~9 min against local Postgres
 Re-record V&V venv/bin/python -m app.verify.recorded     # after any solver/mesher/verify change

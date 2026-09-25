@@ -408,6 +408,34 @@ class TestOverHttp:
         assert response.status_code == 200, response.text
         assert auth_client.cookies.get("kryova_refresh") != first
 
+    def test_a_refused_refresh_deletes_the_session_cookies(self, auth_client) -> None:
+        """Measured 2026-09-25: a refused refresh answered 401 with no
+        `Set-Cookie` at all -- the deletions were made on the injected response
+        and then a raised `HTTPException` threw that response away. A revoked
+        session's cookies then outlive it, and the frontend gate reads
+        `kryova_csrf`."""
+        auth_client.cookies.set("kryova_refresh", "not-a-real-token", path="/api/v1/auth")
+
+        response = auth_client.post("/api/v1/auth/refresh")
+
+        assert response.status_code == 401
+        deleted = " ".join(response.headers.get_list("set-cookie"))
+        for name in ("kryova_access", "kryova_refresh", "kryova_csrf"):
+            assert f"{name}=" in deleted, f"{name} was not cleared"
+        assert "Max-Age=0" in deleted
+
+    def test_a_missing_refresh_cookie_also_clears_what_is_left(self, auth_client) -> None:
+        """Half a session -- a CSRF cookie with no refresh cookie beside it --
+        must end up as no session, or the route gate keeps sending the browser
+        to a dashboard it cannot load."""
+        auth_client.cookies.delete("kryova_refresh", path="/api/v1/auth")
+        auth_client.cookies.delete("kryova_refresh")
+
+        response = auth_client.post("/api/v1/auth/refresh")
+
+        assert response.status_code == 401
+        assert "kryova_csrf=" in " ".join(response.headers.get_list("set-cookie"))
+
     def test_the_session_list_marks_the_current_device(self, auth_client) -> None:
         response = auth_client.get("/api/v1/auth/sessions")
 

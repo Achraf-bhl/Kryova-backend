@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 
@@ -335,7 +336,9 @@ def complete_mfa_login(
 
 
 @router.post("/refresh", response_model=SessionRead)
-def refresh_session(request: Request, response: Response, db: DbSession) -> SessionRead:
+def refresh_session(
+    request: Request, response: Response, db: DbSession
+) -> SessionRead | JSONResponse:
     # Rate-limited like every other credential-bearing auth route. This one was
     # the exception, which made it the cheapest endpoint to grind refresh tokens
     # against.
@@ -347,7 +350,7 @@ def refresh_session(request: Request, response: Response, db: DbSession) -> Sess
     )
     token = request.cookies.get("kryova_refresh")
     if token is None:
-        raise HTTPException(status_code=401, detail="Missing refresh token")
+        return _refused_session(401, "Missing refresh token")
     if not verify_csrf(
         request.headers.get(CSRF_HEADER_NAME), request.cookies.get(CSRF_COOKIE_NAME)
     ):
@@ -360,14 +363,13 @@ def refresh_session(request: Request, response: Response, db: DbSession) -> Sess
         # detection), so the write has to land before the response goes out —
         # otherwise a replayed token revokes nothing and can be replayed again.
         db.commit()
-        _clear_session_cookies(response)
         if refused.compromised:
             logger.warning(
                 "refresh token reuse detected; session family revoked",
                 extra={"remote_addr": _client_ip(request)},
             )
             _notify_of_theft(db, token, request)
-        raise HTTPException(status_code=401, detail=refused.detail) from refused
+        return _refused_session(401, refused.detail)
 
     user = db.get(User, rotated.session.user_id)
     if user is None:  # pragma: no cover - a live session for a deleted user
@@ -378,12 +380,28 @@ def refresh_session(request: Request, response: Response, db: DbSession) -> Sess
     if not user.is_active:
         revoke_session(db, rotated.session, SessionRevocation.ADMIN)
         db.commit()
-        _clear_session_cookies(response)
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
+        return _refused_session(status.HTTP_403_FORBIDDEN, "Inactive user")
 
     issued = _set_session_cookies(response, user.id, rotated.token)
     db.commit()
     return SessionRead(user=UserRead.model_validate(user), csrf_token=issued.csrf)
+
+
+def _refused_session(status_code: int, detail: str) -> JSONResponse:
+    """A refused refresh, returned with the session cookies deleted on it.
+
+    Returned rather than raised. FastAPI builds a fresh response for a raised
+    `HTTPException`, so cookies deleted on the injected `Response` beforehand
+    never reach the browser -- measured 2026-09-25: a refused refresh answered
+    401 with no `Set-Cookie` at all, leaving a revoked session's cookies in
+    place. The frontend's route gate reads `kryova_csrf`, so a cookie that
+    outlives its session would bounce a signed-out user between /login and
+    /dashboard.
+    """
+    refused = JSONResponse(status_code=status_code, content={"detail": detail})
+    _clear_session_cookies(refused)
+    refused.headers["cache-control"] = "no-store"
+    return refused
 
 
 def _notify_of_theft(db: DbSession, token: str, request: Request) -> None:

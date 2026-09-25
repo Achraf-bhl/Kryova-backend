@@ -46,7 +46,11 @@ BRIDGE = Path(__file__).resolve().parent.parent / "scripts" / "catia_bridge"
 sys.path.insert(0, str(BRIDGE.parent))
 
 from catia_bridge import vba  # noqa: E402
-from catia_bridge.com.reference import _face_kind, _outward_normal  # noqa: E402
+from catia_bridge.com.reference import (  # noqa: E402
+    _face_kind,
+    _furthest_face,
+    _outward_normal,
+)
 
 #: The block H3 built, as `KryovaFaceMap` really answered it on the seat:
 #: index; area(m2); cx;cy;cz; then nine plane numbers (origin, then two
@@ -190,6 +194,33 @@ class TestFaceKinds:
         assert _face_kind(reported) == kind
 
 
+class TestANamedFaceIsTheMeasuredOne:
+    """`face="top"` and its five siblings, chosen from what CATIA measured."""
+
+    @pytest.mark.parametrize(
+        ("axis", "sign", "position"),
+        [("z", 1, 1), ("z", -1, 2), ("x", -1, 3), ("x", 1, 5), ("y", 1, 4), ("y", -1, 6)],
+    )
+    def test_each_named_face_of_the_seats_block(
+        self, axis: str, sign: int, position: int
+    ) -> None:
+        assert _furthest_face(measure(), [1, 2, 3, 4, 5, 6], axis, sign) == position
+
+    def test_a_tie_on_height_goes_to_the_larger_face(self) -> None:
+        small = vba.FaceFacts(area_mm2=28.3, centre=(0.0, 0.0, 30.0), normal=None)
+        large = vba.FaceFacts(area_mm2=6000.0, centre=(0.0, 0.0, 30.0), normal=(0.0, 0.0, 1.0))
+        assert _furthest_face({1: small, 2: large}, [1, 2], "z", 1) == 2
+
+    def test_positions_not_selection_indices(self) -> None:
+        """`Face.<n>` is a position among the faces found; the selection can hold
+        other items between them."""
+        measured = measure()
+        assert _furthest_face(measured, [2, 1], "z", 1) == 2
+
+    def test_nothing_measured_is_none_not_a_guess(self) -> None:
+        assert _furthest_face({}, [1, 2], "z", 1) is None
+
+
 class TestTheRoutesThatDoNotWork:
     """Structural, so the dead calls cannot come back one line at a time."""
 
@@ -213,6 +244,29 @@ class TestTheRoutesThatDoNotWork:
             f"catia_list_faces is calling {dead} from Python again -- it returns "
             "without error having written nothing, and every face reports [0, 0, 0]"
         )
+
+    def test_naming_a_face_does_not_measure_from_python_either(self) -> None:
+        """`_face_reference` resolved `face="top"` with a Python-side `GetCOG` for
+        weeks after `list_faces` stopped: every centre read as the origin, every
+        face tied at zero, and the first face found was drilled. Measured on the
+        seat 2026-09-25 -- an L-bracket's "top" resolved to a hole wall."""
+        source = (BRIDGE / "com" / "reference.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        node = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_face_reference"
+        )
+        code = "\n".join(
+            line
+            for statement in node.body
+            if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant))
+            for line in (ast.get_source_segment(source, statement) or "").splitlines()
+            if not line.strip().startswith("#")
+        )
+        assert "GetCOG" not in code
+        assert "GetPlane" not in code
+        assert "face_map" in code
 
     def test_the_face_search_does_not_filter_on_the_edge_type(self) -> None:
         """`TriDim` is what an *edge* search reports. Copied to faces it matched

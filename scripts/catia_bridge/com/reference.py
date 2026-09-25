@@ -626,25 +626,31 @@ class ReferenceMixin:
         from ._context import FACE_AXES
 
         if face.lower() in FACE_AXES:
+            # Measured through `vba.face_map`, the source `list_faces` uses --
+            # never a Python-side `GetCOG`, which returns having written nothing
+            # (see `list_faces`). Scoring on that read every centre as the
+            # origin, tied every face at zero and returned the first one found,
+            # so `face="top"` drilled whichever face the search listed first.
+            # Measured on V5-R33, 2026-09-25: an L-bracket's "top" resolved to
+            # Face.1, a hole wall, where list_faces put the top face at z = 100.
             axis, sign = FACE_AXES[face.lower()]
-            column = {"x": 0, "y": 1, "z": 2}[axis]
-            workbench = self._part().Parent.GetWorkbench("SPAWorkbench")
-            best: tuple[float, Any] | None = None
-            for reference in found:
-                try:
-                    centre = [0.0] * 3
-                    workbench.GetMeasurable(reference).GetCOG(centre)
-                except Exception:  # noqa: BLE001 - skip what cannot be measured
-                    continue
-                score = centre[column] * sign
-                if best is None or score > best[0]:
-                    best = (score, reference)
-            if best is None:
+            _selection, indices, query, scope_shape = self._found_faces(feature or None)
+            measured = vba.face_map(self._app, self._part(), query, scope_shape)
+            position = _furthest_face(measured, indices, axis, sign)
+            if position is None:
                 raise CatiaOperationError(
                     f"Could not measure any face to find the {face!r} one. Name a face "
                     "from catia_list_faces instead."
                 )
-            return best[1]
+            # Enumerated again: `face_map` searched inside CATIA and the
+            # selection the first enumeration left behind is not guaranteed.
+            found = self._search_topology("Face", feature)
+            if len(found) != len(indices):
+                raise CatiaOperationError(
+                    f"The part's faces changed while {face!r} was being located. "
+                    "Call catia_list_faces and name the face by its id."
+                )
+            return found[position - 1]
 
         return reference_to(self._part(), resolve_element(self._part(), face))
 
@@ -735,6 +741,29 @@ class ReferenceMixin:
             f"Could not enumerate {what.lower()}s on this seat: CATIA rejected every "
             "search grammar tried. Selecting by name still works."
         )
+
+
+def _furthest_face(
+    measured: dict[int, Any], indices: list[int], axis: str, sign: int
+) -> int | None:
+    """The 1-based position among `indices` of the face whose measured centre
+    lies furthest along `axis` in direction `sign`, or None if none was measured.
+
+    Positions, not selection indices, because a position is what `Face.<n>`
+    means everywhere else. A tie on the coordinate goes to the larger face:
+    "the top" of a plate is its top face, not the wall of a hole whose centre
+    happens to sit at the same height.
+    """
+    column = {"x": 0, "y": 1, "z": 2}[axis]
+    best: tuple[float, float, int] | None = None
+    for position, index in enumerate(indices, start=1):
+        facts = measured.get(index)
+        if facts is None:
+            continue
+        key = (round(float(facts.centre[column]) * sign, 6), float(facts.area_mm2), position)
+        if best is None or key[:2] > best[:2]:
+            best = key
+    return None if best is None else best[2]
 
 
 def _face_kind(reported: Any) -> str:  # pragma: no cover - Windows only

@@ -46,6 +46,7 @@ BRIDGE = Path(__file__).resolve().parent.parent / "scripts" / "catia_bridge"
 sys.path.insert(0, str(BRIDGE.parent))
 
 from catia_bridge import vba  # noqa: E402
+from catia_bridge.com.inspection import si_to_mm  # noqa: E402
 from catia_bridge.com.reference import (  # noqa: E402
     _face_kind,
     _furthest_face,
@@ -194,6 +195,25 @@ class TestFaceKinds:
         assert _face_kind(reported) == kind
 
 
+class TestMeasureItemLandsInMillimetres:
+    """`Measurable.Area` is m2 and `Volume` m3 from Python; `Length` and `Radius`
+    are mm. Measured on the seat 2026-09-25: a 300 mm2 face read 0.0003 and a
+    42,000 mm3 pad read 4.2e-05, both labelled as mm."""
+
+    @pytest.mark.parametrize(
+        ("key", "raw", "expected"),
+        [
+            ("area_mm2", 0.0003, 300.0),
+            ("area_mm2", 0.0188, 18_800.0),
+            ("volume_mm3", 4.2e-05, 42_000.0),
+            ("length_mm", 7.0, 7.0),
+            ("radius_mm", 3.0, 3.0),
+        ],
+    )
+    def test_each_reading(self, key: str, raw: float, expected: float) -> None:
+        assert si_to_mm(key, raw) == pytest.approx(expected)
+
+
 class TestANamedFaceIsTheMeasuredOne:
     """`face="top"` and its five siblings, chosen from what CATIA measured."""
 
@@ -267,6 +287,28 @@ class TestTheRoutesThatDoNotWork:
         assert "GetCOG" not in code
         assert "GetPlane" not in code
         assert "face_map" in code
+
+    def test_measure_item_does_not_measure_centres_from_python(self) -> None:
+        """`catia_measure_item` read a face's centre and normal with the same dead
+        calls and reported [0, 0, 0] for both, for every face. Measured on the
+        seat 2026-09-25 on an L-bracket's top face, which is at z = 100."""
+        source = (BRIDGE / "com" / "inspection.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        node = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "measure_item"
+        )
+        code = "\n".join(
+            line
+            for statement in node.body
+            if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant))
+            for line in (ast.get_source_segment(source, statement) or "").splitlines()
+            if not line.strip().startswith("#")
+        )
+        assert "GetCOG" not in code
+        assert "GetPlane" not in code
+        assert "list_faces" in code
 
     def test_the_face_search_does_not_filter_on_the_edge_type(self) -> None:
         """`TriDim` is what an *edge* search reports. Copied to faces it matched

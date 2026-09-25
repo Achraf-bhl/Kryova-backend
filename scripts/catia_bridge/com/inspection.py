@@ -20,6 +20,19 @@ from ._context import ComContext, resolve_element
 logger = logging.getLogger("kryova.catia.com.inspection")
 
 
+def si_to_mm(key: str, value: float) -> float:
+    """A `Measurable` reading in CATIA's SI units, in this codebase's mm units.
+
+    Only area and volume need it: `Area` is m2 and `Volume` is m3 when read from
+    Python, while `Length` and `Radius` already arrive in mm.
+    """
+    if key == "area_mm2":
+        return value * 1_000_000.0
+    if key == "volume_mm3":
+        return value * 1_000_000_000.0
+    return value
+
+
 class InspectionMixin:
     """Measurements between and about elements, and part-level analyses."""
 
@@ -98,34 +111,42 @@ class InspectionMixin:
         measurable = self._measurable(element)
         result: dict[str, Any] = {"element": element}
 
+        # `Area` arrives in m2 and `Volume` in m3 from Python; `Length` and
+        # `Radius` in mm. Converted here, once, at the boundary. Measured on
+        # V5-R33, 2026-09-25: a 300 mm2 face read 0.0003 "mm2" and a 42,000 mm3
+        # pad read 4.2e-05 "mm3" -- and the agent verifies its parts with this.
         for key, reader in (
             ("length_mm", lambda: float(measurable.Length)),
-            ("area_mm2", lambda: float(measurable.Area)),
+            ("area_mm2", lambda: si_to_mm("area_mm2", float(measurable.Area))),
             ("radius_mm", lambda: float(measurable.Radius)),
-            ("volume_mm3", lambda: float(measurable.Volume)),
+            ("volume_mm3", lambda: si_to_mm("volume_mm3", float(measurable.Volume))),
         ):
             try:
                 result[key] = round(reader(), 6)
             except Exception:  # noqa: BLE001 - this element has no such property
                 continue
 
-        try:
-            centre = [0.0] * 3
-            measurable.GetCOG(centre)
-            result["centre"] = [round(value, 6) for value in centre]
-        except Exception:  # noqa: BLE001
-            pass
-
-        try:
-            plane = [0.0] * 9
-            measurable.GetPlane(plane)
-            result["normal"] = [round(value, 6) for value in plane[6:9]]
-            result["kind"] = "planar face"
-        except Exception:  # noqa: BLE001
-            pass
+        # No `GetCOG`/`GetPlane` from Python: both return having written nothing
+        # (see `list_faces`), so every element reported centre [0, 0, 0]. A face
+        # takes its centre and normal from the measurement `list_faces` makes.
+        if element.startswith("Face.") and element[5:].isdigit():
+            face = next(
+                (f for f in self.list_faces()["faces"] if f["id"] == element),  # type: ignore[attr-defined]
+                None,
+            )
+            if face is not None:
+                result["area_mm2"] = face["area_mm2"]
+                result["centre"] = face["centre"]
+                if "normal" in face:
+                    result["normal"] = face["normal"]
+                    result["normal_is_outward"] = face.get("normal_is_outward", False)
+                result["kind"] = f"{face['kind']} face"
+                result.pop("length_mm", None)
 
         if "kind" not in result:
-            if "radius_mm" in result and "area_mm2" in result:
+            if "volume_mm3" in result:
+                result["kind"] = "solid"
+            elif "radius_mm" in result and "area_mm2" in result:
                 result["kind"] = "cylindrical face"
             elif "area_mm2" in result:
                 result["kind"] = "face"

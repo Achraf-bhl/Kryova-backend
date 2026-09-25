@@ -1073,6 +1073,54 @@ this faster". Four things from it that are asked most often and answered wrongly
    says measured. Each buys real time and each converts an honest slow answer into a fast
    dishonest one.
 
+## qwen3.8 + Laya on the 8 GB seat — measured 2026-09-24/25
+
+Ten things that each cost an hour or more; the numbers are in the commits and
+`docs/verification-2026-09-24/`.
+
+1. **`torch==2.5.1` has no Python 3.14 wheel**, which is what this seat runs; the pin is
+   2.14.0 (laya asks only `torch>=2.0`). The Laya checkpoint download stalled in
+   `huggingface_hub` at 0 bytes twice; `curl` into the HF snapshot path worked, and the
+   file's SHA-256 matched the tree listing's `lfs_sha256`.
+2. **qwen3.8 is hybrid/recurrent: llama.cpp can only resume its prompt cache from a saved
+   checkpoint**, and logs `forcing full prompt re-processing` when none lies before the first
+   changed token. Anything rewritten early in the prompt re-reads all ~19k tokens (~80 s a
+   step). The state block used to be rebuilt every *step*; it is now built once per turn.
+   Read the llama.cpp log's `checking sim` / `forcing full` lines before blaming the model.
+3. **Thinking at the model default can spend the whole budget and return nothing.** The
+   L-bracket's first step: 8,000 tokens in 100 min, no tool call; `think=false` did it
+   correctly in 159 s; `low` ran 3 h 47 min on one turn. `AI_THINK` is opt-in (default
+   unchanged, the user's choice); this seat's `.env.local` sets `false`.
+4. **`AI_TOOL_LIMIT=15` narrows almost nothing**: core + prompt-taught tools are ~42 before
+   any rule runs, so 44-55 are offered whatever Laya says. Laya adds 0-5 tools, costs
+   0.3-1.5 s on CPU and ~2.5 GB of backend RAM, and routed 1 of 4 ladder prompts right.
+5. **Never read a face centre, normal or area from Python.** `GetCOG`/`GetPlane` return
+   having written nothing and `Area`/`Volume` come back in m2/m3. `_face_reference("top")`
+   and `measure_item` both did it until 2026-09-25 -- "top" was Face.1, whatever that was.
+   `vba.face_map` is the working source; `tests/test_face_measurement.py` pins it.
+6. **Read a COM signature from the live object's `ITypeInfo`, not from memory** --
+   `obj._oleobj_.GetTypeInfo()`, `GetFuncDesc`, `GetNames(memid)`, and
+   `GetContainingTypeLib()` for interfaces and enum values. No gencache, so none of the
+   3b/3c damage. `catia_fillet_variable` passed 3 arguments to a 4-argument factory and
+   called two members that do not exist; `AddImposedVertex` still refuses a point on the
+   curve (probably needs a BRep vertex) -- open.
+7. **FastAPI drops headers set on the injected `Response` when the route raises.**
+   `/auth/refresh` "cleared" cookies that way on every refusal and sent none. Return a
+   `JSONResponse` carrying the deletions instead.
+8. **The refresh cookie is path-scoped to `/api/v1/auth`**, so the Next gate and the
+   server-rendered dashboard never see it: a reload 15 minutes after the last API call
+   lands on /login. Gating on `kryova_csrf` instead makes /login and /dashboard redirect
+   into each other -- tried, measured, reverted. The login page now resumes with one
+   client-side refresh.
+9. **This laptop throttles to ~35% of nominal clock under sustained load** outside
+   Performance mode (Fn+Q), which alone moves a step 3-4x. Log
+   `Win32_PerfFormattedData_Counters_ProcessorInformation.PercentProcessorPerformance`
+   beside any timing; `Get-Counter` paths are localized (French) and a UTF-8 `.ps1` without
+   BOM mangles them under PowerShell 5.1.
+10. **PowerShell 5.1's `*>` writes UTF-16**, so `grep` in the Bash tool matches nothing in
+   a backend log started that way -- a monitor on it stays silent for 30 min. Read it with
+   `Get-Content`.
+
 ## Single-pass decisions (`app/ai/decide.py`) and Gemini — added 2026-09-22
 
 Three primitives — `choose` (categorical), `score` (ordinal), `judge` (boolean) — each one

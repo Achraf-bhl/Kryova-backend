@@ -37,6 +37,12 @@ _HOLE_TYPES = {
     "counterdrilled": 4,
 }
 
+#: `CatFilletEdgePropagation.catTangencyFilletEdgePropagation`, and
+#: `CatFilletVariation` by the registry's `variation` names -- both read from the
+#: seat's PARTITF type library on 2026-09-25, not recalled.
+_TANGENCY_PROPAGATION = 1
+_FILLET_VARIATION = {"linear": 0, "cubic": 1}
+
 #: `catBooleanShapeType`-equivalent: which ShapeFactory call each boolean uses.
 _BOOLEANS = {
     "add": "AddNewAdd",
@@ -311,17 +317,30 @@ class PartDesignMixin:
         part = self._part()
         reference = self._edge_references([edge])[0]
         ordered = sorted(radii, key=lambda entry: float(entry["at_ratio"]))
+        # Read off the seat's own type library (PARTITF, V5-R33, 2026-09-25)
+        # rather than recalled: the factory takes FOUR arguments -- edge,
+        # CatFilletEdgePropagation (1 = tangency), CatFilletVariation (0 linear,
+        # 1 cubic), default radius -- and VarRadEdgeFillet has no
+        # `VariationType` and no `AddVariationPoint`; it has `FilletVariation`
+        # and `AddImposedVertex(iVertex, iRadius)`. The three-argument call
+        # answered "Nombre de parametres non valide" every time, so this tool
+        # had never built a fillet.
         fillet = part.ShapeFactory.AddNewSolidEdgeFilletWithVaryingRadius(
-            reference, 1, float(ordered[0]["radius_mm"])
+            reference,
+            _TANGENCY_PROPAGATION,
+            _FILLET_VARIATION[variation],
+            float(ordered[0]["radius_mm"]),
         )
         try:
-            fillet.VariationType = 1 if variation == "cubic" else 0
             for entry in ordered[1:]:
                 point = part.HybridShapeFactory.AddNewPointOnCurveFromPercent(
                     reference, float(entry["at_ratio"]), False
                 )
                 geometrical_set(part).AppendHybridShape(point)
-                fillet.AddVariationPoint(point, float(entry["radius_mm"]))
+                part.Update()
+                fillet.AddImposedVertex(
+                    part.CreateReferenceFromObject(point), float(entry["radius_mm"])
+                )
             part.Update()
         except Exception as exc:  # noqa: BLE001
             self._discard_failed_feature(fillet)

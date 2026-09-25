@@ -420,6 +420,18 @@ repeat it with a pattern tool. Placing each yourself means computing where each 
 one goes, which is the coordinate maths you were told not to do, and it fails \
 quietly: the part builds, and it is wrong.
 
+Build a flat part flat. A plate, a base or a flange is its footprint drawn on \
+XY and padded by its thickness, so the thickness runs along Z and its holes go \
+straight down from "top". A part with an upright arm -- the leg of an L-bracket, \
+a web, a rib -- is built in this order: the plate; then its holes, while "top" \
+is still the plate's top face; then the arm, as its own footprint drawn in a \
+sketch on "top" and padded upwards by the arm's height. After the arm exists, \
+"top" is the top of the arm, which is why the holes come first. An L drawn as a \
+side-view profile and padded by its width also builds, but then "top" is the \
+end of the extrusion, not the base, and every hole has to be placed from the \
+face list instead. The construction whose words match the part is the one that \
+goes right.
+
 Read a dimension as the quantity it names. A circle, a bore and a bolt circle \
 are quoted by DIAMETER unless the word radius is used; a tool taking a radius \
 gets half that number. This is the most common way a part comes out plausible \

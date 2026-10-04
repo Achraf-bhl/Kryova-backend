@@ -17,12 +17,12 @@ import logging
 import time
 from collections.abc import Iterator
 from datetime import date
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -34,6 +34,7 @@ from app.ai import (
     LLMUnavailable,
     LoadCaseDraft,
     ResultInterpretation,
+    continuation,
     draft_load_case,
     generate_title,
     get_provider,
@@ -554,7 +555,23 @@ def draft_project_load_case(
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=8_000)
+    message: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=8_000,
+        description=(
+            "What the user typed. Required unless `continuation` is set, and refused "
+            "alongside it: a Continue carries no text of the user's."
+        ),
+    )
+    continuation: Literal["continue"] | None = Field(
+        default=None,
+        description=(
+            "Press Continue on a stopped turn. The server writes the instruction itself "
+            "(`app/ai/continuation.py`), from the stored turn record and the plan, and "
+            "answers 409 when there is nothing to continue. Needs `conversation_id`."
+        ),
+    )
     conversation_id: str | None = Field(
         default=None,
         description="Omit to start a new conversation. Pass it back to continue one.",
@@ -573,6 +590,23 @@ class ChatRequest(BaseModel):
             "to ask before it needs this; send true only once the user has said yes."
         ),
     )
+
+    @model_validator(mode="after")
+    def _a_message_or_a_continuation(self) -> "ChatRequest":
+        if self.continuation is not None:
+            if self.message is not None:
+                raise ValueError(
+                    "A continuation carries no message: the server writes the instruction. "
+                    "Send `message` to say something, or `continuation` to carry on, not both."
+                )
+            if not self.conversation_id:
+                raise ValueError(
+                    "A continuation needs `conversation_id`: there is nothing to continue "
+                    "in a conversation that has not started."
+                )
+        elif self.message is None:
+            raise ValueError("Send `message`, or `continuation` to carry on a stopped turn.")
+        return self
 
 
 class AgentStepRead(BaseModel):
@@ -631,7 +665,7 @@ def _resolve_conversation(db: Session, user: User, payload: ChatRequest) -> Conv
         project_id=payload.project_id,
         # A placeholder, replaced by a real title once the first exchange has
         # happened and there is something to name.
-        title=payload.message[:60],
+        title=(payload.message or "")[:60],
     )
     db.add(conversation)
     # Committed, not merely flushed, and that distinction is the whole point.
@@ -736,6 +770,29 @@ _chat_rate_limit = RateLimit(
 )
 
 
+def _turn_message(db: Session, conversation: Conversation, payload: ChatRequest) -> str:
+    """The text this turn answers: the user's, or the server's own for a Continue.
+
+    Decided here and by the stored record, never by the client (`continuation.pending`):
+    a button, a reload and a hand-written request all see the same answer, and a stale
+    button -- pressed under an answer already continued -- is refused rather than resuming
+    work that is running.
+    """
+    if payload.continuation is None:
+        return payload.message or ""
+    action = continuation.pending(db, conversation)
+    if action is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "There is nothing to continue: the newest turn finished, was stopped, or is "
+                "waiting on a decision, or something has been said since. Send a message "
+                "instead."
+            ),
+        )
+    return continuation.message_for(action, conversation)
+
+
 @router.post("/ai/chat", response_model=ChatResponse, dependencies=[Depends(_chat_rate_limit)])
 def chat(
     db: DbSession,
@@ -754,6 +811,7 @@ def chat(
     """
     _enforce_budget(db, current_user, _turn_project_id(db, current_user, payload))
     conversation = _resolve_conversation(db, current_user, payload)
+    user_message = _turn_message(db, conversation, payload)
 
     if payload.project_id and conversation.project_id is None:
         conversation.project_id = payload.project_id
@@ -777,7 +835,7 @@ def chat(
             provider=provider,
             conversation=conversation,
             toolbox=toolbox,
-            user_message=payload.message,
+            user_message=user_message,
             user=current_user,
             allow_mutations=payload.allow_mutations,
             max_tokens=settings.ai_max_tokens,
@@ -802,7 +860,8 @@ def chat(
     if conversation.project_id is None and toolbox.project_id:
         conversation.project_id = toolbox.project_id
 
-    _maybe_title(db, current_user, provider, conversation, payload.message, reply.text)
+    if payload.continuation is None:
+        _maybe_title(db, current_user, provider, conversation, user_message, reply.text)
     _settle_turn(
         db, current_user, provider, conversation, session_scope, meter,
         default_stop_reason=STOP_ERROR,
@@ -847,6 +906,7 @@ def chat_stream(
     """
     _enforce_budget(db, current_user, _turn_project_id(db, current_user, payload))
     conversation = _resolve_conversation(db, current_user, payload)
+    user_message = _turn_message(db, conversation, payload)
     if payload.project_id and conversation.project_id is None:
         conversation.project_id = payload.project_id
 
@@ -935,7 +995,7 @@ def chat_stream(
                 provider=provider,
                 conversation=conversation,
                 toolbox=toolbox,
-                user_message=payload.message,
+                user_message=user_message,
                 user=current_user,
                 allow_mutations=payload.allow_mutations,
                 max_tokens=settings.ai_max_tokens,
@@ -949,7 +1009,10 @@ def chat_stream(
             # mid-stream has to outlive this request.
             if conversation.project_id is None and toolbox.project_id:
                 conversation.project_id = toolbox.project_id
-            _maybe_title(db, current_user, provider, conversation, payload.message, reply_text)
+            # A Continue has no words of the user's to name a conversation from, and the
+            # first exchange it follows was named when it finished.
+            if payload.continuation is None:
+                _maybe_title(db, current_user, provider, conversation, user_message, reply_text)
             settle()
             yield emit({"type": "title", "title": conversation.title})
         except LLMError as exc:
@@ -1012,6 +1075,14 @@ class ConversationMessageRead(BaseModel):
     is_error: bool
     duration_ms: int | None
     created_at: str
+    continuation: bool = Field(
+        default=False,
+        description=(
+            "True for the instruction the server wrote when the user pressed Continue. It is "
+            "stored as a user message so the model reads it, but it is not the user's words "
+            "and a client should draw it as a divider, not as something they said."
+        ),
+    )
 
 
 class UnfinishedOperationRead(BaseModel):
@@ -1021,6 +1092,49 @@ class UnfinishedOperationRead(BaseModel):
     label: str = Field(description="The same human label the step list uses.")
     error: str
     attempts: int = Field(ge=1)
+
+
+class OpenTaskRead(BaseModel):
+    id: str
+    title: str
+    state: str
+
+
+class NextActionRead(BaseModel):
+    """What one press can do next on a stopped turn (ROAD_TO_10 2.2)."""
+
+    kind: Literal["continue"]
+    reason: str = Field(
+        description="step_budget, repeated_calls, task_boundary or provider_busy."
+    )
+    label: str
+    detail: str = Field(description="One sentence saying what the press will do.")
+    open_tasks: list[OpenTaskRead] = Field(default_factory=list)
+
+
+class PlanNextRead(BaseModel):
+    id: str
+    title: str
+
+
+class ResumePlanRead(BaseModel):
+    """The plan the agent declared, as the server recorded it (2.3)."""
+
+    total: int = Field(ge=1)
+    settled: int = Field(ge=0)
+    open: list[OpenTaskRead]
+    next: PlanNextRead | None = Field(
+        default=None,
+        description="What is ready to start now; null when everything left is blocked.",
+    )
+
+
+class ResumeDesignRead(BaseModel):
+    """The recorded design, as a count and a revision -- the numbers are in the panel."""
+
+    name: str
+    revision: int = Field(ge=1)
+    parameters: int = Field(ge=0)
 
 
 class ConversationResumeRead(BaseModel):
@@ -1037,6 +1151,14 @@ class ConversationResumeRead(BaseModel):
         default=None, description="ISO timestamp of the most recent CATIA call."
     )
     unfinished: list[UnfinishedOperationRead] = Field(default_factory=list)
+    plan: ResumePlanRead | None = Field(
+        default=None,
+        description="Null when the conversation never declared a plan.",
+    )
+    design: ResumeDesignRead | None = Field(
+        default=None,
+        description="Null when the conversation has no recorded design.",
+    )
 
 
 class ConversationRead(BaseModel):
@@ -1050,6 +1172,14 @@ class ConversationRead(BaseModel):
     resume: ConversationResumeRead
     prompt_tokens: int
     completion_tokens: int
+    next_action: NextActionRead | None = Field(
+        default=None,
+        description=(
+            "What Continue would do, when the newest turn stopped in a way that can be "
+            "continued and nothing has been said since. Read from the stored turn record, "
+            "so it survives a reload."
+        ),
+    )
     messages: list[ConversationMessageRead]
 
 
@@ -1173,6 +1303,34 @@ def list_conversations(
     )
 
 
+def _pending_action(db: Session, conversation: Conversation) -> NextActionRead | None:
+    action = continuation.pending(db, conversation)
+    return NextActionRead.model_validate(action.to_dict()) if action is not None else None
+
+
+def _resume_plan(conversation: Conversation) -> ResumePlanRead | None:
+    progress = continuation.plan_progress(continuation.graph_of(conversation))
+    return ResumePlanRead.model_validate(progress) if progress is not None else None
+
+
+def _resume_design(db: Session, conversation: Conversation) -> ResumeDesignRead | None:
+    """The conversation's recorded design as a count, or None if it has none or this build
+    cannot read it. A spec that will not parse must not fail the transcript the user
+    reloaded to read: the panel reports the parse error itself."""
+    from app.core import designs
+
+    document = designs.load(db, conversation)
+    if document is None:
+        return None
+    try:
+        spec = designs.spec_of(document)
+    except Exception:  # noqa: BLE001 - see above
+        return None
+    return ResumeDesignRead(
+        name=spec.name, revision=document.revision_number, parameters=len(spec.parameters)
+    )
+
+
 @router.get("/ai/conversations/{conversation_id}", response_model=ConversationRead)
 def read_conversation(
     db: DbSession, current_user: CurrentUser, conversation_id: str
@@ -1211,6 +1369,10 @@ def read_conversation(
                 is_error=message.is_error,
                 duration_ms=message.duration_ms,
                 created_at=message.created_at.isoformat(),
+                continuation=(
+                    message.role is MessageRole.USER
+                    and continuation.is_continuation(message.content)
+                ),
             )
         )
 
@@ -1238,9 +1400,12 @@ def read_conversation(
                 )
                 for item in activity.unresolved
             ],
+            plan=_resume_plan(conversation),
+            design=_resume_design(db, conversation),
         ),
         prompt_tokens=conversation.prompt_tokens,
         completion_tokens=conversation.completion_tokens,
+        next_action=_pending_action(db, conversation),
         messages=messages,
     )
 

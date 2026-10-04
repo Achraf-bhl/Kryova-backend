@@ -269,7 +269,7 @@ What exists today, to build on, not to replace:
 - **The plan the model declares:** `Kryova-backend/app/ai/taskgraph.py`.
 - **A 10-minute resume buffer for a turn in flight:** `Kryova-backend/app/ai/turn_events.py`.
 
-- [ ] **2.1 A structured summary, not prose.** [Linux] **M** — **NEW** (E16)
+- [x] **2.1 A structured summary, not prose.** [Linux] **M** — **NEW** (E16)
   - Today the fold is an LLM paraphrase. Split it into two parts:
     - **Facts the server already holds**: decisions taken, parameter values, open items, failed
       operations. Built from `resume.py`, `taskgraph.py`, the design record
@@ -279,7 +279,8 @@ What exists today, to build on, not to replace:
   - The current guard `_collapses_history` stays.
   - Test: after a fold, every parameter value set earlier in the conversation is in the summary, and
     the facts part is identical across two folds of the same history.
-- [ ] **2.2 "Continue" as a first-class action.** [Linux + frontend] **M** — **NEW** (P5)
+  - **Status 2026-10-04:** done and tested (master plan P11.17, `app/ai/summary_facts.py`, migration `2a00f5443c5f`). The facts are frozen at the fold, not read live: the summary sits ahead of the cached history, so a live fact would re-bill the prompt on every edit.
+- [x] **2.2 "Continue" as a first-class action.** [Linux + frontend] **M** — **NEW** (P5)
   - A turn that stops on `step_budget`, `repeated_calls` or `needs_input` (`agent.py`, with
     `_CLOSING_FALLBACK` and `prompts.AGENT_ENDED_EARLY`) currently needs the user to type something.
   - Do: return a typed `next_action` on the final event. The UI then shows a **Continue** button that
@@ -290,13 +291,16 @@ What exists today, to build on, not to replace:
     as an ordinary message.
   - Test: a turn ended by `step_budget` offers Continue; pressing it resumes the first open task, and
     the transcript records it as a continuation, not as user prose.
-- [ ] **2.3 Make resuming after a long absence work from facts.** [Linux] **S** → P5.2
+  - **Status 2026-10-04:** done and tested on both sides (master plan P11.18, `app/ai/continuation.py`, `Kryova-frontend/src/components/chat/continue-prompt.tsx`). `needs_input` is deliberately **not** continuable: a typed intervention already is its one-click action, and a bare Continue would answer the question by ignoring it.
+- [x] **2.3 Make resuming after a long absence work from facts.** [Linux] **S** → P5.2
   - `Kryova-frontend/src/lib/conversation-resume.ts` shows "welcome back" after 30 minutes or when
     work is unfinished. Drive its content from `resume.py`'s loose ends, which are facts, rather than
     from the summary.
-- [ ] **2.4 Split a request that is too large into turns on purpose.** [Linux] **M** → E16.2
+  - **Status 2026-10-04:** done and tested (master plan P11.19): `resume.plan` and `resume.design` on the conversation detail, drawn by `resume-notice.tsx`.
+- [x] **2.4 Split a request that is too large into turns on purpose.** [Linux] **M** → E16.2
   - When `plan_work` declares more tasks than one turn's step budget can finish, end the turn at a
     task boundary with a progress report and Continue (2.2), instead of running out mid-task.
+  - **Status 2026-10-04:** done and tested (master plan P11.18): the loop ends between tasks with `AGENT_TASK_BOUNDARY` when the next would not fit in the rounds left.
 - [ ] **2.5 Edit and retry the last message; branch a conversation.** [Linux + frontend] **L** — **NEW** (P5)
   - Retry re-runs the last user message after rolling back to the checkpoint taken before it. A
     branch copies the conversation up to a message, with its own CATIA document copy.

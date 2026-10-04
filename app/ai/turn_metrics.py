@@ -34,12 +34,16 @@ from app.models import Conversation, TurnMetric, User
 #: the loop that writes it cannot drift. The first six are the ones a client already
 #: reads off the `done` event; the last two are decided by the route, because the
 #: loop is not there to say them (an exception, or a client that hung up).
+#: `task_boundary` and `provider_busy` joined them for ROAD_TO_10 2.4 and 3.6: both are
+#: stops a person continues with one press (`app/ai/continuation.py`).
 STOP_FINISHED = "finished"
 STOP_CANCELLED = "cancelled"
 STOP_STEP_BUDGET = "step_budget"
 STOP_REPEATED_CALLS = "repeated_calls"
 STOP_NEEDS_INPUT = "needs_input"
 STOP_AWAITING_APPROVAL = "awaiting_approval"
+STOP_TASK_BOUNDARY = "task_boundary"
+STOP_PROVIDER_BUSY = "provider_busy"
 STOP_ERROR = "error"
 STOP_DISCONNECTED = "disconnected"
 

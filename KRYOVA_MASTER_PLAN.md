@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 66/78 = 85% | 33/39 eng-months = 83% |
-| **Programme** | 23/35 | 193/214 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 69/81 = 85% | 33/39 eng-months = 83% |
+| **Programme** | 23/35 | 196/217 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 81% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 84% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8454,6 +8454,60 @@ machine with no network, so the phase is open until a run with a key confirms it
     > whether the model reaches for the tool when the frozen prompts name neither it nor
     > `record_design`, and retrieval, which would withhold the design tools (THE QUEUE H13).
     > Tested by: `tests/test_design_build_tool.py`, `tests/test_tool_registry_size.py`.
+
+17. **A conversation's summary has two authors: the server writes what it knows, the model writes
+    intent.** *(ROAD_TO_10 2.1, E16.)* The fold was one model paraphrase of everything the window
+    dropped, and a paraphrase under pressure to be fluent rounds a number or drops a parameter it
+    thinks was superseded, with nothing afterwards to say so.
+    > DONE (2026-10-04) — `app/ai/summary_facts.py`: every design parameter (stated value or its
+    > formula and unit), the design's newest 30 changes with who made each, and decided sign-offs
+    > with their notes, read from the design record and `approval_gates` **at the moment of the
+    > fold** and frozen in the new column `conversations.summary_facts` (migration `2a00f5443c5f`,
+    > nullable; rollback note in its docstring). Frozen, never read live, because the summary sits
+    > ahead of everything the provider caches and a live fact would re-bill the whole prompt on
+    > every parameter edit. No clock and no person's name in it, so two folds of the same rows give
+    > the same bytes and no colleague's identity reaches a hosted model. The summariser is shown the
+    > facts (`<recorded_by_the_server>`) so it does not restate them; `_collapses_history` guards the
+    > model's note only, and a refused fold leaves the previous pair untouched. A conversation with
+    > no design and no sign-off is byte-identical to before. **Offline-proven:** the fold against
+    > a scripted summariser; whether the shorter model note is as good in a live session is the
+    > ladder's to say. Tested by: `tests/test_summary_facts.py`.
+
+18. **Continue is an action the server defines, not a sentence somebody types.** *(ROAD_TO_10 2.2 and
+    2.4.)* A turn that ran out of rounds left the user to type "go on", which the model read as a new
+    request and sometimes answered by starting the design again.
+    > DONE (2026-10-04) — `app/ai/continuation.py`. The `done` event always carries `next_action`
+    > (null or `{kind, reason, label, detail, open_tasks}`), built by the same `for_stop` a reload
+    > reads (`GET /ai/conversations/{id}` gains `next_action`, from the stored `turn_metrics` stop
+    > reason and the stored plan, so the button survives a refresh). `ChatRequest.message` is now
+    > optional and `continuation: "continue"` is new: the two are mutually exclusive, a continuation
+    > needs `conversation_id`, the server writes the instruction (naming the first open task of the
+    > plan), a press with nothing to continue is **409**, and the stored message starts with
+    > `prompts.CONTINUATION_NOTE` (itself starting with `CONTROL_NOTE`, so the window and tool
+    > selection already skip it) and is returned as `continuation: true` on
+    > `ConversationMessageRead`. **Deliberately not continuable:** `needs_input` and
+    > `awaiting_approval` (a typed intervention already is their action, and a bare Continue would
+    > walk past a checkpoint) and `cancelled` (the user said stop); ROAD_TO_10 listed `needs_input`.
+    > New stop reasons `task_boundary` and `provider_busy` (the latter is written by 3.6). 2.4: when
+    > a task settles and the next would not fit in the rounds left (measured per task this turn,
+    > never under 3), the loop ends *between* tasks with `AGENT_TASK_BOUNDARY` (a progress report)
+    > instead of mid-task. A press does not re-title the conversation. Frontend: the Continue button,
+    > a divider in place of the server's sentence, and a muted banner. **Offline-proven** with a
+    > scripted model; what a live model does with the instruction is the ladder's. Public API
+    > changed (additive except that `message` is no longer required). Tested by:
+    > `tests/test_continuation.py`, `Kryova-frontend/src/components/chat/continue-prompt.test.tsx`,
+    > `Kryova-frontend/src/lib/conversation-transcript.test.ts`.
+
+19. **Coming back after a long absence speaks from the record.** *(ROAD_TO_10 2.3, P5.2.)* The
+    welcome-back notice already read the operation log's loose ends; it said nothing of the plan or
+    the design, which is where a multi-day session's open work actually lives.
+    > DONE (2026-10-04) — `resume.plan` (total, settled, open tasks in order, what is ready next) and
+    > `resume.design` (name, revision, parameter count) on `GET /ai/conversations/{id}`, null when
+    > the conversation has neither, and a design this build cannot parse is null rather than a 500
+    > on the page the user reloaded to read. The notice speaks for an open plan even in the same
+    > sitting. Tested by: `tests/test_continuation.py`,
+    > `Kryova-frontend/src/lib/conversation-resume.test.ts`,
+    > `Kryova-frontend/src/components/chat/resume-notice.test.tsx`.
 
 ---
 

@@ -43,7 +43,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.ai import intervention, prompts
+from app.ai import continuation, intervention, prompts
 from app.ai.attached import for_turn as attachments_for_turn
 from app.ai.context import build_messages, maybe_summarise
 from app.ai.malformed import correction_for, find_written_tool_calls, is_contentless
@@ -53,7 +53,7 @@ from app.ai.recovery import Failure as Recovery_Failure
 from app.ai.recovery import Recovery
 from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
 from app.ai.tools import ToolBox, ToolError
-from app.ai.turn_metrics import STOP_CANCELLED, STOP_FINISHED, TurnMeter
+from app.ai.turn_metrics import STOP_CANCELLED, STOP_FINISHED, STOP_TASK_BOUNDARY, TurnMeter
 from app.ai.verification import (
     assess,
     measurements_in,
@@ -630,6 +630,12 @@ def stream_agent(
     #: than spending the rest of the budget on the same refusal.
     stop_reason = "step_budget"
 
+    # The plan the model declared, as it stands at the start of the turn. A task settled
+    # *this* turn is what the boundary check below counts; one already settled before the
+    # user spoke says nothing about how fast this turn is going.
+    settled_seen = continuation.graph_of(conversation).settled_count()
+    tasks_closed = 0
+
     for step in range(budget):
         # P5 task 6, checked here and nowhere else in the loop. Before the model
         # call, so a stop is not followed by one more paid round trip; after the
@@ -1067,6 +1073,31 @@ def stream_agent(
             turn.usage.prompt_tokens,
         )
 
+        # ROAD_TO_10 2.4: end *between* two tasks, with a report and a Continue, rather
+        # than starting one the remaining rounds cannot finish. Asked only when a task was
+        # settled this round -- the one moment a boundary exists -- and after every other
+        # exit above, which each have a person to hand the turn to and so take priority.
+        declared = continuation.graph_of(conversation)
+        settled_now = declared.settled_count()
+        if settled_now > settled_seen:
+            tasks_closed += settled_now - settled_seen
+            settled_seen = settled_now
+            if continuation.should_pause_at_boundary(
+                declared,
+                rounds_used=step + 1,
+                tasks_closed=tasks_closed,
+                rounds_left=budget - (step + 1),
+            ):
+                logger.info(
+                    "ending the turn at a task boundary at step %d/%d: %d task(s) closed, "
+                    "the next would not fit",
+                    step + 1,
+                    budget,
+                    tasks_closed,
+                )
+                stop_reason = "task_boundary"
+                break
+
     # Out of steps. Ask for a final answer with tools withdrawn, so the user
     # gets the model's best summary instead of a bare "gave up".
     #
@@ -1085,7 +1116,7 @@ def stream_agent(
     # early for a person, and telling the model otherwise had it advise the user
     # to narrow a request that was waiting on a sign-off.
     closing_instruction = (
-        prompts.AGENT_OUT_OF_STEPS if stop_reason == "step_budget" else prompts.AGENT_ENDED_EARLY
+        prompts.AGENT_OUT_OF_STEPS if stop_reason == "step_budget" else _ended_early(stop_reason)
     )
     try:
         closing = provider.chat(
@@ -1153,6 +1184,7 @@ def stream_agent(
         # `intervention` event went past. A decision prompt is the one thing a
         # dropped event must not lose.
         intervention=asking.to_dict() if asking is not None else None,
+        next_action=_next_action(stop_reason, conversation),
     )
 
 
@@ -1214,7 +1246,10 @@ MAX_VERIFICATION_NUDGES = 1
 #: would send them to change the one thing that was fine.
 _CLOSING_FALLBACK: dict[str, str] = {
     "step_budget": "I used all my tool calls for this turn without reaching an answer. "
-    "Try narrowing the question.",
+    "Press Continue to carry on from what is built, or try narrowing the question.",
+    "task_boundary": "I stopped between two tasks of the plan on purpose, because the next "
+    "one would not have fitted in this turn's tool calls. Nothing went wrong. Press "
+    "Continue and I will start the next task.",
     "repeated_calls": "I stopped because I kept repeating a call that had already been "
     "refused, and re-sending it could not change the answer. Tell me what to do "
     "differently and I will carry on from what is built.",
@@ -1448,6 +1483,21 @@ def _refused_before(
     )
 
 
+def _ended_early(stop_reason: str) -> str:
+    """The closing instruction for a turn that stopped with rounds unspent.
+
+    A boundary stop is a progress report with a Continue under it; every other early
+    exit is waiting on a person, and says so.
+    """
+    return prompts.AGENT_TASK_BOUNDARY if stop_reason == STOP_TASK_BOUNDARY else prompts.AGENT_ENDED_EARLY
+
+
+def _next_action(stop_reason: str, conversation: Conversation) -> dict[str, Any] | None:
+    """The Continue the `done` event offers, from the same function a reload reads."""
+    action = continuation.for_stop(stop_reason, continuation.graph_of(conversation))
+    return action.to_dict() if action is not None else None
+
+
 def _done_event(
     conversation: Conversation,
     toolbox: ToolBox,
@@ -1483,6 +1533,10 @@ def _done_event(
         # None when the model has no configured price -- unknown, not free.
         "cost_micro_usd": meter.cost_micro_usd(provider.model),
         "wall_ms": meter.wall_ms,
+        # What one press can do next (ROAD_TO_10 2.2): always present, so a client reads
+        # one shape from every exit. `None` is "nothing to continue" -- a finished turn, a
+        # stop the user asked for, or one that waits on a person's decision.
+        "next_action": None,
         **extra,
     }
 

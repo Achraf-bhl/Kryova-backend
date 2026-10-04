@@ -40,7 +40,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.ai import digest as tool_digest
-from app.ai import prompts
+from app.ai import prompts, summary_facts
 from app.ai import tokens as token_estimate
 from app.ai.prompts import (
     SUMMARISE_SYSTEM,
@@ -136,7 +136,7 @@ def _history_budget(conversation: Conversation) -> int:
     budget = settings.ai_context_token_budget
     if budget <= 0:
         return 0
-    summary = conversation.summary or ""
+    summary = (conversation.summary or "") + (conversation.summary_facts or "")
     spent = token_estimate.estimate(len(summary)) + token_estimate.MESSAGE_OVERHEAD_TOKENS
     return max(min(MIN_WINDOW_TOKENS, budget), budget - spent if summary else budget)
 
@@ -304,6 +304,12 @@ def maybe_summarise(db: Session, provider: LLMProvider, conversation: Conversati
     if not fold:
         return TokenUsage()
 
+    # Read the record before the model call, not after: the facts printed beside the note
+    # are the ones the summariser was shown, and the call can take seconds in which an
+    # edit lands. They are stored only if the note is (below), so a refused fold leaves
+    # the previous pair intact.
+    facts = summary_facts.build(db, conversation)
+
     try:
         turn = provider.chat(
             system=SUMMARISE_SYSTEM,
@@ -311,7 +317,7 @@ def maybe_summarise(db: Session, provider: LLMProvider, conversation: Conversati
                 {
                     "role": "user",
                     "content": summarise_user_message(
-                        conversation.summary, render_for_summary(fold)
+                        conversation.summary, render_for_summary(fold), facts or None
                     ),
                 }
             ],
@@ -355,6 +361,7 @@ def maybe_summarise(db: Session, provider: LLMProvider, conversation: Conversati
         return turn.usage
 
     conversation.summary = text
+    conversation.summary_facts = facts or None
     conversation.summary_through_sequence = boundary
     db.flush()
     return turn.usage
@@ -385,10 +392,14 @@ def _collapses_history(previous: str | None, replacement: str) -> bool:
 def _summary_message(conversation: Conversation) -> dict[str, Any] | None:
     if not conversation.summary:
         return None
+    # The facts are stored text, so this is as pure as it was: the same row renders to the
+    # same bytes on every step of every turn until the next fold changes the boundary.
+    facts = f"\n\n{conversation.summary_facts}" if conversation.summary_facts else ""
     return {
         "role": "user",
         "content": (
-            f"{SUMMARY_OPEN}\n{_SUMMARY_PREAMBLE}\n\n{conversation.summary}\n{SUMMARY_CLOSE}"
+            f"{SUMMARY_OPEN}\n{_SUMMARY_PREAMBLE}\n\n{conversation.summary}{facts}"
+            f"\n{SUMMARY_CLOSE}"
         ),
     }
 

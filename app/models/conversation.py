@@ -102,6 +102,14 @@ class Conversation(UUIDPrimaryKey, TimestampMixin, Base):
     #: Exclusive upper bound: messages with `sequence < this` are covered by the
     #: summary and are never replayed verbatim again.
     summary_through_sequence: Mapped[int] = mapped_column(Integer, default=0)
+    #: The server's own half of the summary (`app/ai/summary_facts.py`): design
+    #: parameters, the design's change log and decided sign-offs, read from their
+    #: records **at the moment of the fold** and frozen here. Written together with
+    #: `summary` and `summary_through_sequence`, so it moves only when the boundary
+    #: does -- a value read live would change with every parameter edit and re-bill
+    #: everything behind it in the prompt cache. NULL is "no design and no sign-off
+    #: at the last fold", which is most conversations.
+    summary_facts: Mapped[str | None] = mapped_column(Text, default=None)
 
     #: Running totals, denormalised from `AITokenUsage` so reading a
     #: conversation costs no aggregate query.
@@ -396,5 +404,5 @@ class TurnMetric(UUIDPrimaryKey, TimestampMixin, Base):
     cost_micro_usd: Mapped[int | None] = mapped_column(BigInteger, default=None)
     wall_ms: Mapped[int] = mapped_column(Integer, default=0)
     #: finished, cancelled, step_budget, repeated_calls, needs_input,
-    #: awaiting_approval, error, disconnected.
+    #: awaiting_approval, task_boundary, provider_busy, error, disconnected.
     stop_reason: Mapped[str] = mapped_column(String(32))

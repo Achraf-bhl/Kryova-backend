@@ -239,6 +239,18 @@ class TestABranchCopiesTheTranscriptUpToAnAnswer:
         assert by_default["from_sequence"] == 1  # skipped the message with a call in it
         assert explicit.status_code == 422
 
+    def test_the_transcript_marks_where_a_branch_may_start(
+        self, db_session: Session, auth_client: AuthenticatedTestClient, account: User
+    ) -> None:
+        source = _built(db_session, account)
+
+        messages = auth_client.get(f"/api/v1/ai/conversations/{source.id}").json()["messages"]
+
+        # The UI offers Branch exactly where the server would accept one.
+        assert {m["sequence"] for m in messages if m["branchable"]} == {3, 5}
+        for sequence in (0, 1, 2, 4):
+            assert _branch(auth_client, source.id, from_sequence=sequence).status_code == 422
+
     def test_a_conversation_with_no_answer_yet_cannot_be_branched(
         self, db_session: Session, auth_client: AuthenticatedTestClient, account: User
     ) -> None:

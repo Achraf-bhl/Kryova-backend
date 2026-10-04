@@ -1415,6 +1415,21 @@ master plan's status line in the same commit.
       whoever changes it. Tested by: `tests/test_kernel_draft_directions.py` (28),
       `tests/test_kernel_routes.py` (+4). Owner: E13 task 1, now DONE.
 
+- [ ] **E11 — ROAD_TO_10 2.5: copy a CATIA document into a branch, and roll one back on retry.**
+      Added 2026-10-04. A branch (`app/ai/branching.py`) carries the transcript, the design as
+      it stood at the answer, and the summary and plan where still true — and **never the
+      document**, because `CatiaDocument.conversation_id` is unique and "save as a new file"
+      is a bridge operation nobody has run. Retry refuses any turn in which a mutating tool
+      ran, because `catia_restore` needs a seat and an approval token. Both refusals are
+      honest rather than final: on the seat, (1) drive `catia_save_as` (or the bridge's
+      equivalent) from a bound document to a new file and bind it to a second conversation, and
+      (2) measure whether `catia_restore` returns a document to its state at a checkpoint taken
+      before the user's message. If both hold, `branch` can copy the document and `rewind` can
+      restore it, and the two refusals narrow to the cases that still cannot. The state-block
+      line `branched:` (`app/ai/state.py::_branch_lines`) and the notice in the web UI are
+      written to go away the moment the branch owns a document, so nothing there needs
+      rewording. Settles: P11 task 20's "Not done, on purpose".
+
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 
 - [x] **F2 — `docker` launched by its bare name fails inside a running job on Windows

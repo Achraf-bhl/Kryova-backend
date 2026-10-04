@@ -1077,6 +1077,14 @@ class ConversationMessageRead(BaseModel):
     is_error: bool
     duration_ms: int | None
     created_at: str
+    branchable: bool = Field(
+        default=False,
+        description=(
+            "True for an assistant answer a branch may start at (ROAD_TO_10 2.5): text, and no "
+            "tool calls waiting on results. The UI offers Branch only here, so it never offers "
+            "what the server would refuse."
+        ),
+    )
     continuation: bool = Field(
         default=False,
         description=(
@@ -1463,6 +1471,7 @@ def read_conversation(
                 is_error=message.is_error,
                 duration_ms=message.duration_ms,
                 created_at=message.created_at.isoformat(),
+                branchable=branching.is_boundary(message),
                 continuation=(
                     message.role is MessageRole.USER
                     and continuation.is_continuation(message.content)

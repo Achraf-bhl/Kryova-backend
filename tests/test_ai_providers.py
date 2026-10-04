@@ -335,8 +335,8 @@ class TestHealth:
     def test_a_non_anthropic_model_id_is_caught_before_the_first_request(
         self, sdk: types.ModuleType
     ) -> None:
-        """The default AI_MODEL is an Ollama tag; pointed at Anthropic it 404s."""
-        provider = AnthropicProvider(api_key="k", model="qwen2.5-coder:7b", timeout_seconds=5)
+        """A model id left over from another vendor, pointed at Anthropic, 404s."""
+        provider = AnthropicProvider(api_key="k", model="deepseek-flash", timeout_seconds=5)
         provider._sdk = sdk
         with pytest.raises(LLMUnavailable, match="not an Anthropic model id"):
             provider.health()
@@ -403,13 +403,6 @@ class TestMessageTranslation:
 
 class TestUsageAcrossProviders:
     """Every provider reports usage under its own spelling."""
-
-    def test_ollama_reports_its_own_field_names(self) -> None:
-        from app.ai.providers.ollama import _usage
-
-        assert _usage({"prompt_eval_count": 12, "eval_count": 5}) == TokenUsage(12, 5)
-        # A server that reports nothing gets zeros, not an invented estimate.
-        assert _usage({}) == TokenUsage(0, 0)
 
     def test_openai_compatible_reports_its_own_field_names(self) -> None:
         from app.ai.providers.openai_compatible import _usage

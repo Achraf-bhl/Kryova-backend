@@ -43,23 +43,26 @@ In rough order of seconds spent by a real user, on the hardware this product run
 
 ### The model, and it is not close
 
-A single agent turn against the local model costs **4–7 minutes** on the Windows workstation
-(measured 2026-09-05, `qwen3.5:9b`, 81% resident on an 8 GB card at `num_ctx=32768`). Every
-other subsystem in this list is seconds. **If the product feels slow to a user, this is why**,
-and no amount of threading, caching or SQL tuning touches it.
+A single agent turn costs **4–7 minutes** (measured 2026-09-05 on a local 9B model; the
+product has since moved to hosted models only, 2026-10-04, and **no turn has yet been timed
+on one** — the first gate run with a key should record the per-step `agent step … prompt tokens`
+line before anyone draws a conclusion). Every other subsystem in this list is seconds. **If the
+product feels slow to a user, this is why**, and no amount of threading, caching or SQL tuning
+touches it.
 
 What moves it, in order of effect:
 
-1. **The model itself.** `qwen3-coder:30b` was measured at 22 GB on an 8 GB card — 72% on the
-   CPU — and took two and a half minutes to answer with a single word. The 9b returns a
-   correct structured `tool_call` in 8–15 s with the full tool payload. Choosing the model is
-   the single largest performance decision in the product.
-2. **GPU residency.** `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0` are what get
-   the 9b to 81% on the card. Dropping the context window to 16k only reaches 86% — **the
-   weights are the bulk, not the KV cache** — so the full window is kept. Check with
-   `ollama ps` and `nvidia-smi` before drawing any conclusion from a timing; a gate run that
-   was actually on the CPU measures patience, not the product.
-3. **How many tools it is offered.** On `GEOMETRY_BACKEND=occt` the agent is offered the 108
+1. **Whether the step reasons.** A reasoning step adds thousands of billed output tokens and tens
+   of seconds, and a turn is ~20 steps. Agent steps run with thinking off by default
+   (`AI_EFFORT_CHAT=low`); structured output and tool-less chat never reason. Raise it to buy
+   judgement, and measure that it bought any.
+2. **A byte-stable prefix.** The system prompt, the ~235 tool schemas (~58k tokens when every
+   tool is offered) and the earlier transcript are resent every step. A hosted API bills a prefix
+   it has seen at a small fraction of a fresh one, so nothing that varies per turn may sit ahead
+   of the state block. `tests/test_prompt_cache_stability.py` pins it.
+3. **How many tools it is offered.** (`AI_TOOL_LIMIT` retrieval, off by default, would offer
+   ~22–38 % of the schema bytes — measured offline at limits 40–80 — but changes what the model
+   sees, so it waits for a gate run that compares accuracy.) On `GEOMETRY_BACKEND=occt` the agent is offered the 108
    implemented operations rather than all 201. That is correctness first — it cannot pick a
    tool that will fail — but it is also prompt bytes, and prompt bytes are latency.
 4. **How many turns.** A turn saved is minutes. This is why `app/ai/resume.py` reads

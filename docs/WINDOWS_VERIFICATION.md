@@ -54,8 +54,8 @@ You have three jobs, in this order, and the order matters:
 [MAKING_IT_FASTER.md](MAKING_IT_FASTER.md) before changing anything.** Two facts from it apply
 directly to a gate run: the model is 4–7 minutes a turn and every other subsystem is seconds,
 so a slow gate is almost always the model rather than the product; and a timing taken while
-Ollama is on the CPU measures patience, not the application — check `ollama ps` and
-`nvidia-smi` first.
+the model is a hosted one now (no local model is supported, 2026-10-04), so a timing is the
+provider's latency and the prompt size — read the `agent step … prompt tokens` log line.
 
 **What "done" means for an item here.** Either a measurement recorded with the number and
 the date, or a defect recorded with what was expected and what happened. Never "looked
@@ -152,7 +152,7 @@ stale tree will "find" defects that were fixed before it sat down.
 5. **Job 3 — the GUI ladder, and gate G1.** G1 ran twice and did not pass either time. Two of
    its three open items were closed on Linux on 2026-09-09, and A2/A3/A4 discharged the thermal
    and shell/beam deck items, so **G1 is dischargeable at this run for the first time.**
-6. **D1** (`ollama pull llava`) and **queue E1** (sheet metal at the seat) if time remains.
+6. **D1** (a hosted vision model) and **queue E1** (sheet metal at the seat) if time remains.
 
 ### What the GUI must be driven through, specifically
 
@@ -698,14 +698,17 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
 
 ### D. Needs a model this machine does not host
 
-- [ ] **D1 — The visual check against a real vision model.** `ollama pull llava`, set
-      `AI_VISION_MODEL=llava`. Confirm you get the *refusal* first with the text-only default
-      — that refusal is the guard working (Ollama drops an image handed to a text-only model
-      and answers anyway, so a check that trusted it would manufacture agreement).
+*Every item below now means a hosted model with a key in `.env.local` (`AI_PROVIDER`, `AI_MODEL`,
+`AI_API_KEY`); no local model is supported. Section H is the provider's own checklist and comes first.*
+
+- [ ] **D1 — The visual check against a real vision model.** Set `AI_VISION_MODEL` to a hosted
+      model that reads images. Confirm the check reports `unchecked` with none configured, and
+      that a model that cannot see is reported (a 400 from the provider) rather than swallowed
+      — a check that trusted a blind model's answer would manufacture agreement.
 
 - [ ] **D2 — E22.2, the silent-corruption rate on edits, measured on the local model.** Linux
       wrote the harness (`app/design/corruption.py`) and the model editor
-      (`app/ai/design_editor.py`) and ran neither. Needs Ollama with the configured `AI_MODEL`.
+      (`app/ai/design_editor.py`) and ran neither. Needs the configured hosted `AI_MODEL`.
       The case set now exists (`app/design/corruption_cases.py`, twelve edits on M1, M3 and M6);
       the fixtures in `tests/test_design_corruption.py` must not be published as the rate. Run
       `tests/test_design_corruption_cases.py`, then
@@ -714,8 +717,8 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       edits by our model corrupt untargeted features, and how often.
 
 - [ ] **D3 — E22.4, selection and argument accuracy on the local model.** Linux wrote
-      `app/ai/argument_accuracy.py` (and `model_chooser`) and ran neither. Needs Ollama with the
-      configured `AI_MODEL`. The case set now exists (`app/ai/argument_cases.py`, twelve requests
+      `app/ai/argument_accuracy.py` (and `model_chooser`) and ran neither. Needs the
+      configured hosted `AI_MODEL`. The case set now exists (`app/ai/argument_cases.py`, twelve requests
       over `ToolBox.every_tool()`); the fixtures in `tests/test_ai_argument_accuracy.py` are on a
       three-tool registry and must not be published. Run `tests/test_ai_argument_cases.py`, then
       `python -m app.ai.argument_cases --out docs/verification-<date>/e22-4.json` at the deployed
@@ -733,10 +736,9 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       2. With the text-only `AI_MODEL` and **no** `AI_VISION_MODEL`, attach a JPEG through
          `POST /attachments` (the composer does not create document attachments yet, P4.6's
          correction, so use `/docs` or curl). Expect `unsupported`, a detail naming the model
-         and `AI_VISION_MODEL`, and **no `/api/chat` line in the Ollama server log** for it.
-         That refusal is the guard: Ollama would otherwise drop the picture and describe nothing.
-      3. Set `AI_VISION_MODEL` to a model that can see (D1's `llava`, or whatever fits the card
-         beside `AI_MODEL`), restart, attach a real photograph of a part with a printed label
+         and `AI_VISION_MODEL`, and **no request to the provider** for it.
+         That refusal is the guard: a model that cannot see may otherwise describe nothing.
+      3. Set `AI_VISION_MODEL` to a hosted model that can see (D1's), restart, attach a real photograph of a part with a printed label
          and a real drawing scan. Expect `ready`, `reliability: inferred`, the unverified note in
          `GET /attachments/{id}/content`, and an `attachment_image` row in `ai_token_usage`
          naming the vision model. Read the text lines against the picture and write down every
@@ -1097,6 +1099,42 @@ this file drives the ladder, with a screenshot each.
 
 ---
 
+### H. The hosted provider itself — DeepSeek, written 2026-10-04 from the vendor's API reference
+
+*Everything in `app/ai/providers/deepseek.py` and the shared transport in
+`openai_compatible.py` was built with no network and no key. Each row is a claim the offline
+tests can only pin against the documented wire format. Do these before any ladder run; with
+a key in `.env.local` they are minutes.*
+
+- [ ] **H1 — A tool-calling chain survives its second step.** `AI_EFFORT_CHAT=high`, one prompt
+      that makes the agent call two tools in a row. Expect no 400. This is the
+      `reasoning_content` echo. Settles: whether the replayed column satisfies the server.
+- [ ] **H2 — Is an empty `reasoning_content` accepted?** Not in the docs. The offline code
+      sends `''` for an assistant turn whose reasoning was returned empty. Settles whether that
+      needs special handling.
+- [ ] **H3 — JSON output in thinking mode.** `complete()` with `AI_EFFORT_INTERPRET=high` (thinking
+      on, `json_object`). The reference does not say the two combine. If it 400s or returns
+      nothing, `_structured` needs to force thinking off for structured calls.
+- [ ] **H4 — `json_object` without a schema in the prompt.** Read one structured answer and
+      confirm the fields match the schema the system message carries (Pydantic catches a wrong
+      shape either way; this measures how often the repair attempt fires).
+- [ ] **H5 — Image input.** Attach a picture with `AI_VISION_MODEL` unset. The reference allows
+      `image_url` parts; whether `deepseek-flash` actually reads them is not stated. Expect a
+      description, or a 400 that `look` reports in words.
+- [ ] **H6 — SSE streaming.** Watch a turn stream: text deltas, a tool call assembled from
+      fragments, usage on the last chunk (`stream_options.include_usage`). A server that rejects
+      the form is learned once and logged.
+- [ ] **H7 — The cache.** Two identical steps in a row; read the response `usage` for a
+      cache-hit count (`prompt_cache_hit_tokens` in DeepSeek's usage block). `usage` is not read
+      for it yet — if it is there, log it, because it is the only direct measure that
+      `tests/test_prompt_cache_stability.py` is protecting anything.
+- [ ] **H8 — `AI_EFFORT_CHAT`: low or high?** Run one ladder level each way and compare steps,
+      wall time and tokens. The shipped default is `low` (thinking off) for cost and speed; this
+      is the measurement that justifies or reverses it.
+- [ ] **H9 — `AI_TOOL_LIMIT`.** The registry is ~235 schemas / ~58k tokens a step; retrieval at
+      limit 60 would send ~25 % of the bytes. Compare accuracy at 0 and 60 on the prompt ladder
+      before switching it on.
+
 ## Expect failures on the first run, and that is the point
 
 `tests/test_render.py`, `tests/test_vision.py`, `tests/test_design_machine_checks.py` and
@@ -1312,24 +1350,9 @@ these:
 
 ## 4. The visual check — needs a vision model
 
-Phase 4.2 will report `unchecked` on any machine with no vision model, which is correct
-behaviour and not a pass. To exercise the real path:
-
-```powershell
-ollama pull llava
-```
-
-then set in `.env`:
-
-```
-AI_VISION_MODEL=llava
-```
-
-The shipping default (`qwen2.5-coder`) has no eyes. **Ollama does not refuse an image handed
-to a text-only model — it drops it and answers anyway**, which is why the code probes
-`/api/show` for a `vision` capability or a `projector_info` block and refuses by name rather
-than trusting the answer. Confirm you get a refusal *before* pulling the vision model; that
-refusal is the guard working.
+With no vision-capable model the check reports `unchecked`, which is correct behaviour and not a
+pass. To exercise the real path set `AI_VISION_MODEL` in `.env.local` to a hosted model that
+reads images (the default model may or may not). Confirm `unchecked` first, then a real verdict.
 
 ---
 

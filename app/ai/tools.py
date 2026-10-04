@@ -77,7 +77,7 @@ class Tool:
     mutating: bool = False
 
     def schema(self) -> dict[str, Any]:
-        """OpenAI/Ollama function shape. Providers translate from here."""
+        """OpenAI function shape. Providers translate from here."""
         return {
             "type": "function",
             "function": {

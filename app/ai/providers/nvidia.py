@@ -22,7 +22,7 @@ than three lines of config.
 **3. The reasoning controls are non-standard fields.** `chat_template_kwargs`
 and `reasoning_budget` are NVIDIA extensions, and this endpoint *rejects* what
 it does not recognise — `400 Validation: Unsupported parameter(s)`. So they go
-through `_extra_body`, which only this provider fills in, and they are never
+through `_plan_reasoning`, which only this provider fills in, and they are never
 sent to a generic endpoint.
 
 **4. Thinking is worth turning off for structured output.** Measured on
@@ -30,17 +30,22 @@ sent to a generic endpoint.
 890 completion tokens and 20.2 s with thinking on, ~20 tokens and 1.8 s with it
 off, for the same correct answer. `complete()` is schema-constrained parsing —
 a sentence into a load case — where the shape is the whole job and there is
-nothing to deliberate about. `chat()` keeps thinking on, because choosing the
+nothing to deliberate about, and so is a chat call with no tools (a title, a
+summary). A chat step that may call tools keeps thinking on, because choosing the
 right CATIA operation out of 201 is exactly the judgement that reasoning buys.
 
 Tool calling works in both modes; that was checked, because it is the thing the
 agent lives or dies on.
 """
 
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from app.ai.provider import AssistantTurn
-from app.ai.providers.openai_compatible import OpenAICompatibleProvider
+from app.ai.providers.openai_compatible import (
+    DEFAULT_REASONING_BUDGET,
+    OpenAICompatibleProvider,
+    Reasoning,
+)
 
 #: NVIDIA's hosted endpoint. Made the default so configuration is a key and a
 #: model name, not a URL anyone has to remember correctly.
@@ -51,17 +56,17 @@ DEFAULT_BASE_URL: Final = "https://integrate.api.nvidia.com/v1"
 #: `integrate.api.nvidia.com` is reachable through this same provider.
 DEFAULT_MODEL: Final = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
-#: Ceiling on reasoning tokens per call. Not the same budget as the answer:
-#: a Nemotron model will happily spend three thousand tokens deliberating over
-#: "give the answer blue", so this is what stops a trivial turn costing a large
-#: one. Generous enough for a real CATIA decision, short of a runaway.
-DEFAULT_REASONING_BUDGET: Final = 4_096
 
 
 class NvidiaProvider(OpenAICompatibleProvider):
     """NVIDIA NIM. Everything OpenAI-shaped, plus reasoning handled honestly."""
 
     name = "nvidia"
+
+    #: Not asked to stream: how this endpoint chunks a reasoning model's output
+    #: (and whether it takes `stream_options`) has not been measured, and a field
+    #: it does not recognise is a 400. It answers whole, as it always did.
+    _STREAMING: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -83,38 +88,31 @@ class NvidiaProvider(OpenAICompatibleProvider):
         )
         self._thinking = thinking
         self._reasoning_budget = reasoning_budget
-        #: Set for the duration of one `complete()` call. Structured output is
-        #: parsing, not judgement, and reasoning through it costs ~45x the
-        #: tokens for the same answer.
-        self._thinking_now = thinking
 
     # -- request ------------------------------------------------------------
 
-    def _extra_body(self) -> dict[str, Any]:
+    def _plan_reasoning(
+        self, *, effort: str | None, messages: list[dict[str, Any]] | None
+    ) -> Reasoning:
         """The two NVIDIA extension fields, and nothing else.
 
         `enable_thinking` is always sent, including when false: the model
         reasons by default, so leaving the field out is not the same as turning
-        it off.
+        it off. Structured output and a chat call with no tools (`effort` is not
+        None) are parsing, not judgement, and reasoning through them costs ~45x
+        the tokens for the same answer.
         """
-        extras: dict[str, Any] = {"chat_template_kwargs": {"enable_thinking": self._thinking_now}}
-        if self._thinking_now:
-            extras["reasoning_budget"] = self._reasoning_budget
-        return extras
-
-    def _structured_payload(self, system: str, user: str, schema: Any, max_tokens: int) -> Any:
-        """Build a structured-output request with thinking off for its duration.
-
-        The flag is toggled around the call rather than passed down because
-        `_extra_body` is the base class's hook and takes no arguments — and
-        widening its signature for one vendor's cost optimisation would push
-        NVIDIA's billing into the shape of every other provider's requests.
-        """
-        self._thinking_now = False
-        try:
-            return super()._structured_payload(system, user, schema, max_tokens)
-        finally:
-            self._thinking_now = self._thinking
+        if effort is not None or not self._thinking:
+            return Reasoning(
+                enabled=False, fields={"chat_template_kwargs": {"enable_thinking": False}}
+            )
+        return Reasoning(
+            enabled=True,
+            fields={
+                "chat_template_kwargs": {"enable_thinking": True},
+                "reasoning_budget": self._reasoning_budget,
+            },
+        )
 
     # -- response -----------------------------------------------------------
 

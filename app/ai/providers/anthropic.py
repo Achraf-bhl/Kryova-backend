@@ -1,10 +1,10 @@
 """Anthropic provider -- hosted Claude models.
 
-Opt-in, never the default: this posts the geometry summary and load case to a
-third party, which is the user's call to make rather than ours.
+Hosted Claude. Like every provider here this posts the geometry summary and load
+case to a third party, which is the user's call to make rather than ours.
 
-Uses the official `anthropic` SDK, imported lazily so an Ollama-only install
-does not need the package at all. Three details of the current Messages API
+Uses the official `anthropic` SDK, imported lazily so an install that uses another
+provider does not need the package at all. Three details of the current Messages API
 shape this file, and each one is a silent failure if got wrong:
 
 **Structured output lives under `output_config.format`.** The older top-level
@@ -58,8 +58,8 @@ DEFAULT_MODEL = "claude-opus-5"
 
 #: Models this provider has been exercised against. Not an allowlist -- a newer
 #: id must work the day it ships -- but a configured model that matches none of
-#: these prefixes is far more likely to be a copy-paste from the Ollama section
-#: of the config than a real Claude release, and `health()` says so.
+#: these prefixes is far more likely to be a leftover model id from another
+#: provider than a real Claude release, and `health()` says so.
 KNOWN_MODEL_PREFIXES = ("claude-",)
 
 
@@ -176,7 +176,7 @@ class AnthropicProvider(LLMProvider):
         except ModuleNotFoundError as exc:
             raise LLMUnavailable(
                 "AI_PROVIDER=anthropic needs the SDK: `pip install anthropic`. "
-                "Or set AI_PROVIDER=ollama to run locally with no extra package."
+                "Or set AI_PROVIDER to another provider."
             ) from exc
         self._sdk = anthropic
         return anthropic

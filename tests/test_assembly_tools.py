@@ -16,7 +16,7 @@ the spec fails here rather than reading as a passing test. `TestTheModelFacingSc
 breaks that guard deliberately, in both directions.
 
 Not called end-to-end tests, and deliberately not: an end-to-end claim goes through the
-Ollama chatbot, and this starts at the runner. What it *does* pin is that the arguments
+chatbot, and this starts at the runner. What it *does* pin is that the arguments
 it uses are the arguments the model is offered, and that the tools are in
 `backends.local_tool_names()` — the list `dispatch.available_tools` hands the model on
 the open kernel — so the gap between this and the chat endpoint is the model's choice of

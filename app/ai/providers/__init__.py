@@ -1,23 +1,29 @@
-"""Provider construction. The only module that knows which vendors exist."""
+"""Provider construction. The only module that knows which vendors exist.
+
+Moving to another vendor is `AI_PROVIDER`, `AI_MODEL`, `AI_BASE_URL` and
+`AI_API_KEY` in the environment and nothing else: no model name, URL or key is
+written into the code below. `openai_compatible` reaches OpenAI itself, and a
+vendor whose dialect needs more (DeepSeek, NVIDIA) is a small subclass of it.
+"""
 
 from functools import lru_cache
 
 from app.ai.provider import LLMProvider, LLMUnavailable
 from app.ai.providers.anthropic import AnthropicProvider
+from app.ai.providers.deepseek import DeepSeekProvider
 from app.ai.providers.nvidia import NvidiaProvider
-from app.ai.providers.ollama import OllamaProvider
 from app.ai.providers.openai_compatible import OpenAICompatibleProvider
 
 __all__ = [
     "AnthropicProvider",
+    "DeepSeekProvider",
     "NvidiaProvider",
-    "OllamaProvider",
     "OpenAICompatibleProvider",
     "PROVIDER_NAMES",
     "get_provider",
 ]
 
-PROVIDER_NAMES = ("ollama", "anthropic", "nvidia", "openai_compatible")
+PROVIDER_NAMES = ("deepseek", "anthropic", "nvidia", "openai_compatible")
 
 
 @lru_cache
@@ -27,11 +33,20 @@ def get_provider() -> LLMProvider:
 
     choice = settings.ai_provider.strip().lower()
 
-    if choice == "ollama":
-        return OllamaProvider(
-            base_url=settings.ai_base_url or "http://localhost:11434",
+    if choice == "deepseek":
+        if not settings.ai_api_key:
+            raise LLMUnavailable(
+                "AI_PROVIDER=deepseek requires AI_API_KEY. Create a key at "
+                "platform.deepseek.com; it looks like 'sk-...'."
+            )
+        return DeepSeekProvider(
+            api_key=settings.ai_api_key,
             model=settings.ai_model,
             timeout_seconds=settings.ai_timeout_seconds,
+            base_url=settings.ai_base_url,
+            thinking=settings.ai_thinking,
+            reasoning_effort=settings.ai_effort_chat,
+            reasoning_budget=settings.ai_reasoning_budget,
             vision_model=settings.ai_vision_model,
         )
     if choice == "anthropic":
@@ -54,15 +69,15 @@ def get_provider() -> LLMProvider:
             # Optional: NVIDIA's hosted endpoint is the default, but the same
             # provider reaches a self-hosted NIM container unchanged.
             base_url=settings.ai_base_url,
-            thinking=settings.ai_nvidia_thinking,
-            reasoning_budget=settings.ai_nvidia_reasoning_budget,
+            thinking=settings.ai_thinking,
+            reasoning_budget=settings.ai_reasoning_budget,
             vision_model=settings.ai_vision_model,
         )
     if choice == "openai_compatible":
         if not settings.ai_base_url:
             raise LLMUnavailable(
                 "AI_PROVIDER=openai_compatible requires AI_BASE_URL "
-                "(e.g. http://localhost:1234/v1 for LM Studio)."
+                "(e.g. https://api.openai.com/v1)."
             )
         return OpenAICompatibleProvider(
             base_url=settings.ai_base_url,

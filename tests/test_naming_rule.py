@@ -26,7 +26,7 @@ belongs in the frozen system prefix where it is stated once and cached, rather
 than in the per-turn payload where it is charged again every step. Moving it
 saved 8,489 characters, about 2,122 tokens, on every model call of every turn
 -- and took a 32,768-token window from 76% full to 69%, which matters because
-Ollama truncates a prompt from the front in silence.
+a long prompt is billed on every step of every turn.
 
 **Four more conventions moved the same way on 2026-09-07**, because the ceiling
 below caught the registry drifting back over it as E14 and E16 added vocabulary.

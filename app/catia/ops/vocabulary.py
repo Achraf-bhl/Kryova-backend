@@ -193,8 +193,7 @@ def element_reference(description: str) -> dict[str, Any]:
     it** -- and each step cost 15-26 s against 0.3-1.1 s for the CATIA calls.
     The model, not COM, is the whole latency of a turn, and the schemas are the
     bulk of the model's prompt. The repetition was also pushing a 32,768-token
-    window to 76% full, which is where Ollama starts truncating from the front
-    in silence.
+    window to 76% full. Hosted models bill every one of those tokens on every step.
 
     A rule that applies to every reference belongs in the frozen system prefix,
     where it is stated once and cached, not in the per-turn payload where it is

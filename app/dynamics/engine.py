@@ -144,7 +144,7 @@ class KinematicEngine(DynamicsEngine):
 
 #: Symbols every real PyChrono build has exposed since Chrono 4.0. Used structurally --
 #: no version string is parsed and no module name is trusted -- for the same reason
-#: `app/ai/vision.py` gates on Ollama's reported capabilities rather than on a list of
+#: `app/ai/vision.py` gates on a provider's declared capability rather than on a list of
 #: model names: a name list rots, and a structural signal does not.
 _CHRONO_REQUIRED_SYMBOLS = ("ChSystemNSC", "ChBody")
 

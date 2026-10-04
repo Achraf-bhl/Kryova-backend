@@ -11,7 +11,6 @@ named test fail.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import httpx
@@ -26,9 +25,7 @@ from app.ai.provider import (
     LLMProvider,
     LLMUnavailable,
     TokenUsage,
-    VisionUnsupported,
 )
-from app.ai.providers.ollama import IMAGE_PROMPT_TOKENS, OllamaProvider
 from app.ai.schemas import Discrepancy, VisualCheck
 from app.render import Frame, Projection, Render
 
@@ -268,152 +265,6 @@ class TestTheDefaultViews:
         assert "could not be rendered" in review.reason
 
 
-class TestOllamaWillNotAnswerAboutAnImageItCannotSee:
-    """The single most dangerous case: Ollama drops the image and answers anyway."""
-
-    def _provider(self, monkeypatch: pytest.MonkeyPatch, show: dict[str, Any]) -> OllamaProvider:
-        def fake_post(url: str, **kwargs: Any) -> Any:
-            assert url.endswith("/api/show")
-            return httpx.Response(200, json=show, request=httpx.Request("POST", url))
-
-        monkeypatch.setattr(httpx, "post", fake_post)
-        return OllamaProvider("http://localhost:11434", "qwen2.5-coder:7b", 5.0)
-
-    def test_a_model_reporting_vision_can_see(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        provider = self._provider(monkeypatch, {"capabilities": ["completion", "vision"]})
-        assert provider._sees() is True
-
-    def test_a_projector_block_alone_is_enough(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Only a multimodal model has a projector; it *is* the vision encoder."""
-        provider = self._provider(monkeypatch, {"projector_info": {"clip.has_vision_encoder": True}})
-        assert provider._sees() is True
-
-    def test_a_text_only_model_is_refused_by_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        provider = self._provider(monkeypatch, {"capabilities": ["completion", "tools"]})
-        with pytest.raises(VisionUnsupported) as raised:
-            provider.look(
-                system="s",
-                user="u",
-                images=[b"png"],
-                schema=VisualCheck,
-                effort="low",
-                max_tokens=100,
-            )
-        message = str(raised.value)
-        assert "qwen2.5-coder:7b" in message
-        assert "AI_VISION_MODEL" in message
-
-    def test_the_capability_is_probed_once_not_per_call(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls: list[str] = []
-
-        def fake_post(url: str, **kwargs: Any) -> Any:
-            calls.append(url)
-            return httpx.Response(
-                200, json={"capabilities": ["vision"]}, request=httpx.Request("POST", url)
-            )
-
-        monkeypatch.setattr(httpx, "post", fake_post)
-        provider = OllamaProvider("http://localhost:11434", "llava", 5.0)
-        assert provider._sees() and provider._sees() and provider._sees()
-        assert len(calls) == 1
-
-    def test_the_vision_model_setting_is_what_gets_probed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        asked: list[dict[str, Any]] = []
-
-        def fake_post(url: str, **kwargs: Any) -> Any:
-            asked.append(kwargs.get("json") or {})
-            return httpx.Response(
-                200, json={"capabilities": ["vision"]}, request=httpx.Request("POST", url)
-            )
-
-        monkeypatch.setattr(httpx, "post", fake_post)
-        provider = OllamaProvider(
-            "http://localhost:11434", "qwen2.5-coder:7b", 5.0, vision_model="llava"
-        )
-        provider._sees()
-        assert asked[0]["model"] == "llava"
-
-
-class TestOllamaSizesItsWindowForThePictures:
-    def test_the_window_leaves_room_for_every_image(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Sized from the text alone, the images fall off the front of the prompt."""
-        sent: list[dict[str, Any]] = []
-
-        def fake_post(url: str, **kwargs: Any) -> Any:
-            payload = kwargs.get("json") or {}
-            if url.endswith("/api/show"):
-                return httpx.Response(
-                    200, json={"capabilities": ["vision"]}, request=httpx.Request("POST", url)
-                )
-            sent.append(payload)
-            answer = _check("matches").model_dump_json()
-            return httpx.Response(
-                200,
-                json={"message": {"content": answer}, "prompt_eval_count": 12},
-                request=httpx.Request("POST", url),
-            )
-
-        monkeypatch.setattr(httpx, "post", fake_post)
-        provider = OllamaProvider("http://localhost:11434", "llava", 5.0)
-        provider._num_ctx = 8_192
-
-        provider.look(
-            system="s",
-            user="u",
-            images=[b"a", b"b", b"c"],
-            schema=VisualCheck,
-            effort="low",
-            max_tokens=1_200,
-        )
-        payload = sent[0]
-        assert payload["options"]["num_ctx"] >= 3 * IMAGE_PROMPT_TOKENS + 1_200
-
-    def test_the_images_ride_on_the_user_message_in_order(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import base64
-
-        sent: list[dict[str, Any]] = []
-
-        def fake_post(url: str, **kwargs: Any) -> Any:
-            if url.endswith("/api/show"):
-                return httpx.Response(
-                    200, json={"capabilities": ["vision"]}, request=httpx.Request("POST", url)
-                )
-            sent.append(kwargs.get("json") or {})
-            return httpx.Response(
-                200,
-                json={"message": {"content": _check("matches").model_dump_json()}},
-                request=httpx.Request("POST", url),
-            )
-
-        monkeypatch.setattr(httpx, "post", fake_post)
-        provider = OllamaProvider("http://localhost:11434", "llava", 5.0)
-        provider._num_ctx = 8_192
-        provider.look(
-            system="s",
-            user="u",
-            images=[b"first", b"second"],
-            schema=VisualCheck,
-            effort="low",
-            max_tokens=100,
-        )
-        message = sent[0]["messages"][-1]
-        assert message["role"] == "user"
-        assert message["images"] == [
-            base64.b64encode(b"first").decode(),
-            base64.b64encode(b"second").decode(),
-        ]
-        # Constrained decoding, same as every other structured call here.
-        assert json.dumps(sent[0]["format"])
-
-
 class TestThePromptSaysWhatTheModelMustNotDo:
     def test_it_forbids_reading_a_dimension_off_the_picture(self) -> None:
         """A drawing has no scale; a number from the model would read as a measurement."""
@@ -525,12 +376,12 @@ class TestAnAttachedPictureIsDescribed:
     def test_a_provider_that_did_not_answer_is_a_failure_and_spends_nothing(self) -> None:
         from app.documents.errors import ExtractionFailed
 
-        look = vision.attachment_look(_Reading(LLMError("Ollama request failed: 500")))
+        look = vision.attachment_look(_Reading(LLMError("Provider request failed: 500")))
 
         with pytest.raises(ExtractionFailed) as failed:
             look(_PNG, "png")
 
-        assert "Ollama request failed" in str(failed.value)
+        assert "Provider request failed" in str(failed.value)
         assert failed.value.short
         assert look.answered == 0
 
@@ -547,13 +398,13 @@ class TestAnAttachedPictureIsDescribed:
         fields = list(ImageReading.model_fields)
         assert fields.index("describes") < fields.index("visible_text")
 
-    def test_a_local_model_can_decode_against_the_reading_schema(self) -> None:
-        """Ollama refuses a schema over its budget before any GPU time is spent, so a
-        schema that grew past it would refuse every picture."""
-        from app.ai.providers._json_schema import local_decoding_problem
+    def test_the_reading_schema_is_within_the_provider_budget(self) -> None:
+        """A schema over the budget is a structured request that is slow to decode or
+        refused outright, so one that grew past it would refuse every picture."""
+        from app.ai.providers._json_schema import schema_problem
         from app.ai.schemas import ImageReading
 
-        assert local_decoding_problem(ImageReading.model_json_schema()) is None
+        assert schema_problem(ImageReading.model_json_schema()) is None
 
 
 class TestTheImageIsLabelledByWhatItIs:

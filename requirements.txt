@@ -70,7 +70,7 @@ openpyxl==3.1.5
 pywin32==312; sys_platform == "win32"
 
 # AI providers talk HTTP. The Anthropic SDK is deliberately NOT here: the
-# default provider is local Ollama, and only AI_PROVIDER=anthropic needs it.
+# default provider is DeepSeek over plain HTTP, and only AI_PROVIDER=anthropic needs it.
 # Install it with `pip install anthropic` if you pick that provider.
 httpx==0.28.1
 

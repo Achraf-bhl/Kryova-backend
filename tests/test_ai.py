@@ -251,7 +251,7 @@ class TestAIRoutes:
         assert response.status_code == 200
         body = response.json()
         # Assert against configuration, not a literal: the provider is a
-        # deployment choice, and pinning "ollama" here made this test fail the
+        # deployment choice, and pinning one provider here made this test fail the
         # moment the app was pointed at a hosted one.
         assert body["provider"] == settings.ai_provider
         assert body["model"] == settings.ai_model
@@ -425,7 +425,9 @@ class TestOpenAIWireFormat:
                 }
             ]
         )
-        assert set(wire[0]) == {"role", "tool_call_id", "name", "content"}
+        # `name` is not part of the chat-completions tool message either, and a
+        # strict endpoint rejects what it does not recognise.
+        assert set(wire[0]) == {"role", "tool_call_id", "content"}
 
     def test_plain_messages_pass_through_untouched(self) -> None:
         from app.ai.providers.openai_compatible import _to_wire

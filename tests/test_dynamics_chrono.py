@@ -9,7 +9,7 @@ the image existed — the real engine.
 translation*: a millimetre becomes a metre exactly once, a prismatic driver is scaled and a
 revolute one is not, a child is passed to `Initialize` before its parent, what the entry
 point writes is exactly what `payload.from_result` reads. A stub agrees with whatever it
-was written to agree with — the trap `app/ai/providers/ollama.py` fell into, which
+was written to agree with — the trap the first local-model streaming parser fell into, which
 CLAUDE.md names as "a mock of a wire format is a copy of what you believed it to be" — so
 every *physical* claim was settled against the real `kryova-chrono:9.0.1` image instead,
 and three of those runs found real defects that this file's stub had happily agreed with:

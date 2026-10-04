@@ -2,7 +2,7 @@
 
 Every model here is turned into a JSON Schema and handed to whichever provider
 is configured as a generation constraint -- Anthropic's `output_config.format`,
-OpenAI's `response_format`, Ollama's `format` -- so decoding is constrained to
+OpenAI-shaped `response_format` -- so decoding is constrained to
 match rather than us parsing prose and hoping. `providers/_json_schema.py`
 closes the schema first, because the strict providers reject an object that
 allows extra properties.
@@ -168,8 +168,8 @@ class ImageReading(BaseModel):
     arrives as a line of text with the unverified-read label, never as a value.
     """
 
-    # No `max_length` on the string. Ollama compiles the schema into a decoding
-    # grammar, where a bounded string becomes a repetition that size, and no
+    # No `max_length` on the string. A constrained decoder compiles the schema into
+    # a grammar, where a bounded string becomes a repetition that size, and no
     # schema here has one. The output token ceiling in `vision.py` is the bound.
     describes: str = Field(
         description=(

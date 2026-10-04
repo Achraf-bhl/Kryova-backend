@@ -3,9 +3,8 @@
 Hosted providers that enforce a schema (Anthropic's `json_schema` output format,
 OpenAI's strict mode) require every object to carry `additionalProperties: false`
 and to list all of its properties as required. Pydantic emits neither, so the
-raw `model_json_schema()` is rejected. Ollama is more forgiving and takes the
-schema unmodified, which is why this lives beside the strict providers rather
-than in the shared seam.
+raw `model_json_schema()` is rejected. That is why this lives beside the
+providers rather than in the shared seam.
 """
 
 from typing import Any
@@ -46,20 +45,23 @@ def _close(node: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# How much a schema costs a local model to decode against.
+# How much schema a call may hand a model.
 # ---------------------------------------------------------------------------
 
-#: The most JSON Schema a schema-constrained call may hand a local model.
-#: Measured on qwen3.5:9b, 2026-09-06, ladder prompt H4: the 14,445-character
+#: The most JSON Schema a schema-constrained call may hand a model. Measured on
+#: a small model, 2026-09-06, ladder prompt H4: the 14,445-character
 #: `LoadCaseDraft` schema (fourteen definitions, two discriminated unions)
 #: cost 146 s, 146 s and 38 s for one empty answer and two that did not match
 #: it, while the 3.4k `LoadCaseSketch` that replaced it answers in seconds.
-#: Grammar-constrained decoding is not free: the sampler walks the whole
-#: grammar at every token, and a union of objects is a fork it can wander down
-#: for thousands of tokens. The three schemas the product ships are all under
-#: 3.5k; the budget sits just above them so the next field added to one is a
-#: decision and not a drift.
-LOCAL_SCHEMA_BUDGET_CHARS = 4_096
+#: A schema the product sends a model is kept small and flat. Where the server
+#: does not constrain decoding (DeepSeek's `json_object` takes the schema as an
+#: instruction in the system message) the schema is paid for in input tokens on
+#: every call, and where it does, the sampler walks the whole grammar at every
+#: token and a union of objects is a fork it can wander down for thousands of
+#: tokens. The three schemas the product ships are all under 3.5k; the budget
+#: sits just above them so the next field added to one is a decision and not a
+#: drift. `tests/test_schema_budget.py` holds every schema the code sends to it.
+SCHEMA_BUDGET_CHARS = 4_096
 
 #: Keywords that make a schema a fork rather than a form. `anyOf` of a value
 #: with `null` is harmless and is not counted; a union of objects is.
@@ -67,7 +69,7 @@ _UNION_KEYWORDS = ("anyOf", "oneOf")
 
 
 def schema_characters(schema: dict[str, Any]) -> int:
-    """The size of `schema` as Ollama would receive it."""
+    """The size of `schema` as a provider receives it, compactly encoded."""
     import json
 
     return len(json.dumps(schema, separators=(",", ":")))
@@ -77,7 +79,7 @@ def object_unions(node: Any) -> int:
     """How many places in `schema` offer a choice between object shapes.
 
     A `discriminator` is counted as a union too: pydantic emits `oneOf` for a
-    tagged union, and the tag is the thing a small model gets wrong.
+    tagged union, and the tag is the thing a model gets wrong.
     """
     count = 0
     if isinstance(node, list):
@@ -99,8 +101,8 @@ def object_unions(node: Any) -> int:
     return count
 
 
-def local_decoding_problem(schema: dict[str, Any], *, name: str = "The schema") -> str | None:
-    """Why a local model should not be asked to decode against `schema`, or None.
+def schema_problem(schema: dict[str, Any], *, name: str = "The schema") -> str | None:
+    """Why `schema` is too big or too forked to hand a model, or None.
 
     A sentence, not a boolean, because the caller raises it: the person reading
     the error is the one who added the field, and they need to know which
@@ -109,15 +111,15 @@ def local_decoding_problem(schema: dict[str, Any], *, name: str = "The schema") 
     characters = schema_characters(schema)
     unions = object_unions(schema)
     problems: list[str] = []
-    if characters > LOCAL_SCHEMA_BUDGET_CHARS:
+    if characters > SCHEMA_BUDGET_CHARS:
         problems.append(
             f"is {characters:,} characters of JSON Schema, over the "
-            f"{LOCAL_SCHEMA_BUDGET_CHARS:,} a local model decodes against reliably"
+            f"{SCHEMA_BUDGET_CHARS:,} the product budgets for a schema it sends a model"
         )
     if unions:
         problems.append(
-            f"offers {unions} choice(s) between object shapes, which a small model "
-            "wanders through for minutes and then gets wrong"
+            f"offers {unions} choice(s) between object shapes, which a model wanders "
+            "through at length and then gets wrong"
         )
     if not problems:
         return None

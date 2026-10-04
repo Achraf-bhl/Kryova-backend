@@ -182,6 +182,14 @@ class ConversationMessage(UUIDPrimaryKey, TimestampMixin, Base):
 
     #: Assistant turns only: the tool calls this turn requested.
     tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, default=None)
+    #: Assistant turns only: the model's chain of thought, kept **only** for a
+    #: provider that must be sent it back with the transcript (DeepSeek rejects a
+    #: tool-calling request whose earlier turns lack it). NULL means none was
+    #: kept -- the provider needs none, thinking was off, or the agent wrote the
+    #: message itself -- and ``""`` means the model returned the field empty;
+    #: they are different facts to that provider. Never shown to the user and
+    #: not part of `ConversationMessageRead`.
+    reasoning: Mapped[str | None] = mapped_column(Text, default=None)
     #: Tool turns only: which call this is the result of, and which tool ran.
     tool_call_id: Mapped[str | None] = mapped_column(String(64), default=None)
     tool_name: Mapped[str | None] = mapped_column(String(64), default=None)

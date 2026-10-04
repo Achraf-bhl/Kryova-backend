@@ -4,7 +4,7 @@ Measured on ladder prompt H4, 2026-09-06, run 8. The bracket was built, the
 STEP exported, and `draft_load_case` -- the tool added after run 4 so the agent
 would stop hand-writing load cases -- was called three times:
 
-    Working out the loads -- LLMError: Ollama returned an empty response.   146,768 ms
+    Working out the loads -- LLMError: the local model returned an empty response.   146,768 ms
     Working out the loads -- ... does not match the expected schema:
         load_case.loads.0.force.where Field required                        145,988 ms
     Working out the loads -- ... fixtures.0.where Unable to extract tag
@@ -14,7 +14,7 @@ Five and a half minutes, three of twenty rounds, and no load case. The cause
 was the schema the tool handed the model: `LoadCaseDraft` wraps the solver's
 own `LoadCase`, which is two discriminated unions, fourteen definitions and
 14,445 characters of JSON Schema. A 9B model decoding against that grammar
-walks it for thousands of tokens and, when Ollama cannot compile it fully,
+walks it for thousands of tokens and, when the server cannot compile it fully,
 falls back to free JSON and guesses the shape.
 
 The fix is not a better prompt. It is the split this file tests: the model
@@ -34,7 +34,7 @@ from pydantic import ValidationError
 
 from app.ai.load_case_sketch import FACE_SELECTORS, SketchProblem, face_selector, realise
 from app.ai.providers._json_schema import (
-    LOCAL_SCHEMA_BUDGET_CHARS,
+    SCHEMA_BUDGET_CHARS,
     object_unions,
     schema_characters,
 )
@@ -65,8 +65,8 @@ def _sketch(**overrides: object) -> LoadCaseSketch:
 class TestTheSchemaIsSmall:
     """The property that makes it decodable at all, pinned as numbers."""
 
-    def test_it_is_within_the_local_budget(self) -> None:
-        assert schema_characters(LoadCaseSketch.model_json_schema()) <= LOCAL_SCHEMA_BUDGET_CHARS
+    def test_it_is_within_the_budget(self) -> None:
+        assert schema_characters(LoadCaseSketch.model_json_schema()) <= SCHEMA_BUDGET_CHARS
 
     def test_it_has_no_choice_between_object_shapes(self) -> None:
         assert object_unions(LoadCaseSketch.model_json_schema()) == 0
@@ -75,7 +75,7 @@ class TestTheSchemaIsSmall:
         """What was being sent before. If this ever passes, the budget has
         been loosened until it guards nothing."""
         schema = LoadCaseDraft.model_json_schema()
-        assert schema_characters(schema) > LOCAL_SCHEMA_BUDGET_CHARS
+        assert schema_characters(schema) > SCHEMA_BUDGET_CHARS
         assert object_unions(schema) > 0
 
     def test_every_face_word_is_in_the_schema(self) -> None:

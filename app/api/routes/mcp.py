@@ -25,7 +25,7 @@ by the router, which is what the spec asks of a modern server receiving legacy t
 
 **`draft_load_case` is not offered here.** It calls Kryova's own model to turn a sentence into a
 load case; an MCP caller brings its own model, and building the provider would put a health
-check against Ollama in front of every `tools/list`. `ToolBox` withholds that tool when it has
+check against the model in front of every `tools/list`. `ToolBox` withholds that tool when it has
 no provider, so it is absent rather than offered and refused.
 """
 

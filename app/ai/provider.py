@@ -1,8 +1,8 @@
 """The LLM seam.
 
 The fourth interface in this codebase, alongside Solver, JobQueue and MediaStore:
-everything above it speaks `LLMProvider`, so swapping a local Ollama model for a
-hosted API is a config change, not a rewrite. Never reach around it -- callers
+everything above it speaks `LLMProvider`, so moving from one hosted vendor to
+another is a config change, not a rewrite. Never reach around it -- callers
 must not import a vendor SDK directly.
 
 Every provider takes the same three things (a frozen system prompt, a user
@@ -34,7 +34,7 @@ class TokenUsage:
 
     Named after the two things every provider reports under some spelling --
     Anthropic's `input_tokens`/`output_tokens`, OpenAI's
-    `prompt_tokens`/`completion_tokens`, Ollama's `prompt_eval_count`/`eval_count`.
+    `prompt_tokens`/`completion_tokens`.
     Cached-read and cache-write tokens are folded into `prompt_tokens`: they are
     billed as input, and splitting them here would push provider billing detail
     through a seam whose whole point is that callers do not know who answered.
@@ -90,6 +90,15 @@ class AssistantTurn:
     #: is then a fragment, not an answer, and the caller must say so rather than
     #: presenting a sentence that stops mid-word as a considered reply.
     truncated: bool = False
+    #: The chain of thought a provider returned beside the answer, **only for a
+    #: provider that must be sent it back** (DeepSeek rejects a tool-calling
+    #: request whose earlier assistant turns lack their `reasoning_content`).
+    #: `None` means the provider returned none, or does not need it kept; ``""``
+    #: means it returned the field and it was empty -- the two are different
+    #: facts to a provider that checks the field is present. It is stored with
+    #: the message and replayed to that provider, and is never shown to the
+    #: user, summarised, or sent to any other provider.
+    reasoning: str | None = None
 
     @property
     def wants_tools(self) -> bool:
@@ -155,11 +164,11 @@ class VisionUnsupported(LLMUnavailable):
     """This provider, or the model it is configured with, cannot look at an image.
 
     Its own error rather than a bare `LLMUnavailable` because the caller does
-    something different with it. "Ollama is not running" is a fault to report;
-    "this model has no eyes" is a *capability* answer, and Phase 4.2's whole
-    discipline is that it must come back as `unchecked` rather than as a pass or
-    a failure. Folding the two together would make a missing vision model look
-    like a broken install.
+    something different with it. "The API key was rejected" is a fault to
+    report; "this model has no eyes" is a *capability* answer, and Phase 4.2's
+    whole discipline is that it must come back as `unchecked` rather than as a
+    pass or a failure. Folding the two together would make a missing vision
+    model look like a broken install.
     """
 
 
@@ -201,12 +210,13 @@ class LLMProvider(ABC):
     ) -> AssistantTurn:
         """One step of an agent loop: given the transcript, decide what to do next.
 
-        `messages` uses the OpenAI-shaped normal form, which Ollama and every
-        OpenAI-compatible server take as-is and the Anthropic provider
-        translates:
+        `messages` uses the OpenAI-shaped normal form, which every
+        OpenAI-compatible server takes (through a whitelist -- extra keys are
+        ours, not theirs) and the Anthropic provider translates:
 
             {"role": "user",      "content": str}
-            {"role": "assistant", "content": str, "tool_calls": [...]}
+            {"role": "assistant", "content": str, "tool_calls": [...],
+                                  "reasoning": str}   # optional, see AssistantTurn
             {"role": "tool",      "tool_call_id": str, "name": str, "content": str}
 
         `tools` is a list of OpenAI function schemas. Providers must return an
@@ -271,10 +281,10 @@ class LLMProvider(ABC):
         will work. The default refuses by name; a provider that can see
         overrides it.
 
-        The images are unlabelled on the wire — Ollama attaches them to the
-        message and has nowhere to put a caption — so the *order* is the only
-        thing tying an image to what it is a picture of, and the caller names
-        that order in `user`. Providers must not reorder them.
+        The images are unlabelled on the wire -- they are parts of one message
+        with nowhere to put a caption -- so the *order* is the only thing tying
+        an image to what it is a picture of, and the caller names that order in
+        `user`. Providers must not reorder them.
 
         Raises `VisionUnsupported` when the model cannot see, which is a
         different answer from failing: see Phase 4.2, where a check that could

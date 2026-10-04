@@ -13,13 +13,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-import httpx
 import pytest
 from sqlalchemy.orm import Session
 
 from app.ai import vision
-from app.ai.provider import AssistantTurn, Completion, LLMProvider, LLMUnavailable, TokenUsage
-from app.ai.providers.ollama import OllamaProvider
+from app.ai.provider import (
+    AssistantTurn,
+    Completion,
+    LLMProvider,
+    LLMUnavailable,
+    TokenUsage,
+    VisionUnsupported,
+)
 from app.ai.schemas import ImageReading
 from app.ai.tools import ToolBox, ToolError, tool_label
 from app.core import attachments
@@ -863,42 +868,27 @@ class TestAPictureNobodyCouldReadIsNotAnEmptyPicture:
         assert "model that can see" in detail
         assert "Describe what the picture shows" in detail
 
-    def test_a_text_only_model_is_not_asked(
-        self,
-        db_session: Session,
-        owner: User,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+    def test_a_text_only_model_is_not_described_as_empty(
+        self, db_session: Session, owner: User, tmp_path: Path
     ) -> None:
-        """Ollama does not refuse an image handed to a text-only model: it drops the
-        picture and describes nothing. The capability probe must stop the request
-        before the picture is sent, and the attachment must say why."""
-        asked: list[str] = []
-
-        def fake_post(url: str, **kwargs: Any) -> httpx.Response:
-            asked.append(url)
-            if url.endswith("/api/show"):
-                return httpx.Response(
-                    200,
-                    json={"capabilities": ["completion", "tools"]},
-                    request=httpx.Request("POST", url),
-                )
-            raise AssertionError(f"a text-only model was sent the picture at {url}")
-
-        monkeypatch.setattr(httpx, "post", fake_post)
-        provider = OllamaProvider("http://localhost:11434", "qwen3.5:9b", 5.0)
-
-        ingested = _attach_picture(
-            db_session, owner, tmp_path, "weld.png", PNG, vision.attachment_look(provider)
+        """A model that cannot see must not be recorded as having read a picture and
+        found nothing in it: the attachment says it was not read, and why."""
+        eyes = _Eyes(
+            VisionUnsupported(
+                "The model 'chat-model' cannot read images. Set AI_VISION_MODEL to one that can."
+            )
         )
 
-        assert asked == ["http://localhost:11434/api/show"]
+        ingested = _attach_picture(
+            db_session, owner, tmp_path, "weld.png", PNG, vision.attachment_look(eyes)
+        )
+
         attachment = ingested.attachment
         assert attachment.status is ExtractionStatus.UNSUPPORTED
         assert attachment.extracted is None
         detail = attachment.status_detail or ""
         assert "not read" in detail
-        assert "qwen3.5:9b" in detail
+        assert "chat-model" in detail
         assert "AI_VISION_MODEL" in detail
 
     def test_a_model_that_answers_with_nothing_is_a_failure(
@@ -915,10 +905,10 @@ class TestAPictureNobodyCouldReadIsNotAnEmptyPicture:
     def test_a_model_that_cannot_be_reached_is_a_failure_not_a_capability(
         self, db_session: Session, owner: User, tmp_path: Path
     ) -> None:
-        """"Ollama is not running" is a fault to report; "this model has no eyes" is a
+        """"The model is not reachable" is a fault to report; "this model has no eyes" is a
         capability answer. Filing the first as `unsupported` would tell the user the
         format is the problem."""
-        eyes = _Eyes(LLMUnavailable("Nothing is listening at localhost:11434."))
+        eyes = _Eyes(LLMUnavailable("Nothing is listening at the configured endpoint."))
 
         ingested = _attach_picture(
             db_session, owner, tmp_path, "weld.png", PNG, vision.attachment_look(eyes)

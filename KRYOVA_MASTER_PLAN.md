@@ -65,15 +65,15 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-09-16** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-10-04** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 15/24 | 122/133 = 92% | 138/151 eng-months = 92% |
-| Product — P1–P10 | 6/10 | 52/62 = 84% | 31/38 eng-months = 82% |
-| **Programme** | 21/34 | 174/195 = 89% | 170/189 eng-months = 90% |
+| Product — P1–P11 | 6/11 | 54/65 = 83% | 32/39 eng-months = 82% |
+| **Programme** | 21/35 | 176/198 = 89% | 170/190 eng-months = 90% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E14, E16, E17.3, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 88%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57% |
+| in flight | E8 92%, E9 75%, E13 88%, E15 80%, E17 83%, E18 88%, E21 58%, E22 62%, E23 75%, P4 86%, P9 57%, P11 67% |
 | nothing finished yet | P6, P7 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -7127,6 +7127,51 @@ scene in the Tauri app.
    > passing in every test that wrote and read one in a single session. Both now use the new
    > `models/types.EnumText`, which is `MessageRoleType` generalised — this is the same bug class
    > for the third and fourth time. No migration: the DDL is unchanged.
+
+##### Phase P11 — The hosted model provider (added 2026-10-04) #####
+
+*Added because the work taught the plan something it did not know: the user ruled on 2026-10-04
+that **no local model is supported, for testing or production**, and the agent's model moved from
+Ollama to a hosted one. Every claim about the hosted vendor was built from its API reference on a
+machine with no network, so the phase is open until a run with a key confirms it (THE QUEUE H).*
+
+**~1 engineer-month.**
+
+1. **One hosted provider, vendor by configuration** (`AI_PROVIDER` / `AI_MODEL` / `AI_BASE_URL` /
+   `AI_API_KEY` and nothing in code), with the transport a hosted API needs: bounded retries,
+   402/401 in words, a bounded repair for structured output, SSE streaming that falls back to
+   a whole request, and a vendor's own reasoning kept with the message and replayed.
+   > PARTIAL (2026-10-04) — `app/ai/providers/{openai_compatible,deepseek,nvidia}.py`, migration
+   > `c3a7d1f08b52` (`conversation_messages.reasoning`, nullable, never in a response), settings
+   > `AI_EFFORT_CHAT` / `AI_THINKING` / `AI_REASONING_BUDGET` (replacing `AI_NVIDIA_*`, whose
+   > default cap rose 4,096 → 8,192). DeepSeek is the default. **Offline-proven only:** the wire
+   > format is pinned against the vendor's reference, not measured — `reasoning_content` echo,
+   > JSON mode with thinking, image input, streaming and the cache report are THE QUEUE H1–H7.
+   > Also fixed on the way: NVIDIA's thinking flag was toggled on a shared singleton around each
+   > structured call, which raced across request threads; it is now a returned value.
+   > Tested by: `tests/test_deepseek_provider.py`, `tests/test_openai_compatible_resilience.py`,
+   > `tests/test_message_reasoning.py`, `tests/test_nvidia_provider.py`, `tests/test_ai.py`.
+
+2. **Remove the local-model path** — Ollama provider, its GPU/context knobs, its tests and every
+   claim that geometry stays on the machine by default.
+   > DONE (2026-10-04) — `app/ai/providers/ollama.py`, `AI_GPU_LAYERS`, three Ollama test files
+   > and the local-schema-budget framing are gone (`tests/test_schema_budget.py` keeps the budget,
+   > now stated for hosted models); CLAUDE.md, `.env.example`, both READMEs, the settings page and
+   > `docs/` no longer describe a local default. **Data now leaves the machine by default** — a
+   > summary of the geometry and load case goes to the configured vendor — and the READMEs say so.
+   > Tested by: `tests/test_schema_budget.py`, `tests/test_deepseek_provider.py`
+   > (`TestTheFactory.test_a_removed_provider_is_refused_by_name`).
+
+3. **Spend discipline: the prompt is the bill.** The tool registry is ~235 schemas / ~58k tokens a
+   step; what is sent each step must stay byte-stable so the vendor's prefix cache applies, agent
+   steps default to thinking off, and cache hits are logged when the vendor reports them.
+   > PARTIAL (2026-10-04) — stability pinned by `tests/test_prompt_cache_stability.py`; defaults
+   > pinned by `tests/test_deepseek_provider.py::TestTheShippedDefaultsAreTheCheapOnes`; the cache
+   > report by `tests/test_openai_compatible_resilience.py`. **Not done, on purpose:** tool
+   > retrieval (`AI_TOOL_LIMIT`) would send ~22–38 % of the schema bytes (measured offline at
+   > limits 40–80) but changes what the model sees, so it waits for an accuracy comparison
+   > (THE QUEUE H8, H9). Tested by: the files named above.
+
 ---
 
 ## Part 3 — Technology register
@@ -7203,6 +7248,7 @@ constrain architecture (Decision 4).
 8. P8 billing — 3. Standard, pre-GA.
 9. P9 delivery — 3. Starts week one.
 10. P10 docs and trust — 2+. Continuous.
+11. P11 hosted model provider — 1. Added 2026-10-04.
 
 **Programme total ≈ 189 engineer-months** — about 8–10 engineers × ~2 years, in ideal conditions.
 (It was 161 until Era VIII was added on 2026-09-09; the 28 months that arrived with it are work

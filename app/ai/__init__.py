@@ -1,7 +1,7 @@
 """AI features for Kryova.
 
 Layered behind `LLMProvider` (see `provider.py`) so the model that answers is a
-deployment choice, not a code dependency. Default is local Ollama.
+deployment choice, not a code dependency. Default is DeepSeek (hosted).
 """
 
 from app.ai.provider import (

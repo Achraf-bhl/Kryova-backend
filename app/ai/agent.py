@@ -70,15 +70,12 @@ logger = logging.getLogger(__name__)
 
 #: Ceiling on tool round-trips in a single user turn.
 #:
-#: Raised 8 -> 20 -> 60. The reasoning behind the first two numbers was that a
-#: step costs something, and here it does not: the provider is a local Ollama
-#: model on the engineer's own machine, so the only price of another round is
-#: wall-clock. Against that, the thing Kryova exists to build is a *machine*,
-#: and a machine is not a dozen calls. Measured on the seat 2026-09-07, a
-#: four-part punch press -- C-frame, ram, punch, die block, then a product,
-#: three component adds and the constraints -- passed step 34 with the assembly
-#: only starting. At 20 it could not have been reached from one prompt at all,
-#: and the run before it ended on the cap with nothing built.
+#: Raised 8 -> 20 -> 60. The thing Kryova exists to build is a *machine*, and a
+#: machine is not a dozen calls. Measured on the seat 2026-09-07, a four-part
+#: punch press -- C-frame, ram, punch, die block, then a product, three
+#: component adds and the constraints -- passed step 34 with the assembly only
+#: starting. At 20 it could not have been reached from one prompt at all, and
+#: the run before it ended on the cap with nothing built.
 #:
 #: A cap is a poor way to stop a stuck agent anyway, and it is no longer the way
 #: it is done: `MAX_IDENTICAL_READS` refuses a read repeated verbatim,
@@ -86,10 +83,11 @@ logger = logging.getLogger(__name__)
 #: ends the turn after a few of either. Those fire on *behaviour* and end a
 #: looping turn in seconds regardless of what is left in the budget. So the cap
 #: now only bites on an agent that is genuinely working, which is the one case
-#: it should never have been deciding.
+#: it should never have been deciding. It does still bound the bill: each round
+#: is billed tokens now that the model is hosted, so this is the ceiling on what
+#: one runaway turn can cost.
 #:
-#: Sixty steps is roughly twenty minutes of wall-clock at this model's ~20 s per
-#: round. `AI_MAX_STEPS` (or the `ai_max_steps` setting) moves it without a code
+#: `AI_MAX_STEPS` (or the `ai_max_steps` setting) moves it without a code
 #: change -- see `max_steps`.
 DEFAULT_MAX_STEPS = 60
 
@@ -648,7 +646,13 @@ def stream_agent(
                 corrections += 1
                 # The model's own words go in first: it has to see what it
                 # actually produced, or the correction is about nothing.
-                _append(db, conversation, MessageRole.ASSISTANT, content=turn.text or None)
+                _append(
+                    db,
+                    conversation,
+                    MessageRole.ASSISTANT,
+                    content=turn.text or None,
+                    reasoning=turn.reasoning,
+                )
                 _append(
                     db,
                     conversation,
@@ -710,7 +714,13 @@ def stream_agent(
             exhausted = bool(written or blank)
             if shortfall and not exhausted and nudges < MAX_VERIFICATION_NUDGES and step + 1 < budget:
                 nudges += 1
-                _append(db, conversation, MessageRole.ASSISTANT, content=turn.text or None)
+                _append(
+                    db,
+                    conversation,
+                    MessageRole.ASSISTANT,
+                    content=turn.text or None,
+                    reasoning=turn.reasoning,
+                )
                 _append(
                     db, conversation, MessageRole.USER,
                     content=prompts.CONTROL_NOTE + shortfall,
@@ -750,7 +760,9 @@ def stream_agent(
                     "\n\n[This answer was cut off at the model's output limit. "
                     "Ask me to continue, or narrow the question.]"
                 )
-            _append(db, conversation, MessageRole.ASSISTANT, content=text)
+            _append(
+                db, conversation, MessageRole.ASSISTANT, content=text, reasoning=turn.reasoning
+            )
             db.commit()
             yield {"type": "message", "content": text}
             yield {
@@ -787,6 +799,7 @@ def stream_agent(
                 }
                 for call in turn.tool_calls
             ],
+            reasoning=turn.reasoning,
         )
 
         if turn.text:

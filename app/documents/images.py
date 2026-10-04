@@ -22,10 +22,9 @@ socket. A `Look` answers with a `Sight` or raises one of this package's own
 errors:
 
 * `UnsupportedDocument` when no model here can see. That is a capability
-  answer, not a fault, and it matters most on Ollama, which does not refuse an
-  image handed to a text-only model: it drops the picture and describes
-  nothing, confidently. The provider's `_sees()` gate is what turns that into
-  this refusal.
+  answer, not a fault: a model handed a picture it cannot see may drop it and
+  describe nothing, confidently, so the provider's `VisionUnsupported` is what
+  turns that into this refusal.
 * `ExtractionFailed` when a model that should have answered did not: the
   provider was unreachable, refused, or returned something unusable.
 

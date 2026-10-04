@@ -1,36 +1,93 @@
 """Any server that speaks the OpenAI chat-completions shape.
 
-One implementation covers OpenAI itself, LM Studio, vLLM, llama.cpp's server,
-Groq, Together, OpenRouter and most self-hosted gateways -- they all expose
-`POST /v1/chat/completions` and accept `response_format: {"type": "json_schema"}`.
-Point `AI_BASE_URL` at whichever one you run.
+One implementation covers OpenAI itself, vLLM, Groq, Together, OpenRouter and
+most gateways -- they all expose `POST /v1/chat/completions` and accept
+`response_format: {"type": "json_schema"}`. Point `AI_BASE_URL` at whichever one
+you run. A vendor whose dialect differs (DeepSeek, NVIDIA) subclasses this and
+overrides the small class attributes and the one hook below; nothing else in the
+product knows which vendor answered.
 
 Kept deliberately SDK-free: the wire format is small and stable, and adding the
-`openai` package to reach a local llama.cpp would be a dependency for nothing.
+`openai` package would be a dependency for nothing.
+
+**What a vendor subclass can change, and nothing more:**
+
+* `_max_tokens_field` -- the request field that caps output. OpenAI's reasoning
+  models want `max_completion_tokens`; DeepSeek documents `max_tokens` and
+  silently ignores the other, so a cap the operator set would not apply.
+* `_reasoning_field` -- the message field a vendor requires its own reasoning
+  echoed back in (DeepSeek's `reasoning_content`). `None` for everyone else, and
+  then reasoning is neither kept nor replayed.
+* `_plan_reasoning` -- the extra request fields that switch reasoning on or off
+  for one call, and how many tokens of headroom it needs. It returns a value
+  instead of setting state because the provider is one cached instance shared by
+  every request thread: a flag toggled around a call is a race.
+* `_STREAMING` / `_STREAM_USAGE` -- whether the vendor is known to stream
+  correctly, and to take `stream_options`. Unknown fields are rejected outright
+  by some servers, so an option is sent only where it is known to be taken.
 """
 
 import base64
 import json
-from collections.abc import Sequence
-from typing import Any, TypeVar
+import logging
+import time
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Final, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.ai.provider import (
     AssistantTurn,
+    ChatEvent,
     Completion,
+    Finished,
     LLMError,
     LLMProvider,
     LLMRefusal,
     LLMUnavailable,
+    TextDelta,
     TokenUsage,
     ToolCall,
     image_media_type,
 )
 from app.ai.providers._json_schema import strictify
 
+logger = logging.getLogger(__name__)
+
 T = TypeVar("T", bound=BaseModel)
+
+#: Tokens a reasoning model may spend thinking on one call, beyond the answer's
+#: own cap -- the default of `AI_REASONING_BUDGET`. NVIDIA takes it as a field
+#: that bounds the reasoning; DeepSeek counts reasoning against the output cap
+#: and gets it as headroom. Generous enough for a real CATIA decision, short of
+#: a runaway: a model will happily spend thousands of tokens deliberating over
+#: "give the answer blue" if nothing stops it.
+DEFAULT_REASONING_BUDGET: Final = 8_192
+
+#: Attempts at one HTTP request before a transient failure is reported. A hosted
+#: API sheds load with 429 and 503 at peak, and every call here is idempotent --
+#: a chat completion mutates nothing, so a repeat is a fresh sample and not a
+#: duplicated action. A timeout is *not* retried: the caller's patience is spent.
+HTTP_ATTEMPTS = 3
+
+#: Statuses worth another attempt. A 4xx other than 429 is a bug in what was
+#: sent and fails identically forever.
+RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+RETRY_BACKOFF_S = 0.5
+#: Ceiling on how long a `Retry-After` header can make one attempt wait.
+MAX_RETRY_WAIT_S = 8.0
+
+#: Attempts at one structured answer. The second is told what was wrong with the
+#: first; a third would draw from the same distribution as the second.
+STRUCTURED_ATTEMPTS = 2
+
+#: Finish reasons that mean the server stopped generating for its own reasons
+#: (DeepSeek documents both). The partial answer is not an answer and, unlike
+#: `length`, asking again can succeed.
+INTERRUPTED_FINISH_REASONS = frozenset({"insufficient_system_resource", "aborted"})
 
 
 def _usage(body: dict[str, Any]) -> TokenUsage:
@@ -47,43 +104,93 @@ def _usage(body: dict[str, Any]) -> TokenUsage:
     )
 
 
-def _to_wire(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _log_prompt_cache(usage: dict[str, Any] | None) -> None:
+    """Say how much of the prompt the server billed as already seen, when it says.
+
+    DeepSeek reports `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`. It is
+    the only direct measure that the prompt is byte-stable between steps
+    (`tests/test_prompt_cache_stability.py` is the offline half), and a vendor
+    that reports nothing is simply silent here.
+    """
+    if not usage:
+        return
+    hit, miss = usage.get("prompt_cache_hit_tokens"), usage.get("prompt_cache_miss_tokens")
+    if isinstance(hit, int) and isinstance(miss, int) and hit + miss > 0:
+        logger.info("prompt cache: %d of %d prompt tokens were hits", hit, hit + miss)
+
+
+def _finish_reason(body: dict[str, Any]) -> str | None:
+    choices = body.get("choices") or [{}]
+    reason = choices[0].get("finish_reason")
+    return str(reason) if reason else None
+
+
+@dataclass(frozen=True)
+class Reasoning:
+    """What one call asks of the model's reasoning, in a vendor's own terms.
+
+    `enabled` is whether the model will reason on this call -- the provider needs
+    it to decide whether an earlier turn's reasoning must travel with the
+    transcript. `fields` are merged into the request body. `extra_tokens` is the
+    headroom added to the output cap, because a vendor that counts reasoning
+    against it would otherwise cut the answer off after thinking.
+    """
+
+    enabled: bool = False
+    fields: dict[str, Any] = field(default_factory=dict)
+    extra_tokens: int = 0
+
+
+def _to_wire(
+    messages: list[dict[str, Any]], *, reasoning_field: str | None = None
+) -> list[dict[str, Any]]:
     """Translate the agent's normal form into the OpenAI message shape.
 
-    Two things differ and both are silent failures if missed:
+    Three things differ and each is a silent failure if missed:
 
     * ``tool_calls[].function.arguments`` must be a **JSON-encoded string**, not
       an object. The agent stores the parsed dict (that is what every other
       provider wants), so replaying a transcript verbatim sends an object and a
       strict endpoint answers 400 with no indication of which field was wrong.
-    * Tool messages carry ``is_error``, which is ours, not OpenAI's. Only the
-      documented keys go on the wire; the error text is already in ``content``.
+    * Only the documented keys go on the wire. Tool messages carry ``is_error``
+      and ``name``, assistant messages carry ``reasoning`` -- all ours, and a
+      strict endpoint rejects a key it does not know. The error text is already
+      in ``content`` and ``tool_call_id`` already ties a result to its call.
+    * ``reasoning`` is sent, as ``reasoning_field``, only when the caller names
+      one -- that is, only to a vendor that requires it and only on a call where
+      the model will reason.
     """
     wire: list[dict[str, Any]] = []
     for message in messages:
-        if message.get("role") == "tool":
+        role = message.get("role")
+        if role == "tool":
             wire.append(
                 {
                     key: message[key]
-                    for key in ("role", "tool_call_id", "name", "content")
+                    for key in ("role", "tool_call_id", "content")
                     if key in message
                 }
             )
             continue
 
-        calls = message.get("tool_calls")
-        if not calls:
+        if role != "assistant":
             wire.append(message)
             continue
 
-        normalised = []
-        for call in calls:
-            function = dict(call.get("function") or {})
-            arguments = function.get("arguments")
-            if not isinstance(arguments, str):
-                function["arguments"] = json.dumps(arguments or {})
-            normalised.append({**call, "function": function})
-        wire.append({**message, "tool_calls": normalised})
+        entry: dict[str, Any] = {"role": "assistant", "content": message.get("content") or ""}
+        calls = message.get("tool_calls")
+        if calls:
+            normalised = []
+            for call in calls:
+                function = dict(call.get("function") or {})
+                arguments = function.get("arguments")
+                if not isinstance(arguments, str):
+                    function["arguments"] = json.dumps(arguments or {})
+                normalised.append({**call, "function": function})
+            entry["tool_calls"] = normalised
+        if reasoning_field and message.get("reasoning") is not None:
+            entry[reasoning_field] = message["reasoning"]
+        wire.append(entry)
     return wire
 
 
@@ -98,6 +205,12 @@ _RESPONSE_FORMAT_REJECTIONS = (
     "response_format",
     "json_schema",
     "response format",
+)
+
+
+_NO_STRUCTURED_OUTPUT = (
+    "This endpoint accepts neither json_schema nor json_object output, so a structured "
+    "answer cannot be requested from it."
 )
 
 
@@ -119,8 +232,114 @@ def _unfence(content: str) -> str:
     return (body[:closing] if closing != -1 else body).strip()
 
 
+def _repair_message(problem: str) -> str:
+    """The second attempt's brief: what was wrong, and the one rule that fixes it."""
+    first_line = problem.splitlines()[0] if problem else "The answer was empty."
+    return (
+        f"Your previous answer could not be used: {first_line} Answer again with "
+        "only the JSON object, every required field present, no field left as a "
+        "placeholder, and nothing outside the object."
+    )
+
+
+class _StreamAssembler:
+    """Folds a server-sent-events chat stream back into one response body.
+
+    The stream carries the answer in pieces: text in `delta.content`, a
+    reasoning vendor's chain of thought in `delta.reasoning_content`, and each
+    tool call as fragments keyed by `index` -- the first names the call, the
+    rest append to its `arguments` string. `body()` rebuilds the shape a
+    non-streaming response has, so `_parse_turn` reads both identically and a
+    vendor's override of it applies to both.
+    """
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._reasoning: list[str] = []
+        self._calls: dict[int, dict[str, Any]] = {}
+        self.finish_reason: str | None = None
+        self.usage: dict[str, Any] | None = None
+
+    @property
+    def finished(self) -> bool:
+        """Whether the server said why it stopped -- the mark of a whole stream."""
+        return self.finish_reason is not None
+
+    def feed(self, line: str) -> str:
+        """Take one line of the stream; return the text it carried, if any.
+
+        Blank lines, `:` comments (keep-alives) and non-`data:` fields are not
+        events. One unreadable `data:` line is skipped rather than fatal: an
+        answer that is otherwise arriving fine is not worth discarding for it.
+        """
+        line = line.strip()
+        if not line.startswith("data:"):
+            return ""
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            return ""
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            logger.warning("A model stream sent an unreadable line; skipping it")
+            return ""
+        if not isinstance(chunk, dict):
+            return ""
+
+        if chunk.get("usage"):
+            self.usage = chunk["usage"]
+        text = ""
+        for choice in chunk.get("choices") or []:
+            if choice.get("index", 0) != 0:
+                continue
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                text += delta["content"]
+                self._text.append(delta["content"])
+            if delta.get("reasoning_content"):
+                self._reasoning.append(delta["reasoning_content"])
+            for fragment in delta.get("tool_calls") or []:
+                self._add_call_fragment(fragment)
+            if choice.get("finish_reason"):
+                self.finish_reason = choice["finish_reason"]
+        return text
+
+    def _add_call_fragment(self, fragment: dict[str, Any]) -> None:
+        call = self._calls.setdefault(
+            int(fragment.get("index") or 0),
+            {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+        )
+        if fragment.get("id"):
+            call["id"] = fragment["id"]
+        function = fragment.get("function") or {}
+        # Named once. Concatenating would double a name a server repeats on every
+        # fragment, and a server that splits one name across fragments is not
+        # known to exist.
+        if function.get("name") and not call["function"]["name"]:
+            call["function"]["name"] = function["name"]
+        if function.get("arguments"):
+            call["function"]["arguments"] += function["arguments"]
+
+    def body(self) -> dict[str, Any]:
+        message: dict[str, Any] = {"content": "".join(self._text)}
+        if self._reasoning:
+            message["reasoning_content"] = "".join(self._reasoning)
+        if self._calls:
+            message["tool_calls"] = [self._calls[index] for index in sorted(self._calls)]
+        return {
+            "choices": [{"message": message, "finish_reason": self.finish_reason}],
+            "usage": self.usage or {},
+        }
+
+
 class OpenAICompatibleProvider(LLMProvider):
     name = "openai_compatible"
+
+    #: See the module docstring: the four knobs a vendor subclass may turn.
+    _max_tokens_field: ClassVar[str] = "max_completion_tokens"
+    _reasoning_field: ClassVar[str | None] = None
+    _STREAMING: ClassVar[bool] = True
+    _STREAM_USAGE: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -135,31 +354,32 @@ class OpenAICompatibleProvider(LLMProvider):
         self._model = model
         self.model = model
         #: Which model a visual check runs against, when it is not the one doing
-        #: the engineering. Unlike Ollama there is nothing to probe here — this
-        #: endpoint family publishes no capability list — so a model that cannot
-        #: see answers with a 400, which `look` reports rather than swallowing.
+        #: the engineering. There is nothing to probe here -- this endpoint
+        #: family publishes no capability list -- so a model that cannot see
+        #: answers with a 400, which `look` reports rather than swallowing.
         self._vision_model = (vision_model or "").strip() or None
         self._timeout = timeout_seconds
-        # Learned on first use, then remembered: see `_structured_payload`.
+        # Learned on first use, then remembered: see `_structured`.
         self._json_schema_supported = True
+        # Learned the same way: see `stream_chat`.
+        self._streaming_supported = self._STREAMING
 
-    def _extra_body(self) -> dict[str, Any]:
-        """Vendor fields to merge into every request. Empty for a plain endpoint.
+    def _plan_reasoning(
+        self, *, effort: str | None, messages: list[dict[str, Any]] | None
+    ) -> Reasoning:
+        """What this call asks of the model's reasoning. A plain endpoint asks nothing.
 
-        A subclass overrides this to reach a feature its vendor exposes outside
-        the OpenAI schema -- NVIDIA's reasoning controls are the case it exists
-        for. It is a hook rather than a config knob because the fields are not
-        interchangeable: this endpoint family *rejects* what it does not know.
-        NVIDIA answers `400 Validation: Unsupported parameter(s)`, so a field
-        that is right for one server takes another one down entirely, and
-        "merge whatever the operator put in the env" would be a way to break
-        every call with a typo.
+        `effort` is the structured-output hint (`complete`/`look`, and a chat call
+        with no tools); `None` means an agent step that may call tools, which
+        `messages` is the transcript of. A subclass answers
+        from its own configuration -- a method returning a value, because the
+        provider is shared across threads and per-call state would race.
         """
-        return {}
+        return Reasoning()
 
     def _headers(self) -> dict[str, str]:
         headers = {"content-type": "application/json"}
-        # Local servers (LM Studio, llama.cpp, vLLM) usually need no key.
+        # Self-hosted servers (vLLM, llama.cpp) usually need no key.
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"
         return headers
@@ -173,27 +393,29 @@ class OpenAICompatibleProvider(LLMProvider):
                 f"No OpenAI-compatible server answered at {self._base_url}."
             ) from exc
 
+    # -- requests -----------------------------------------------------------
+
     def _structured_payload(
-        self, system: str, user: str, schema: type[T], max_tokens: int
+        self, system: str, user: str, schema: type[T], max_tokens: int, effort: str
     ) -> dict[str, Any]:
         """One structured-output request, in whichever dialect this server takes.
 
         `json_schema` is the one that actually constrains decoding, so it is
         tried first and kept whenever it works. Not every OpenAI-compatible
-        endpoint has it: DeepSeek answers 400 "This response_format type is
-        unavailable now" for both its models, and it is the endpoint Kryova
-        runs against, so a hard failure here would take out load-case parsing
-        entirely. The fallback asks for `json_object` -- which does guarantee
+        endpoint has it: DeepSeek documents `text` and `json_object` only and
+        answers 400 "This response_format type is unavailable now" for the
+        rest. The fallback asks for `json_object` -- which does guarantee
         syntactically valid JSON -- and puts the schema in the system message.
         Pydantic still validates the result either way, so the guarantee that
         matters (nothing malformed reaches the caller) is unchanged; what is
         lost is the server refusing to emit a wrong shape in the first place.
         """
         json_schema = strictify(schema.model_json_schema())
+        plan = self._plan_reasoning(effort=effort, messages=None)
         payload: dict[str, Any] = {
-            **self._extra_body(),
+            **plan.fields,
             "model": self._model,
-            "max_completion_tokens": max_tokens,
+            self._max_tokens_field: max_tokens + plan.extra_tokens,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -218,33 +440,194 @@ class OpenAICompatibleProvider(LLMProvider):
         )
         return payload
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
-        try:
-            response = httpx.post(
-                f"{self._base_url}/chat/completions",
-                json=payload,
-                headers=self._headers(),
-                timeout=self._timeout,
-            )
-            response.raise_for_status()
-        except httpx.TimeoutException as exc:
-            raise LLMError(f"The model did not respond within {self._timeout:g}s.") from exc
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-            if status in (401, 403):
-                raise LLMUnavailable("The API key was rejected.") from exc
-            body = exc.response.text
-            if (
-                status == 400
-                and "response_format" in payload
-                and any(marker in body.lower() for marker in _RESPONSE_FORMAT_REJECTIONS)
-            ):
-                raise _ResponseFormatUnsupported(body[:200]) from exc
-            raise LLMError(f"Chat completion failed ({status}): {body[:200]}") from exc
-        except httpx.HTTPError as exc:
-            raise LLMError(f"Chat completion request failed: {exc}") from exc
+    def _chat_payload(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        # A step with no tools is a plain generation -- a title, a summary, the
+        # note written when the rounds run out -- not a decision about what to
+        # do next, so it is hinted like structured output and does not reason.
+        # `None` is reserved for the step that chooses a tool.
+        plan = self._plan_reasoning(effort=None if tools else "low", messages=messages)
+        payload: dict[str, Any] = {
+            **plan.fields,
+            "model": self._model,
+            self._max_tokens_field: max_tokens + plan.extra_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                *_to_wire(
+                    messages,
+                    reasoning_field=self._reasoning_field if plan.enabled else None,
+                ),
+            ],
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        return payload
 
-        return dict(response.json())
+    # -- transport ----------------------------------------------------------
+
+    def _wait(self, attempt: int, response: httpx.Response | None) -> None:
+        """Sleep before the next attempt: the server's `Retry-After`, else backoff."""
+        delay = RETRY_BACKOFF_S * attempt
+        if response is not None:
+            try:
+                delay = max(delay, float(response.headers.get("retry-after", "")))
+            except ValueError:
+                pass
+        time.sleep(min(delay, MAX_RETRY_WAIT_S))
+
+    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+        for attempt in range(1, HTTP_ATTEMPTS + 1):
+            last = attempt == HTTP_ATTEMPTS
+            try:
+                response = httpx.post(
+                    f"{self._base_url}/chat/completions",
+                    json=payload,
+                    headers=self._headers(),
+                    timeout=self._timeout,
+                )
+                response.raise_for_status()
+            except httpx.TimeoutException as exc:
+                raise LLMError(f"The model did not respond within {self._timeout:g}s.") from exc
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if status in (401, 403):
+                    raise LLMUnavailable("The API key was rejected.") from exc
+                if status == 402:
+                    raise LLMUnavailable(
+                        "The provider reports the account has no balance (HTTP 402). "
+                        "Top it up, then try again."
+                    ) from exc
+                error_text = exc.response.text
+                if (
+                    status == 400
+                    and "response_format" in payload
+                    and any(marker in error_text.lower() for marker in _RESPONSE_FORMAT_REJECTIONS)
+                ):
+                    raise _ResponseFormatUnsupported(error_text[:200]) from exc
+                if status in RETRYABLE_STATUSES and not last:
+                    logger.warning(
+                        "Chat completion got %s; retrying %d of %d", status, attempt + 1, HTTP_ATTEMPTS
+                    )
+                    self._wait(attempt, exc.response)
+                    continue
+                raise LLMError(f"Chat completion failed ({status}): {error_text[:200]}") from exc
+            except httpx.HTTPError as exc:
+                if not last:
+                    logger.warning(
+                        "Chat completion request failed (%s); retrying %d of %d",
+                        exc,
+                        attempt + 1,
+                        HTTP_ATTEMPTS,
+                    )
+                    self._wait(attempt, None)
+                    continue
+                raise LLMError(f"Chat completion request failed: {exc}") from exc
+
+            try:
+                body = dict(response.json())
+            except ValueError as exc:
+                raise LLMError("The model server answered with something that is not JSON.") from exc
+            reason = _finish_reason(body)
+            if reason in INTERRUPTED_FINISH_REASONS:
+                if not last:
+                    logger.warning(
+                        "The server stopped generating early (%s); retrying %d of %d",
+                        reason,
+                        attempt + 1,
+                        HTTP_ATTEMPTS,
+                    )
+                    self._wait(attempt, None)
+                    continue
+                raise LLMError(
+                    f"The provider stopped generating before the answer was finished ({reason}). "
+                    "That is the server being short of capacity -- try again shortly."
+                )
+            _log_prompt_cache(body.get("usage"))
+            return body
+        raise AssertionError("unreachable: the final attempt returns or raises")
+
+    # -- structured output --------------------------------------------------
+
+    def _structured(
+        self, build: Callable[[], dict[str, Any]], schema: type[T], *, refusal: str
+    ) -> Completion[T]:
+        """Send a structured request and validate the answer, with one repair attempt.
+
+        `build` makes the request afresh each time because what it contains
+        depends on state this method changes: whether `json_schema` is
+        available, learned from the first rejection. The shared body of
+        `complete` and `look`, which differ only in what the request holds.
+
+        An empty or invalid answer is asked for once more with the defect named
+        -- a retry that repeats the request draws another sample from the same
+        distribution, one that names the problem is an easier question. A
+        hosted JSON mode is not constrained decoding (DeepSeek documents that
+        it "may occasionally return empty content"), so this is a routine path,
+        not a rare one. Never a third attempt.
+        """
+        usage = TokenUsage()
+        problem = ""
+
+        def request() -> dict[str, Any]:
+            payload = build()
+            if problem:
+                payload["messages"].append({"role": "user", "content": _repair_message(problem)})
+            return payload
+
+        for attempt in range(1, STRUCTURED_ATTEMPTS + 1):
+            try:
+                body = self._post(request())
+            except _ResponseFormatUnsupported:
+                if not self._json_schema_supported:
+                    raise LLMError(_NO_STRUCTURED_OUTPUT) from None
+                # The endpoint speaks the chat API but not schema-constrained
+                # output. Remembered, so this costs one 400 per process and not
+                # one per call.
+                self._json_schema_supported = False
+                try:
+                    body = self._post(request())
+                except _ResponseFormatUnsupported:
+                    raise LLMError(_NO_STRUCTURED_OUTPUT) from None
+
+            usage += _usage(body)
+            choices = body.get("choices") or []
+            if not choices:
+                raise LLMError("The model returned no choices.")
+            choice = choices[0]
+            if choice.get("finish_reason") == "content_filter":
+                raise LLMRefusal(refusal)
+            if choice.get("finish_reason") == "length":
+                raise LLMError(
+                    "The model hit the output limit before finishing. Raise AI_MAX_TOKENS "
+                    "(or AI_REASONING_BUDGET for a reasoning model)."
+                )
+
+            content = _unfence((choice.get("message") or {}).get("content") or "")
+            if not content.strip():
+                problem = "The model returned an empty response."
+            else:
+                try:
+                    return Completion(value=schema.model_validate_json(content), usage=usage)
+                except ValidationError as exc:
+                    problem = (
+                        f"The model returned output that does not match the expected schema: {exc}"
+                    )
+            if attempt < STRUCTURED_ATTEMPTS:
+                logger.warning(
+                    "Structured answer for %s failed (%s); retrying %d of %d with the problem "
+                    "fed back",
+                    schema.__name__,
+                    problem.splitlines()[0],
+                    attempt,
+                    STRUCTURED_ATTEMPTS - 1,
+                )
+        raise LLMError(problem)
 
     def complete(
         self,
@@ -255,33 +638,11 @@ class OpenAICompatibleProvider(LLMProvider):
         effort: str,
         max_tokens: int,
     ) -> Completion[T]:
-        try:
-            body = self._post(self._structured_payload(system, user, schema, max_tokens))
-        except _ResponseFormatUnsupported:
-            # The endpoint speaks the chat API but not schema-constrained output.
-            # Remembered, so this costs one 400 per process and not one per call.
-            self._json_schema_supported = False
-            body = self._post(self._structured_payload(system, user, schema, max_tokens))
-        choices = body.get("choices") or []
-        if not choices:
-            raise LLMError("The model returned no choices.")
-
-        choice = choices[0]
-        if choice.get("finish_reason") == "content_filter":
-            raise LLMRefusal("The provider's content filter rejected this request.")
-        if choice.get("finish_reason") == "length":
-            raise LLMError("The model hit the output limit before finishing. Raise AI_MAX_TOKENS.")
-
-        content = _unfence((choice.get("message") or {}).get("content") or "")
-        if not content.strip():
-            raise LLMError("The model returned an empty response.")
-
-        try:
-            return Completion(value=schema.model_validate_json(content), usage=_usage(body))
-        except ValidationError as exc:
-            raise LLMError(
-                f"The model returned output that does not match the expected schema: {exc}"
-            ) from exc
+        return self._structured(
+            lambda: self._structured_payload(system, user, schema, max_tokens, effort),
+            schema,
+            refusal="The provider's content filter rejected this request.",
+        )
 
     def look(
         self,
@@ -302,72 +663,32 @@ class OpenAICompatibleProvider(LLMProvider):
         """
         if not images:
             raise LLMError("A visual check needs at least one image.")
-        payload = self._structured_payload(system, user, schema, max_tokens)
-        payload["model"] = self._vision_model or self._model
-        payload["messages"][-1]["content"] = [
-            *(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{image_media_type(one)};base64,"
-                        + base64.b64encode(one).decode("ascii")
-                    },
-                }
-                for one in images
-            ),
-            # The question after the pictures: the parts are read in order, and
-            # one asked first is asked about nothing.
-            {"type": "text", "text": payload["messages"][-1]["content"]},
-        ]
 
-        try:
-            body = self._post(payload)
-        except _ResponseFormatUnsupported:
-            self._json_schema_supported = False
-            retry = self._structured_payload(system, user, schema, max_tokens)
-            retry["model"] = payload["model"]
-            retry["messages"][-1]["content"] = payload["messages"][-1]["content"]
-            body = self._post(retry)
+        def build() -> dict[str, Any]:
+            payload = self._structured_payload(system, user, schema, max_tokens, effort)
+            payload["model"] = self._vision_model or self._model
+            payload["messages"][-1]["content"] = [
+                *(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{image_media_type(one)};base64,"
+                            + base64.b64encode(one).decode("ascii")
+                        },
+                    }
+                    for one in images
+                ),
+                # The question after the pictures: the parts are read in order,
+                # and one asked first is asked about nothing.
+                {"type": "text", "text": payload["messages"][-1]["content"]},
+            ]
+            return payload
 
-        choices = body.get("choices") or []
-        if not choices:
-            raise LLMError("The model returned no choices.")
-        choice = choices[0]
-        if choice.get("finish_reason") == "content_filter":
-            raise LLMRefusal("The provider's content filter rejected this render.")
-        if choice.get("finish_reason") == "length":
-            raise LLMError("The model hit the output limit before finishing. Raise AI_MAX_TOKENS.")
+        return self._structured(
+            build, schema, refusal="The provider's content filter rejected this render."
+        )
 
-        content = _unfence((choice.get("message") or {}).get("content") or "")
-        if not content.strip():
-            raise LLMError("The model returned an empty response.")
-        try:
-            return Completion(value=schema.model_validate_json(content), usage=_usage(body))
-        except ValidationError as exc:
-            raise LLMError(
-                f"The model returned output that does not match the expected schema: {exc}"
-            ) from exc
-
-    def _chat_payload(
-        self,
-        system: str,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        max_tokens: int,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            **self._extra_body(),
-            "model": self._model,
-            "max_completion_tokens": max_tokens,
-            "messages": [
-                {"role": "system", "content": system},
-                *_to_wire(messages),
-            ],
-        }
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
-        return payload
+    # -- agent steps --------------------------------------------------------
 
     def _parse_turn(self, body: dict[str, Any]) -> AssistantTurn:
         """Read one chat response into the agent's normal form.
@@ -401,11 +722,13 @@ class OpenAICompatibleProvider(LLMProvider):
                     arguments=arguments or {},
                 )
             )
+        reasoning = message.get(self._reasoning_field) if self._reasoning_field else None
         return AssistantTurn(
             text=message.get("content") or "",
             tool_calls=calls,
             usage=_usage(body),
             truncated=choice.get("finish_reason") == "length",
+            reasoning=reasoning if isinstance(reasoning, str) else None,
         )
 
     def chat(
@@ -417,3 +740,78 @@ class OpenAICompatibleProvider(LLMProvider):
         max_tokens: int,
     ) -> AssistantTurn:
         return self._parse_turn(self._post(self._chat_payload(system, messages, tools, max_tokens)))
+
+    def stream_chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> Iterator[ChatEvent]:
+        """The same request with `stream: true`, yielding text as it is written.
+
+        The deltas are for display only: `Finished.turn` is assembled from the
+        whole stream and is the answer, tool calls included.
+
+        **A stream that fails part-way falls back to the whole request rather
+        than raising.** `_post`'s retry cannot help here -- some of the answer
+        has already been shown, and re-issuing would double it -- so a broken
+        stream is repeated once as a *non-streaming* call, whose text replaces
+        what was shown rather than appending to it. That is why the contract is
+        that `Finished.turn.text` is the answer and the deltas never were.
+        Errors the whole request raises properly (a rejected key, no balance)
+        therefore surface from it, with their words, and not from here.
+
+        A server that rejects the streaming form itself (a 400, 404 or 422
+        where the plain request then works) is remembered and not asked again.
+        """
+        if not self._streaming_supported:
+            yield Finished(
+                self.chat(system=system, messages=messages, tools=tools, max_tokens=max_tokens)
+            )
+            return
+
+        payload = self._chat_payload(system, messages, tools, max_tokens)
+        payload["stream"] = True
+        if self._STREAM_USAGE:
+            payload["stream_options"] = {"include_usage": True}
+
+        assembled = _StreamAssembler()
+        rejected_with: int | None = None
+        broke = False
+        try:
+            with httpx.stream(
+                "POST",
+                f"{self._base_url}/chat/completions",
+                json=payload,
+                headers=self._headers(),
+                timeout=self._timeout,
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    delta = assembled.feed(line)
+                    if delta:
+                        yield TextDelta(delta)
+        except httpx.HTTPError as exc:
+            broke = True
+            if isinstance(exc, httpx.HTTPStatusError):
+                rejected_with = exc.response.status_code
+            logger.warning("A model stream failed (%s); falling back to a whole request", exc)
+
+        if not assembled.finished or assembled.finish_reason in INTERRUPTED_FINISH_REASONS:
+            if not broke:
+                logger.warning("A model stream ended without a usable finish; repeating it whole")
+            turn = self.chat(system=system, messages=messages, tools=tools, max_tokens=max_tokens)
+            if rejected_with in (400, 404, 422):
+                self._streaming_supported = False
+                logger.warning(
+                    "This endpoint rejected the streaming form (%s) but answers the plain "
+                    "one; it will not be asked to stream again",
+                    rejected_with,
+                )
+            yield Finished(turn)
+            return
+
+        _log_prompt_cache(assembled.usage)
+        yield Finished(self._parse_turn(assembled.body()))

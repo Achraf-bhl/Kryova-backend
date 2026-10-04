@@ -15,6 +15,28 @@ happened.
 
 ## Now
 
+> **Handoff, 2026-10-04 — the agent's model is a hosted one (DeepSeek), local models are gone,
+> and nothing about the vendor has run against the live endpoint.** The user ruled that no local
+> LLM is supported, for testing or production. Master plan **P11** records it (task 1 PARTIAL,
+> task 2 DONE, task 3 PARTIAL). The first session with an API key reads **THE QUEUE section H**
+> (`docs/WINDOWS_VERIFICATION.md`) before any ladder run: a tool-calling chain's second step
+> (the `reasoning_content` echo), JSON mode with thinking, image input, SSE streaming, the cache
+> report, then `AI_EFFORT_CHAT` low versus high and `AI_TOOL_LIMIT` 0 versus 60.
+> **Operator action:** `.env` still carries the OpenRouter settings — set `AI_PROVIDER=deepseek`,
+> `AI_MODEL=deepseek-flash`, `AI_API_KEY=<key>` in `.env.local` and unset `AI_BASE_URL`.
+> `AI_NVIDIA_THINKING` / `AI_NVIDIA_REASONING_BUDGET` were renamed `AI_THINKING` /
+> `AI_REASONING_BUDGET` with no alias (an old value is silently ignored), and the NVIDIA default
+> reasoning cap rose from 4,096 to 8,192.
+> **Schema change:** migration `c3a7d1f08b52` adds nullable `conversation_messages.reasoning`.
+> **Pre-existing, found and fixed on the way:** 11 ruff findings and 5 mypy errors that the tree
+> carried although this file says both are clean (`pychrono` is now a declared untyped import;
+> `app/api/routes/kernel.py` no longer calls a `None` runner). **Pre-existing and not fixed:**
+> `tests/test_dynamics_chrono.py::TestEveryResultSaysItIsUnverified::
+> test_the_unverified_note_names_where_the_oracle_runs_are_recorded` fails on a clean HEAD
+> (`UNVERIFIED_NOTE` does not contain `WINDOWS_VERIFICATION`).
+> **No continuation job was scheduled this turn:** it was interactive, at the user's direction,
+> and the chain below was stopped by the user on 2026-09-16.
+
 > **Continuation, 2026-09-16 11:07 — three mission rungs, and the ladder gained a fourth kind
 > of rung to hold the third.**
 > Linux writes code and tests and **runs no pytest, ruff or mypy** (the user's rule; Windows runs
@@ -464,6 +486,17 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-10-04 — the agent's model moved from Ollama to a hosted one (DeepSeek by default), with
+  vendor-by-configuration, and the local path removed (P11).** `OpenAICompatibleProvider` gained
+  bounded retries (429/5xx/connection/interrupted, `Retry-After`), 401/402 in words, a bounded
+  structured-output repair, SSE streaming with a whole-request fallback, and a `Reasoning` value
+  returned per call; `DeepSeekProvider` (new) keeps `reasoning_content` on the message
+  (migration `c3a7d1f08b52`), replays it, and runs a step with thinking off when the current
+  chain cannot be echoed; NVIDIA moved onto the same hook, fixing a flag race. Agent steps
+  default to thinking off. Removed: `providers/ollama.py`, `AI_GPU_LAYERS`, three Ollama test
+  files, `ADDED_SYMBOLS.md`, `image.png`, `Kryova.png`. Added: `test_deepseek_provider.py`,
+  `test_openai_compatible_resilience.py`, `test_message_reasoning.py`,
+  `test_prompt_cache_stability.py`. Unmeasured against the live vendor: THE QUEUE H.
 - **2026-09-16 (late) — three mission rungs: E18.4, E18.5, E18.7. The ladder went 4/9 to 7/9
   and gained a fourth kind of rung to hold the last one.**
   **E18.4** (`a2261c9`): M4, the gearbox. Three claims that must agree and only one is

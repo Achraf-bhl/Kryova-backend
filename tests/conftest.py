@@ -254,9 +254,9 @@ def client(
     app.dependency_overrides[get_media_store] = lambda: media_store
 
     app.dependency_overrides[get_media_service] = lambda: MediaService(db_session, media_store)
-    # No model looks at an attached picture unless a test hands one in. The
-    # default provider is Ollama on localhost, so without this a test attaching
-    # a PNG would open a socket and its outcome would depend on what is running.
+    # No model looks at an attached picture unless a test hands one in. A
+    # test attaching a PNG would otherwise call the configured hosted model with
+    # a real key, spending tokens and making its outcome depend on the network.
     app.dependency_overrides[get_attachment_look] = lambda: None
     # Jobs run inline on the request thread, against the same transaction the
     # test holds open. A worker thread would use its own connection and see none

@@ -645,8 +645,8 @@ class TestTokenBudget:
             user=user,
             usage=TokenUsage(),
             purpose=token_usage.PURPOSE_TITLE,
-            provider="ollama",
-            model="qwen",
+            provider="deepseek",
+            model="deepseek-flash",
         )
         rows = db_session.query(AITokenUsage).filter_by(user_id=user.id).all()
         assert len(rows) == 1

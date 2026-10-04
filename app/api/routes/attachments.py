@@ -64,8 +64,8 @@ def get_attachment_look() -> AttachmentLook | None:
     """How an attached PNG or JPEG is read: the configured provider's model, or nothing.
 
     `None` only when no provider can be built at all. A provider whose model
-    cannot see is still returned, because its own refusal (Ollama's `_sees()`
-    gate) is the reason the attachment then records. `tests/conftest.py`
+    cannot see is still returned, because its own refusal (`VisionUnsupported`)
+    is the reason the attachment then records. `tests/conftest.py`
     overrides this to `None` for every test, so no test reaches a model by
     attaching a picture.
     """

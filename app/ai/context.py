@@ -317,6 +317,8 @@ def _replay(message: ConversationMessage) -> dict[str, Any]:
         entry: dict[str, Any] = {"role": "assistant", "content": message.content or ""}
         if message.tool_calls:
             entry["tool_calls"] = message.tool_calls
+        if message.reasoning is not None:
+            entry["reasoning"] = message.reasoning
         return entry
     return {
         "role": "tool",

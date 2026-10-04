@@ -1,18 +1,13 @@
 """Every request and every agent step reports how long it took.
 
-A number nobody prints is a number nobody optimises. The clearest evidence is
-the GPU offload defect found on 2026-09-06: the model had been running at 43%
-of its speed for weeks, with one layer of thirty-four left on the CPU, and
-nothing anywhere reported a token rate -- so every turn merely *felt* slow and
-there was nothing to point at. Two lines of logging would have made it
-obvious the first day.
+A number nobody prints is a number nobody optimises. A model that ran at 43% of
+its speed for weeks went unnoticed because nothing reported a rate, so every turn
+merely *felt* slow and there was nothing to point at.
 
-Three timings, because they are optimised in three different places:
+Two timings here, because they are optimised in different places (the agent
+step line also carries the prompt tokens, which drive both cost and speed):
 
 * **the endpoint** -- what the browser waited for, including the database;
-* **the model** -- generation speed from Ollama's own counters, which is the
-  only honest measure of whether the model is on the GPU (wall time mixes in
-  the prompt, the queue and the network);
 * **the tools** -- per call, named, because a slow turn is usually one COM
   round trip to CATIA and not the model at all.
 
@@ -20,7 +15,7 @@ Three timings, because they are optimised in three different places:
 and the browser's own network panel renders it, so the number is in front of
 whoever is looking at the frontend rather than only in a file on the server.
 
-Offline: no database, no Ollama, no CATIA.
+Offline: no database, no model, no CATIA.
 """
 
 from __future__ import annotations
@@ -39,10 +34,6 @@ from app.main import SLOW_REQUEST_MS, AccessLogMiddleware
 AGENT_SOURCE = (Path(__file__).resolve().parent.parent / "app" / "ai" / "agent.py").read_text(
     encoding="utf-8"
 )
-OLLAMA_SOURCE = (
-    Path(__file__).resolve().parent.parent / "app" / "ai" / "providers" / "ollama.py"
-).read_text(encoding="utf-8")
-
 
 @pytest.fixture
 def app() -> FastAPI:
@@ -152,49 +143,6 @@ class TestTheAgentLine:
         """Prompt tokens drive both the cost and the speed, and a turn that
         got slower usually got longer first."""
         assert "prompt tokens" in self._loop()
-
-
-class TestTheModelLine:
-    def test_the_rate_comes_from_ollamas_own_counters(self) -> None:
-        """Wall time mixes in the prompt, the queue and the network. A slow
-        turn on a fast model has to look different from a fast turn on a slow
-        one, or the offload regression is invisible again."""
-        assert "eval_count" in OLLAMA_SOURCE
-        assert "eval_duration" in OLLAMA_SOURCE
-        assert "tok/s" in OLLAMA_SOURCE
-
-    def test_a_response_with_no_counters_logs_nothing(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """A missing counter is not an error on the agent's path."""
-        from app.ai.providers.ollama import _log_generation_speed
-
-        with caplog.at_level(logging.INFO, logger="app.ai.providers.ollama"):
-            _log_generation_speed("m", {}, 1.0)
-            _log_generation_speed("m", {"eval_count": 0, "eval_duration": 0}, 1.0)
-            _log_generation_speed("m", {"eval_count": "x", "eval_duration": None}, 1.0)
-        assert not [r for r in caplog.records if "tok/s" in r.getMessage()]
-
-    def test_the_rate_is_tokens_over_ollamas_own_duration(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        from app.ai.providers.ollama import _log_generation_speed
-
-        with caplog.at_level(logging.INFO, logger="app.ai.providers.ollama"):
-            # 120 tokens in 2 seconds is 60 tok/s, whatever the wall clock says.
-            _log_generation_speed("qwen3.5:9b", {"eval_count": 120, "eval_duration": 2_000_000_000}, 9.9)
-        line = next(r.getMessage() for r in caplog.records if "tok/s" in r.getMessage())
-        assert "60.0 tok/s" in line
-        assert "120 tokens" in line
-
-    def test_it_runs_on_the_agent_path(self) -> None:
-        """A helper nothing calls measures nothing."""
-        tree = ast.parse(OLLAMA_SOURCE)
-        node = next(
-            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "chat"
-        )
-        body = ast.get_source_segment(OLLAMA_SOURCE, node) or ""
-        assert "_log_generation_speed(" in body
 
 
 class TestItDoesNotCostWhatItMeasures:

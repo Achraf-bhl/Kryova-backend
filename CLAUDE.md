@@ -355,39 +355,28 @@ session.**
    row named "This workstation" and runs `catia_bridge run --wait-for-catia` with the token
    passed by environment. A hand-paired second daemon cannot start beside it — `bridge.lock` is
    held, one daemon per machine — so pairing by hand is not just unnecessary, it fails.
-5. **The model is `qwen3.5:9b`**, configured in `.env.local`. Chosen over `qwen3-coder:30b` on the
-   grounds that matter here: the 30b is 22 GB on an 8 GB card, runs 72% on the CPU, and took two
-   and a half minutes to answer with a single word — a CATIA build is tens of turns of that. The
-   9b returns a correct structured `tool_call` in 8–15 s with the full tool payload, and sits 81%
-   on the GPU at `num_ctx=32768` with `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0`.
-   Dropping the window to 16k only reaches 86% — the weights are the bulk, not the KV cache — so
-   the full window is kept. A truncated prompt is refused loudly by `app/ai/providers/ollama.py`
-   and would end a long run.
-6. **Confirm Ollama is actually on the GPU before a gate**: `ollama ps` for the CPU/GPU split,
-   `nvidia-smi` for resident bytes. A gate run on the CPU measures patience, not the product.
-   **But `ollama ps` saying `100% GPU` is not evidence of anything on Windows, and on a model
-   bigger than the card it is the signature of the *slowest* configuration there is.** WDDM lets
-   a process over-commit VRAM and pages it over PCIe instead of refusing, so `AI_GPU_LAYERS=all`
-   on a model that does not fit reports a perfect split while running at a crawl. Measured
-   2026-09-11, `qwen3.6:27b` (15.7 GB of weights) on the 7.9 GiB card at `num_ctx=32768`:
-   `num_gpu=26` gives `60%/40% CPU/GPU` and **8.38 tok/s**; `num_gpu=999` (what `all` sends)
-   gives `100% GPU` and **0.53 tok/s** — **15.8× slower**, with llama.cpp logging
-   `CUDA0 model buffer size = 15364.44 MiB` on an 8 GB card and the run never appearing in
-   `ollama ps` at all while it thrashed. So **read the server log's `CUDA0 model buffer size`
-   against `nvidia-smi`'s total**, and treat the two numbers, not the percentage, as the answer.
-7. **`AI_GPU_LAYERS` is a per-model value and nothing checks that the model fits.** `all` in
-   `.env.local` was measured on `qwen3.5:9b`, which does fit; it is actively harmful on anything
-   larger, for the reason above. Re-decide it whenever `AI_MODEL` changes. And note that an
-   **empty** environment variable does *not* override `.env.local` — `$env:AI_GPU_LAYERS=""`
-   still resolves to `'all'`, while `"26"` resolves to `'26'`. The env-var override trick works
-   for setting a knob, never for unsetting one.
+5. **The model is a hosted one, and no local model is supported or wanted** (the user's rule,
+   2026-10-04: no Ollama or any local LLM, not for testing and not for production). The default is
+   `AI_PROVIDER=deepseek`, `AI_MODEL=deepseek-flash`, `AI_API_KEY` in `.env.local`; moving to
+   OpenAI or Anthropic is `AI_PROVIDER` / `AI_MODEL` / `AI_BASE_URL` and nothing in code
+   (`openai_compatible` reaches OpenAI itself). **Nothing about DeepSeek has been measured against
+   the live endpoint** — it was built from the vendor's API reference on a machine with no network,
+   and each unverified fact is a row in THE QUEUE. The first gate run with a key is therefore a
+   verification of the provider before it is a test of the product: read `reasoning_content`
+   echo, JSON mode, image input and streaming off the first transcript.
+6. **A hosted model bills every token and the agent resends everything each step.** The tool
+   registry alone is ~235 schemas / ~58k tokens with every tool offered, so what is sent must stay
+   byte-stable (`tests/test_prompt_cache_stability.py`) and the cheap defaults are deliberate:
+   agent steps run with thinking **off** (`AI_EFFORT_CHAT=low`); structured output and tool-less
+   chat never reason. Raise `AI_EFFORT_CHAT` to buy judgement and measure it on the ladder.
+   `AI_TOOL_LIMIT` would cut the offered schemas by ~70–78 % (measured offline, limit 40–80) but
+   changes what the model sees, so it stays off until a gate run compares accuracy.
 
-**Why it is batched.** Driving a real conversation through the local model against a real seat is
+**Why it is batched.** Driving a real conversation through the model against a real seat is
 the only test that has ever found the defects that matter — every one of the seven found on
 2026-09-05 was invisible to the offline suite and left the geometry looking plausible. It is also
-four to seven minutes per prompt on this hardware. So work runs in **stretches** (pytest only,
-Ollama stopped so the card is free) separated by **gates** (the whole product, once, properly).
-The gates are listed in the master plan's Part 2.
+four to seven minutes per prompt. So work runs in **stretches** (pytest only) separated by
+**gates** (the whole product, once, properly). The gates are listed in the master plan's Part 2.
 
 ## Commands
 
@@ -809,16 +798,13 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    and `tests/test_kernel_unsupported_arguments.py` are the shape to copy — and note that the
    `harmless` value is per-argument, because `catia_bill_of_materials.recursive` defaults to
    **true**, so a table assuming every flag defaults to false has that one backwards.
-11. **On a local model, prompt *re-processing* is the cost, not generation — and it grows with
-   the transcript.** Measured 2026-09-11 with `qwen3.6:27b` at 60/40 CPU/GPU: generation 8.38
-   tok/s, but **prompt processing 3.7–7.9 tok/s**, and Ollama logged
-   `KV cache shifting is not supported for this context, disabling KV cache shifting` with
-   `cached n_tokens = 16384` against `task.n_tokens = 25933`. So ~9,500 tokens were re-read
-   **every step** — about 20 minutes before a single new token — and ladder L4 never reached the
-   solver. A turn that is fine at step 3 is unusable at step 17. Before blaming the agent for
-   stalling, read the ollama server log's `prompt processing` line: a slow *gate* is usually the
-   model, and a gate that dies in the middle is usually this. An MoE with few active parameters
-   (`qwen3.6:35b-a3b`) does not have this problem the way a dense 27b does.
+11. **On a hosted model the prompt is the bill, and it grows with the transcript.** Every agent
+   step resends the system prompt, the tool registry and the window; only a byte-identical prefix
+   is billed at the cache rate. So never put anything that varies per turn ahead of the state
+   block (`build_messages` places it last on purpose), never build a prompt from a set or a clock,
+   and read the `agent step … prompt tokens` log line before blaming the model for a slow or dear
+   turn. (The earlier version of this item was a local-model measurement and went with the local
+   providers.)
 12. **Two small defects that each look survivable can be conclusive together.** The same L2 run
    hit the `_refused_before` guard blocking a correct retry *and* the listing above. Defect one
    induced a false belief; defect two corroborated it. The model is a competent recoverer — it
@@ -1595,12 +1581,12 @@ line). `structure.py` holds what every structured reader shares; `tables.py`, `o
 11. **A picture is read through an injected `Look`, and `tests/conftest.py` injects nothing**
    (P4.2, 2026-09-15). `app/documents/images.py` imports nothing from `app.ai`. The route builds
    `app/ai/vision.py::AttachmentLook` through `routes/attachments.py::get_attachment_look`, and
-   the `client` fixture overrides that to `None`, because the default provider is Ollama on
-   localhost and a test attaching a PNG would otherwise open a socket. A test that wants a model
+   the `client` fixture overrides that to `None`, because the default provider is a hosted
+   model and a test attaching a PNG would otherwise spend real tokens. A test that wants a model
    sets `app.dependency_overrides[get_attachment_look]` itself. What a model says is `INFERRED`,
    never a `DIMENSION`. The outcomes are fixed: no provider gives `UNSUPPORTED` with sniff's
-   advice; a model that cannot see gives `UNSUPPORTED` with the provider's reason (Ollama's
-   `_sees()` refuses before the image is sent); an unreachable model or an empty answer gives
+   advice; a model that cannot see gives `UNSUPPORTED` with the provider's reason (`VisionUnsupported`,
+   raised before the image is sent); an unreachable model or an empty answer gives
    `FAILED`. None of them is `READY` with nothing in it.
 12. **Never label an image part `image/png` by hand.** `LLMProvider.look` takes JPEG since
    P4.2, and a hosted API checks the label against the bytes. Use `provider.image_media_type`.
@@ -1952,11 +1938,12 @@ a vision model asked whether the part matches the request.
 5. **The visual check is a filter, never a sign-off**, so `VisualReview` deliberately has no
    `approved`/`passed` property — only `objected`. Every way it can fail to run is `unchecked`,
    which is never a pass. Nothing in it raises.
-6. **Ollama does not refuse an image handed to a text-only model** — it drops it and answers
-   anyway, so the check would manufacture agreement, which is worse than no check. `_sees()` gates
-   on `/api/show` `capabilities` or a `projector_info` block (structural signals, no model-name
-   list to rot); `AI_VISION_MODEL` names the model that looks. `num_ctx` must be sized for the
-   images too — Ollama truncates a prompt from the front in silence.
+6. **A model that cannot see may answer anyway** — handed a picture it has no eyes for, it can
+   describe nothing and still sound sure, so the check would manufacture agreement, which is worse
+   than no check. `LLMProvider.look` refuses by default (`VisionUnsupported`); `AI_VISION_MODEL`
+   names the model that looks, and with none configured the check is `unchecked`. The hosted
+   providers publish no capability list, so a model without eyes surfaces as a 400 from `look`,
+   reported rather than swallowed.
 
 ## Driving CATIA's interface
 
@@ -2048,7 +2035,7 @@ difference between the two machines hides in whatever neither one has to state o
   result.** `Set-Content -Encoding utf8` writes a **BOM** on PowerShell 5.1, and `-NoNewline`
   strips the trailing newline; the file then fails to parse, and every test in the run goes red
   for a reason your break did not cause. Measured 2026-09-10 mutating
-  `app/ai/providers/ollama.py`: the guard was supposed to fail in **one** parametrised case and
+  `app/ai/providers/ollama.py` (removed 2026-10-04): the guard was supposed to fail in **one** parametrised case and
   failed in all three, which reads as "the guard is too broad" and is actually "the file is not
   Python any more". This is the Windows sibling of the `git checkout` trap above, and it poisons
   a measurement the same way — so **apply a break with the `Edit` tool, not with a shell
@@ -2299,6 +2286,34 @@ arguments, both already in hand. An LLM would put a paraphrase between the user 
 the one screen where the exact wording is the evidence. A failure the taxonomy does not recognise
 escalates anyway, quoting verbatim — the same contract `app/solve/calculix/diagnose.py` holds.
 
+## Hosted providers (`app/ai/providers/`) — rewritten 2026-10-04 with the move to DeepSeek
+
+Only hosted models: `deepseek` (default), `anthropic`, `nvidia`, `openai_compatible` (OpenAI
+itself, Groq, vLLM…). A vendor with a different dialect is a small subclass of
+`OpenAICompatibleProvider` turning four class attributes and one hook; `providers/__init__.py` is
+the only place that knows vendors exist. Everything below was built from vendor documentation with
+no network, so it is unmeasured (THE QUEUE) — a mock of a wire format is a copy of what was believed.
+
+1. **Reasoning is a per-call decision returned as a value** (`_plan_reasoning` → `Reasoning`),
+   never a flag toggled around a call: the provider is one cached instance shared by every request
+   thread, and the old NVIDIA toggle raced. Structured output and tool-less chat are hinted
+   `effort="low"` and never reason.
+2. **DeepSeek wants its own `reasoning_content` back** on every assistant turn of a tool-calling
+   chain, or it answers 400. It is kept in `conversation_messages.reasoning` (nullable; NULL is
+   "none kept", `''` is "returned, empty"), replayed by `context._replay`, sent only to a vendor
+   that sets `_reasoning_field`, and **never in any API response**. A chain missing a turn's
+   reasoning runs that step with thinking off rather than guessing what the server accepts; turns
+   before the newest user message do not count, because the guide says they are ignored.
+3. **Retries are bounded and mean different things.** Transport: 3 attempts on 429/5xx/connection
+   errors/interrupted finish reasons, `Retry-After` honoured and capped, a timeout never retried,
+   402 = no balance, 401/403 = key. Structured output: one repair attempt that names the defect,
+   never a third, usage of every attempt summed (a retry is spend).
+4. **A stream that breaks is repeated once as a whole request**, not resumed; the deltas are for
+   display and `Finished.turn` is the answer. A 400/404/422 on the streaming form switches
+   streaming off for that provider instance; a 503 does not.
+5. **The wire carries only documented keys.** `is_error`, `name` on tool messages and our
+   `reasoning` key are ours and a strict endpoint rejects them.
+
 ## Streaming, resuming and progress — added 2026-09-10 with P5.1 and P5.2
 
 **`stream_chat` is the provider seam for token streaming.** It yields zero or more `TextDelta`
@@ -2309,14 +2324,15 @@ provider does not stream", and the UI renders the text twice. `Finished.turn.tex
 own copy would silently drop the half of the turn that does the work.
 
 **Where the tool calls actually are is a measurement, and this file had it wrong.** Until
-2026-09-10 the line above read "tool calls arrive on the final chunk", and
-`ollama.py::stream_chat` was written to that — it assembled the turn from the `done: true` chunk
-alone. Measured on the seat against Ollama and `qwen3.5:9b`: a 102-chunk reply carried the call
-whole on **chunk 101, with `done: false`**, and the `done` chunk that followed carried none. So
-every local-model tool call was discarded, and the product answered "I'll create the part…" with
-**zero steps run**. Collect tool calls from *whichever* chunk carries them; never key on the
-`done` flag. `tests/test_ollama_streaming_tool_calls.py` pins it, including that a call repeated
-on both chunks runs once.
+2026-09-10 the line above read "tool calls arrive on the final chunk", and the first (local,
+since removed 2026-10-04) streaming provider assembled the turn from the final `done: true`
+chunk alone. Measured against a live server: a 102-chunk reply carried the call whole on **chunk
+101, with `done: false`**, and the `done` chunk that followed carried none. So every tool call
+was discarded and the product answered "I'll create the part…" with **zero steps run**. Collect
+tool calls from *whichever* chunk carries them; never key on a `done` flag.
+`_StreamAssembler` (OpenAI-shaped SSE: calls arrive as fragments keyed by `index`) and
+`tests/test_openai_compatible_resilience.py` carry the lesson now. It has **never run against a
+live server** — THE QUEUE.
 
 **This is the third defect of one shape**, and the shape is worth naming: *the non-streaming path
 is fine, the mocked test agrees with the wrong assumption, and nothing goes red.* The turn

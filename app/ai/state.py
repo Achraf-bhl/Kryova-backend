@@ -390,8 +390,8 @@ def _catia_reference_lines(conversation: Conversation, language: str | None) -> 
     """A few lines naming the CATIA terms in the user's message, or nothing.
 
     This is the one part of the block that is not read from the database, and it
-    earns its place for a specific reason: the deployment target is a local
-    Ollama model, and a small model reliably *answers* a CATIA question without
+    earns its place for a specific reason: a fast, non-reasoning model
+    reliably *answers* a CATIA question without
     first deciding to look one up. Putting the workbench, the menu path and the
     localised name beside the question removes the decision.
 

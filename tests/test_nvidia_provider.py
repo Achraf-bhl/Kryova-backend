@@ -189,7 +189,10 @@ class TestTheReasoningControlsAreSentCorrectly:
         """The hook is on the base class; the base class must not use it."""
         from app.ai.providers.openai_compatible import OpenAICompatibleProvider
 
-        assert OpenAICompatibleProvider("http://x/v1", None, "m", 5.0)._extra_body() == {}
+        plan = OpenAICompatibleProvider("http://x/v1", None, "m", 5.0)._plan_reasoning(
+            effort=None, messages=None
+        )
+        assert plan.fields == {}
 
 
 class TestStructuredOutputTurnsThinkingOff:
@@ -219,28 +222,28 @@ class TestStructuredOutputTurnsThinkingOff:
         endpoint = self._complete(provider(), monkeypatch)
         assert endpoint.last["response_format"]["type"] == "json_schema"
 
-    def test_the_flag_is_restored_afterwards(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """`complete()` toggles a flag around the call. If it leaked, every
-        later agent turn would silently lose its reasoning."""
-        prov = provider()
-        self._complete(prov, monkeypatch)
-        assert prov._extra_body() == {
-            "chat_template_kwargs": {"enable_thinking": True},
-            "reasoning_budget": DEFAULT_REASONING_BUDGET,
-        }
-
-    def test_the_flag_is_restored_even_when_the_call_raises(
+    def test_a_structured_call_does_not_switch_thinking_off_for_the_next_step(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The thinking choice is made per call and returned, not toggled on the
+        provider. The provider is a cached singleton shared by every request, so a
+        flag flipped around `complete()` would leak into a concurrent agent step
+        on another thread -- and did, before this was a pure function."""
         prov = provider()
+        self._complete(prov, monkeypatch)
+        endpoint = _Endpoint({"content": "", "tool_calls": A_TOOL_CALL}, "tool_calls")
+        _chat(prov, endpoint, monkeypatch)
+        assert endpoint.last["chat_template_kwargs"] == {"enable_thinking": True}
+        assert endpoint.last["reasoning_budget"] == DEFAULT_REASONING_BUDGET
 
-        def explode(*args: Any, **kwargs: Any) -> None:
-            raise httpx.ConnectError("nope")
-
-        monkeypatch.setattr(httpx, "post", explode)
-        with pytest.raises(Exception):
-            prov.complete(system="s", user="u", schema=LoadCase, effort="low", max_tokens=200)
-        assert prov._extra_body()["chat_template_kwargs"] == {"enable_thinking": True}
+    def test_a_chat_call_with_no_tools_does_not_reason(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A title or a summary is not a judgement call."""
+        endpoint = _Endpoint({"content": "Bracket study"})
+        _chat(provider(), endpoint, monkeypatch, tools=[])
+        assert endpoint.last["chat_template_kwargs"] == {"enable_thinking": False}
+        assert "reasoning_budget" not in endpoint.last
 
 
 class TestReasoningIsNeverPresentedAsAnAnswer:

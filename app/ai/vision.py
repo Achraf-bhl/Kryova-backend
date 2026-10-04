@@ -275,11 +275,11 @@ class AttachmentLook:
     the bill both miss.
 
     **The provider's own refusal is the gate for a model that cannot see.**
-    Ollama answers `/api/show` with the model's capabilities and `look` raises
-    `VisionUnsupported` before any image is sent, because Ollama would otherwise
-    drop the picture and describe nothing. That becomes `UnsupportedDocument`
-    here, so the attachment is recorded as not read, with the reason, and never
-    as an empty picture.
+    A provider whose model has no eyes raises `VisionUnsupported` from `look`
+    before any image is sent (the ABC's default does), because a model handed a
+    picture it cannot see may answer anyway and describe nothing. That becomes
+    `UnsupportedDocument` here, so the attachment is recorded as not read, with
+    the reason, and never as an empty picture.
     """
 
     def __init__(self, provider: LLMProvider) -> None:

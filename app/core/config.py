@@ -224,31 +224,52 @@ class Settings(BaseSettings):
     allow_self_approval: bool = False
 
     # AI. Which model serves the AI features -- see app/ai/providers/.
-    # Ollama is the TEST-PHASE default (decided 2026-09-05): free, keyless, and
-    # what dev machines and CI run. Production runs a hosted API and will not
-    # support Ollama -- which also means production posts geometry summaries and
-    # load cases to the model vendor, a data-flow fact that belongs in the
-    # customer contract, not buried here. A misconfigured provider makes the AI
-    # endpoints report themselves unavailable; it never stops the app booting.
-    #   ollama            -> local, no key; dev/test only
+    # Hosted only (decided 2026-10-04): no local model is run, for development,
+    # tests or production. That also means every deployment posts geometry
+    # summaries and load cases to the model vendor, a data-flow fact that
+    # belongs in the customer contract, not buried here. A misconfigured
+    # provider makes the AI endpoints report themselves unavailable; it never
+    # stops the app booting.
+    #
+    # Moving vendor is these four variables and nothing in the code: no model
+    # name, URL or key is written anywhere else.
+    #   deepseek          -> DeepSeek (api.deepseek.com), needs AI_API_KEY
     #   anthropic         -> hosted Claude, needs AI_API_KEY
     #   nvidia            -> NVIDIA NIM (build.nvidia.com), needs AI_API_KEY
-    #   openai_compatible -> OpenAI / LM Studio / vLLM / llama.cpp / Groq /
+    #   openai_compatible -> OpenAI (https://api.openai.com/v1) / vLLM / Groq /
     #                        OpenRouter, needs AI_BASE_URL
-    ai_provider: str = "ollama"
-    ai_model: str = "qwen2.5-coder:7b"
+    ai_provider: str = "deepseek"
+    ai_model: str = "deepseek-flash"
     ai_base_url: str | None = None
     ai_api_key: str | None = None
     # Interpreting a result is a judgement task and gets more headroom than
-    # parsing a sentence into a load case, which is near-mechanical.
+    # parsing a sentence into a load case, which is near-mechanical. "Effort" is
+    # a hint each provider translates into its vendor's own terms; for a
+    # reasoning model "low" and below means thinking off.
     ai_effort_interpret: str = "high"
     ai_effort_parse: str = "low"
-    # Which model looks at a render (Phase 4.2). Separate from `ai_model`
-    # because locally it usually is separate: the shipping default writes CAD
-    # operations and cannot see at all, and a vision model is a second pull.
-    # Unset means "use ai_model", which is right for a hosted provider whose
-    # every model reads images. Ollama refuses honestly when the model cannot
-    # see, rather than dropping the picture and answering anyway.
+    # The effort an agent step that may call tools runs at -- the one judgement
+    # that matters (which of 201 CATIA operations, with which numbers). "low" is
+    # *thinking off*: the fast, cheap, non-reasoning mode, which is the default
+    # because a turn is ~20 of these steps and each reasoning step adds thousands
+    # of billed output tokens and tens of seconds. Raise it ("high", "max") to
+    # buy judgement; measure the difference on the prompt ladder before relying
+    # on it, because nothing here has run against a live model.
+    ai_effort_chat: str = "low"
+    # Whether a reasoning model reasons at all. False switches it off on every
+    # call (DeepSeek, NVIDIA), which is faster and cheaper and measurably worse
+    # at picking the right CATIA operation. The providers that take no such
+    # switch ignore it.
+    ai_thinking: bool = True
+    # Tokens a call that reasons may spend beyond its answer's own cap
+    # (`ai_max_tokens`). A reasoning model will spend thousands deliberating over
+    # a trivial question if nothing stops it.
+    ai_reasoning_budget: int = 8_192
+    # Which model looks at a render (Phase 4.2). Separate from `ai_model` for a
+    # deployment whose main model cannot see. Unset means "use ai_model", which
+    # is right for a vendor whose every model reads images; a model that cannot
+    # answers the request with an error, and the visual check then reports
+    # itself unchecked rather than agreeing.
     ai_vision_model: str | None = None
     #: How many tool schemas to put in front of the model in one turn — master
     #: plan 16.1. 0 (the default) offers the whole registry, which is what every
@@ -258,13 +279,6 @@ class Settings(BaseSettings):
     #: It narrows the *offer* only. `ToolBox.call` still accepts every tool, so
     #: no setting of this can make a capability unreachable.
     ai_tool_limit: int = 0
-    #: Layers to put on the GPU, or "all". Ollama's own estimator keeps a
-    #: margin against a shared card and leaves a layer or two on the CPU;
-    #: measured on the seat, that halved the model's throughput (25.7 -> 59.0
-    #: tok/s at the full 32k window). Empty leaves the split to Ollama, which
-    #: is right for a machine nobody has measured. See
-    #: `app/ai/providers/ollama.py::GPU_LAYERS_ALL`.
-    ai_gpu_layers: str = ""
 
     #: Tokens one user may spend per UTC day. 0 means unlimited.
     #:
@@ -290,19 +304,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     ai_max_tokens: int = 8_000
-    # A 7B model on CPU can take a minute; the default is generous on purpose.
+    # A reasoning model thinking at high effort can take most of a minute before
+    # it answers; the default is generous on purpose.
     ai_timeout_seconds: float = 120.0
     # How many past turns of a conversation are replayed to the model. Beyond
     # this the oldest turns are dropped, so a long session cannot grow the
     # prompt (and its cost) without limit.
-    # NVIDIA only. Nemotron models reason by default and put the chain of
-    # thought in a separate field; these two say how much of that to buy.
-    # Turning it off makes every turn faster and cheaper and measurably worse at
-    # picking the right CATIA operation, which is the one judgement that matters.
-    ai_nvidia_thinking: bool = True
-    # Reasoning tokens per call, billed as output. A Nemotron model will spend
-    # three thousand deliberating over a trivial question if nothing stops it.
-    ai_nvidia_reasoning_budget: int = 4_096
     ai_max_context_messages: int = 40
     # Once a conversation passes this many messages the older ones are folded
     # into a running summary. Deliberately below `ai_max_context_messages`, so

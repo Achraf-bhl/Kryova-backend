@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 72/84 = 86% | 33/39 eng-months = 84% |
-| **Programme** | 23/35 | 199/220 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 75/87 = 86% | 33/39 eng-months = 84% |
+| **Programme** | 23/35 | 202/223 = 91% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 86% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 88% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8597,6 +8597,67 @@ machine with no network, so the phase is open until a run with a key confirms it
     > `Kryova-frontend/src/components/project-memory/memory-proposals.test.tsx`,
     > `Kryova-frontend/src/components/chat/chat-view-memory.test.tsx`,
     > `Kryova-frontend/src/lib/api-client.test.ts`.
+
+23. **More than one worker means a shared limiter, or the process does not start.**
+    *(ROAD_TO_10 3.1.)* An in-process limiter is one limiter per worker, so with four workers a
+    limit of ten a minute is forty, with no error and one warning at first use. `WEB_CONCURRENCY`
+    (the variable `uvicorn` and `gunicorn` choose `--workers` from) is now a setting, and
+    production refuses to boot with more than one worker and no `REDIS_URL`, the way it refuses
+    `MAIL_TRANSPORT=console`. The lifespan then checks the *fact* the configuration cannot: a URL
+    that is set and a Redis that does not answer leaves the limiter on memory exactly as no URL
+    would, and several workers on that is refused too. One worker keeps the in-process limiter, so
+    the desktop app needs no Redis.
+    > DONE (2026-10-05) — `Settings.web_concurrency` (default 1, at least 1, read from
+    > `WEB_CONCURRENCY`); `_harden_production` names it and a blank `REDIS_URL` counts as unset;
+    > `rate_limit.backend_report()` and `refuse_an_unshared_limiter_across_workers()` run from the
+    > lifespan, which also logs `rate limits: redis|memory` once. **A real Redis fixed a real
+    > defect on the way:** `RedisBackend` called `EXPIRE` on every hit, so a client over its
+    > budget that kept retrying -- which is what a client with no `Retry-After` does -- held its
+    > own window open and a 429 lasted as long as it kept asking. The window is now anchored to
+    > the first request (`SET NX EX`, `INCR` and `PTTL` in one MULTI/EXEC), and a counter found
+    > with no expiry is given one. **Not done:** nothing sets `WEB_CONCURRENCY` in the Dockerfile
+    > or a compose file, because none of them starts more than one worker; the day one does it
+    > will have to set `REDIS_URL` in the same change.
+    > Tested by: `tests/test_rate_limit_budget.py` (against a real `redis-server`, skipped where
+    > the binary is missing), `tests/test_auth_session.py`.
+
+24. **Every limited route tells the client its budget, and a refusal says when to come back.**
+    *(ROAD_TO_10 3.2.)* `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` on every
+    response from a limited route, `Retry-After` on a 429, readable across origins. The page shows
+    "You can send again in 12 s" instead of a generic error.
+    > DONE (2026-10-05) — `RateLimiterBackend.hit` returns a `Decision` (allowed, limit,
+    > remaining, whole seconds until the budget moves, rounded up); `check` is its boolean form.
+    > `enforce()` is the one way a route spends a budget and records the answer before it can
+    > refuse. A pure-ASGI `RateLimitHeadersMiddleware` writes the headers at the start of the
+    > response, which is what lets a *streaming* chat answer carry them; a route with two limits
+    > reports the one nearer to running out. The CORS layer exposes the four names. **Public
+    > behaviour changed:** `Retry-After` on a refusal is now the time actually left, not the whole
+    > window, and seven auth routes that answered 429 with no `Retry-After` now send one.
+    > Web: `ApiError.retryAfterSeconds`, a `RateLimitedError` from the chat stream, a countdown
+    > notice above the composer.
+    > Tested by: `tests/test_rate_limit_budget.py`, `tests/test_rate_limit.py`,
+    > `Kryova-frontend/src/lib/rate-limit.test.ts`,
+    > `Kryova-frontend/src/components/chat/rate-limit-notice.test.tsx`,
+    > `Kryova-frontend/src/components/chat/chat-view-rate-limit.test.tsx`,
+    > `Kryova-frontend/src/lib/api-client.test.ts`.
+
+25. **Sign-in is limited per account as well as per address, so an office can sign in and a
+    stranger still cannot guess.** *(ROAD_TO_10 3.3.)* One address is not one person, and ten
+    sign-ins a minute across a whole NAT is a lockout on a Monday morning.
+    > DONE (2026-10-05) — login, the second factor and the silent refresh moved to a wider
+    > per-address budget (`AUTH_IP_REQUESTS_PER_MINUTE`, 30); login, the second factor and
+    > password-reset requests are *also* counted per account at ten a minute, keyed on a hash of
+    > the name the request submits (the challenge's user for the second factor), counted whether
+    > or not such an account exists so a 429 is not an oracle for who has one. Registration,
+    > reset confirmation and email verification stay at ten an address. Pairing a CATIA device
+    > stays per address on purpose: the code is the credential and nobody is signed in.
+    > **Security trade-off, stated:** anyone can spend an account's budget by naming it, so ten
+    > wrong passwords against a stranger's address locks *that stranger* out for the rest of the
+    > minute. The window is a minute to keep that small, and the alternative -- no per-account
+    > bound -- leaves online guessing limited only by the address budget, which this change
+    > widened. **Not done:** an authenticated route on the bare address key is still possible
+    > to add; no route that has a signed-in principal uses one today.
+    > Tested by: `tests/test_auth_rate_limits.py`, `tests/test_rate_limit.py`.
 
 ---
 

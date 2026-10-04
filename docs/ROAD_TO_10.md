@@ -345,17 +345,17 @@ Today:
   (`Kryova-backend/app/api/rate_limit.py`, `redis_url` in config).
 - Keys: `limit_key` uses the signed-in user where there is one.
 
-- [ ] **3.1 Use Redis wherever more than one worker runs.** [Linux] **S** → P9
+- [x] **3.1 Use Redis wherever more than one worker runs.** [Linux] **S** → P9
   - With `InMemoryBackend`, each worker enforces its own budget, so the real limit is N times the
     configured one. Make production refuse to boot with `InMemoryBackend` and more than one worker,
     the same way it refuses `MAIL_TRANSPORT=console` (`config.py::_harden_production`).
   - The desktop app runs one process, so it keeps the in-memory backend.
-- [ ] **3.2 Tell the client its remaining budget.** [Linux + frontend] **S** — **NEW**
+- [x] **3.2 Tell the client its remaining budget.** [Linux + frontend] **S** — **NEW**
   - Send `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` headers on every limited
     route, plus `Retry-After` on a 429.
   - Frontend: show "You can send again in 12 s" instead of a generic error
     (`Kryova-frontend/src/lib/api-client.ts`).
-- [ ] **3.3 Move every limited route onto the principal key.** [Linux] **S** → P1.6
+- [x] **3.3 Move every limited route onto the principal key.** [Linux] **S** → P1.6
   - Several routes still use the bare IP key `auth_limiter`, as CLAUDE.md's *Known landmines* item 5
     notes. Users behind one office NAT then share one budget.
 - [ ] **3.4 Queue simulations instead of refusing them.** [Linux] **M** — **NEW** (E15)

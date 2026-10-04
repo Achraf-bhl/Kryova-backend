@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from app import mail
 from app.api.deps import get_media_service, get_session_scope
-from app.api.rate_limit import auth_limiter
+from app.api.rate_limit import account_limiter, auth_limiter, login_limiter
 from app.api.routes.attachments import get_attachment_look
 from app.catia import local_bridge
 from app.core import email_verification, maintenance
@@ -245,6 +245,27 @@ def _forget_the_maintenance_window() -> Iterator[None]:
         maintenance.invalidate()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits() -> Iterator[None]:
+    """No test inherits another test's spent budget.
+
+    The sign-in limits are module globals counting against one address
+    (`testclient`) and, since 3.3, against the account a request names -- and
+    nearly every test signs in as the same `eng@kryova.dev`. Left to
+    accumulate, the tenth login of the *suite* inside a minute is a 429 in a test
+    that has nothing to do with limits, and which test it lands in depends on
+    collection order. Before this, `auth_client` reset one of them and the rest
+    were luck.
+    """
+    for limiter in (auth_limiter, login_limiter, account_limiter):
+        limiter.reset()
+    try:
+        yield
+    finally:
+        for limiter in (auth_limiter, login_limiter, account_limiter):
+            limiter.reset()
+
+
 @pytest.fixture
 def client(
     db_session: Session, media_store: LocalMediaStore, tmp_path: Path, monkeypatch
@@ -280,6 +301,8 @@ def auth_client(
 ) -> AuthenticatedTestClient:
     """A client already registered, verified, and carrying a bearer token."""
     auth_limiter.reset()
+    login_limiter.reset()
+    account_limiter.reset()
     credentials = {"email": "eng@kryova.dev", "password": "correct-horse-battery"}
     response = client.post("/api/v1/auth/register", json=credentials)
     assert response.status_code == 201, response.text

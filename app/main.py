@@ -17,6 +17,8 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from app.api.rate_limit import EXPOSED_HEADERS as EXPOSED_RATE_LIMIT_HEADERS
+from app.api.rate_limit import RateLimitHeadersMiddleware
 from app.api.router import api_router
 from app.core.config import BASE_DIR, settings
 from app.jobs import get_job_queue
@@ -163,11 +165,28 @@ _configure_logging()
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _warn_about_insecure_defaults()
     _start_local_postgres()
+    _check_rate_limit_backend()
     _fail_orphaned_jobs()
     _warm_intent_router()
     yield
     get_job_queue().shutdown()
     _stop_local_catia_bridge()
+
+
+def _check_rate_limit_backend() -> None:
+    """Say which backend counts the rate limits, and refuse the one that is wrong.
+
+    `config._harden_production` refuses the *configuration* of several workers with no
+    Redis URL. This is the other half: a URL that is set and a Redis that is not answering
+    leaves the limiter on memory exactly as no URL would, and the configuration check had
+    passed. One line in the log says which it is either way, because "the limit did
+    nothing" is otherwise a question with two answers.
+    """
+    from app.api.rate_limit import backend_report, refuse_an_unshared_limiter_across_workers
+
+    report = backend_report()
+    logger.info("rate limits: %s (%s)", report.kind, report.detail)
+    refuse_an_unshared_limiter_across_workers()
 
 
 def _warm_intent_router() -> None:
@@ -420,10 +439,23 @@ app.add_middleware(
     # `ETag` is exposed for the same reason — it is the render's own digest, and
     # a client that can read it can tell "the part has not moved" from "the part
     # is unchanged in this view" without another request.
-    expose_headers=[REQUEST_ID_HEADER, "ETag", "X-Kryova-View", "X-Kryova-Blank"],
+    #
+    # The rate-limit set is here for the same reason (ROAD_TO_10 3.2): the page's "you can
+    # send again in 12 s" is built from `Retry-After`, which a cross-origin fetch cannot
+    # read unless it is named.
+    expose_headers=[
+        REQUEST_ID_HEADER,
+        "ETag",
+        "X-Kryova-View",
+        "X-Kryova-Blank",
+        *EXPOSED_RATE_LIMIT_HEADERS,
+    ],
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+# Pure ASGI, so it can write its headers at the start of a *streaming* answer. Outside the
+# CORS layer would work as well; it sits here because it reads state the routes write.
+app.add_middleware(RateLimitHeadersMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 # Order matters: middleware added last runs first, so `RequestIdMiddleware`
 # wraps `AccessLogMiddleware` and every access line already carries the id.

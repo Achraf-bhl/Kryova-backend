@@ -129,6 +129,42 @@ class TestProductionHardening:
         with pytest.raises(ValueError, match="http://"):
             self._settings(cors_origins=["http://app.kryova.dev"])
 
+    def test_rejects_several_workers_without_a_shared_rate_limiter(self) -> None:
+        # Each worker has its own in-process limiter, so every limit would really be
+        # N times what is configured, and nothing would say so.
+        with pytest.raises(ValueError, match="WEB_CONCURRENCY is 4.*REDIS_URL"):
+            self._settings(web_concurrency=4)
+
+    def test_a_blank_redis_url_is_not_a_shared_rate_limiter(self) -> None:
+        # `REDIS_URL=` in an env file reads as the empty string, not as unset.
+        with pytest.raises(ValueError, match="WEB_CONCURRENCY"):
+            self._settings(web_concurrency=2, redis_url="   ")
+
+    def test_accepts_several_workers_with_redis(self) -> None:
+        assert self._settings(web_concurrency=4, redis_url="redis://cache:6379/0").is_production
+
+    def test_one_worker_needs_no_redis_in_production(self) -> None:
+        # The desktop app is one process.
+        assert self._settings(web_concurrency=1).is_production
+
+    def test_web_concurrency_is_read_from_the_variable_the_process_manager_reads(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # uvicorn and gunicorn choose `--workers` from WEB_CONCURRENCY; reading the same
+        # variable is what makes the refusal match what actually starts.
+        monkeypatch.setenv("WEB_CONCURRENCY", "3")
+        assert Settings(  # type: ignore[call-arg]
+            environment="development", database_url="postgresql://u:p@localhost/db"
+        ).web_concurrency == 3
+
+    def test_zero_workers_is_not_a_configuration(self) -> None:
+        with pytest.raises(ValueError):
+            Settings(  # type: ignore[call-arg]
+                environment="development",
+                database_url="postgresql://u:p@localhost/db",
+                web_concurrency=0,
+            )
+
     def test_development_is_left_alone(self) -> None:
         relaxed = Settings(
             environment="development",

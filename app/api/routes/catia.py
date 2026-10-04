@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketDisconnect
 
 from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject
-from app.api.rate_limit import RateLimiter
+from app.api.rate_limit import RateLimiter, enforce
 from app.catia.approval import mint_approval
 from app.catia.bridge import (
     CATIABridgeError,
@@ -266,11 +266,15 @@ def pair_device(payload: PairRequest, request: Request, db: DbSession) -> PairRe
     whether or not anything later fails, so it is single-use in fact and not
     merely by intention.
     """
-    if not pairing_limiter.check(f"catia-pair:{_client_ip(request)}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many pairing attempts. Wait a minute and try again.",
-        )
+    # By address, and deliberately not by a principal: the code is the credential and the
+    # daemon has no session, so the address is the only denominator that exists. What is
+    # being rationed is guessing at the code.
+    enforce(
+        request,
+        pairing_limiter,
+        f"catia-pair:{_client_ip(request)}",
+        detail="Too many pairing attempts. Wait a minute and try again.",
+    )
 
     code = payload.code.strip().upper()
     device = db.scalar(select(CatiaDevice).where(CatiaDevice.pairing_code == code))

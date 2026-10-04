@@ -9,7 +9,14 @@ from sqlalchemy import select
 
 from app import mail
 from app.api.deps import CurrentUser, DbSession
-from app.api.rate_limit import auth_limiter, client_ip
+from app.api.rate_limit import (
+    account_key,
+    account_limiter,
+    auth_limiter,
+    client_ip,
+    enforce,
+    login_limiter,
+)
 from app.core import email_verification, mfa
 from app.core.config import settings
 from app.core.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, new_csrf_token, verify_csrf
@@ -162,11 +169,12 @@ def _send_verification(db: DbSession, user: User) -> None:
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(request: Request, payload: UserCreate, db: DbSession) -> User:
-    if not auth_limiter.check(f"register:{_client_ip(request)}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many registration attempts. Try again in a minute.",
-        )
+    enforce(
+        request,
+        auth_limiter,
+        f"register:{_client_ip(request)}",
+        detail="Too many registration attempts. Try again in a minute.",
+    )
     email = payload.email.lower()
     existing = db.scalar(select(User).where(User.email == email))
     if existing is not None:
@@ -225,11 +233,21 @@ def login(
     the old shape reads `user` as undefined rather than failing loudly, so the
     frontend narrows on `mfa_required` — see `types/api.ts`.
     """
-    if not auth_limiter.check(f"login:{_client_ip(request)}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Try again in a minute.",
-        )
+    # Two budgets, and both are spent. The address one is wide (a NAT is many people); the
+    # account one is the one that bounds guessing, and it counts the *submitted* name whether
+    # or not an account answers to it, so a 429 never says which addresses are registered.
+    enforce(
+        request,
+        login_limiter,
+        f"login:{_client_ip(request)}",
+        detail="Too many login attempts. Try again in a minute.",
+    )
+    enforce(
+        request,
+        account_limiter,
+        account_key("login", form_data.username),
+        detail="Too many login attempts for this account. Try again in a minute.",
+    )
     user = db.scalar(select(User).where(User.email == form_data.username.lower()))
     if user is None:
         # Hash against a throwaway digest so a miss costs the same ~275ms a hit
@@ -270,17 +288,26 @@ def complete_mfa_login(
     credential in the system a client may guess a million times: the password
     limit was already spent getting here, and six digits is 10^6.
     """
-    if not auth_limiter.check(f"mfa:{_client_ip(request)}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many attempts. Try again in a minute.",
-        )
+    enforce(
+        request,
+        login_limiter,
+        f"mfa:{_client_ip(request)}",
+        detail="Too many attempts. Try again in a minute.",
+    )
     user_id = decode_mfa_challenge_token(payload.challenge_token)
     if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="That sign-in has expired. Start again.",
         )
+    # Per account as well, from the challenge's own user: six digits is 10^6, and a wider
+    # address budget must not widen the guessing rate at one person's code.
+    enforce(
+        request,
+        account_limiter,
+        account_key("mfa", user_id),
+        detail="Too many attempts for this account. Try again in a minute.",
+    )
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise HTTPException(
@@ -312,11 +339,12 @@ def refresh_session(request: Request, response: Response, db: DbSession) -> Sess
     # Rate-limited like every other credential-bearing auth route. This one was
     # the exception, which made it the cheapest endpoint to grind refresh tokens
     # against.
-    if not auth_limiter.check(f"refresh:{_client_ip(request)}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many refresh attempts. Try again in a minute.",
-        )
+    enforce(
+        request,
+        login_limiter,
+        f"refresh:{_client_ip(request)}",
+        detail="Too many refresh attempts. Try again in a minute.",
+    )
     token = request.cookies.get("kryova_refresh")
     if token is None:
         raise HTTPException(status_code=401, detail="Missing refresh token")
@@ -499,11 +527,19 @@ def request_password_reset(
     DEBUG; a production deployment records that a reset was requested and
     nothing more, because a token in a log file is a password in a log file.
     """
-    if not auth_limiter.check(f"pwreset:{_client_ip(request)}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many reset requests. Try again in a minute.",
-        )
+    enforce(
+        request,
+        auth_limiter,
+        f"pwreset:{_client_ip(request)}",
+        detail="Too many reset requests. Try again in a minute.",
+    )
+    # And per address asked about, so many sources cannot fill one person's inbox.
+    enforce(
+        request,
+        account_limiter,
+        account_key("pwreset", payload.email),
+        detail="Too many reset requests for this address. Try again in a minute.",
+    )
 
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     # Always return 204 so the response does not reveal whether the email exists.
@@ -528,11 +564,12 @@ def confirm_password_reset(
     payload: PasswordReset,
     db: DbSession,
 ) -> None:
-    if not auth_limiter.check(f"pwconfirm:{_client_ip(request)}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many attempts. Try again in a minute.",
-        )
+    enforce(
+        request,
+        auth_limiter,
+        f"pwconfirm:{_client_ip(request)}",
+        detail="Too many attempts. Try again in a minute.",
+    )
 
     token_hash = hash_token(payload.token)
     user = db.scalar(select(User).where(User.password_reset_token_hash == token_hash))
@@ -571,11 +608,12 @@ def verify_email(request: Request, payload: EmailVerification, db: DbSession) ->
     client hands it to, which is routinely not the one holding the session. The
     token is the credential, it is single-use, and it expires.
     """
-    if not auth_limiter.check(f"verifyemail:{_client_ip(request)}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many attempts. Try again in a minute.",
-        )
+    enforce(
+        request,
+        auth_limiter,
+        f"verifyemail:{_client_ip(request)}",
+        detail="Too many attempts. Try again in a minute.",
+    )
     user = email_verification.confirm(db, payload.token, now=email_verification.utcnow())
     if user is None:
         db.commit()  # An expired token is cleared; that write must land.

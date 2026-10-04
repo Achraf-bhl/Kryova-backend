@@ -138,6 +138,14 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
     frontend_url: str = "http://localhost:3000"
     redis_url: str | None = None
+    # How many server processes run. `uvicorn` and `gunicorn` both read this same
+    # `WEB_CONCURRENCY` variable to choose their `--workers`, so one setting is the fact
+    # and the process manager acts on it. The application cannot count its own siblings,
+    # which is why it has to be told: with more than one, an in-process rate limiter is N
+    # separate limiters and the real limit is N times the configured one, so production
+    # refuses that combination (`_harden_production`, ROAD_TO_10 3.1). The desktop app is
+    # one process and leaves it at 1.
+    web_concurrency: int = Field(default=1, ge=1)
 
     # Rate limiting keys off the client address. `X-Forwarded-For` is a header
     # any client can write, so it is only believed when a reverse proxy is known
@@ -217,6 +225,15 @@ class Settings(BaseSettings):
     # MCP calls (E23.3). One `tools/call` is one request, and a client agent makes many per
     # task, so this is wider than the chat budget, which is one per turn.
     mcp_requests_per_minute: int = 120
+    # Login, the second factor and the silent token refresh, counted *per address*
+    # (ROAD_TO_10 3.3). Wider than the ten a minute the other pre-sign-in routes keep,
+    # because one office behind one NAT is one address and a hundred engineers all signing
+    # in on a Monday morning. It is safe to be wider only because those same routes are
+    # also counted per *account* at ten a minute (`rate_limit.account_limiter`), so online
+    # guessing at one account is capped whatever the address budget does. Lower it to
+    # tighten credential stuffing across many accounts from one address; the cost of
+    # lowering it is the NAT lockout this exists to remove.
+    auth_ip_requests_per_minute: int = 30
 
     # --- Billing (P8.2) ------------------------------------------------------
     # `none` is the default and the only one a self-hosted install needs: plans
@@ -713,6 +730,18 @@ class Settings(BaseSettings):
         if any(origin.startswith("http://") for origin in self.cors_origins):
             problems.append(
                 f"CORS_ORIGINS contains a plaintext http:// origin: {self.cors_origins}"
+            )
+        if self.web_concurrency > 1 and not (self.redis_url or "").strip():
+            # The same failure class as the mail transport below: every component reports
+            # success. Each worker has its own in-process limiter, so a limit of ten a
+            # minute is ten a minute *per worker* -- N times the configured number, with no
+            # error and nothing in the log but one warning at first use. The desktop app is
+            # one process and is not affected: this only bites a deployment that asked for
+            # more than one.
+            problems.append(
+                f"WEB_CONCURRENCY is {self.web_concurrency} but REDIS_URL is not set, so each "
+                "worker would count its own rate-limit budget and every limit would really be "
+                f"{self.web_concurrency} times what is configured. Set REDIS_URL, or run one worker"
             )
         if self.mail_transport not in DELIVERING_MAIL_TRANSPORTS:
             # The failure this refuses is quiet and total: on the console

@@ -158,7 +158,10 @@ class TestTheDependencyRefusesOverBudget:
         response = client.get("/thing")
 
         assert response.status_code == 429
-        assert response.headers["retry-after"] == "45"
+        # The time actually left, not the whole window: two requests in the first
+        # milliseconds leave 44-45 s, and a client sent back for the full window
+        # when 40 s remain is a client kept waiting for nothing.
+        assert 40 <= int(response.headers["retry-after"]) <= 45
         assert "2 per 45 seconds" in response.json()["detail"]
 
     def test_two_principals_have_separate_budgets(self) -> None:

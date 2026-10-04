@@ -47,9 +47,14 @@ A caller that needs a threshold must ask for `MEASURED` and handle its absence.
 
 ## Why the option set is closed before the call
 
-The schema carries a `Literal[...]`, so the provider constrains decoding and the answer is
-one of the options or the call failed. Nothing here parses prose, strips fences, lowercases
-or fuzzy-matches an answer back onto the option list. That matters because the failure it
+The schema carries a `Literal[...]`. Where the provider supports `json_schema` that
+constrains decoding; where it does not -- DeepSeek, the default, offers only `json_object`
+with the schema stated in the prompt -- the provider validates the answer against the same
+schema, asks once more naming the defect, and fails after that, so a decision can cost up
+to two (rarely three) requests rather than one. And `_ask` checks the value against the
+options itself, because a provider that hands back an unvalidated value would otherwise
+turn an out-of-set answer into a decision. Nothing here parses prose, strips fences,
+lowercases or fuzzy-matches an answer back onto the option list. That matters because the failure it
 prevents is silent: a near-miss coerced to the closest option is a decision nobody made,
 reported as one somebody did.
 
@@ -235,6 +240,22 @@ def _ask(
         )
 
     answer = completion.value.answer  # type: ignore[attr-defined]
+    if answer not in options:
+        # The module's contract, enforced here rather than trusted to every provider:
+        # an answer outside the set is a refusal, never a decision. It still cost what
+        # it cost, so the usage travels with the fallback.
+        return Decision(
+            value=fallback,
+            confidence=Confidence(
+                basis=Basis.UNAVAILABLE,
+                reason=f"the model answered {answer!r}, which is not one of the options",
+            ),
+            options=options,
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+            usage=completion.usage,
+            taken_by_fallback=True,
+            fallback_reason=f"answer {answer!r} is not one of {list(options)}",
+        )
     return Decision(
         value=answer,
         confidence=_unavailable(provider),

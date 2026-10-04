@@ -184,9 +184,14 @@ class TestAFallbackIsNeverPassedOffAsADecision:
 
     def test_a_failed_decision_still_reports_how_long_it_waited(self) -> None:
         """A timeout that reports zero latency hides the cost of the thing that failed."""
-        got = judge(Recorder(raises=LLMError("down")), "is it?", fallback=False)
+        class Slow(Recorder):
+            def complete(self, **kwargs):  # type: ignore[no-untyped-def]
+                time.sleep(0.02)
+                return super().complete(**kwargs)
 
-        assert got.latency_ms >= 0.0
+        got = judge(Slow(raises=LLMError("down")), "is it?", fallback=False)
+
+        assert got.latency_ms >= 20.0
 
 
 class TestItRefusesAQuestionItCannotAnswerHonestly:
@@ -254,16 +259,35 @@ class TestTheCallIsShapedForOnePassAndNoProse:
 
         assert len(recorder.calls) == 1
 
-    def test_the_option_set_is_closed_in_the_schema_not_checked_afterwards(self) -> None:
-        """Constrained decoding, not parsing. The enum is in the schema handed to the
-        provider, so a wrong answer is the provider's error rather than something this
-        module coerces onto the nearest option."""
+    def test_the_option_set_is_closed_in_the_schema(self) -> None:
+        """The enum is in the schema handed to the provider, so a provider that can
+        constrain decoding does, and one that cannot validates against it."""
         recorder = Recorder("a")
         choose(recorder, "which?", ["alpha", "beta"], fallback="alpha")
 
         schema = recorder.calls[0]["schema"]
         enum = schema.model_json_schema()["properties"]["answer"]["enum"]  # type: ignore[union-attr]
         assert enum == ["alpha", "beta"]
+
+    @pytest.mark.parametrize(
+        "run",
+        [
+            lambda p: choose(p, "which?", ["alpha", "beta"], fallback="beta"),
+            lambda p: score(p, "how much?", low=1, high=5, fallback=3),
+            lambda p: judge(p, "is it?", fallback=False),
+        ],
+    )
+    def test_an_answer_outside_the_set_is_a_refusal_not_a_decision(self, run) -> None:
+        """Until 2026-10-04 `_ask` returned whatever came back as `decided`, trusting
+        every provider to have validated it. DeepSeek, the default, cannot constrain
+        decoding at all, and a double -- or a future provider -- that skips validation
+        turned "gamma" into a decision nobody made. Now it is the caller's fallback,
+        labelled, and what the call cost still travels with it."""
+        got = run(Recorder("gamma"))
+
+        assert got.decided is False
+        assert "gamma" in str(got.fallback_reason)
+        assert got.usage.prompt_tokens == 11
 
     def test_the_input_is_fenced_as_data_and_not_as_instructions(self) -> None:
         """Decision 8. A decision function steerable by the text it is deciding about is

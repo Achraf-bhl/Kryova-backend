@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 69/81 = 85% | 33/39 eng-months = 83% |
-| **Programme** | 23/35 | 196/217 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 70/83 = 84% | 33/39 eng-months = 83% |
+| **Programme** | 23/35 | 197/219 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 84% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 81% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8508,6 +8508,34 @@ machine with no network, so the phase is open until a run with a key confirms it
     > sitting. Tested by: `tests/test_continuation.py`,
     > `Kryova-frontend/src/lib/conversation-resume.test.ts`,
     > `Kryova-frontend/src/components/chat/resume-notice.test.tsx`.
+
+20. **Branch from an answer, and retry or edit the newest message — and never claim to have rolled
+    back a part.** *(ROAD_TO_10 2.5.)* A branch copies the transcript up to one assistant answer
+    into a new conversation; a rewind deletes the newest user message and what followed and hands
+    the text back. Neither can undo a CATIA document (it belongs to one conversation, and a
+    restore exists only on a seat), so the rules are built around what can be told apart from
+    outside: a branch never carries a document and says so in its response and, until it owns
+    one, in the state block; a rewind refuses any turn in which a mutating tool ran or was asked
+    for, a sign-off was raised, the message is already folded into the summary, or a turn is in
+    flight, and deletes nothing when it refuses.
+    > PARTIAL (2026-10-04) — backend: `POST /ai/conversations/{id}/branch` (from an answer only;
+    > design read as of that answer by time; summary and plan copied only where still true; tokens
+    > not copied; the source may be deleted later) and `POST /ai/conversations/{id}/rewind`
+    > (409 naming the tools that ran and offering a branch; a rewound turn is no longer offered
+    > Continue). Schema: `conversations.branched_from_id`, `branched_at_sequence`, `rewound_at`
+    > (migration `d2ec5f1d8253`). Not yet: the composer actions in the web UI, and the document
+    > copy, which needs a bridge operation nobody has run (THE QUEUE). Tested by:
+    > `tests/test_conversation_branching.py`.
+
+21. **Finding a conversation again, and keeping the important ones on top.** *(ROAD_TO_10 2.6.)*
+    Search reads titles and the user's own words only — not answers, tool results or the server's
+    notes — and treats the text as text; pinning orders the list and does not count as working on
+    a conversation.
+    > PARTIAL (2026-10-04) — backend: `GET /ai/conversations?q=` (case-insensitive, `%` and `_`
+    > literal, scoped to the caller, `match` says title or message) and `PATCH
+    > /ai/conversations/{id}` taking `pinned` beside `title` (`conversations.pinned_at`, same
+    > migration; pinning leaves `updated_at` alone). Not yet: the sidebar search box and pin
+    > control. Tested by: `tests/test_conversation_search_pin.py`.
 
 ---
 

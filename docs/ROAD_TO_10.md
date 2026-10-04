@@ -306,10 +306,20 @@ What exists today, to build on, not to replace:
     branch copies the conversation up to a message, with its own CATIA document copy.
   - Trap: the CATIA document is bound per conversation (CLAUDE.md, *A conversation acts on the
     document it owns*). A branch must save the document as a new file, never share one.
+  - **Status 2026-10-04 (backend; the composer actions are next):** master plan P11.20.
+    Decided differently from the text above, on purpose: a branch does **not** copy the CATIA
+    document (it says so, and the state block says so until the branch has a document of its
+    own — "save as a new file" is a bridge operation nobody has run), and a retry does **not**
+    roll the document back to a checkpoint (`catia_restore` needs a seat and an approval token):
+    a rewind is refused, with the tools named, whenever a mutating tool ran in the turn, and
+    offers a branch from before it. Read-only turns rewind cleanly.
 - [ ] **2.6 Conversation search, pinning and titles.** [Linux + frontend] **S** — **NEW** (P5)
   - Full-text search over titles and user messages, restricted to the user's own conversations
     (tenant scope; another user's conversation is a 404, never a 403).
   - Title generation exists (`Kryova-backend/app/ai/service.py`, `TITLE_MAX_TOKENS=60`).
+  - **Status 2026-10-04 (backend; the sidebar controls are next):** master plan P11.21. Search is
+    `GET /ai/conversations?q=` over titles and the user's own words only; pinning is
+    `PATCH /ai/conversations/{id}` with `pinned`, and does not move `updated_at`.
 - [ ] **2.7 Long-term project memory.** [Linux] **M** — **NEW** (E16)
   - Facts that should outlive one conversation (the house material, the preferred fastener
     standard, the units of the drawing template) belong to the *project*, as rows the user can see

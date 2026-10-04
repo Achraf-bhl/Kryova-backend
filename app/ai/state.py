@@ -266,6 +266,30 @@ def _documents_to_name(
     return [row for index, row in enumerate(owned) if index in keep]
 
 
+def _branch_lines(conversation: Conversation, document: str | None) -> list[str]:
+    """What a branch must be told until it has a document of its own (ROAD_TO_10 2.5).
+
+    A branch copies the messages and never the CATIA document (`app/ai/branching.py` says
+    why), so its transcript describes a part this conversation does not hold. With nothing in
+    the state block to contradict it the model edits a feature that is not there. The line
+    goes the moment the branch owns a document, which is the one change that makes it false.
+    """
+    if conversation.branched_from_id is None or document:
+        return []
+    return [
+        "branched: this conversation was branched from another one"
+        + (
+            f" at message {conversation.branched_at_sequence}"
+            if conversation.branched_at_sequence is not None
+            else ""
+        )
+        + ". The messages above describe a part in THAT conversation's document, which this "
+        "one does not have. Before changing anything, rebuild it (build_design when a design "
+        "is recorded) or start a part with catia_new_part; never edit a feature the messages "
+        "mention as though it were here."
+    ]
+
+
 def _catia_lines(
     conversation: Conversation,
     available: bool | None,
@@ -642,15 +666,17 @@ def build_state_block(db: Session, user: User, conversation: Conversation) -> st
         lines.extend(_project_lines(db, project))
 
     seat_language = _catia_ui_language(db, user.id, conversation)
+    document = bound_document_name(db, conversation.id)
     lines.extend(
         _catia_lines(
             conversation,
             _catia_available(db, user.id),
-            bound_document_name(db, conversation.id),
+            document,
             seat_language,
             owned_documents(db, conversation.id),
         )
     )
+    lines.extend(_branch_lines(conversation, document))
     # What this conversation already did, read from the operation log rather
     # than from the transcript -- the transcript is what the window and the
     # summariser have been trimming, and the loose ends are exactly what they

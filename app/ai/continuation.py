@@ -199,15 +199,20 @@ def pending(db: Session, conversation: Conversation) -> NextAction | None:
         return None
     if conversation.messages[-1].role is not MessageRole.ASSISTANT:
         return None
-    newest = db.scalar(
-        select(TurnMetric.stop_reason)
+    newest = db.execute(
+        select(TurnMetric.stop_reason, TurnMetric.created_at)
         .where(TurnMetric.conversation_id == conversation.id)
         .order_by(TurnMetric.created_at.desc(), TurnMetric.id.desc())
         .limit(1)
-    )
+    ).first()
     if newest is None:
         return None
-    return for_stop(newest, graph_of(conversation))
+    stop_reason, recorded_at = newest
+    # A turn recorded before the newest messages were rewound belongs to an answer that was
+    # deleted; the answer now last in the transcript is an earlier turn's, which finished.
+    if conversation.rewound_at is not None and recorded_at <= conversation.rewound_at:
+        return None
+    return for_stop(stop_reason, graph_of(conversation))
 
 
 def message_for(action: NextAction, conversation: Conversation) -> str:

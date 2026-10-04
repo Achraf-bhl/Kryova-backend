@@ -151,6 +151,29 @@ def latest_sequence(db: Session, conversation_id: str) -> int:
     )
 
 
+def in_flight(db: Session, conversation_id: str, *, now: datetime | None = None) -> bool:
+    """Whether a turn of this conversation is probably running right now.
+
+    The newest stored event is not terminal and is younger than the idle timeout a follower
+    gives up at (`FOLLOW_IDLE_TIMEOUT_S`): a turn that has said nothing for that long is, by
+    the follower's own rule, finished or wedged. Used to refuse an operation that would pull
+    the transcript out from under a running loop. The non-streaming route records no events,
+    so a turn on it is invisible here -- a limit stated, not hidden.
+    """
+    row = db.execute(
+        select(TurnEvent.payload, TurnEvent.created_at)
+        .where(TurnEvent.conversation_id == conversation_id)
+        .order_by(TurnEvent.sequence.desc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return False
+    payload, created_at = row
+    if is_terminal(payload):
+        return False
+    return ((now or utcnow()) - created_at).total_seconds() < FOLLOW_IDLE_TIMEOUT_S
+
+
 def prune(db: Session, *, now: datetime | None = None) -> int:
     """Delete events past the retention window. Returns how many went.
 

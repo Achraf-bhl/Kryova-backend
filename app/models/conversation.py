@@ -111,6 +111,26 @@ class Conversation(UUIDPrimaryKey, TimestampMixin, Base):
     #: at the last fold", which is most conversations.
     summary_facts: Mapped[str | None] = mapped_column(Text, default=None)
 
+    #: Pinned to the top of the sidebar (ROAD_TO_10 2.6). A timestamp rather than a flag so
+    #: pins keep the order they were made in; NULL is "not pinned". Setting it does not move
+    #: `updated_at`, which means "last worked on" and must not change because someone tidied
+    #: the list.
+    pinned_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+
+    #: Where this conversation was branched from, and the last message it took (2.5). The
+    #: source is `SET NULL` on delete: a branch is its own conversation and outlives the one
+    #: it started from. Only the *messages* up to `branched_at_sequence` were copied; the
+    #: CATIA document never is (see `app/ai/branching.py`).
+    branched_from_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), index=True, default=None
+    )
+    branched_at_sequence: Mapped[int | None] = mapped_column(Integer, default=None)
+
+    #: When the newest messages were last rewound for a retry or an edit (2.5). A turn
+    #: recorded before this is not continuable: the answer its Continue would resume was
+    #: deleted (`app/ai/continuation.pending`).
+    rewound_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+
     #: Running totals, denormalised from `AITokenUsage` so reading a
     #: conversation costs no aggregate query.
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)

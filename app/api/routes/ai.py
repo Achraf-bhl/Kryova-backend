@@ -16,14 +16,14 @@ import json
 import logging
 import time
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.ai import (
@@ -34,12 +34,14 @@ from app.ai import (
     LLMUnavailable,
     LoadCaseDraft,
     ResultInterpretation,
+    branching,
     continuation,
     draft_load_case,
     generate_title,
     get_provider,
     interpret_result,
     org_budget,
+    prompts,
     turn_events,
 )
 from app.ai import usage as token_usage
@@ -1161,9 +1163,23 @@ class ConversationResumeRead(BaseModel):
     )
 
 
+class BranchOriginRead(BaseModel):
+    conversation_id: str
+    title: str
+    at_sequence: int | None
+
+
 class ConversationRead(BaseModel):
     conversation_id: str
     title: str
+    pinned: bool = False
+    branched_from: BranchOriginRead | None = Field(
+        default=None,
+        description=(
+            "Where this conversation was branched from, when the original is still the "
+            "user's to read; null for any other conversation."
+        ),
+    )
     project_id: str | None
     created_at: str
     updated_at: str
@@ -1195,6 +1211,14 @@ class ConversationSummaryRead(BaseModel):
     has_catia_document: bool
     prompt_tokens: int
     completion_tokens: int
+    pinned: bool = Field(default=False, description="Pinned conversations sort first (2.6).")
+    branched_from_id: str | None = Field(
+        default=None, description="The conversation this one was branched from, if any (2.5)."
+    )
+    match: Literal["title", "message"] | None = Field(
+        default=None,
+        description="With `q`: whether the title or one of the user's messages matched.",
+    )
 
 
 class ConversationPage(BaseModel):
@@ -1205,7 +1229,20 @@ class ConversationPage(BaseModel):
 
 
 class ConversationUpdate(BaseModel):
-    title: str = Field(min_length=1, max_length=255)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    pinned: bool | None = Field(
+        default=None, description="Pin to, or unpin from, the top of the sidebar."
+    )
+
+    @model_validator(mode="after")
+    def _says_something(self) -> "ConversationUpdate":
+        if self.title is not None:
+            self.title = self.title.strip()
+            if not self.title:
+                raise ValueError("A title cannot be only spaces.")
+        if self.title is None and self.pinned is None:
+            raise ValueError("Send a `title`, `pinned`, or both.")
+        return self
 
 
 def _unfence(content: str | None) -> Any:
@@ -1244,25 +1281,59 @@ def list_conversations(
     current_user: CurrentUser,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    q: Annotated[
+        str | None,
+        Query(
+            min_length=2,
+            max_length=100,
+            description=(
+                "Search the titles and the user's own messages, case-insensitively and as "
+                "plain text (no wildcards). Only this user's conversations are searched."
+            ),
+        ),
+    ] = None,
 ) -> ConversationPage:
-    """The user's conversations, newest activity first.
+    """The user's conversations: pinned first, then newest activity first.
 
     Ordered by `updated_at` rather than `created_at`: a sidebar is a list of
-    what you were last working on, not what you started first.
+    what you were last working on, not what you started first. Pinning does not
+    move `updated_at`.
+
+    `q` filters to conversations whose title, or one of whose messages *the user wrote*,
+    contains the text. The server's own notes (`CONTROL_NOTE`, a Continue) are not the
+    user's words and are not searched, nor are the model's answers or tool results: a search
+    for "M6" should find the conversation where the user said it, not every one whose
+    log mentions a bolt. The scan is bounded by the owner's conversations (the owner filter
+    is applied first) and has no index of its own -- stated, not hidden.
     """
-    total = (
-        db.scalar(
-            select(func.count())
-            .select_from(Conversation)
-            .where(Conversation.owner_id == current_user.id)
+    filters: list[Any] = [Conversation.owner_id == current_user.id]
+    needle = " ".join(q.split()) if q else None
+    if needle:
+        filters.append(
+            or_(
+                Conversation.title.icontains(needle, autoescape=True),
+                exists().where(
+                    ConversationMessage.conversation_id == Conversation.id,
+                    ConversationMessage.role == MessageRole.USER,
+                    ~ConversationMessage.content.startswith(
+                        prompts.CONTROL_NOTE, autoescape=True
+                    ),
+                    ConversationMessage.content.icontains(needle, autoescape=True),
+                ),
+            )
         )
-        or 0
-    )
+    total = db.scalar(select(func.count()).select_from(Conversation).where(*filters)) or 0
     rows = list(
         db.scalars(
             select(Conversation)
-            .where(Conversation.owner_id == current_user.id)
-            .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+            .where(*filters)
+            # NULLs sort last under `IS NULL ASC`, whichever way the database orders them.
+            .order_by(
+                Conversation.pinned_at.is_(None),
+                Conversation.pinned_at.desc(),
+                Conversation.updated_at.desc(),
+                Conversation.created_at.desc(),
+            )
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -1297,9 +1368,32 @@ def list_conversations(
                 has_catia_document=bound_document_name(db, row.id) is not None,
                 prompt_tokens=row.prompt_tokens,
                 completion_tokens=row.completion_tokens,
+                pinned=row.pinned_at is not None,
+                branched_from_id=row.branched_from_id,
+                match=(
+                    ("title" if needle.lower() in row.title.lower() else "message")
+                    if needle
+                    else None
+                ),
             )
             for row in rows
         ],
+    )
+
+
+def _branch_origin(
+    db: Session, user: User, conversation: Conversation
+) -> BranchOriginRead | None:
+    """The conversation this one was branched from, if it is still the user's to read."""
+    if conversation.branched_from_id is None:
+        return None
+    source = db.get(Conversation, conversation.branched_from_id)
+    if source is None or source.owner_id != user.id:
+        return None
+    return BranchOriginRead(
+        conversation_id=source.id,
+        title=source.title,
+        at_sequence=conversation.branched_at_sequence,
     )
 
 
@@ -1381,6 +1475,8 @@ def read_conversation(
     return ConversationRead(
         conversation_id=conversation.id,
         title=conversation.title,
+        pinned=conversation.pinned_at is not None,
+        branched_from=_branch_origin(db, current_user, conversation),
         project_id=conversation.project_id,
         created_at=conversation.created_at.isoformat(),
         updated_at=conversation.updated_at.isoformat(),
@@ -1417,11 +1513,36 @@ def rename_conversation(
     conversation_id: str,
     payload: Annotated[ConversationUpdate, ...],
 ) -> ConversationRead:
-    """Rename a conversation. The only field a user may edit."""
+    """Rename a conversation, pin it, or both. The only fields a user may edit."""
     conversation = _owned_conversation(db, current_user, conversation_id)
-    conversation.title = payload.title.strip()[:255]
+    if payload.title is not None:
+        conversation.title = payload.title[:255]
+    if payload.pinned is not None:
+        _set_pinned(db, conversation, payload.pinned)
     db.commit()
+    # The pin was written by a Core statement, which the identity map does not see.
+    db.expire(conversation)
     return read_conversation(db, current_user, conversation_id)
+
+
+def _set_pinned(db: Session, conversation: Conversation, pinned: bool) -> None:
+    """Pin or unpin without moving `updated_at`, which means "last worked on".
+
+    A column with `onupdate` is bumped by every ORM UPDATE that does not name it, and
+    assigning it the value it already has is no change at all to the ORM. Naming it in a Core
+    statement is what stops the bump.
+    """
+    if (conversation.pinned_at is not None) == pinned:
+        return
+    db.flush()
+    db.execute(
+        update(Conversation)
+        .where(Conversation.id == conversation.id)
+        .values(
+            pinned_at=datetime.now(timezone.utc) if pinned else None,
+            updated_at=Conversation.updated_at,
+        )
+    )
 
 
 @router.post(
@@ -1557,6 +1678,115 @@ def resume_stream(
         media_type="text/event-stream",
         headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
     )
+
+
+class BranchRequest(BaseModel):
+    from_sequence: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "The assistant answer to branch at. Omit for the newest answer. A message with "
+            "tool calls, or one that is not the assistant's, is refused (422)."
+        ),
+    )
+    title: str | None = Field(default=None, max_length=255)
+
+
+class BranchRead(BaseModel):
+    conversation_id: str
+    title: str
+    from_sequence: int
+    copied_messages: int = Field(ge=0)
+    design_revision: int | None = Field(
+        description="The revision of the original's design that was copied, or null."
+    )
+    plan_copied: bool
+    summary_kept: bool
+    notes: list[str] = Field(
+        description=(
+            "What was and was not carried over, in words -- always including that the CATIA "
+            "document is never copied."
+        )
+    )
+
+
+class RewindRead(BaseModel):
+    message: str = Field(description="The user's message, to send again or edit first.")
+    removed_messages: int = Field(ge=1)
+
+
+#: Branching, rewinding and the rest of the conversation edits share a budget: none of them
+#: calls a model, and none of them should be a loop's inner step.
+_conversation_edit_limit = RateLimit("ai.conversation_edit", 60, window_seconds=60)
+
+
+@router.post(
+    "/ai/conversations/{conversation_id}/branch",
+    response_model=BranchRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_conversation_edit_limit)],
+)
+def branch_conversation(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+    payload: Annotated[BranchRequest, ...],
+) -> BranchRead:
+    """Copy a conversation up to one of its answers into a new conversation (ROAD_TO_10 2.5).
+
+    The branch carries the messages, the design as it stood at that answer and, where they
+    are still true, the summary and the plan. It never carries the CATIA document: a
+    document belongs to one conversation, and `notes` says so.
+    """
+    source = _owned_conversation(db, current_user, conversation_id)
+    try:
+        outcome = branching.branch(
+            db, source, current_user, from_sequence=payload.from_sequence, title=payload.title
+        )
+    except branching.BadPoint as exc:
+        # Both refusals are raised before anything is written, so there is nothing to undo.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    except branching.Refused as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    return BranchRead(
+        conversation_id=outcome.conversation.id,
+        title=outcome.conversation.title,
+        from_sequence=outcome.from_sequence,
+        copied_messages=outcome.copied_messages,
+        design_revision=outcome.design_revision,
+        plan_copied=outcome.plan_copied,
+        summary_kept=outcome.summary_kept,
+        notes=list(outcome.notes),
+    )
+
+
+@router.post(
+    "/ai/conversations/{conversation_id}/rewind",
+    response_model=RewindRead,
+    dependencies=[Depends(_conversation_edit_limit)],
+)
+def rewind_conversation(
+    db: DbSession, current_user: CurrentUser, conversation_id: str
+) -> RewindRead:
+    """Delete the newest user message and everything after it, and hand the text back.
+
+    This is Retry and Edit (ROAD_TO_10 2.5): the client puts the text back in the composer, or
+    sends it again at once. It is refused (409) when the turn changed anything, because the
+    document and the design cannot be rolled back with the transcript -- the answer says what
+    ran and offers a branch from before it.
+    """
+    conversation = _owned_conversation(db, current_user, conversation_id)
+    toolbox = ToolBox(db=db, user=current_user, conversation=conversation)
+    try:
+        outcome = branching.rewind(db, conversation, toolbox)
+    except branching.Refused as exc:
+        # Every refusal is raised before the first delete, so there is nothing to undo.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    return RewindRead(message=outcome.message, removed_messages=outcome.removed_messages)
 
 
 @router.delete("/ai/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

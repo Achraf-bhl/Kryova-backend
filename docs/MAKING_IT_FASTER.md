@@ -155,6 +155,26 @@ integrates three times for the same answer.
   serialised by something outside this process — the gmsh lock, **CATIA's COM surface (one
   in-flight call per device)**, OCCT's per-document runner — or is GPU-bound in the model.
   Adding threads to those queues the same work behind the same lock.
+* **Running one step's independent read-only tool calls concurrently** (ROAD_TO_10 1.12,
+  measured 2026-10-04). The premise is true — `stream_agent` runs a step's calls one after
+  another — and for the lookups the saving is not there. Nine of them were timed against the local
+  database: `list_projects` 0.5 ms, `get_project` 1.7, `list_simulations` 0.8, `search_documentation`
+  0.7 (with no index built, so a floor), `estimate_cost` 1.4, `design_history` 1.4, `list_materials`
+  and `explain_catia_term` 0.01; overlapping *k* of them saves about *(k−1)* × 1 ms against a model
+  step of seconds. **Not timed**, and the only candidates that could take real time:
+  `draft_load_case` (one model call), `assess_fatigue`, `check_part` and `wait_for_simulation`
+  (which polls a job). It is unsafe for all of them, for two reasons that each stand alone: a
+  `ToolBox` is bound to **one SQLAlchemy `Session`, which is not thread-safe**, and every one of
+  those reads it (`draft_load_case` queries the project and the geometry version,
+  `assess_fatigue` builds a `MediaService` on it, `check_part` goes through `_call_catia` and so the
+  document binding, `wait_for_simulation` re-reads the job each poll);
+  and **`Tool.mutating` is the confirmation gate, not a read/write flag** — `create_project` and
+  `update_project` are `mutating=False` on purpose (reversible, so ungated) and write to the
+  database, so a scheme that parallelised "the non-mutating calls" would run a write beside a read
+  of the same project. The 22 read-only `catia_*` tools are serialised by the bridge's
+  one-call-per-device turnstile whatever the loop does. What *would* move wall time is fewer model
+  steps (1.13). Reopen only on a live `turn_metrics` showing steps that spend their time in one of
+  the four tools above, and then give that tool its own session rather than sharing this one.
 * **Running two big solves in one process.** FEA is RAM-bound before it is CPU-bound.
   `max_elements` exists because of this, and two concurrent direct solves is how a box OOMs
   rather than how it goes faster.

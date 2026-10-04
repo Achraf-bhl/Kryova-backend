@@ -1787,6 +1787,16 @@ a key in `.env.local` they are minutes.*
       message are ignored); (c) on one 30-step CATIA turn, read `cached_prompt_tokens /
       prompt_tokens` per step from `turn_metrics` with the block where it is (H7's figure) — if it
       is already ~0.9 the change is not worth its risk. Settles: whether P11.14 is built.
+- [ ] **H12 — Does the model batch independent reads when it may?** The loop executes every call
+      a step carries, so the lever on wall time is how many calls the model puts in one step
+      (ROAD_TO_10 1.12 found tool concurrency worthless: every read-only tool is under 2 ms). The
+      prompt does not currently tell the model that it may ask for several independent facts at
+      once, and `parallel_tool_calls` is not sent. On the first ladder run, read from
+      `turn_metrics` (`rounds`, `tool_calls`) the calls-per-round of a measurement-heavy prompt;
+      if it is ~1.0, add one sentence to the system prompt and re-run the same prompt, reading
+      `rounds` and `prompt_tokens` again — a sentence changes the cached prefix once, so the first
+      run after it bills the whole prompt at the full price. Settles: whether the prompt change
+      is worth shipping.
 
 ## Expect failures on the first run, and that is the point
 

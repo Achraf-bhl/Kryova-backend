@@ -205,12 +205,22 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
 
 ### 1C. Spend fewer turns
 
-- [ ] **1.12 Batch the agent's tool calls where the provider allows parallel calls.** [Linux] **M** (verify)
+- [x] **1.12 Batch the agent's tool calls where the provider allows parallel calls.** [Linux] **M** (verify)
   - The loop appears to run tool calls one at a time (`agent.py` around line 855). Read-only calls in
     the same step can run concurrently: measurements, lookups, `search_documentation`.
   - CATIA calls cannot, because the bridge allows one call in flight per device
     (`Kryova-backend/app/catia/connection.py` `_Turnstile`).
   - Test: two read-only calls in one model turn take the time of one.
+  - **Status 2026-10-04: verified, and closed without building it** (`docs/MAKING_IT_FASTER.md` §3
+    has the numbers). The loop does run a step's calls one at a time. Nine lookups were timed and
+    each answers in under 2 ms, so overlapping them saves about a millisecond per extra call
+    against a model step of seconds. The four tools that could take real time (`draft_load_case`,
+    `assess_fatigue`, `check_part`, `wait_for_simulation`) were **not timed**, and running any of
+    them concurrently would be unsafe: a `ToolBox` shares one non-thread-safe `Session`, and
+    `Tool.mutating` is the confirmation gate, not a read/write flag (`create_project` and
+    `update_project` are ungated writes). The test the item asked for would have asserted a saving
+    that was never measured. The lever that does exist is fewer model steps (1.13); whether the
+    model batches independent reads when told to is THE QUEUE H12.
 - [ ] **1.13 Let one tool call carry a whole design plan.** [Linux then Seat] **L** → E15.1, Phase 5.3
   - The design IR (`Kryova-backend/app/design/`) already compiles a spec into a plan. Expose
     "compile and build this spec" as one tool, so a part costs one agent step instead of twenty.

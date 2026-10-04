@@ -1037,9 +1037,15 @@ def stream_agent(
     # with nothing saying so.
     plan = _requirement_plan(conversation, steps)
     shortfall = shortfall_note(plan)
+    # Only the step budget is "out of tool calls". The other three exits ended
+    # early for a person, and telling the model otherwise had it advise the user
+    # to narrow a request that was waiting on a sign-off.
+    closing_instruction = (
+        prompts.AGENT_OUT_OF_STEPS if stop_reason == "step_budget" else prompts.AGENT_ENDED_EARLY
+    )
     try:
         closing = provider.chat(
-            system=system + prompts.AGENT_OUT_OF_STEPS,
+            system=system + closing_instruction,
             messages=build_messages(db, owner, conversation, attached=attached)
             + (
                 [{"role": "user", "content": prompts.CONTROL_NOTE + shortfall}]
@@ -1056,14 +1062,7 @@ def stream_agent(
         # happened, because the remedies are opposite. Out of rounds means the
         # request was too big for one turn; repeating a refused call means it
         # was stuck, and asking for less would not have helped.
-        text = (
-            "I stopped because I kept repeating a call that had already been "
-            "refused, and re-sending it could not change the answer. Tell me "
-            "what to do differently and I will carry on from what is built."
-            if stop_reason == "repeated_calls"
-            else "I used all my tool calls for this turn without reaching an answer. "
-            "Try narrowing the question."
-        )
+        text = _CLOSING_FALLBACK.get(stop_reason, _CLOSING_FALLBACK["step_budget"])
     if shortfall:
         text += unverified_footnote(plan)
     # The same caveat on the truncated exits, for the same reason: a turn that
@@ -1168,6 +1167,24 @@ MAX_BLOCKED_REPEATS = 3
 #: with the unverified requirements listed under it, so the user sees what was
 #: skipped even when the model does not say so.
 MAX_VERIFICATION_NUDGES = 1
+
+
+#: What the user reads when the closing call itself fails, by why the turn ended.
+#: The same rule as the banner: say which ending this was, because the remedies
+#: are opposite. Out of rounds means the request was too big for one turn; the
+#: other three mean it is waiting on the person, and "try narrowing the question"
+#: would send them to change the one thing that was fine.
+_CLOSING_FALLBACK: dict[str, str] = {
+    "step_budget": "I used all my tool calls for this turn without reaching an answer. "
+    "Try narrowing the question.",
+    "repeated_calls": "I stopped because I kept repeating a call that had already been "
+    "refused, and re-sending it could not change the answer. Tell me what to do "
+    "differently and I will carry on from what is built.",
+    "needs_input": "I stopped because the same step kept failing the same way. Answer "
+    "the question below and I will carry on from what is built.",
+    "awaiting_approval": "I paused at a checkpoint that needs a person to sign off. "
+    "Approve or reject it below and I will carry on from what is built.",
+}
 
 
 def _requirement_plan(conversation: Conversation, steps: list[AgentStep]) -> Any:

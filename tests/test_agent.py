@@ -2082,6 +2082,54 @@ class TestATurnStopsRepeatingItself:
         # "ran out of tool rounds" the wrong sentence for this ending.
         assert done[0]["steps"] < 12
 
+    def test_an_early_ending_is_not_closed_as_running_out_of_calls(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """The closing call for an escalation is told the turn ended early, not that
+        every tool call was used -- the budget here is mostly unspent."""
+        from app.ai import prompts
+
+        provider = ScriptedProvider(self._hammering(12))
+        run_agent(
+            db=db_session,
+            provider=provider,
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="delete it",
+            allow_mutations=True,
+        )
+
+        closing = provider.seen_systems[-1]
+        assert closing.endswith(prompts.AGENT_ENDED_EARLY)
+        assert prompts.AGENT_OUT_OF_STEPS not in closing
+
+    def test_a_failed_closing_call_names_the_real_ending(
+        self, db_session: Session, user: User, project: Project, conversation: Conversation
+    ) -> None:
+        """When the closing call itself fails, the fallback sentence is the whole
+        reply. "Try narrowing the question" is the wrong remedy for an escalation."""
+        from app.ai.provider import LLMError
+
+        class ClosingFails(ScriptedProvider):
+            def chat(self, *, system, messages, tools, max_tokens):  # type: ignore[no-untyped-def]
+                if not tools:
+                    raise LLMError("the provider is down")
+                return super().chat(
+                    system=system, messages=messages, tools=tools, max_tokens=max_tokens
+                )
+
+        reply = run_agent(
+            db=db_session,
+            provider=ClosingFails(self._hammering(12)),
+            toolbox=_toolbox(db_session, user, project),
+            conversation=conversation,
+            user_message="delete it",
+            allow_mutations=True,
+        )
+
+        assert "kept failing the same way" in reply.text
+        assert "narrowing the question" not in reply.text
+
     def test_repeats_spread_across_tools_still_end_as_repeated_calls(
         self, db_session: Session, user: User, project: Project, conversation: Conversation
     ) -> None:

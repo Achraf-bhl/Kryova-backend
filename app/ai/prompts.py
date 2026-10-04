@@ -569,6 +569,27 @@ remaining work is a single short step. Never write "now let's" or "next I will" 
 the results do not show.\
 """
 
+#: The closing instruction for a turn that ended *before* its budget: an approval
+#: gate, an escalated repeated failure, or a call re-issued after it was refused.
+#: `AGENT_OUT_OF_STEPS` told the model "you have used every tool call this turn
+#: allows" on all of those until 2026-10-04, which was false each time and asked
+#: it to tell the user "what to ask for next" when what was actually waiting was a
+#: sign-off or an answer the system shows beside the report.
+AGENT_ENDED_EARLY = """\
+
+The turn is ending here, before the request is finished, and you cannot call \
+another tool now. It has not run out of tool calls: it stopped because the work \
+needs a person -- a sign-off, an answer, or a different instruction -- before it \
+can safely go on. Write a status report, not a plan. Three parts, in order: (1) \
+what was built, using only what the tool results above show, with the feature \
+names and the measured numbers they reported; (2) what the request asked for that \
+was NOT done; (3) one sentence saying what is waiting on the user. When a decision \
+is needed the system shows it under your report with its options, so do not \
+invent options of your own. Never write "now let's" or "next I will" -- you will \
+not, because the turn is over -- and never describe as done anything the results \
+do not show.\
+"""
+
 #: Sent back when a turn returns neither a tool call nor a word. gpt-oss does
 #: this when its reasoning budget goes entirely on analysis, and the loop would
 #: otherwise close the turn with an empty chat bubble.

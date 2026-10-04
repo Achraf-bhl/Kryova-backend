@@ -82,8 +82,8 @@ class TestItIsTheMessageActuallySent:
         one place the agent loop appends it to the system prompt, with `tools`
         emptied so the model cannot answer with another call."""
         source = inspect.getsource(agent)
-        assert "system + prompts.AGENT_OUT_OF_STEPS" in source
-        block = source.split("system + prompts.AGENT_OUT_OF_STEPS", 1)[1][:400]
+        assert 'prompts.AGENT_OUT_OF_STEPS if stop_reason == "step_budget"' in source
+        block = source.split("system + closing_instruction", 1)[1][:400]
         assert "tools=[]" in block, (
             "the closing call must withdraw the tools, or the model answers the "
             "budget-exhausted turn with yet another tool call"
@@ -94,6 +94,36 @@ class TestItIsTheMessageActuallySent:
         the user still gets a sentence rather than an empty bubble."""
         source = inspect.getsource(agent)
         assert "I used all my tool calls for this turn" in source
+
+    def test_every_ending_has_its_own_fallback(self) -> None:
+        """Each stop reason the loop can produce gets a sentence about *its* cause;
+        a missing one would fall back to "try narrowing the question"."""
+        import re
+
+        reasons = set(re.findall(r'stop_reason = "(\w+)"', inspect.getsource(agent)))
+        assert reasons == set(agent._CLOSING_FALLBACK)
+
+
+class TestAnEarlyEndingIsNotCalledRunningOut:
+    """`AGENT_ENDED_EARLY`: the gate, escalation and repeated-call exits stop with
+    rounds unspent. Telling the model it had used every tool call was false each
+    time, and its advice ("ask for less") pointed at the one thing that was fine."""
+
+    EARLY = prompts.AGENT_ENDED_EARLY.lower()
+
+    def test_it_does_not_claim_the_budget_ran_out(self) -> None:
+        assert "used every tool call" not in self.EARLY
+        assert "not run out of tool calls" in self.EARLY
+
+    def test_it_keeps_the_report_rules(self) -> None:
+        assert "cannot call another" in self.EARLY
+        assert "now let's" in self.EARLY and "next i will" in self.EARLY
+        assert "the results do not show" in self.EARLY
+
+    def test_it_leaves_the_options_to_the_system(self) -> None:
+        """The intervention carries the real options; a model inventing its own
+        would put two different forks on one screen."""
+        assert "do not invent options" in self.EARLY
 
     def test_it_is_frozen_prose_and_not_built_at_runtime(self) -> None:
         """Same property the four system prompts have: what the model was told

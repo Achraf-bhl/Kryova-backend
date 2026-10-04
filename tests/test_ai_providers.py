@@ -189,8 +189,12 @@ class TestCompleteRequestShape:
         completion = provider.complete(
             system="S", user="U", schema=Finding, effort="low", max_tokens=100
         )
-        # Cache reads and writes bill as input, so they belong in the input total.
-        assert completion.usage == TokenUsage(prompt_tokens=106, completion_tokens=4)
+        # Cache reads and writes bill as input, so they belong in the input total --
+        # and only the 90 *reads* are the discounted part, so only they are the
+        # cached subset. The 6 written to the cache are fresh input that was stored.
+        assert completion.usage == TokenUsage(
+            prompt_tokens=106, completion_tokens=4, cached_prompt_tokens=90
+        )
 
 
 class TestEffort:

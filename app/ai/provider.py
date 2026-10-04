@@ -35,22 +35,47 @@ class TokenUsage:
     Named after the two things every provider reports under some spelling --
     Anthropic's `input_tokens`/`output_tokens`, OpenAI's
     `prompt_tokens`/`completion_tokens`.
-    Cached-read and cache-write tokens are folded into `prompt_tokens`: they are
-    billed as input, and splitting them here would push provider billing detail
-    through a seam whose whole point is that callers do not know who answered.
+
+    **`prompt_tokens` is every input token, whether or not the vendor served it
+    from its prompt cache**, so a caller that only wants "how big was the
+    request" never has to know a cache exists. `cached_prompt_tokens` is the
+    part of that which was a cache read: a *subset* of `prompt_tokens`, never
+    added to it. The vendor bills the two at very different rates (DeepSeek and
+    Anthropic charge a cached read at a fraction of fresh input), so a ledger
+    that kept only the sum charged every cached token as fresh -- which made
+    the one thing that keeps a long agent turn cheap, a byte-stable prefix,
+    invisible to the budget. Cache *writes* are not split out: they are billed
+    at or above the fresh rate, so counting them as fresh never under-states
+    spend.
     """
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cached_prompt_tokens: int = 0
+
+    def __post_init__(self) -> None:
+        # A vendor that reports more hits than prompt tokens has told us
+        # something inconsistent. Clamping keeps `fresh_prompt_tokens` from going
+        # negative and a cost from going below zero -- the invariant every
+        # consumer relies on -- without inventing a number.
+        clamped = max(0, min(self.cached_prompt_tokens, self.prompt_tokens))
+        if clamped != self.cached_prompt_tokens:
+            object.__setattr__(self, "cached_prompt_tokens", clamped)
 
     @property
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
+    @property
+    def fresh_prompt_tokens(self) -> int:
+        """Prompt tokens the vendor had to compute rather than read from cache."""
+        return self.prompt_tokens - self.cached_prompt_tokens
+
     def __add__(self, other: "TokenUsage") -> "TokenUsage":
         return TokenUsage(
             prompt_tokens=self.prompt_tokens + other.prompt_tokens,
             completion_tokens=self.completion_tokens + other.completion_tokens,
+            cached_prompt_tokens=self.cached_prompt_tokens + other.cached_prompt_tokens,
         )
 
 
@@ -160,7 +185,19 @@ def image_media_type(image: bytes) -> str:
 
 
 class LLMError(RuntimeError):
-    """The model could not be reached, or did not answer usably."""
+    """The model could not be reached, or did not answer usably.
+
+    `usage` is what the call had *already spent* when it failed -- zero for a
+    request that never reached a model, and the first attempt's tokens for a
+    structured answer that was repaired once and still came back unusable. A
+    failure is not free: the vendor billed the attempts it answered, and an
+    exception that dropped their usage made a failing endpoint look cheaper
+    than it was, in the ledger and in the budget.
+    """
+
+    def __init__(self, *args: object, usage: TokenUsage | None = None) -> None:
+        super().__init__(*args)
+        self.usage: TokenUsage = usage if usage is not None else TokenUsage()
 
 
 class LLMUnavailable(LLMError):

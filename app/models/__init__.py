@@ -31,6 +31,7 @@ from app.models.conversation import (
     ConversationMessage,
     MessageRole,
     TurnEvent,
+    TurnMetric,
 )
 from app.models.design import DesignDocument, DesignRevision
 from app.models.gates import ApprovalGate, GateState
@@ -111,6 +112,7 @@ __all__ = [
     "StaffGrant",
     "StaffRole",
     "TurnEvent",
+    "TurnMetric",
     "TotpEnrolment",
     "UploadStatus",
     "UsageRecord",

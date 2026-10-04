@@ -235,6 +235,10 @@ def _ask(
             ),
             options=options,
             latency_ms=(time.perf_counter() - started) * 1000.0,
+            # A failure is not free: a repaired structured answer that then fails
+            # was answered, and billed, once. The exception carries that spend
+            # (ROAD_TO_10 1.4); dropping it made a flaky endpoint look cheap.
+            usage=exc.usage,
             taken_by_fallback=True,
             fallback_reason=str(exc),
         )

@@ -22,7 +22,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, String, Text, TypeDecorator
+from sqlalchemy import BigInteger, Date, ForeignKey, Index, Integer, String, Text, TypeDecorator
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -279,5 +279,72 @@ class AITokenUsage(UUIDPrimaryKey, TimestampMixin, Base):
     purpose: Mapped[str] = mapped_column(String(32))
     provider: Mapped[str] = mapped_column(String(32))
     model: Mapped[str] = mapped_column(String(128))
+    #: Every input token, cached or not -- the request's size.
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    #: The part of `prompt_tokens` the vendor served from its prompt cache -- a
+    #: subset, never added to it. Billed at a fraction of fresh input, so a
+    #: ledger without it charges every cached token as fresh.
+    cached_prompt_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    #: What this call cost in micro-dollars (1e-6 USD), priced from
+    #: `settings.ai_prices` *at the time of the call* -- a later price change
+    #: must not rewrite what an earlier call cost. **NULL means the model had no
+    #: configured price, which is not the same as free**: a cost budget sums only
+    #: what is known, and says so (`app/ai/pricing.py`).
+    cost_micro_usd: Mapped[int | None] = mapped_column(BigInteger, default=None)
+
+
+class TurnMetric(UUIDPrimaryKey, TimestampMixin, Base):
+    """One row per agent turn: what it cost, how long it took, and why it stopped.
+
+    `AITokenUsage` answers "what did we spend" -- one row per *billing event*, kept
+    for the budget and the bill. This answers "what did a turn cost, and how did it
+    behave": steps taken, tokens split by cache, wall time, the stop reason, how many
+    tools were offered and how many calls failed. Those are the baseline every
+    ROAD_TO_10 Phase 1 optimisation is judged against, and until this table they
+    existed only as log lines, which cannot be summed or compared between two
+    configurations (`app/ai/turn_metrics.py` says why this is not folded into the
+    ledger).
+
+    Append-only and denormalised on purpose: a metric row must still be readable
+    after its conversation is deleted, which is why the conversation key is
+    SET NULL, exactly as the ledger's is.
+    """
+
+    __tablename__ = "turn_metrics"
+    __table_args__ = (
+        Index("ix_turn_metrics_conversation_created", "conversation_id", "created_at"),
+        Index("ix_turn_metrics_model_created", "model", "created_at"),
+    )
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), default=None
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(128))
+    #: Loop iterations, which `AI_MAX_STEPS` bounds; `step_budget` is the bound it ran
+    #: under, so "used 41 of 60" is a division and not an archaeology.
+    rounds: Mapped[int] = mapped_column(Integer, default=0)
+    step_budget: Mapped[int] = mapped_column(Integer, default=0)
+    #: Billed provider calls: steps, summary folds, routing decisions, the closing answer.
+    model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    #: Tool schemas the model was offered. 235 with every tool, fewer with retrieval.
+    tools_offered: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls_failed: Mapped[int] = mapped_column(Integer, default=0)
+    #: Turned back by the loop for repeating a call. They never ran, so they are not
+    #: failures and are counted apart.
+    tool_calls_blocked: Mapped[int] = mapped_column(Integer, default=0)
+    #: Every input token across the turn, cached or not; the cached part is a subset.
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    #: The largest single request of the turn, in prompt tokens.
+    peak_prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    #: Micro-dollars; NULL when the model had no configured price (not the same as free).
+    cost_micro_usd: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    wall_ms: Mapped[int] = mapped_column(Integer, default=0)
+    #: finished, cancelled, step_budget, repeated_calls, needs_input,
+    #: awaiting_approval, error, disconnected.
+    stop_reason: Mapped[str] = mapped_column(String(32))

@@ -53,6 +53,7 @@ from app.ai.recovery import Failure as Recovery_Failure
 from app.ai.recovery import Recovery
 from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
 from app.ai.tools import ToolBox, ToolError
+from app.ai.turn_metrics import STOP_CANCELLED, STOP_FINISHED, TurnMeter
 from app.ai.verification import (
     assess,
     measurements_in,
@@ -511,6 +512,7 @@ def stream_agent(
     user: User | None = None,
     allow_mutations: bool = False,
     max_tokens: int = 4_000,
+    meter: TurnMeter | None = None,
 ) -> Iterator[dict[str, Any]]:
     """The loop, as a generator of events.
 
@@ -521,12 +523,20 @@ def stream_agent(
 
     Everything is persisted as it happens, so a crash mid-loop leaves a
     transcript that still reflects what actually ran.
+
+    `meter` is the turn's running tally of tokens, calls and tool outcomes, and it
+    belongs to the *caller* (`app/ai/turn_metrics.py` says why): a loop that kept
+    its own total lost steps 1..N-1 of any turn that failed at step N, which is
+    real spend. Left as None the loop makes one of its own, which is what the
+    tests and `run_agent` get.
     """
     owner = user if user is not None else toolbox.user
     budget = max_steps()
     system = system_prompt()
     labels = toolbox.labels()
-    usage = TokenUsage()
+    if meter is None:
+        meter = TurnMeter()
+    meter.step_budget = budget
 
     # Any stop left over from an earlier turn is spent. Without this one press
     # of stop would end every turn after it, instantly, each looking to the user
@@ -544,13 +554,14 @@ def stream_agent(
     routing: list[TokenUsage] = []
     shown = _shown_tools(toolbox, user_message, provider, routing)
     for spent in routing:
-        usage += spent
+        meter.charge(spent)
 
     _append(db, conversation, MessageRole.USER, content=user_message)
 
     # Fold before building the window, so the material being folded is still
     # present to be read and the window that follows is already compacted.
-    usage += maybe_summarise(db, provider, conversation)
+    folded = maybe_summarise(db, provider, conversation)
+    meter.charge(folded, calls=1 if folded.total_tokens else 0)
 
     steps: list[AgentStep] = []
     #: Read-only calls made this turn, by fingerprint, so a loop is caught.
@@ -571,6 +582,7 @@ def stream_agent(
     #: turn than on more of them.
     blocked = 0
     schemas = toolbox.schemas(include_mutating=allow_mutations, only=shown)
+    meter.tools_offered = len(schemas)
     known = set(labels)
     corrections = 0
     #: How many times this turn was held open for unmeasured requirements.
@@ -626,21 +638,16 @@ def stream_agent(
             )
             db.commit()
             yield {"type": "message", "content": interruption.TURN_STOPPED_MESSAGE}
-            yield {
-                "type": "done",
-                "conversation_id": conversation.id,
-                "project_id": toolbox.project_id,
-                # True: the turn did not reach an answer. The frontend uses this
-                # to decide whether to offer "continue", which is exactly what a
-                # stopped turn should offer.
-                "truncated": True,
-                "stop_reason": "cancelled",
-                "steps": len(steps),
-                "prompt_tokens": usage.prompt_tokens,
-                "completion_tokens": usage.completion_tokens,
-            }
+            # `truncated` is True: the turn did not reach an answer. The frontend
+            # uses it to decide whether to offer "continue", which is exactly what
+            # a stopped turn should offer.
+            yield _done_event(
+                conversation, toolbox, meter, provider, steps,
+                truncated=True, stop_reason=STOP_CANCELLED,
+            )
             return
 
+        meter.rounds = step + 1
         yield {"type": "thinking", "step": step + 1, "max_steps": budget}
         # A turn is the model thinking plus the tools running, and the two are
         # optimised in completely different places -- one is GPU offload and
@@ -673,7 +680,7 @@ def stream_agent(
                 "Nothing was produced, so nothing has been written to the conversation."
             )
         thinking_ms = (time.perf_counter() - thinking_started) * 1000.0
-        usage += turn.usage
+        meter.charge(turn.usage)
         step_timings: list[tuple[str, float]] = []
 
         if not turn.wants_tools:
@@ -805,16 +812,10 @@ def stream_agent(
             )
             db.commit()
             yield {"type": "message", "content": text}
-            yield {
-                "type": "done",
-                "conversation_id": conversation.id,
-                "project_id": toolbox.project_id,
-                "truncated": False,
-                "stop_reason": "finished",
-                "steps": len(steps),
-                "prompt_tokens": usage.prompt_tokens,
-                "completion_tokens": usage.completion_tokens,
-            }
+            yield _done_event(
+                conversation, toolbox, meter, provider, steps,
+                truncated=False, stop_reason=STOP_FINISHED,
+            )
             return
 
         # The model asked for tools, so whatever went wrong on an earlier step
@@ -895,6 +896,14 @@ def stream_agent(
             step_timings.append((call.name, float(elapsed_ms)))
 
             steps.append(AgentStep(tool=call.name, arguments=call.arguments, ok=ok, result=result))
+            if guarded:
+                # Turned back by the loop's own repeat guard: it never ran, so it
+                # is neither a success nor the tool's failure.
+                meter.tool_calls_blocked += 1
+            else:
+                meter.tool_calls += 1
+                if not ok:
+                    meter.tool_calls_failed += 1
             if ok and isinstance(result, dict):
                 # Which of the two happened is the whole of the empty-document
                 # guard below. Every solid-producing operation comes back
@@ -1088,7 +1097,7 @@ def stream_agent(
             max_tokens=max_tokens,
         )
         text = closing.text
-        usage += closing.usage
+        meter.charge(closing.usage)
     except LLMError:
         # The fallback follows the same rule as the banner: say which of the two
         # happened, because the remedies are opposite. Out of rounds means the
@@ -1133,21 +1142,15 @@ def stream_agent(
     if asking is not None:
         yield {"type": "intervention", **asking.to_dict()}
 
-    yield {
-        "type": "done",
-        "conversation_id": conversation.id,
-        "project_id": toolbox.project_id,
-        "truncated": True,
-        "stop_reason": stop_reason,
-        "steps": len(steps),
-        "prompt_tokens": usage.prompt_tokens,
-        "completion_tokens": usage.completion_tokens,
+    yield _done_event(
+        conversation, toolbox, meter, provider, steps,
+        truncated=True, stop_reason=stop_reason,
         # Repeated on `done` as well as its own event, because a client that
         # reconnects mid-turn replays from the buffer and may land after the
         # `intervention` event went past. A decision prompt is the one thing a
         # dropped event must not lose.
-        "intervention": asking.to_dict() if asking is not None else None,
-    }
+        intervention=asking.to_dict() if asking is not None else None,
+    )
 
 
 #: How many times one read-only call may be repeated, byte for byte, inside a
@@ -1442,6 +1445,45 @@ def _refused_before(
     )
 
 
+def _done_event(
+    conversation: Conversation,
+    toolbox: ToolBox,
+    meter: TurnMeter,
+    provider: LLMProvider,
+    steps: list[AgentStep],
+    *,
+    truncated: bool,
+    stop_reason: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    """The turn's final event. One builder, so the three exits cannot disagree.
+
+    The loop ends in three places -- stopped on request, finished with an answer, and
+    out of road -- and each used to spell this dictionary out by hand. A field added
+    to one and not the others is a client that sees a cost on a finished turn and
+    none on a stopped one, which is how a "total spent today" drifts below the truth.
+    The turn's stop reason is also recorded on the meter here, because the route that
+    writes the metrics row is not the one that knows it.
+    """
+    meter.stop_reason = stop_reason
+    return {
+        "type": "done",
+        "conversation_id": conversation.id,
+        "project_id": toolbox.project_id,
+        "truncated": truncated,
+        "stop_reason": stop_reason,
+        "steps": len(steps),
+        "prompt_tokens": meter.usage.prompt_tokens,
+        "completion_tokens": meter.usage.completion_tokens,
+        # A subset of `prompt_tokens`, never added to it.
+        "cached_prompt_tokens": meter.usage.cached_prompt_tokens,
+        # None when the model has no configured price -- unknown, not free.
+        "cost_micro_usd": meter.cost_micro_usd(provider.model),
+        "wall_ms": meter.wall_ms,
+        **extra,
+    }
+
+
 def run_agent(
     *,
     db: Session,
@@ -1452,16 +1494,20 @@ def run_agent(
     user: User | None = None,
     allow_mutations: bool = False,
     max_tokens: int = 4_000,
+    meter: TurnMeter | None = None,
 ) -> AgentReply:
     """Run the loop to completion and return the result.
 
     A thin collector over `stream_agent` -- there is one loop, so the streaming
-    and non-streaming endpoints can never drift apart.
+    and non-streaming endpoints can never drift apart. Pass a `meter` to read what
+    the turn spent even when it raises: the reply's `usage` exists only for a turn
+    that finished, and the ones that did not are the ones nobody else bills.
     """
     text = ""
     steps: list[AgentStep] = []
     truncated = False
-    usage = TokenUsage()
+    if meter is None:
+        meter = TurnMeter()
 
     for event in stream_agent(
         db=db,
@@ -1472,6 +1518,7 @@ def run_agent(
         user=user,
         allow_mutations=allow_mutations,
         max_tokens=max_tokens,
+        meter=meter,
     ):
         if event["type"] == "tool_end":
             steps.append(
@@ -1486,9 +1533,5 @@ def run_agent(
             text = event["content"]
         elif event["type"] == "done":
             truncated = event["truncated"]
-            usage = TokenUsage(
-                prompt_tokens=event.get("prompt_tokens", 0),
-                completion_tokens=event.get("completion_tokens", 0),
-            )
 
-    return AgentReply(text=text, steps=steps, truncated=truncated, usage=usage)
+    return AgentReply(text=text, steps=steps, truncated=truncated, usage=meter.usage)

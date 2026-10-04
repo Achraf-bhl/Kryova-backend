@@ -46,6 +46,7 @@ from app.ai.provider import TokenUsage
 from app.ai.resume import catia_activity
 from app.ai.state import bound_document_name
 from app.ai.tools import ToolBox, tool_label
+from app.ai.turn_metrics import STOP_DISCONNECTED, STOP_ERROR, TurnMeter, record_turn
 from app.api.deps import (
     CurrentUser,
     DbSession,
@@ -228,6 +229,56 @@ def _meter_tokens(
             )
     except Exception:  # noqa: BLE001 - metering must never fail the work
         logger.exception("Could not meter AI tokens for user %s", user.id)
+
+
+def _settle_turn(
+    db: Session,
+    user: User,
+    provider: LLMProvider,
+    conversation: Conversation | None,
+    session_scope: SessionScope | None,
+    meter: TurnMeter,
+    *,
+    default_stop_reason: str,
+) -> None:
+    """Bill what an agent turn spent and write its metrics row, however it ended.
+
+    One call, from every exit of both chat routes: it finished, it raised
+    mid-way, or the client hung up. The loop's tokens live on the `meter` the
+    route owns, so steps 1..N-1 of a turn that died at step N are billed -- which
+    the old comment in the streaming route promised and the code did not do
+    (`spent` was assigned only from the final `done` event, so a failed turn
+    recorded nothing at all).
+
+    The metrics row is flushed before `_record` because `_record` commits; a turn
+    that spent no token still gets its commit here. Nothing in this function may
+    raise into the reply: accounting is never a reason to lose an answer.
+    """
+    try:
+        record_turn(
+            db,
+            user=user,
+            conversation=conversation,
+            meter=meter,
+            provider=provider.name,
+            model=provider.model,
+            default_stop_reason=default_stop_reason,
+        )
+        if meter.usage.prompt_tokens or meter.usage.completion_tokens:
+            _record(
+                db,
+                user,
+                meter.usage,
+                purpose=token_usage.PURPOSE_CHAT,
+                provider=provider,
+                conversation=conversation,
+                session_scope=session_scope,
+            )
+        else:
+            db.commit()
+    except Exception:  # noqa: BLE001 - accounting must not mask the real outcome
+        logger.exception("Failed to record the turn for conversation %s", getattr(conversation, "id", None))
+        db.rollback()
 
 
 @router.get("/ai/status", response_model=AIStatus)
@@ -579,6 +630,7 @@ def chat(
         provider=provider,
     )
 
+    meter = TurnMeter()
     try:
         reply: AgentReply = run_agent(
             db=db,
@@ -589,11 +641,19 @@ def chat(
             user=current_user,
             allow_mutations=payload.allow_mutations,
             max_tokens=settings.ai_max_tokens,
+            meter=meter,
         )
     except LLMError as exc:
         # The user turn is already persisted, so roll back to the last committed
         # state rather than leaving a question with no answer in the transcript.
         db.rollback()
+        # Then bill what the turn had already spent, plus what the failing call
+        # itself was billed for: a failure is not free.
+        meter.charge(exc.usage, calls=1 if exc.usage.total_tokens else 0)
+        _settle_turn(
+            db, current_user, provider, conversation, session_scope, meter,
+            default_stop_reason=STOP_ERROR,
+        )
         raise _translate(exc) from exc
 
     # The agent may have created a project this turn. Adopt it as the
@@ -603,14 +663,9 @@ def chat(
         conversation.project_id = toolbox.project_id
 
     _maybe_title(db, current_user, provider, conversation, payload.message, reply.text)
-    _record(
-        db,
-        current_user,
-        reply.usage,
-        purpose=token_usage.PURPOSE_CHAT,
-        provider=provider,
-        conversation=conversation,
-        session_scope=session_scope,
+    _settle_turn(
+        db, current_user, provider, conversation, session_scope, meter,
+        default_stop_reason=STOP_ERROR,
     )
 
     return ChatResponse(
@@ -703,8 +758,12 @@ def chat_stream(
         # conversation rather than an orphan.
         yield emit({"type": "start", "conversation_id": conversation_id})
         reply_text = ""
-        spent = TokenUsage()
+        meter = TurnMeter()
         recorded = False
+        #: What `settle` says when the loop did not name a stop reason itself. The
+        #: default is the one that reaches `finally` without passing either branch
+        #: above it, which is the client hanging up mid-stream.
+        ending = STOP_DISCONNECTED
 
         def settle() -> None:
             """Persist what this turn actually cost, exactly once.
@@ -715,28 +774,20 @@ def chat_stream(
             already committed by `stream_agent`, but no `AITokenUsage` row was
             ever written, so aborting every stream was unmetered, unlimited
             spend against a budget that never advanced.
+
+            It reads the tokens off the `meter` the loop has been writing into,
+            not off the final `done` event: that event never arrives for a turn
+            that failed or was abandoned, and those are exactly the turns that
+            had spent something.
             """
             nonlocal recorded
             if recorded:
                 return
             recorded = True
-            if not (spent.prompt_tokens or spent.completion_tokens):
-                return
-            try:
-                _record(
-                    db,
-                    current_user,
-                    spent,
-                    purpose=token_usage.PURPOSE_CHAT,
-                    provider=provider,
-                    conversation=conversation,
-                    session_scope=session_scope,
-                )
-            except Exception:  # noqa: BLE001 - accounting must not mask the real error
-                logger.exception(
-                    "Failed to record token usage for conversation %s", conversation_id
-                )
-                db.rollback()
+            _settle_turn(
+                db, current_user, provider, conversation, session_scope, meter,
+                default_stop_reason=ending,
+            )
 
         try:
             for event in stream_agent(
@@ -748,14 +799,10 @@ def chat_stream(
                 user=current_user,
                 allow_mutations=payload.allow_mutations,
                 max_tokens=settings.ai_max_tokens,
+                meter=meter,
             ):
                 if event["type"] == "message":
                     reply_text = event["content"]
-                elif event["type"] == "done":
-                    spent = TokenUsage(
-                        prompt_tokens=event.get("prompt_tokens", 0),
-                        completion_tokens=event.get("completion_tokens", 0),
-                    )
                 yield emit(event)
 
             # Same adoption as the non-streaming route: a project created
@@ -770,6 +817,8 @@ def chat_stream(
             # calls this turn already made -- steps 1..N-1 of a multi-step turn
             # are real spend even though step N failed.
             db.rollback()
+            meter.charge(exc.usage, calls=1 if exc.usage.total_tokens else 0)
+            ending = STOP_ERROR
             settle()
             yield emit({"type": "error", "message": str(exc)})
         finally:

@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 55/65 = 85% | 32/39 eng-months = 83% |
-| **Programme** | 23/35 | 182/201 = 91% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 59/69 = 86% | 33/39 eng-months = 84% |
+| **Programme** | 23/35 | 186/205 = 91% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 67% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 86% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8255,6 +8255,45 @@ machine with no network, so the phase is open until a run with a key confirms it
    > retrieval (`AI_TOOL_LIMIT`) would send ~22–38 % of the schema bytes (measured offline at
    > limits 40–80) but changes what the model sees, so it waits for an accuracy comparison
    > (THE QUEUE H8, H9). Tested by: the files named above.
+
+4. **Cached prompt tokens are recorded, and the ledger knows what a cache hit is.** *(ROAD_TO_10
+   1.1.)* `TokenUsage` carried cached reads folded into `prompt_tokens`, so the budget charged a
+   cache hit as a fresh token while the vendor bills it at a fraction.
+   > DONE (2026-10-04) — `TokenUsage.cached_prompt_tokens` (a *subset* of `prompt_tokens`, clamped,
+   > summing), filled from DeepSeek/OpenAI-shaped `prompt_cache_hit_tokens` and Anthropic's
+   > `cache_read_input_tokens`; `ai_token_usage.cached_prompt_tokens` (migration `90b05c4b90e3`,
+   > NOT NULL default 0 — an old row's 0 means "not recorded" and prices as a miss, the safe
+   > direction). The `done` event carries the split (a user-facing
+   > usage route is task 8). Tested by: `tests/test_ai_pricing.py`, `tests/test_turn_metrics.py`.
+
+5. **Budget by cost, not by raw tokens — prices live in configuration, an unpriced model is
+   unknown and never free.** *(ROAD_TO_10 1.2.)*
+   > DONE (2026-10-04) — `app/ai/pricing.py`, `settings.ai_prices` (`AI_PRICES`, JSON, USD per
+   > million tokens: input / cached input / output), `ai_token_usage.cost_micro_usd` (BIGINT,
+   > **NULL = no price configured**, same migration), `AI_DAILY_COST_BUDGET_USD`, and the
+   > per-user budget in `app/ai/usage.py` enforced on cost where a price exists. Money is integer
+   > micro-dollars so a period total is an exact `SUM`. **Production refuses to boot** with a cost
+   > budget set and no price for `AI_MODEL` (`Settings.unpriced_cost_budget`), because that
+   > misconfiguration would switch every budget off without a sound. Org caps are task 8.
+   > Tested by: `tests/test_ai_pricing.py` (the production-boot refusal included).
+
+6. **A failed call is not free: usage survives the exception.** *(ROAD_TO_10 1.4, widened.)*
+   `LLMError` now carries `.usage`; both providers attach what a billed attempt spent before
+   raising (structured-output repair, refusals), `decide._ask` hands it to its fallback, and the
+   chat routes bill it. Found on the way: the streaming route billed nothing for a turn that
+   died, because it read its total off a `done` event a failed turn never emits.
+   > DONE (2026-10-04) — `app/ai/provider.py`, `providers/openai_compatible.py`,
+   > `providers/anthropic.py`, `app/ai/decide.py`, `app/api/routes/ai.py`. Tested by:
+   > `tests/test_turn_metrics.py` (the failed-turn class), `tests/test_ai_pricing.py`.
+
+7. **A turn is measured and kept: one `turn_metrics` row per turn.** *(ROAD_TO_10 0.2.)* Before
+   this the only record was two log lines. The meter is **owned by the route, not the loop**, so a
+   turn that dies on step 9 still holds steps 1–8's spend; the loop counts tools offered, ran,
+   failed and *blocked* separately (a blocked repeat is the model's loop, not a tool's fault).
+   > DONE (2026-10-04) — `app/ai/turn_metrics.py` (`TurnMeter`, `record_turn`), table
+   > `turn_metrics` (migration `be18af3e6a04`), wired into `/ai/chat` and `/ai/chat/stream`; the
+   > `done` event gains `cached_prompt_tokens`, `cost_micro_usd` and `wall_ms`. A turn that
+   > reached no model writes no row. Tested by: `tests/test_turn_metrics.py`.
 
 ---
 

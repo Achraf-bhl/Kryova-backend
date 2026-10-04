@@ -17,11 +17,13 @@ work whose outcome nobody ever saw, which is worse than a slightly overrun
 budget.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.ai import pricing
 from app.ai.provider import TokenUsage
 from app.core.config import settings
 from app.models import AITokenUsage, Conversation, User
@@ -76,21 +78,108 @@ def user_totals(db: Session, user_id: str) -> TokenUsage:
         select(
             func.coalesce(func.sum(AITokenUsage.prompt_tokens), 0),
             func.coalesce(func.sum(AITokenUsage.completion_tokens), 0),
+            func.coalesce(func.sum(AITokenUsage.cached_prompt_tokens), 0),
         ).where(AITokenUsage.user_id == user_id)
     ).one()
-    return TokenUsage(prompt_tokens=int(row[0]), completion_tokens=int(row[1]))
+    return TokenUsage(
+        prompt_tokens=int(row[0]),
+        completion_tokens=int(row[1]),
+        cached_prompt_tokens=int(row[2]),
+    )
+
+
+def daily_cost_budget_micro() -> int:
+    """Micro-dollars one user may spend per UTC day. Zero means unlimited."""
+    return pricing.budget_micro(settings.ai_daily_cost_budget_usd)
+
+
+@dataclass(frozen=True, slots=True)
+class DayUsage:
+    """What one user has spent today, split so a budget can say *which* it hit.
+
+    `cost_micro_usd` sums **only priced calls**; `unpriced_calls` counts the rest.
+    Reported together on purpose: a total that silently left out a model nobody
+    priced would read as "you have spent $0.40" when the honest sentence is
+    "$0.40 on calls we could price, plus 12 we could not".
+    """
+
+    prompt_tokens: int
+    completion_tokens: int
+    cached_prompt_tokens: int
+    cost_micro_usd: int
+    unpriced_calls: int
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+
+def usage_today(db: Session, user_id: str) -> DayUsage:
+    """Everything this user has spent on the current UTC day, in one index lookup."""
+    today = datetime.now(timezone.utc).date()
+    row = db.execute(
+        select(
+            func.coalesce(func.sum(AITokenUsage.prompt_tokens), 0),
+            func.coalesce(func.sum(AITokenUsage.completion_tokens), 0),
+            func.coalesce(func.sum(AITokenUsage.cached_prompt_tokens), 0),
+            func.coalesce(func.sum(AITokenUsage.cost_micro_usd), 0),
+            # Counted in SQL rather than by loading rows: this runs on every chat
+            # turn and the ledger is append-only and large.
+            func.count().filter(AITokenUsage.cost_micro_usd.is_(None)),
+        ).where(AITokenUsage.user_id == user_id, AITokenUsage.usage_date == today)
+    ).one()
+    return DayUsage(
+        prompt_tokens=int(row[0]),
+        completion_tokens=int(row[1]),
+        cached_prompt_tokens=int(row[2]),
+        cost_micro_usd=int(row[3]),
+        unpriced_calls=int(row[4]),
+    )
 
 
 def over_budget(db: Session, user_id: str) -> bool:
-    budget = daily_token_budget()
-    return bool(budget) and tokens_used_today(db, user_id) >= budget
+    """Whether this user has reached either daily ceiling -- tokens or dollars."""
+    return exceeded(db, user_id) is not None
+
+
+def exceeded(db: Session, user_id: str) -> str | None:
+    """Which daily ceiling is reached (`"tokens"` or `"cost"`), or None.
+
+    One ledger read serves both checks. Tokens are checked first: it is the
+    ceiling that exists on every deployment, while the cost one needs a price.
+    """
+    token_budget = daily_token_budget()
+    cost_budget = daily_cost_budget_micro()
+    if not token_budget and not cost_budget:
+        return None
+    used = usage_today(db, user_id)
+    if token_budget and used.total_tokens >= token_budget:
+        return "tokens"
+    if cost_budget and used.cost_micro_usd >= cost_budget:
+        return "cost"
+    return None
 
 
 def budget_message(db: Session, user_id: str) -> str:
     """A 429 detail that tells the user what happened and when it clears."""
+    used = usage_today(db, user_id)
+    which = exceeded(db, user_id) or "tokens"
+    if which == "cost":
+        spent = pricing.usd(used.cost_micro_usd)
+        allowance = pricing.usd(daily_cost_budget_micro())
+        return (
+            f"You have used your daily AI allowance of ${allowance:,.2f} "
+            f"(${spent:,.2f} spent today"
+            + (
+                f", plus {used.unpriced_calls} call(s) on a model with no configured price"
+                if used.unpriced_calls
+                else ""
+            )
+            + "). It resets at 00:00 UTC. Simulations, uploads and results are unaffected."
+        )
     return (
         f"You have used your daily AI allowance of {daily_token_budget():,} tokens "
-        f"({tokens_used_today(db, user_id):,} spent today). It resets at 00:00 UTC. "
+        f"({used.total_tokens:,} spent today). It resets at 00:00 UTC. "
         "Simulations, uploads and results are unaffected."
     )
 
@@ -121,6 +210,10 @@ def record(
             model=model,
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
+            cached_prompt_tokens=usage.cached_prompt_tokens,
+            # Priced now, from the configuration in force now. None -- not 0 --
+            # when the model has no price: see `app/ai/pricing.py`.
+            cost_micro_usd=pricing.cost_micro_usd(usage, model),
         )
     )
     if conversation is not None:

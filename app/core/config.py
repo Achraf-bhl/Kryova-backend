@@ -1,8 +1,9 @@
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 INSECURE_SECRET_KEY = "changeme"
@@ -54,6 +55,30 @@ def _as_psycopg_url(url: str) -> str:
         if url.startswith(prefix):
             return "postgresql+psycopg://" + url[len(prefix) :]
     return url
+
+
+class ModelPrice(BaseModel):
+    """What a model costs, in US dollars per **million** tokens.
+
+    Lives in configuration and nowhere in code: a vendor changes its prices and
+    a deployment moves between vendors by editing `.env`, never by shipping a
+    release (the user's rule, 2026-10-04). Nothing here is a Kryova claim about
+    what any vendor charges -- every figure is the operator's, copied from the
+    vendor's own price page on the day, and an absent model has *no price*, which
+    the ledger records as unknown rather than as free.
+
+    `cached_input` is what a prompt-cache read costs. Left out it defaults to the
+    full `input` price, so a vendor whose discount the operator has not entered
+    is over-estimated rather than under-estimated.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    input: Decimal = Field(ge=0, description="USD per million fresh input tokens")
+    output: Decimal = Field(ge=0, description="USD per million output tokens")
+    cached_input: Decimal | None = Field(
+        default=None, ge=0, description="USD per million input tokens served from the cache"
+    )
 
 
 class Settings(BaseSettings):
@@ -308,6 +333,26 @@ class Settings(BaseSettings):
     #: about exactly this trap and works around it by reading `os.environ` too;
     #: the budget had the same hole and no workaround.
     ai_daily_token_budget: int = 2_000_000
+
+    #: What each model costs, as JSON: `{"deepseek-flash": {"input": 0.14,
+    #: "cached_input": 0.014, "output": 0.28}}` -- US dollars per million tokens,
+    #: keyed on the exact model name the provider is configured with. **Empty by
+    #: default, on purpose**: a default would be a price list Kryova is claiming
+    #: for a vendor it does not speak for. A call to a model with no entry is
+    #: recorded with an unknown cost, never a zero one, and no cost budget can be
+    #: enforced against it (`app/ai/pricing.py`).
+    ai_prices: dict[str, ModelPrice] = Field(default_factory=dict)
+
+    #: Dollars one user may spend per UTC day, priced from `ai_prices`. 0 means
+    #: unlimited. Enforced beside `ai_daily_token_budget`, not instead of it: a
+    #: call to an unpriced model still counts against the token budget.
+    ai_daily_cost_budget_usd: Decimal = Decimal(0)
+
+    #: Dollars one organisation may spend per UTC day / per UTC calendar month,
+    #: across every member (ROAD_TO_10 1.3). 0 means unlimited. A billing
+    #: account's own override outranks these (`BillingAccount.ai_org_*`).
+    ai_org_daily_cost_budget_usd: Decimal = Decimal(0)
+    ai_org_monthly_cost_budget_usd: Decimal = Decimal(0)
 
     #: Verbosity of the application's own logs, as a level name.
     #:
@@ -637,6 +682,13 @@ class Settings(BaseSettings):
             )
         elif not self.smtp_host.strip():
             problems.append("SMTP_HOST is empty, so the smtp transport has nowhere to connect")
+        unpriced = self.unpriced_cost_budget()
+        if unpriced:
+            # A cost budget with no price for the model that spends it is a budget
+            # that never trips: the ledger would record an unknown cost for every
+            # call and the cap would read 0 forever. Same class as the in-memory
+            # rate limiter -- configured, working, and doing nothing.
+            problems.append(unpriced)
         if any(origin.strip() == "*" for origin in self.cors_origins):
             # Starlette pairs `allow_origins=["*"]` with `allow_credentials=True`
             # by echoing whichever Origin asked, which is credentialed
@@ -653,6 +705,29 @@ class Settings(BaseSettings):
                 "Refusing to start with ENVIRONMENT=production:\n  - " + "\n  - ".join(problems)
             )
         return self
+
+    def unpriced_cost_budget(self) -> str | None:
+        """A sentence when a cost budget is set that no call can ever count against.
+
+        Returned rather than raised so one rule serves both audiences: production
+        refuses to boot on it (`_harden_production`) and a development machine is
+        told once at startup (`insecure_defaults`). Matched case-insensitively,
+        the way `app.ai.pricing.price_for` matches, so the two cannot disagree.
+        """
+        budgets = (
+            self.ai_daily_cost_budget_usd,
+            self.ai_org_daily_cost_budget_usd,
+            self.ai_org_monthly_cost_budget_usd,
+        )
+        if not any(budget > 0 for budget in budgets):
+            return None
+        if self.ai_model.lower() in {name.lower() for name in self.ai_prices}:
+            return None
+        return (
+            f"a cost budget is set but AI_PRICES has no entry for AI_MODEL {self.ai_model!r}, "
+            "so no call can ever count against it and it will never trip -- add "
+            '{"<model>": {"input": ..., "output": ...}} in US dollars per million tokens'
+        )
 
     def insecure_defaults(self) -> list[str]:
         """Development-grade settings that would be refused in production.
@@ -674,6 +749,9 @@ class Settings(BaseSettings):
             found.append(
                 f"SECRET_KEY is shorter than {MIN_SECRET_KEY_LENGTH} characters"
             )
+        unpriced = self.unpriced_cost_budget()
+        if unpriced:
+            found.append(unpriced)
         return found
 
     @property

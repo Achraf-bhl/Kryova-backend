@@ -96,6 +96,36 @@ STRUCTURED_ATTEMPTS = 2
 INTERRUPTED_FINISH_REASONS = frozenset({"insufficient_system_resource", "aborted"})
 
 
+def _carrying(exc: LLMError, spent: TokenUsage) -> None:
+    """Add the usage of attempts already billed to `exc`'s own, in place.
+
+    Mutates the exception rather than wrapping it, so its type (a `LLMUnavailable`
+    for a rejected key stays one) and message are untouched; only the accounting
+    moves. The caller re-raises the same object.
+    """
+    exc.usage = spent + exc.usage
+
+
+def _cached_tokens(usage: dict[str, Any]) -> int:
+    """How many prompt tokens the server says it read from its prompt cache.
+
+    DeepSeek spells it `prompt_cache_hit_tokens` at the top of the block; OpenAI
+    (and the vendors that copy it) nest it as `prompt_tokens_details.cached_tokens`.
+    A server that reports neither gets 0, which is the honest answer and not a
+    claim that nothing was cached -- the ledger cannot tell the two apart, and
+    pricing a miss as a miss is the safe direction to be wrong in.
+    """
+    hit = usage.get("prompt_cache_hit_tokens")
+    if isinstance(hit, int) and not isinstance(hit, bool):
+        return max(0, hit)
+    details = usage.get("prompt_tokens_details")
+    if isinstance(details, dict):
+        cached = details.get("cached_tokens")
+        if isinstance(cached, int) and not isinstance(cached, bool):
+            return max(0, cached)
+    return 0
+
+
 def _usage(body: dict[str, Any]) -> TokenUsage:
     """Read the `usage` block, tolerating a server that omits it.
 
@@ -107,6 +137,7 @@ def _usage(body: dict[str, Any]) -> TokenUsage:
     return TokenUsage(
         prompt_tokens=int(usage.get("prompt_tokens") or 0),
         completion_tokens=int(usage.get("completion_tokens") or 0),
+        cached_prompt_tokens=_cached_tokens(usage),
     )
 
 
@@ -591,7 +622,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 body = self._post(request())
             except _ResponseFormatUnsupported:
                 if not self._json_schema_supported:
-                    raise LLMError(_NO_STRUCTURED_OUTPUT) from None
+                    raise LLMError(_NO_STRUCTURED_OUTPUT, usage=usage) from None
                 # The endpoint speaks the chat API but not schema-constrained
                 # output. Remembered, so this costs one 400 per process and not
                 # one per call.
@@ -599,19 +630,29 @@ class OpenAICompatibleProvider(LLMProvider):
                 try:
                     body = self._post(request())
                 except _ResponseFormatUnsupported:
-                    raise LLMError(_NO_STRUCTURED_OUTPUT) from None
+                    raise LLMError(_NO_STRUCTURED_OUTPUT, usage=usage) from None
+                except LLMError as exc:
+                    _carrying(exc, usage)
+                    raise
+            except LLMError as exc:
+                # The repair attempt failed at the transport after the first
+                # attempt was answered and billed: that spend travels with the
+                # failure instead of vanishing with it (ROAD_TO_10 1.4).
+                _carrying(exc, usage)
+                raise
 
             usage += _usage(body)
             choices = body.get("choices") or []
             if not choices:
-                raise LLMError("The model returned no choices.")
+                raise LLMError("The model returned no choices.", usage=usage)
             choice = choices[0]
             if choice.get("finish_reason") == "content_filter":
-                raise LLMRefusal(refusal)
+                raise LLMRefusal(refusal, usage=usage)
             if choice.get("finish_reason") == "length":
                 raise LLMError(
                     "The model hit the output limit before finishing. Raise AI_MAX_TOKENS "
-                    "(or AI_REASONING_BUDGET for a reasoning model)."
+                    "(or AI_REASONING_BUDGET for a reasoning model).",
+                    usage=usage,
                 )
 
             content = _unfence((choice.get("message") or {}).get("content") or "")
@@ -633,7 +674,7 @@ class OpenAICompatibleProvider(LLMProvider):
                     attempt,
                     STRUCTURED_ATTEMPTS - 1,
                 )
-        raise LLMError(problem)
+        raise LLMError(problem, usage=usage)
 
     def complete(
         self,

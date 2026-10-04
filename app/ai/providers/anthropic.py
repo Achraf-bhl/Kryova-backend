@@ -70,20 +70,25 @@ def _effort(value: str) -> str:
 
 
 def _usage(response: Any) -> TokenUsage:
-    """Read the usage block, folding cache tokens into the input count.
+    """Read the usage block: all input in `prompt_tokens`, cache reads split out.
 
-    Cache reads and cache writes are billed as input at different rates; the
-    seam reports one input number, so they are summed here rather than leaking
-    Anthropic's billing shape through `TokenUsage`.
+    Anthropic reports `input_tokens` as the *uncached* remainder, with cache
+    reads and cache writes beside it. The seam's `prompt_tokens` is all input,
+    so the three are summed, and the cache *reads* are also reported on their
+    own (`cached_prompt_tokens`) because they are billed at a fraction of the
+    fresh rate. Cache writes stay in the fresh share: they cost at least as
+    much as fresh input, so counting them as fresh never under-states spend.
     """
     usage = getattr(response, "usage", None)
     if usage is None:
         return TokenUsage()
+    cache_read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
     return TokenUsage(
         prompt_tokens=int(getattr(usage, "input_tokens", 0) or 0)
-        + int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+        + cache_read
         + int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
         completion_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+        cached_prompt_tokens=cache_read,
     )
 
 
@@ -281,18 +286,22 @@ class AnthropicProvider(LLMProvider):
             raise  # unreachable; _raise_for_sdk_error never returns
 
         if response.stop_reason == "refusal":
-            raise LLMRefusal("The model declined to describe this render.")
+            raise LLMRefusal("The model declined to describe this render.", usage=_usage(response))
         if response.stop_reason == "max_tokens":
-            raise LLMError("The model hit the output limit before finishing. Raise AI_MAX_TOKENS.")
+            raise LLMError(
+                "The model hit the output limit before finishing. Raise AI_MAX_TOKENS.",
+                usage=_usage(response),
+            )
 
         text = next((block.text for block in response.content if block.type == "text"), "")
         if not text.strip():
-            raise LLMError("Anthropic returned an empty response.")
+            raise LLMError("Anthropic returned an empty response.", usage=_usage(response))
         try:
             value = schema.model_validate_json(text)
         except ValidationError as exc:
             raise LLMError(
-                f"Anthropic returned output that does not match the expected schema: {exc}"
+                f"Anthropic returned output that does not match the expected schema: {exc}",
+                usage=_usage(response),
             ) from exc
         return Completion(value=value, usage=_usage(response))
 
@@ -332,20 +341,25 @@ class AnthropicProvider(LLMProvider):
         if response.stop_reason == "refusal":
             raise LLMRefusal(
                 "The model declined this request. Rephrase the description, "
-                "or switch to a local provider."
+                "or switch to a local provider.",
+                usage=_usage(response),
             )
         if response.stop_reason == "max_tokens":
-            raise LLMError("The model hit the output limit before finishing. Raise AI_MAX_TOKENS.")
+            raise LLMError(
+                "The model hit the output limit before finishing. Raise AI_MAX_TOKENS.",
+                usage=_usage(response),
+            )
 
         text = next((block.text for block in response.content if block.type == "text"), "")
         if not text.strip():
-            raise LLMError("Anthropic returned an empty response.")
+            raise LLMError("Anthropic returned an empty response.", usage=_usage(response))
 
         try:
             value = schema.model_validate_json(text)
         except ValidationError as exc:
             raise LLMError(
-                f"Anthropic returned output that does not match the expected schema: {exc}"
+                f"Anthropic returned output that does not match the expected schema: {exc}",
+                usage=_usage(response),
             ) from exc
         return Completion(value=value, usage=_usage(response))
 
@@ -388,7 +402,7 @@ class AnthropicProvider(LLMProvider):
             raise  # unreachable; _raise_for_sdk_error never returns
 
         if response.stop_reason == "refusal":
-            raise LLMRefusal("The model declined this request.")
+            raise LLMRefusal("The model declined this request.", usage=_usage(response))
 
         text_parts: list[str] = []
         calls: list[ToolCall] = []

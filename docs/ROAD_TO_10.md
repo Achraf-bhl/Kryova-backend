@@ -76,6 +76,11 @@ improvement without a before-and-after taken from this baseline.
   - Done when: each H row is ticked with the transcript or log line that answers it, and any defect
     it finds is fixed with a test in `Kryova-backend/tests/test_deepseek_provider.py` or
     `test_openai_compatible_resilience.py`.
+  - **Status 2026-10-04: BLOCKED on an API key, not on the network.** This Linux machine reaches the
+    internet now (`api.deepseek.com` answered 401, `eur-lex.europa.eu` 202, GitHub 200), so the old
+    "no outbound network from Linux" line no longer decides this. No `AI_API_KEY` is configured in
+    `.env` or `.env.local` and none is in the environment, and a key is the user's to supply. With
+    one, H1–H7 can be run from here: they need a chat, not a seat.
 - [x] **0.2 Write a turn-metrics recorder.** [Linux] **M** — **NEW** (E15 or P11)
   - Today the numbers exist only as log lines (`agent step … prompt tokens` in
     `Kryova-backend/app/ai/agent.py`, `prompt cache: … hits` in
@@ -124,12 +129,13 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
     `.env` (the user's rule).
   - Test: two calls with the same token count and a different cache share cost different amounts,
     and the budget trips on cost.
-- [~] **1.3 Organisation-level budgets and alerts.** [Linux] **M** → P8
+- [x] **1.3 Organisation-level budgets and alerts.** [Linux] **M** → P8
   - The ledger is per user (`usage.py`). Add an org daily and monthly cap, with soft warnings at 80%
     and 100% through `Kryova-backend/app/mail/` and an in-app banner.
-  - **Status 2026-10-04:** backend done and tested (master plan P11.8, `app/ai/org_budget.py`); the
-    banner is the frontend half and is P11.9, not started. `[~]` in this file means "done except for
-    the piece named under the item".
+  - **Status 2026-10-04:** done and tested on both sides (master plan P11.8, `app/ai/org_budget.py`;
+    P11.9, `Kryova-frontend/src/components/ai-budget-banner.tsx`). A real organisation crossing 80 %
+    in a browser is the next gate run's. `[~]` in this file means "done except for the piece named
+    under the item".
 - [x] **1.4 Stop losing usage on a failed decision.** [Linux] **S** — flagged 2026-10-04
   - `Kryova-backend/app/ai/decide.py::_ask`: when the provider raises `LLMError` after a paid repair
     attempt, the usage of the attempts already made is lost.
@@ -146,6 +152,12 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
     same rung or better.
   - Test: already pinned (`Kryova-backend/tests/test_tool_retrieval.py`). The decision is recorded
     with its ladder numbers.
+  - **Status 2026-10-04: BLOCKED on 0.1 and 0.3** (a live key, then the ladder at 0 and at 60). There
+    is no Linux code left to write: retrieval, its tests and the switch all exist. One thing the
+    comparison must account for, found while building 1.13: **the design tools (`record_design`,
+    `read_design`, `set_design_parameter`, `build_design`) are in no intent family and not in
+    `CORE_TOOLS`**, so retrieval at 60 would withhold them, and the two arms would differ by more
+    than the schema count (THE QUEUE H13 part c).
 - [~] **1.6 Make the tool schemas themselves shorter.** [Linux] **M** — **NEW** (P11.3)
   - Measure the bytes per schema: `toolbox.schemas()` in `Kryova-backend/app/ai/tools.py` and the
     specs in `Kryova-backend/app/catia/tool_specs.py`. Rank the top 30 by size, cut repeated prose
@@ -193,6 +205,10 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
   - `DEFAULT_MAX_STEPS = 60` (`Kryova-backend/app/ai/agent.py:92`). Read the Phase 0 step counts per
     level, and set the default near the 95th percentile of successful turns, plus a margin. A turn
     that needs more is a turn to split (2.4), not a budget to raise.
+  - **Status 2026-10-04: BLOCKED on 0.3** (the ladder's step counts). `turn_metrics` now records
+    `rounds` and `step_budget` per turn, so the 95th percentile is one query once there are
+    successful turns to take it over; nothing is left to build, and a number set without those
+    turns would be a guess.
 - [x] **1.11 Prompt-cache hit rate as a tracked number.** [Linux] **S**
   - Once 1.1 lands, show the hit rate per turn in the admin console
     (`Kryova-frontend/src/app/dashboard/admin/_components/operations-console.tsx`) and alert when it

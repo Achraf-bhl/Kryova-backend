@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 65/78 = 83% | 32/39 eng-months = 83% |
-| **Programme** | 23/35 | 192/214 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 66/78 = 85% | 33/39 eng-months = 83% |
+| **Programme** | 23/35 | 193/214 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 75% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 81% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8319,7 +8319,18 @@ machine with no network, so the phase is open until a run with a key confirms it
    > `tests/test_ai_org_budget.py`, `tests/test_mail.py`.
 
 9. **The in-app banner for AI budget notices.** *(ROAD_TO_10 1.3, frontend half.)* `GET /ai/usage`
-   serves the lines; nothing in `Kryova-frontend` draws them yet.
+   serves the lines; nothing in `Kryova-frontend` drew them until 2026-10-04.
+   > DONE (2026-10-04) — `Kryova-frontend/src/components/ai-budget-banner.tsx`, mounted in the
+   > dashboard shell beside the platform banner, reading `api.aiUsage()` (types `AIUsage`,
+   > `AIOrgNotice`). A warning can be dismissed for the page; an exhausted cap and a blocked turn
+   > cannot, because they explain a refusal, and a blocked turn that has the same words as a notice
+   > is said once. Polled every five minutes (each read is a ledger sum) and again when a hidden tab
+   > becomes visible. Every failure is silent, as with the platform banner. **Offline-proven:** the
+   > component against a mocked `/ai/usage`; a real organisation crossing 80 % in a browser is on
+   > the next gate run. Tested by:
+   > `Kryova-frontend/src/components/ai-budget-banner.test.tsx`.
+
+   <!-- superseded 2026-10-04 -->
    > NOT STARTED
 
 10. **The registry is measured, and it cannot grow back unnoticed.** *(ROAD_TO_10 1.6.)* The

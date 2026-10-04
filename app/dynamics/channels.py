@@ -299,6 +299,10 @@ def instant(cycle: CyclePlan, index: int) -> dict[str, Any]:
                 field[k] += scale_by * load.magnitude_mm_s2 * load.direction[k]
             continue
         key = channel.name.rsplit(" ", 1)[0]
+        if not isinstance(load, (ForceLoad, BearingLoad)):
+            # Gravity was handled above; a pressure, moment or centrifugal load has no
+            # force vector to sum, and was an AttributeError here before this said so.
+            raise TypeError(f"channel {channel.name!r} carries a {type(load).__name__}, which has no force to sum")
         total = forces.setdefault(key, [0.0, 0.0, 0.0])
         for k in range(3):
             total[k] += scale_by * load.force_n[k]

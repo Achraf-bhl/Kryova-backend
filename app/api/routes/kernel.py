@@ -802,6 +802,8 @@ def check_conversation_rules(
         if kind == "draft":
             arguments["direction"] = list(body.pull_direction or ())
         try:
+            if runner is None:
+                raise RuntimeError("this conversation has no open part to scan")
             scanned = dict(runner("catia_analysis_part", arguments))
         except Exception as exc:  # noqa: BLE001 - a failed scan leaves its rules unmeasured
             notes.append(f"The {kind} scan failed, so its rules are unmeasured: {exc}")

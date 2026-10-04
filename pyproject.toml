@@ -59,6 +59,11 @@ module = [
   # undeclared optional import failed the mypy gate in CI on every run.
   "stripe",
   "stripe.*",
+  # `pychrono` exists only inside the kryova-chrono container image
+  # (app/dynamics/chrono/_entrypoint.py imports it there); `pip install pychrono`
+  # installs an unrelated package, so it is never a dependency of this venv.
+  "pychrono",
+  "pychrono.*",
   # pyLife (E8, fatigue) and OpenMDAO (E10, optimisation) are the federated
   # libraries Decision 2 requires rather than hand-written solvers. Neither
   # ships a py.typed marker, and pandas comes in through pyLife's own API. They

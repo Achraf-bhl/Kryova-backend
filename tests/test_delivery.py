@@ -810,8 +810,8 @@ class TestTheDemoSeed:
     def test_a_project_is_owned_by_someone_who_is_not_the_org_owner(self) -> None:
         """Access comes from membership, never from `Project.owner_id` — the
         comment on that column since P2. A demo has to be able to show it."""
-        from scripts.seed_demo import PEOPLE, PROJECTS
         from app.models.organisation import OrgRole
+        from scripts.seed_demo import PEOPLE, PROJECTS
 
         owner = next(p for p in PEOPLE if p.role is OrgRole.OWNER)
         holders = {project.owner_email for project in PROJECTS}

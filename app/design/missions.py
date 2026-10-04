@@ -116,9 +116,11 @@ from app.design.compile import compile_spec
 from app.design.errors import SpecError
 from app.design.execute import BuildReport, CallRunner, execute_plan
 from app.design.params import Parameter, ParameterSet, Unit
+from app.design.spec import DesignSpec, FeatureSpec, expr, ref
 from app.dynamics.assembly import JointDeclaration, body_name, derive
 from app.dynamics.kinematics import evaluate as evaluate_motion
-from app.dynamics.reactions import compute as compute_reactions, free_body_check
+from app.dynamics.reactions import compute as compute_reactions
+from app.dynamics.reactions import free_body_check
 from app.dynamics.types import (
     GRAVITY_DOWN_MM_S2,
     Driver,
@@ -128,7 +130,6 @@ from app.dynamics.types import (
     MotionRange,
     Vec3,
 )
-from app.design.spec import DesignSpec, FeatureSpec, expr, ref
 from app.parts.bearings import CATALOGUE, Bearing, Duty, Refusal, Selection, select
 from app.rules.stackup import Contributor, Method, StackVerdict, check, stack, symmetric
 from app.sheetmetal import (
@@ -1254,7 +1255,9 @@ def _motion_payload(
         },
     }
     if available:
-        motion["peak_reaction_force_n"] = max(r.peak_force_n for r in available)
+        motion["peak_reaction_force_n"] = max(
+            peak for r in available if (peak := r.peak_force_n) is not None
+        )
     # **Nested, not flattened, and this cost a build to learn.** It was written first
     # as flat keys spelled "motion.total_mass_kg", and every motion claim came back
     # NOT CHECKED against a payload that visibly contained them: the assertion
@@ -5109,6 +5112,7 @@ def _m4_design(
 
     float_verdict = m4_end_float()
     assert float_verdict.result.maximum_mm is not None  # noqa: S101 - worst case always resolves
+    assert float_verdict.result.minimum_mm is not None  # noqa: S101 - and so does the best
     stacked_maximum = _M4_SEAT_SPAN_MM + _M4_SEAT_SPAN_TOL_MM - float_verdict.result.minimum_mm
     return AssemblyDesign(
         structure=_m4_structure() if structure is None else structure,

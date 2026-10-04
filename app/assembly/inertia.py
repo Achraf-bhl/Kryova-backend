@@ -49,9 +49,9 @@ Units: mass kg, lengths mm, inertia **kg.mm^2** — the same spelling
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, TypeGuard
 
 from app.assembly.mass import ComponentMeasurer, MissingMass
 from app.assembly.structure import Occurrence, ProductStructure
@@ -464,7 +464,7 @@ def _place(
     )
 
 
-def _is_three_by_three(value: Any) -> bool:
+def _is_three_by_three(value: Any) -> TypeGuard[Sequence[Sequence[float]]]:
     if not isinstance(value, (list, tuple)) or len(value) != 3:
         return False
     return all(

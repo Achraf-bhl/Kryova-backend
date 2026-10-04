@@ -124,9 +124,12 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
     `.env` (the user's rule).
   - Test: two calls with the same token count and a different cache share cost different amounts,
     and the budget trips on cost.
-- [ ] **1.3 Organisation-level budgets and alerts.** [Linux] **M** → P8
+- [~] **1.3 Organisation-level budgets and alerts.** [Linux] **M** → P8
   - The ledger is per user (`usage.py`). Add an org daily and monthly cap, with soft warnings at 80%
     and 100% through `Kryova-backend/app/mail/` and an in-app banner.
+  - **Status 2026-10-04:** backend done and tested (master plan P11.8, `app/ai/org_budget.py`); the
+    banner is the frontend half and is P11.9, not started. `[~]` in this file means "done except for
+    the piece named under the item".
 - [x] **1.4 Stop losing usage on a failed decision.** [Linux] **S** — flagged 2026-10-04
   - `Kryova-backend/app/ai/decide.py::_ask`: when the provider raises `LLMError` after a paid repair
     attempt, the usage of the attempts already made is lost.

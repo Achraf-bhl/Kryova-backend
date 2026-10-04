@@ -285,6 +285,10 @@ def _build(kind: MailKind) -> Mail:
         MailKind.QUOTA_EXHAUSTED: templates.quota_exhausted(
             to="a@example.com", organisation="Acme", what="solver-second", resets="1 October"
         ),
+        MailKind.AI_BUDGET_ALERT: templates.ai_budget_alert(
+            to="a@example.com", organisation="Acme", period="daily", percent=80,
+            spent="$8.00", cap="$10.00", resets="at 00:00 UTC",
+        ),
     }
     return made[kind]
 

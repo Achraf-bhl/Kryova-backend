@@ -146,6 +146,11 @@ class BillingAccountRead(BaseModel):
     external_provider: str | None = None
     external_customer_ref: str | None = None
     quotas: QuotaEnvelopeRead
+    #: This tenant's own AI spending caps in US dollars. **Null means the deployment's
+    #: global `AI_ORG_*_COST_BUDGET_USD` applies; 0 means this tenant is unlimited.**
+    #: What is actually in force, with its spend, is `GET /ai/usage`.
+    ai_org_daily_cost_budget_usd: Decimal | None = None
+    ai_org_monthly_cost_budget_usd: Decimal | None = None
     #: Said in the payload rather than only in a docstring, because the field
     #: above being null is otherwise indistinguishable from a broken sync.
     billing_provider: str = (
@@ -169,6 +174,11 @@ class BillingAccountUpdate(BaseModel):
     max_concurrent_simulations_per_user: int | None = Field(default=None, ge=-1)
     max_media_bytes: int | None = Field(default=None, ge=-1)
     ai_daily_token_budget: int | None = Field(default=None, ge=-1)
+    #: Dollars the whole organisation may spend on the model per UTC day / month.
+    #: `-1` clears the override (back to the global setting); `0` makes this tenant
+    #: unlimited, which is a different thing and is deliberately expressible.
+    ai_org_daily_cost_budget_usd: Decimal | None = Field(default=None, ge=-1)
+    ai_org_monthly_cost_budget_usd: Decimal | None = Field(default=None, ge=-1)
 
 
 class UsageRollupRead(BaseModel):

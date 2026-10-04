@@ -33,6 +33,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
+from app.ai import pricing
 from app.api.deps import (
     AdminOrganisation,
     AuditDep,
@@ -177,6 +178,10 @@ def _rollup_view(rollup: UsageRollup) -> UsageRollupRead:
 # ---------------------------------------------------------------------------
 
 
+def _micro_to_usd(micro: int | None) -> Decimal | None:
+    return pricing.usd(micro)
+
+
 @router.get("/{organisation_id}/billing", response_model=BillingAccountRead)
 def read_billing_account(
     organisation: AdminOrganisation, db: DbSession
@@ -197,6 +202,12 @@ def read_billing_account(
         external_provider=account.external_provider if account is not None else None,
         external_customer_ref=account.external_customer_ref if account is not None else None,
         quotas=_envelope_view(db, organisation.id),
+        ai_org_daily_cost_budget_usd=_micro_to_usd(
+            account.ai_org_daily_cost_budget_micro_usd if account is not None else None
+        ),
+        ai_org_monthly_cost_budget_usd=_micro_to_usd(
+            account.ai_org_monthly_cost_budget_micro_usd if account is not None else None
+        ),
     )
 
 
@@ -227,6 +238,16 @@ def update_billing_account(
         if value is None:
             continue
         setattr(account, name, None if value == CLEAR_OVERRIDE else value)
+    for name, column in (
+        ("ai_org_daily_cost_budget_usd", "ai_org_daily_cost_budget_micro_usd"),
+        ("ai_org_monthly_cost_budget_usd", "ai_org_monthly_cost_budget_micro_usd"),
+    ):
+        dollars = getattr(payload, name)
+        if dollars is None:
+            continue
+        setattr(
+            account, column, None if dollars == CLEAR_OVERRIDE else pricing.budget_micro(dollars)
+        )
 
     db.flush()
     db.commit()

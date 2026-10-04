@@ -23,9 +23,10 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.ai import pricing
+from app.ai import org_budget, pricing
 from app.ai.provider import TokenUsage
 from app.core.config import settings
+from app.core.metering import quota_envelope
 from app.models import AITokenUsage, Conversation, User
 
 #: Fallback when `AI_DAILY_TOKEN_BUDGET` is not configured. Generous: a heavy
@@ -52,6 +53,25 @@ def daily_token_budget() -> int:
         return max(0, int(configured))
     except (TypeError, ValueError):
         return DEFAULT_DAILY_TOKEN_BUDGET
+
+
+def effective_daily_token_budget(db: Session, organisation_id: str | None) -> int:
+    """Tokens one user of this tenant may spend per UTC day, honouring the tenant's override.
+
+    `BillingAccount.ai_daily_token_budget` and a plan's allowance have been settable
+    since P8 and the quota page has reported them, but nothing on the chat path ever
+    read them: `daily_token_budget()` is the *global* setting, so an owner who set a
+    tighter (or looser) limit for their organisation was shown it as "in force" while
+    the product kept enforcing the global number. Resolved through the same envelope
+    the quota page reads, so the page and the enforcement cannot disagree again. A
+    user with no organisation has no tenant to override anything, and gets the global.
+    """
+    if organisation_id is None:
+        return daily_token_budget()
+    limit = quota_envelope(db, organisation_id).limit_for("ai_daily_token_budget")
+    if limit is None:
+        return daily_token_budget()
+    return max(0, int(limit.limit))
 
 
 def tokens_used_today(db: Session, user_id: str) -> int:
@@ -142,13 +162,16 @@ def over_budget(db: Session, user_id: str) -> bool:
     return exceeded(db, user_id) is not None
 
 
-def exceeded(db: Session, user_id: str) -> str | None:
+def exceeded(db: Session, user_id: str, *, token_budget: int | None = None) -> str | None:
     """Which daily ceiling is reached (`"tokens"` or `"cost"`), or None.
 
     One ledger read serves both checks. Tokens are checked first: it is the
     ceiling that exists on every deployment, while the cost one needs a price.
+    `token_budget` is the tenant-resolved figure (`effective_daily_token_budget`);
+    left out, it is the global setting.
     """
-    token_budget = daily_token_budget()
+    if token_budget is None:
+        token_budget = daily_token_budget()
     cost_budget = daily_cost_budget_micro()
     if not token_budget and not cost_budget:
         return None
@@ -160,10 +183,12 @@ def exceeded(db: Session, user_id: str) -> str | None:
     return None
 
 
-def budget_message(db: Session, user_id: str) -> str:
+def budget_message(db: Session, user_id: str, *, token_budget: int | None = None) -> str:
     """A 429 detail that tells the user what happened and when it clears."""
+    if token_budget is None:
+        token_budget = daily_token_budget()
     used = usage_today(db, user_id)
-    which = exceeded(db, user_id) or "tokens"
+    which = exceeded(db, user_id, token_budget=token_budget) or "tokens"
     if which == "cost":
         spent = pricing.usd(used.cost_micro_usd)
         allowance = pricing.usd(daily_cost_budget_micro())
@@ -178,10 +203,28 @@ def budget_message(db: Session, user_id: str) -> str:
             + "). It resets at 00:00 UTC. Simulations, uploads and results are unaffected."
         )
     return (
-        f"You have used your daily AI allowance of {daily_token_budget():,} tokens "
+        f"You have used your daily AI allowance of {token_budget:,} tokens "
         f"({used.total_tokens:,} spent today). It resets at 00:00 UTC. "
         "Simulations, uploads and results are unaffected."
     )
+
+
+def refusal(db: Session, user: User, project_id: str | None = None) -> str | None:
+    """Why this user may not start a turn right now, or None if they may.
+
+    Two ceilings, checked in this order: the user's own (tokens, resolved through
+    their tenant's override, then dollars) and then the organisation's (dollars,
+    per day and per month, summed over every member). The user's own comes first
+    because its message is the one that is theirs to act on; an organisation cap is
+    the owner's to raise.
+    """
+    organisation_id = org_budget.billed_organisation(db, user, project_id)
+    token_budget = effective_daily_token_budget(db, organisation_id)
+    if exceeded(db, user.id, token_budget=token_budget) is not None:
+        return budget_message(db, user.id, token_budget=token_budget)
+    if organisation_id is not None:
+        return org_budget.refusal(db, organisation_id)
+    return None
 
 
 def record(
@@ -204,6 +247,9 @@ def record(
         AITokenUsage(
             user_id=user.id,
             conversation_id=conversation.id if conversation is not None else None,
+            organisation_id=org_budget.billed_organisation(
+                db, user, conversation.project_id if conversation is not None else None
+            ),
             usage_date=datetime.now(timezone.utc).date(),
             purpose=purpose,
             provider=provider,

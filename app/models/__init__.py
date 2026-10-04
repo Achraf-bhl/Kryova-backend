@@ -26,6 +26,7 @@ from app.models.catia import (
     CatiaOperation,
 )
 from app.models.conversation import (
+    AIBudgetAlert,
     AITokenUsage,
     Conversation,
     ConversationMessage,
@@ -63,6 +64,7 @@ from app.models.user import User
 
 __all__ = [
     "REUSE_GRACE_SECONDS",
+    "AIBudgetAlert",
     "AITokenUsage",
     "Attachment",
     "ApprovalGate",

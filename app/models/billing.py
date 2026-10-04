@@ -400,6 +400,16 @@ class BillingAccount(UUIDPrimaryKey, TimestampMixin, Base):
     )
     max_media_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
     ai_daily_token_budget: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    #: What the whole organisation may spend on the model per UTC day / calendar
+    #: month, in micro-dollars (`app/ai/pricing.py`). Null means the global
+    #: `AI_ORG_*_COST_BUDGET_USD`; **0 is a real override meaning "this tenant is
+    #: unlimited"**, which is why null and 0 are not the same thing here.
+    ai_org_daily_cost_budget_micro_usd: Mapped[int | None] = mapped_column(
+        BigInteger, default=None
+    )
+    ai_org_monthly_cost_budget_micro_usd: Mapped[int | None] = mapped_column(
+        BigInteger, default=None
+    )
 
     organisation: Mapped["Organisation"] = relationship()
 

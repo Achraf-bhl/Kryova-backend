@@ -16,6 +16,7 @@ import json
 import logging
 import time
 from collections.abc import Iterator
+from datetime import date
 from typing import Annotated, Any
 from uuid import uuid4
 
@@ -37,6 +38,7 @@ from app.ai import (
     generate_title,
     get_provider,
     interpret_result,
+    org_budget,
     turn_events,
 )
 from app.ai import usage as token_usage
@@ -69,12 +71,65 @@ from app.models import (
     SimulationJob,
     User,
 )
-from app.models.organisation import organisation_ids_for_user
 from app.simulation.runner import SessionScope
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ai"])
+
+
+class DayUsageRead(BaseModel):
+    """What this user has spent on the model today (UTC), split the way it is billed."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    #: A subset of `prompt_tokens`, never added to it.
+    cached_prompt_tokens: int
+    #: Micro-dollars (1e-6 USD) over the calls that could be priced. Integers, because
+    #: a period total is an exact sum and a float drifts.
+    cost_micro_usd: int
+    #: Calls on a model with no configured price, which `cost_micro_usd` cannot include.
+    unpriced_calls: int
+
+
+class UserAllowanceRead(BaseModel):
+    #: 0 means unlimited. Resolved through the tenant's override, then the global setting.
+    daily_token_budget: int
+    #: 0 means unlimited.
+    daily_cost_budget_micro_usd: int
+
+
+class OrgCapRead(BaseModel):
+    period: str = Field(description="`day` or `month` (UTC).")
+    #: 0 means no cap in force.
+    cap_micro_usd: int
+    #: `tenant override` or `global settings`.
+    source: str
+    spent_micro_usd: int
+    #: Whole percent of the cap spent; null when there is no cap.
+    percent: int | None
+    resets_on: date
+
+
+class OrgNoticeRead(BaseModel):
+    """One line for the in-app banner."""
+
+    period: str
+    percent: int
+    level: str = Field(description="`warning` from 80 %, `exhausted` at 100 %.")
+    message: str
+
+
+class AIUsageRead(BaseModel):
+    today: DayUsageRead
+    allowance: UserAllowanceRead
+    organisation_id: str | None
+    organisation_caps: list[OrgCapRead]
+    #: This month's calls on an unpriced model: a cap cannot see them, so say so.
+    organisation_unpriced_calls: int
+    notices: list[OrgNoticeRead]
+    #: Why the next turn would be refused right now, or null if it would not be.
+    blocked: str | None
 
 
 class AIStatus(BaseModel):
@@ -120,18 +175,37 @@ def _translate(exc: LLMError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
 
-def _enforce_budget(db: Session, user: User) -> None:
-    """Refuse a turn that starts over the daily allowance.
+def _enforce_budget(db: Session, user: User, project_id: str | None = None) -> None:
+    """Refuse a turn that starts over the daily allowance or its organisation's cap.
 
     Checked before the call, never during: an agent cut off between a tool call
     and its result leaves a transcript describing work whose outcome nobody
     saw, which is worse for the user than a slightly overrun budget.
+
+    `project_id` says which organisation's cap applies (`org_budget.billed_organisation`).
     """
-    if token_usage.over_budget(db, user.id):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=token_usage.budget_message(db, user.id),
+    refused = token_usage.refusal(db, user, project_id)
+    if refused is not None:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=refused)
+
+
+def _turn_project_id(db: Session, user: User, payload: "ChatRequest") -> str | None:
+    """The project a chat turn will be billed under, read *before* the conversation exists.
+
+    An existing conversation answers with its own project (the user's own rows only --
+    this is a read for billing, not an ownership check, and `_resolve_conversation`
+    still 404s a stranger's id); a new one with the project the request names.
+    """
+    if payload.conversation_id:
+        existing = db.scalar(
+            select(Conversation.project_id).where(
+                Conversation.id == payload.conversation_id,
+                Conversation.owner_id == user.id,
+            )
         )
+        if existing:
+            return str(existing)
+    return payload.project_id
 
 
 def _record(
@@ -206,13 +280,15 @@ def _meter_tokens(
     if session_scope is None:
         return
     try:
-        tenants = organisation_ids_for_user(db, user)
-        if not tenants:
+        organisation_id = org_budget.billed_organisation(
+            db, user, conversation.project_id if conversation is not None else None
+        )
+        if organisation_id is None:
             # No tenant to bill. Skipped rather than attributed to a guess —
             # a wrong organisation on an invoice is worse than a missing line.
             return
         cause = Cause(
-            organisation_id=next(iter(sorted(tenants))),
+            organisation_id=organisation_id,
             source="ai.chat",
             subject_type="conversation" if conversation else "user",
             subject_id=conversation.id if conversation else user.id,
@@ -279,6 +355,70 @@ def _settle_turn(
     except Exception:  # noqa: BLE001 - accounting must not mask the real outcome
         logger.exception("Failed to record the turn for conversation %s", getattr(conversation, "id", None))
         db.rollback()
+        return
+    # After the turn is durable, so the warning is computed from spend that is real.
+    # It never raises, and it is its own transaction.
+    org_budget.alert_if_crossed(
+        db,
+        org_budget.billed_organisation(
+            db, user, conversation.project_id if conversation is not None else None
+        ),
+    )
+
+
+@router.get("/ai/usage", response_model=AIUsageRead)
+def ai_usage(
+    db: DbSession,
+    current_user: CurrentUser,
+    project_id: Annotated[str | None, Query()] = None,
+) -> AIUsageRead:
+    """What the model has cost today, what the limits are, and whether a turn would be refused.
+
+    `project_id` picks which organisation's cap applies, the way it does for a chat turn;
+    left out, it is the user's own organisation. This is the one place the user can see
+    the numbers a 429 is made of, and the banner reads `notices` from it.
+    """
+    organisation_id = org_budget.billed_organisation(db, current_user, project_id)
+    used = token_usage.usage_today(db, current_user.id)
+    caps: list[OrgCapRead] = []
+    unpriced = 0
+    notices: list[OrgNoticeRead] = []
+    if organisation_id is not None:
+        current = org_budget.status(db, organisation_id)
+        unpriced = current.unpriced_calls
+        caps = [
+            OrgCapRead(
+                period=cap.period,
+                cap_micro_usd=cap.cap_micro_usd,
+                source=cap.source,
+                spent_micro_usd=cap.spent_micro_usd,
+                percent=cap.percent,
+                resets_on=cap.resets_on,
+            )
+            for cap in current.caps
+        ]
+        notices = [
+            OrgNoticeRead(period=n.period, percent=n.percent, level=n.level, message=n.message)
+            for n in org_budget.notices(current)
+        ]
+    return AIUsageRead(
+        today=DayUsageRead(
+            prompt_tokens=used.prompt_tokens,
+            completion_tokens=used.completion_tokens,
+            cached_prompt_tokens=used.cached_prompt_tokens,
+            cost_micro_usd=used.cost_micro_usd,
+            unpriced_calls=used.unpriced_calls,
+        ),
+        allowance=UserAllowanceRead(
+            daily_token_budget=token_usage.effective_daily_token_budget(db, organisation_id),
+            daily_cost_budget_micro_usd=token_usage.daily_cost_budget_micro(),
+        ),
+        organisation_id=organisation_id,
+        organisation_caps=caps,
+        organisation_unpriced_calls=unpriced,
+        notices=notices,
+        blocked=token_usage.refusal(db, current_user, project_id),
+    )
 
 
 @router.get("/ai/status", response_model=AIStatus)
@@ -332,7 +472,7 @@ def interpret_simulation(
             ),
         )
 
-    _enforce_budget(db, current_user)
+    _enforce_budget(db, current_user, project.id)
     provider = _provider_or_503()
     try:
         completion: Completion[ResultInterpretation] = interpret_result(
@@ -388,7 +528,7 @@ def draft_project_load_case(
             detail="This geometry has no bounding box, so 'top' and 'bottom' cannot be resolved",
         )
 
-    _enforce_budget(db, current_user)
+    _enforce_budget(db, current_user, project.id)
     provider = _provider_or_503()
     try:
         completion: Completion[LoadCaseDraft] = draft_load_case(
@@ -612,7 +752,7 @@ def chat(
     the agent replays a bounded window of everything it did before -- including
     the calls that failed -- plus a summary of anything older.
     """
-    _enforce_budget(db, current_user)
+    _enforce_budget(db, current_user, _turn_project_id(db, current_user, payload))
     conversation = _resolve_conversation(db, current_user, payload)
 
     if payload.project_id and conversation.project_id is None:
@@ -705,7 +845,7 @@ def chat_stream(
     naming happens after the answer exists, so it cannot ride on `done`. A
     client that does not know the event ignores it and keeps the title it had.
     """
-    _enforce_budget(db, current_user)
+    _enforce_budget(db, current_user, _turn_project_id(db, current_user, payload))
     conversation = _resolve_conversation(db, current_user, payload)
     if payload.project_id and conversation.project_id is None:
         conversation.project_id = payload.project_id

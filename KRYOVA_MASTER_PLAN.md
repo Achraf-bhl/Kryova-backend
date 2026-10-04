@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 59/69 = 86% | 33/39 eng-months = 84% |
-| **Programme** | 23/35 | 186/205 = 91% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 60/71 = 85% | 32/39 eng-months = 83% |
+| **Programme** | 23/35 | 187/207 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 86% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 78% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8294,6 +8294,33 @@ machine with no network, so the phase is open until a run with a key confirms it
    > `turn_metrics` (migration `be18af3e6a04`), wired into `/ai/chat` and `/ai/chat/stream`; the
    > `done` event gains `cached_prompt_tokens`, `cost_micro_usd` and `wall_ms`. A turn that
    > reached no model writes no row. Tested by: `tests/test_turn_metrics.py`.
+
+8. **An organisation's AI spend is capped, warned about, and visible — and the tenant's own token
+   limit is finally enforced.** *(ROAD_TO_10 1.3.)* A per-user budget cannot protect whoever is
+   invoiced: ten users each under their own allowance spend ten times what the owner agreed to.
+   > DONE (2026-10-04) — `app/ai/org_budget.py`: a daily and a monthly **cost** cap per
+   > organisation (`AI_ORG_DAILY_/MONTHLY_COST_BUDGET_USD`, overridden per tenant on
+   > `BillingAccount.ai_org_*_cost_budget_micro_usd`; null = global, **0 = this tenant is
+   > unlimited**), summed over every member's priced calls, enforced before each turn beside the
+   > user's own budget. Owners are mailed once at 80 % and once at 100 %
+   > (`MailKind.AI_BUDGET_ALERT`; the unique `ai_budget_alerts` row is the lock, so two turns
+   > finishing together send one mail, and a turn that jumps past both sends only the higher).
+   > `GET /ai/usage` returns spend, caps with their source, banner `notices`, unpriced-call
+   > count and why the next turn would be refused. `PUT /organisations/{id}/billing` sets and
+   > clears the caps (`-1` clears). **Found and fixed on the way:** the tenant's
+   > `ai_daily_token_budget` override was shown as "in force" on the quota page and read by
+   > nothing on the chat path (`usage.effective_daily_token_budget` now resolves it through the
+   > same envelope); and the usage *bill* attributed every turn to the user's first organisation
+   > while the cap counted another — both now read `org_budget.billed_organisation`, which prefers
+   > the project's organisation when the user belongs to it. **Schema:** `ai_token_usage.
+   > organisation_id` (+ index), table `ai_budget_alerts`, two `billing_accounts` columns
+   > (migration `9becb1e46a38`, rollback note inside). Existing ledger rows are not back-filled
+   > (their cost is NULL, so they add nothing to a cost cap anyway). Tested by:
+   > `tests/test_ai_org_budget.py`, `tests/test_mail.py`.
+
+9. **The in-app banner for AI budget notices.** *(ROAD_TO_10 1.3, frontend half.)* `GET /ai/usage`
+   serves the lines; nothing in `Kryova-frontend` draws them yet.
+   > NOT STARTED
 
 ---
 

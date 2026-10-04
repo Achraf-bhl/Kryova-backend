@@ -276,6 +276,45 @@ def quota_exhausted(*, to: str, organisation: str, what: str, resets: str) -> Ma
     )
 
 
+def ai_budget_alert(
+    *, to: str, organisation: str, period: str, percent: int, spent: str, cap: str, resets: str
+) -> Mail:
+    """An organisation is nearing (80) or has reached (100) its AI spending cap.
+
+    `spent` and `cap` arrive already formatted, with their currency sign: this
+    module renders and never computes, so a figure in a mail cannot disagree with
+    the one the in-app banner shows from the same call.
+    """
+    if percent >= 100:
+        subject = f"{organisation} has reached its {period} AI spending cap"
+        lead = (
+            f'The organisation "{organisation}" has spent {spent} of its {cap} {period} '
+            f"AI cap on Kryova. New assistant turns are refused until {resets}."
+        )
+    else:
+        subject = f"{organisation} has used {percent}% of its {period} AI spending cap"
+        lead = (
+            f'The organisation "{organisation}" has spent {spent} of its {cap} {period} '
+            f"AI cap on Kryova ({percent}%). Assistant turns will be refused once the cap "
+            f"is reached, which resets {resets}."
+        )
+    return Mail(
+        to=to,
+        subject=subject,
+        kind=MailKind.AI_BUDGET_ALERT,
+        body=_wrap(
+            f"""
+            {lead}
+
+            Simulations, uploads and results already produced are unaffected, and
+            nothing has been deleted. An owner can change the cap in the
+            organisation's billing settings.
+            """
+        )
+        + SIGNATURE,
+    )
+
+
 #: Every builder, keyed by the kind it produces. A test walks this to prove the
 #: two enumerations agree — a `MailKind` with no builder is a message somebody
 #: intended to send and did not, and a builder with no kind cannot be routed.
@@ -288,6 +327,7 @@ BUILDERS = {
     MailKind.DELETION_SCHEDULED: deletion_scheduled,
     MailKind.SESSION_THEFT_NOTICE: session_theft_notice,
     MailKind.QUOTA_EXHAUSTED: quota_exhausted,
+    MailKind.AI_BUDGET_ALERT: ai_budget_alert,
 }
 
 __all__ = [
@@ -297,6 +337,7 @@ __all__ = [
     "impersonation_notice",
     "org_invitation",
     "password_reset",
+    "ai_budget_alert",
     "quota_exhausted",
     "session_theft_notice",
     "suspension_notice",

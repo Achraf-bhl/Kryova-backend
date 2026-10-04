@@ -87,9 +87,10 @@ def _within_allowance(look: AttachmentLook, db: Session, user: User) -> Look:
     """
 
     def guarded(image: bytes, image_format: str) -> Sight:
-        if token_usage.over_budget(db, user.id):
+        refused = token_usage.refusal(db, user)
+        if refused is not None:
             raise ExtractionFailed(
-                f"the picture was not read. {token_usage.budget_message(db, user.id)} "
+                f"the picture was not read. {refused} "
                 "Attach it again after the reset to have it read.",
                 short="daily AI allowance spent",
             )

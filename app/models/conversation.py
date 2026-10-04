@@ -22,7 +22,17 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Index, Integer, String, Text, TypeDecorator
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    TypeDecorator,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -264,6 +274,8 @@ class AITokenUsage(UUIDPrimaryKey, TimestampMixin, Base):
     __table_args__ = (
         # The budget check runs on every chat turn and is exactly this lookup.
         Index("ix_ai_token_usage_user_day", "user_id", "usage_date"),
+        # The organisation's cap is the same lookup, summed over its members.
+        Index("ix_ai_token_usage_org_day", "organisation_id", "usage_date"),
     )
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -271,6 +283,14 @@ class AITokenUsage(UUIDPrimaryKey, TimestampMixin, Base):
     #: and a deleted conversation must not take its spend history with it.
     conversation_id: Mapped[str | None] = mapped_column(
         ForeignKey("conversations.id", ondelete="SET NULL"), index=True, default=None
+    )
+    #: The tenant this call is billed to (`app/ai/org_budget.billed_organisation`):
+    #: the conversation's project's organisation, else the user's own. NULL when
+    #: the user belongs to none -- skipped rather than guessed at, like the bill
+    #: in `app/core/metering.py` -- and SET NULL on delete, because removing an
+    #: organisation must not erase what its members' calls cost.
+    organisation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("organisations.id", ondelete="SET NULL"), default=None
     )
     #: UTC calendar day, denormalised so the budget query is an index lookup
     #: rather than a timezone-sensitive expression over `created_at`.
@@ -292,6 +312,36 @@ class AITokenUsage(UUIDPrimaryKey, TimestampMixin, Base):
     #: configured price, which is not the same as free**: a cost budget sums only
     #: what is known, and says so (`app/ai/pricing.py`).
     cost_micro_usd: Mapped[int | None] = mapped_column(BigInteger, default=None)
+
+
+class AIBudgetAlert(UUIDPrimaryKey, TimestampMixin, Base):
+    """The claim that one budget alert was sent: once per organisation, period and threshold.
+
+    The row is the lock. Two turns finishing together both see the organisation
+    cross 80 %; each tries to insert this row, the unique constraint lets exactly
+    one succeed, and only that one sends the mail. A flag on the organisation
+    could not do this without a read-then-write race, and a "last alerted"
+    timestamp could not say *which* threshold or period it was for. Append-only:
+    the history of when an organisation was warned is itself worth keeping.
+    """
+
+    __tablename__ = "ai_budget_alerts"
+    __table_args__ = (
+        UniqueConstraint(
+            "organisation_id", "period", "period_start", "threshold",
+            name="uq_ai_budget_alert_once",
+        ),
+    )
+
+    organisation_id: Mapped[str] = mapped_column(
+        ForeignKey("organisations.id", ondelete="CASCADE"), index=True
+    )
+    #: "day" or "month".
+    period: Mapped[str] = mapped_column(String(8))
+    #: First UTC day of the period, so a new day or month is a new claim.
+    period_start: Mapped[date] = mapped_column(Date)
+    #: Percent of the cap: 80 or 100.
+    threshold: Mapped[int] = mapped_column(Integer)
 
 
 class TurnMetric(UUIDPrimaryKey, TimestampMixin, Base):

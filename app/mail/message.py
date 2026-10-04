@@ -37,6 +37,7 @@ class MailKind(StrEnum):
     DELETION_SCHEDULED = "deletion_scheduled"
     SESSION_THEFT_NOTICE = "session_theft_notice"
     QUOTA_EXHAUSTED = "quota_exhausted"
+    AI_BUDGET_ALERT = "ai_budget_alert"
 
 
 @dataclass(frozen=True)

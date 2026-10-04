@@ -1227,6 +1227,63 @@ class TestTokenAccounting:
         assert reply.usage.completion_tokens == 50
         assert reply.usage.total_tokens == 300
 
+    def test_a_hosted_intent_router_is_counted_and_hears_the_message_once(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """`AI_INTENT_ROUTER=llm` makes one paid call before the turn. Its usage was
+        dropped -- so the daily budget and billing never saw it -- and it was sent
+        the current message twice, because the context it read was taken after the
+        message had been stored."""
+        from pydantic import BaseModel
+
+        from app.ai.tool_retrieval import INTENT_FAMILIES
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "ai_tool_limit", 20, raising=False)
+        monkeypatch.setattr(settings, "ai_intent_router", "llm", raising=False)
+        family = next(iter(INTENT_FAMILIES))
+
+        class Routes(ScriptedProvider):
+            asked: list[str] = []
+
+            def complete(self, *, user: str, schema: type[BaseModel], **_: Any) -> Any:
+                self.asked.append(user)
+                return Completion(
+                    value=schema.model_construct(answer=family), usage=TokenUsage(40, 2)
+                )
+
+        from app.models import ConversationMessage, MessageRole
+
+        db_session.add(
+            ConversationMessage(
+                conversation_id=conversation.id,
+                sequence=1,
+                role=MessageRole.USER,
+                content="A 60 x 40 x 10 plate.",
+            )
+        )
+        db_session.flush()
+        provider = Routes([AssistantTurn(text="Done.", usage=TokenUsage(100, 10))])
+        reply = run_agent(
+            db=db_session,
+            provider=provider,
+            conversation=conversation,
+            # Bound to the conversation, as the chat route builds it; without
+            # it `recent_user_messages` is empty and there is nothing to repeat.
+            toolbox=_toolbox(db_session, user, project, conversation=conversation),
+            user_message="pocket the top face",
+        )
+
+        assert reply.usage == TokenUsage(140, 12)
+        assert len(provider.asked) == 1
+        assert "A 60 x 40 x 10 plate." in provider.asked[0]
+        assert provider.asked[0].count("pocket the top face") == 1
+
     def test_usage_adds(self) -> None:
         assert (TokenUsage(1, 2) + TokenUsage(3, 4)) == TokenUsage(4, 6)
 

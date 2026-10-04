@@ -99,7 +99,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Final, Protocol
 
 if TYPE_CHECKING:  # pragma: no cover - import kept out of the runtime path
-    from app.ai.provider import LLMProvider
+    from app.ai.provider import LLMProvider, TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -722,7 +722,7 @@ def select(
         labels = tuple(INTENT_FAMILIES)
         decided: str | None
         try:
-            decided = decide(f"{context} {message}".strip(), labels)
+            decided = decide(_decider_request(message, context), labels)
         except Exception:  # noqa: BLE001 - a decider must never take a turn down
             logger.exception("the intent decider raised; keeping the lexical selection")
             decided = None
@@ -811,7 +811,23 @@ __all__ = [
 ]
 
 
-def decider_for(provider: LLMProvider) -> IntentDecider:
+#: The most of the conversation a hosted decider is sent, in characters. The
+#: lexical scorer reads the whole context for free; a decider bills every token,
+#: and four earlier messages can be a pasted specification each. The request
+#: itself comes first, so a cut only ever drops the oldest context.
+DECIDER_REQUEST_CHARS: Final = 2000
+
+
+def _decider_request(message: str, context: str) -> str:
+    request = message.strip()
+    if context.strip():
+        request += "\n\nEarlier in this conversation: " + context.strip()
+    return request[:DECIDER_REQUEST_CHARS]
+
+
+def decider_for(
+    provider: LLMProvider, *, spent: list[TokenUsage] | None = None
+) -> IntentDecider:
     """Bind a provider into the `decide=` seam `select` takes.
 
     Separate from `select` so the selector keeps no provider import and stays
@@ -842,6 +858,8 @@ def decider_for(provider: LLMProvider) -> IntentDecider:
             # of a call that did not happen.
             fallback="none",
         )
+        if spent is not None:
+            spent.append(decision.usage)
         if not decision.decided or decision.value == "none":
             return None
         return str(decision.value)

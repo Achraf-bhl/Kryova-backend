@@ -437,6 +437,55 @@ class TestTheInjectedIntentDecider:
         assert "earlier words" in message, "the decider sees the same context the scorer does"
         assert set(labels) == set(INTENT_FAMILIES)
 
+    def test_the_request_is_sent_once_and_the_context_is_capped(self) -> None:
+        """A decider bills every token. The request goes first and once; the
+        conversation follows and is cut at `DECIDER_REQUEST_CHARS`, so a cut only
+        ever drops the oldest context, never the question."""
+        from app.ai.tool_retrieval import DECIDER_REQUEST_CHARS
+
+        seen: list[str] = []
+        long_context = "an earlier pasted specification " * 400
+
+        select(self._specs(), "pocket the face", context=long_context, limit=25,
+               decide=lambda m, _l: seen.append(m) or None)
+
+        (request,) = seen
+        assert request.startswith("pocket the face")
+        assert request.count("pocket the face") == 1
+        assert len(request) == DECIDER_REQUEST_CHARS
+
+    def test_a_hosted_decision_reports_what_it_cost(self) -> None:
+        """`decider_for` used to drop `Decision.usage`, so with `AI_INTENT_ROUTER=llm`
+        one paid call per turn reached neither the daily budget nor billing."""
+        from pydantic import BaseModel
+
+        from app.ai.provider import Completion, LLMProvider, TokenUsage
+        from app.ai.tool_retrieval import INTENT_FAMILIES, decider_for
+
+        family = next(iter(INTENT_FAMILIES))
+
+        class Answers(LLMProvider):
+            name = "answers"
+            model = "answers-1"
+
+            def health(self) -> None:
+                return None
+
+            def complete(self, *, schema: type[BaseModel], **_: object) -> Completion:
+                return Completion(
+                    value=schema.model_construct(answer=family),
+                    usage=TokenUsage(prompt_tokens=40, completion_tokens=2),
+                )
+
+            def chat(self, **_: object) -> object:  # pragma: no cover - not used
+                raise NotImplementedError
+
+        spent: list[TokenUsage] = []
+        decided = decider_for(Answers(), spent=spent)("pocket the face", tuple(INTENT_FAMILIES))
+
+        assert decided == family
+        assert spent == [TokenUsage(prompt_tokens=40, completion_tokens=2)]
+
     def test_it_is_not_consulted_when_retrieval_is_a_no_op(self) -> None:
         """Below the limit the selector returns everything, so there is nothing to widen
         and a call would be spent to learn nothing."""

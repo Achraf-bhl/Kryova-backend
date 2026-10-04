@@ -184,7 +184,9 @@ def system_prompt() -> str:
     return prompts.AGENT_SYSTEM_DOCS if has_docs else prompts.AGENT_SYSTEM
 
 
-def _intent_decider(provider: LLMProvider | None) -> Any:
+def _intent_decider(
+    provider: LLMProvider | None, spent: list[TokenUsage] | None = None
+) -> Any:
     """Bind `AI_INTENT_ROUTER` to a `decide=` callable, or `None` for lexical-only.
 
     Three-way rather than a bool, because "on" has two different answers to
@@ -200,12 +202,15 @@ def _intent_decider(provider: LLMProvider | None) -> Any:
     if router == "llm" and provider is not None:
         from app.ai.tool_retrieval import decider_for
 
-        return decider_for(provider)
+        return decider_for(provider, spent=spent)
     return None
 
 
 def _shown_tools(
-    toolbox: Any, user_message: str, provider: LLMProvider | None = None
+    toolbox: Any,
+    user_message: str,
+    provider: LLMProvider | None = None,
+    spent: list[TokenUsage] | None = None,
 ) -> set[str] | None:
     """Which tools to put in front of the model this turn — master plan 16.1.
 
@@ -222,6 +227,12 @@ def _shown_tools(
     Never raises. A retrieval failure falls back to offering everything, on
     `KnowledgeService.search`'s contract: consulting an index may improve an
     answer and must never be the reason there is not one.
+
+    Called *before* the user's message is stored, so `recent_user_messages` is
+    the conversation so far and not this message a second time. Whatever a
+    hosted decider spends is appended to `spent`, which the turn adds to its
+    own usage -- a paid call left out of the turn's count is invisible to the
+    daily budget and to billing alike.
     """
     limit = getattr(settings, "ai_tool_limit", 0)
     if not limit:
@@ -241,7 +252,7 @@ def _shown_tools(
             recent=toolbox.recent_tool_names(),
             context=toolbox.recent_user_messages(),
             limit=limit,
-            decide=_intent_decider(provider),
+            decide=_intent_decider(provider, spent),
         )
         # Logged rather than discarded, because the failure this can cause is
         # silent: a needed tool is absent, the model does something else, and
@@ -529,6 +540,12 @@ def stream_agent(
     # persisted -- see that function, and `app/ai/attached.py` for why.
     attached = attachments_for_turn(db, conversation, owner).block
 
+    # Chosen before the message is stored, for the reason `_shown_tools` gives.
+    routing: list[TokenUsage] = []
+    shown = _shown_tools(toolbox, user_message, provider, routing)
+    for spent in routing:
+        usage += spent
+
     _append(db, conversation, MessageRole.USER, content=user_message)
 
     # Fold before building the window, so the material being folded is still
@@ -553,9 +570,7 @@ def stream_agent(
     #: MAX_BLOCKED_REPEATS: past a few, the budget is better spent ending the
     #: turn than on more of them.
     blocked = 0
-    schemas = toolbox.schemas(
-        include_mutating=allow_mutations, only=_shown_tools(toolbox, user_message, provider)
-    )
+    schemas = toolbox.schemas(include_mutating=allow_mutations, only=shown)
     known = set(labels)
     corrections = 0
     #: How many times this turn was held open for unmeasured requirements.

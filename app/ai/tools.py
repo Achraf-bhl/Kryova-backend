@@ -2796,7 +2796,7 @@ class ToolBox:
         **A separate tool from `run_simulation`, and that is the E10.1 decision.**
         Folding a thermal case into `run_simulation` would put two case shapes
         and an analysis switch into the one tool every structural run goes
-        through, and the local model that drives this product got a single
+        through, and the local model that drove this product then got a single
         `LoadCase` wrong four times running on ladder prompt H4 — a union of
         three shapes is the wrong direction. The route already has the three
         analyses; before this, the agent could reach only one of them, which is
@@ -2874,7 +2874,7 @@ class ToolBox:
         """Queue a laminar flow run, as the HTTP route does (E10 task 2).
 
         Its own tool for `run_thermal_simulation`'s reason: a third case shape
-        folded into an existing tool is a union the local model has to get right
+        folded into an existing tool is a union the model has to get right
         on every structural run. Two checks run here as well as in the worker,
         because a refusal from the worker arrives as a failed job the agent finds
         only by polling: the case's shape, and whether OpenFOAM can run at all —

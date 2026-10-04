@@ -285,10 +285,10 @@ class Settings(BaseSettings):
     #: based on. `"none"` (default): lexical only, byte-identical to every
     #: deployment before this existed. `"laya"`: a 421M local decision model
     #: answers in ~140 ms and adds no load on the conversational provider.
-    #: `"llm"`: the agent's own provider answers, which shares its queue and
-    #: -- on a provider too large for its GPU -- can cost minutes for a single
-    #: decision; kept for a deployment with no GPU to spare for a second
-    #: model. Only matters when `ai_tool_limit` is narrowing the offer at all.
+    #: Local, so off unless the user agrees, and installed only from
+    #: `requirements-laya.txt`. `"llm"`: the agent's own hosted provider
+    #: answers, a billed request per decision (more when the answer needs a
+    #: repair), counted in the turn's usage. Only matters when `ai_tool_limit` is narrowing the offer at all.
     ai_intent_router: str = "none"
     #: Where Laya runs. `"auto"` (default) takes CUDA when torch can see it, else
     #: the CPU. `"cpu"` keeps a 421M model off the GPU entirely -- the right choice

@@ -12,10 +12,10 @@ answer.
 
 **Content is quoted on the turn after it was attached; the inventory goes every
 turn.** Quoting everything every turn is the simple rule and it is unaffordable:
-`MAX_TURN_CHARS` is 12,000 characters, and on a local model prompt
-*re-processing* dominates a turn (CLAUDE.md, testing item 11 — 3.7–7.9 tok/s,
-measured), so re-sending a datasheet on every step would cost minutes per step
-and grow with the transcript. Quoting once and never again is the other simple
+`MAX_TURN_CHARS` is 12,000 characters, and every agent step resends the whole
+prompt (CLAUDE.md, testing item 11), so a hosted model bills a datasheet re-sent
+on every step once per step, and the bill grows with the transcript. (Measured
+first on a local model, where the same re-processing cost minutes per step.) Quoting once and never again is the other simple
 rule, and it is wrong for the reason `app/ai/resume.py` exists: the window trims
 and the summary is a paraphrase, so "once" eventually means "never". What is
 sent every turn is `inventory_line` — a few dozen characters naming the file,

@@ -30,6 +30,14 @@ module = [
   # for its submodules.
   "anthropic",
   "anthropic.*",
+  # `laya` and `torch` are the opt-in local intent router's (`requirements-laya.txt`,
+  # since 19eba7e) and are absent from a default install, which is what made mypy
+  # report both as import-not-found on `app/ai/laya_decide.py`. The import is inside
+  # `_load_agent` and a missing package is the router's documented off state.
+  "laya",
+  "laya.*",
+  "torch",
+  "torch.*",
   # `pdfminer.six` is the last-resort PDF extractor in app/retrieval/extract.py
   # and is deliberately absent from requirements: poppler and pypdf cover the
   # corpus, and pdfminer is an order of magnitude slower. The import is guarded

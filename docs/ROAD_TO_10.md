@@ -221,10 +221,19 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
     `update_project` are ungated writes). The test the item asked for would have asserted a saving
     that was never measured. The lever that does exist is fewer model steps (1.13); whether the
     model batches independent reads when told to is THE QUEUE H12.
-- [ ] **1.13 Let one tool call carry a whole design plan.** [Linux then Seat] **L** → E15.1, Phase 5.3
+- [~] **1.13 Let one tool call carry a whole design plan.** [Linux then Seat] **L** → E15.1, Phase 5.3
   - The design IR (`Kryova-backend/app/design/`) already compiles a spec into a plan. Expose
     "compile and build this spec" as one tool, so a part costs one agent step instead of twenty.
     This is the largest token saving available, because it removes whole turns.
+  - **Status 2026-10-04: the Linux half is done; the seat half is not** (master plan P11.16,
+    `ToolBox._build_design`). `build_design` compiles the recorded design and runs its plan through
+    `_call_catia`, the path every geometry tool takes, so the document binding, the checkpoints and
+    the `CatiaOperation` log apply as to a hand build. It stops at the first feature that fails and
+    names it (what was built stays), reads the stop button between two features, refuses a part the
+    conversation has already started, and is mutating (needs confirmation). Proved on the open
+    kernel through `run_agent` with a scripted model: a three-feature plate is two tool steps, and
+    the volume is the closed form. **Not proved:** a real CATIA's per-call latency across a long
+    build, and whether a model that is shown the tool uses it (THE QUEUE H13).
 
 ---
 

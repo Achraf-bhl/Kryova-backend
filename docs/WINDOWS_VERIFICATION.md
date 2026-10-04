@@ -1797,6 +1797,20 @@ a key in `.env.local` they are minutes.*
       `rounds` and `prompt_tokens` again — a sentence changes the cached prefix once, so the first
       run after it bills the whole prompt at the full price. Settles: whether the prompt change
       is worth shipping.
+- [ ] **H13 — Does `build_design` hold up on a real seat, and does the model reach for it?**
+      Three things only a live run settles. (a) On the seat, record a ten-feature design and call
+      `build_design` once: does every call land, how long does the whole step take (it is one
+      tool call with no progress events, so a long build is minutes of a silent step list), and
+      does a refusal from CATIA mid-build leave the part in the state the error message says?
+      Also confirm `CatiaDocument.doc_name` is what the guard compares: it recognises the part by
+      name with `.CATPart`/`.CATProduct` stripped, and the seat's stored name was never read.
+      (b) With the prompts as they are, does the model *call `record_design` and then
+      `build_design`* at all? The four frozen system prompts teach the hand route and name neither
+      tool, so the only thing offering them is their schema — read `turn_metrics.tool_calls` on a
+      "make a plate" prompt. If it never does, the lever is a sentence in the prompt (which moves
+      the cached prefix once). (c) With `AI_TOOL_LIMIT` on, the design tools are in no family and
+      not in `CORE_TOOLS`, so retrieval withholds them: check before comparing accuracy at H8/H9.
+      Settles: whether ROAD_TO_10 1.13 is done, and whether the design tools join `CORE_TOOLS`.
 
 ## Expect failures on the first run, and that is the point
 

@@ -143,7 +143,11 @@ integrates three times for the same answer.
 5. **Reuse a factorisation** where several load cases share one stiffness matrix. Unmeasured
    here and structurally sound: the factorisation is the expensive half of a direct solve.
 6. **Shorten the agent's path to the tool call** — fewer offered tools, fewer turns, shorter
-   frozen prompts. Minutes, not milliseconds. Measure with the model on the GPU or not at all.
+   frozen prompts. Minutes, not milliseconds. Measure with the model on the hosted model or not at
+   all. The biggest single instance is `build_design` (ROAD_TO_10 1.13): a recorded design is built by
+   one tool call, so a twenty-feature part is one model step and one resend of the transcript, not
+   twenty. It is written and proved on the open kernel; whether the model *uses* it, and whether a
+   seat survives a long build, are THE QUEUE H13.
 
 ---
 

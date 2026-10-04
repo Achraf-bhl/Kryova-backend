@@ -1,6 +1,6 @@
 """The tool registry is resent on every agent step, so it may not quietly grow back.
 
-ROAD_TO_10 1.6. 243 schemas are about 66k estimated tokens (`scripts/schema_report.py`), and on
+ROAD_TO_10 1.6. 245 schemas are about 67k estimated tokens (`scripts/schema_report.py`), and on
 a hosted model that is billed again at every step of every turn -- a tool added casually is a
 cost on every conversation, forever, that no test would otherwise notice. The caps below are the
 measured sizes, rounded up, so that adding to the registry is a decision somebody makes and
@@ -27,11 +27,15 @@ from scripts import schema_report
 #:   239,100 / 33,000  the first measurement (243 tools).
 #:   239,600 / 33,500  +`recall_earlier_result` (495 B): a digested tool result in the replay
 #:                     points at it, and a digest with no way back would be a summary.
+#:   240,500 / 33,500  +`build_design` (835 B, ~230 tokens a step, billed at the cache price): it
+#:                     runs a whole recorded design in one step, so a twenty-feature part is one
+#:                     model step and one transcript resend instead of twenty. Mutating, so the
+#:                     read-only cap is unmoved.
 #:
 #: Measured 2026-10-04, compact JSON. To raise one: run `venv/bin/python -m scripts.schema_report`,
 #: set the new figure here rounded up to the next 100, and say in the commit what the new tool
 #: buys that is worth its share of every step's bill.
-TOTAL_BYTES_ALL_TOOLS = 239_600
+TOTAL_BYTES_ALL_TOOLS = 240_500
 TOTAL_BYTES_READ_ONLY = 33_500
 LARGEST_SINGLE_TOOL_BYTES = 3_200
 

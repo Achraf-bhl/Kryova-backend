@@ -28,7 +28,7 @@ import difflib
 import json
 import logging
 import time
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Final
 
@@ -112,6 +112,9 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     "record_design": "Writing down the design",
     "read_design": "Reading the design",
     "set_design_parameter": "Changing a design parameter",
+    # One step for the whole recorded design, so the label says the part is being
+    # made, not that a tool ran (ROAD_TO_10 1.13).
+    "build_design": "Building the part from the design",
     # The plan and its checkpoints (E16 tasks 2, 5, 6). Each says what is
     # happening to the *work*, not which module answered.
     "plan_work": "Planning the work",
@@ -787,6 +790,26 @@ class ToolBox:
                     required=["name", "value"],
                 ),
                 handler=self._set_design_parameter,
+                mutating=True,
+            ),
+            Tool(
+                name="build_design",
+                description=(
+                    "Build the recorded design in ONE step: it makes the part and runs "
+                    "every feature in order, instead of one catia_* call per feature. "
+                    "Use it once record_design has written the part down and nothing "
+                    "has been built yet -- it creates the part itself, so call it "
+                    "INSTEAD of catia_new_part, never after it.\n"
+                    "It stops at the first feature that fails and names it; whatever "
+                    "was already built stays in the part, and you carry on from there "
+                    "with the individual tools (catia_delete_feature removes a wrong "
+                    "one). It is refused when this part has already been started in "
+                    "this conversation. "
+                    "It takes no arguments: it builds the design exactly as recorded, "
+                    "and what it reports back is the finished part's measurement."
+                ),
+                parameters=_object({}),
+                handler=self._build_design,
                 mutating=True,
             ),
             Tool(
@@ -1871,6 +1894,151 @@ class ToolBox:
                     "this parameter."
                 )
         return result
+
+    def _build_design(self) -> dict[str, Any]:
+        """Compile the recorded design and run the whole plan through `_call_catia`.
+
+        **One agent step instead of one per feature**, which is the largest token
+        saving the design IR makes available: every step resends the transcript,
+        so twenty features is twenty prompts and this is one. The plan is what
+        `designs.save` already compiled and diffed; `execute_plan` walks it and
+        stops at the first failure, so nothing here decides what a valid design is.
+
+        **The runner is `_call_catia`, not `dispatch` directly.** That is the path
+        every `catia_*` tool takes, so the conversation-document binding, the
+        "start CATIA once" recovery, the per-call checkpoint and the
+        `CatiaOperation` log all apply to a built design exactly as to a hand-built
+        one -- which is what `resume.py` reads, so a built design is never invisible
+        to a later turn.
+
+        **It does not build a part this conversation has already started.** The plan
+        begins with `catia_new_part`. The open kernel refuses that while a part is
+        live, by itself. A seat *allows* it (a conversation owns a set of documents,
+        for assemblies), so a second `build_design` would quietly double the part;
+        `_already_started` refuses on the part's name, which leaves an assembly's next
+        part -- a different design -- free to be built.
+
+        **A failure is a `ToolError`, and says how far it got.** What the model needs
+        is the feature that failed, the seat's words, and that the earlier features
+        are still in the part -- not a structured report it must decide how to read.
+        The calls that did complete were logged by `dispatch` as they ran.
+
+        **It stops between calls when the user asks it to.** A build is the one tool
+        that can run for minutes, so the stop signal is read before each call rather
+        than only at the agent's step boundary. Between two calls is a place the part
+        is whole; inside one is not, and that is never interrupted.
+        """
+        from app.core import designs, interruption
+        from app.design.compile import compile_spec
+        from app.design.errors import SpecError
+        from app.design.execute import execute_plan
+
+        conversation = self._design_conversation()
+        document = designs.load(self.db, conversation)
+        if document is None:
+            raise ToolError(
+                "There is no design to build. Call record_design first -- build_design "
+                "builds the part exactly as it was written down."
+            )
+        try:
+            plan = compile_spec(designs.spec_of(document))
+        except SpecError as exc:
+            raise ToolError(
+                f"The recorded design does not compile, so nothing was built: {exc}"
+            ) from None
+        if not backends.is_local():
+            # A seat *allows* a second part (a conversation owns a set of documents), so the
+            # open kernel's refusal does not exist here and a second `build_design` would quietly
+            # double the part. The test is the part's *name*, not "owns anything": an assembly's
+            # next part is a different design with a different name and must not be refused.
+            started = self._already_started(plan)
+            if started is not None:
+                raise ToolError(
+                    f"The part {started!r} was already started in this conversation, and "
+                    "build_design makes a new one -- on this workstation that would add a "
+                    f"second {started!r} beside it. Carry on with the individual catia_* "
+                    "tools, or record a design with a different name for the next part."
+                )
+
+        def run_one(tool: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+            if interruption.turn_stop_requested(self.db, conversation):
+                raise ToolError("Stopped at your request, between two features.")
+            result = self._call_catia(tool, dict(arguments))
+            return result if isinstance(result, dict) else {}
+
+        report = execute_plan(plan, run_one)
+
+        total = len(plan.calls)
+        if report.failure is not None:
+            if len(report) == 0:
+                raise ToolError(
+                    f"The build could not start: {report.failure}. Nothing was built."
+                )
+            built = ", ".join(report.features_built()) or "the document"
+            raise ToolError(
+                f"The build stopped at {report.failure}. {len(report)} of {total} calls "
+                f"had completed and what they made is still in the part ({built}). Fix "
+                "that feature and carry on from there with the individual catia_* tools "
+                "(catia_list_features shows the part as it stands, catia_delete_feature "
+                "removes a wrong one). Do not call build_design again: the part is open."
+            )
+
+        # What each feature is called *now*. A feature that could not be named on creation is
+        # made and then renamed, and `report.created` keeps the first name (it answers "what did
+        # the seat call it before we renamed it"); the model's next call has to name the last.
+        names: dict[str, str] = {}
+        last_named: str | None = None
+        for call in report.completed:
+            made = call.created_name
+            if made is not None:
+                last_named = made
+                if call.feature is not None:
+                    names[call.feature] = made
+
+        result: dict[str, Any] = {
+            "design": document.name,
+            "revision": document.revision_number,
+            "plan_digest": report.plan_digest,
+            "calls": len(report),
+            "features_built": list(report.features_built()),
+            "created": dict(sorted(names.items())),
+            "seconds": round(report.seconds, 1),
+            # The finished part's own measurement, exactly as the last call reported it
+            # (provenance included): the same numbers the model would have read after
+            # the last feature of a hand build, with the nineteen before it left out.
+            "final": dict(report.last_result()),
+        }
+        if report.suppressed:
+            result["not_built"] = list(report.suppressed)
+        # The key the loop reads to count a solid as built and to name what was made.
+        if last_named is not None:
+            result["feature"] = last_named
+        return result
+
+    def _already_started(self, plan: Any) -> str | None:
+        """The name of the part `plan` would create, if this conversation already has one by it."""
+        from app.models.catia import CatiaDocument
+
+        first = plan.calls[0] if plan.calls else None
+        if first is None or first.tool != "catia_new_part" or self.conversation is None:
+            return None
+        name = str(first.arguments.get("name") or "")
+        if not name:
+            return None
+
+        def bare(label: str) -> str:
+            lowered = label.strip().lower()
+            for suffix in (".catpart", ".catproduct"):
+                if lowered.endswith(suffix):
+                    return lowered[: -len(suffix)]
+            return lowered
+
+        owned = self.db.scalars(
+            select(CatiaDocument.doc_name).where(
+                CatiaDocument.conversation_id == self.conversation.id
+            )
+        )
+        return name if any(bare(label) == bare(name) for label in owned) else None
 
     # -- the plan, its checkpoints, and what a run costs (E16 tasks 2, 5, 6) --
 

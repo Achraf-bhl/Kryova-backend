@@ -278,6 +278,9 @@ def summarise_step(tool: str, result: Any, ok: bool) -> str:
     if not isinstance(result, dict):
         return "Done"
 
+    if tool == "build_design":
+        built = result.get("features_built") or []
+        return f"Built {result.get('design', 'the part')}: {len(built)} features, {result.get('calls', 0)} operations"
     if tool == "create_project":
         return f"Created {result.get('name', 'project')}"
     if tool == "list_projects":

@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 64/77 = 84% | 32/39 eng-months = 83% |
-| **Programme** | 23/35 | 192/213 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 65/78 = 83% | 32/39 eng-months = 83% |
+| **Programme** | 23/35 | 192/214 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 77% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 75% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8424,6 +8424,25 @@ machine with no network, so the phase is open until a run with a key confirms it
     > thresholds are choices to re-read against the first week of live numbers.
     > Tested by: `tests/test_ai_cache_health.py`,
     > `Kryova-frontend/src/app/dashboard/admin/_components/ai-cache-panel.test.tsx`.
+
+16. **A recorded design is built in one agent step.** *(ROAD_TO_10 1.13, E15 task 1.)*
+    `record_design` has always said "Recording a design does NOT build it", and `execute_plan` was
+    a library function nothing in `app/` called, so a part the model had already written down was
+    still built one `catia_*` step at a time, each resending the whole transcript.
+    > PARTIAL (2026-10-04) — `ToolBox._build_design` (tool `build_design`, mutating): compiles the
+    > recorded design and runs the plan through `_call_catia`, so the document binding, checkpoints
+    > and the `CatiaOperation` log apply as to a hand build; stops at the first feature that fails
+    > and names it by its design name, keeping what was built; reads the stop button **between two
+    > features**; reports each feature's *current* name (after the plan's rename, not the first
+    > kernel name) and the finished part's own measurement with its provenance. On a seat it refuses
+    > only a part **this conversation already started** (by name, extension stripped), because a seat
+    > allows a second part and an assembly's next part must stay buildable. The registry cap rose
+    > 239,600 → 240,500 B (835 B, ~230 tokens a step at the cache price). **Proved on the open kernel
+    > only, through `run_agent` with a scripted model** — a three-feature plate is two tool steps
+    > and the volume is 60 × 40 × 8 to 1e-9. **Not proved:** a real seat's latency over a long build,
+    > whether the model reaches for the tool when the frozen prompts name neither it nor
+    > `record_design`, and retrieval, which would withhold the design tools (THE QUEUE H13).
+    > Tested by: `tests/test_design_build_tool.py`, `tests/test_tool_registry_size.py`.
 
 ---
 

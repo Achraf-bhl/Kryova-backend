@@ -73,7 +73,7 @@ about which rung had landed, and a real machine of this *size* is still several 
 
 **The synthetic generator is therefore built and is the reference assembly**, as option 2
 below always intended: `app/render/reference.py`, pinned by digest
-`2c6d3f5c8d9d534ccbbe0aeb6d58f4ab`, held to every row of the table by
+`ee54a7aafbdd7a5b0825bf11b94556e1` (re-pinned 2026-10-04: the first digest came from the Windows seat's `sin`/`cos`, and Linux built a different scene from the same commit), held to every row of the table by
 `tests/test_render_reference.py`. Measured: **2,000 occurrences, 120 distinct components,
 99% instanced, 5 deep.**
 

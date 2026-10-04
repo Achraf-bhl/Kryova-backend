@@ -116,7 +116,7 @@ Two numbers, both from P6 task 2, both against the reference assembly that alrea
 **The scene to measure them on is built and pinned.** `app/render/reference.py` generates
 the assembly `RENDERER_DECISION.md` §4 specifies — 2,000 occurrences, 120 distinct
 components, 99% instanced, 5 deep — and `tests/test_render_reference.py` holds it to every
-row, pinned by digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab` so two runs a month apart compare.
+row, pinned by digest `ee54a7aafbdd7a5b0825bf11b94556e1` (re-pinned 2026-10-04: the first digest came from the Windows seat's `sin`/`cos`, and Linux built a different scene from the same commit) so two runs a month apart compare.
 Nothing in it is random: the varied transforms are arithmetic on the index, because a
 random transform satisfies the wording and destroys the artefact.
 

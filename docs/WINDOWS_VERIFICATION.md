@@ -1525,7 +1525,7 @@ this file drives the ladder, with a screenshot each.
       **STEP 2 IS DONE, 2026-09-17.** `app/render/reference.py` generates the synthetic
       reference assembly §4 specifies and `tests/test_render_reference.py` holds it to every
       row: **2,000 occurrences, 120 distinct components, 99% instanced, 5 deep**, pinned by
-      digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab` so two runs a month apart compare. Nothing
+      digest `ee54a7aafbdd7a5b0825bf11b94556e1` (re-pinned 2026-10-04: the first digest came from the Windows seat's `sin`/`cos`, and Linux built a different scene from the same commit) so two runs a month apart compare. Nothing
       in it is random — the varied transforms are arithmetic on the index, because a random
       transform satisfies §4's wording and destroys the artefact.
       **The stale half of §4 is corrected too**: it said "M5 is not built and is blocked on

@@ -7056,7 +7056,7 @@ client renders what it is sent, at the detail the view deserves.
    > a total comparator that returns −1 rather than NaN for two parts containing the camera.
    > The reference assembly the targets are measured against also exists now
    > (`app/render/reference.py`, 2,000 occurrences over 120 components, 99% instanced, 5 deep,
-   > digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab`), which was G1's other blocker.
+   > digest `ee54a7aafbdd7a5b0825bf11b94556e1` (re-pinned 2026-10-04: the first digest came from the Windows seat's `sin`/`cos`, and Linux built a different scene from the same commit)), which was G1's other blocker.
    > **The reference machine is NAMED as of 2026-09-22 and the blocker is gone**:
    > `docs/REFERENCE_MACHINE_DECISION.md` §1a — Lenovo Legion Pro 5 16ADR10 (83LT), measured on
    > its **integrated** Radeon 610M (driver 32.0.21030.13004), Edge 153.0.4234.32, 1920×1080 at

@@ -52,8 +52,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from app.assembly.placement import at, compose, turned
+from app.assembly.placement import at, compose
 from app.assembly.structure import ProductStructure, StructureBuilder
+from app.dynamics.pose import Frame
 
 #: §4's occurrence target, exactly. P6 task 2's own "2,000-part machine".
 OCCURRENCES: Final = 2_000
@@ -169,15 +170,44 @@ def _placement(index: int, spacing_mm: float):
     because an instance frame is a full transform and the glTF writer refuses a mirrored
     one — a generator that only ever translated would never exercise that path.
     """
-    angle = (index % 12) * (math.tau / 12.0)
+    cosine, sine = _TWELFTHS[index % 12]
     return compose(
         at(
             spacing_mm * float(index % 7),
             spacing_mm * float((index // 7) % 5),
             spacing_mm * 0.25 * float(index % 3),
         ),
-        turned((0.0, 0.0, 1.0), angle),
+        Frame((cosine, 0.0 - sine, 0.0, sine, cosine, 0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0)),
     )
+
+
+_ROOT3_OVER_2: Final = math.sqrt(3.0) / 2.0
+
+#: cos and sin of k x 30 degrees, k = 0..11 -- the turns `_placement` steps through.
+#:
+#: Tabulated from `math.sqrt`, never computed with `math.cos`/`math.sin`, because the
+#: digest is only an identity if every machine writes the same bytes. IEEE 754
+#: requires a correctly rounded square root, so `sqrt(3)/2` is one bit pattern
+#: everywhere; it says nothing about `sin` and `cos`, which come from the platform's C
+#: library. Measured 2026-10-04: the trigonometric version gave
+#: `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab` on the Windows seat and
+#: `834334eba5654ae3145c470b5033b6f1` on Linux from the same commit -- two scenes, each
+#: perfectly reproducible on its own machine, which is exactly the failure no
+#: single-machine test can see.
+_TWELFTHS: Final[tuple[tuple[float, float], ...]] = (
+    (1.0, 0.0),
+    (_ROOT3_OVER_2, 0.5),
+    (0.5, _ROOT3_OVER_2),
+    (0.0, 1.0),
+    (-0.5, _ROOT3_OVER_2),
+    (-_ROOT3_OVER_2, 0.5),
+    (-1.0, 0.0),
+    (-_ROOT3_OVER_2, -0.5),
+    (-0.5, -_ROOT3_OVER_2),
+    (0.0, -1.0),
+    (0.5, -_ROOT3_OVER_2),
+    (_ROOT3_OVER_2, -0.5),
+)
 
 
 def reference_assembly() -> ProductStructure:

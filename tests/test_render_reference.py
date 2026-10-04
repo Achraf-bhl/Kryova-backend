@@ -40,8 +40,11 @@ from app.render.reference import (
 #: a generator whose output drifts makes every historical measurement incomparable, which
 #: is what makes a performance threshold worthless a year later. If this changes
 #: deliberately, every recorded measurement taken on the old digest is about a different
-#: scene and the run log has to say so.
-DIGEST = "2c6d3f5c8d9d534ccbbe0aeb6d58f4ab"
+#: scene and the run log has to say so. It moved once, on 2026-10-04, from
+#: `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab`: that was the Windows seat's libm, and Linux built
+#: a different scene from the same commit (`TestTheSceneIsTheSameOnEveryMachine`). No
+#: renderer measurement had been recorded against it.
+DIGEST = "ee54a7aafbdd7a5b0825bf11b94556e1"
 
 
 class TestItMeetsSectionFoursTable:
@@ -115,6 +118,16 @@ class TestItIsTheSameSceneEveryTime:
         assert first == second
         assert len(set(first)) > 100, "every instance at the same place is not 'varied'"
 
+    def test_the_rotations_are_proper_ones(self) -> None:
+        """The tabulated turns must still be rotations: the glTF writer refuses a mirrored
+        frame, and an unnormalised one would scale the part it places."""
+        from app.dynamics.pose import is_rotation
+
+        rotations = {o.frame.rotation for o in reference_assembly().occurrences()}
+
+        assert len(rotations) == 12
+        assert all(is_rotation(r) for r in rotations)
+
     def test_the_part_sizes_are_bounded_and_varied(self) -> None:
         """Bounded so no part dominates the view or falls under a display level's
         deflection; varied so the triangle budget is not one part's count times 2,000."""
@@ -125,6 +138,27 @@ class TestItIsTheSameSceneEveryTime:
         assert max(every) <= 60.0
         assert len(set(sizes)) > 50
         assert len(SIZES) == 100
+
+
+class TestTheSceneIsTheSameOnEveryMachine:
+    """A digest pinned on one machine is an identity only if no input to it comes from the
+    platform. IEEE 754 fixes `+`, `*` and `sqrt` to the last bit and says nothing about
+    `sin` and `cos`, which the C library supplies -- and the first version of this scene
+    built its turns from them, so the Windows seat and Linux pinned two different scenes
+    from one commit, each perfectly reproducible at home."""
+
+    def test_no_placement_is_computed_by_the_platforms_trigonometry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import math
+
+        def refuse(_: float) -> float:
+            raise AssertionError("the reference scene must not depend on the C library's trig")
+
+        for name in ("sin", "cos", "tan", "atan2", "acos", "asin"):
+            monkeypatch.setattr(math, name, refuse)
+
+        assert reference_assembly().digest() == DIGEST
 
 
 class TestTheTriangleRowsMeasuredThroughTheKernel:

@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 64/76 = 84% | 32/39 eng-months = 83% |
-| **Programme** | 23/35 | 190/212 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 64/77 = 84% | 32/39 eng-months = 83% |
+| **Programme** | 23/35 | 192/213 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 75% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 77% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8406,6 +8406,24 @@ machine with no network, so the phase is open until a run with a key confirms it
     > message after a tool chain is accepted by every provider adapter, whether DeepSeek's
     > thinking mode keeps the chain's reasoning when a user message follows it (H1/H2), and what a
     > block frozen at the start of the turn gets wrong by the end of it.
+
+15. **The prompt-cache hit rate is a number an operator watches, and a fall is announced.**
+    *(ROAD_TO_10 1.11.)* Nothing errors when the cache stops working: a timestamp, a counter or an
+    unsorted set slipping ahead of the transcript just bills every step at the full input price.
+    `turn_metrics` has recorded the hit count per turn since task 7; this reads it back.
+    > DONE (2026-10-04) — `app/ai/cache_health.py` (`assess`, `read`): the rate is weighted by
+    > tokens (`sum(cached) / sum(prompt)`, never an average of per-turn rates), the earlier stretch
+    > is the window's exact totals less the newest 20 turns (two bounded queries however long the
+    > window), and an alert needs a *healthy* earlier stretch (>= 40 %) and a recent one under 60 %
+    > of it — so a provider that reports no cached tokens is `reported: false`, never an
+    > incident, and fewer than 10 recent or 20 earlier turns is a null rate, never 0 %.
+    > `GET /admin/health` gains `ai_cache` (an additive field of `FleetHealthRead`, shape
+    > `AiCacheHealthRead`); the operations console renders it (`ai-cache-panel.tsx`) with the three
+    > states kept apart. **Offline-proven:** the arithmetic and the route against real
+    > `turn_metrics` rows; what a real DeepSeek turn reports as cached is THE QUEUE H1/H7 and the
+    > thresholds are choices to re-read against the first week of live numbers.
+    > Tested by: `tests/test_ai_cache_health.py`,
+    > `Kryova-frontend/src/app/dashboard/admin/_components/ai-cache-panel.test.tsx`.
 
 ---
 

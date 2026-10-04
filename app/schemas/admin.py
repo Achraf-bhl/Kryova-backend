@@ -341,6 +341,27 @@ class FailureClassRead(BaseModel):
     count: int
 
 
+class AiCacheHealthRead(BaseModel):
+    """Whether the prompt cache is working, as `app/ai/cache_health.py` reads it (ROAD_TO_10 1.11).
+
+    Every rate is **None** rather than 0.0 when there is nothing to divide by or too few turns to
+    compare: a cache that is not measured and a cache that is missing are opposite states, and
+    the console renders the first as a sentence, not as 0%. `reported` is false when no turn in
+    the window recorded a cached count -- the provider does not say, so the rate means nothing.
+    `alert` is the sentence the operator reads when the recent turns fell well below the earlier
+    ones; it is None otherwise.
+    """
+
+    turns: int
+    prompt_tokens: int
+    cached_prompt_tokens: int
+    hit_rate: float | None
+    recent_turns: int
+    recent_hit_rate: float | None
+    reported: bool
+    alert: str | None
+
+
 class ComputeScalingRead(BaseModel):
     """The worker count the job table asks for (E15.2), and why.
 
@@ -396,3 +417,6 @@ class FleetHealthRead(BaseModel):
     #: counter shows.
     mail_delivers: bool
     maintenance_active: bool
+    #: The prompt-cache hit rate of the agent's turns in the window (ROAD_TO_10 1.11). Added
+    #: 2026-10-04; additive, so an older console that does not read it is unaffected.
+    ai_cache: AiCacheHealthRead

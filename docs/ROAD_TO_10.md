@@ -193,10 +193,15 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
   - `DEFAULT_MAX_STEPS = 60` (`Kryova-backend/app/ai/agent.py:92`). Read the Phase 0 step counts per
     level, and set the default near the 95th percentile of successful turns, plus a margin. A turn
     that needs more is a turn to split (2.4), not a budget to raise.
-- [ ] **1.11 Prompt-cache hit rate as a tracked number.** [Linux] **S**
+- [x] **1.11 Prompt-cache hit rate as a tracked number.** [Linux] **S**
   - Once 1.1 lands, show the hit rate per turn in the admin console
     (`Kryova-frontend/src/app/dashboard/admin/_components/operations-console.tsx`) and alert when it
     falls, because a drop means something volatile has crept ahead of the state block.
+  - **Status 2026-10-04:** done (master plan P11.15, `app/ai/cache_health.py`, `GET /admin/health`
+    gaining `ai_cache`, the console's `ai-cache-panel.tsx`). The rate is token-weighted; an alert
+    needs a healthy earlier stretch and a recent one that fell under 60 % of it, so a provider that
+    reports no cache is "not measured", not an incident. Thresholds are choices to re-read against
+    the first week of live numbers (THE QUEUE H1/H7).
 
 ### 1C. Spend fewer turns
 

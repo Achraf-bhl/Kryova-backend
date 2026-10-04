@@ -31,6 +31,7 @@ from whichever staff account is compromised first.
 """
 
 import logging
+from dataclasses import asdict
 from datetime import timedelta
 from typing import Annotated
 
@@ -40,6 +41,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app import mail
+from app.ai import cache_health
 from app.api.deps import (
     AuditDep,
     DbSession,
@@ -83,6 +85,7 @@ from app.schemas.admin import (
     AdminJobRead,
     AdminOrganisationRead,
     AdminUserRead,
+    AiCacheHealthRead,
     AnnouncementCreate,
     AnnouncementRead,
     AuditEventRead,
@@ -1520,4 +1523,7 @@ def read_fleet_health(
         ),
         mail_delivers=mail.can_reach_real_mailboxes(),
         maintenance_active=maintenance.active_window(db) is not None,
+        ai_cache=AiCacheHealthRead.model_validate(
+            asdict(cache_health.read(db, since)),
+        ),
     )

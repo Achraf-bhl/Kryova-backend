@@ -95,6 +95,7 @@ def summarise_static(
     von_mises_per_element: NDArray[np.float64],
     warnings: list[str],
     seconds: float,
+    nodal_von_mises: NDArray[np.float64] | None = None,
 ) -> StaticResult:
     """The summary of one linear static run, however it was solved.
 
@@ -112,6 +113,7 @@ def summarise_static(
         volume_mm3=mesh.volume,
         node_count=mesh.node_count,
         element_count=mesh.tet_count,
+        nodal_von_mises=nodal_von_mises,
     )
 
 
@@ -161,6 +163,7 @@ def _summarise(
     volume_mm3: float,
     node_count: int,
     element_count: int,
+    nodal_von_mises: NDArray[np.float64] | None = None,
 ) -> StaticResult:
     """The one definition of what a static result means. See both callers."""
     magnitudes = np.linalg.norm(displacements.reshape(-1, 3), axis=1)
@@ -171,13 +174,32 @@ def _summarise(
     yield_strength = case.material.yield_strength_mpa
     fos = yield_strength / peak_stress if peak_stress > 0.0 else float("inf")
 
+    # The peak at the nodes, which is where a surface is. Reported beside the
+    # element value rather than instead of it: the two under-read in opposite
+    # cases -- the centroid misses the skin of a part in bending, the nodal
+    # value smooths a concentration -- so `StaticResult.governing_peak_mpa`
+    # takes the larger and names which. Gate G1, 2026-09-20, is why this exists:
+    # a three-grid study certified 41.03 MPa `converged` at GCI 1.03% on a bar
+    # whose closed-form surface stress is 60.0.
+    surface_stress: float | None = None
+    surface_fos: float | None = None
+    if nodal_von_mises is not None and nodal_von_mises.size:
+        surface_stress = float(np.max(nodal_von_mises))
+        surface_fos = (
+            yield_strength / surface_stress if surface_stress > 0.0 else float("inf")
+        )
+
     return StaticResult(
         max_displacement_mm=float(magnitudes[peak_node]),
         max_displacement_node=peak_node,
         max_von_mises_mpa=peak_stress,
         max_von_mises_element=peak_element,
         factor_of_safety=fos,
-        yields=peak_stress >= yield_strength,
+        max_von_mises_surface_mpa=surface_stress,
+        factor_of_safety_surface=surface_fos,
+        # Against the governing peak, not the element one: a part whose surface
+        # yields has yielded, whatever the centroid says.
+        yields=max(peak_stress, surface_stress or 0.0) >= yield_strength,
         mass_kg=volume_mm3 * 1e-9 * case.material.density_kg_m3,
         volume_mm3=volume_mm3,
         node_count=node_count,

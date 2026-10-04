@@ -34,8 +34,8 @@ happened.
 > `tests/test_dynamics_chrono.py::TestEveryResultSaysItIsUnverified::
 > test_the_unverified_note_names_where_the_oracle_runs_are_recorded` fails on a clean HEAD
 > (`UNVERIFIED_NOTE` does not contain `WINDOWS_VERIFICATION`).
-> **No continuation job was scheduled this turn:** it was interactive, at the user's direction,
-> and the chain below was stopped by the user on 2026-09-16.
+> **No continuation job was scheduled this turn:** it was interactive, at the user's direction.
+> Whoever holds the chain below (see its *Next continuation fires* line) still does.
 
 > **Continuation, 2026-09-16 11:07 — three mission rungs, and the ladder gained a fourth kind
 > of rung to hold the third.**
@@ -93,6 +93,305 @@ happened.
 > (conduction against ccx, unblocked now A1/A2 are ticked), **E7.7 then E2** (the gates; the
 > gate fails at L4 on E7.7 until that is fixed), **E18.8** (M8), and **E6** (DMU Kinematics).
 > Update that file when the brief changes; do not let it drift from this block.
+
+> **Continuation, 2026-09-22 (third turn) — the user supplied a Gemini API key, asked to switch
+> off `qwen3.5:9b`, and asked for single-pass decision logic.** Two of the three shipped; the
+> model switch is **built and deliberately not active**, for a measured reason.
+>
+> * **`app/ai/decide.py`** — `choose` / `score` / `judge`, one constrained call each, closed
+>   option set in the schema rather than parsed out of prose. **Confidence is a provenance, not
+>   a float**: Gemini returns no logprobs on any reachable model, Ollama does, so
+>   `Confidence.basis` is MEASURED/STATED/UNAVAILABLE and `probability` is None unless measured.
+>   A fallback is declared by the caller and returned *labelled*, never as a decision.
+> * **`app/ai/providers/gemini.py`** — `AI_PROVIDER=gemini`, a thin subclass of the
+>   OpenAI-compatible provider, adding `reasoning_effort` on structured calls only.
+> * **Wired into `tool_retrieval.select(decide=...)`** as a union-only recall rule, injected so
+>   the selector stays pure and offline by default.
+> * **THE BLOCKER, and it is the user's to clear:** the key is free tier —
+>   **20 requests per day, per model**. One CATIA turn is tens of steps. The Gemini block in
+>   `.env.local` is commented out one line from live, the effective provider is back on
+>   `qwen3.5:9b`, and enabling billing on the Google project is the whole of what is needed.
+>
+> **Next targets are unchanged from the block below** — P6.2's two numbers first.
+
+> **Continuation, 2026-09-22 — the user supplied two standards and asked for a user-intervention
+> surface.** Their message: *"here you go. you can find attached the needed standards so that
+> unblocks E13.2 and E8.3. Rename the reference machine so P6.2 and P6.3 are unblocked and
+> finished. And add the option that kryova tells the user to intervene when it needs a user
+> decision this should be shown as a message on the app for the user to decide what to do."*
+> The earlier instruction — *"forget the G1 for now, continue on the other aspects to be as close
+> to 100% as possible"* — still stands. **Phase E7 is CLOSED. Phase E13 is CLOSED.**
+> **This machine holds the chain. Next continuation fires: 2026-09-22 23:59**, held by **this
+> session**. The job dies if this editor is closed. (The 13:18 job never fired: its time passed
+> while the session was mid-turn, which is the one failure mode that ends the chain silently.
+> `CronList` first on every wake.)
+> **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires.
+>
+> **Board: 23/34 phases · 180.0/198 tasks = 90.9%.** Suite **10,949 passed / 21 skipped /
+> 1 xpassed / 0 failed** (12 min 25 s, one run); `ruff` and `mypy` (498) clean;
+> `app.verify.recorded --check` current — `app/rules/` and `app/ai/` are outside the
+> fingerprinted set, so this turn needed no re-record.
+>
+> **What this turn settled, and one thing it corrected in the user's own message.**
+> * **E13.2 is DONE and E13 is COMPLETE.** ISO 286-1:2010 is transcribed in
+>   `app/rules/iso286.py` — Tables 1–5, the 4.3.2 reading rules, the 4.3.2.5 |delta| rule. All
+>   **nine** transformations the standard works in full are reproduced from Part 1 alone, so
+>   ISO 286-2 is a convenience and not a missing dependency. Tables 4 and 5 are transcribed a
+>   second time in the test file; they agree with the hole tables everywhere but **one cell**,
+>   hole EF +28 against shaft ef −25 at 18–30 mm, resolved to 28 by ISO's own geometric-mean
+>   construction and recorded as a misprint. One real defect found by the tests: K above IT8
+>   was returning its base value instead of 0.
+> * **E8.3 is NOT unblocked, and the user's message was wrong about that** — said plainly
+>   because it is the kind of error that otherwise gets built on. The BS 7608 attachment is a
+>   **pure scan**: 152 pages, zero text layer, ~108 dpi, which is *below* the 300–400 dpi this
+>   project already measured as necessary for exactly this job. And every page footer says
+>   *"Provided by IHS under license with BSI — Uncontrolled Copy, Licensee=ZHEJIANG INST OF
+>   STANDARDIZATION"*. That is a decision for the user. Recorded in full at E8.3.
+> * **The reference machine is NAMED** (`docs/REFERENCE_MACHINE_DECISION.md` §1a): Lenovo
+>   Legion Pro 5 16ADR10, measured on its **integrated** Radeon 610M, Edge 153.0.4234.32,
+>   1920×1080, mains. The previous draft excluded this workstation "because it has a discrete
+>   GPU" and **that was wrong** — it has both, and the display runs on the integrated one.
+>   **Naming it did not measure anything**, so P6.2 is unblocked and not finished.
+> * **The intervention surface is built, both halves.** `app/ai/intervention.py` +
+>   `../Kryova-frontend/src/components/chat/intervention-prompt.tsx`.
+>
+> **Next targets, in order — at least seven:**
+> (1) **Take P6.2's two numbers** on the machine now named. `docs/REFERENCE_MACHINE_DECISION.md`
+>     §6 steps 2–5. **Step 3's trap: Windows hands a browser the discrete GPU by default**, so
+>     check `edge://gpu` says Radeon 610M before believing any reading, and set the panel to
+>     1920×1080. Record them even if they miss; label the paint number optimistic per §1a.
+> (2) **P6.3's WebGL 2 upgrade** (instancing, attribute handling) and WebGPU capability
+>     detection — the half that was never machine-blocked.
+> (3) **`catia_pocket`'s `limit` on the bridge.** Unblocks THE QUEUE B7 and E3's phase proof;
+>     same gap on `catia_pad`. Read the parameter flags in `%LOCALAPPDATA%\Temp\gen_py` first,
+>     and never brute-force a signature on a live seat — `AddJoint` killed it once.
+> (4) **Pace `scripts/catia_conformance.py`** to the seat's 60 ops/minute; it throttles itself
+>     out at M4 today. Harness gap, not a product defect.
+> (5) **P6.4/P6.5/P6.6 frontend work** — no section UI, no explode animation, no tree gutter, no
+>     legend, no probe, and no surface calls `propose.py`. None of it needs the reference laptop.
+> (6) **THE QUEUE G6 steps 2 and 3** — joint moment against a closed form, four-bar closed loop.
+> (7) **THE QUEUE E5 — crash recovery** (kill CNEXT mid-plan). Closes E15.4. LAST in any turn.
+> (8) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle.
+> (9) **The intervention surface's approval path, end to end.** The *repeated-failure* path is
+>     driven through `stream_agent` and measured; the **approval** path is covered only at the
+>     module level, because raising a real gate needs `request_approval` to run against an
+>     organisation, a subject and a digest. So "a checkpoint puts a decision on the stream" is
+>     believed and not measured — the exact distinction CLAUDE.md testing item 8 exists for, and
+>     both defects of that class shipped green. Drive `request_approval` through `stream_agent`
+>     and assert the `intervention` event carries that gate's id. Stated in
+>     `app/ai/intervention.py`'s docstring too, so it is not only here.
+>
+> **Still needs a document nobody holds**: E8.3 (a licensed, readable BS 7608), most of E21.
+> Do not keep re-reading them.
+>
+> **Environment is all in CLAUDE.md**: the dev server never hydrates (`npm run build && npm
+> start`), `TaskStop` leaves the server holding the port, `localhost` resolves to `::1` and
+> splits the browser from the bridge so everything is on IPv4, the CDP driver must match
+> `127.0.0.1:3000`, the bridge spawns on demand from `dispatch`, and the conformance script must
+> BE the server process (nothing else may hold `bridge.lock`).
+
+> **Continuation, 2026-09-21 — the user parked gate G1 and asked for breadth: "forget the G1 for
+> now, continue on the other aspects to be as close to 100% as possible."** That instruction
+> stands until they say otherwise. **Phase E7 is CLOSED.**
+> **This machine holds the chain.** **Next continuation fires: 2026-09-21 19:59**, held by
+> **this session**. The job dies if this editor is closed.
+> **`CronList` FIRST on every wake** — a one-shot job whose time passes mid-turn never fires.
+>
+> **Board: 22/34 phases - 179.5/198 tasks = 90.7%.** Suite **10,718 passed / 23 skipped /
+> 1 xpassed / 0 failed** (12 min 01 s, measured in one run); `ruff` and `mypy` (495) clean;
+> `app.verify.recorded --check` current at 4/5 agreed.
+>
+> **What is left, priced honestly.** The remaining 18.5 tasks are not evenly takeable:
+> * **Needs a document nobody has bought** — E8.3 (BS 7608), E13.2 (ISO 286's tables), most of
+>   E21. Not takeable by any machine; do not keep re-reading them.
+> * **Needs the seat to *write* against** — B7's blocker is `catia_pocket` advertising `limit`
+>   while the bridge does not implement it (a *known* gap, nineteen tools carry it per
+>   `KNOWN_NARROWER`). Implementing `limit` on pocket and pad is real COM work and unblocks E3's
+>   phase proof.
+> * **Needs a named reference machine** — P6.2's fps and first-paint targets. THE QUEUE G1 step
+>   2b: no machine is named anywhere, and this workstation has a discrete card, so it is
+>   explicitly the wrong one. That is a decision, not a measurement.
+> * **Takeable code, and this is where the next turns should go** — the list below.
+>
+> **Next targets, in order — at least seven:**
+> (1) **`catia_pocket`'s `limit` on the bridge.** Unblocks THE QUEUE B7 and with it E3's phase
+>     proof, and it is the same gap on `catia_pad`. Read the parameter flags in
+>     `%LOCALAPPDATA%\Temp\gen_py` before calling anything unfamiliar, and never brute-force a
+>     signature on a live seat — `AddJoint` killed it once.
+> (2) **Pace `scripts/catia_conformance.py`.** The seat allows 60 operations a minute and the
+>     script has none, so a ladder-wide run throttles itself out at M4. Not a product defect —
+>     the harness ignoring a product rule.
+> (3) **E17.1's leader attachment.** Frames are tabulated by feature name; nothing resolves that
+>     name to an edge on a view, because the design IR names features and the renderer projects
+>     the whole shape. Building that mapping closes E17 (+1 phase).
+> (4) **THE QUEUE G6 steps 2 and 3** — joint moment against a closed form, four-bar closed loop.
+> (5) **THE QUEUE E5 — crash recovery** (kill CNEXT mid-plan). Closes E15.4. LAST in any turn.
+> (6) **THE QUEUE D5 steps 3 and 4** — the attachment half only a model can settle.
+> (7) **P6.2's reference machine (G1 step 2b)** — name one, or record why the target cannot be
+>     met here and what would satisfy it.
+>
+> **Gate G1, when it is picked up again**: everything is discharged except the model writing a
+> verdict clause above its own footnote, and the study asking for grids further apart at the
+> coarsest size the model chose. `docs/verification-2026-09-21/README.md` has the state.
+>
+> **Environment is all in CLAUDE.md**: the dev server never hydrates (`npm run build && npm
+> start`), `TaskStop` leaves the server holding the port, `localhost` resolves to `::1` and
+> splits the browser from the bridge so everything is on IPv4, the CDP driver must match
+> `127.0.0.1:3000`, the bridge spawns on demand from `dispatch`, and the conformance script must
+> BE the server process (nothing else may hold `bridge.lock`).
+
+> **Continuation, 2026-09-19 04:30 — DOCKER AND THE MSI ARE INSTALLED, AND THE MACHINE IS
+> ABOUT TO REBOOT.** Board **22/34 phases · 176.0/195 tasks = 90.3% · 171.3/189 eng-months =
+> 90.7%**.
+>
+> **READ THIS FIRST IF YOU ARE A FRESH SESSION AFTER THE REBOOT.** The cron chain is **dead**:
+> jobs live in the session's memory and the reboot ends them. Nothing is scheduled. Re-arm it
+> per CLAUDE.md's *"Ending every turn"* once you have a target.
+>
+> **What the reboot was for.** The user cleared both elevation blockers at the keyboard on
+> 2026-09-19, so two items that were "not takeable by any machine" are now takeable:
+> * **Docker Desktop 4.91.0** is installed, CLI **29.8.0** at
+>   `C:\Program Files\Docker\Docker\resources\bin\docker.exe`. **WSL was not installed on this
+>   machine at all** (`wsl.exe` ships with Windows; the subsystem did not), so
+>   `wsl --install --no-distribution` ran first and left CBS `RebootPending` true. Until the
+>   reboot, `wsl --status` says virtualisation is not enabled. Firmware virtualisation *is* on.
+>   **Trap:** `Win32_ComputerSystem.HypervisorPresent` was already `True` beforehand and means
+>   nothing here — ask `wsl --status`.
+> * **Kryova 0.2.0 is installed** at `C:\Program Files\Kryova\kryova.exe`, closing **P7.5** —
+>   and installing it found what building it could not: **two uninstall entries from two
+>   installer technologies pointing at one directory** (0.1.2 NSIS `uninstall.exe`, 0.2.0
+>   `MsiExec /X{C7DA910E-…}`). A packaging defect for P9.4's release checklist, not an artefact
+>   of this machine.
+>
+> **First things after the reboot, in order:**
+> 1. `wsl --status` and `docker version` — confirm the daemon starts. Docker Desktop may need
+>    launching once (`C:\Program Files\Docker\Docker\Docker Desktop.exe`) and it prompts for
+>    its licence terms on first run.
+> 2. **THE QUEUE F1 — the OpenFOAM flow run**, which has never run on Windows. Three things
+>    differ there by construction: the mount is a Windows path, there is no `os.getuid`, and
+>    `Allrun` must arrive with LF endings. `docker pull opencfd/openfoam-default:2412`, then
+>    `pytest tests/test_solver_openfoam.py tests/test_simulations.py -k Flow` — **the
+>    Docker-backed classes skip when the image is absent, and a skip is not a pass.**
+> 3. **P9 task 3's image build**, whose last nightly failed honestly on `libgomp.so.1`; nothing
+>    has built the image since that fix.
+> 4. **P7 task 1** — does the installed app start and reach its setup page? It is what the
+>    install unblocked. Postgres does not survive a reboot; the server starts it itself from
+>    lifespan, but `pytest` needs it up first
+>    (`C:\Users\achra\pg\pgsql\bin\pg_ctl.exe -D C:\Users\achra\pgdata start`).
+> 5. **THE QUEUE E2 — gate G1 through the GUI**, still the oldest untaken item and the only one
+>    that tests the product rather than a tool. CATIA must be restarted for it.
+> 6. **E7's last two routes for a datum** (`CreateDatumTarget`, `CreateEvoluateDatum`, then the
+>    Win32 bridge) and **E6's engine half**.
+>
+> **State at the reboot:** suite **10,634 passed / 38 skipped / 1 xpassed / 0 failed**;
+> `ruff`, `mypy` (494 files), `app.verify.recorded --check`, `tsc` and `eslint` all clean;
+> frontend 583 tests across 48 files. Working tree clean, everything pushed to `main`.
+>
+> **Still not takeable by any machine:** E21's five and E23's two — document purchases, vendor
+> licence forms and questions for counsel, about seven of the ~19 task-halves left.
+
+> **Continuation, 2026-09-19 04:00 — a seat day. E6's reading half is built, E7's FTA
+> licensing is settled, and the board is 90.0%.**
+> **This machine holds the chain.** The user's instruction of 2026-09-19 is to **keep testing
+> on CATIA** and drive the plan closer to 100%.
+> **Next continuation fires: 2026-09-19 06:35.**
+> **A one-shot cron fires only while the REPL is idle.** The 2026-09-18 05:44 job never fired —
+> its slot passed mid-turn, and a passed date never comes round again. **`CronList` first on
+> every wake**, and reschedule if the pending time has gone by. Four misses so far; this is the
+> one failure mode that ends the chain silently.
+> **Board: 22/34 phases · 175.5/195 tasks = 90.0% · 171.0/189 eng-months = 90.5%.** Suite
+> **10,634 passed / 38 skipped / 1 xpassed / 0 failed** in 10 min 28 s; `ruff`, `mypy`
+> (494 files) and `app.verify.recorded --check` all clean.
+>
+> **Closed this turn:** `db88b2f` (E9.2 / QUEUE E6's reading half, 21 tests), `16fcdc6` +
+> `9ed2863` + `d3bca87` + `704c582` (QUEUE E7's FTA measurement and its correction),
+> `fa3b6eb` (E17.1's status), `6fd065d` (the last 26 stale "never run" claims).
+>
+> **Four findings worth carrying.** (1) **`GetConstraintElement(n)` is a method**, not the
+> properties `ConstraintElement1/2` — reading those as absent led to a wrong conclusion that
+> the next type-library read overturned. (2) **`GetConstraintVisuLocation` is a zero vector**,
+> so a joint axis is genuinely absent from a constraint and must not be defaulted. (3) **FTA
+> was never a licence** — `AnnotationSets.Add` wants a *string*, and an annotation needs a TPS
+> view. (4) **A BRep name CATIA prints cannot be read back** by
+> `CreateReferenceFromBRepName`; the trailing `Z0;G10904` is session-scoped, which is CATIA
+> confirming from its own side why this codebase never stores a face id.
+>
+> **Next targets, in order:**
+> (1) **THE QUEUE E2 — gate G1 through the GUI.** Now the oldest untaken item by a wide
+>     margin, and the only one that tests the *product* rather than a tool. Needs the server
+>     (which spawns its own bridge daemon — do not start it while a pytest runs) and Edge over
+>     CDP. One prompt per level, a screenshot every time, no moving up until a level passes.
+> (2) **E7's remaining two routes for a datum**: `CreateDatumTarget` / `CreateEvoluateDatum`,
+>     then the Win32 bridge driving the interactive command. Everything else about FTA works.
+> (3) **THE QUEUE E6's engine half** — building and driving a mechanism. ⚠ `AddJoint` killed
+>     the seat once; its flags are a string and an array of doubles. `AssemblyConvertor` is
+>     **not** the constraints conversion (it is the BOM/print convertor), so the conversion
+>     command is still unlocated over COM and the Win32 bridge is the route to try.
+> (4) **THE QUEUE E5 — E15.4 crash recovery**: kill `CNEXT.exe` mid-plan and write the path
+>     that recovers. Do this last in a turn; it costs the seat.
+> (5) **P6's measurement half** — FMP under 2 s and 30 fps on the 2,000-part scene. Browser,
+>     not vitest. Step 2b needs a mid-range laptop this workstation is not.
+> (6) **P4.6's drag-and-drop**, which still reaches only the geometry path.
+> (7) **E13.2 / E8.3** — both end in a document; check outbound network before planning a turn
+>     around either.
+>
+> **Not takeable by any machine, and saying so is the honest answer:** E21's five and E23's two
+> are document purchases, vendor licence forms and questions for counsel — about seven of the
+> ~19 task-halves left. Installing the MSI needs elevation no automated session can answer
+> (P7.1 and P9.4 wait behind it). Docker is not installed here, so P9.3 and QUEUE F1 are
+> blocked on the user's decision to install it.
+
+> **Continuation, 2026-09-18 03:00 — E1, E10, E4 and E17.2 settled; the board is 90.0%.**
+> **This machine holds the chain.** Linux stopped scheduling on 2026-09-16; Windows runs
+> `pytest`, `ruff` and `mypy` and schedules its own next turn. The user's instruction of
+> 2026-09-17 stands: **keep going until the master plan is 100%**, not stop at seven tasks.
+> **Next continuation fires: 2026-09-18 05:50.**
+> **A one-shot cron fires only while the REPL is idle**, so a job whose time passes mid-turn
+> never fires and its date never comes round again. **Run `CronList` first on every wake** and
+> reschedule if the pending time has gone by. That is the one failure mode that ends this
+> chain silently, and it has bitten three times.
+> **Board: 22/34 phases · 175.5/195 tasks = 90.0% · 171.0/189 eng-months = 90.5%.** Suite
+> **10,613 passed / 38 skipped / 1 xpassed / 0 failed** in 10 min 56 s; `ruff`, `mypy`
+> (493 files) and `app.verify.recorded --check` all clean. Frontend **583 tests** across
+> 48 files, `tsc` and `eslint` silent.
+>
+> **Closed this turn, each committed as it closed:** THE QUEUE **E1** (`8e30cfe`), **E10**
+> (`3f6aa51`), the first stale-claim sweep and G1 step 1 (`5d1c8ca`), THE QUEUE **E4**'s
+> measurement (`df5e168`), the second sweep with the MSI rebuild (`83a0903`), and **E17.2**
+> on the seat (`5213028`).
+>
+> **The four findings worth carrying.** (1) `AddNewWall`/`AddNewFlange` **do not exist** — the
+> sheet-metal automation API has four classes and no creation method, so the missing CATIA
+> half of E17.3 was never merely unwritten. (2) **A schema is checked two storeys above the
+> backend**: E10's plane names had to be declared, not accepted in the handler, or they were
+> unreachable code behind passing tests. (3) **The CATScript batch route is worth ~2×**, not
+> the order of magnitude `batch.py` assumed, and its output is unrunnable because
+> `KryovaDispatch` exists nowhere. (4) **The bridge blamed a licence this seat holds** — one
+> `ExportData` error covers both a missing licence and a wrong-kind document.
+>
+> **Next targets, in order — take as many as the runway allows:**
+> (1) **THE QUEUE E2 — run gate G1 through the GUI.** Its blocker has been gone since
+>     2026-09-11 and it is the oldest untaken item. One prompt per level, a screenshot every
+>     time, no moving up until the level passes. The model is `qwen3.5:9b`.
+> (2) **THE QUEUE E6 / E9.5 — `DmuKinematicsEngine`**, which closes phase E9. ⚠ Brute-forcing
+>     `AddJoint` **killed CATIA** on 2026-09-17; its flags are `((16392,1),(8204,3))`, a string
+>     and an array of doubles. Build assembly constraints and convert them instead.
+> (3) **THE QUEUE E5 — E15.4 crash recovery**: kill `CNEXT.exe` mid-plan and write the path
+>     that recovers.
+> (4) **E13.2 and E8.3's remainders** — both are documents (ISO 286's tables, EC3 rows), so
+>     check whether this machine has network before planning a turn around them.
+> (5) **P6's remaining measurement half** — first meaningful paint under 2 s and 30 fps on the
+>     2,000-part reference scene. Needs the browser, not vitest; step 2b needs a mid-range
+>     laptop this workstation is not.
+> (6) **P4.3/P4.6**, and **E17.1**'s leader-attachment residual.
+> (7) **P9.3** — blocked on Docker, which is **not installed on this machine**; QUEUE F1
+>     (OpenFOAM) is blocked the same way. Installing it is the user's call, not a task.
+>
+> **Two things a human must do, and they are not failures of this chain:** the MSI is built and
+> **installing it needs elevation** (a UAC prompt no automated session can answer), which is
+> what P7.1 and P9.4 wait behind; and E21's five and E23's two are document purchases, vendor
+> licence forms and questions for counsel — about seven of the ~19 task-halves left. Marking
+> any of them done would be false.
 
 > **Continuation, 2026-09-16 07:40 — six targets, and four of them were found by *running*
 > something rather than by reading it.**
@@ -497,6 +796,450 @@ needs a different extraction stated up front rather than chosen after the sweep.
   files, `ADDED_SYMBOLS.md`, `image.png`, `Kryova.png`. Added: `test_deepseek_provider.py`,
   `test_openai_compatible_resilience.py`, `test_message_reasoning.py`,
   `test_prompt_cache_stability.py`. Unmeasured against the live vendor: THE QUEUE H.
+
+- **2026-09-22 (second turn) — the user supplied two standards and asked for an intervention
+  surface; one standard closed a phase, the other did not, and the reference machine was
+  named.** Board **23/34 phases · 180.0/198 = 90.9%**.
+  **E13.2 DONE, E13 COMPLETE** (`949818b`): ISO 286-1:2010 transcribed into
+  `app/rules/iso286.py` — Tables 1–5, the 4.3.2 reading rules, the 4.3.2.5 |delta| rule, 177
+  tests. The standard is its own oracle: all **nine** transformations it works in full
+  (4.3.2.4, 4.3.2.5, 4.3.3, Annex B's three fits) are reproduced from Part 1 alone, which is
+  also the evidence ISO 286-2 is a convenience rather than a missing dependency. Tables 4 and 5
+  are transcribed a **second** time in the test file and compared against the hole tables
+  shipped — one transcription is a hope, two that agree are evidence. They agree in every cell
+  but one: **hole EF +28 against shaft ef −25 at 18–30 mm**, resolved to 28 because ISO builds
+  the intermediate deviations as the geometric mean of their neighbours and √(40×20) = 28,28
+  reproduces EF in *every* band while 25 matches nothing. Recorded as a misprint, not silently
+  fixed. Three further cells are exceptions the standard states rather than computes (N above
+  IT8, M6 from 250–315 mm, the A/B and N footnote prohibitions). **One real defect the tests
+  found**: K above IT8 returned its base value instead of 0 — settled two ways, the 0-to-3 row
+  printing "0 0" and the general rule giving ES = −ei(k) where Table 5 states shaft k is 0.
+  **E8.3 was NOT unblocked, and the user's message said it was** (`19b5960`). Said plainly
+  because it is the kind of error that gets built on. The BS 7608:2014+A1:2015 attachment is a
+  **pure scan** — 152 pages, **zero** characters of text layer, one 902×1277 JPEG per page at
+  ~108 dpi. Legible, which is the trap: 108 dpi is *below* the 300–400 dpi this project already
+  measured as necessary for this exact job, where a Figure 7.1 label read "180" and was 160.
+  And every page footer says *"Provided by IHS under license with BSI — Uncontrolled Copy,
+  Licensee=ZHEJIANG INST OF STANDARDIZATION, Not for Resale"*. The provenance is the user's
+  decision. E8.3's blocker now names what would lift it.
+  **The reference machine is named** (`545b0ac`), on the user's explicit delegation that day,
+  which reversed the previous day's audit brief. Lenovo Legion Pro 5 16ADR10, measured on its
+  **integrated** Radeon 610M, Edge 153.0.4234.32, 1920×1080, mains. **The previous draft's
+  exclusion of this workstation — "because it has a discrete GPU" — was wrong**, and correcting
+  it is what makes the choice defensible: the machine has both adapters and the display runs on
+  the integrated one. The record splits the two numbers rather than treating them alike: the
+  610M is a 2-CU part at or *below* the required band so **fps is representative**, while a
+  Ryzen 9 with 31 GB makes **first paint optimistic** — so *a miss is conclusive and a pass is
+  not*. **Naming measured nothing**: P6.2 is unblocked and deliberately not marked done.
+  **The intervention surface, both halves** (`2c2bfef`, frontend `02dc835`). The agent already
+  knew when it needed a person and had two ways of saying so that put a decision in front of
+  nobody: `recovery.escalation()` appended a question to the *end of the answer as prose*, and
+  an approval gate sent the user to another page to sign off something they could no longer
+  see. `app/ai/intervention.py` is the decision as data; `stream_agent` yields it before `done`
+  and repeats it *on* `done` because a reconnect replays from the buffer and may miss the
+  event. Four rules enforced at construction, because the failure mode is not "no prompt
+  appears" but a prompt that answers itself: **no default or recommendation** (`Choice` has four
+  fields and a test asserts the set), **a typed answer always accepted** (`answer_in_words` is a
+  property, not a field), **two options minimum besides "Stop here"**, and **nothing calls a
+  model**. The prose escalation stays, because `ConversationMessage` is what survives a reload —
+  the sentence is the record and the card is the surface, built from one `Failure` so they
+  cannot fork. Five backend tests drive the real `stream_agent` rather than the module
+  (CLAUDE.md testing item 8); the frontend asserts every choice renders with **identical**
+  classes, which is the one rule the server cannot enforce.
+- **2026-09-22 — an honest audit, then the highest-value unblockable work: E17's leader
+  attachment built, and P6's reference machine written up as a decision the user takes.**
+  Board **22/34 - 179.5/198 = 90.7%**; suite **10,739 passed / 21 skipped / 1 xpassed / 0
+  failed**.
+  **E17.1's leader attachment built** (`c69cc27`): `app/manufacture/anchors.py` is the chain the
+  task named as missing — feature identity → geometric entity → projection → anchor → leader.
+  Identity to entity is a **`Selector`** supplied by the caller, the one way this codebase names
+  a face without a face id; **nothing infers a selector from a name**, because a leader pointing
+  confidently at the wrong feature is worse than none. Entity to projection is the face's own
+  `centre_mm` through the **view's own basis**, verified against HLR — on a 120x80x12 block the
+  eight corners project to exactly the extent `HLRBRep` reports for front, top and right.
+  19 tests; two guards broken to prove them.
+  **Why E17 did not close, and it is architectural**: `NameRegistry` exists to resolve semantic
+  names across a rebuild and **nothing in `app/` or `tests/` calls its `record()`** — no
+  operation records a name for the faces it creates, so the binding must be supplied.
+  **P6's reference machine is now a decision record** (`72b50ae`,
+  `docs/REFERENCE_MACHINE_DECISION.md`): what the machine must be, why this workstation is
+  excluded, the two numbers, the digest-pinned scene, the unresolved "fps in CI with no GPU"
+  question, and the five steps once a machine is named. **It does not choose one.**
+  **And it corrects a premise**: it is *not* true that all six P6 tasks wait on that decision.
+  Only P6.2 does, and P6.3 for its re-decision criteria alone. **P6.1, P6.4, P6.5 and P6.6 are
+  blocked by unbuilt frontend UI** — no legend, no probe, no section control, no tree gutter —
+  which this workstation can build.
+  **One self-inflicted defect found and fixed** (`5441ad5`): a status line that wrapped onto
+  `> PARTIAL for one honest reason…` was counted by `plan_progress` as a **second task**, and
+  the board silently read 90.5% off 199 tasks instead of 90.7% off 198. Nothing catches it —
+  the hygiene tests pass because the parser genuinely sees an extra open task. Recorded in
+  CLAUDE.md beside the supersede rule.
+- **2026-09-21 (evening) — G1 parked at the user's instruction; breadth instead. E7 CLOSED,
+  the conformance ladder run and re-priced, and a drawing defect fixed.** Board **22/34 -
+  179.5/198 = 90.7%**.
+  **E7 task 10 DONE and phase E7 COMPLETE** (`1c0b8b8`): the convergence study now converges on
+  `governing_peak_mpa`, the number the verdict uses. **The fear that made it a separate task was
+  measured and did not hold** — on the bar whose closed-form surface stress is 60.00 MPa, the
+  element quantity converged to **49.104 MPa (-18%)** at order 2.375 / GCI 0.025%, and the surface
+  one to **60.062 (+0.1%)** at order 2.466 / GCI 0.016%. The centroid quantity was converging
+  *confidently on the wrong number*. The standing condition is written into the status: if a part
+  is found where the surface peak refuses more often, the refusals must be shown real before
+  reverting. The marker is restored on exactly the condition it was withdrawn under, and says what
+  it does not claim — G1 has still not passed, and what is left in it belongs to the gate.
+  **THE QUEUE B7 run** (`0e5f04f`): Plate and BoredPlate **agree**, reproducing B2 — volume to
+  2.0e-9 relative, mass to the known 0.127% *Acier* density, and the only divergences the two
+  documented ones. Everything else is blocked by **`catia_pocket` advertising `limit` while the
+  bridge does not implement it** (a *known* gap — `KNOWN_NARROWER` lists nineteen such tools) and
+  by the seat's **60-operations-per-minute rate limit**, which the script has no pacing for. One
+  stale claim corrected: M4 *does* have geometry now.
+  **E17.1's second open item fixed** (`b56b9ab`): a sheet reserves the room its own tables take.
+  One 400x250 plate now chooses A4 / A3 / A2 as the tables grow, and a named A4 that cannot fit
+  them is refused rather than drawn with the views over the parts list. **The first version of
+  that test was worthless** — it asserted where views landed, which passes against the mutant on
+  any sheet with room to spare; it asserts sheet choice now.
+- **2026-09-21 — E7.9 built, gate G1 driven twice more. The headline peak now lands 0.4% from
+  closed form, and what stops the gate has moved one step further in.** Board **21/34 -
+  178.5/198 = 90.2%**.
+  **E7.9 DONE** (`c8737d3`): `StaticResult` reports `max_von_mises_surface_mpa` and
+  `factor_of_safety_surface` beside the element values, and a verdict rests on
+  `governing_peak_mpa` — **the larger of the two**, with `governing_basis` naming which. Both
+  numbers are kept because they under-read in opposite cases: a centroid misses the skin of a
+  part in bending, a nodal value flatters a sharp concentration. Nothing existing changed meaning,
+  so the 52 test files reading `max_von_mises_mpa` are untouched. **The benchmarks did not move,
+  checked rather than assumed** — `stress_component_at` already read `nodal_stress`, so NAFEMS
+  never went through the headline; the artefact still expired (`app/solve/` is fingerprinted) and
+  re-recorded to the same 4/5.
+  **G1 run 5** (`c23246b`): element 51.94 MPa, **surface 59.78 against my closed-form 60.00**,
+  deflection 0.51697 against 0.514. Yesterday the same bar said 41.03 and called it converged.
+  **Still not a pass**: the study refused to certify — observed order 11.08, above the credible
+  ceiling of 6.0 — and was right to, saying so and saying what to do. That refusal exposed
+  **E7 task 10**: `quantities._max_von_mises` reads the *element* value, so the study converges on
+  one number while the answer judges another. One line to change, and its consequences are not.
+  An earlier attempt was discarded as `FAIL — model` under the ladder's own rule (the model
+  re-created a sketch it had just made, three times, against a refusal that spelled out the fix);
+  checked first that each conversation has its own CATIA document, so nothing was inherited dirty.
+- **2026-09-20 (evening) — E7.8 built, gate G1 driven a third time. It still does not pass, and
+  what it stops on now is a number rather than a mechanism.** Board **21/34 - 177.5/197 = 90.1%**.
+  **E7.8 DONE** (`ac4542b`): `wait_for_simulation` — one call, one step, however long the solve
+  takes. Chosen over a `wait_s` flag and over exempting the repeat guard, because the model's
+  failure on the seat was **not knowing it could wait at all**, and a named tool is discoverable
+  where an optional flag on a read tool is not. The guard is untouched: the waiting happens inside
+  one tool call, so it never sees a repeat. A timeout returns `timed_out: true` rather than
+  claiming a failure. Breaking it caught a trap it would have shipped with — `Session.get` returns
+  the identity-mapped copy, so without `expire` the status never moves — **and the first version
+  of that test passed against the mutant**, because a same-session `update()` expires the object
+  for you; it uses `synchronize_session=False` now, which is what a worker actually looks like.
+  **G1 run 3**: the study ran, the agent waited in one step, and answered *"41.0 MPa … numerically
+  converged (GCI 1.03% < 5%) … passes with margin to spare"*. **The number fails my own
+  arithmetic.** Closed form gives **60.0 MPa** at the surface; the run's **deflection is 0.5176 mm
+  against my 0.514**, 0.7% high — so geometry, mesh, material and load case are all right and only
+  the stress is low. 41.03 MPa is beam theory evaluated **1.90 mm inboard of the surface**; a 2 mm
+  run of the same part gives 52.87, the same line 0.71 mm inboard. Both report the stress at the
+  **first element centroid**, which walks towards the skin as the mesh refines — so the study's
+  three grids agree because they are coarse in the same way, and the quantity they agree on is not
+  the surface stress. That is how GCI comes out at 1.03% while the number is 32% low.
+  `linear_static.py` already documents both halves; what the gate adds is the consequence
+  end-to-end, a verdict wearing a converged badge. **Filed as E7 task 9**, not fixed at the end of
+  a gate run because publishing the surface peak moves the factor of safety on every part and
+  re-records every benchmark.
+- **2026-09-20 (afternoon) — GATE G1 RAN ON THE SEAT. It did not pass, and its blocker moved.**
+  THE QUEUE E2, the oldest untaken item, deferred five turns running. Driven in the browser
+  against a live V5-R33 seat, not through `dispatch`. Four screenshots and the write-up in
+  `docs/verification-2026-09-20/`.
+  **The regression the gate existed to re-check is closed.** Asked to build a 180 x 50 x 12 mild
+  steel bracket, hang 400 N off the free end and say whether it stays under 120 MPa, the product
+  built it on the seat, exported STEP, drafted the case, solved, and reported **52.09 MPa against
+  the 60.0 MPa I computed from M·c/I myself**, with mass **0.84888 kg** matching 108,000 mm³ ×
+  7860 exactly. **And it refused to call that a verdict**, naming the run single-grid. That is
+  E7.7 working; stating a verdict from an unconverged solve is exactly what failed on 2026-09-10.
+  **Defect found and fixed** (`20d1107`): asked for the convergence study the product's own
+  footnote tells users to ask for, **the agent had no `grids` parameter**. `SimulationCreate` has
+  taken it since E7.1. The model invented a `geometry_version_number` argument — a key it read off
+  that tool's own *result* payload — fired three separate single-grid runs, and ran out of steps.
+  Third instance of CLAUDE.md testing item 8 and the worst, because this one is **advertised in
+  the product's own prose**. The guard is written against the printed advice rather than a
+  parameter list, and its first version failed its own break (substring match let `gridsXX`
+  through), so it walks the AST now.
+  **Defect found and NOT fixed — the new blocker, E7 task 8:** the agent cannot wait for a run it
+  started. `run_simulation` returns `queued` and tells it to poll, `MAX_IDENTICAL_READS = 2`
+  refuses the third identical read, and **none of the thirty tools is a wait**. Any solve slower
+  than about two agent steps cannot be reported in its own turn; turn 1 passed only because its
+  mesh was coarse enough. The guard is right and is being applied to the one read it does not fit
+  — *"reading something does not alter it"* is true of every other read here and false of a job
+  status. Three defensible remedies are named in the task; picking one is the work.
+- **2026-09-20 (night) — seven tasks: FTA on the seat, P4.6 finished, the four attachment guards
+  broken, the horizon measured, and Chrono proved on Windows.** Board **22/34 · 177.5/195 =
+  91.0%**.
+  **FTA is a bridge operation** (`42419b0`): `catia_tolerance_datum` / `_frame` / `_list`, with
+  the characteristic index in **two tables** because it is per family — a name in the wrong one
+  is refused by name and told which family it belongs to. No `value_mm`: setting the magnitude
+  was never measured, so it is `UNIMPLEMENTED` rather than a parameter that silently does
+  nothing.
+  **CLAUDE.md's "no outbound network" is about Linux** (`b32f439`); this seat has one, which
+  re-opens four tasks that were returned as un-takeable.
+  **P4.6 is finished and its status was false twice over.** The document-upload half
+  (`b9472be`, `57e9a83`) had never shipped — `git log --all -S uploadDocumentFile` returned
+  nothing while the plan described it in detail for five days. The drag-and-drop half
+  (`c7f5d57`, `f24cb6c`) did not "reach only the geometry path": **`onDrop` existed in no commit
+  of the frontend**. The composer is a drop zone now, pinned on the two behaviours that are
+  silent when wrong — a text drag must not look like an upload, and drag-depth counting keeps
+  the highlight steady as the pointer crosses the textarea. Pill and drop share **one** upload
+  controller, so a dropped file's progress shows where the user is already looking. Frontend
+  **611 across 51 files**.
+  **THE QUEUE D5 steps 1-2** (`bf42aa8`): 326 passed across the seven files it names, and all
+  four P4.7 guards broken one at a time and watched to fail. Dropping `notes=` fails the named
+  test **and two siblings**, which is the right radius — the inventory is what every naming
+  claim rests on. Dropping the owner check fails **exactly one**, which is the useful kind of
+  narrow.
+  **THE QUEUE D6 / E22.3** (`556a051`): the horizon measured on this machine's own 44 turns, 15
+  labelled from the ladder run log. **Completion and success move in opposite directions** —
+  0.60 → 0.11 against 0.17 → 0.29 across the 1-5 / 5-15 minute boundary. `horizon.py` argued the
+  two were different questions; this is the first evidence they are *anti-correlated* on real
+  traces. Nothing was truncated anywhere: every fall is `failed_tools`, and `completed` is a
+  conjunction over the turn, so decay with length is arithmetic before a model degrades at all.
+  The two long buckets are abandoned conversations and are recorded as an artefact.
+  **A real defect the suite found, and the suite was right** (`e9ba890`): the full run came back
+  **2 failed / 11 errors**, all OpenFOAM, while the same file alone was 67 passed — which reads
+  exactly like the two-runs-collided trap and was not. On Windows,
+  `subprocess.run(["docker", ...])` by the **bare name** raises `FileNotFoundError [WinError 2]`
+  inside a running job while `shutil.which` still resolves it and the **absolute path works in
+  the same breath**: same PATH, same cwd, seconds after an identical call returned 0. Mechanism
+  unidentified and recorded as unidentified. Both launchers now use the resolved path. **The half
+  that hid it for an hour**: `_image_present` swallowed the `OSError` into a bare `False`, so
+  "no such image" and "could not run docker" became one refusal saying `docker pull` — wrong, and
+  it sends you to fix the one thing that was not broken. Third time one message for two causes has
+  cost a session here.
+  **THE QUEUE G6 step 1** (`3f70462`): Chrono runs on Windows in 1.0 s, pendulum at 29.4190 N
+  against 3mg. **Every Chrono test before today was against a stub** — 77 of them, two
+  hand-written fakes — so 10 real-engine tests now exist. Of the three Windows traps the item
+  listed, **CRLF is wrong**: the entry point is invoked as an argument to `python`, so its
+  shebang is never parsed and a CRLF file runs fine. Found by breaking the guard, which measured
+  what the guard is worth as well as that it fires.
+- **2026-09-19 (afternoon, after the reboot) — Docker in use, the image health-checked, OpenFOAM
+  on Windows, and CATIA FTA measured end to end.** Board **22/34 · 176.5/195 = 90.5%**.
+  **Docker** (after the WSL2 reboot): server 29.8.0, WSL2 `docker-desktop`. **THE QUEUE F1**
+  (`e8b87be`): OpenFOAM runs on Windows — 13 real-engine tests pass, none skip, and the
+  container's files (written as uid 0, since there is no `getuid`) are deletable by the host.
+  **P9.3 DONE** (`e8b87be`): the image builds in 150 s and **passes its own health check for the
+  first time**; the whole app imports inside it (147 paths). Building it found no
+  `.dockerignore` (the context carried `.env.local`) and **25 third-party PDFs in the image,
+  several named `z-library`** — excluded by default as the reversible direction; the image fell
+  3.70 → 2.85 GB. **Shipping the manuals is the user's decision.**
+  **The installer** (`../Kryova-frontend` `c64067e`): the bundle shipped MSI *and* NSIS into one
+  directory, which is how the double uninstall entry happened; NSIS removed and pinned.
+  **Two pointers corrected** (`defcbd0`): P7.1 and P7.5 sent readers to P9 task 4 and P7 task 1;
+  the finding they mean is P9 task 5.
+  **THE QUEUE E7 / E17.1** (`333864b`, `8e0f004`): **a datum and a position frame now exist on the
+  seat.** `iSurf` wants a **`UserSurface`** (`part.UserSurfaces.Generate(ref)`), which a *control*
+  proved — text and flag notes refused exactly as datums did. Then the frame comes back empty
+  and `SetFrame(label, "", "")` fills it: parallelism 3, **position 4**, profiles 7 and 8. The
+  index is per family. Two of this morning's readings were wrong and are kept, marked.
+  **The one extra skip** (39 vs 38) is ambient: `tests/test_catia.py::TestLiveCatia` reads
+  whatever the engineer has open and refuses to mutate the seat to pass.
+- **2026-09-19 (early hours) — a seat day: E6's reading half built, E7's FTA licensing settled,
+  and a conclusion of my own corrected within the hour.** Board **22/34 phases · 175.5/195 =
+  90.0%**.
+  **E9.2 / THE QUEUE E6** (`db88b2f`): `app/dynamics/catia_constraints.py` — CATIA's assembly
+  constraints read as joint declarations, the input E9.2 has taken by hand since it was
+  written. **The first sitting concluded the operands were unreadable and was wrong**:
+  `ConstraintElement1`/`2` are property names that do not exist, and the real member is the
+  method `GetConstraintElement(n)`, declared in `MecModInterfaces`. `DisplayName` then gives
+  `'E6Rig/E6Base.1/!E6Base/Plan xy'` — the occurrence path **and** the geometry. But
+  `GetConstraintVisuLocation` returns a **zero vector**: it is the glyph's location, not the
+  joint's axis, so `read_constraints` refuses a moving joint with no axis rather than
+  defaulting to +Z. 21 tests, guard verified by breaking it.
+  **THE QUEUE E7** (`16fcdc6`, `9ed2863`, `d3bca87`, `704c582`): **FTA is licensed and it was
+  never a licence.** `AnnotationSets.Add` takes its standard as a **string** — `Add("ISO")`
+  gives `Annotations.1` — the container is `part.AnnotationSets` (no `GetWorkbench` spelling
+  works), and it is invisible to late binding without `EnsureModule` on
+  `{88D26C84-D8E9-0000-0280-020CC3000000}`, the third API here with that trap.
+  `CreateView(planeRef, 0)` makes `Vue de face.1` and sets `ActiveView` — an annotation needs
+  a view.
+  **And the correction that matters**: I wrote, and committed, that `CreateDatum` refused its
+  surface because of a late-bound/early-bound conflict. The next measurement refuted it —
+  `CreateView` accepts the **identical** Reference through a parameter with the **identical**
+  `(9,1)` flag. So CATIA is refusing the object as a datum *support*, not failing to marshal
+  it. Two of the three routes out are now closed as well: a `Reference`'s own `DisplayName`
+  (`…;Z0;G10904`) **cannot be read back** by `CreateReferenceFromBRepName`, which is a fact
+  worth more than FTA — anything storing a face reference as a string and resolving it later
+  is building on sand, exactly why selection here is by geometric selector and never by face id.
+  **The bookkeeping** (`6fd065d`): the last **26** "tests written on Linux and not run" claims,
+  which survived two earlier sweeps because the phrase wraps across quoted lines. P4.6's was
+  spot-checked against `git log --all` first, since the 2026-09-17 audit proved a status can
+  name a file that never existed — this one is real and its 9 tests pass.
+  **Two hazards created and undone**: `EnsureModule` on `MecModInterfaces` breaks
+  `ShapeFactory.AddNewPad` the way `EnsureDispatch` on INFITF breaks `Documents.Add`. Every
+  library generated today was removed and the seat re-checked.
+- **2026-09-18 (early hours) — THE QUEUE E1, E10 and E4 settled, E17.2 closed on the seat, and
+  twenty-four stale "never run" claims corrected.** Board **22/34 phases · 175.5/195 tasks =
+  90.0% · 171.0/189 eng-months = 90.5%**.
+  **THE QUEUE E1** (`8e30cfe`): sheet metal over COM, and the headline is a measured refusal —
+  `AddNewWall` and `AddNewFlange` **do not exist**; `CATShfInterfaces` declares four classes and
+  no creation method. Four operations shipped, what COM cannot reach recorded as data, and two
+  traps found: the parameter names are **localised** (`Epaisseur`, `Rayon pli`, `Facteur perte
+  au pli`) and CATIA **computes** the K-factor, refusing a write while its DIN formula is active
+  — solved exactly as `K = (0.5 + 0.5·log10(2r/t))/2`, DIN 6935 with the **unrounded** constant,
+  so the printed 0.65 is off by 2.575e-4 at every ratio.
+  **THE QUEUE E10** (`3f6aa51`): a mould can be pulled any way now. The fix was not a fourth
+  plane name — `catia_draft` has always taken a *vector* for the identical quantity, so the
+  product carried two vocabularies and an agent could draft along `[0, 0, -1]` and be unable to
+  ask about what it built. **The finding**: the six plane names had to go in the *schema*, not
+  in the handler, because `validation.validate` runs two storeys above the backend — the first
+  draft passed every test and answered `direction must be array, got str` through the real
+  product. Measured on the way: flipping the pull changes *nothing* (the report is
+  `min(|draft|)` and undercuts already test both halves); the half that moves numbers is the
+  arbitrary direction, 5° along +Z against 3.533° along [0, 1, 1].
+  **THE QUEUE E4** (`df5e168`): the CATScript route is worth **~2×**, not an order of magnitude
+  — 200 points 1.022 s → 0.566 s (1.8×), 25 pads 1.826 s → 0.835 s (2.2×). The ratio *rises* on
+  real geometry, refuting the probe's own hypothesis: the saving tracks the **number** of COM
+  calls, not their weight. At 10⁵ that is 2.0 h against 0.9 h. And `as_catscript`'s output is
+  not merely un-run but **unrunnable** — every line calls a `KryovaDispatch` that exists
+  nowhere, and E4's instruction to reuse the bridge's Python mapping from inside CNEXT cannot
+  be followed. Left open with the numbers rather than built blind.
+  **E17.2** (`5213028`): export run from the seat, both directions, and the defect was in the
+  *refusal*. **This seat holds the DXF/DWG licence** and the bridge said it did not, because
+  `ExportData` answers the same error for a missing licence and a wrong-kind document. It now
+  refuses by the cause, only in the two directions measured.
+  **The bookkeeping** (`5d1c8ca`, `83a0903`): twenty-four statuses claimed their tests had
+  never run. All had, under the full suite. The second sweep needed flattening the markdown —
+  the phrase wraps across quoted lines, so grep found nothing — and a second phrasing, "not run
+  as pytest", said the same thing in different words.
+  **Also**: the frontend suite ran for the first time since the rebuild (48 files, **583
+  tests**, `tsc` and `eslint` silent — QUEUE G1 step 1), and the MSI rebuilt at today's code
+  (3,842,048 bytes, 52.17 s).
+  **One hazard created and undone**: `gencache.EnsureDispatch("CATIA.Application")` writes a
+  machine-wide persistent early-binding cache that removes `.Part` from `Documents.Add` in
+  *every* win32com process, the bridge included. Deleted; CLAUDE.md carries it.
+- **2026-09-17 (evening) — THE QUEUE E1 ANSWERED on the seat, and the answer is a measured
+  refusal.** Suite green: **10,538 passed / 38 skipped / 1 xpassed / 0 failed** in 12 min 38 s;
+  `ruff` clean, `mypy` clean across 493 files.
+  **`AddNewWall` and `AddNewFlange` do not exist.** `CATShfInterfaces`
+  (`{AEDE231A-8E0E-11D3-827B-006094EB7FE4}`, invisible to late binding like DMU Kinematics)
+  declares four classes — `SheetMetalFactory`, `SheetMetalParameters`, `SheetMetalPart`,
+  `Bend` — and **not one creation method**. The type library was read before anything was
+  called, which is the discipline the `AddJoint` crash bought the same day. So E17.3's
+  residual was right for the wrong reason: the COM calls behind a wall were not unwritten,
+  three of them are unwritable.
+  **Shipped** (`app/catia/ops/sheet_metal.py`, four COM methods in
+  `scripts/catia_bridge/catia_com.py`, four refusals on the open kernel,
+  `tests/test_catia_sheet_metal.py` — 23): `catia_sheetmetal_start`, `_parameters`, `_bends`,
+  `_export_flat`. What COM cannot reach is recorded **as data** in `UNREACHABLE_OVER_COM`,
+  because an absent operation reads as "nobody got to it yet" and invites somebody to write
+  one blind.
+  **Two traps, either of which silently produces a wrong blank.** The parameter names are
+  **localised** (`Epaisseur`, `Rayon pli`, `Facteur perte au pli` here) — CLAUDE.md's "the COM
+  API is not localised" is about *method* names and holds; a parameter's name is user-visible
+  data. And **CATIA computes the K-factor and refuses a write while its DIN formula is
+  active**; solved exactly against three measured points as `K = (0.5 + 0.5 log10(2r/t))/2`,
+  DIN 6935 halved with the **unrounded** constant — the printed 0.65 is off by a constant
+  **2.575e-4** at every ratio, exactly the size of an unexplainable disagreement between two
+  unfold implementations.
+  **Three product rules caught the first draft**, each worth carrying: no tool may take a
+  filesystem path (the bridge runs on the engineer's workstation — the export attaches bytes
+  like `catia_export_step`); the registry has a size budget because the whole schema reaches
+  the local model every turn (raised 208,000 → 210,000 with the reason written down, since
+  four genuinely new tools landed); and every new operation owes the open kernel a handler or
+  a named refusal.
+  **Still open, now properly scoped**: building a wall at all needs the Win32 UI bridge, and
+  so therefore does the end-to-end blank comparison.
+- **2026-09-17 (midday) — E18 COMPLETE. M8 lands, the ladder reaches 8/9, and the DMU
+  Kinematics API is measured.** Suite green: **10,499 passed / 38 skipped / 1 xpassed / 0
+  failed** in 9 min 56 s.
+  **E18.8** (`42ff6b4`): M8, the motorcycle chassis and swingarm — the rung where E8, E9 and
+  E17.3 have to agree about one machine, and the one M7's own `unproven` asked for. Six CHS
+  tubes built through the real kernel, the same tubes as a `Weldment` cut list, the swingarm
+  as a `MovingDesign`. Cut list and specs both total **2654.9175 mm**. Twelve claims pass.
+  **The finding is the transition cycle as a number**: the life counts to 17,449,999 cycles,
+  of which **19,999 close only because one mode follows another**, carrying 6.474 MPa where
+  the widest any single mode contains is 2.266 — a factor of **2.857**. Sum the per-mode
+  counts and the widest cycle of the whole life is absent from the answer.
+  **Two things the first real build found.** A tube meeting a cylinder at an angle is
+  *coped*: drawn to the tangent plane the down tube's tilted face reached 14.8 mm inside a
+  headstock whose surface is at 25 mm — **13.529 mm³** of overlap on a machine holding
+  1.1e6 mm³ of steel. And **a duty cycle whose worst mode holds both extremes demonstrates
+  nothing**: the first spectrum gave the pothole the highest peak *and* the lowest trough
+  and the transition cycles came out exactly equal to it. The means straddle now, which is
+  also what a swingarm really sees.
+  **THE QUEUE E6** (`36fcf99`): the DMU Kinematics API measured rather than guessed. DMU is
+  licensed on this seat; **late binding sees none of it** (the `Joints` collection comes back
+  `<COMObject <unknown>>` with every method missing) and **the documented `AddJointRevolute`
+  family does not exist** — the real interface is a generic `Mechanism.AddJoint`. The way in
+  is the `KinematicsInterfaces` type library. `AddJoint`, `AddCommand`,
+  `PutCommandValuesWithMultiSteps`, `GetProductMotion`, `Update` and `NbDof` are all there,
+  so E9.5 is a build now rather than a guess.
+  **`49df886`**: the seventh file writing the ladder's totals as literals, and the sixth time
+  the same fix. CLAUDE.md gains the rule — a test about one thing must not assert the total
+  of the set it belongs to.
+  Board 22/34 phases · 175.0/195 tasks = 89.7% · 170.5/189 eng-months = 90.2%. Ladder 8/9.
+
+- **2026-09-17 — the first Windows session of the new chain: thirteen tasks, and the suite went
+  from 48 failures to GREEN (measured: 10,463 passed / 38 skipped / 1 xpassed / 0 failed,
+  10 min 02 s, exit 0) — the first time this codebase has been green on a machine that ran
+  it. THE QUEUE E3, E8 and E9 closed; E10 opened.**
+  **THE QUEUE E3** (`c055558`): steady conduction federated to CalculiX. `app/solve/calculix/
+  conduction.py` writes a `*HEAT TRANSFER, STEADY STATE` deck, `CalculiXConductionSolver` runs
+  it, and `oracle.compare_conduction` puts both solvers on one case. **Five cases ran on ccx
+  2.23 and all five agreed**, including a convection film — the one boundary that cannot be
+  handed over as a vector, because a film puts `integral h N_i N_j dA` into the matrix and not
+  only into the load. `CONDUCTION_BACKEND=calculix` is a valid deployment now. The oracle found
+  a defect on its first run: `RFL` is the *pure* reaction and excludes the `*CFLUX` applied at
+  the same node, so raw it read −21.5 W against the in-house −22.5 W — exactly the volumetric
+  source's share of the material tributary to the held face, and 4.4% wrong on any model with a
+  source or a flux.
+  **The four defects the new tests found** (`16592f0`): `draft_load_case` was offered to every
+  MCP client and could only be refused, while `app/api/routes/mcp.py` had claimed since it
+  shipped that `ToolBox` withheld it; `ImageReading` was never in the local-schema budget's sent
+  list though `vision.py` hands it to a provider; four settings were undocumented in
+  `.env.example`; and a register test demanded a citation to an empty string.
+  **mypy, run on a machine for the first time** (`5732fa7`): 12 errors, three of them Windows
+  platform facts (`os.killpg`, `signal.SIGKILL`, `os.getgid` do not exist there, and `hasattr`
+  cannot narrow a module attribute) and four real — an assert narrowing `maximum_mm` while the
+  line below subtracted `minimum_mm`; an unguarded `peek_session` where both siblings guard;
+  `load.force_n` read off a five-member union; and a `bool` where a `TypeGuard` was meant.
+  **The handbook called the robot arm pending** (`22e246d`): `Mission.buildable` learned about
+  `MovingDesign` and `gallery._builds` did not, so a public page published M7 as unbuildable
+  with nothing in `waiting_on`, and the headline undercounted. Four tests that wrote the
+  ladder's state as a literal failed because a rung *advanced*; each now asserts what its own
+  subject may claim. **All 143 mission tests written on Linux and never executed anywhere pass.**
+  **The note saying attachments were omitted was itself omitted** (`a5add88`): the turn budget
+  counted extract text and never the per-item citation header, so hundreds of small fragments
+  ran three times over the cap and the outer fence cut the tail — which held the omission note.
+  Plus: a harmonic peak expected at 1/32 s where its own comment derives 1/16; a "same file
+  uploaded again" test that uploaded two different files, because **OCCT's STEP writer names the
+  product with a per-process counter and is not deterministic across two writes**; and a Linux
+  measurement (1.14x the convex bound) written as a 1.2 theorem, where this machine's local
+  optimum is 1.2325x.
+  **Chrono** (`dfab8f4`): two tests asserting POSIX-only container facts.
+  **V&V re-recorded** (`1ed220e`): 4/5 agreed, and eleven failures across three test files that
+  were one stale fingerprint wearing three names went green. Two never-run LE3 slips with it —
+  an `is True` against a `np.bool_`, which can never pass, and a tolerance whose edge a chosen
+  size lands on by one ulp.
+  **The drill and the scanner** (`d91b392`): a missing `psql` killed the restore drill on its
+  first check instead of reporting a finding, in the class called
+  `TestWhatTheFirstRealDrillRunFound`; and two fixture URLs are assembled from pieces so the
+  blocking secret scan stops reading them as leaks.
+  **Two regressions this turn caused itself** (`cf87651`), both invisible to the targeted runs and
+  both caught by the full suite: withholding `draft_load_case` inside `ToolBox` removed it from
+  the agent's own vocabulary wherever a box has no provider (it belongs in `ToolBoxHost`, the MCP
+  surface with the requirement), and a test using `"calculix"` as its example of a conduction
+  backend that does not exist was made false by E3 the same turn.
+  **THE QUEUE E8 and E9** (`c1e87f1`), the two left open, and E8 is the session's most serious
+  finding. `catia_analysis_part` declares `direction` as an origin **plane**; the rules route's
+  public API takes a **vector**, which its own 422 teaches. The route passed it through unchanged,
+  the kernel refused it, and the route's broad handler turned that into "the draft scan failed, so
+  its rules are unmeasured" — so **every draft and undercut rule on every part came back
+  UNMEASURED**, beside a note a reader had no cause to doubt. A part with a real undercut was
+  reported unchecked rather than bad. `_pull_plane` is the translation the adapter always owed and
+  refuses a pull it cannot express rather than guessing; verified by breaking it. E9 was the
+  opposite kind of answer: the gouge assertion passed on all 80 cases for both cutters, and the
+  test died one line later on `np.cross` with 2-D vectors, which numpy 2 removed.
+  **Two stale documents corrected**, both of the class that sends a session to repair working
+  code: THE QUEUE E2 said "fix E7.7 before attempting G1" when E7 task 7 has been DONE since
+  2026-09-11 (so G1 is attemptable), and the plan said "Ladder standing at 5/9" three rungs after
+  that stopped being true.
+  Board unchanged at 21/34 phases · 174.0/195 tasks = 89.2% — every task here was a defect or a
+  QUEUE item rather than a plan task, which is what a first verification run is for.
+
 - **2026-09-16 (late) — three mission rungs: E18.4, E18.5, E18.7. The ladder went 4/9 to 7/9
   and gained a fourth kind of rung to hold the last one.**
   **E18.4** (`a2261c9`): M4, the gearbox. Three claims that must agree and only one is

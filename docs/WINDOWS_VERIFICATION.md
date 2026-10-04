@@ -588,7 +588,32 @@ server inherits and the Git Bash one.
       see the note added to E6 for what would have to be true first.
       Probe scripts are throwaway; the numbers above are the record.
 
-- [ ] **B7 — E3 phase proof through M4: the ladder's own parts on the seat.** Added
+- [ ] **B7 — E3 phase proof through M4: the ladder's own parts on the seat.**
+      **RUN 2026-09-21, and it re-prices the item rather than closing it.** Output:
+      `docs/verification-2026-09-21/B7-ladder.json`, 16 entries.
+      **What it settled.** Plate and BoredPlate **agree**, reproducing B2 exactly: volume equal to
+      0.0 and 2.0e-9 relative, area to 0.0 and 6.8e-9, mass to 0.127% — the known *Acier* density.
+      The only divergences are the two already documented: `solid_count`, which CATIA has no way
+      to report, and one `edge_count` on the bored plate, the seam edge per closed cylinder.
+      **What blocks the rest, and it is not geometry.** Every M1, M2 and M4 part fails on the seat
+      for one of two reasons:
+      1. **`catia_pocket` advertises `limit` and the bridge does not implement it.** The ladder's
+         parts bore with `limit`, so `bracket.bore`, `member.bore` and `housing.cavity` stop at
+         that call. **This is a known, tracked gap, not a new defect** — `backend.narrowed_options`
+         reports it to the server precisely so the model is never offered it, and
+         `tests/test_backend_signatures.py::KNOWN_NARROWER` lists **nineteen** tools carrying it.
+         So B7 cannot be closed until the bridge implements `limit` on pocket (and pad), or the
+         ladder's parts are rewritten not to use it. **The first is the real work and it belongs
+         with section E**, beside the sheet-metal COM half.
+      2. **The seat's own rate limit: 60 CATIA operations per minute.** Everything from M4's
+         pinion onward failed at call 0 with *"This workstation has hit its limit of 60 CATIA
+         operations per minute"*. The conformance script fires as fast as the bridge will answer
+         and has no pacing, so a ladder-wide run throttles itself out. **Pace the script before
+         re-running** — this is not a product defect, it is the harness ignoring a product rule.
+      **One stale claim corrected**: this item and E3's status both say *"M4 has no geometry yet"*.
+      It does. The run built M4's housing, cover, pinion, wheel, both shafts, both bearings and
+      both spacers on OCCT, with measurements. M4 is no longer the reason M4 is skipped.
+      **Original entry follows.** Added
       2026-09-15 on Linux. B2 measured agreement on two plates; E3's proof is "every assertion
       in the ladder through M4 is measurable, and each measurement agrees between OCCT and
       CATIA". `scripts/catia_conformance.py --ladder` now builds **M1's bracket and every
@@ -603,6 +628,26 @@ server inherits and the Git Bash one.
 ### C. Not hardware — an input this machine does not have
 
 Recorded here because the effect is the same: a Linux session cannot finish it.
+
+- [x] ~~**C0 — E13.2, ISO 286's deviation tables.**~~ **Resolved 2026-09-22.** The user
+      attached ISO 286-1:2010(E) and it is transcribed in `app/rules/iso286.py` with 177 tests.
+      Closed E13.2 and with it **phase E13**. See `KRYOVA_BUILD_PLAN.md`'s *Done* for the
+      single misprint the two-way transcription found.
+- [ ] **C0a — E8.3, BS 7608. A copy arrived on 2026-09-22 and does NOT unblock it.** Assessed
+      that day; do not re-assess it, and do not start transcribing from the file in
+      `~/Downloads`. Three findings, and the second is the one that matters most:
+      1. **Pure scan.** 152 pages, **zero** characters of text layer. One 902×1277 JPEG per
+         page, about **108 dpi**.
+      2. **Legible, and that is the trap.** The body text reads perfectly, so the file looks
+         usable. But §*Fatigue* item 6 of `CLAUDE.md` records that at ~110 dpi an EN 1993-1-9
+         figure label read **"180" when it was 160**, and that the tables needed 300–400 dpi.
+         The source has no more resolution to give, so some BS 7608 rows would be transcribed
+         from pixels that cannot settle a digit — in a register that republishes its sources.
+      3. **Provenance, which is the user's decision and not a session's.** Every page footer:
+         *"Provided by IHS under license with BSI — Uncontrolled Copy"*,
+         *"Licensee=ZHEJIANG INST OF STANDARDIZATION 5956617"*, *"Not for Resale"*.
+      **What would lift it:** a licensed copy of BS 7608:2014+A1:2015 whose tables can be read
+      at 300 dpi or better. Nothing else in E8.3 is open.
 
 - [ ] **C1 — E7.1, LE11's problem *definition*.** The catalogue is written
       (`app/verify/nafems.py`) and all five targets are sourced from vendor verification
@@ -753,6 +798,20 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       refreshes without sending a message.
 
 - [ ] **D5 — P4.7 and P4.6, what was attached reaching the agent's turn (added 2026-09-15).**
+      **Steps 1 and 2 are DONE (2026-09-20); steps 3 and 4 are what is left, and they need a
+      model.** Step 1: the seven-file set is **326 passed**, `ruff` and `mypy` clean over 495
+      files, and the frontend suite is 611 across 51 files with `tsc` and `eslint` clean.
+      Step 2: all four guards broken one at a time with the `Edit` tool and each restore
+      confirmed by `git status --short`. Dropping `notes=` fails
+      `test_an_attachment_is_named_even_before_it_is_quoted` **and two siblings**, because the
+      inventory is what every naming claim rests on; `_is_new` always true fails
+      `test_the_content_is_not_repeated_on_the_following_turn` and
+      `test_the_cutoff_is_the_users_last_message`; dropping the owner check fails **exactly**
+      `test_another_users_attachment_is_not_found`; a `raw_for_analysis` call in
+      `app/ai/attached.py` fails `test_nothing_outside_the_boundary_reads_the_payload` with the
+      file and line named. Recorded on P4.7's status line.
+      The original item, for the two steps still open:
+
       Linux wrote the quoting path (`app/ai/attached.py`, `quote_for_tool_result`, the
       `read_attachment` tool, the composer's document route) and **ran no pytest, ruff, mypy or
       vitest**. In order:
@@ -783,7 +842,30 @@ Recorded here because the effect is the same: a Linux session cannot finish it.
       for `read_attachment` unprompted once the quote is out of the window, and whether the
       inventory is enough to keep an attachment knowable across a long conversation.
 
-- [ ] **D6 — E22.3, the horizon harness run on real traces (added 2026-09-15).**
+- [x] **D6 — E22.3, the horizon harness run on real traces (added 2026-09-15).**
+      **DONE 2026-09-20.** 22 tests pass; `ruff` and `mypy` clean. `scripts/horizon_report.py`
+      measured **44 turns, 15 labelled**, and writes `data/verify/horizon.json`. Completion by
+      bucket: under 1 min 0.67 (n=6), 1-5 min 0.60 (15), 5-15 min **0.11** (18), 15-60 min 0.50
+      (2), over 1 hour 0.67 (3). Success where labelled: 1.00 (2), **0.17** (6), **0.29** (7).
+      **The two columns move in opposite directions** — completion falls 0.60 to 0.11 across the
+      1-5 to 5-15 boundary while success rises 0.17 to 0.29 — which is the first evidence that
+      the separation `horizon.py` argued for on principle is anti-correlation on real traces,
+      not just a difference of definition. Nothing was truncated anywhere and no turn above a
+      minute went unanswered: every fall is `failed_tools` (16 of 18 turns in the 5-15 bucket),
+      and the operation rate doubles with length, 11% to 20%. `completed` is a conjunction over
+      the turn, so decay with length is arithmetic before any model degrades.
+      **The two long buckets are an artefact and are recorded as one**: 13-58 steps over
+      1,141-7,009 s means somebody walked away, and the durable record carries no idle signal to
+      tell that from a long turn. Five turns, so nothing rests on it.
+      Labels come from `docs/GUI_PROMPT_LADDER.md`'s run log by exact prompt prefix, first turn
+      only, and refuse any entry whose outcome is not unanimous across the conversations
+      matching it; the artefact's `unlabelled` block lists each refusal with its rule.
+      **Left open deliberately:** the literature figures stay `UNSOURCED` — nobody here has
+      opened the papers, so the comparison is still refused. That is C4's kind of work, not
+      this machine's.
+
+      The original item:
+
       `app/verify/horizon.py` groups recorded turns into duration buckets and reports a
       completion rate per bucket. Linux wrote it and ran no pytest.
       1. `venv/bin/python -m pytest tests/test_verify_horizon.py -q`, then `ruff` and `mypy`.
@@ -826,7 +908,66 @@ Treat each one as a normal task under this repo's rules: write the tests with th
 `pytest`/`ruff`/`mypy`, verify each new guard by breaking what it guards, and update the
 master plan's status line in the same commit.
 
-- [ ] **E1 — Sheet metal on the CATIA side (E17.3 task 3, written 2026-09-09).** A
+- [x] **E1 — Sheet metal on the CATIA side (E17.3 task 3).** **ANSWERED 2026-09-17, and the
+      headline is a refusal that is now measured rather than assumed.**
+
+      **`AddNewWall` and `AddNewFlange` do not exist.** `CATShfInterfaces`
+      (`{AEDE231A-8E0E-11D3-827B-006094EB7FE4}` — late binding does not see it, exactly as
+      with DMU Kinematics) declares **four** classes and not one creation method:
+
+      | class | members |
+      |---|---|
+      | `SheetMetalFactory` | `CreateSheetMetalParameters`, `GetItem` |
+      | `SheetMetalParameters` | `GetThickness` — a getter; **there is no setter** |
+      | `SheetMetalPart` | `CreateManufacturingFace`, `SaveAsDXF`, `SaveAsDWG` |
+      | `Bend` | `GetBendAngle`, `GetBendRadius`, `GetBreakAxis` |
+
+      So the registry was right to carry no wall operation and **still carries none**: over
+      COM it is a promise the bridge cannot keep. Creating walls needs the Win32 UI bridge,
+      and that is now a separate, properly-scoped task rather than an assumption.
+      Read off the type library **before** anything was called — the discipline the
+      `AddJoint` crash bought earlier the same day.
+
+      **E1's other two questions, answered.** *Can the parameters be set before the first
+      wall?* Yes: `CreateSheetMetalParameters()` works on an **empty** part. But not
+      through the COM object, which has no setter — through knowledge-ware, where
+      `part.Parameters` carries them. Set thickness 3.5 there and `GetThickness()` returns
+      3.5: the round trip is proved, not assumed. *Does a CATIA part unfold to the same
+      blank?* Now answerable, and **only if both use the same K** — see below.
+
+      **Two traps found, either of which silently produces a wrong blank.**
+      1. **The parameter names are LOCALISED.** On this French seat they are `Epaisseur`,
+         `Rayon pli`, `Facteur perte au pli`. CLAUDE.md's "the COM API is not localised" is
+         about *method* names and holds; a parameter's name is user-visible data and
+         translates. A table keyed on `"Thickness"` finds nothing here and the operation
+         appears to succeed while changing nothing.
+      2. **CATIA computes the K-factor and refuses a write to it.** The default is
+         `0.40051499783199057` — not a number anybody typed — and `Value =` is refused
+         while `…\Formule norme DIN\Activity` is true. Deactivate the formula and the
+         write takes. The formula depends on `r/t` alone and was **solved exactly** against
+         three measured points: `K = (0.5 + 0.5·log10(2r/t)) / 2`, which is DIN 6935's
+         factor halved **with the unrounded constant** — the printed standard says 0.65 and
+         CATIA uses `0.5 + 0.5·log10 2 = 0.650515…`. Using the printed value is wrong by a
+         constant **2.575e-4** at every ratio: small, plausible, and exactly the size of
+         disagreement between two unfold implementations that nobody can explain.
+         `app/sheetmetal/` takes K as a free input, so a comparison must hand CATIA
+         Kryova's K or read CATIA's — **it may not let each use its own**.
+
+      **Shipped**: `app/catia/ops/sheet_metal.py` (four operations, plus
+      `UNREACHABLE_OVER_COM` recording what cannot be declared and why), the four COM
+      methods in `scripts/catia_bridge/catia_com.py`, refusals for all four on the open
+      kernel, and `tests/test_catia_sheet_metal.py` (23). Three product rules caught the
+      first draft and are worth knowing: **no tool may take a filesystem path** (the bridge
+      runs on the engineer's workstation — the export attaches its result the way
+      `catia_export_step` does), the **registry has a size budget** because the whole
+      schema reaches the local model every turn, and every new operation owes the open
+      kernel a handler or a named refusal.
+
+      **Still open, and it is the half that needs the UI bridge**: building a wall or a
+      flange at all, and therefore the end-to-end blank comparison — which needs a part
+      with bends in it, and nothing here can make one over COM.
+
+      **Original entry follows.** A
       `SheetMetalPart` now builds as an OCCT solid (`app/kernel/occt/sheetmetal.py`), which is
       the open-kernel half and is verified against closed-form volumes here. The seat half —
       CATIA's SheetMetal Design workbench through the bridge, so a folded part *lands* where
@@ -849,7 +990,29 @@ master plan's status line in the same commit.
       form, so a CATIA-built part can be measured against the same arithmetic.
       Master plan: **E17.3 task 3** carries this residual in its status line.
 
-- [ ] **E2 — Run the four gates the plan defines, in order (master plan Part 2).** G1 ran on
+- [ ] **E2 — Run the four gates the plan defines, in order (master plan Part 2).**
+      **G1 RUN 2026-09-20 ON THIS SEAT — DID NOT PASS, and the blocker has moved.** Full write-up
+      and four screenshots in `docs/verification-2026-09-20/`. Driven in the browser against a
+      live V5-R33 seat, backend `20d1107`, model `qwen3.5:9b`.
+      **What is now settled:** the load-bearing prompt builds, loads and measures correctly
+      (52.09 MPa against my own beam-theory 60.0; mass 0.84888 kg exact), and **it refuses to
+      state a verdict from a single-grid solve** — E7.7 works, and that was the 2026-09-10
+      failure.
+      **Defect found and fixed** (`20d1107`): `run_simulation` had no `grids` parameter while the
+      product's own answer tells the user to ask for `grids: 3`. Third instance of CLAUDE.md
+      testing item 8 and the worst of them, because this one is advertised.
+      **Defect found and NOT fixed — the new blocker, master plan E7 task 8:** the agent cannot
+      wait for a run it started. `run_simulation` returns `queued` and tells it to poll,
+      `MAX_IDENTICAL_READS = 2` refuses the third identical read, and none of the thirty tools is
+      a wait. Any solve slower than about two agent steps cannot be reported in its own turn.
+      **Fix E7.8 before attempting G1 again**, or the gate will re-measure a known failure — the
+      same sentence this item carried about E7.7, which turned out to be right.
+      **Environment notes that cost an hour before a prompt was typed** are in the report: the
+      dev server never hydrates here (use `npm run build && npm start`), `TaskStop` leaves the
+      node process holding the port, and `localhost` vs `127.0.0.1` splits the browser from the
+      CATIA bridge because Python sets `IPV6_V6ONLY` on Windows.
+
+      **Original entry follows.** G1 ran on
       2026-09-06 and did **not** pass (rung 3 failed); it is carried forward and is now also
       the only thing that can verify E6's CalculiX work. G2, G3 and G4 have never run. Each
       gate is driven from `docs/GUI_PROMPT_LADDER.md` through the chatbot in the browser —
@@ -865,7 +1028,25 @@ master plan's status line in the same commit.
       `docs/verification-2026-09-10-night/`. **Fix E7.7 before attempting G1 again**, or the
       gate will re-measure a known failure.
 
-- [ ] **E3 — The conduction analysis through the GUI, and against CalculiX once A2 passes.**
+      **THAT BLOCKER IS GONE — checked 2026-09-17, and the sentence above is why this was
+      checked rather than believed.** Master plan **E7 task 7 is DONE (2026-09-11)**: a verdict
+      may not be stated from a solve holding no evidence about itself, and
+      `tests/test_unconverged_verdict.py` (23 tests) pins it, with the element order defaulted
+      to **2 in both entry points** — the route and the agent tool default independently, and
+      the tool is the one the agent calls. The measurement behind that default is in the status
+      line: linear tets got the cantilever's deflection wrong by 3.6x systematically and
+      scattered peak stress 2.8x across identical inputs, 50 to 141 MPa, every one of them
+      reported as a verdict against a stated 150 MPa limit.
+      **So G1 is attemptable now**, and the next session should run it rather than re-fixing
+      E7.7. A stale blocker sends somebody to repair working code, which is exactly what
+      CLAUDE.md's *Known landmines* preamble says a stale entry does.
+      **What is still true and still unmeasured**: L4 has not been re-driven since the fix, so
+      "L1-L3 pass, L4 does not" describes 2026-09-10 and nothing since. The residual E7.7 names
+      is also still open — element *size* takes no account of the part's thinnest section, so a
+      slender part still gets very few elements through it; tet10 makes that survivable rather
+      than correct.
+
+- [x] **E3 — The conduction analysis through the GUI, and against CalculiX once A2 passes.**
       Added 2026-09-09 with the work. `analysis: "thermal-conduction"` now reaches a request
       and is verified against three closed forms on Linux (linear bar to 6.6e-12 K, the
       logarithmic tube wall, the convecting-bar Biot tip temperature). What Linux cannot do
@@ -875,14 +1056,62 @@ master plan's status line in the same commit.
       mathematics* into *cross-checked against another implementation*, which is the stronger
       claim and the one `CONDUCTION_BACKEND` was given its own setting to make possible.
 
+      **CLOSED 2026-09-17, ccx 2.23 on this seat.** `app/solve/calculix/conduction.py` writes
+      the `*HEAT TRANSFER, STEADY STATE` deck and `oracle.compare_conduction` puts the two
+      solvers on one case. **Five cases ran and all five agreed** — a bar held at both ends on
+      tet4 and on tet10, a convecting tip through `*FILM`, a flux plus a volumetric source, and
+      films alone with nothing held. `CONDUCTION_BACKEND=calculix` is a valid deployment now.
+      Measured facts that were not guessable: the step takes no data line; the temperature DOF
+      is **11**; `*INITIAL CONDITIONS, TYPE=TEMPERATURE` is required and does not reach the
+      answer; the `.frd` carries `NDTEMP` and `RFL` **for every node**; and the linear bar comes
+      back with a **maximum nodal error of exactly 0.0**.
+      **The oracle earned its keep on the first run.** `RFL` is the pure reaction and excludes
+      the `*CFLUX` applied at the same node, where `fixed_temperature_heat_w` does not — raw, it
+      read **−21.5 W** against the in-house **−22.5 W**, the 1.0 W being the source's own share
+      of the material tributary to the held face. Published unread it would have been 4.4% wrong
+      on every model with a source or a flux.
+      **Still open, and not this item's**: CalculiX *transient* conduction and thermal-stress
+      decks, and a GUI surface for a conduction run.
+      Tested by: `tests/test_calculix_conduction.py` (24; 7 run the real `ccx`).
+
 - [ ] **E4 — E15 task 1's CATIA half: run one `as_catscript` output on the seat.** Added
-      2026-09-15. `app/design/batch.py::as_catscript` emits a compiled plan as one CATScript
-      calling a `KryovaDispatch` per operation; nothing has ever executed one. Write the
-      dispatcher on the seat (it maps an operation name and literal arguments onto the bridge's
-      existing COM mapping; do not inline CATIA's API a second time). Then run M1's bracket
-      plan as one script and compare `catia_measure` against the per-call build with
-      `scripts/catia_conformance.py`'s `_measured_divergences`. Settles: E15.1 `PARTIAL` →
-      `DONE` if the one-script build measures the same part.
+      2026-09-15. **MEASURED 2026-09-18, and the item is re-priced rather than closed.**
+
+      **The premise it rested on is now a number.** `app/design/batch.py` said "there is no way
+      to lower the cost of a COM round trip; the only fix is not to make 10⁵ of them" — true
+      about the round trip, and it overstates what the fix buys. The same work was run twice on
+      this seat, each route made to prove it built what it claimed:
+
+      | work | over COM | one CATScript | ratio |
+      |---|---|---|---|
+      | 200 points (2 COM calls each) | 1.022 s | 0.566 s | **1.8×** |
+      | 25 pads (~9 COM calls each) | 1.826 s | 0.835 s | **2.2×** |
+
+      The second row is the surprising one and it refutes the hypothesis the probe was written
+      to test: the saving was expected to collapse on a pad, where CATIA has real geometry to
+      build, and it rises slightly instead. **The saving tracks the number of COM calls, not
+      their weight** — V5 builds a 20 mm block faster than the marshalling costs. At the
+      phase's own 10⁵: **2.0 hours over COM against 0.9 hours as one script.**
+
+      **Why it is still open, and it is not "no seat" any more.** Every emitted line calls
+      `KryovaDispatch`, and **that subroutine exists in no file in this repository and on no
+      seat**, so no emitted script has ever been executable — not merely un-run. This row's own
+      instruction is why it stayed unwritten: *write the dispatcher, mapping operation names
+      onto the bridge's existing COM mapping, and do not inline CATIA's API a second time.*
+      Those cannot both hold. The mapping is `scripts/catia_bridge/com/`, which is **Python**,
+      and nothing inside CNEXT can call it.
+
+      **Two ways out, for whoever takes this next.** (a) *Generate* the VBScript dispatcher
+      from the same operation registry the bridge reads (`app/catia/ops/` → `TOOL_METHODS`), so
+      there is one source of truth and two emissions — this is the only version that honours
+      both halves of the instruction, and it is roughly the size of `scripts/gen_bridge_tools.py`.
+      (b) Accept that the lever is ~2× and spend the effort elsewhere; a plan that is
+      intractable interactively stays intractable batched, so nothing becomes *possible* here
+      that was not.
+      **Take (a) only with a reason to want the 2×.** Recorded rather than decided, because
+      whether it is worth it depends on what a real plan's call count turns out to be, and no
+      plan in this repository is near 10⁵ yet.
+      Settles: E15.1 `PARTIAL` → `DONE` if the one-script build measures the same part.
 - [ ] **E5 — E15 task 4: crash recovery against a real seat.** Added 2026-09-15.
       `affinity.Outcome.stranded` names the state. What the product does about it is
       unwritten, and it needs CATIA dying under a live conversation to write against: resume
@@ -899,7 +1128,103 @@ master plan's status line in the same commit.
       match `kinematics.evaluate` pose for pose. Also settles whether CATIA's assembly
       constraints can be read as joint declarations, which is the one input E9.2 still takes
       by hand. Settles: E9.5 `NOT STARTED` → `DONE`.
-- [ ] **E7 — E17 tasks 1 and 2 on the seat: FTA annotations and export from CATIA.** Added
+
+      **THE API IS MEASURED, 2026-09-17 — this item is no longer a guess, only a build.**
+      DMU Kinematics is **licensed on this seat** (V5-R33): `product.GetTechnologicalObject
+      ("Mechanisms")` answers, and `Mechanisms.Add()` creates a mechanism (`Mécanisme.1`,
+      French seat). Two traps found on the way, both of which would have cost a session:
+
+      * **Late binding sees none of it.** `win32com.client.GetActiveObject` returns the
+        `Joints` collection as `<COMObject <unknown>>` and *every* method name fails with
+        `AttributeError` — including the `AddJointRevolute`, `AddJointPrismatic` … family
+        the V5 documentation lists. Probing that way reads as "DMU automation does not
+        exist on this seat", and it is wrong.
+      * **Those `AddJoint<Type>` methods do not exist at all.** The real interface is a
+        *generic* `AddJoint`. A session that went looking for the documented per-type
+        methods, found none, and concluded the licence was missing would be wrong twice.
+
+      The way in is the type library: **`CATIA V5 KinematicsInterfaces Object Library`,
+      `{6652FDA0-BA01-11D2-88A1-0008C7194E6A}`**, via
+      `win32com.client.gencache.EnsureModule(...)`. With it generated, the interface is:
+
+      | object | members |
+      |---|---|
+      | `Mechanisms` | `Add()`, `Item(i)`, `GetItem(name)`, `Count` |
+      | `Mechanism` | `AddJoint(iJointType, iListElem)`, `AddCommand(iCmdType, iJoint)`, `PutCommandValues(iCmdValues)`, **`PutCommandValuesWithMultiSteps(iCmdValues, iNbSteps)`**, `GetCommandValues(ioCmdValues)`, **`GetProductMotion(iProduct, ioMotion)`**, `Update()`, `GetProduct(i)`, `FixedPart`, `NbDof`, `NbJoints`, `NbCommands`, `NbProducts` |
+      | `Joint` | `Type`, `CurrentValue1/2`, `LowerLimit1/2`, `UpperLimit1/2`, `Name` |
+      | `MechanismCommand` | `Type`, `CurrentValue`, `Orientation`, `Name` |
+
+      So the engine's shape is settled: build the product, `Mechanisms.Add()`, one
+      `AddJoint` per `JointDeclaration`, one `AddCommand` per `Driver`, drive with
+      `PutCommandValuesWithMultiSteps` over the `MotionRange`, and read each body's pose
+      back through `GetProductMotion`. **`NbDof` is the free check nothing else gives**: a
+      mechanism whose declared joints leave a different number of degrees of freedom than
+      `app/dynamics/` thinks it has is a disagreement about the machine, not about
+      arithmetic, and it is available before anything is driven.
+      **⚠ `Mechanism.AddJoint` CRASHED CATIA, and the next session must not repeat the way
+      it was probed.** Measured 2026-09-17, second sitting. Read off the type library, its
+      parameter flags are `((16392, 1), (8204, 3))` — **16392 is `VT_BYREF|VT_BSTR`, so
+      `iJointType` is a *string*, not an integer**, and **8204 is `VT_ARRAY|VT_R8`, an
+      in/out array of *doubles*, not COM objects.** Every attempt passing an integer and a
+      list of `Reference`s failed identically, which reads like a licence problem and is
+      not one.
+      With the string form, `AddJoint("Revolute", [])` **returns `(None, ())` and does not
+      raise** — so the name is accepted and an empty element list simply makes no joint.
+      But `AddJoint("Revolute", [0.0, 0.0])` raised a COM error, `[1.0, 2.0]` answered
+      *"Échec de l'appel de procédure distante"*, and `[0.0] * 12` answered **"Le serveur
+      RPC n'est pas disponible"** — which is not an error message, it is CATIA being gone.
+      `CNEXT` was no longer running. **Feeding a non-empty doubles array to `AddJoint` on
+      V5-R33 kills the seat**, in the same family as the `StartCommand` wedge this
+      repository already documents, and worse because nothing is left to dismiss.
+      **So: do not brute-force this signature again.** An array of doubles is not a
+      plausible way to name two pieces of geometry, which suggests the automation route is
+      not the interactive one — in V5 a DMU joint is normally made by *Assembly Constraints
+      Conversion* from existing assembly constraints. The next attempt should build the
+      constraints first and convert them, or drive the conversion command through the
+      existing Win32 bridge, rather than calling `AddJoint` with guessed arguments.
+      **HALF OF THIS IS NOW CLOSED, 2026-09-19, and it needed no `AddJoint` at all.** The
+      sub-question — "whether CATIA's assembly constraints can be read as joint declarations,
+      which is the one input E9.2 still takes by hand" — is **answered yes for the pair and no
+      for the axis**, on a two-part product with a coincidence, a 25 mm offset and a fix:
+
+      * **The operands are not `ConstraintElement1`/`ConstraintElement2`.** Those property
+        names do not exist; late binding answers `AttributeError`, and a first sitting read
+        that as "constraints do not expose their operands" and was wrong. The real member is
+        the method **`GetConstraintElement(n)`**, declared in `CATIA V5 MecModInterfaces`
+        (`{0D90A5C9-3B08-11D1-A26C-0000F87546FD}`). Same lesson as the kinematics licence:
+        **read the type library before concluding an API is absent.**
+      * `element.DisplayName` is the prize: `'E6Rig/E6Base.1/!E6Base/Plan xy'` carries the
+        **occurrence path and the geometry**, which is exactly `JointDeclaration.child`.
+      * **`GetConstraintVisuLocation` is not the axis.** It returns cleanly — it did *not*
+        crash the seat, despite taking the same `(8204, 3)` doubles array `AddJoint` died on —
+        and answers `((0,0,0), (0,0,0))`. It is the constraint glyph's location. A zero vector
+        is not a direction, so the axis is genuinely absent and must come from the geometry
+        the DisplayName names.
+      * `Side`, `DistanceConfig`, `DistanceDirection` and `AngleSector` are readable **only on
+        the constraint types they apply to**; on a Coincidence they raise *"Défaillance
+        irrémédiable"*, an alarming message for "not applicable".
+      * A `Fix` is mono-element: `GetConstraintElement(2)` is refused, not empty.
+      * The localised-reference trap **still holds, seventeen days on**: `!Plan xy` and
+        `!Plan yz` resolve, `!PlaneXY` and `!Axe X` are refused, so no axis is nameable.
+
+      Shipped: `app/dynamics/catia_constraints.py` (no COM import — the daemon sends records
+      as data, so the translation is testable with no seat) and
+      `tests/test_dynamics_catia_constraints.py` (21).
+      **What is still open on E6 is the engine itself**: building and driving a mechanism.
+      `AssemblyConvertor` in `ProductStructureInterfaces` is **not** the constraints
+      conversion despite its name — it is the BOM/print convertor (`Print`,
+      `SetCurrentFormat`). The conversion command is still unlocated over COM, so the Win32
+      bridge remains the route to try.
+
+      **Also unmeasured**: what `ioMotion` is filled with — `GetProductMotion` refused at
+      12, 16 and 9 doubles on a mechanism with no joints, which may only mean it needs a
+      valid mechanism first. `MechanismDOF`, `DOF` and `Laws` do **not** exist; `NbDof` is
+      the spelling.
+      **Housekeeping learned the same sitting**: a probe that fails part-way leaves its
+      `CATProduct` and `CATPart` documents open, and the next `Documents.Add("Product")`
+      then fails on `PartNumber`. Close products before parts and **test that the count
+      fell**, never that `Close()` succeeded — the loop this repository already documents.
+- [x] **E7 — E17 tasks 1 and 2 on the seat: FTA annotations and export from CATIA.** Added
       2026-09-15. `app/manufacture/drawing.py` now carries a part's `Tolerancing` and
       `dxf.py` tabulates it; nothing puts the same frames into CATIA's Functional Tolerancing &
       Annotation workbench, and no STEP or DXF has been exported from a live seat. Write the
@@ -908,9 +1233,255 @@ master plan's status line in the same commit.
       `app/manufacture/export.read_step` and ezdxf. Settles: E17.2's open item, and E17.1's FTA
       item (the leader attachment and the reserved table zones remain Linux work).
 
+      **THE EXPORT HALF IS DONE (2026-09-18, E17.2) AND THE FTA HALF IS MEASURED
+      (2026-09-19).** Export: STEP, IGES, STL and 3DXML from a part and DXF/DWG from a
+      drawing, all checked by their bytes — and it found that the bridge blamed a missing
+      licence for a wrong-kind document, on a seat that holds the licence.
+
+      **FTA is licensed, reachable, and the earlier probe failed on its signature exactly as
+      CLAUDE.md suspected.** Measured:
+
+      * **The container is `part.AnnotationSets`.** Not `GetTechnologicalObject` (that is on
+        `Product` and refuses this name there), and **no** `GetWorkbench` spelling works on a
+        PartDocument — `TPSWorkbench`, `TPSWorkBench`, `FTAWorkbench` and `TPS` are all
+        refused.
+      * **Late binding sees none of it**: it needs `EnsureModule` on **`CATIA V5
+        CATTPSInterfaces`, `{88D26C84-D8E9-0000-0280-020CC3000000}`** — the same trap sheet
+        metal and DMU Kinematics have, now three for three.
+      * **`AnnotationSets.Add(iStandard)` takes a STRING**, flags `((16392, 1),)` =
+        `VT_BYREF|VT_BSTR`. `Add("ISO")` creates `Annotations.1`. An integer there is the
+        "signature failure that reads like a licence failure" CLAUDE.md recorded — **it was
+        never a licence.**
+      * `AnnotationFactory` is reachable from the set, and **`CreateDatumReferenceFrame()`
+        works** with no arguments.
+
+      * **An annotation needs a view, and that is the precondition that is easy to miss.**
+        `TPSViewFactory.CreateView(planeReference, 0)` creates `Vue de face.1` and sets
+        `AnnotationSet.ActiveView` — which *raises* before a view exists, then answers it.
+
+      **What is still unidentified is what `CreateDatum(iSurf)` will accept, and it is NOT a
+      binding problem.** A first reading of this said it was, and the next measurement
+      refuted it: `CreateDatum` answers *"Le type ne correspond pas"* on argument 1 for a face
+      `Reference` from `Selection.Search("Topologie.Face,all")` (which finds all six faces)
+      **and** for a plane `Reference` — while **the identical plane Reference is accepted by
+      `CreateView`**, whose `iPlane` carries the same `(9, 1)` = `VT_DISPATCH` flag. One
+      library, two methods, one object: the marshalling is fine, and CATIA is refusing the
+      object as a datum *support*. `CreateToleranceWithDRF` refuses the same way on its
+      `iSurf` (argument 2). Creating the view first was necessary and is not sufficient.
+      **The first route on the list was tried and is closed too.** A `Reference`'s own
+      `DisplayName` comes back as
+      `Selection_RSur:(Face:(Brp:(Pad.1;2);None:();Cf14:());Pad.1_ResultOUT;Z0;G10904)`, and
+      handing it back to `CreateReferenceFromBRepName` fails — with and without the
+      `Selection_` prefix. So **a BRep name CATIA prints is not one CATIA will read back**;
+      the trailing `Z0;G10904` looks session-scoped. That is worth knowing on its own, well
+      beyond FTA: anything that stores a face reference as a string and expects to resolve it
+      later is building on sand, which is exactly why `app/kernel/occt/naming.py` exists and
+      why region selection here is by geometric selector and never by face id.
+      **What is left to try**: `CreateDatumTarget` and `CreateEvoluateDatum`, which take a
+      surface plus coordinates and may want a different support; and the Win32 bridge driving
+      the interactive Datum command, which is what `app/catia_kb/ui.py` exists for when COM
+      will not.
+      Until one of those works, **no datum or feature control frame has been created on a
+      seat**, and E17.1's FTA item stays open.
+
+      **SOLVED 2026-09-19, afternoon: a datum and four form tolerances now exist on the seat.**
+      The discriminating probe was a *control*: `CreateText(face)` and `CreateFlagNote(face)`
+      refused exactly as `CreateDatum` did, so the refusal was never datum-specific — **every
+      `iSurf` parameter wants a `UserSurface`, not a `Reference`.** The library declares the
+      class and nothing declared who hands it out; `part.UserSurfaces` does, by analogy with
+      `part.AnnotationSets`. Then:
+
+          part.UserSurfaces.Generate(faceRef)        -> Surface utilisateur.1
+          AnnotationFactory.CreateDatum(userSurface) -> Référence.1
+          CreateDatumReferenceFrame()                -> Système de références.1
+          CreateToleranceWithoutDRF(i, userSurface):  1 Rectitude  3 Planéité
+                                                      6 Profil d'une ligne quelconque
+                                                      7 Profil d'une surface quelconque
+                                                      2, 4, 5, 8-16 refused on a plane
+
+      Saved as a 480 KB CATPart. The index sweep was over *values* on a signature whose *types*
+      were already read and correct — the `AddJoint` crash came from wrong types — and CATIA
+      survived all 32 calls. That 2, 4 and 5 refuse on a planar face is consistent with their
+      being the circular/cylindrical family, but that is an inference, not a measurement.
+      **And the last step closed the same afternoon: a POSITION frame referencing datum A.**
+      `CreateToleranceWithDRF` refused at every index because `CreateDatumReferenceFrame()`
+      returns an *empty* frame. The datum carries its letter (`datum.DatumSimple().Label` →
+      `'A'`), and `drf.ReferenceFrame().SetFrame('A', '', '')` — three strings, flags
+      `((16392,1),(16392,1),(16392,1))`, read before calling — fills the first box. Then:
+
+          CreateToleranceWithDRF(i, userSurface, drf):  3 Parallélisme   4 Localisation (position)
+                                                        7 Localisation ligne quelconque
+                                                        8 Localisation surface quelconque
+                                                        1, 2, 5, 6, 9-16 refused here
+
+      Saved as a 489 KB CATPart. **The index is per family, not global**: `3` is flatness
+      without a frame and parallelism with one, so a table keyed on the number alone would put
+      the wrong symbol on a drawing and nothing would error.
+      **CLOSED 2026-09-20 — the bridge side is written and driven.**
+      `catia_tolerance_datum`, `catia_tolerance_frame` and `catia_tolerance_list` are declared
+      on a new `Workbench.FTA` and implemented in `scripts/catia_bridge/com/tolerancing.py`,
+      which generates `CATTPSInterfaces` **and only that library** (CLAUDE.md 3c). Run through
+      the bridge's own backend object on the seat: datum on `top` → `A` / `Référence.1`,
+      flatness → `Planéité.1`, position against A on `front` → `Localisation.1`, list → 1 set,
+      datum `A`, 4 annotations; both family refusals fire in words. The tolerance *value* is
+      not a parameter, because setting it was never measured — recorded in `UNIMPLEMENTED`
+      with `datum_target` and `roughness`. The full recipe, in order: `part.AnnotationSets.Add("ISO")` →
+      `TPSViewFactory.CreateView(planeRef, 0)` → `part.UserSurfaces.Generate(faceRef)` →
+      `CreateDatum(us)` → `DatumSimple().Label` → `CreateDatumReferenceFrame()` →
+      `ReferenceFrame().SetFrame(label, "", "")` → `CreateToleranceWithDRF(4, us2, drf)`.
+      Two readings of this refusal earlier today were wrong — first "a binding conflict", then
+      "CATIA refuses it as a datum support" — and both are left above, marked, because the way
+      they were wrong is the lesson: **a control that shares the parameter but not the
+      semantics is what separates the two.**
+
+      **A separate and real hazard found on the way** (now CLAUDE.md item 3c): generating
+      `MecModInterfaces` so `Reference` would be an early-bound type **breaks
+      `part.ShapeFactory.AddNewPad`**, because the wrapper types `ShapeFactory` to the base
+      `Factory` — the same shape as the INFITF hazard, and the reason a daemon that both
+      builds and annotates needs `CastTo` at the call site rather than one binding mode for
+      the whole process. It is *not*, as first written, the cause of `CreateDatum`'s refusal.
+
+- [x] **E8 — The undercut rule reads no scan through `POST /kernel/…/rules`.** **CLOSED
+      2026-09-17: it was the adapter, and the effect was silent.**
+      `catia_analysis_part` declares `direction` as an **origin plane** and this route's public
+      API takes a **vector**, which its own 422 teaches. The route passed the vector through,
+      `_pull_direction` refused it, and the route's broad handler turned that into "the draft
+      scan failed, so its rules are unmeasured" — so **every draft and undercut rule on every
+      part came back UNMEASURED**, beside a note a reader had no cause to doubt. A part with a
+      real undercut would have been reported unchecked rather than bad. `_pull_plane` is the
+      translation the adapter always owed, and it refuses a pull it cannot express rather than
+      guessing. Master plan E13 task 1 superseded; verified by breaking it.
+      **Original entry follows.** Found on this machine 2026-09-17 and not closed at the time,
+      so it was written down rather than left to be rediscovered. `tests/test_kernel_routes.py::TestCheckingDesignRulesAgainstTheLivePart::
+      test_a_plate_too_long_for_the_machine_is_a_red_build_naming_the_rule` asserts
+      `machined.undercuts` comes back as something other than `unmeasured`, and it comes back
+      `unmeasured`. What is already known: a runner *is* live (the same route's
+      `_live_document` resolved one two lines earlier, so this is not the None case the
+      neighbouring guard now covers), and the same response reports `scans_needed == ["draft"]`
+      — so the undercut rule is expected to be satisfied by the draft scan's payload and is
+      not. The question to answer first is whether `app/rules/processes.py` names a
+      measurement key that `catia_analysis_part(kind="draft")` does not produce, which is
+      CLAUDE.md's testing item 9 in a new place: a parameter the schema advertises is a
+      promise. **This is not a Windows-only defect** — nothing in it depends on the platform —
+      it is simply the first machine that ran the test. Owner: E13 (design rules), which is
+      already `PARTIAL`.
+- [x] **E9 — `TestDropCutterNeverGouges` fails on both cutters.** **CLOSED 2026-09-17, and the
+      gouge assertion was never the one failing.** The safety claim — the exact drop is never
+      below a sampled surface point — **passed on all 80 cases for both cutters**. The test died
+      one line later, in the helper for its weaker second assertion: `np.cross` on two length-2
+      vectors returned the scalar z-component for years and **numpy 2 removed it**. Written out
+      as `u[0]*v[1] - u[1]*v[0]`. Checked that no other 2-D `np.cross` exists in `app/` or
+      `tests/` — every other use is on (n, 3) mesh coordinates, so this was the only site.
+      **Original entry follows.** Found 2026-09-17, not investigated at the time. `tests/test_manufacture_cam.py::TestDropCutterNeverGouges::
+      test_the_exact_drop_is_never_below_a_sampled_surface_point` fails for `flat` and `ball`.
+      The claim is the safety one a CAM path rests on — the exact drop must never be below a
+      sampled surface point, i.e. the cutter must not gouge — so this is worth reading
+      properly rather than adjusting. Written on Linux, executed nowhere until here. Owner:
+      E17 (manufacturing output).
+
+- [x] **E10 — A draft analysis can only be asked about the three positive axes.** **CLOSED
+      2026-09-18, and the choice this row offered was the wrong pair.** It asked whether
+      `direction` should become a vector or gain three more names. It is the vector — and the
+      reason is a defect the row did not name: **`catia_draft`, the operation that *creates* the
+      taper, has always taken `pulling_direction` as a vector**, so the product carried two
+      vocabularies for one physical quantity and an agent could draft along `[0, 0, -1]` and
+      then be unable to ask about what it had just built. A fourth name would have entrenched
+      that.
+
+      `direction` is now that same vector (new `vocab.pull_direction`), with the six plane names
+      — `XY`, `YZ`, `ZX` and their minus forms — declared **beside** it as a union rather than
+      kept as a quiet accept-list. **That distinction is the finding.**
+      `app/catia/validation.py` checks arguments against the operation's document *before* any
+      backend sees them, so names accepted only in the handler are unreachable code: the first
+      draft did exactly that, every test passed because they call the runner directly, and
+      `"XY"` through the product answered `direction must be array, got str`. CLAUDE.md's
+      testing item 8 in miniature, caught before shipping.
+      The schema carries **no `enum`** on purpose — `validate` applies one to whatever it is
+      handed, so listing the names would have refused every vector as "not one of: XY, YZ, …",
+      the union's other arm rejected by its own constraint.
+
+      **Two things measured that corrected the work in progress.** Flipping the pull changes
+      *nothing* in the report: `draft.py` reports `min(|draft|)` — the sign says which half of
+      the tool takes a face, not how much draft it has — and `find_undercuts` already tests both
+      halves, so a straight-pull tool is symmetric and the report says so. The half of E10 that
+      moves numbers is the **arbitrary** direction: one drafted block reads 5° along +Z and
+      3.533° along [0, 1, 1]. Both are pinned, the undercut half non-vacuously against a part
+      with two real undercuts.
+
+      **No CATIA half was owed after all**, which is why this needed no seat in the end:
+      `scripts/catia_bridge/com/inspection.py` refuses every kind but `validity`, because
+      CATIA's draft analysis is a screen overlay with no automation API, so `direction` has
+      never reached a seat. A test states that so the day it changes the claim is in front of
+      whoever changes it. Tested by: `tests/test_kernel_draft_directions.py` (28),
+      `tests/test_kernel_routes.py` (+4). Owner: E13 task 1, now DONE.
+
 ### F. Needs Docker Desktop on the Windows machine — OpenFOAM
 
-- [ ] **F1 — The OpenFOAM flow run through Docker Desktop (E10.2, added 2026-09-14).** On Linux,
+- [x] **F2 — `docker` launched by its bare name fails inside a running job on Windows
+      (found 2026-09-20, fixed the same day).** The full suite came back **2 failed / 11 errors**,
+      every one of them OpenFOAM, and `pytest tests/test_solver_openfoam.py` alone was **67
+      passed**. The reproducing case was `TestAFlowRunThroughTheRealEngine`, which failed alone in
+      1.7 s with *"The OpenFOAM image … is not present. Pull it once with `docker pull`"* — while
+      `docker images` listed it and `availability("docker")` returned `None` from a plain
+      interpreter, from inside pytest, and from a worker thread.
+      **What it actually is.** Instrumented through the job path: `_image_present` is called twice
+      in one job. The first returns **True**; the second raises **`FileNotFoundError [WinError 2]`**
+      — with `os.getcwd()` unchanged and the directory still existing, `os.environ["PATH"]`
+      identical (same length, still containing the Docker directory), `shutil.which("docker")`
+      still resolving to `C:\Program Files\Docker\Docker
+esourcesin\docker.EXE`, and a run
+      of that **absolute path succeeding in the same breath**. So `which` finds it and
+      `CreateProcess` cannot. **The mechanism was not identified and is recorded as unidentified**;
+      the fix does not depend on it.
+      **Two fixes, both in `app/solve/openfoam/run.py` and mirrored into
+      `app/dynamics/chrono/run.py`** (copied from it, and carrying the same bug before it bit):
+      launch the **resolved absolute path**, never the bare name; and let `_image_present` return
+      **`None`** for "docker could not be asked", separately from `False` for "no such image", so
+      the refusal stops telling an operator to pull an image that is already there. That second
+      half is the same correction as the CATIA `ExportData` refusal which blamed a licence for a
+      document of the wrong kind.
+      Verified by breaking both: returning the bare name fails
+      `test_docker_is_launched_by_its_absolute_path` alone, and collapsing the three-state answer
+      fails `test_docker_that_cannot_be_RUN_is_not_the_image_being_absent` alone. 158 pass across
+      the three files; the originally failing job test passes.
+
+
+> **DOCKER DESKTOP IS INSTALLED, 2026-09-19** — the user cleared the elevation blocker at the
+> keyboard. `winget install Docker.DockerDesktop` returned 0, **4.91.0**, and the CLI answers
+> `Docker version 29.8.0, build 88096ef` from
+> `C:\Program Files\Docker\Docker\resources\bin\docker.exe`.
+> **It cannot run yet and the reason is recorded rather than rediscovered**: WSL was *not*
+> installed on this machine — `wsl.exe` ships with Windows and the subsystem did not — so
+> `wsl --install --no-distribution` was run first. It enabled the features and left
+> `HKLM:\…\Component Based Servicing\RebootPending` **true**, and until that reboot happens
+> `wsl --status` answers *"WSL2 ne peut pas démarrer, car la virtualisation n'est pas
+> activée"*. Firmware virtualisation itself is on (`VirtualizationFirmwareEnabled: True`), so
+> this is the ordinary staged-feature reboot and not a BIOS problem.
+> **One trap worth carrying**: `Win32_ComputerSystem.HypervisorPresent` was **already `True`**
+> before any of this, which reads as "virtualisation is ready" and is not — it reflects a
+> hypervisor already running (VBS), not that WSL2 can start. Ask `wsl --status`, never that
+> property.
+> **After the reboot**, F1 below is takeable and so is P9 task 3's image build.
+
+- [x] **F1 — The OpenFOAM flow run through Docker Desktop (E10.2, added 2026-09-14).**
+      **MEASURED 2026-09-19 — it runs on Windows, and all three things that differ there hold.**
+      `opencfd/openfoam-default:2412` pulled in 60 s (2.18 GB,
+      `sha256:1ba02114…`). **Every real-engine class passes, and none skipped** — 13 tests:
+      Hagen–Poiseuille and the isothermal Graetz Nusselt number on the pipe (23.6 s), the
+      uniform-flux Nusselt number and its energy balance (26.0 s), the square duct against the
+      series solution (34.0 s), and the whole job path, `TestAFlowRunThroughTheRealEngine`
+      (7.5 s). The wider selection is **87 passed, 0 skipped**; a skip would have been the
+      symptom, so the count was the point.
+      What the three construction differences turned out to be: **the Windows path mount**
+      (`-v C:\…:/case`) works as written; **there is no `os.getuid`, so no `--user`**, and the
+      container runs as **uid 0** — measured with `id -u`; **`Allrun` arrives with LF endings**
+      and runs. The question the row ended on — *can the server delete a finished case?* — was
+      measured directly rather than inferred from pytest's silent temp cleanup: a file the
+      container wrote as root into a Windows bind mount is removed by the host's
+      `shutil.rmtree` without complaint, because Docker Desktop does not carry the container's
+      ownership back to NTFS. So running as root costs nothing *here*; on a Linux host it would,
+      and that is why `run.py` passes `--user` wherever `getuid` exists.
+      **Original entry follows.** On Linux,
       `tests/test_solver_openfoam.py` runs the whole path against `opencfd/openfoam-default:2412`
       and agrees with Hagen–Poiseuille, the rectangular-duct series and both Graetz limits;
       `tests/test_simulations.py::TestAFlowRunThroughTheRealEngine` runs it through the job.
@@ -941,6 +1512,34 @@ this file drives the ladder, with a screenshot each.
       interaction never below 30 fps.**
       1. `npm run test -- src/lib/scene-streaming.test.ts`, then `npm run type-check` and
          `npm run lint`.
+      **STEP 1 IS DONE, 2026-09-18.** The *whole* frontend suite was run rather than the one
+      file, because the one file's 20 tests prove less than the 583 around them:
+      **48 files, 583 tests, all passing** in 35.8 s; `npm run type-check` (`tsc --noEmit`)
+      and `npm run lint` (`eslint`) both silent. That is the first execution of the six
+      modules rebuilt on 2026-09-17 after the audit found ten claimed frontend files had
+      never existed in any commit — 163 of those 583 tests are theirs, and they pass
+      unchanged. **A pass here is not the task's number**: steps 1 and 2 establish that the
+      arithmetic runs and that there is a scene to run it against; **first meaningful paint
+      under 2 s and interaction never below 30 fps are still unmeasured**, and they need the
+      browser, not vitest.
+      **STEP 2 IS DONE, 2026-09-17.** `app/render/reference.py` generates the synthetic
+      reference assembly §4 specifies and `tests/test_render_reference.py` holds it to every
+      row: **2,000 occurrences, 120 distinct components, 99% instanced, 5 deep**, pinned by
+      digest `2c6d3f5c8d9d534ccbbe0aeb6d58f4ab` so two runs a month apart compare. Nothing
+      in it is random — the varied transforms are arithmetic on the index, because a random
+      transform satisfies §4's wording and destroys the artefact.
+      **The stale half of §4 is corrected too**: it said "M5 is not built and is blocked on
+      E13". M5 landed 2026-09-16 and M8 on 2026-09-17, and it changes nothing — M5 is eleven
+      parts and M8 eight occurrences against a 2,000-part target.
+      **One row this scene cannot meet, and it is written down rather than fudged**: the
+      parts are boxes, a box is twelve triangles at every deflection, so the 8-12 M triangle
+      band is unreachable here by three orders of magnitude. This scene measures ordering,
+      streaming, instancing and tree depth; it does **not** measure the triangle budget, and
+      a run log quoting that row off it is quoting the wrong scene.
+      **Still open on G1**: steps 2b (naming the
+      reference laptop — this workstation has a discrete card and is the opposite of
+      mid-range, so it cannot be it) and 3 (wiring the module to the viewer and measuring).
+
       2. **Build a reference assembly.** There is none, and that is the blocker under the
          blocker: the target is meaningless without a fixed scene to measure it on. 2,000
          parts with real repetition (a frame, a few hundred distinct components, thousands of
@@ -952,7 +1551,19 @@ this file drives the ladder, with a screenshot each.
          assembly this repository can produce today is M6 at **three** components (measured
          2026-09-16). So this is a synthetic generator until M5 lands, and a run on it is
          labelled synthetic.
-      2b. **Name the reference laptop**, here, with make, GPU, driver version and screen
+      2b. **THE DECISION IS WRITTEN UP AND IS THE USER'S TO TAKE — `docs/REFERENCE_MACHINE_DECISION.md`
+         (2026-09-22).** It states the requirement (integrated GPU, 1920x1080 at 100%, 16 GB, a
+         pinned browser build and driver version, measured on mains not battery), why this
+         workstation is excluded (discrete GPU), what the two numbers are, that the scene to
+         measure them on already exists and is digest-pinned, and the five steps to take the
+         measurement once a machine is named. **It deliberately does not choose the machine**:
+         that is a decision about who the performance is promised to.
+         It also corrects a premise worth carrying: **only P6.2 is blocked by the machine**, and
+         P6.3 only for its re-decision criteria. P6.1, P6.4, P6.5 and P6.6 are blocked by
+         *unbuilt frontend UI* — no legend, no probe, no section control, no tree gutter — which
+         this workstation can build. The machine is needed to *measure* frame times, not to
+         write a surface.
+         **Original item follows.** Name the reference laptop, here, with make, GPU, driver version and screen
          resolution — and then measure on that one. P6.2 says "a mid-range laptop" and the
          phase proof says "the reference laptop"; **no machine is named anywhere in this
          repository** (checked 2026-09-16). A frame-time threshold with no machine behind it
@@ -1071,7 +1682,25 @@ this file drives the ladder, with a screenshot each.
       giving a constant force vector where it should sweep). What is left is what Linux could
       not do.
 
-      1. **Does it run here at all?** This is the sibling of F1 and the same three things bite:
+      **Step 1 is DONE (2026-09-20). Steps 2 and 3 are open and are the ones that matter.**
+      The image builds here (exit 0) and a mechanism runs in **1.0 s**. Of the three things this
+      item said would bite, two did not bite and the third is **wrong**: the `C:\...:/work` mount
+      resolves; the container writes as root (no `os.getuid`, so no `--user`) and the host deletes
+      the directory anyway, the same answer F1 gave; and **CRLF line endings do not break the
+      run** — removing the explicit `newline="
+"` still succeeds, because the entry point is
+      invoked as `python /work/chrono_run.py`, an argument rather than an executable, so its
+      shebang is never parsed. Only `test_the_entry_point_is_written_with_lf` fails. The line
+      stays as insurance against a caller that execs the file; `run.py` now records which of the
+      two it is.
+      The pendulum oracle reproduces: **29.4190 N against 3mg = 29.4200 N (0.003%)**, radius
+      holding 500.000000-500.000613 mm. `chrono_version` reads `unknown` because the conda-forge
+      package carries **no `__version__` at all**, which is why the image content id is the only
+      identity this engine has. And **every Chrono test before today was against a stub** — 77 of
+      them, two hand-written fakes — so `tests/test_dynamics_chrono_engine.py` (10, real engine,
+      skipped where there is no image) is the first thing here that has touched Chrono.
+
+      1. **Does it run here at all?** ~~This is the sibling of F1 and the same three things bite:~~
          the bind mount is a **Windows path** (`-v C:\...:/work`); there is no `os.getuid`, so
          `run_mechanism` sends no `--user` and the container writes as root into a directory
          this server must then delete; and the entry point must arrive with **LF** endings (it

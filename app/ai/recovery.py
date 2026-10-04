@@ -302,8 +302,15 @@ def _one_line(message: str, limit: int = 240) -> str:
     return flattened[: limit - 1] + "…"
 
 
+#: The question and the quoting rule, under public names, because `intervention.py`
+#: builds the *pressable* form of the same decision and the two must not drift. Sharing
+#: the text is what stops the button offering one fork and the transcript another.
+QUESTIONS: Final[dict[str, str]] = _QUESTIONS
+one_line = _one_line
+
 __all__ = [
     "BAD_ARGUMENT",
+    "QUESTIONS",
     "GEOMETRY",
     "MAX_SAME_FAILURE",
     "MISSING_SUBJECT",
@@ -313,4 +320,5 @@ __all__ = [
     "Failure",
     "Recovery",
     "escalate",
+    "one_line",
 ]

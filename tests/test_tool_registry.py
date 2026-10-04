@@ -273,3 +273,103 @@ class TestCatiaVocabularyIsOneList:
         specs = {spec.name for spec in CATIA_TOOL_SPECS}
         stale = sorted(CATIA_NO_DOCUMENT_REQUIRED - specs)
         assert not stale, f"CATIA_NO_DOCUMENT_REQUIRED exempts tools that do not exist: {stale}"
+
+
+class TestThePromptedParameterIsReachable:
+    """A parameter the product *tells the user to ask for* must exist on the tool.
+
+    **Gate G1, 2026-09-20, and the third instance of this class.** Every
+    unconverged answer ends with `app/ai/verification.py`'s sentence *"Ask for a
+    convergence study (`grids: 3`) to find out what the number really is"*, and
+    `app/handbook/guides.py` publishes the same advice. `SimulationCreate` has
+    taken `grids` since E7.1. **`run_simulation`, the tool the agent actually
+    calls, did not.** So the product named a parameter, the user asked for it,
+    and the one actor able to act on it had no way to send it: the model
+    submitted three separate single-grid runs instead, each of which reported
+    "not converged", and the question could not be answered at all.
+
+    This is CLAUDE.md's testing item 8 — *a green suite cannot see what the agent
+    was never offered* — after `catia_new_part` (2026-09-05) and
+    `catia_export_step` (2026-09-10). It is the worst of the three, because the
+    other two were silent gaps while this one is advertised in the product's own
+    prose, so the user is actively directed into it.
+
+    The test is written against the *advice*, not against a list of parameters:
+    it reads the sentence the server prints and checks the tool can honour it.
+    A hard-coded `"grids" in schema` would pass the day somebody reworded the
+    advice to name something else.
+    """
+
+    @staticmethod
+    def _run_simulation_schema() -> dict[str, object]:
+        source = (APP / "ai" / "tools.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            named = [k for k in node.keywords if k.arg == "name"]
+            if not named or not isinstance(named[0].value, ast.Constant):
+                continue
+            if named[0].value.value != "run_simulation":
+                continue
+            for keyword in node.keywords:
+                if keyword.arg == "parameters":
+                    # The property NAMES, not the unparsed source. A substring
+                    # test over the source passes for `gridsXX`, which is how
+                    # this guard was first written and how breaking it caught
+                    # itself: the mutant renamed the key and three tests stayed
+                    # green.
+                    keys: set[str] = set()
+                    for inner in ast.walk(keyword.value):
+                        if isinstance(inner, ast.Dict):
+                            for key in inner.keys:
+                                if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                                    keys.add(key.value)
+                    return {"found": True, "keys": keys}
+        return {"found": False, "keys": set()}
+
+    def test_the_convergence_advice_names_a_parameter_the_agent_can_send(self) -> None:
+        from app.ai import verification
+
+        advice = verification.UNCONVERGED_ADVICE if hasattr(
+            verification, "UNCONVERGED_ADVICE"
+        ) else ""
+        printed = (APP / "ai" / "verification.py").read_text(encoding="utf-8")
+        assert "grids: 3" in printed or "grids: 3" in advice, (
+            "The unconverged footnote no longer names `grids: 3`. If the advice moved, "
+            "move this test with it — the claim is that whatever the product tells the "
+            "user to ask for is something the agent can actually send."
+        )
+
+        schema = self._run_simulation_schema()
+        assert schema["found"], "run_simulation is no longer declared with a `parameters=`."
+        assert "grids" in schema["keys"], (
+            "run_simulation does not accept `grids`, but the product's own unconverged "
+            "answer tells the user to ask for `grids: 3`. That is the gap gate G1 hit on "
+            "2026-09-20: the agent submitted three separate single-grid runs instead."
+        )
+
+    def test_the_handler_accepts_it_too(self) -> None:
+        """A schema entry the handler would reject is the same gap one layer down."""
+        import inspect
+
+        from app.ai.tools import ToolBox
+
+        parameters = inspect.signature(ToolBox._run_simulation).parameters
+        assert "grids" in parameters, (
+            "run_simulation's schema advertises `grids` and the handler does not take it, "
+            "so every call using it fails with an unexpected-keyword error."
+        )
+
+    def test_two_grids_is_refused_by_name_the_way_the_route_refuses_it(self) -> None:
+        """One product, one wording. The route refuses 2; so must the tool.
+
+        Not because two grids is dangerous, but because a caller who meets the
+        route's refusal and then the tool's should not be told two different
+        things about the same rule.
+        """
+        source = (APP / "ai" / "tools.py").read_text(encoding="utf-8")
+        assert "two give a difference" in source, (
+            "The tool no longer refuses grids=2 in the route's words. `SimulationCreate."
+            "_two_grids_cannot_form_a_study` is the wording to match."
+        )

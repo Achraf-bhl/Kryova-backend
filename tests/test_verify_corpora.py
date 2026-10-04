@@ -189,6 +189,17 @@ DAT = "  1  2.0000E+00\n  2  3.0000E+00\n"
 FRD = "    1C\n -4  DISP\n -5  D1\n -1         1 1.00000E+00\n -3\n"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "the corpora harness is POSIX-only and so is this fixture: the fake solver "
+        "is a #! script and the check scripts are perl, so Windows answers "
+        "WinError 193 rather than running them. The harness itself runs the "
+        "solvers' own suites under Linux (debian:bookworm-slim for CalculiX, a "
+        "conda environment for code_aster) -- see app/verify/corpora.py's "
+        "_kill_process_group. A skip is not a pass; these run in CI on Linux."
+    ),
+)
 class TestACaseIsJudgedTheWayCompareJudgesIt:
     def test_matching_outputs_reproduce(self, corpus_dir: Path) -> None:
         _case(corpus_dir, "beam", write={"beam.dat": DAT, "beam.frd": FRD},

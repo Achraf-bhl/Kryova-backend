@@ -50,7 +50,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from app.mesh.types import TetMesh
-from app.solve.base import SolveOutput, Solver
+from app.solve.base import ConductionSolver, SolveOutput, Solver
+from app.solve.conduction import ThermalCase
 from app.solve.types import LoadCase, SolverError
 
 #: Relative tolerance on peak displacement. Loose enough for two different
@@ -72,6 +73,29 @@ UNIFORM_STRESS_TOLERANCE = 1e-3
 #: reported rather than judged.
 UNIFORM_FIELD_SPREAD = 0.02
 
+#: Relative tolerance on every temperature row of a conduction comparison,
+#: measured against the reference field's **span** rather than against a kelvin
+#: value — see `_difference`. Held at the same order as displacement for the
+#: same reason: two direct solvers on one symmetric positive-definite system
+#: differ by their pivot orders and nothing else, and a wrong boundary face
+#: moves a temperature by whole kelvin rather than by parts in a thousand.
+TEMPERATURE_TOLERANCE = 1e-3
+
+#: Relative tolerance on the heat crossing the fixed-temperature regions. Looser
+#: than the field by an order of magnitude on purpose: it is a *sum of
+#: reactions*, so it accumulates the round-off of every held node, and the two
+#: solvers reach it by genuinely different routes — ours from `K T - f` over the
+#: assembled system, CalculiX's from the `RFL` block its own solver wrote.
+HEAT_TOLERANCE = 1e-2
+
+#: Below this the boundary heat is reported rather than judged, in watts. A
+#: model with two held regions at different temperatures supplies exactly as
+#: much as it removes, so the true value is zero and a relative tolerance
+#: against it is not a test. The floor is one milliwatt: small enough that any
+#: model with a real heat path through a held region is judged, large enough
+#: that the residue of a balanced one is not.
+HEAT_FLOOR_W = 1e-3
+
 
 @dataclass
 class Difference:
@@ -89,6 +113,11 @@ class Difference:
     #: None when this quantity is reported rather than judged — see the module
     #: docstring on peak stress in a non-uniform field.
     agrees: bool | None
+    #: What `relative` was divided by, when that is not the reference's own
+    #: magnitude. Recorded rather than implied: a reader of a +0.02% row has to
+    #: be able to tell 0.02% of 400 K from 0.02% of the 100 K the problem
+    #: actually spans, and those differ by a factor of four.
+    scale: float | None = None
 
     def __str__(self) -> str:
         verdict = {True: "agrees", False: "DIFFERS", None: "reported"}[self.agrees]
@@ -236,19 +265,33 @@ def _compare_outputs(
 
 
 def _difference(
-    name: str, reference: float, candidate: float, tolerance: float | None
+    name: str,
+    reference: float,
+    candidate: float,
+    tolerance: float | None,
+    scale: float | None = None,
 ) -> Difference:
-    """One quantity, relative to the reference.
+    """One quantity, relative to the reference — or to `scale` where given.
 
     A reference of exactly zero is handled rather than divided by: the relative
     difference is then zero if the candidate is zero too and infinite otherwise,
     which is the correct reading — going from nothing to something is not a small
     relative change however small the absolute number.
+
+    **`scale` exists because a quantity's own magnitude is not always the right
+    denominator.** A displacement of 0.012 mm and a stress of 25 MPa are both
+    measured from a physical zero, so a part-per-thousand of the value means
+    something. An absolute temperature is not: 400.4 K against 400 K is a
+    thousandth of the *kelvin scale* and a whole four hundredth of a problem
+    that spans 100 K, and judging it against 400 would pass a solver that got
+    the temperature rise wrong by 0.4%. So a conduction comparison passes the
+    field's own span, and the row records what it divided by.
     """
-    if reference == 0.0:
-        relative = 0.0 if candidate == 0.0 else float("inf")
+    denominator = abs(scale) if scale is not None else abs(reference)
+    if denominator == 0.0:
+        relative = 0.0 if candidate == reference else float("inf")
     else:
-        relative = (candidate - reference) / abs(reference)
+        relative = (candidate - reference) / denominator
 
     agrees: bool | None
     if tolerance is None:
@@ -263,15 +306,137 @@ def _difference(
         relative=relative,
         tolerance=tolerance,
         agrees=agrees,
+        scale=scale,
+    )
+
+
+def compare_conduction(
+    mesh: TetMesh,
+    case: "ThermalCase",
+    reference: "ConductionSolver",
+    candidate: "ConductionSolver",
+) -> Agreement:
+    """Run both conduction solvers on one case and say whether they agree.
+
+    The same contract as `compare`: any failure of either solver makes the
+    comparison UNMEASURED with the refusing solver's own words, because "do
+    these two agree" has no answer when one of them declined to answer.
+
+    **What is judged, and against what scale.** Every temperature row is divided
+    by the *reference field's span* rather than by its own magnitude, for the
+    reason `_difference` gives — a kelvin temperature is measured from a zero
+    the problem did not choose, so a relative error against 400 K flatters a
+    solver that got a 100 K rise wrong.
+
+    * **The node count must match exactly.** Both read it off the same mesh, so
+      a difference means the two were not given the same model and nothing below
+      it means anything. This is `compare`'s volume row in its thermal form.
+    * **The peak nodal difference is the finding.** A comparison of minima and
+      maxima alone passes two fields that are wrong in opposite places by the
+      same amount, which is exactly what a mis-mapped boundary face produces.
+      Its reference is 0.0 — the whole claim is that the two fields coincide —
+      and dividing by the reference there would be meaningless, which is the
+      other half of what `scale` is for.
+    * **The boundary heat is judged only when there is enough of it to judge.**
+      `fixed_temperature_heat_w` is legitimately zero on a model with two held
+      regions at different temperatures (what one supplies the other removes),
+      and a relative tolerance against zero is not a test. Below
+      `HEAT_FLOOR_W` it is reported rather than judged, and the report says so.
+
+    **Heat flux is not compared at all**, and that is deliberate:
+    `CalculiXConductionSolver` derives its flux by differentiating CalculiX's
+    temperature field with *this repository's* gradient operator, so comparing
+    it would be comparing one operator with itself and would read as
+    corroboration.
+    """
+    try:
+        reference_field = reference.solve(mesh, case)
+    except SolverError as failed:
+        return _unmeasured_named(
+            reference.name, candidate.name, f"{reference.name} could not run: {failed}"
+        )
+
+    try:
+        candidate_field = candidate.solve(mesh, case)
+    except SolverError as failed:
+        return _unmeasured_named(
+            reference.name, candidate.name, f"{candidate.name} could not run: {failed}"
+        )
+
+    left = reference_field.result
+    right = candidate_field.result
+    span = left.max_temperature_k - left.min_temperature_k
+    # A uniform field is a legitimate answer — a part entirely at ambient — and
+    # has no span to divide by. Its own level is then the only scale available,
+    # and it is a fair one because there is no rise to be wrong about.
+    scale = span if span > 0.0 else abs(left.max_temperature_k) or 1.0
+
+    peak = 0.0
+    if left.node_count == right.node_count:
+        peak = float(
+            np.max(np.abs(candidate_field.temperatures_k - reference_field.temperatures_k))
+        )
+
+    heat = left.fixed_temperature_heat_w
+    heat_tolerance = (
+        HEAT_TOLERANCE if np.isfinite(heat) and abs(heat) >= HEAT_FLOOR_W else None
+    )
+
+    differences = [
+        _difference("node_count", float(left.node_count), float(right.node_count), 0.0),
+        _difference(
+            "min_temperature_k",
+            left.min_temperature_k,
+            right.min_temperature_k,
+            TEMPERATURE_TOLERANCE,
+            scale=scale,
+        ),
+        _difference(
+            "max_temperature_k",
+            left.max_temperature_k,
+            right.max_temperature_k,
+            TEMPERATURE_TOLERANCE,
+            scale=scale,
+        ),
+        _difference(
+            "peak_nodal_difference_k", 0.0, peak, TEMPERATURE_TOLERANCE, scale=scale
+        ),
+        _difference(
+            "fixed_temperature_heat_w",
+            heat,
+            right.fixed_temperature_heat_w,
+            heat_tolerance,
+        ),
+    ]
+
+    return Agreement(
+        reference_name=reference.name,
+        candidate_name=candidate.name,
+        ran=True,
+        differences=differences,
+        # A temperature field has no stress in it to smooth, so the caveat
+        # `report` prints for a non-uniform field does not apply and would read
+        # as a hedge about something this comparison did not do.
+        uniform_field=True,
+    )
+
+
+def _unmeasured_named(reference: str, candidate: str, reason: str) -> Agreement:
+    return Agreement(
+        reference_name=reference, candidate_name=candidate, ran=False, reason=reason
     )
 
 
 __all__ = [
     "DISPLACEMENT_TOLERANCE",
+    "HEAT_FLOOR_W",
+    "HEAT_TOLERANCE",
+    "TEMPERATURE_TOLERANCE",
     "UNIFORM_FIELD_SPREAD",
     "UNIFORM_STRESS_TOLERANCE",
     "Agreement",
     "Difference",
     "compare",
+    "compare_conduction",
     "field_is_uniform",
 ]

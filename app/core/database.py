@@ -248,6 +248,66 @@ def tenant_scope(session: Session, organisation_ids: Iterable[str]) -> Iterator[
         event.remove(session, "after_begin", _on_begin)
 
 
+def widen_tenant_scope(session: Session, organisation_id: str) -> None:
+    """Add one more organisation to the tenant context already published this
+    transaction -- for a row whose own organisation did not exist when the
+    request began, and so could not have been in the `tenant_scope` this
+    request opened with.
+
+    **The bootstrap gap this closes.** `_assign_owning_organisation`'s
+    `before_flush` hook (`app/models/organisation.py`) creates a user's
+    personal organisation on demand, the first time they create a project.
+    `FORCE ROW LEVEL SECURITY` applies to that INSERT exactly as to any
+    other, and the request's tenant context was published *before* the
+    organisation existed -- from `organisation_ids_for_user`, which for a
+    first-time user is empty, published as `NO_TENANTS`. So the organisation
+    a user is creating for themselves was, without this call, never in the
+    one set of ids their own INSERT was allowed to match: every account's
+    first project failed here, the same way on Neon as on a local server,
+    the RLS policy doing exactly what it was told for a row nobody had told
+    it about yet.
+
+    Publishes through the same `set_config(..., true)` as `tenant_scope`, so
+    this is transaction-scoped identically and never outlives it -- calling
+    it mid-transaction only ever *adds* to what the transaction may write,
+    and `SET LOCAL`'s rollback-or-commit boundary still applies, so nothing
+    here can leak into the connection's next borrower under PgBouncer.
+
+    **One statement, not a read then a write.** The obvious version selects
+    `current_setting`, computes the union in Python, and sends a second
+    statement -- a second round trip, and a real one:
+    `test_the_first_project_creates_the_personal_organisation_without_a_lookup`
+    pins the first project a user ever creates to exactly one `SELECT`, and a
+    literal read of the setting is one `_selects()` would count, unlike the
+    `set_config` publish it deliberately excludes (Decision 7). Reading
+    `current_setting` *inside* the `set_config` call keeps this the same one
+    administrative round trip as the original publish, at the server rather
+    than in Python.
+
+    Only sanctioned caller: that `before_flush` hook. Reaching for this
+    anywhere else is a sign the tenant should have been established with
+    `tenant_scope` at request start instead.
+    """
+    bind = session.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    session.connection().execute(
+        text(
+            "SELECT set_config(:name, CASE "
+            "WHEN current_setting(:name, true) IS NULL "
+            "  OR current_setting(:name, true) IN ('', :no_tenants) "
+            "THEN :organisation_id "
+            "ELSE current_setting(:name, true) || ',' || :organisation_id "
+            "END, true)"
+        ),
+        {
+            "name": TENANT_SETTING,
+            "no_tenants": NO_TENANTS,
+            "organisation_id": str(organisation_id),
+        },
+    )
+
+
 def current_tenant_setting(session: Session) -> str | None:
     """What Postgres currently believes the tenant context is, or None.
 

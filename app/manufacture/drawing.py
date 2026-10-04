@@ -42,6 +42,7 @@ drawing is where that rule matters most.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Final
@@ -330,6 +331,25 @@ class CuttingPlane:
 
 
 @dataclass(frozen=True)
+class Leader:
+    """One line from a feature control frame's table row to the feature on a view.
+
+    Master plan E17 task 1. Carried on the `Drawing` rather than on a `DrawnView`
+    because a leader *joins* the two — the table is a property of the sheet and the
+    anchor is a property of one view — and hanging it off the view would leave nothing
+    owning the end that starts at the table.
+
+    `point_mm` is in that view's own millimetres, so it moves with the view when the
+    sheet is laid out again; `DrawnView.to_sheet_mm` is the one conversion, the same one
+    every other view-space quantity goes through.
+    """
+
+    feature: str
+    view: str
+    point_mm: tuple[float, float]
+
+
+@dataclass(frozen=True)
 class DrawnView:
     """One view, its line work, and where it sits on the sheet.
 
@@ -565,6 +585,18 @@ class Drawing:
 
     #: The parts list, drawn as a table above the title block. An assembly drawing's BOM.
     parts: tuple[BomLine, ...] = ()
+
+    #: Where each frame's leader lands, for the frames whose feature was bound to real
+    #: geometry. Empty when no binding was supplied, which is every drawing made before
+    #: E17 task 1 and every one whose caller does not supply `feature_anchors` — those
+    #: frames are tabulated exactly as they were.
+    leaders: tuple[Leader, ...] = ()
+
+    #: Why a frame got no leader, keyed on its feature. Carried beside the leaders
+    #: rather than logged, because "this frame points at nothing and here is why" is
+    #: something the drawing's own record must be able to state — a silently
+    #: unannotated frame reads as one nobody thought needed a leader.
+    unanchored: Mapping[str, str] = field(default_factory=dict)
 
     def view_named(self, name: str) -> DrawnView:
         for candidate in self.views:

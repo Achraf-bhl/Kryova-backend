@@ -61,8 +61,14 @@ class TestExtremesAreExactNotSampled:
         )
         _, _, high, t_high = coordinate_extremes(driver, 0.5)
         assert high == pytest.approx(1.0, abs=1e-12)
-        # 2π·2·t + π/4 = π/2  →  t = 1/32 s.
-        assert t_high == pytest.approx(1.0 / 32.0, abs=1e-12)
+        # 2π·2·t + π/4 = π/2  →  4πt = π/4  →  t = 1/16 s.
+        #
+        # The literal said 1/32 until 2026-09-17, contradicting the comment
+        # directly above it: π/4 divided by 4π is 1/16, and sin at 1/32 is
+        # sin(3π/8) = 0.924, not 1. The implementation was right and only the
+        # expected value was wrong — which the `high == 1.0` line on the row
+        # above could not catch, because a crest is a crest whenever it is found.
+        assert t_high == pytest.approx(1.0 / 16.0, abs=1e-12)
 
     def test_a_harmonic_that_never_reaches_its_crest_peaks_at_the_end(self) -> None:
         driver = Driver(joint="j", kind="harmonic", amplitude=1.0, frequency_hz=1.0)

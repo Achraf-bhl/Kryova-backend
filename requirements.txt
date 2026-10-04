@@ -83,3 +83,17 @@ httpx==0.28.1
 # pyLife (E8) is the fatigue engine app/fatigue/backend.py federates to.
 openmdao==3.45.1
 pylife==2.3.1
+
+# Laya (ConvAI Innovations, Apache-2.0) -- a 421M non-autoregressive decision
+# model, the open-weight shape TypeSafe's Jev introduced (System One Models,
+# 2026-09-15): typed Choice/Score/Noul questions over a state, answered in one
+# forward pass with a calibrated probability per option, never a token of text.
+# `app/ai/laya_decide.py` is the one caller: routing "which tool family does
+# this request need" off the agent's own slow provider and onto a model small
+# enough to answer in milliseconds on hardware the 9B generator does not fit.
+# torch is the CPU wheel by default; a CUDA build is a per-machine install
+# (`pip install torch --index-url https://download.pytorch.org/whl/cu121`),
+# never pinned here because the right CUDA/driver pairing is per-GPU, not
+# per-checkout.
+laya==0.3.11
+torch==2.5.1

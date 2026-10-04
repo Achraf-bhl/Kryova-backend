@@ -69,3 +69,8 @@ _probe*.py
 # below; `.env.local.bak` was not, and a session that copies one aside before
 # editing would have committed the database password (2026-09-10).
 .env*.bak
+
+# scripts/dev_console.py's cached login (cookies + CSRF token) -- a bearer
+# credential for whatever local dev account it signed into, same class of
+# file as .env.local and kept out of history for the same reason.
+scripts/.dev_session.json

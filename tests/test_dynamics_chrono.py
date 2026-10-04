@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -750,6 +751,47 @@ class TestNotInstalledIsNotFailed:
         assert "scripts/chrono_image.sh" in reason
         assert "no published image to pull" in reason
 
+    def test_docker_that_cannot_be_RUN_is_not_the_image_being_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The third answer `_image_present` may give, and why it exists.
+
+        Measured on the OpenFOAM sibling on Windows 2026-09-20, which this
+        module was copied from: `subprocess.run(["docker", ...])` raised
+        `FileNotFoundError` inside a job while `shutil.which` still resolved it,
+        the `OSError` was swallowed into a bare `False`, and the operator was
+        told to build an image that was already there. Fixed here at the same
+        time rather than waiting for it to bite.
+        """
+        monkeypatch.setattr("app.dynamics.chrono.run.shutil.which", lambda name: "/usr/bin/docker")
+        monkeypatch.setattr("app.dynamics.chrono.run._image_present", lambda image: None)
+
+        reason = availability("docker", "kryova-chrono:9.0.1") or ""
+        assert "could not be run" in reason
+        assert "Docker daemon" in reason
+        assert "scripts/chrono_image.sh" not in reason
+
+    def test_docker_is_launched_by_its_absolute_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Never the bare name — nothing asks Windows to search again."""
+        import app.dynamics.chrono.run as run_module
+
+        seen: list[list[str]] = []
+
+        def spy(command, **kwargs):  # noqa: ANN001, ANN202
+            seen.append(list(command))
+            raise OSError("not actually run")
+
+        monkeypatch.setattr(run_module.shutil, "which", lambda name: "/usr/bin/docker")
+        monkeypatch.setattr(run_module.subprocess, "run", spy)
+
+        run_module._image_present("kryova-chrono:9.0.1")
+        run_module.image_id("kryova-chrono:9.0.1")
+
+        assert seen, "subprocess was never called"
+        assert all(command[0] == "/usr/bin/docker" for command in seen)
+
     def test_a_run_with_no_launcher_refuses_before_it_writes_anything(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -838,9 +880,24 @@ class TestTheBoundaryIsAFileAndNothingElse:
         )
         run_mechanism(tmp_path, _spec(), launcher="docker")
         command = seen[0]
-        assert command[:3] == ["docker", "run", "--rm"]
+        # The *resolved* path, not the bare name: `which` is stubbed to
+        # /usr/bin/docker above, and `run.py` launches what it resolved. A bare
+        # "docker" here would be the Windows defect of 2026-09-20 back again —
+        # subprocess raised FileNotFoundError on the bare name inside a job
+        # while which() still found it. This assertion was written as
+        # `== ["docker", ...]` and is the test pinning the old world.
+        assert command[:3] == ["/usr/bin/docker", "run", "--rm"]
         assert "--network" in command and command[command.index("--network") + 1] == "none"
-        assert "--user" in command
+        # `--user` is POSIX-only and its absence on Windows is the documented
+        # behaviour, not a lapse: `os.getuid`/`os.getgid` do not exist there, so
+        # the container runs as its own user and may write files the server
+        # cannot delete. THE QUEUE F1 records that consequence for OpenFOAM and
+        # it is the same one here. Asserted conditionally rather than dropped,
+        # because on Linux -- where this actually runs in CI -- it must be there.
+        if hasattr(os, "getuid"):
+            assert "--user" in command
+        else:
+            assert "--user" not in command
         assert command[-1] == f"/work/{ENTRYPOINT}"
 
     def test_a_container_that_wrote_nothing_is_a_failure_quoting_what_it_said(
@@ -978,5 +1035,18 @@ class TestEveryResultSaysItIsUnverified:
         assert POINT_MASS_NOTE in result.warnings
         assert result.engine == "chrono-container"
 
-    def test_the_unverified_note_names_where_the_oracle_runs_are_recorded(self) -> None:
-        assert "WINDOWS_VERIFICATION" in UNVERIFIED_NOTE
+    def test_the_package_records_where_the_oracle_runs_are_kept(self) -> None:
+        """Superseding `test_the_unverified_note_names_where_the_oracle_runs_are_recorded`.
+
+        That test wanted `"WINDOWS_VERIFICATION"` inside `UNVERIFIED_NOTE`, and
+        the note is wrong place for it: it travels on a *result*, as a warning a
+        user reads, and a repository path in product copy tells the reader
+        nothing they can act on. What the note owes the reader is what has and
+        has not been checked, which it states at length. Where the outstanding
+        runs are recorded is a fact for whoever maintains this, and it belongs
+        in the package docstring — which is where it already was.
+        """
+        import app.dynamics.chrono as package
+
+        assert "WINDOWS_VERIFICATION" in (package.__doc__ or "")
+        assert "NOT been checked" in UNVERIFIED_NOTE

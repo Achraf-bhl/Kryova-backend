@@ -1171,3 +1171,109 @@ class TestTheVonMisesReaderStaysThreeDimensional:
 
         read = stress_component_at((10.0, 0.0, 0.0), "yy").read
         assert read(_PlaneIsh(), _Output()) == pytest.approx(7.0)  # type: ignore[arg-type]
+
+
+class TestTheStudyConvergesOnTheNumberTheVerdictUses:
+    """Master plan E7 task 10 — the other half of task 9.
+
+    Task 9 made the *answer* quote `governing_peak_mpa`, the larger of the
+    element-centroid and nodal-surface peaks. Until this task the *study* still
+    converged on `max_von_mises_mpa`, the element value, so a `converged` badge
+    was about a different number from the one the reader was given — a subtler
+    form of exactly what gate G1 caught on 2026-09-20.
+
+    **The change was measured before it was made**, because the fear was that a
+    surface peak would be noisier across remeshes: it moves with the position of
+    a node, where a centroid does not. On the 180x50x12 bar with 400 N at the
+    free end, whose closed-form surface stress is 60.00 MPa, at 8.0 / 5.7 /
+    4.1 mm:
+
+        element centroid     -> 49.104 MPa, order 2.375, GCI 0.025%
+        governing (surface)  -> 60.062 MPa, order 2.466, GCI 0.016%
+
+    The centroid quantity converged *confidently on a number 18% low*. The
+    surface one converged slightly more cleanly and landed on the answer. The
+    fear was not borne out here; if a part is ever found where it does refuse
+    more often, the refusals must be shown to be real before this is reverted.
+    """
+
+    LENGTH, WIDTH, THICKNESS, FORCE = 180.0, 50.0, 12.0, 400.0
+
+    @property
+    def closed_form_surface_mpa(self) -> float:
+        second_moment = self.WIDTH * self.THICKNESS**3 / 12.0
+        return self.FORCE * self.LENGTH * (self.THICKNESS / 2.0) / second_moment
+
+    def _bar_case(self):
+        from app.solve.materials import MATERIALS
+        from app.solve.types import FaceSelector, Fixture, ForceLoad, LoadCase
+
+        return LoadCase(
+            name="bar",
+            material=MATERIALS["steel-1018"],
+            fixtures=[Fixture(where=FaceSelector(axis="x", side="min"), kind="clamp")],
+            loads=[
+                ForceLoad(
+                    where=FaceSelector(axis="x", side="max"),
+                    force_n=(0.0, 0.0, -self.FORCE),
+                )
+            ],
+        )
+
+    def test_the_study_reads_the_governing_peak_not_the_element_value(self) -> None:
+        """Read through the Quantity, so this cannot pass on a stale import."""
+        from app.solve.types import StaticResult
+        from app.verify.quantities import MAX_VON_MISES
+
+        class _Output:
+            result = StaticResult(
+                max_displacement_mm=1.0,
+                max_displacement_node=0,
+                max_von_mises_mpa=40.0,
+                max_von_mises_element=0,
+                factor_of_safety=9.0,
+                yields=False,
+                mass_kg=1.0,
+                volume_mm3=1000.0,
+                node_count=4,
+                element_count=1,
+                solve_seconds=0.1,
+                max_von_mises_surface_mpa=60.0,
+                factor_of_safety_surface=6.0,
+            )
+
+        assert MAX_VON_MISES.read(object(), _Output()) == 60.0, (
+            "the study is still reading the element value; a converged badge would then "
+            "be about a different number from the one the answer quotes"
+        )
+
+    def test_it_converges_to_the_closed_form_surface_stress(self) -> None:
+        """The measurement that justified the change, run rather than quoted."""
+        from app.mesh.primitives import box_mesh, promote_to_tet10
+        from app.solve.linear_static import LinearStaticSolver
+        from app.verify.convergence import run_study
+        from app.verify.quantities import MAX_VON_MISES
+
+        case, solver = self._bar_case(), LinearStaticSolver()
+
+        def sample(h: float):
+            mesh = promote_to_tet10(
+                box_mesh(
+                    (self.LENGTH, self.WIDTH, self.THICKNESS),
+                    divisions=(
+                        max(6, round(self.LENGTH / h)),
+                        max(3, round(self.WIDTH / h)),
+                        max(3, round(self.THICKNESS / h)),
+                    ),
+                )
+            )
+            return mesh, MAX_VON_MISES.read(mesh, solver.solve(mesh, case))
+
+        study = run_study(MAX_VON_MISES.name, MAX_VON_MISES.unit, [8.0, 5.7, 4.1], sample)
+        stated = study.value_or_refuse()
+
+        assert stated is not None, f"the study refused to state a value: {study.report()}"
+        assert stated == pytest.approx(self.closed_form_surface_mpa, rel=0.05), (
+            f"converged on {stated:.3f} MPa against a closed-form surface stress of "
+            f"{self.closed_form_surface_mpa:.2f} MPa"
+        )

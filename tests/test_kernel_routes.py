@@ -413,6 +413,72 @@ class TestCheckingDesignRulesAgainstTheLivePart:
         assert response.status_code == 422
         assert "pull_direction" in response.json()["detail"]
 
+    def test_the_route_sends_the_vector_the_tool_now_declares(self) -> None:
+        """There is no translation left to do, and that is THE QUEUE E10's answer.
+
+        The tool used to declare an origin *plane* while this route's public API
+        took a *vector*, so an adapter mapped one to the other and could only map
+        three — a plane has no side, so a mould pulled along −Z was unaskable.
+        `catia_analysis_part` now takes the same vector `catia_draft` has always
+        taken for the identical quantity.
+        """
+        from app.api.routes.kernel import _pull_vector
+
+        assert _pull_vector([0.0, 0.0, 1.0]) == [0.0, 0.0, 1.0]
+        assert _pull_vector([0.0, 0.0, -1.0]) == [0.0, 0.0, -1.0]
+        assert _pull_vector([1.0, 1.0, 0.0]) == [1.0, 1.0, 0.0]
+        assert _pull_vector(None) == [0.0, 0.0, 1.0]
+
+    def test_a_direction_that_points_nowhere_is_still_refused_here(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """The refusal the adapter's removal must not take with it.
+
+        The route sent the vector straight through before the adapter existed,
+        the kernel refused it, the broad handler turned that into "the draft scan
+        failed, so its rules are unmeasured", and every draft and undercut rule
+        on every part came back unmeasured with a note nobody had a reason to
+        disbelieve. A zero vector is what an arithmetic slip produces, so it is
+        refused at the boundary and not deep in a scan.
+        """
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(auth_client, mine.id, pull_direction=[0.0, 0.0, 0.0])
+
+        assert response.status_code == 400
+        assert "points nowhere" in response.json()["detail"]
+
+    def test_the_mould_can_be_pulled_the_other_way(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """THE QUEUE E10, end to end. A −Z pull used to be a 400 naming the three
+        directions that could be asked about; it now reaches the scan, and the
+        answer is not an `unmeasured` note."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(auth_client, mine.id, pull_direction=[0.0, 0.0, -1.0])
+
+        assert response.status_code == 200
+        assert not any(
+            "draft scan failed" in note for note in response.json().get("notes", [])
+        )
+
+    def test_an_arbitrary_pull_reaches_the_scan_too(
+        self, auth_client: Any, db_session: Session, current_user_id: str
+    ) -> None:
+        """Not only the six named ones. A tool drawn off an angled parting line is
+        an ordinary thing to want, and the arithmetic underneath never needed the
+        direction to be an axis — `analyse_draft` normalises whatever it is
+        given."""
+        mine = _conversation(db_session, current_user_id)
+        _build_plate(mine.id)
+        response = self._check(auth_client, mine.id, pull_direction=[0.0, 1.0, 1.0])
+
+        assert response.status_code == 200
+        assert not any(
+            "draft scan failed" in note for note in response.json().get("notes", [])
+        )
+
     def test_an_unknown_process_is_refused(
         self, auth_client: Any, db_session: Session, current_user_id: str
     ) -> None:

@@ -66,17 +66,23 @@ T = TypeVar("T", bound=BaseModel)
 #: "give the answer blue" if nothing stops it.
 DEFAULT_REASONING_BUDGET: Final = 8_192
 
-#: Attempts at one HTTP request before a transient failure is reported. A hosted
-#: API sheds load with 429 and 503 at peak, and every call here is idempotent --
-#: a chat completion mutates nothing, so a repeat is a fresh sample and not a
-#: duplicated action. A timeout is *not* retried: the caller's patience is spent.
-HTTP_ATTEMPTS = 3
+#: Seconds to wait before each retry, so the request is tried `len + 1` times.
+#: Sized from a live measurement, 2026-09-23, against Gemini's free tier: a
+#: tool-calling turn carrying a real ~46-tool offer 503'd five times running
+#: ("This model is currently experiencing high demand") while no-tool turns on
+#: the same account answered every time. The bursts lasted several seconds to
+#: low tens of seconds -- past what a sub-2 s budget rides out -- and the same
+#: request tried a little later routinely succeeds, so this is capacity
+#: backpressure and not a rejection. Every call here is idempotent (a chat
+#: completion mutates nothing; a repeat is a fresh sample, not a duplicated
+#: action), and a timeout is *not* retried: the caller's patience is spent.
+RETRY_BACKOFF_S: Final[tuple[float, ...]] = (1.0, 3.0, 8.0)
+HTTP_ATTEMPTS = len(RETRY_BACKOFF_S) + 1
 
 #: Statuses worth another attempt. A 4xx other than 429 is a bug in what was
 #: sent and fails identically forever.
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 
-RETRY_BACKOFF_S = 0.5
 #: Ceiling on how long a `Retry-After` header can make one attempt wait.
 MAX_RETRY_WAIT_S = 8.0
 
@@ -473,7 +479,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def _wait(self, attempt: int, response: httpx.Response | None) -> None:
         """Sleep before the next attempt: the server's `Retry-After`, else backoff."""
-        delay = RETRY_BACKOFF_S * attempt
+        delay = RETRY_BACKOFF_S[min(attempt, len(RETRY_BACKOFF_S)) - 1]
         if response is not None:
             try:
                 delay = max(delay, float(response.headers.get("retry-after", "")))
@@ -720,6 +726,9 @@ class OpenAICompatibleProvider(LLMProvider):
                     id=raw.get("id") or function.get("name", "call"),
                     name=function.get("name", ""),
                     arguments=arguments or {},
+                    # Gemini-only today (see `ToolCall.provider_extra`); any
+                    # other endpoint simply has no `extra_content` to carry.
+                    provider_extra=raw.get("extra_content") or None,
                 )
             )
         reasoning = message.get(self._reasoning_field) if self._reasoning_field else None

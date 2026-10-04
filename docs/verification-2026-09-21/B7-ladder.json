@@ -1,0 +1,567 @@
+[
+  {
+    "label": "M3",
+    "skipped": "a folded sheet: no sheet-metal operation exists in the CATIA registry, deliberately, until THE QUEUE E1 writes its COM half on a seat"
+  },
+  {
+    "design": "Plate",
+    "plan_digest": "b6c2ac2bfd6e0347d39b92134564a64278678dc19f764cc980fd5fa4e2d16728",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": true,
+    "divergences": [
+      "volume_mm3",
+      "surface_area_mm2",
+      "mass_kg",
+      "face_count",
+      "edge_count",
+      "solid_count",
+      "has_solid",
+      "centre_of_mass_mm",
+      "bounding_box_mm.size"
+    ],
+    "unsupported": {},
+    "failures": {},
+    "measured": {
+      "occt": {
+        "has_solid": true,
+        "face_count": 6,
+        "edge_count": 12,
+        "solid_count": 1,
+        "provenance": {
+          "face_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "edge_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "solid_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "bounding_box_mm": {
+            "basis": "measured",
+            "method": "Bnd_Box over the B-rep"
+          },
+          "surface_area_mm2": {
+            "basis": "measured",
+            "method": "BRepGProp surface integration"
+          },
+          "volume_mm3": {
+            "basis": "measured",
+            "method": "BRepGProp volume integration"
+          },
+          "centre_of_mass_mm": {
+            "basis": "measured",
+            "method": "BRepGProp volume integration"
+          },
+          "mass_kg": {
+            "basis": "measured",
+            "method": "volume integration times the assigned density, 7870 kg/m^3"
+          },
+          "oriented_bounding_box_mm": {
+            "basis": "approximated",
+            "method": "Bnd_OBB orientation search (AddOBB, optimal)"
+          }
+        },
+        "bounding_box_mm": {
+          "min": [
+            -15.0000001,
+            -10.0000001,
+            -1e-07
+          ],
+          "max": [
+            15.0000001,
+            10.0000001,
+            5.0000001
+          ],
+          "size": [
+            30.0000002,
+            20.0000002,
+            5.000000200000001
+          ]
+        },
+        "surface_area_mm2": 1700.0,
+        "volume_mm3": 3000.0,
+        "centre_of_mass_mm": [
+          6.106226635438363e-17,
+          1.1102230246251565e-16,
+          2.5
+        ],
+        "oriented_bounding_box_mm": {
+          "size": [
+            30.0000002,
+            20.0000002,
+            5.000000200000001
+          ],
+          "volume_mm3": 3000.000170000002
+        },
+        "density_kg_m3": 7870.0,
+        "mass_kg": 0.023610000000000003,
+        "features": [
+          "p_body"
+        ],
+        "material": "steel-1018"
+      },
+      "catia": {
+        "has_solid": true,
+        "mass_kg": 0.02358,
+        "density_kg_m3": 7860.0,
+        "volume_mm3": 3000.0,
+        "surface_area_mm2": 1700.0,
+        "center_of_gravity_mm": [
+          0.0,
+          0.0,
+          2.5
+        ],
+        "bounding_box_mm": {
+          "min": [
+            -15.0,
+            -10.0,
+            0.0
+          ],
+          "max": [
+            15.0,
+            10.0,
+            5.0
+          ],
+          "size": [
+            30.0,
+            20.0,
+            5.0
+          ]
+        },
+        "material_applied": true,
+        "mass_is_provisional": false,
+        "face_count": 6,
+        "edge_count": 12,
+        "topology_note": "face_count and edge_count are searched on the solid; edge_count excludes sketch geometry. solid_count is not reported: CATIA accepts no Selection.Search grammar for solids on this seat.",
+        "features": [
+          {
+            "name": "p_body",
+            "type": "Shape"
+          }
+        ],
+        "approximate": false
+      },
+      "divergences": [
+        "solid_count"
+      ],
+      "deltas": {
+        "volume_mm3": {
+          "occt": 3000.0,
+          "catia": 3000.0,
+          "abs": 0.0,
+          "rel": 0.0
+        },
+        "surface_area_mm2": {
+          "occt": 1700.0,
+          "catia": 1700.0,
+          "abs": 0.0,
+          "rel": 0.0
+        },
+        "mass_kg": {
+          "occt": 0.023610000000000003,
+          "catia": 0.02358,
+          "abs": 3.0000000000002247e-05,
+          "rel": 0.0012706480304956478
+        }
+      },
+      "absent": {
+        "not reported by catia": [
+          "centre_of_mass_mm",
+          "solid_count"
+        ],
+        "not reported by occt": [
+          "center_of_gravity_mm"
+        ]
+      }
+    }
+  },
+  {
+    "design": "BoredPlate",
+    "plan_digest": "98387e6798165f30b5b77c1f8102a1380bedda7e74bb7fd84c85078d3fcae26e",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": true,
+    "divergences": [
+      "volume_mm3",
+      "surface_area_mm2",
+      "mass_kg",
+      "face_count",
+      "edge_count",
+      "solid_count",
+      "has_solid",
+      "centre_of_mass_mm",
+      "bounding_box_mm.size"
+    ],
+    "unsupported": {},
+    "failures": {},
+    "measured": {
+      "occt": {
+        "has_solid": true,
+        "face_count": 7,
+        "edge_count": 15,
+        "solid_count": 1,
+        "provenance": {
+          "face_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "edge_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "solid_count": {
+            "basis": "measured",
+            "method": "TopExp traversal, de-duplicated"
+          },
+          "bounding_box_mm": {
+            "basis": "measured",
+            "method": "Bnd_Box over the B-rep"
+          },
+          "surface_area_mm2": {
+            "basis": "measured",
+            "method": "BRepGProp surface integration"
+          },
+          "volume_mm3": {
+            "basis": "measured",
+            "method": "BRepGProp volume integration"
+          },
+          "centre_of_mass_mm": {
+            "basis": "measured",
+            "method": "BRepGProp volume integration"
+          },
+          "mass_kg": {
+            "basis": "measured",
+            "method": "volume integration times the assigned density, 7870 kg/m^3"
+          },
+          "oriented_bounding_box_mm": {
+            "basis": "approximated",
+            "method": "Bnd_OBB orientation search (AddOBB, optimal)"
+          }
+        },
+        "bounding_box_mm": {
+          "min": [
+            -30.0000001,
+            -20.0000001,
+            -1e-07
+          ],
+          "max": [
+            30.0000001,
+            20.0000001,
+            10.0000001
+          ],
+          "size": [
+            60.0000002,
+            40.0000002,
+            10.000000199999999
+          ]
+        },
+        "surface_area_mm2": 6950.79644737231,
+        "volume_mm3": 22869.026644707676,
+        "centre_of_mass_mm": [
+          -2.752810050309406e-16,
+          3.908195641643307e-19,
+          4.999999999999998
+        ],
+        "oriented_bounding_box_mm": {
+          "size": [
+            60.0000002,
+            40.0000002,
+            10.000000199999999
+          ],
+          "volume_mm3": 24000.000680000005
+        },
+        "density_kg_m3": 7870.0,
+        "mass_kg": 0.17997923969384944,
+        "features": [
+          "p_body",
+          "p_cut"
+        ],
+        "material": "steel-1018"
+      },
+      "catia": {
+        "has_solid": true,
+        "mass_kg": 0.179751,
+        "density_kg_m3": 7860.0,
+        "volume_mm3": 22869.0266,
+        "surface_area_mm2": 6950.7964,
+        "center_of_gravity_mm": [
+          -0.0,
+          0.0,
+          5.0
+        ],
+        "bounding_box_mm": {
+          "min": [
+            -30.0,
+            -20.0,
+            0.0
+          ],
+          "max": [
+            30.0,
+            20.0,
+            10.0
+          ],
+          "size": [
+            60.0,
+            40.0,
+            10.0
+          ]
+        },
+        "material_applied": true,
+        "mass_is_provisional": false,
+        "face_count": 7,
+        "edge_count": 14,
+        "topology_note": "face_count and edge_count are searched on the solid; edge_count excludes sketch geometry. solid_count is not reported: CATIA accepts no Selection.Search grammar for solids on this seat.",
+        "features": [
+          {
+            "name": "p_body",
+            "type": "Shape"
+          },
+          {
+            "name": "p_cut",
+            "type": "Shape"
+          }
+        ],
+        "approximate": false
+      },
+      "divergences": [
+        "edge_count",
+        "solid_count"
+      ],
+      "deltas": {
+        "volume_mm3": {
+          "occt": 22869.026644707676,
+          "catia": 22869.0266,
+          "abs": 4.470767453312874e-05,
+          "rel": 1.954944354550172e-09
+        },
+        "surface_area_mm2": {
+          "occt": 6950.79644737231,
+          "catia": 6950.7964,
+          "abs": 4.737230938189896e-05,
+          "rel": 6.815378603096292e-09
+        },
+        "mass_kg": {
+          "occt": 0.17997923969384944,
+          "catia": 0.179751,
+          "abs": 0.00022823969384944132,
+          "rel": 0.0012681445606597989
+        }
+      },
+      "absent": {
+        "not reported by catia": [
+          "centre_of_mass_mm",
+          "solid_count"
+        ],
+        "not reported by occt": [
+          "center_of_gravity_mm"
+        ]
+      }
+    }
+  },
+  {
+    "design": "M1 machined bracket",
+    "plan_digest": "ca58d683531f51c590fb20dcea5d255f1b491797654b308e5cbf5cd01a9f6bca",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "bracket.bore \u2014 catia_pocket (call 10): catia_pocket accepts 'limit' in its schema, but this bridge does not implement that option yet. Nothing was changed. Call catia_pocket again without it, or reach the full command through catia_run_command, which drives CATIA's own menus."
+    }
+  },
+  {
+    "design": "M2 post",
+    "plan_digest": "9e39d50011c68e0cf863db7a33703daa736dc0892ac73e5733da7734ee991cb7",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "member.bore \u2014 catia_pocket (call 8): catia_pocket accepts 'limit' in its schema, but this bridge does not implement that option yet. Nothing was changed. Call catia_pocket again without it, or reach the full command through catia_run_command, which drives CATIA's own menus."
+    }
+  },
+  {
+    "design": "M2 header",
+    "plan_digest": "232ccff0ece956a70b2aa6b249c89e29dc0a4a045f7e84e11831b3ce26c5d891",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "member.bore \u2014 catia_pocket (call 8): catia_pocket accepts 'limit' in its schema, but this bridge does not implement that option yet. Nothing was changed. Call catia_pocket again without it, or reach the full command through catia_run_command, which drives CATIA's own menus."
+    }
+  },
+  {
+    "design": "M4 housing",
+    "plan_digest": "3afdb8c744880691b26a7977d25d5d813a75bbef51c4e047cbbd2fa04b6fdb84",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "housing.cavity \u2014 catia_pocket (call 8): catia_pocket accepts 'limit' in its schema, but this bridge does not implement that option yet. Nothing was changed. Call catia_pocket again without it, or reach the full command through catia_run_command, which drives CATIA's own menus."
+    }
+  },
+  {
+    "design": "M4 cover",
+    "plan_digest": "9e3356791dd57d80684797f2701f09b27aec5f4c4c016a1930e8a926781c767e",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "cover.body \u2014 catia_pad (call 4): This workstation has hit its limit of 60 CATIA operations per minute. Wait a moment before continuing, and prefer one parameter change over a burst of small edits."
+    }
+  },
+  {
+    "design": "M4 pinion",
+    "plan_digest": "b032592d406290b0b8f44f21e0f53de60683ede3e57233925be103fbc9211d22",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "catia_new_part (call 0): This workstation has hit its limit of 60 CATIA operations per minute. Wait a moment before continuing, and prefer one parameter change over a burst of small edits."
+    }
+  },
+  {
+    "design": "M4 wheel",
+    "plan_digest": "76f259604f8a5d6ea4ec485b76d67c9d9e0de43483f2c8c2c0de1f16914167e6",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "catia_new_part (call 0): This workstation has hit its limit of 60 CATIA operations per minute. Wait a moment before continuing, and prefer one parameter change over a burst of small edits."
+    }
+  },
+  {
+    "design": "M4 input shaft",
+    "plan_digest": "91b385f973ae442c8a35483920c812e3395a590951e677bd90952d656bc9b679",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "catia_new_part (call 0): This workstation has hit its limit of 60 CATIA operations per minute. Wait a moment before continuing, and prefer one parameter change over a burst of small edits."
+    }
+  },
+  {
+    "design": "M4 output shaft",
+    "plan_digest": "4d7211d6bee01febe3173534140ee2e26521bee8452ea30b7c673cac5ffc7a20",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "catia_new_part (call 0): This workstation has hit its limit of 60 CATIA operations per minute. Wait a moment before continuing, and prefer one parameter change over a burst of small edits."
+    }
+  },
+  {
+    "design": "M4 input bearing",
+    "plan_digest": "dbf1c912ff3ecfe6c871d4748ca63ad004f6908244d62c19d6d9a43f0cdb290f",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "catia_new_part (call 0): This workstation has hit its limit of 60 CATIA operations per minute. Wait a moment before continuing, and prefer one parameter change over a burst of small edits."
+    }
+  },
+  {
+    "design": "M4 output bearing",
+    "plan_digest": "ae3410521949df721f11c011a64afc688595192940e43e2293700bf3da095983",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "catia_new_part (call 0): This workstation has hit its limit of 60 CATIA operations per minute. Wait a moment before continuing, and prefer one parameter change over a burst of small edits."
+    }
+  },
+  {
+    "design": "M4 input spacer",
+    "plan_digest": "97752e8c5004761aa2e6c39937105d257a5bb8eb78a1198be54d2b2a72152789",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "catia_new_part (call 0): This workstation has hit its limit of 60 CATIA operations per minute. Wait a moment before continuing, and prefer one parameter change over a burst of small edits."
+    }
+  },
+  {
+    "design": "M4 output spacer",
+    "plan_digest": "5147dd1704891aee92dbde9fec25e14426d8a559243fac8b288771ae60de92ee",
+    "backends": [
+      "occt",
+      "catia"
+    ],
+    "agrees": false,
+    "comparable": false,
+    "divergences": [],
+    "unsupported": {},
+    "failures": {
+      "catia": "catia_new_part (call 0): This workstation has hit its limit of 60 CATIA operations per minute. Wait a moment before continuing, and prefer one parameter change over a burst of small edits."
+    }
+  }
+]

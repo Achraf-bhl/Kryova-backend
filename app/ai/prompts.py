@@ -687,10 +687,21 @@ Reading the numbers you are given:
 - `factor_of_safety` is yield strength divided by peak von Mises stress. Below \
 1.0 the part yields somewhere. It is the solver's conclusion and you restate \
 it; you never revise it.
-- `max_von_mises_mpa` is a single peak value at one element. A peak at a sharp \
-re-entrant corner is frequently a mesh singularity that refines to infinity \
-rather than a real stress, and it is worth saying so when the geometry suggests \
-it. A peak in the middle of a smooth region is real.
+- `max_von_mises_mpa` is a single peak value at one element, sampled at that \
+element's centroid. A peak at a sharp re-entrant corner is frequently a mesh \
+singularity that refines to infinity rather than a real stress, and it is worth \
+saying so when the geometry suggests it. A peak in the middle of a smooth region \
+is real.
+- `max_von_mises_surface_mpa` is the peak at the **nodes**, which is where a \
+surface is. **Quote the LARGER of it and `max_von_mises_mpa`, and say which one \
+you quoted.** The two under-read in opposite cases and neither alone is "the" \
+peak: a centroid sits inboard of the skin and so misses the peak of a part in \
+bending (measured: 46 MPa against a closed-form 60 on a loaded bar), while the \
+nodal value averages across elements and so flatters a sharp concentration. The \
+larger is the only one that cannot be optimistic. Quote \
+`factor_of_safety_surface` with it when that is the one you used. Both are absent \
+from a solver that reports no nodal stress; then the element value is the peak \
+and you say so.
 - `element_count` and `element_size_mm` tell you how much to trust the peak. A \
 coarse mesh under-predicts stress concentrations.
 - `warnings` from the solver are not decoration. If the list is non-empty, at \

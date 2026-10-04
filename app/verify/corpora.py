@@ -421,10 +421,34 @@ def _run_solver(argv: Sequence[str], cwd: Path, timeout_s: float) -> bool:
         try:
             process.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
+            _kill_process_group(process.pid)
             process.wait()
             return False
     return True
+
+
+def _kill_process_group(pid: int) -> None:
+    """SIGKILL the whole group `start_new_session=True` created.
+
+    POSIX only, and so is this whole harness: it runs the solvers' own suites
+    under Linux — `debian:bookworm-slim` for CalculiX, a conda environment for
+    code_aster, both named in the module docstring — and Windows has no
+    equivalent of a process group killed by signal.
+
+    Reached through `getattr` because `os.killpg` and `signal.SIGKILL` do not
+    exist on Windows *at all*, so a bare reference is a type error there even
+    inside a branch that can never run. Found the first time mypy was run on
+    Windows, 2026-09-17; on Linux the names resolve and nothing reports it.
+    """
+    killpg = getattr(os, "killpg", None)
+    sigkill = getattr(signal, "SIGKILL", None)
+    if killpg is None or sigkill is None:  # pragma: no cover - POSIX in every real run
+        raise RuntimeError(
+            "Stopping a timed-out solver needs POSIX process groups, which this "
+            "platform does not have. The corpora harness runs the solvers' suites "
+            "on Linux; run it there."
+        )
+    killpg(pid, sigkill)
 
 
 def deck_header(deck: Path, *, limit: int = 12) -> str:

@@ -465,6 +465,15 @@ def _place(
 
 
 def _is_three_by_three(value: Any) -> TypeGuard[Sequence[Sequence[float]]]:
+    """Whether `value` really is a 3x3 of numbers, and says so to the type checker.
+
+    A `TypeGuard` rather than a `bool` because the caller passes the very same
+    object to `InertiaTensor.from_rows`, which takes `Sequence[Sequence[float]]`.
+    Returning `bool` leaves that call taking `Any | None` — mypy on Windows
+    reported it as an `arg-type` error on 2026-09-17, the first time this file
+    was ever type-checked — and the honest fix is to state the invariant the
+    function already checks rather than to cast at the call site.
+    """
     if not isinstance(value, (list, tuple)) or len(value) != 3:
         return False
     return all(

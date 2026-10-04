@@ -106,7 +106,18 @@ class TestDropCutterNeverGouges:
             # Above it only by what the sampling can miss, on a triangle that is not a
             # sliver (a sliver's slope makes the sampling's reach unbounded).
             edges = [np.linalg.norm(tri[(k + 1) % 3, :2] - tri[k, :2]) for k in range(3)]
-            area = 0.5 * abs(np.cross(tri[1, :2] - tri[0, :2], tri[2, :2] - tri[0, :2]))
+            # The 2-D cross product written out. `np.cross` on two length-2
+            # vectors returned the scalar z-component for years and **numpy 2
+            # removed it**: it now raises
+            # "Both input arrays must be (arrays of) 3-dimensional vectors".
+            # Measured 2026-09-17, the first time this test was executed
+            # anywhere. Note what did *not* fail — the gouge assertion two lines
+            # above passed on all 80 cases for both cutters, so the safety claim
+            # this class exists for was never in question; the test died on the
+            # helper for its weaker second assertion.
+            u = tri[1, :2] - tri[0, :2]
+            v = tri[2, :2] - tri[0, :2]
+            area = 0.5 * abs(float(u[0] * v[1] - u[1] * v[0]))
             if 2.0 * area / max(edges) >= 5.0:
                 reach = 0.5 if cutter.shape is CutterShape.FLAT else 1.5
                 assert exact <= brute + reach

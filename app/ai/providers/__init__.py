@@ -11,19 +11,21 @@ from functools import lru_cache
 from app.ai.provider import LLMProvider, LLMUnavailable
 from app.ai.providers.anthropic import AnthropicProvider
 from app.ai.providers.deepseek import DeepSeekProvider
+from app.ai.providers.gemini import GeminiProvider
 from app.ai.providers.nvidia import NvidiaProvider
 from app.ai.providers.openai_compatible import OpenAICompatibleProvider
 
 __all__ = [
     "AnthropicProvider",
     "DeepSeekProvider",
+    "GeminiProvider",
     "NvidiaProvider",
     "OpenAICompatibleProvider",
     "PROVIDER_NAMES",
     "get_provider",
 ]
 
-PROVIDER_NAMES = ("deepseek", "anthropic", "nvidia", "openai_compatible")
+PROVIDER_NAMES = ("deepseek", "anthropic", "gemini", "nvidia", "openai_compatible")
 
 
 @lru_cache
@@ -54,6 +56,34 @@ def get_provider() -> LLMProvider:
             api_key=settings.ai_api_key or "",
             model=settings.ai_model,
             timeout_seconds=settings.ai_timeout_seconds,
+            vision_model=settings.ai_vision_model,
+        )
+    if choice == "gemini":
+        if not settings.ai_api_key:
+            raise LLMUnavailable(
+                "AI_PROVIDER=gemini requires AI_API_KEY. Get one from "
+                "aistudio.google.com; AI_BASE_URL is optional and defaults to "
+                "Gemini's OpenAI-compatible endpoint."
+            )
+        return GeminiProvider(
+            api_key=settings.ai_api_key,
+            model=settings.ai_model,
+            timeout_seconds=settings.ai_timeout_seconds,
+            base_url=settings.ai_base_url,
+            vision_model=settings.ai_vision_model,
+        )
+    if choice == "gemini":
+        if not settings.ai_api_key:
+            raise LLMUnavailable(
+                "AI_PROVIDER=gemini requires AI_API_KEY. Get one from "
+                "aistudio.google.com; AI_BASE_URL is optional and defaults to "
+                "Gemini's OpenAI-compatible endpoint."
+            )
+        return GeminiProvider(
+            api_key=settings.ai_api_key,
+            model=settings.ai_model,
+            timeout_seconds=settings.ai_timeout_seconds,
+            base_url=settings.ai_base_url,
             vision_model=settings.ai_vision_model,
         )
     if choice == "nvidia":

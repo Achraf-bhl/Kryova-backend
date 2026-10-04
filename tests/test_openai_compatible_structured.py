@@ -200,6 +200,80 @@ class TestOnlyThatOneRejection:
             provider.complete(system="s", user="u", schema=LoadCase, effort="low", max_tokens=10)
 
 
+class TestTransientOverloadRetries:
+    """Measured live against Gemini's free tier, 2026-09-23: a tool-calling
+    turn carrying Kryova's real ~46-tool offer 503'd repeatedly ("high
+    demand") while the identical account's no-tool turns answered every
+    time, and the same call retried a few seconds later routinely
+    succeeded. `_post` now retries `_RETRYABLE_STATUSES` a bounded number
+    of times before giving up.
+    """
+
+    def _overloaded_then(self, *, ok_after: int) -> Any:
+        calls: list[int] = []
+
+        def endpoint(url: str, *, json: dict[str, Any], headers: Any, timeout: Any) -> Any:
+            calls.append(1)
+            request = httpx.Request("POST", url)
+            if len(calls) <= ok_after:
+                return httpx.Response(
+                    503, text='{"error": {"message": "high demand"}}', request=request
+                )
+            return httpx.Response(200, json=_reply('{"force_n": 1, "axis": "x"}'), request=request)
+
+        return calls, endpoint
+
+    def test_a_transient_503_is_retried_and_then_succeeds(
+        self,
+        provider: OpenAICompatibleProvider,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls, endpoint = self._overloaded_then(ok_after=1)
+        monkeypatch.setattr(httpx, "post", endpoint)
+        sleeps: list[float] = []
+        monkeypatch.setattr(
+            "app.ai.providers.openai_compatible.time.sleep", lambda s: sleeps.append(s)
+        )
+
+        result = provider.complete(
+            system="s", user="u", schema=LoadCase, effort="low", max_tokens=10
+        )
+
+        assert result.value.force_n == 1
+        assert len(calls) == 2
+        assert sleeps  # backed off before the retry, did not hammer the server
+
+    def test_it_gives_up_after_the_retry_budget_and_says_so(
+        self,
+        provider: OpenAICompatibleProvider,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls, endpoint = self._overloaded_then(ok_after=999)
+        monkeypatch.setattr(httpx, "post", endpoint)
+        monkeypatch.setattr("app.ai.providers.openai_compatible.time.sleep", lambda s: None)
+
+        with pytest.raises(LLMError, match="503"):
+            provider.complete(system="s", user="u", schema=LoadCase, effort="low", max_tokens=10)
+        # Four tries total: the first plus the retry budget, not unbounded.
+        assert len(calls) == 4
+
+    def test_a_non_retryable_error_is_not_retried(
+        self,
+        provider: OpenAICompatibleProvider,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[int] = []
+
+        def endpoint(url: str, *, json: dict[str, Any], headers: Any, timeout: Any) -> Any:
+            calls.append(1)
+            return httpx.Response(400, text="bad request", request=httpx.Request("POST", url))
+
+        monkeypatch.setattr(httpx, "post", endpoint)
+        with pytest.raises(LLMError, match="400"):
+            provider.complete(system="s", user="u", schema=LoadCase, effort="low", max_tokens=10)
+        assert len(calls) == 1
+
+
 class TestUnfencing:
     @pytest.mark.parametrize(
         "raw",

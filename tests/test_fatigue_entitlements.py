@@ -45,7 +45,16 @@ class TestEveryCitedDocumentIsRegistered:
         for entry in REGISTER:
             for module in entry.used_by:
                 assert (ROOT / module).is_file(), module
-            if entry.used_by:
+            # Only an entry that names a document somebody *read* can be cited.
+            # `fkm-via-pylife` is NOT_HELD with an empty `read_from` on purpose:
+            # the methods reach Kryova through pyLife's implementation and the
+            # guidelines themselves were never obtained, so there is no URL. It
+            # still has `used_by`, because four modules really do rely on it —
+            # and requiring a citation there would push somebody to invent a URL
+            # for a document nobody opened, which is the failure this whole
+            # register exists to prevent. Measured on Windows 2026-09-17: this
+            # assertion had never run, and it fails on that entry alone.
+            if entry.used_by and entry.read_from:
                 citing = cited.get(entry.read_from, set())
                 assert citing, f"{entry.key} lists users but no module cites {entry.read_from}"
 

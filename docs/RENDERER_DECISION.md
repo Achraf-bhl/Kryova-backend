@@ -62,9 +62,20 @@ Every number below is measured on one assembly, because a threshold against an u
 scene is not a threshold.
 
 **The plan names M5's stamping press.** It cannot be used, and that has to be said plainly
-rather than discovered in March: **M5 is not built and is blocked on E13**, and the largest
-assembly this repository can actually produce today is **M6, the belt conveyor, with three
-components** (measured 2026-09-16). Three against a two-thousand-part target.
+rather than discovered in March.
+
+*Corrected 2026-09-17:* the sentence here used to read "M5 is not built and is blocked on
+E13". **M5 landed on 2026-09-16 and M8 on 2026-09-17**, so that is no longer true — and it
+changes nothing, which is the point worth keeping. M5 is **eleven** parts and M8 is
+**eight** occurrences, against a two-thousand-part target. The largest assembly this
+repository can produce is not three components any more; it is eleven. The gap was never
+about which rung had landed, and a real machine of this *size* is still several eras away.
+
+**The synthetic generator is therefore built and is the reference assembly**, as option 2
+below always intended: `app/render/reference.py`, pinned by digest
+`2c6d3f5c8d9d534ccbbe0aeb6d58f4ab`, held to every row of the table by
+`tests/test_render_reference.py`. Measured: **2,000 occurrences, 120 distinct components,
+99% instanced, 5 deep.**
 
 A criterion that cannot be measured until an unrelated phase lands is a mood with a date
 on it. So the reference assembly is defined **by its properties**, and there are two ways
@@ -88,7 +99,18 @@ to obtain one:
 
 **Building the synthetic generator is a prerequisite of the decision, not part of it.** It
 is recorded as QUEUE G1's first step; if March arrives and no reference assembly exists,
-the honest outcome is §6's *"no decision"* and not a guess.
+the honest outcome is §6's *"no decision"* and not a guess. **Done 2026-09-17** — so that
+outcome is no longer the likely one, and what remains is the measuring.
+
+**One row of the table this scene cannot meet, stated rather than fudged.** The parts are
+**boxes**, and a box tessellates to twelve triangles at every deflection there is. So the
+8–12 M triangle row is a statement about real parts with curvature, and a synthetic scene
+of prisms reaches ~24,000 — three orders of magnitude under it. Widening the band, or
+giving the generator curved parts chosen to hit the number, would both be fitting the
+artefact to the threshold. The honest position is that **this scene measures ordering,
+streaming, instancing and tree depth, and does not measure the triangle budget**; the
+triangle rows wait for a real machine, and any run log that quotes them off this scene is
+quoting the wrong scene.
 
 ## 5. The criteria, and the thresholds
 

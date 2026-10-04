@@ -24,6 +24,11 @@ from app.catia.ops.spec import one_of
 #: CATIA's three standard reference planes, in `Part.OriginElements` order.
 ORIGIN_PLANES: Final = ("XY", "YZ", "ZX")
 
+#: The six plane names a pull direction may still be spelled as, newest first in
+#: importance: the **vector** is what `pull_direction` advertises and these are the
+#: spellings that keep working beside it.
+PULL_DIRECTION_NAMES: Final = ("XY", "YZ", "ZX", "-XY", "-YZ", "-ZX")
+
 #: Semantic faces of the part's bounding box, in the part's own frame. Still
 #: useful shorthand — "the top face" is what an engineer says — but no longer
 #: the *only* way to name a face; see `face_reference`.
@@ -151,6 +156,52 @@ def origin_plane(description: str) -> dict[str, Any]:
     where `support` is open.
     """
     return one_of(ORIGIN_PLANES, f"{description} One of: {', '.join(ORIGIN_PLANES)}.")
+
+
+def pull_direction(description: str) -> dict[str, Any]:
+    """Which way a straight-pull tool comes off — a vector, or a plane name.
+
+    **A union, declared rather than half-honoured** (THE QUEUE E10, 2026-09-17).
+    Three things forced this exact shape and each of them rules out something
+    simpler:
+
+    1. **Not `origin_plane`.** That names a *plane*, and a plane has no side, so
+       a mould pulled along −Z — half of every two-part tool — was a question the
+       draft analysis had no way to be asked. Its other five users are genuine
+       planes (a pattern's grid, a circle's plane, a sketch plane) where a sign is
+       meaningless, so widening it would let `-XY` be offered as a sketch plane.
+    2. **The vector comes first, because `catia_draft` already takes one.** That
+       operation *creates* the taper this one *measures*, and two vocabularies for
+       one physical quantity is how an agent drafts along `[0, 0, -1]` and then
+       cannot ask about what it just built.
+    3. **The names stay, and they stay in the schema rather than as a quiet
+       accept-list.** `app/catia/validation.py` checks arguments against this
+       document before the backend sees them, so a spelling the schema does not
+       declare is refused two storeys above the handler that would have accepted
+       it — an accept-list alone would have been unreachable code with a passing
+       test behind it. The CATIA KB and the manuals talk about origin planes
+       constantly, so a model writing `"XY"` here is following the documentation.
+
+    `nonZero` is carried for the vector arm; the validator applies it only to a
+    list, so a name is unaffected.
+    """
+    return {
+        "type": ["array", "string"],
+        "minItems": 3,
+        "maxItems": 3,
+        "items": {"type": "number", "minimum": -1e6, "maximum": 1e6},
+        "nonZero": True,
+        # **No `enum` here, deliberately.** `validation.validate` applies an enum to
+        # whatever it is given, so listing the six names would refuse every *vector*
+        # as "not one of: XY, YZ, …" — the union's other arm, rejected by its own
+        # constraint. A name the table does not hold is refused one storey down by
+        # `_pull_direction`, which can see that it is a name and says so.
+        "description": (
+            f"{description} A direction vector such as [0, 0, 1] or [0, 0, -1] — the "
+            f"same one catia_draft takes — or a plane name: "
+            f"{', '.join(PULL_DIRECTION_NAMES)}. The vector's length is not used."
+        ),
+    }
 
 
 def face_reference(description: str) -> dict[str, Any]:

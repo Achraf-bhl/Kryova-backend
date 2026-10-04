@@ -63,6 +63,37 @@ class TestTheContainerHealthCheck:
         assert set(results) == {"calculix", "gmsh", "occt"}
 
 
+class TestTheBuildContext:
+    """What `docker build .` may send, and what the image may carry — P9 task 3, 2026-09-19.
+
+    There was no `.dockerignore` until the first image was built on Windows, and building it
+    found two things. The context carried the whole checkout — a Windows virtualenv that
+    cannot run in a Linux image, `.git`, and `.env`/`.env.local` with the database password.
+    And `COPY data ./data` put **25 third-party PDFs (462 MB) into the image**, several with
+    `z-library` in the filename. A pushed image redistributes whatever it carries.
+    """
+
+    def _ignored(self) -> list[str]:
+        lines = (REPO / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+
+    @pytest.mark.parametrize("entry", ["venv/", ".git", ".env", ".env.local"])
+    def test_the_context_leaves_out_what_must_never_leave_the_machine(self, entry: str) -> None:
+        assert entry in self._ignored()
+
+    def test_the_manuals_do_not_ship_in_the_image(self) -> None:
+        """The reversible default. Delete the line to ship them — that is a decision about
+        redistributing third-party books, and it belongs to a person, not to a build."""
+        assert "data/bm25/" in self._ignored()
+
+    def test_the_verification_artefact_still_ships(self) -> None:
+        """The trust page publishes from `data/verify/`. Excluding all of `data/` to be
+        tidy would publish nothing, with the reason, on every deployed instance."""
+        ignored = self._ignored()
+        assert "data/" not in ignored
+        assert not any(entry.startswith("data/verify") for entry in ignored)
+
+
 class TestTheDockerfile:
     def _text(self) -> str:
         return (REPO / "Dockerfile").read_text(encoding="utf-8")

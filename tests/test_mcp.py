@@ -311,10 +311,21 @@ class TestTheRouteOffersTheToolBox:
         response = _post(auth_client, conversation.id, _message("tools/list"))
         assert response.status_code == 200, response.text
         names = [tool["name"] for tool in response.json()["result"]["tools"]]
-        expected = sorted(tool.name for tool in ToolBox(db=db_session, user=account, conversation=conversation).every_tool())
+        box = ToolBox(db=db_session, user=account, conversation=conversation)
+        # The vocabulary **minus what this box cannot serve**. `ToolBox` offers
+        # `draft_load_case` and refuses at call time — a refusal the agent can
+        # act on — and `ToolBoxHost` drops it here, because an MCP client brings
+        # its own model and would only spend a turn discovering the same thing.
+        # Written as the whole vocabulary until 2026-09-17, which contradicted
+        # the `not in` line below it and was satisfiable only while the tool was
+        # withheld one layer too low.
+        expected = sorted(
+            tool.name for tool in box.every_tool() if box.missing_dependency(tool.name) is None
+        )
         assert names == expected
         assert "list_materials" in names
         assert "draft_load_case" not in names
+        assert "draft_load_case" in {tool.name for tool in box.every_tool()}
 
     def test_a_read_only_tool_runs_through_the_toolbox(
         self, auth_client: AuthenticatedTestClient, conversation: Conversation

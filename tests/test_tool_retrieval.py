@@ -20,6 +20,7 @@ from app.ai.tool_retrieval import (
     DEFAULT_LIMIT,
     describe_selection,
     score_tool,
+    select,
     select_tool_names,
 )
 
@@ -300,3 +301,126 @@ class TestItCanBeMeasured:
 
     def test_the_default_limit_is_a_starting_point_not_a_tuned_constant(self) -> None:
         assert DEFAULT_LIMIT == 40
+
+
+class TestTheInjectedIntentDecider:
+    """`select(decide=...)` — master plan 16.1's recall gap, closed by a single pass.
+
+    The lexical `intent` rule fires only when the request's words overlap a trigger
+    table, so the failure it is written for — a tool the task needs sharing no
+    vocabulary with the way the task was asked for — is exactly the case it cannot
+    catch. A decider reads intent instead of words.
+
+    Every test here is about the *seam*, not the model: that it can only add, that it
+    cannot take a turn down, and that its absence changes nothing.
+    """
+
+    def _specs(self):
+        from app.ai.tool_retrieval import INTENT_FAMILIES
+
+        names = {"catia_new_part", "catia_sketch_create", "catia_pad", "catia_measure"}
+        for _words, tools in INTENT_FAMILIES.values():
+            names.update(tools)
+        return [SimpleNamespace(name=n, description=f"does {n}") for n in sorted(names)]
+
+    def test_no_decider_is_exactly_the_old_behaviour(self) -> None:
+        """The default path must be byte-identical, or every existing measurement of
+        this module is measuring something else."""
+        specs = self._specs()
+
+        without = select(specs, "pocket the face", limit=25)
+        explicit_none = select(specs, "pocket the face", limit=25, decide=None)
+
+        assert without.names() == explicit_none.names()
+        assert "decided" not in without.by_rule()
+
+    def test_a_decider_can_only_add(self) -> None:
+        """The module's own doctrine: it narrows what is shown and never what can be
+        called, and every widening rule is allowed to be loose because its worst case is
+        tokens. A decider that could *remove* a tool would break that."""
+        from app.ai.tool_retrieval import INTENT_FAMILIES
+
+        specs = self._specs()
+        label = next(iter(INTENT_FAMILIES))
+
+        plain = select(specs, "pocket the face", limit=25)
+        decided = select(specs, "pocket the face", limit=25, decide=lambda _m, _l: label)
+
+        assert plain.names() <= decided.names()
+
+    def test_what_it_adds_is_labelled_as_decided(self) -> None:
+        """So a wrong offer is diagnosable from a log line — `Selection.why` is the
+        module's stated debugging route and a decided tool must answer it."""
+        from app.ai.tool_retrieval import INTENT_FAMILIES
+
+        specs = self._specs()
+        label, (_words, tools) = next(iter(INTENT_FAMILIES.items()))
+
+        # Below the registry size, or `select` short-circuits to the no-op path
+        # and there is nothing to widen.
+        decided = select(specs, "unrelated words entirely", limit=12,
+                         decide=lambda _m, _l: label)
+
+        assert "decided" in decided.by_rule()
+        added = decided.by_rule()["decided"]
+        assert added, "the decided rule claimed the tools and then offered none"
+        for name in added:
+            assert name in tools
+            assert "decided" in (decided.why(name) or "")
+
+    def test_a_decider_that_declines_changes_nothing(self) -> None:
+        specs = self._specs()
+
+        plain = select(specs, "pocket the face", limit=25)
+        declined = select(specs, "pocket the face", limit=25, decide=lambda _m, _l: None)
+
+        assert plain.names() == declined.names()
+
+    def test_a_decider_naming_something_unknown_is_ignored(self) -> None:
+        """A model answering outside the label set is a refusal, not a new family."""
+        specs = self._specs()
+
+        plain = select(specs, "pocket the face", limit=25)
+        odd = select(specs, "pocket the face", limit=25, decide=lambda _m, _l: "not-a-family")
+
+        assert plain.names() == odd.names()
+
+    def test_a_decider_that_raises_cannot_take_the_turn_down(self) -> None:
+        """`KnowledgeService.search`'s contract, applied here: consulting something may
+        improve an answer and must never be the reason there is not one."""
+        def explode(_message: str, _labels: tuple[str, ...]) -> str:
+            raise RuntimeError("the model fell over")
+
+        specs = self._specs()
+        plain = select(specs, "pocket the face", limit=25)
+        survived = select(specs, "pocket the face", limit=25, decide=explode)
+
+        assert survived.names() == plain.names()
+
+    def test_it_is_asked_once_and_given_the_labels_it_may_choose_from(self) -> None:
+        from app.ai.tool_retrieval import INTENT_FAMILIES
+
+        seen: list[tuple[str, tuple[str, ...]]] = []
+
+        def record(message: str, labels: tuple[str, ...]) -> None:
+            seen.append((message, labels))
+            return None
+
+        select(self._specs(), "pocket the face", context="earlier words", limit=25,
+               decide=record)
+
+        assert len(seen) == 1, "a decision per turn, never per tool"
+        message, labels = seen[0]
+        assert "pocket the face" in message
+        assert "earlier words" in message, "the decider sees the same context the scorer does"
+        assert set(labels) == set(INTENT_FAMILIES)
+
+    def test_it_is_not_consulted_when_retrieval_is_a_no_op(self) -> None:
+        """Below the limit the selector returns everything, so there is nothing to widen
+        and a call would be spent to learn nothing."""
+        seen: list[str] = []
+        specs = [SimpleNamespace(name="catia_pad", description="pad")]
+
+        select(specs, "pad it", limit=25, decide=lambda m, _l: seen.append(m) or None)
+
+        assert seen == []

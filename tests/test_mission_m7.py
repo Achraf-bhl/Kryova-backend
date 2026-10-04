@@ -694,13 +694,20 @@ class TestTheRungInTheLadder:
         assert entry.not_claimed == mission("M7").unproven
         assert entry.rung == "M7"
 
-    def test_the_ladder_now_stands_at_seven_of_nine(self) -> None:
-        from app.design.missions import run_ladder
+    def test_the_ladder_is_not_complete_and_m7_is_not_why(self) -> None:
+        """Superseding `test_the_ladder_now_stands_at_seven_of_nine`.
+
+        That name and its "7/9" were true on 2026-09-16 and false the day M8 landed,
+        which made a rung *advancing* fail a test about M7. The count is derived here
+        instead, and what is asserted is the two things M7 is entitled to say: the
+        ladder runs green, and it is still short of complete.
+        """
+        from app.design.missions import LADDER, run_ladder
         from app.kernel import OcctRunner
 
         report = run_ladder(OcctRunner)
 
-        assert len(report.pending) == 2
-        assert "7/9 rungs pass" in report.summary()
+        assert len(report.pending) == sum(1 for rung in LADDER if not rung.buildable)
+        assert f"/{len(LADDER)} rungs pass" in report.summary()
         assert report.ok, report.summary()
         assert not report.complete

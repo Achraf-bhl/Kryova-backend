@@ -1,0 +1,119 @@
+{
+  "traces": 44,
+  "labelled": 15,
+  "statement": "Completion rate is not success rate. It says a turn ended with an answer and no recorded failure signal; it says nothing about whether the answer was right, and a turn that confidently builds the wrong part completes perfectly. Success is reported only for turns carrying a ground-truth label, and is null where none was supplied.",
+  "buckets": [
+    {
+      "bucket": "under 1 min",
+      "low_s": 0.0,
+      "high_s": 60.0,
+      "turns": 6,
+      "completed": 4,
+      "completion_rate": 0.6666666666666666,
+      "labelled": 2,
+      "succeeded": 2,
+      "success_rate": 1.0
+    },
+    {
+      "bucket": "1-5 min",
+      "low_s": 60.0,
+      "high_s": 300.0,
+      "turns": 15,
+      "completed": 9,
+      "completion_rate": 0.6,
+      "labelled": 6,
+      "succeeded": 1,
+      "success_rate": 0.16666666666666666
+    },
+    {
+      "bucket": "5-15 min",
+      "low_s": 300.0,
+      "high_s": 900.0,
+      "turns": 18,
+      "completed": 2,
+      "completion_rate": 0.1111111111111111,
+      "labelled": 7,
+      "succeeded": 2,
+      "success_rate": 0.2857142857142857
+    },
+    {
+      "bucket": "15-60 min",
+      "low_s": 900.0,
+      "high_s": 3600.0,
+      "turns": 2,
+      "completed": 1,
+      "completion_rate": 0.5,
+      "labelled": 0,
+      "succeeded": 0,
+      "success_rate": null
+    },
+    {
+      "bucket": "over 1 hour",
+      "low_s": 3600.0,
+      "high_s": null,
+      "turns": 3,
+      "completed": 2,
+      "completion_rate": 0.6666666666666666,
+      "labelled": 0,
+      "succeeded": 0,
+      "success_rate": null
+    }
+  ],
+  "literature": [
+    {
+      "id": "graceful-degradation-code-domain",
+      "claim": "Reliability decay is domain-stratified: code and tool-driving domains fall from 0.90 to 0.44 on a graceful degradation score across duration buckets, while document processing stays flat.",
+      "basis": "unsourced",
+      "value": null,
+      "url": null,
+      "read_on": null,
+      "note": "Quoted in KRYOVA_MASTER_PLAN.md E22 task 3. The study is not named there and has not been read here, so neither the bucket boundaries nor the definition of the score is known \u2014 and without the bucket boundaries the figure cannot be compared against anything this harness computes."
+    },
+    {
+      "id": "failure-attribution-split",
+      "claim": "A 3,100-trajectory / 700-task attribution study splits agent failures 72.5% process-level against 27.5% design-level, over seven categories.",
+      "basis": "unsourced",
+      "value": null,
+      "url": null,
+      "read_on": null,
+      "note": "Quoted in the master plan; the study is unnamed there and unread here."
+    },
+    {
+      "id": "catastrophic-failure-rate",
+      "claim": "The strongest models show the highest catastrophic-failure rates, up to 19%.",
+      "basis": "unsourced",
+      "value": null,
+      "url": null,
+      "read_on": null,
+      "note": "Quoted in the master plan; unnamed there and unread here."
+    },
+    {
+      "id": "memory-scaffolds-degrade",
+      "claim": "Memory scaffolds degraded long-horizon performance in all ten models tested, and added orchestration does not reliably help.",
+      "basis": "unsourced",
+      "value": null,
+      "url": null,
+      "read_on": null,
+      "note": "Quoted in the master plan, and load-bearing: E16.2 cites it as the reason `app/ai/taskgraph.py` enforces a declared plan rather than generating one, and E16 task 3's hierarchical memory is held open on it. A claim this consequential should be read before it is relied on again."
+    }
+  ],
+  "unlabelled": [
+    {
+      "entry": "2026-09-10 night L3 -- 'Make a mild steel bracket 100 mm by 60 mm and 8 mm thick'",
+      "why": "Rule 3: the log records two attempts that ran zero tool calls and then a pass after the defect was fixed. Four conversations carry the prompt, so no single outcome covers them, and telling them apart by step count would read the label off the trace it is meant to judge."
+    },
+    {
+      "entry": "2026-09-11 L2 -- 'Make a mild steel spacer block 90 mm'",
+      "why": "Rule 3: recorded as FAIL then PASS on the re-run. Two conversations carry the prompt and chronology would resolve them, but 're-run' as evidence of order is an inference the log does not state, and both runs built the right part -- the first is a failure only because two Kryova defects fired during it."
+    },
+    {
+      "entry": "Every turn after the first in a labelled conversation",
+      "why": "Rule 1: the run log says nothing about them. Several are the engineer's challenge to an answer, and the 2026-09-10 L4 note records that the agent got it entirely right when challenged -- so carrying the rung's FAIL forward would label a correct turn wrong."
+    },
+    {
+      "entry": "The 2026-09-07 and 2026-09-08 conversations (the arbor press and after)",
+      "why": "They predate the run log's current format, which began on 2026-09-09. The retired named prompts are in this file's git history, not in the log."
+    }
+  ],
+  "labels_from": "docs/GUI_PROMPT_LADDER.md run log"
+}

@@ -119,6 +119,20 @@ class TestTheGalleryIsDerived:
         m2 = next(entry for entry in gallery() if entry.rung == "M2")
         assert m2.not_claimed, "M2 builds and carries caveats; the gallery dropped them"
 
+    def test_the_gallery_agrees_with_the_ladder_about_what_builds(self) -> None:
+        """The one thing a derived page must never get wrong about its source.
+
+        `GalleryEntry.buildable` is `builds != "pending"` and `Mission.buildable`
+        is "carries one of the four design kinds", and the two are computed in
+        different modules. When `MovingDesign` landed with M7 on 2026-09-16,
+        `Mission.buildable` learned about it and `gallery._builds` did not — so
+        for a day the handbook published a seven-part robot arm as *pending*,
+        with nothing in `waiting_on` to explain it, and the headline undercounted
+        the ladder. Caught the first time this suite ran on Windows, 2026-09-17.
+        """
+        for mission in LADDER:
+            assert entry_for(mission).buildable is mission.buildable, mission.rung
+
     def test_a_rung_that_cannot_be_built_says_what_it_waits_on(self) -> None:
         pending = [entry for entry in gallery() if not entry.buildable]
         assert pending, "the ladder has unreachable rungs; the gallery hid them"
@@ -137,9 +151,11 @@ class TestTheGalleryIsDerived:
         kinds = {entry.builds for entry in gallery()}
         assert "part" in kinds
         assert "pending" in kinds
-        # Two different demonstrations, and a reader deciding whether this
-        # product suits them cares which.
-        assert kinds <= {"part", "assembly", "sheet", "pending"}
+        # Different demonstrations, and a reader deciding whether this product
+        # suits them cares which. `moving` joined on 2026-09-17 with M7's rung:
+        # a product that moves and reports its own joint reactions is not the
+        # same claim as a product graph that sits still.
+        assert kinds <= {"part", "assembly", "sheet", "moving", "pending"}
 
 
 class TestTheReferenceComesFromTheSchema:

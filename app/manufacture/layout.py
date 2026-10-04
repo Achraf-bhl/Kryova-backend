@@ -39,6 +39,7 @@ with two numbers that can disagree after an edit.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
@@ -51,6 +52,7 @@ from app.manufacture.drawing import (
     DimensionSource,
     Drawing,
     DrawnView,
+    Leader,
     Polyline,
     TracedDimension,
     Unplaced,
@@ -85,6 +87,30 @@ DIMENSION_ALLOWANCE_MM: Final = 22.0
 #: of unplaced dimensions and the design's own rationale notes are printed — the
 #: block that a drawing which could not be fully dimensioned must carry.
 NOTES_WIDTH_MM: Final = 62.0
+
+#: Height of one row in the tolerancing and parts tables, in sheet millimetres.
+#: Defined here rather than in `dxf.py`, which draws them, because `_usable` and
+#: `_place` must reserve exactly the room the writer will take: two constants
+#: that happened to agree would disagree the first time either moved, and the
+#: symptom would be a drawing whose views sit on top of its own tables.
+TABLE_ROW_MM: Final = 7.0
+
+#: A table gets one row per entry plus a heading row, and a little air beneath it
+#: so a view's dimension lines do not touch its last rule.
+TABLE_HEADING_ROWS: Final = 1
+TABLE_CLEARANCE_MM: Final = 6.0
+
+
+def table_height_mm(rows: int) -> float:
+    """Sheet millimetres a table of `rows` entries occupies, heading included.
+
+    Zero for no rows: a drawing with no tolerancing and no parts list must lay
+    out exactly as it did before this reservation existed, or every drawing in
+    the suite moves for a feature it does not use.
+    """
+    if rows <= 0:
+        return 0.0
+    return (rows + TABLE_HEADING_ROWS) * TABLE_ROW_MM + TABLE_CLEARANCE_MM
 
 #: The order views are searched for a round feature to hang a radius or diameter
 #: dimension on. Top first: a plate's holes are drilled through its thickness, so
@@ -185,6 +211,35 @@ class LayoutRequest:
     general_tolerance: str = ""
     notes: tuple[str, ...] = ()
 
+    #: How many rows the two tables `dxf.py` stacks on the sheet will have, so the
+    #: layout can keep the views out of them. **The layout has to be told**: it
+    #: runs before a `Drawing` exists, so it cannot count `drawing.tolerancing`
+    #: or `drawing.parts` itself, and a layout that guessed would be wrong in the
+    #: direction that matters — a view drawn over the parts list is a drawing
+    #: nobody can read, and neither table moves out of the way.
+    #:
+    #: `tolerance_rows` is datums plus feature control frames (top-left, growing
+    #: down); `parts_rows` is the bill of materials (bottom-right, stacked on the
+    #: title block and growing up). Left at zero, nothing is reserved and the
+    #: sheet lays out exactly as it did before.
+    tolerance_rows: int = 0
+    parts_rows: int = 0
+
+    #: Which geometry each GD&T feature name refers to, as a selector per feature —
+    #: the form `catia_list_faces` reports and the one thing in this codebase that
+    #: names a face without using a face id, which a re-export renumbers.
+    #:
+    #: **Supplied, never inferred.** `FeatureControlFrame.feature` is free text by
+    #: design and `app/rules/gdt.py` resolves it against nothing; guessing a normal
+    #: from words like "base face" is exactly the leader that points confidently at
+    #: the wrong feature. Left empty, no leaders are drawn and every frame is
+    #: tabulated as it was before E17 task 1.
+    feature_anchors: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+
+    #: The part's faces as `catia_list_faces` reports them, which is what
+    #: `feature_anchors` selectors are matched against.
+    part_faces: tuple[Mapping[str, Any], ...] = ()
+
 
 @dataclass(frozen=True)
 class _Cell:
@@ -255,7 +310,7 @@ def lay_out(
     sheet = _pick_sheet(request, cells)
     columns, rows = _grid(cells)
     content = (sum(columns), sum(rows))
-    usable = _usable(sheet, columns, rows)
+    usable = _usable(sheet, columns, rows, request)
     if usable[0] <= 0.0 or usable[1] <= 0.0:
         # Refused here rather than in `choose_scale`, which can only see the two
         # numbers and blames the title block for them. What has actually
@@ -272,13 +327,23 @@ def lay_out(
         )
     scale = choose_scale(content, usable)
 
-    placed = _place(cells, columns, rows, scale, sheet, request.projection)
+    placed = _place(
+        cells,
+        columns,
+        rows,
+        scale,
+        sheet,
+        request.projection,
+        tolerance_rows=request.tolerance_rows,
+        parts_rows=request.parts_rows,
+    )
     report, dimensions, views = _dimension(
         shape, cells, placed, traced, suppressed, non_dimensional
     )
     planes = _cutting_planes(shape, request, cells)
 
     notes = tuple(request.notes) + _rationale_notes(traced)
+    leaders, unanchored = _leaders(request, views)
     return Drawing(
         title=request.title,
         sheet=sheet,
@@ -302,7 +367,53 @@ def lay_out(
         cutting_planes=planes,
         report=report,
         notes=notes,
+        leaders=leaders,
+        unanchored=unanchored,
     )
+
+
+def _leaders(
+    request: LayoutRequest, views: tuple[DrawnView, ...]
+) -> tuple[tuple[Leader, ...], dict[str, str]]:
+    """Where each bound feature's leader lands, and why the others have none.
+
+    Master plan E17 task 1. **Nothing is inferred**: a leader exists only for a feature
+    the caller bound to geometry through `feature_anchors`, and the reason a frame has
+    none travels beside the leaders rather than being dropped, because a silently
+    unannotated frame reads as one nobody thought needed a leader.
+
+    The anchor is projected into each candidate view through the *view's own* basis and
+    kept on the one the surface faces most squarely — a leader onto a view the feature is
+    behind points at a silhouette, which the reader cannot tell from the real thing.
+    """
+    if not request.feature_anchors:
+        return (), {}
+
+    from app.manufacture.anchors import anchors_for, best_view, project_point
+    from app.render.views import view_named
+
+    anchors, unresolved = anchors_for(request.feature_anchors, request.part_faces)
+    placed: dict[str, DrawnView] = {view.name: view for view in views}
+
+    leaders: list[Leader] = []
+    for anchor in anchors:
+        candidates = [view_named(name) for name in placed]
+        chosen = best_view(anchor, candidates)
+        if chosen is None:
+            unresolved[anchor.feature] = (
+                f"{anchor.feature!r} faces away from every view on this sheet "
+                f"({', '.join(sorted(placed))}), so a leader would point at a "
+                "silhouette it is behind rather than at the feature."
+            )
+            continue
+        leaders.append(
+            Leader(
+                feature=anchor.feature,
+                view=chosen.name,
+                point_mm=project_point(anchor.point_mm, chosen),
+            )
+        )
+    return tuple(leaders), unresolved
 
 
 # -- views ------------------------------------------------------------------
@@ -589,7 +700,7 @@ def _detail_letter(index: int) -> str:
 
 
 def _usable(
-    sheet: SheetSize, columns: list[float], rows: list[float]
+    sheet: SheetSize, columns: list[float], rows: list[float], request: LayoutRequest
 ) -> tuple[float, float]:
     """How much of `sheet` the views themselves may occupy, in sheet millimetres.
 
@@ -603,12 +714,13 @@ def _usable(
     refused it with a message about the title block.
     """
     area_width, area_height = drawing_area(sheet)
+    tables = table_height_mm(request.tolerance_rows) + table_height_mm(request.parts_rows)
     return (
         area_width
         - NOTES_WIDTH_MM
         - 2.0 * DIMENSION_ALLOWANCE_MM
         - VIEW_GAP_MM * (len(columns) - 1),
-        area_height - 2.0 * DIMENSION_ALLOWANCE_MM - VIEW_GAP_MM * (len(rows) - 1),
+        area_height - 2.0 * DIMENSION_ALLOWANCE_MM - VIEW_GAP_MM * (len(rows) - 1) - tables,
     )
 
 
@@ -626,7 +738,7 @@ def _pick_sheet(request: LayoutRequest, cells: tuple[_Cell, ...]) -> SheetSize:
     columns, rows = _grid(cells)
     content = (sum(columns), sum(rows))
     for sheet in SHEET_SIZES:
-        usable = _usable(sheet, columns, rows)
+        usable = _usable(sheet, columns, rows, request)
         if usable[0] <= 0.0 or usable[1] <= 0.0:
             continue
         try:
@@ -662,6 +774,9 @@ def _place(
     scale: float,
     sheet: SheetSize,
     projection: Projection,
+    *,
+    tolerance_rows: int = 0,
+    parts_rows: int = 0,
 ) -> tuple[DrawnView, ...]:
     """Turn cells into placed views, applying the projection convention's signs.
 
@@ -673,8 +788,17 @@ def _place(
     frame_x0, frame_y0, frame_x1, frame_y1 = sheet.frame
     free_x0 = frame_x0 + DIMENSION_ALLOWANCE_MM
     free_x1 = frame_x1 - NOTES_WIDTH_MM - DIMENSION_ALLOWANCE_MM
-    free_y0 = frame_y0 + TITLE_BLOCK_HEIGHT_MM + DIMENSION_ALLOWANCE_MM
-    free_y1 = frame_y1 - DIMENSION_ALLOWANCE_MM
+    # The parts list stacks on the title block and grows *up*; the tolerancing
+    # table starts under the top frame line and grows *down*. Neither moves out
+    # of a view's way, so the free band is narrowed at both ends rather than the
+    # views being trusted to miss them.
+    free_y0 = (
+        frame_y0
+        + TITLE_BLOCK_HEIGHT_MM
+        + table_height_mm(parts_rows)
+        + DIMENSION_ALLOWANCE_MM
+    )
+    free_y1 = frame_y1 - table_height_mm(tolerance_rows) - DIMENSION_ALLOWANCE_MM
 
     column_mm = [width * scale for width in columns]
     row_mm = [height * scale for height in rows]

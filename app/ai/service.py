@@ -40,6 +40,12 @@ def _result_payload(
         "factor_of_safety": result.get("factor_of_safety"),
         "yields": result.get("yields"),
         "max_von_mises_mpa": result.get("max_von_mises_mpa"),
+        # The peak at the surface, and the factor of safety on it. Both are
+        # `None` from a solver that reported no nodal tensor. The model is told
+        # in `prompts.py` to quote the larger of the two and name which -- see
+        # `StaticResult.governing_peak_mpa` for why neither alone will do.
+        "max_von_mises_surface_mpa": result.get("max_von_mises_surface_mpa"),
+        "factor_of_safety_surface": result.get("factor_of_safety_surface"),
         "max_displacement_mm": result.get("max_displacement_mm"),
         "mass_kg": result.get("mass_kg"),
         "volume_mm3": result.get("volume_mm3"),

@@ -48,6 +48,15 @@ lets the next session start.** Rules:
    intention, not a status.
 4. When every task in a phase is done, add `> ✅ PHASE COMPLETE (date) — all tasks done and
    tested.` under the phase heading. One open task means no marker, however much has shipped.
+4a. **A status line's continuation must never begin with a status word.**
+   `scripts/plan_progress.py` counts every line matching `^ *> (DONE|PARTIAL|…)` as a status,
+   so a sentence that happens to wrap onto `   > PARTIAL for one honest reason: …` is read as a
+   **second task** in that phase. Caught 2026-09-22: E17 jumped from 6 tasks to 7 and the board
+   fell from 90.7% to 90.5% because of where a sentence broke. Nothing else notices — the
+   hygiene tests pass, because the phase genuinely has an extra "open task" as far as the parser
+   can tell. **Check the phase's task count after editing a status**, not just `--check`, which
+   only re-stamps the block it just computed from the same misreading.
+
 5. **Never delete a status; supersede it.** Then append one line to the build plan's *Done*, and
    re-stamp the plan's progress block (`python -m scripts.plan_progress --write`) — it is
    generated from those status lines, and it is the one number in the plan nobody may type.
@@ -298,13 +307,35 @@ session.**
 >    app.verify.recorded`) is this machine's job and comes last, after the suite is green.
 
 
-> **The Linux stretch stopped on 2026-09-09 at phase E7**, with ten of twenty-nine phases
-> complete, the suite green, and everything closed that could be closed without hardware. If
-> you are reading this on the Windows machine, **you are the next session, and your brief is
-> the top of [docs/WINDOWS_VERIFICATION.md](docs/WINDOWS_VERIFICATION.md)** — read it before
-> anything else. Three jobs, in order: verify what Linux wrote, **finish THE QUEUE** (sections
-> A–D are measurements, **section E is code you have to write on that machine**), and drive
-> the product through the GUI with `docs/GUI_PROMPT_LADDER.md`.
+> **Linux stopped scheduling on 2026-09-16 at the user's instruction, and every cron job there
+> is deleted. This machine holds the chain.** It is the only one that can close what is left,
+> because almost all of it needs CATIA, a GUI, or a test run. The board stood at 21/34 phases ·
+> 89.2% when the chain moved. Three jobs, in order: verify what Linux wrote, **finish THE QUEUE**
+> (sections A–D are measurements, **section E is code you have to write on that machine**), and
+> drive the product through the GUI with `docs/GUI_PROMPT_LADDER.md`.
+>
+> **Five standing rules, the user's, 2026-09-16 11:07.** (1) *Schedule the next turn yourself,
+> every turn* — one `CronCreate`, `recurring: false`, at least 2 h 30 min out; run `CronList`
+> first and delete any earlier continuation so exactly one exists. A turn that ends without
+> scheduling the next one stops the project. **And a scheduled job is not a live job.** A
+> one-shot cron fires only while the REPL is *idle*, so one whose time passes while the session
+> is mid-turn or waiting on the user never fires at all — and its date is then in the past
+> forever, so it will not fire later either. Measured 2026-09-17: a 04:27 job was still sitting
+> in `CronList`, unfired, at 09:20. **So `CronList` on every wake, before anything else, and if
+> the pending job's time has gone by, delete it and schedule a fresh one.** This is the one
+> failure mode that ends the chain silently — everything else leaves a trace. (2) *Do not open a new conversation per turn* — the
+> job fires into the session that created it, and that session's loaded context is the whole
+> point. (3) *Keep coding until the master plan is finished*; you are not only a gate. (4) *At
+> least seven tasks a turn*, each committed as it closes with its status line and
+> `plan_progress --write` in the same commit, so a turn cut off loses only the task in flight —
+> and `git add` by path, never `-A`. (5) *Use CATIA and the GUI only where the claim needs them*;
+> a seat prompt is four to seven minutes and `pytest` is not. **Unlike Linux, this machine may
+> and must run `pytest`, `ruff` and `mypy`.**
+>
+> **Your brief is the top of [docs/WINDOWS_VERIFICATION.md](docs/WINDOWS_VERIFICATION.md)** and
+> the *Now* block of [KRYOVA_BUILD_PLAN.md](KRYOVA_BUILD_PLAN.md), which names the next targets
+> and when the continuation fires. Read both by line range; neither big file is ever opened
+> whole.
 
 0. **Start from THE QUEUE at the top of [docs/WINDOWS_VERIFICATION.md](docs/WINDOWS_VERIFICATION.md)** —
    a checkbox list of every item a Linux session was stopped on by missing hardware, grouped by
@@ -343,12 +374,55 @@ session.**
    `OAuth2PasswordRequestForm` and imposes no length — so this password can sign in but cannot be
    registered. The script is idempotent (re-running resets a forgotten password) and refuses a
    non-local `DATABASE_URL` without `--i-know`.
+1a. **`scripts/dev_console.py`, added 2026-09-23** — a live client for a running dev backend,
+   for when the question is "did this turn behave correctly" rather than "does this render",
+   which is what item 2's browser is for. `send "<message>" [--mutate] [--conversation ID]
+   [--log <path to the backend's stdout>]` logs in exactly the way the browser does (cookies +
+   `x-csrf-token`, no bypass), streams the real SSE turn, and — if `--log` is given — tails the
+   backend's own log file in the same terminal, interleaved by timestamp with the SSE events.
+   Before this, checking what Laya or the tool-selection log said about a turn meant a second
+   terminal running `tail -f` and manually lining its timestamps up against `curl`'s output by
+   eye; now it is one command. `conversations` lists an account's conversations and `forget
+   <text>` deletes every one whose title contains it — the sidebar's own delete is a
+   hover-revealed icon with no keyboard path, tedious for a loop that starts a new conversation
+   every run. Signs into a dedicated `dev-console@kryova.dev` account (its own
+   `create_admin.py` provisioning, not `admin@admin.com`) precisely so it never resets the
+   password or steals the session out from under whoever is using the GUI account for item 2 at
+   the same time. Refuses to run against a non-local `--server`, same guard and same reason as
+   `create_admin.py`'s `--i-know`. Dev-only: it has no place in a deployed image.
 2. **Browser.** Edge is launched **once**, by hand, with `--remote-debugging-port=9222` and its
    own persistent `--user-data-dir`; the driver attaches with `playwright-core`'s
    `chromium.connectOverCDP` and runs one batch of actions per invocation. The persistent profile
    is what keeps the login cookie and the open conversation alive between tool calls.
    **Never call `browser.close()` on a CDP-attached browser** — it shuts Edge down and signs the
    session out; exiting the process is the whole of the detach.
+2a. **Three things stop a gate before a prompt is typed, all measured 2026-09-20.**
+   * **The frontend dev server never hydrates on this machine.** `npm run dev` serves correct
+     HTML and React never attaches: a login form does a *native* GET submit (the URL becomes
+     `/login?`), so nothing a client component does happens. No JS error explains it — only
+     repeated `_next/hmr` websocket failures. **`npm run build && npm start` works**, and a gate
+     should drive the production build anyway, because that is what ships.
+   * **`TaskStop` does not kill the server.** It stops the bash pipeline while node or uvicorn
+     keeps the port, so the next `npm start` dies with `EADDRINUSE` *while the browser carries on
+     talking to the old server* — which reads as "my fix did nothing". Free the port by PID
+     (`Get-NetTCPConnection -LocalPort 3000 -State Listen`), and check the listener rather than
+     the task.
+   * **`localhost` and `127.0.0.1` are not interchangeable, and they split the browser from the
+     bridge.** Chromium resolves `localhost` to `::1`; Python sets `IPV6_V6ONLY` on Windows, so
+     uvicorn serves exactly one family. A backend on `127.0.0.1` shows the browser only
+     *"Failed to fetch"*; binding `::` fixes the browser and **breaks the CATIA bridge**, which
+     reaches the API at `127.0.0.1:8000` (`settings.catia_local_bridge_server`) and whose daemon
+     then cannot register. Put everything on IPv4: `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000/api/v1`,
+     `CORS_ORIGINS` including `http://127.0.0.1:3000`, and drive the browser at `127.0.0.1:3000`.
+     The CDP driver must match the tab on **`127.0.0.1:3000`** too — a filter looking for
+     `localhost:3000` finds nothing, opens a fresh `about:blank`, and every action then times out
+     against an empty page.
+   * **The bridge spawns on demand from `dispatch`, not at startup.** It comes up when the first
+     CATIA tool is called, so an offline device right after a restart is expected. Restarting the
+     backend rotates the device token and any older daemon exits with *"the server rejected this
+     workstation's credentials (403) … exiting rather than retrying a token that cannot become
+     valid again"* — correct behaviour, not a fault.
+
 3. **Scope every DOM read to `main`.** A document-wide text or element scan returns Next.js's RSC
    `self.__next_f.push` payload and floods the context with megabytes of build output.
 4. **The backend spawns its own CATIA bridge.** `app/catia/local_bridge.py` auto-pairs a device
@@ -371,6 +445,12 @@ session.**
    chat never reason. Raise `AI_EFFORT_CHAT` to buy judgement and measure it on the ladder.
    `AI_TOOL_LIMIT` would cut the offered schemas by ~70–78 % (measured offline, limit 40–80) but
    changes what the model sees, so it stays off until a gate run compares accuracy.
+   (`AI_INTENT_ROUTER=laya` is a different thing: a small local *decision* model that picks the
+   tool family before a turn. It is off by default, it does not converse, and the ruling above is
+   about the conversational model — but it is a local model, so confirm with the user before
+   switching it on anywhere. The upstream note that `.env.local` held several `AI_PROVIDER`
+   blocks, last one winning, still applies to any local file with repeats: check what
+   `settings.ai_model` resolves to, never what the file appears to say.)
 
 **Why it is batched.** Driving a real conversation through the model against a real seat is
 the only test that has ever found the defects that matter — every one of the seven found on
@@ -628,6 +708,17 @@ to *materialise* the id before you read it.
 **Two concurrent full-suite runs drop each other's tables.** The `kryova_test` schema is created
 and dropped per run. Run the suite once at a time.
 
+**And do not edit `app/` while a full run is going, even though nothing forbids it.** Editing is
+not a second `pytest` and feels free; it is not, because a ten-minute run imports modules as it
+reaches them, so a file changed at minute four is measured in its new state by everything
+collected after it and its old state by everything before. Worse, anything fingerprinting source
+— `verify.recorded`, the job cache's `source_identity` — is then comparing a hash of a tree that
+no longer exists. Seen 2026-09-17: the first Windows run came back **48 failed**, and
+`test_simulation_cache` and two others were in it purely because `app/solve/oracle.py` changed
+mid-run; a quiet re-run cleared them and the real number was 10. That is the same class as the
+poisoned-backup trap above — a measurement taken on a tree that moved. **Start the run, then read
+code, drive the GUI or write notes until it finishes.**
+
 **And it is not only *full* runs — it is any second `pytest` that touches the database.** The
 teardown drops the schema whatever selected it, so a one-file run started "just to check
 something" while a full run is going kills the full run from underneath. Measured 2026-09-11:
@@ -750,6 +841,18 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    too tight for one and too loose for the other.
 4. **Verify a new guard by breaking the thing it guards** and watching a named test fail. Say so
    in the commit. A guard nobody has seen fail is a guard nobody knows works.
+   **And read *how much* went red, not only that something did — the blast radius is the second
+   measurement, and it is free.** Both directions carry information, and both were taken on
+   2026-09-20. *Wider than expected is usually right*: dropping `notes=` from
+   `attached.for_turn` failed the named test **and two siblings**, because the inventory line is
+   what every claim about naming rests on — a single failure there would have meant the other
+   two were pinned on something weaker. *Narrower than expected is a documented claim to
+   re-read*: removing the explicit `newline="
+"` in `app/dynamics/chrono/run.py` failed exactly
+   one test **and zero runs**, which is how it was discovered that CRLF does not in fact break a
+   Chrono run on Windows — THE QUEUE had listed it for days as one of three things that would.
+   A guard that fires narrowly is not a weak guard; it is often a strong guard attached to an
+   overstated claim, and the claim is the thing to fix.
 5. `client` overrides the job queue to `InlineJobQueue` so jobs run on the request thread inside
    the test's open transaction — a worker thread would use its own connection and see none of the
    uncommitted data.
@@ -774,6 +877,25 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    capability, ask separately whether the agent is offered it, and write at least one test that
    goes through `call_catia` — `tests/test_geometry_backends.py::TestThePartCanReachTheSolver` is
    the shape to copy. The ladder exists because this class is only visible from the outside.
+8a. **The third instance of item 8 shipped on 2026-09-20, and this one the product
+   *advertised*.** Every unconverged answer ends with `app/ai/verification.py`'s sentence
+   *"Ask for a convergence study (`grids: 3`) to find out what the number really is"*, and the
+   handbook publishes the same advice. `SimulationCreate` has taken `grids` since E7.1.
+   **`run_simulation`, the tool the agent actually calls, did not.** So the product named a
+   parameter, gate G1's user asked for it, and the one actor able to act on it had no slot for
+   it: the model invented a `geometry_version_number` argument — a key it had read off that
+   tool's own *result* payload, where the spelling differed from the parameter — then submitted
+   three separate single-grid runs, each of which reported "not converged". The question was
+   unanswerable by construction.
+   Two rules follow. **When a server string tells the user to ask for something, a test must
+   check the agent can send it** — `tests/test_tool_registry.py::TestThePromptedParameterIsReachable`
+   reads the printed advice rather than hard-coding a parameter name, so it survives a rewording.
+   And **a tool's result keys should be spelled the way its parameters are**, because the model
+   feeds one straight back into the other; that asymmetry is what produced the invented argument.
+   (Note the guard's own first version failed its break: it matched `grids` as a *substring* of
+   the unparsed schema, so renaming the key to `gridsXX` left three tests green. It walks the AST
+   for property names now — *Testing* item 4's blast-radius rule, applied to the guard itself.)
+
 9. **A parameter the schema advertises is a promise, and honouring it on one backend is half a
    fix.** `catia_list_features` declares `body`, `kind` and `include_sketches`. The gap was found
    on the **CATIA** side on 2026-09-06 (ladder H2) and closed there; **the open kernel was never
@@ -811,6 +933,49 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    recovers cleanly from three other refusals in the same transcript — and it had no way back
    from two independent confirmations. When triaging a ladder failure, do not stop at the first
    defect: ask what *confirmed* it.
+13. **A test written and never executed fails for one of four reasons, and three of them are the
+   test.** 143 mission tests and roughly forty others were written on Linux under the
+   no-pytest rule and first ran here on 2026-09-17. **Every mission test passed unchanged** —
+   their numbers had been measured against the real kernel before being asserted, which is why.
+   Of the rest, the split is worth knowing before you start triaging: *a real product defect*
+   (three of them, and none findable by reading — a tool offered to every MCP client that could
+   only be refused, a public page calling a buildable rung pending, an omission note the outer
+   fence truncated away); *a claim about the platform* (`--user` on a docker line, a `#!` fake
+   solver, `os.getgid`); *a literal that was a measurement* (a Linux compliance ratio written as
+   a theorem, a ladder count, a tolerance whose edge a chosen size lands on by one ulp); and *an
+   assertion that could never have passed anywhere* (`np.bool_(True) is True` is False; a
+   "same file uploaded again" test that called a non-deterministic writer twice). **Read the
+   failure before touching either side** — the second and third kinds look identical to a
+   regression, and the fourth looks like a broken feature.
+14. **`str()` on a result object is often a summary, not its content.** `UserTurnBlock` renders
+   as `<quoted attachment block: 2000 attachment(s), 11994 chars>` and holds the real text in
+   `_block`. Perfectly reasonable, and it cost ten minutes of believing a probe had produced a
+   58-character block. Check `dir()` before concluding a builder returned nothing.
+15. **A test about one thing must not assert the total of the set it belongs to.** Measured
+   the hard way: the mission ladder's counts — "7/9 rungs pass", the buildable list, the
+   pending set, the runner count — were written as literals in **seven** test files, and
+   every rung that *advanced* turned a success into several red tests in files about other
+   rungs. M6 on 2026-09-10, M4, M5 and M7 on 2026-09-16, M8 on 2026-09-17: six separate
+   fixes, all of them the same fix, and each one arriving as a failure that reads exactly
+   like a regression. **The rule: a rung's own file asserts its own rung**, and the ladder's
+   totals belong to the one file that owns the ladder (`tests/test_design_missions.py`),
+   where moving them is deliberate and the message says so. The same applies to
+   `app/verify/nafems.py`'s blocked-case count, which made unblocking a case look like a
+   regression twice. **Derive a total, or do not assert it where it is not the subject.**
+16. **A change to a *shared vocabulary* has a blast radius bigger than its files, and only the
+   full suite knows it.** Item 7 under *Subagents* says to run everything after integrating
+   parallel lanes; this is the same rule with no lanes in it, and it is the commoner case.
+   Measured 2026-09-17, twice in one turn. Withholding one tool inside `ToolBox` touched two
+   files and broke four tests in a third, because the *agent's* box and the *MCP route's* box
+   want opposite behaviour from the same object — the agent can act on "no model is available"
+   and an MCP client can only waste a turn on it, so the filter belongs at the surface with the
+   requirement and not in the shared builder. And adding `calculix` to the conduction registry
+   broke a test that used that exact name as its example of a backend which does not exist.
+   **The two shapes to watch for**: a change that *narrows* something many callers read, and a
+   change that *fills an absence* some test pins. Both pass every targeted run. Neither is
+   findable by grep, because what broke was a test asserting the old world, not a caller.
+   **A test pinning an absence has to be re-read the day the absence is filled, not edited
+   until it passes.**
 
 ## Subagents — never more than one at a time
 
@@ -902,6 +1067,84 @@ this faster". Four things from it that are asked most often and answered wrongly
    says measured. Each buys real time and each converts an honest slow answer into a fast
    dishonest one.
 
+## Single-pass decisions (`app/ai/decide.py`) and Gemini — added 2026-09-22
+
+Three primitives — `choose` (categorical), `score` (ordinal), `judge` (boolean) — each one
+constrained call with a closed option set, for the branch decisions that were costing a
+conversational turn. Wired into `tool_retrieval.select(decide=...)` as a **union-only**
+recall rule, injected so the selector stays pure and instant by default.
+
+1. **Confidence is a provenance, not a float, and that is forced by a measurement.**
+   Ollama returns logprobs; **Gemini returns none on any reachable model** — the
+   OpenAI-compatible endpoint rejects `logprobs`/`top_logprobs` as unknown fields and the
+   native one answers `Logprobs is not enabled for models/gemini-2.5-flash`. So
+   `Confidence.basis` is `MEASURED` / `STATED` / `UNAVAILABLE`, and `probability` is
+   **None unless MEASURED**, enforced in `__post_init__`. A model's self-reported
+   certainty is not a probability and there is deliberately no field to put it in.
+2. **`AI_PROVIDER=gemini` exists** (`app/ai/providers/gemini.py`) and is a thin subclass of
+   `OpenAICompatibleProvider` — Gemini serves the OpenAI dialect at
+   `https://generativelanguage.googleapis.com/v1beta/openai`, so nothing else was needed.
+3. **Gemini thinks by default and on a small call it is most of the bill.** Measured: the
+   smallest possible decision was **81 total tokens against 21** with
+   `reasoning_effort: "none"`, on a question whose prompt and answer were 22 of them. At a
+   24-token cap the hidden tokens exhaust the budget and the call returns
+   `finish_reason: length` — which reads as "raise the token limit" and is not that.
+   The flag is toggled around **structured** calls only (a `complete()` output is schema-
+   constrained, so reasoning cannot improve it; a `chat()` turn is the agent and keeps it),
+   copying `NvidiaProvider`'s documented pattern rather than widening `_extra_body`.
+4. **The free tier is 20 requests per day, per model** — `GenerateRequestsPerDayPerProject
+   PerModel-FreeTier = 20`, found by exhausting it. One CATIA turn is tens of steps, so a
+   single gate run spends a day's quota before a part exists. **A free-tier Gemini key
+   cannot drive the agent**, whatever its quality. The quota is per *model*, so a second
+   model still answers while the first is exhausted. `.env.local`'s Gemini block is
+   therefore commented out, one uncomment from live, with this recorded beside it.
+5. **`gemini-2.5-flash` is the one to use**, measured same prompt, same schema, reasoning
+   off: **908 ms**, against 4.9 s (`gemini-3.5-flash`), 20.2 s (`gemini-flash-latest`) and
+   33.0 s (`gemini-3.8-flash`, which also refused the strict `json_schema`). Newer is not
+   faster here and the newest is 36× slower.
+6. **A first structured call against a new endpoint can fail once and then be fine.** Seen
+   that day: the first three live decisions came back `finish_reason: length`, and the same
+   calls were deterministic and correct immediately after. `OpenAICompatibleProvider`
+   negotiates `json_schema` support on first use and remembers it, so treat one cold
+   failure as negotiation rather than as a defect — and note the fallback path is what made
+   it legible, because it returned the declared fallback *labelled* rather than a guess.
+
+## Reading a standard the user attaches (learned 2026-09-22)
+
+Two arrived in one message, one closed a phase and the other could not, and the difference
+was not visible from the message.
+
+1. **A PDF the user attached is recoverable from the session transcript, so a compaction
+   does not lose it.** The attachment is stored base64 in
+   `~/.claude/projects/<slug>/<session>.jsonl` inside a `{"type":"document"}` block. Walk
+   the JSON for `source.media_type == "application/pdf"` and `base64.b64decode(source.data)`.
+   A post-compaction summary will *not* carry it, and it will not say so — the summary that
+   day named one of the two attachments and silently dropped the other. **Check the
+   transcript for `"type":"document"` before concluding the user sent one thing.**
+2. **`pypdf`'s `extract_text` with a `visitor_text` callback gives x/y per fragment, and
+   that is what settles a table's column alignment.** Flat extraction of a merged-cell
+   engineering table reads plausibly and puts values in the wrong column. Reading the
+   **header** row's x-positions and matching data fragments to them is the check; it is how
+   the ISO 286 `K`/"above IT8" cell was found to be *blank* rather than absent, which is a
+   different fact with a different answer.
+3. **A cross-check between two tables that must agree is worth more than care.** ISO 286's
+   Tables 2/3 (holes) and 4/5 (shafts) are negations of each other, so transcribing both and
+   asserting agreement found the single cell where the *standard itself* misprints. One
+   transcription is a hope.
+4. **There is no PDF rasteriser on this machine.** The `Read` tool's PDF path needs
+   `pdftoppm` (poppler), which is not installed; `pymupdf` is a one-line pip install and
+   renders pages fine. **Uninstall it again** — a venv that diverges from
+   `requirements.txt` is the hazard, and nothing in `app/` imports it.
+5. **A scanned standard is legible and still unusable, and legibility is the trap.** The
+   BS 7608 copy reads perfectly at ~108 dpi for *body text*. The fatigue section below
+   records that 110 dpi turned a Figure 7.1 label "160" into "180", and that tables needed
+   300–400 dpi. **Check the embedded image's pixel size** (`page.get_images` →
+   `extract_image` → `width`/`height`), not whether the page looks readable: rendering at
+   200 dpi from a 902×1277 source upsamples and adds nothing.
+6. **Read the page footer before using a standard.** IHS/BSI copies carry
+   *"Uncontrolled Copy"*, a named licensee and *"Not for Resale"*. Whether to build on one is
+   the user's decision, not a session's, and it belongs in the status line either way.
+
 ## Tools
 
 **Use `rg` (ripgrep), not `grep`**, for code search — it respects `.gitignore`, so it will not
@@ -922,11 +1165,15 @@ right tag.
 
 **Read only the files you need.** `rg` to locate first; avoid loading large files wholesale.
 
-**There is no outbound network from this machine.** `curl https://ntrs.nasa.gov/` times out
-(measured 2026-09-16). So every plan task whose remainder is "fetch the page", "read the
-judgement", "ask the vendor's form" is not a Linux task however much it looks like one —
-E21.5, E21.6, E23.1 and E23.4 are all in that state and were taken and returned once. Check
-before planning a turn around one.
+**There is no outbound network from the LINUX machine** — `curl https://ntrs.nasa.gov/` times
+out there (measured 2026-09-16) — **and there is one from this Windows seat**: `eur-lex.europa.eu`
+answers 200, and `iso.org` answers 403, which is a bot block rather than a dead connection
+(measured 2026-09-20). The distinction matters because this file is read on both machines and
+the sentence used to name neither: a task whose remainder is "fetch the page" or "read the
+judgement" is **not a Linux task and may well be a Windows one**. Check which machine you are
+on before parking one. What network does *not* buy: a purchase (MMPDS is $939 a volume), a
+vendor's licence form, or a judgement the design deliberately refuses to compute — E23 task 2
+owes its first verdict "by a person", and that is the design, not a gap.
 
 **`venv/bin/python -m scripts.scan_secrets` is a blocking CI step, and it will catch your test
 fixtures.** A connection URL with a reachable-looking host, or anything shaped like an issued
@@ -1127,7 +1374,28 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
    the file but no such layer appears in CATIA. **Those three are "on this seat's default import
    settings", not proofs**: CATIA's STEP import options and its FTA licensing were not inspected,
    and an `AnnotationSets.Add()` probe failed on its *signature* rather than on a licence, so it
-   settled nothing. Worth ten minutes next seat session. What it does already show is that
+   settled nothing. **SETTLED 2026-09-19: it was never a licence.** FTA is licensed here.
+   `AnnotationSets.Add` takes its standard as a **string** (`((16392,1),)` =
+   `VT_BYREF|VT_BSTR`), and `Add("ISO")` creates `Annotations.1`; the container is
+   **`part.AnnotationSets`** — not `GetTechnologicalObject`, and no `GetWorkbench` spelling —
+   and it is invisible to late binding without `EnsureModule` on
+   `{88D26C84-D8E9-0000-0280-020CC3000000}`. `CreateDatumReferenceFrame()` works, and
+   `TPSViewFactory.CreateView(planeRef, 0)` makes `Vue de face.1` and sets `ActiveView` —
+   an annotation needs a view, which is the precondition that is easy to miss. **And
+   `iSurf` is not a `Reference` — it is a `UserSurface`**, which is why every `iSurf` method
+   refused (plain text and a flag note too, not only datums). `part.UserSurfaces.Generate(ref)`
+   makes one (`Surface utilisateur.1`), and then `CreateDatum` gives `Référence.1` —
+   **the first datum created on this seat through automation, 2026-09-19.** Two earlier
+   readings of the refusal were wrong and are recorded so nobody repeats them: it was not
+   late/early binding, and it was not the datum rejecting its support. Form tolerances work
+   too: `CreateToleranceWithoutDRF(i, userSurface)` on a planar face gives 1 straightness,
+   3 flatness, 6 line profile, 7 surface profile; 2, 4, 5 and 8-16 refuse there.
+   `CreateToleranceWithDRF` refuses at **every** index until the frame is filled —
+   `CreateDatumReferenceFrame()` makes it **empty**. `ReferenceFrame().SetFrame(label, "", "")`
+   with the datum's `DatumSimple().Label` (`'A'`) fills it, and then 3 parallelism,
+   **4 position**, 7 and 8 profiles work. **The index is per family**: 3 is flatness without a
+   frame and parallelism with one, so never key a symbol on the number alone. `part.UserSurfaces.Count` raises
+   on an empty collection; do not probe with it. What it does already show is that
    `interop.measure_metadata_round_trip`'s "names, colours, layers … all carry" is a statement
    about **OCCT talking to itself**, which is exactly the limit B5 was written to expose.
 
@@ -1150,6 +1418,16 @@ unavailable-with-a-reason, as a sidecar so paths still resolve).
 17. **Every declared operation must be in `HANDLERS`, `LOCALLY_SERVED` or `refusals.REASONS`**, and
    a reason may only name a served tool (`tests/test_kernel_refusals.py`). When you implement
    one, delete its reason in the same change, or the partition test fails.
+18. **OCCT's STEP writer is not deterministic across two writes in one process.** It names the
+   product `'Open CASCADE STEP translator 7.8 N'` with **N incrementing per process**, so
+   exporting the same shape twice gives two files that differ on two lines and hash
+   differently. Measured 2026-09-17. Nothing downstream is wrong — the geometry is identical —
+   but any test or cache that expects "the same part exported again is the same bytes" is
+   expecting something this writer does not offer, and `tests/test_geometry.py`'s display-cache
+   test was built on exactly that and could never have passed. **Content-addressed identity for
+   an exported STEP has to come from one export reused, never from two exports compared.**
+   Contrast `app/render/`, where byte-identical output *is* guaranteed and is defended at every
+   cheap place to lose it — that is a property somebody built, not one OCCT hands you.
 
 ## Sheet metal reaches geometry (`app/sheetmetal/fold.py`, `app/kernel/occt/sheetmetal.py`)
 
@@ -1318,7 +1596,21 @@ Five things that are easy to get wrong and are pinned by tests:
    stiffness assembly's four-point Gauss rule — that rule is exact only to degree 2 and tet10's
    `N^T N` is quartic, so reusing it would be wrong by a few percent: plausible-looking, and wrong.
 4. **The centroid and the nodes answer different questions, and averaging the first is not the
-   second.** `SolveOutput.nodal_stress` is the full tensor in Voigt order **SXX SYY SZZ SXY SYZ
+   second — and since 2026-09-21 the result reports BOTH.** `max_von_mises_mpa` is the element
+   value at the centroid; `max_von_mises_surface_mpa` is the peak at the nodes, which is where a
+   surface is. **Neither is "the" peak and a verdict rests on `governing_peak_mpa`, the larger of
+   the two**, with `governing_basis` naming which it was. They under-read in opposite cases: a
+   centroid sits inboard of the skin and misses the peak of a part in bending, while the nodal
+   value averages across elements and so flatters a sharp concentration — which is the reason
+   `summarise_static` chose the element value originally, and it was right about concentrations.
+   Gate G1 measured the cost of having only the first: on a 180x50x12 bar at 400 N, closed-form
+   surface stress 60.0 MPa, a three-grid study certified **41.03 MPa** as `converged` at GCI
+   1.03% with the deflection right to 0.7%. The surface peak now reads **59.78**.
+   **The convergence study still assesses the element value** (`quantities._max_von_mises`), so
+   the evidence and the claim are about different numbers until E7 task 10 lands — do not read a
+   `converged` badge as being about the number the answer quoted.
+
+4b. **(The original entry, still true of the two recoveries themselves.)** `SolveOutput.nodal_stress` is the full tensor in Voigt order **SXX SYY SZZ SXY SYZ
    SZX** (CalculiX's own order, so the adapter never permutes), and it is recovered by evaluating
    tet10's gradient at **each node's own natural coordinate** — `_TET10_NATURAL_NODES`, derived
    from `TET10_EDGES` rather than typed out. The element centroid stays the superconvergent point
@@ -1968,6 +2260,54 @@ Server specs in `app/catia/tool_specs.py`, resolution in `app/catia_kb/ui.py`, d
    the bridge is right to be Win32 rather than COM. The daemon still tries the **live menu
    first** and falls back to `StartCommand` with `verified: false`; never report an unverified
    `StartCommand` as success, and never send one without a way to dismiss what it may put up.
+3a. **A COM call with the wrong argument *types* can kill the seat outright, not refuse.**
+   Measured 2026-09-17: `Mechanism.AddJoint` (DMU Kinematics) declares
+   `((16392, 1), (8204, 3))` — a **string** by reference and an **array of doubles** — and
+   called with a non-empty doubles array it took `CNEXT` down. The first sign was
+   *"Échec de l'appel de procédure distante"*, the second *"Le serveur RPC n'est pas
+   disponible"*, and by then CATIA was gone. There is no dialog to dismiss and nothing to
+   recover; every open document goes with it. This is worse than item 3's wedge.
+   **So read the parameter flags before calling an unfamiliar COM method**: the generated
+   type-library wrapper in `%LOCALAPPDATA%\Temp\gen_py\` states them exactly
+   (`16392 = VT_BYREF|VT_BSTR`, `8204 = VT_ARRAY|VT_R8`, `9 = VT_DISPATCH`), and guessing
+   an integer where a string is wanted is what produced six identical French COM errors
+   that read like a missing licence. **Never sweep an unknown signature by brute force on
+   a live seat.**
+3b. **`gencache.EnsureDispatch("CATIA.Application")` breaks the bridge, machine-wide and
+   persistently.** Measured 2026-09-18 while reading `SystemService.ExecuteScript`'s flags.
+   It writes an early-binding wrapper for **INFITF** into `%LOCALAPPDATA%\Temp\gen_py`, and
+   that cache is global, on disk, and consulted by *every* win32com process afterwards — so
+   one read of one signature changes how the daemon binds. The early wrapper types
+   `Documents.Add` as the base `Document`, which **has no `.Part`**, and
+   `CastTo("PartDocument")` is refused because that interface lives in MECMOD rather than
+   INFITF. `win32com.client.dynamic.Dispatch` does not rescue it either: children fetched
+   through a dynamic parent are still re-wrapped from the cache. The symptom is
+   `AttributeError: 'Document' object has no attribute 'Part'. Did you mean: 'Parent'?` in
+   code that worked yesterday and was not touched.
+   **So: never `EnsureDispatch` the Application.** To read a signature, `EnsureModule` the
+   *specific* library (the sheet-metal work does this for `CATShfInterfaces`), or generate,
+   read, and **delete the directory afterwards** — the INFITF one is
+   `gen_py\<python version>F197B2-0771-11D1-A5B1-00A0C9575177x0x0x0`. Deleting it restores
+   late binding immediately, with no CATIA restart. Verify with
+   `Documents.Add("Part").Part is not None` before trusting the seat again.
+
+3c. **Generating a type library can BREAK calls that already worked, and it has twice.**
+   The mechanism is always the same: the early-bound wrapper types a member to a *base*
+   class that lacks what late binding reached. Measured 2026-09-18 and 2026-09-19 —
+   `EnsureDispatch("CATIA.Application")` (INFITF) makes `Documents.Add` return a base
+   `Document` with **no `.Part`**; `EnsureModule` on `MecModInterfaces` makes
+   `part.ShapeFactory` a base `Factory` with **no `AddNewPad`**. Both caches are global, on
+   disk, and consulted by every win32com process afterwards, the bridge included.
+   **And you cannot simply generate everything**: FTA needs `CATTPSInterfaces` generated to
+   be visible at all, while generating `MecModInterfaces` alongside it breaks the geometry
+   calls, so a process that both builds and annotates needs `win32com.client.CastTo` to the
+   narrow interface at the call site rather than a process-wide switch — the bridge is
+   late-bound by design. (`CreateDatum`'s own refusal is **not** an instance of this: it
+   rejects a Reference that a sibling method on the same library accepts. See the FTA entry.)
+   Deleting the generated file restores late binding immediately, with no CATIA restart —
+   `EnsureModule` writes one flat `.py` per library, `EnsureDispatch` a per-class
+   *directory*. Verify with `Documents.Add("Part").Part` before trusting the seat again.
+
 4. **Command labels are localised; internal command ids are not, and are undocumented.**
    `COMMAND_IDS` holds only ids with a published source. Do not add one from memory.
 5. **Buttons are pressed by role, never by label.** `ButtonRole` + `BUTTON_LABELS` resolve
@@ -1999,6 +2339,56 @@ Server specs in `app/catia/tool_specs.py`, resolution in `app/catia_kb/ui.py`, d
    reports unrecognised controls with their class name so the first Windows session produces the
    answer instead of a shrug.
 
+### Exporting from a seat: the refusal used to name the wrong cause
+
+Measured 2026-09-18 (E17 task 2), every declared format written from a live V5-R33 document:
+
+    PartDocument     stp 8,966 B | igs 12,393 B | stl 3,244 B | 3dxml 6,057 B | dxf REFUSED
+    DrawingDocument  dxf 75,363 B (AC1027) | dwg 12,357 B     | stp REFUSED
+
+1. **`ExportData` gives one error for two unrelated causes**, and the bridge used to read it
+   as the wrong one. A missing Data Exchange licence and a document of the wrong *kind* both
+   answer `La méthode ExportData a échoué`, so `_FORMAT_LICENCE` reported "This needs the
+   DXF/DWG (D2/DW1) licence" on a seat that wrote 75 kB of DXF from a drawing seconds later.
+   A 3D part has no 2D views; that is the whole of it. `infrastructure.wrong_kind_of_document`
+   now refuses by the cause first, and **only in the two directions actually measured** —
+   an unclassifiable document is passed through, because over-refusal becomes a wrongly built
+   part.
+2. **`GetWorkbench` is on the document, not the application.** `app.GetWorkbench("SPAWorkbench")`
+   raises `AttributeError ... Did you mean: 'GetWorkbenchId'?`, which reads like a version
+   difference and is not.
+3. **`GetMeasurable` wants a reference, not the object.** Hand it `part.MainBody` and it answers
+   `Le type ne correspond pas`; it needs `part.CreateReferenceFromObject(body)`.
+
+### The installed desktop app and Microsoft Defender — measured 2026-09-19
+
+The unsigned 0.2.0 MSI installs cleanly and Defender then quarantines `kryova.exe` as
+`Trojan:Script/Wacatac.H!ml`. Three things that each cost time:
+
+1. **It is an ML verdict per build, not a signature, and a rebuild can clear it.**
+   `target/release/kryova.exe` scans clean while the MSI's copy is flagged — **but they are
+   not the same bytes**: the shipped exe differs in 3 bytes (Tauri's bundle-type stamp), so
+   **never treat `target/release/kryova.exe` as the shipped binary**; extract it with
+   `msiexec /a <msi> /qn TARGETDIR=<dir>` or hash the installed one. A relink (touch
+   `src-tauri/src/main.rs`; cargo will not relink an unchanged tree, and the MSVC linker stamps
+   a fresh PE timestamp) gave a new hash that installed and ran unflagged on 2026-09-19.
+   That is luck, not a fix.
+2. **A path exclusion does not beat a cloud verdict.** Restored after
+   `Add-MpPreference -ExclusionPath`, the file was re-quarantined 11 s later by real-time
+   protection, triggered by `explorer.exe` rendering the desktop shortcut. Add the exclusion
+   *before* restoring regardless, or the restore undoes itself instantly.
+3. **`Get-MpThreatDetection` hides a re-detection**: it keeps the original
+   `InitialDetectionTime`, so "any detection since T" reads zero while the file is being
+   quarantined again. Read `Microsoft-Windows-Windows Defender/Operational`, events 1116
+   (detected) and 1117 (action taken).
+
+4. **The installed app starts a real backend, and with it a real CATIA bridge daemon.** Close
+   Kryova before a full `pytest` run, or the daemon holds `bridge.lock` and `tests/test_catia_*`
+   can go red for a reason no test caused (see *Known landmines*).
+
+Do **not** "Allow on device" to get past it: that allows the threat ID machine-wide, and
+`Wacatac.H!ml` also covers real malware. The fixes are code signing and P9 task 5's bundling.
+
 ### Two seat behaviours that cost a restart each — measured, not theorised
 
 1. **`catia_sketch_dimension` fails on this seat far more often than it works** (measured
@@ -2027,9 +2417,20 @@ earlier and never removed from here. That is worse than an empty section: a stal
 you to re-fix something that works, and it teaches you to skim the ones that are real. **Verify an
 entry before acting on it, and delete it the moment it stops being true.**
 
-**Five that only bite on Windows** — the first three measured 2026-09-09, the last two
-2026-09-10. Each was invisible on Linux by construction, which is the pattern worth carrying: a
-difference between the two machines hides in whatever neither one has to state out loud.
+**Six that only bite on Windows** — the first three measured 2026-09-09, then two on
+2026-09-10 and one on 2026-09-17. Each was invisible on Linux by construction, which is the
+pattern worth carrying: a difference between the two machines hides in whatever neither one has
+to state out loud.
+
+- **`os.getuid`, `os.getgid`, `os.killpg` and `signal.SIGKILL` do not exist on Windows at all,
+  and `hasattr` does not narrow a module attribute for mypy.** So `if hasattr(os, "getuid"):
+  os.getuid()` is correct at runtime and a type error here, in code that never runs. It was in
+  three places (`solve/openfoam/run.py`, `dynamics/chrono/run.py`, `verify/corpora.py`) and all
+  three now go through `getattr(os, "getuid", None)`. The consequence that is *not* a typing
+  detail and is worth knowing: **a container Kryova starts on Windows runs as its own user**, so
+  it can write files the server may not be able to delete — THE QUEUE F1 records that for
+  OpenFOAM and it is the same for Chrono. Write a test that asserts `--user` conditionally, or
+  it claims a POSIX fact about the machine the product ships on.
 
 - **Never mutate a source file with PowerShell's `Set-Content` when you are about to measure the
   result.** `Set-Content -Encoding utf8` writes a **BOM** on PowerShell 5.1, and `-NoNewline`
@@ -2066,6 +2467,27 @@ difference between the two machines hides in whatever neither one has to state o
   validation outcome, and published *nothing is validated* on the trust page. It also keyed on
   `str(path)`, which is `app\solve\...` here. **Neither normalisation alone reproduces a Linux
   digest** — both are needed, and both are pinned by their own test.
+- **`subprocess.run(["docker", ...])` by the BARE NAME fails inside a running job here, while
+  `shutil.which("docker")` still resolves it.** Measured 2026-09-20. The full suite came back
+  **2 failed / 11 errors**, all OpenFOAM, and the same file alone was **67 passed** — which reads
+  exactly like the contention trap above and is not: the reproducing test failed alone, in 1.7 s,
+  reporting *"The OpenFOAM image … is not present"* while `docker images` listed it. Instrumented
+  through the job path, `_image_present` runs **twice**: the first returns True, the second raises
+  **`FileNotFoundError [WinError 2]`** with the working directory unchanged and still existing,
+  `PATH` byte-identical and still containing the Docker directory, `which` still resolving
+  Docker Desktop's own `docker.EXE` under `C:\Program Files`, and a run of **that absolute
+  path succeeding in the same breath**. So `which` finds it and `CreateProcess` does not. **The
+  mechanism is unidentified** and is written down as unidentified; the fix does not depend on it.
+  **Launch the resolved absolute path, never the bare name** — `run._docker()` in both
+  `app/solve/openfoam/` and `app/dynamics/chrono/`.
+  **The half that hid it for an hour is the better lesson.** `_image_present` caught `OSError` and
+  returned a bare `False`, so *"docker says no such image"* and *"we could not run docker at all"*
+  arrived as one answer, and the refusal said `docker pull`. Wrong and unactionable: it sends you
+  to fix the one thing that was not broken. It returns `None` for the second case now. **This is
+  the third time one message for two causes has cost a session** — the CATIA `ExportData` refusal
+  blaming a licence for a document of the wrong kind, and `gmsh`'s bare "Error loading" on a valid
+  STL, are the other two. When a refusal is written, ask what *else* reaches that line.
+
 - **A test that reads real machine state answers differently depending on the machine.** Eight
   `test_catia_local_bridge` tests hit a `sys.platform`-guarded `tasklist` probe for the first
   time: the process double is not a context manager, so `subprocess.run` raised inside a broad
@@ -2113,6 +2535,26 @@ difference between the two machines hides in whatever neither one has to state o
    `RUN python` in the Dockerfile dies with `python: command not found` *after* the
    fourteen-minute conda solve; and `docker run IMAGE python …` works anyway, because the
    image's entrypoint activates the environment.
+   **It runs on Windows (2026-09-20, THE QUEUE G6 step 1), and one of the three things that
+   were supposed to stop it does not exist.** A mechanism runs in 1.0 s; the `C:\…:/work`
+   mount resolves; the container writes as **root** (no `os.getuid`, so no `--user`) and the
+   host deletes the directory anyway — the same answer OpenFOAM gave here. But **CRLF line
+   endings do not break the run**: the entry point is invoked as `python /work/chrono_run.py`,
+   an *argument* rather than an executable, so its shebang is never parsed and CPython accepts
+   CRLF source. Removing `newline="
+"` fails exactly one test and no run. The explicit LF
+   stays as insurance against a caller that execs the file; do not cite it as the reason a
+   Windows run works, because it is not.
+   **`pychrono` carries no `__version__` at all** — `dir()` offers only
+   `ChMatrix_dense_version_tag`, a matrix format tag — so `chrono_version` reads `unknown` and
+   that is the only reachable answer. The image's **content id** is the whole of this engine's
+   identity, which is why `cache.engine_for` keys on it.
+   **And every Chrono test before that day was against a stub.** 77 of them, driving two
+   hand-written fakes (one spelled the Chrono 8 way, one the Chrono 9 way) — exactly right for
+   pinning `_call`'s name resolution and no evidence whatever about the engine. That is
+   `stream_chat`'s lesson in a second package: **a mock of an API is a copy of what its author
+   believed it to be.** `tests/test_dynamics_chrono_engine.py` is the real-engine half, and it
+   skips where there is no image, so CI and Linux still learn nothing from it.
 5. **The in-memory rate-limiter backend is per-process.** `RedisBackend` exists in
    `api/rate_limit.py`; with `InMemoryBackend` selected, multiple workers each enforce their own
    budget. Check which backend is configured before reasoning about a limit. **Since P1.6 the

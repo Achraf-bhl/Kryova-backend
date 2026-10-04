@@ -7,6 +7,7 @@ the work it claims to have submitted -- rather than whether some model happened
 to behave.
 """
 
+import time
 from typing import Any
 
 import pytest
@@ -31,6 +32,7 @@ from app.models import (
     SimulationJob,
     User,
 )
+from app.solve.linear_static import LinearStaticSolver
 
 LOAD_CASE: dict[str, Any] = {
     "name": "Tip load",
@@ -2572,3 +2574,190 @@ class TestRunSimulationCanCarryATemperatureField:
 
         assert coupling._THERMAL == runner.THERMAL_ANALYSES
         assert coupling._TRANSIENT == runner.TRANSIENT
+
+
+class TestWaitingForARunItStarted:
+    """Master plan E7 task 8 — what gate G1 stopped on, 2026-09-20.
+
+    `run_simulation` returns `queued` and its own description tells the agent to
+    poll `get_simulation`. `MAX_IDENTICAL_READS` then refuses the third identical
+    read, and not one of the thirty tools was a wait. So the product instructed
+    the agent to poll and forbade it from polling, and **any solve slower than
+    about two agent steps could not be reported in the turn that started it** —
+    measured on the seat, where the agent built the part, drafted the case
+    correctly, submitted a 2 mm run, polled, was refused and ran out of steps
+    with the answer still queued.
+
+    The repeat guard is not weakened anywhere in this fix. Its justification —
+    *"reading something does not alter it, and the answer has not changed"* — is
+    true of every other read here and false of exactly one, a job status, which
+    is the read whose answer changes with nobody doing anything. The waiting
+    happens inside a single tool call, so the guard never sees a repeat.
+    """
+
+    def _box(self, db_session: Session, user: User, project: Project) -> ToolBox:
+        return _toolbox(db_session, user, project, job_queue=_NoopQueue())
+
+    def _queued_job(self, db_session: Session, project: Project, version: Any) -> Any:
+        from app.models import SimulationJob
+        from app.models.simulation import JobStatus
+
+        job = SimulationJob(
+            project_id=project.id,
+            geometry_version_id=version.id,
+            analysis="linear-static",
+            status=JobStatus.QUEUED,
+            element_size_mm=5.0,
+            # `solver` is NOT NULL: the row records which solver was asked for at
+            # queue time, and the runner overwrites it with what actually ran.
+            solver=LinearStaticSolver.name,
+        )
+        db_session.add(job)
+        db_session.flush()
+        return job
+
+    def test_it_returns_as_soon_as_the_run_reaches_a_terminal_status(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        """The whole point: one call, one step, whatever the solve costs."""
+        from app.models.simulation import JobStatus
+
+        job = self._queued_job(db_session, project, geometry)
+        job.status = JobStatus.SUCCEEDED
+        db_session.flush()
+
+        box = self._box(db_session, user, project)
+        answer = box.call(
+            "wait_for_simulation", {"simulation_id": job.id}, allow_mutations=False
+        )
+
+        assert answer["status"] == "succeeded"
+        assert answer["timed_out"] is False
+
+    def test_a_run_still_going_when_the_wait_is_up_is_not_reported_as_failed(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        """"Still running" and "failed" are different facts.
+
+        The agent must not report the second when it has the first, so a timeout
+        returns the job as it stands and says `timed_out`, rather than raising
+        or inventing a terminal status.
+        """
+        job = self._queued_job(db_session, project, geometry)
+        box = self._box(db_session, user, project)
+
+        answer = box.call(
+            "wait_for_simulation",
+            {"simulation_id": job.id, "timeout_s": 0.5},
+            allow_mutations=False,
+        )
+
+        assert answer["timed_out"] is True
+        assert answer["status"] == "queued"
+        assert answer["error"] is None
+
+    def test_the_wait_is_capped_however_long_it_is_asked_for(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        """An unbounded wait is a worker leak wearing a helpful name.
+
+        It blocks one FastAPI threadpool thread and holds the request session's
+        transaction open, so the cap is load-bearing rather than tidy. Asserted
+        on the constant rather than by waiting ten minutes.
+        """
+        assert ToolBox.WAIT_MAX_S == 600.0
+        assert ToolBox.WAIT_DEFAULT_S < ToolBox.WAIT_MAX_S
+
+        box = self._box(db_session, user, project)
+        job = self._queued_job(db_session, project, geometry)
+        with pytest.raises(ToolError, match="positive"):
+            box.call(
+                "wait_for_simulation",
+                {"simulation_id": job.id, "timeout_s": 0},
+                allow_mutations=False,
+            )
+
+    def test_another_users_run_is_refused_before_any_waiting_happens(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        """Ownership first, or the wait is an oracle for ids that are not yours.
+
+        A tool that waited and *then* refused would answer "not found" slowly for
+        a foreign id and quickly for a made-up one, which is a timing side channel
+        on exactly the thing `get_owned_project` returns 404 to hide.
+        """
+        box = self._box(db_session, user, project)
+        started = time.monotonic()
+        with pytest.raises(ToolError, match="No simulation"):
+            box.call(
+                "wait_for_simulation",
+                {"simulation_id": "not-a-real-id", "timeout_s": 30},
+                allow_mutations=False,
+            )
+        assert time.monotonic() - started < 5.0
+
+    def test_it_sees_a_status_another_session_committed(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        """The trap this would have shipped with, and it is silent.
+
+        The worker commits from its own session. `db.get` hands back the copy
+        this session already loaded, so without expiring it the status never
+        appears to move however long the wait — the tool would time out on every
+        run that was already finished. Simulated by mutating the row behind the
+        identity map's back.
+        """
+        from sqlalchemy import update
+
+        from app.models import SimulationJob
+        from app.models.simulation import JobStatus
+
+        job = self._queued_job(db_session, project, geometry)
+        job_id = job.id
+        box = self._box(db_session, user, project)
+        assert job in db_session, "the job must be in the identity map for this to mean anything"
+
+        # `synchronize_session=False` is what makes this a real reproduction: the
+        # ORM then does NOT touch the identity map, so the in-memory object stays
+        # stale exactly as it does when a worker commits from its own session.
+        # With the default, SQLAlchemy expires the object for us and the test
+        # passes whether or not the tool expires anything — which is how the
+        # first version of this test came to pass against the mutant.
+        db_session.execute(
+            update(SimulationJob)
+            .where(SimulationJob.id == job_id)
+            .values(status=JobStatus.SUCCEEDED)
+            .execution_options(synchronize_session=False)
+        )
+        assert job.status is JobStatus.QUEUED, "the in-memory copy should still be stale here"
+
+        answer = box.call(
+            "wait_for_simulation",
+            {"simulation_id": job_id, "timeout_s": 5},
+            allow_mutations=False,
+        )
+        assert answer["status"] == "succeeded"
+        assert answer["timed_out"] is False
+
+    def test_it_is_a_read_and_needs_no_mutation_permission(
+        self, db_session: Session, user: User, project: Project, geometry: GeometryVersion
+    ) -> None:
+        """Waiting changes nothing, so it must not need `allow_mutations`.
+
+        A conversation that has not granted mutations can still have a run going
+        — the user may have started it from the project page — and refusing to
+        let the agent read the outcome would be a second way to lose the answer.
+        """
+        from app.models.simulation import JobStatus
+
+        job = self._queued_job(db_session, project, geometry)
+        job.status = JobStatus.FAILED
+        job.error = "mesh too coarse"
+        db_session.flush()
+
+        box = self._box(db_session, user, project)
+        answer = box.call(
+            "wait_for_simulation", {"simulation_id": job.id}, allow_mutations=False
+        )
+        assert answer["status"] == "failed"
+        assert answer["error"] == "mesh too coarse"

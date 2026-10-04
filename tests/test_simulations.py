@@ -1023,19 +1023,52 @@ class TestAConductionAnalysisCanBeAskedFor:
 
         The two default to the same value, so a run that succeeded could not tell
         which one was read — this asks for a conduction backend that does not
-        exist and checks the refusal comes from the conduction registry, naming
-        `*HEAT TRANSFER`. Pointing `SOLVER_BACKEND` at the same name would not
-        move this job at all, which is the property being pinned: a deployment
-        that set `SOLVER_BACKEND=calculix` for its structural work must not
-        thereby change what answers a temperature field.
+        exist and checks the refusal comes from the conduction registry, which
+        names what that registry has. Pointing `SOLVER_BACKEND` at the same name
+        does not move this job at all, which is the property being pinned: a
+        deployment that federated its structural work must not thereby change
+        what answers a temperature field.
+
+        **It used `"calculix"` as the name that does not exist, until 2026-09-17
+        it did.** `*HEAT TRANSFER` is federated now, so the refusal it asserted
+        is gone — correctly, and the fix is a name no registry will ever hold
+        rather than a weaker claim. That the refusal's wording moved is the
+        point: a test pinning an absence has to be re-read the day the absence
+        is filled, not edited until it passes.
         """
         from app.simulation import runner as simulation_runner
 
-        monkeypatch.setattr(simulation_runner.settings, "conduction_backend", "calculix")
+        monkeypatch.setattr(simulation_runner.settings, "conduction_backend", "nonesuch")
         job = self._run(auth_client, project_with_geometry)
 
         assert job["status"] == "failed"
-        assert "HEAT TRANSFER" in job["error"]
+        assert "No conduction solver called 'nonesuch'" in job["error"]
+        # The list in the refusal is the conduction registry's, not the
+        # structural one's — which is what says the right table was consulted.
+        assert "calculix, internal" in job["error"]
+
+    def test_a_conduction_run_reads_the_conduction_setting_and_not_the_other(
+        self, monkeypatch
+    ) -> None:
+        """The other half, asserted where it is actually decided.
+
+        `runner.backend_for` is the one function three callers ask — the route,
+        the job cache and the runner — so pointing the two settings at different
+        values and reading it is the direct form of the claim. Driving it through
+        a submitted job is not: the route validates `SOLVER_BACKEND` for *every*
+        analysis before a runner chooses anything, so a deployment whose
+        structural backend does not exist cannot submit a conduction run either.
+        That coupling is real and is arguably right — refusing a misconfigured
+        deployment early beats half-refusing it — but it means a route-level test
+        cannot separate the two settings, which is the whole question here.
+        """
+        from app.simulation import runner as simulation_runner
+
+        monkeypatch.setattr(simulation_runner.settings, "solver_backend", "structural-one")
+        monkeypatch.setattr(simulation_runner.settings, "conduction_backend", "thermal-one")
+
+        assert simulation_runner.backend_for("thermal-conduction") == "thermal-one"
+        assert simulation_runner.backend_for("linear-static") == "structural-one"
 
 
 class TestATransientConductionRunCanBeAskedFor:

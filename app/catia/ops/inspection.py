@@ -173,7 +173,12 @@ OPERATIONS: tuple[Operation, ...] = (
                 "kind",
                 one_of(("draft", "thickness", "curvature", "validity"), "Which analysis to run."),
             ),
-            optional("direction", vocab.origin_plane("Pulling direction, for a draft analysis.")),
+            optional(
+                "direction",
+                vocab.pull_direction(
+                    "Mould opening direction, for a draft analysis. Default [0, 0, 1]."
+                ),
+            ),
             optional("minimum_mm", text("Flag anything below this, for a thickness analysis.", maximum=40)),
             optional("faces", name_list("Restrict the analysis to these faces.")),
         ),

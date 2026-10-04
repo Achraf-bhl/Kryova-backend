@@ -402,11 +402,24 @@ class LinearStaticSolver(Solver):
             mesh, case.material, displacements, delta_t_k=delta_t
         )
         mises = von_mises(element_stress)
+        # Recovered before the summary rather than after, because the summary
+        # needs it: the peak at the *nodes* is where a surface is, and a part in
+        # bending carries its peak at the skin rather than at the centroid the
+        # element value sits on. See `StaticResult.governing_peak_mpa`.
+        nodal_stress = self._recover_nodal_stress(
+            mesh, case.material, displacements, delta_t_k=delta_t
+        )
         # Shared with every other Solver rather than computed here: two
         # solvers that summarised their own results would be free to mean
         # different things by "factor of safety", and 6.5 compares them.
         result = summarise_static(
-            mesh, case, displacements, mises, warnings, time.perf_counter() - started
+            mesh,
+            case,
+            displacements,
+            mises,
+            warnings,
+            time.perf_counter() - started,
+            nodal_von_mises=von_mises(nodal_stress),
         )
         return SolveOutput(
             result=result,
@@ -418,9 +431,7 @@ class LinearStaticSolver(Solver):
             # different and much worse decision — but a stress *at a named
             # point* is a nodal question, and CalculiX answers it at nodes too,
             # so the oracle compares like with like.
-            nodal_stress=self._recover_nodal_stress(
-                mesh, case.material, displacements, delta_t_k=delta_t
-            ),
+            nodal_stress=nodal_stress,
         )
 
     @staticmethod

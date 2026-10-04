@@ -195,17 +195,40 @@ def _select_sphere(mesh: PointCloud, selector: SphereSelector) -> NDArray[np.int
     return np.flatnonzero(inside)
 
 
+def _boundary_face_mask(mesh: TetMesh, nodes: NDArray[np.int64]) -> NDArray[np.bool_]:
+    """Which rows of `mesh.surface_triangles` have all three corners in `nodes`.
+
+    The single definition of "this region's facets". Everything that integrates
+    over a selected surface — a pressure, a heat flux, a convection film, and
+    the CalculiX deck's `*FILM` faces — goes through it, so a region cannot mean
+    one set of triangles to one solver and a different set to another.
+    """
+    membership = np.zeros(mesh.node_count, dtype=bool)
+    membership[nodes] = True
+    selected: NDArray[np.bool_] = membership[mesh.surface_triangles].all(axis=1)
+    return selected
+
+
 def _boundary_faces_within(
     mesh: TetMesh, nodes: NDArray[np.int64]
 ) -> tuple[NDArray[np.int64], NDArray[np.int64] | None]:
     """Boundary triangles whose three corners are all in `nodes`, and their
     midside nodes where the mesh has them."""
-    membership = np.zeros(mesh.node_count, dtype=bool)
-    membership[nodes] = True
-    triangles = mesh.surface_triangles
-    selected = membership[triangles].all(axis=1)
+    selected = _boundary_face_mask(mesh, nodes)
     midside = mesh.surface_midside_nodes
-    return triangles[selected], None if midside is None else midside[selected]
+    return mesh.surface_triangles[selected], None if midside is None else midside[selected]
+
+
+def surface_face_rows_within(mesh: TetMesh, nodes: NDArray[np.int64]) -> NDArray[np.int64]:
+    """Row indices into `mesh.surface_triangles` for the facets inside `nodes`.
+
+    The rows rather than the triangles, because the caller that needs this —
+    `app/solve/calculix/conduction.py`, writing `*FILM` — needs to index
+    `mesh.surface_face_owners` alongside, and re-deriving the selection there
+    would be a second answer to "which facets are in this region".
+    """
+    rows: NDArray[np.int64] = np.flatnonzero(_boundary_face_mask(mesh, nodes))
+    return rows
 
 
 def surface_triangles_within(mesh: TetMesh, nodes: NDArray[np.int64]) -> NDArray[np.int64]:

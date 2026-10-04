@@ -77,14 +77,34 @@ _BETWEEN_KINDS: Final[frozenset[str]] = frozenset(
 
 _DEFAULT_BETWEEN_KIND: Final = "minimum_distance"
 
-#: The registry names a *plane* for the pull, which is how a CATIA user thinks about it —
-#: "pulled off the XY plane". A pull direction is the plane's normal. Declared here rather
-#: than derived so the mapping is visible: getting it wrong silently analyses draft
-#: against the wrong axis and reports a plausible number for the wrong question.
+#: Plane names a pull direction may be spelled as, and the direction each means.
+#:
+#: **One of two arms; the other is a plain vector** (THE QUEUE E10, 2026-09-17). The
+#: registry used to declare the pull as an origin *plane*, which is how a CATIA user says
+#: it — "pulled off the XY plane" — and a plane has no side, so a mould pulled along −Z
+#: was a question this analysis had no way to be asked. It now declares the **vector**
+#: `catia_draft` already takes for the identical physical quantity: two vocabularies for
+#: one direction is how an agent drafts along `[0, 0, -1]` and then cannot ask about what
+#: it drafted.
+#:
+#: The names stay, and they are **declared in the schema** beside the vector rather than
+#: quietly accepted here. That is not a nicety: `app/catia/validation.py` checks arguments
+#: against the operation's document before any backend is reached, so a table here that
+#: the schema did not know about would be unreachable code — the first draft of E10 did
+#: exactly that and `"XY"` through the product answered `direction must be array, got
+#: str` while every test against this module passed. See
+#: `app.catia.ops.vocabulary.pull_direction`.
+#:
+#: Declared rather than derived so the mapping is visible: getting the sign wrong silently
+#: analyses draft against the wrong axis and reports a plausible number for the wrong
+#: question.
 _PULL_NORMALS: Final[dict[str, tuple[float, float, float]]] = {
     "XY": (0.0, 0.0, 1.0),
     "YZ": (1.0, 0.0, 0.0),
     "ZX": (0.0, 1.0, 0.0),
+    "-XY": (0.0, 0.0, -1.0),
+    "-YZ": (-1.0, 0.0, 0.0),
+    "-ZX": (0.0, -1.0, 0.0),
 }
 
 _DEFAULT_PULL: Final = "XY"
@@ -517,20 +537,70 @@ _MAX_REPORTED_POINTS: Final = 20
 
 
 def _pull_direction(value: Any) -> tuple[float, float, float]:
+    """The mould opening direction: any non-zero vector, or a plane name.
+
+    **A vector since 2026-09-17 (THE QUEUE E10)**, and the arithmetic below never needed
+    anything else — `analyse_draft` and `find_undercuts` both take a bare direction and
+    normalise it. What refused an arbitrary pull was the *vocabulary*, three storeys up,
+    which is why a mould pulled along −Z came back `unmeasured` on every part rather than
+    as a number: a question nobody could ask looks exactly like a scan that failed.
+
+    Not normalised here: `unit_vector` in the two callers does it, and doing it twice
+    would put a second place to get a zero-length vector wrong.
+    """
     if value is None:
         return _PULL_NORMALS[_DEFAULT_PULL]
-    name = str(value).strip().upper()
-    if name not in _PULL_NORMALS:
-        allowed = ", ".join(sorted(_PULL_NORMALS))
+
+    if isinstance(value, str):
+        # `+XY` is accepted and never advertised, for the reason the bare names are: a
+        # spelling that costs a round to refuse and means exactly one thing.
+        name = value.strip().upper().lstrip("+")
+        if name in _PULL_NORMALS:
+            return _PULL_NORMALS[name]
         raise OperationNotSupported(
             subject=ANALYSIS,
             reason=(
-                f"{value!r} is not a pull direction. Give the plane the part is drawn "
-                f"off, one of: {allowed}"
+                f"{value!r} is not a pull direction. Give the direction the mould opens "
+                f"along as a vector — [0, 0, 1] — or one of: {', '.join(_PULL_NORMALS)}"
             ),
             backend="occt",
         )
-    return _PULL_NORMALS[name]
+
+    try:
+        components = tuple(float(component) for component in value)
+    except (TypeError, ValueError) as exc:
+        raise OperationNotSupported(
+            subject=ANALYSIS,
+            reason=(
+                f"{value!r} is not a pull direction. Give three numbers — [0, 0, 1] is "
+                "the default — or one of: " + ", ".join(_PULL_NORMALS)
+            ),
+            backend="occt",
+        ) from exc
+    if len(components) != 3:
+        raise OperationNotSupported(
+            subject=ANALYSIS,
+            reason=(
+                f"a pull direction has three components and {list(components)} has "
+                f"{len(components)}"
+            ),
+            backend="occt",
+        )
+    if not any(components):
+        # Refused rather than defaulted. A zero vector is what an arithmetic slip
+        # produces — a difference of two points that turned out to be the same point —
+        # and answering the +Z question instead would report a plausible number for a
+        # direction nobody chose. `direction3`'s `nonZero` says the same thing one
+        # storey up; this is the backend keeping its own half of the promise.
+        raise OperationNotSupported(
+            subject=ANALYSIS,
+            reason=(
+                "[0, 0, 0] is not a pull direction — it points nowhere, so there is no "
+                "draft angle to measure against it"
+            ),
+            backend="occt",
+        )
+    return components
 
 
 def _optional_float(value: Any) -> float | None:

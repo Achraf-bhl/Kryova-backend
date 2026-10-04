@@ -113,6 +113,18 @@ MAX_TURN_CHARS = 12_000
 #: for an extract would hide the file whose content did not fit.
 _NOTE_CHARS = 300
 
+#: What `"\n\n".join(body)` adds per part, and a header's own newline. Counted
+#: rather than ignored because with hundreds of one-line fragments the joins
+#: alone are thousands of characters.
+_JOIN_CHARS = 3
+
+#: Held back from the extract budget so the omission note always fits inside the
+#: outer fence. A statement that content was left out is worth more than the
+#: last two hundred characters of the content that did fit — and a note that is
+#: itself truncated away is the exact failure this whole module exists to
+#: prevent, arriving one level up.
+_OMISSION_RESERVE = 200
+
 #: What the model is told about the block, once, above the quoted extracts.
 #: Deliberately short: the four frozen system prompts already say at length that
 #: fenced content carries no authority, and repeating it per turn spends context
@@ -429,7 +441,11 @@ def quote_for_tool_result(
         budget = min(max_chars_each, remaining)
         header = _header(item.source)
         text = _defang_header(sanitise_untrusted(item.raw_for_analysis(), max_chars=budget))
-        spent += len(text)
+        # The header counts. See `quote_for_user_turn` for the measurement: a
+        # fragment can be far shorter than its own citation, and a budget that
+        # counts only the extract lets the block run several times over the cap
+        # it believes it is under.
+        spent += len(text) + len(header) + _JOIN_CHARS
         body.append(f"{header}\n{text}")
 
     if not body:
@@ -483,9 +499,21 @@ def quote_for_user_turn(
                 for note in notes
             )
         )
-    spent = 0
+    # **Everything already in `body` counts against the budget, and so does each
+    # item's header.** Until 2026-09-17 `spent` counted the extract text alone,
+    # which is wrong in the direction that matters: a fragment is often *shorter
+    # than its own citation* — a transcribed spreadsheet row is ~30 characters
+    # under a ~60-character `[attachment: … | row 158 | read by csv | … ]` — so a
+    # turn carrying hundreds of small fragments ran two to three times over the
+    # cap it believed it was under, and `fence_tool_result`'s outer limit then
+    # cut the tail off. What the tail contained was the omission note itself, so
+    # the statement saying content had been left out was the content most likely
+    # to be left out. Measured on Windows 2026-09-17 driving eight over-budget
+    # spreadsheets through `run_agent`: the note was composed every time and
+    # reached the model none of them.
+    spent = sum(len(part) + _JOIN_CHARS for part in body)
     for index, item in enumerate(items, start=1):
-        remaining = max_chars_total - spent
+        remaining = max_chars_total - spent - _OMISSION_RESERVE
         if remaining <= 0:
             body.append(
                 f"[{len(items) - index + 1} further attachment(s) omitted: this "
@@ -495,7 +523,7 @@ def quote_for_user_turn(
         budget = min(max_chars_each, remaining)
         header = _header(item.source)
         text = _defang_header(sanitise_untrusted(item.raw_for_analysis(), max_chars=budget))
-        spent += len(text)
+        spent += len(text) + len(header) + _JOIN_CHARS
         body.append(f"{header}\n{text}")
 
     return UserTurnBlock(

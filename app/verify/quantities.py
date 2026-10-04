@@ -228,7 +228,30 @@ def _max_displacement(mesh: HasNodes, output: Any) -> float:
 
 
 def _max_von_mises(mesh: HasNodes, output: Any) -> float:
-    return float(output.result.max_von_mises_mpa)
+    """The peak a verdict is stated against — `governing_peak_mpa`, not the element value.
+
+    **Master plan E7 task 10.** Task 9 made the *answer* quote the larger of the
+    element and surface peaks; this makes the *study* converge on the same one,
+    because otherwise the evidence and the claim are about different numbers and
+    a `converged` badge says nothing about the figure the reader was given.
+
+    **Measured before adopting, on the 180x50x12 bar whose closed-form surface
+    stress is 60.00 MPa**, three grids at 8.0 / 5.7 / 4.1 mm:
+
+        element centroid     converges to 49.104 MPa, order 2.375, GCI 0.025%
+        governing (surface)  converges to 60.062 MPa, order 2.466, GCI 0.016%
+
+    So the centroid quantity converged *confidently on a number 18% below the
+    right one*, which is the failure gate G1 met from the other side. The worry
+    that a surface peak would be noisier across remeshes — it moves with the
+    position of a node — is not borne out here: it converged slightly more
+    cleanly than the centroid did. If a part is ever found where it does refuse
+    more often, the refusals must be shown to be real before this is reverted.
+
+    `governing_peak_mpa` falls back to the element value on a solver that reports
+    no nodal tensor, so nothing that only produces element stress changes.
+    """
+    return float(output.result.governing_peak_mpa)
 
 
 #: Peak displacement magnitude over the whole part.

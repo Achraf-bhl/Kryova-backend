@@ -35,7 +35,8 @@ agent works gets a 304 until the part actually changes.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from collections.abc import Sequence
+from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -115,6 +116,59 @@ def _live_runner(conversation_id: str) -> Any:
             ),
         )
     return runner
+
+
+#: The pull direction this route defaults to when a draft rule names none. `XY`'s
+#: normal, spelled as the vector the tool now takes.
+#:
+#: **There was a translation table here until 2026-09-17 and there is not one now**
+#: (THE QUEUE E10). `catia_analysis_part` used to declare the pull as an origin *plane*
+#: while this route's public API takes a *vector*, so the adapter had to map one to the
+#: other — and could only map three, because a plane has no side. The tool now takes the
+#: same vector `catia_draft` has always taken for the identical quantity, so there is
+#: nothing left to translate and a pull along −Z, or along any other direction, reaches
+#: the scan.
+#:
+#: **What the table's absence must not take with it** is the refusal. The route sent the
+#: vector straight through before the table existed, the kernel refused it as "not a pull
+#: direction", the broad handler below turned that into "The draft scan failed, so its
+#: rules are unmeasured", and **every draft and undercut rule on every part came back
+#: unmeasured** with a note nobody had a reason to disbelieve. So `_pull_vector` still
+#: checks, and still answers 400 — it just has far less to refuse.
+_DEFAULT_PULL: Final[tuple[float, float, float]] = (0.0, 0.0, 1.0)
+
+
+def _pull_vector(direction: Sequence[float] | None) -> list[float]:
+    """The mould opening direction, or a 400 that says what is wrong with it.
+
+    Only a zero vector and a wrong-length one are refusable now: any other
+    direction is a question the scan can answer. A zero vector is refused rather
+    than defaulted because it is what an arithmetic slip produces — a difference
+    of two points that turned out to be the same point — and answering the +Z
+    question instead would report a plausible number for a direction nobody
+    chose.
+    """
+    if direction is None:
+        return list(_DEFAULT_PULL)
+    components = [float(component) for component in direction]
+    if len(components) != 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"pull_direction has three components; {components} has "
+                f"{len(components)}."
+            ),
+        )
+    if not any(components):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "pull_direction [0, 0, 0] points nowhere, so there is no draft angle to "
+                "measure against it. Give the direction the mould opens along, such as "
+                "[0, 0, 1] or [0, 0, -1]."
+            ),
+        )
+    return components
 
 
 def _live_document(conversation_id: str) -> Any:
@@ -798,9 +852,22 @@ def check_conversation_rules(
     notes: list[str] = []
     runner = backends.peek_session(conversation_id)
     for kind in scans:
+        if runner is None:
+            # `_live_document` above proved a document existed, but a session can
+            # still be evicted between that call and this one — and calling None
+            # would arrive in the handler below as "'NoneType' object is not
+            # callable", a note that tells the reader nothing about what to do.
+            # Both sibling call sites in this module guard and this one did not;
+            # found by running mypy on Windows for the first time, 2026-09-17.
+            notes.append(
+                f"The {kind} scan could not run: the part left memory between being "
+                "measured and being scanned, so its rules are unmeasured. Ask for the "
+                "part again."
+            )
+            continue
         arguments: dict[str, Any] = {"kind": kind}
         if kind == "draft":
-            arguments["direction"] = list(body.pull_direction or ())
+            arguments["direction"] = _pull_vector(body.pull_direction)
         try:
             if runner is None:
                 raise RuntimeError("this conversation has no open part to scan")

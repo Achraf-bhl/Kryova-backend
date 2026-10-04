@@ -36,6 +36,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.ai import prompts
 from app.ai.resume import HISTORY_PAGE_LIMIT, build_history
 from app.ai.state import bound_document_name
 from app.catia_kb import catia_knowledge
@@ -3942,7 +3943,11 @@ class ToolBox:
         **User turns only.** Scoring the assistant's own replies would let the
         model widen its own offer by talking about tools, which is a loop with
         no floor — and the assistant's text is the one part of the transcript
-        that is not evidence of what the engineer wants.
+        that is not evidence of what the engineer wants. The loop's own nudges
+        (`prompts.CONTROL_NOTE`) are stored as user messages too, because that is
+        the only role a provider accepts an instruction in, and are excluded for
+        the same reason `context._is_the_question` excludes them: they are not the
+        engineer, and four of them would push every real request out of `limit`.
 
         Bounded and indexed on `(conversation_id, sequence)`, the same lookup
         the context window already does. Empty rather than raising when there is
@@ -3956,6 +3961,7 @@ class ToolBox:
             .where(
                 ConversationMessage.conversation_id == self.conversation.id,
                 ConversationMessage.role == MessageRole.USER,
+                ~ConversationMessage.content.startswith(prompts.CONTROL_NOTE, autoescape=True),
             )
             .order_by(ConversationMessage.sequence.desc())
             .limit(limit)

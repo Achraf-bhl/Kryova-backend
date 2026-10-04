@@ -464,6 +464,41 @@ class TestConversationDocumentBinding:
         assert catia.calls[0]["tool"] == "catia_status"
 
 
+class TestTheSelectorHearsOnlyTheEngineer:
+    def test_the_loops_own_nudges_are_not_read_as_what_the_user_asked(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        """The loop's nudges are stored as user messages and start `CONTROL_NOTE`.
+
+        Read as the engineer's words they pushed real requests out of the window
+        and fired intent families of their own ("measure" in a nudge pulled in the
+        inspection tools).
+        """
+        from app.ai.prompts import CONTROL_NOTE
+        from app.models import ConversationMessage, MessageRole
+
+        lines = [
+            "Four M8 holes on a 60 mm bolt circle.",
+            CONTROL_NOTE + "Nothing is built yet; measure before you answer.",
+            "Go on.",
+            CONTROL_NOTE + "You are looking at the part in circles.",
+        ]
+        for sequence, content in enumerate(lines, start=1):
+            db_session.add(
+                ConversationMessage(
+                    conversation_id=conversation.id,
+                    sequence=sequence,
+                    role=MessageRole.USER,
+                    content=content,
+                )
+            )
+        db_session.flush()
+
+        heard = ToolBox(db=db_session, user=user, conversation=conversation).recent_user_messages()
+
+        assert heard == "Go on. Four M8 holes on a 60 mm bolt circle."
+
+
 class TestCatiaErrorTranslation:
     def test_an_offline_bridge_tells_the_user_what_to_start(
         self,

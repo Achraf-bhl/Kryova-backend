@@ -57,6 +57,7 @@ from app.models.platform import (
     MaintenanceWindow,
 )
 from app.models.project import Project
+from app.models.project_memory import MemoryState, ProjectMemory
 from app.models.session import REUSE_GRACE_SECONDS, SessionRevocation, UserSession
 from app.models.sharing import ProjectTransfer, ShareLink, ShareRevocation
 from app.models.simulation import JobStatus, SimulationJob
@@ -96,6 +97,7 @@ __all__ = [
     "Media",
     "MediaKind",
     "MediaUploadSession",
+    "MemoryState",
     "Membership",
     "MessageRole",
     "Meter",
@@ -105,6 +107,7 @@ __all__ = [
     "OrganisationInvitation",
     "Plan",
     "Project",
+    "ProjectMemory",
     "ProjectTransfer",
     "RecoveryCode",
     "SessionRevocation",

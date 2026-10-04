@@ -320,7 +320,7 @@ What exists today, to build on, not to replace:
   - **Status 2026-10-04:** done and tested (master plan P11.21), backend and web. Search is
     `GET /ai/conversations?q=` over titles and the user's own words only; pinning is
     `PATCH /ai/conversations/{id}` with `pinned`, and does not move `updated_at`.
-- [ ] **2.7 Long-term project memory.** [Linux] **M** — **NEW** (E16)
+- [x] **2.7 Long-term project memory.** [Linux] **M** — **NEW** (E16)
   - Facts that should outlive one conversation (the house material, the preferred fastener
     standard, the units of the drawing template) belong to the *project*, as rows the user can see
     and edit. They are injected into the state block.

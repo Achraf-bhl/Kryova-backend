@@ -21,9 +21,9 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.ai import resume
-from app.ai.state import build_state_block
+from app.ai.state import MAX_MEMORY_CHARS, build_state_block
 from app.ai.tokens import estimate
-from app.core import designs
+from app.core import designs, project_memory
 from app.core.security import hash_password
 from app.design.spec import DesignSpec, FeatureSpec, Parameter, Unit
 from app.models import (
@@ -86,6 +86,7 @@ def build_session(
     requirements: int = 5,
     text: int = 24,
     active_document: int | None = None,
+    memory_facts: int = 0,
 ) -> Conversation:
     """A conversation as far into a design as the arguments say."""
     # Column widths are 255; names are as long as the arguments say, up to that.
@@ -144,6 +145,9 @@ def build_session(
         )
     db.flush()
     designs.save(db, conversation, _spec(design_parameters))
+    for index in range(memory_facts):
+        # Distinct (a duplicate is the same fact) and as long as a fact may be.
+        project_memory.create(db, project, user, f"{index:02d} " + "f" * 290)
     if plan_tasks:
         conversation.task_graph = {
             "format_version": 1,
@@ -202,9 +206,34 @@ class TestHowMuchItWeighs:
             block(
                 db_session, user, catia_features=100, catia_parameters=100, design_parameters=300,
                 documents=200, plan_tasks=40, failures=40, operations=120, requirements=30, text=300,
+                memory_facts=project_memory.MAX_FACTS_PER_PROJECT,
             )
         )
         assert size <= WORST_CASE_CAP_CHARS
+
+    def test_a_project_at_its_fact_limit_costs_its_own_budget_and_no_more(
+        self, db_session: Session, user: User
+    ) -> None:
+        # Forty confirmed facts of the longest length are 12,000 characters of text. The
+        # block must carry the budget's worth and say how many did not fit, not the lot:
+        # every fact is resent on every step of every conversation in the project.
+        without = len(block(db_session, user))
+        with_facts = len(block(db_session, user, memory_facts=project_memory.MAX_FACTS_PER_PROJECT))
+
+        assert with_facts - without <= MAX_MEMORY_CHARS + 600
+        assert "more confirmed fact(s) did not fit" in block(
+            db_session, user, memory_facts=project_memory.MAX_FACTS_PER_PROJECT
+        )
+
+    def test_a_few_short_facts_are_a_few_short_lines(
+        self, db_session: Session, user: User
+    ) -> None:
+        without = len(block(db_session, user))
+        three = len(block(db_session, user, memory_facts=3))
+
+        # Three 294-character facts plus the header: this is the figure to read before
+        # deciding whether an average project's memory is worth its share of every step.
+        assert 0 < three - without <= 3 * 300 + 400
 
     def test_a_machine_with_many_parts_names_them_and_counts_the_rest(
         self, db_session: Session, user: User

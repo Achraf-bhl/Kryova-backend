@@ -17,6 +17,7 @@ from app.api.routes import (
     media,
     organisations,
     platform,
+    project_memory,
     projects,
     sharing,
     simulations,
@@ -35,6 +36,7 @@ api_router.include_router(organisations.router)
 api_router.include_router(gates.router)
 api_router.include_router(billing.router)
 api_router.include_router(projects.router)
+api_router.include_router(project_memory.router)
 api_router.include_router(sharing.router)
 api_router.include_router(geometry.router)
 api_router.include_router(simulations.router)

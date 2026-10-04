@@ -31,11 +31,17 @@ from scripts import schema_report
 #:                     runs a whole recorded design in one step, so a twenty-feature part is one
 #:                     model step and one transcript resend instead of twenty. Mutating, so the
 #:                     read-only cap is unmoved.
+#:   241,100 / 33,500  +`propose_project_memory` (515 B, ~145 tokens a step, billed at the cache
+#:                     price): the only way the agent can offer a project fact for the user to
+#:                     confirm (ROAD_TO_10 2.7). Without it a fact reaches the project only if the
+#:                     user thinks to type it, and the point of the feature is the ones nobody
+#:                     thought of. Mutating, so the read-only cap is unmoved; the description is
+#:                     already one short paragraph and the parameter one sentence.
 #:
 #: Measured 2026-10-04, compact JSON. To raise one: run `venv/bin/python -m scripts.schema_report`,
 #: set the new figure here rounded up to the next 100, and say in the commit what the new tool
 #: buys that is worth its share of every step's bill.
-TOTAL_BYTES_ALL_TOOLS = 240_500
+TOTAL_BYTES_ALL_TOOLS = 241_100
 TOTAL_BYTES_READ_ONLY = 33_500
 LARGEST_SINGLE_TOOL_BYTES = 3_200
 

@@ -65,15 +65,15 @@ Companion documents:
 ## Progress — counted from the status lines, never typed
 
 <!-- progress:begin -->
-**Measured 2026-10-04** by `venv/bin/python -m scripts.plan_progress`, which reads the status
+**Measured 2026-10-05** by `venv/bin/python -m scripts.plan_progress`, which reads the status
 line under every task in this file and the engineer-month figures in Part 4. Do not edit the
 block by hand — regenerate it with `--write`, and `--check` says whether it has gone stale.
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 71/83 = 86% | 33/39 eng-months = 84% |
-| **Programme** | 23/35 | 198/219 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 72/84 = 86% | 33/39 eng-months = 84% |
+| **Programme** | 23/35 | 199/220 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -8569,6 +8569,34 @@ machine with no network, so the phase is open until a run with a key confirms it
    > /ai/conversations/{id}` taking `pinned` beside `title` (`conversations.pinned_at`, same
    > migration; pinning leaves `updated_at` alone). Not yet: the sidebar search box and pin
    > control. Tested by: `tests/test_conversation_search_pin.py`.
+
+22. **A project remembers what is true of all its conversations, and the model reads only what a
+    person confirmed.** *(ROAD_TO_10 2.7.)* Facts belong to the project, as rows the user sees,
+    rewords and deletes. The agent may *propose* one and can do nothing more: a proposal waits
+    for the user, is never quoted to the model, and the tool says in words that it is not saved.
+    Only confirmed facts reach the state block, as quoted data under a header that says they are
+    not instructions, sanitised like every other free text in it, oldest first, within a fixed
+    character budget with a count of what did not fit.
+    > DONE (2026-10-05) — backend: table `project_memories` (migration `7da3113b27aa`, with its
+    > RLS policy; the user and conversation links are SET NULL so a fact outlives the person who
+    > confirmed it, and the project's deletion removes its facts); `GET/POST
+    > /projects/{id}/memory`, `PATCH`/`DELETE /projects/{id}/memory/{memory_id}` and `POST
+    > .../confirm` (read for any member including viewers, write for `MEMBER` and above, 404
+    > across projects and organisations, a sentence already held comes back as it is with 200);
+    > agent tool `propose_project_memory` (mutating, so a turn that proposed cannot be rewound;
+    > refuses past eight open proposals, 300 characters a fact, 40 a project); the state block's
+    > `project_facts` lines. Web: a Project memory panel on the project page (add, reword, delete,
+    > keep or dismiss a suggestion, "n of 40 used") and a suggestions strip above the composer
+    > that renders nothing unless one is waiting and re-reads once per finished turn. Registry
+    > cap raised 240,500 to 241,100 B (the tool is 515 B, ~145 tokens a step at the cache
+    > price). **Not done:** project-memory changes are not written to the audit log (the row
+    > records who wrote and who confirmed it, but a delete leaves no trace).
+    > Tested by: `tests/test_project_memory.py`, `tests/test_ai_state_size.py`,
+    > `tests/test_tool_registry_size.py`, `tests/test_tenancy_rls.py`,
+    > `Kryova-frontend/src/components/project-memory/memory-panel.test.tsx`,
+    > `Kryova-frontend/src/components/project-memory/memory-proposals.test.tsx`,
+    > `Kryova-frontend/src/components/chat/chat-view-memory.test.tsx`,
+    > `Kryova-frontend/src/lib/api-client.test.ts`.
 
 ---
 

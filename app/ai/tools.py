@@ -115,6 +115,9 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     # One step for the whole recorded design, so the label says the part is being
     # made, not that a tool ran (ROAD_TO_10 1.13).
     "build_design": "Building the part from the design",
+    # Says what the *user* will see -- a suggestion -- not that anything was saved: nothing is
+    # kept until they confirm it (ROAD_TO_10 2.7).
+    "propose_project_memory": "Suggesting something to remember",
     # The plan and its checkpoints (E16 tasks 2, 5, 6). Each says what is
     # happening to the *work*, not which module answered.
     "plan_work": "Planning the work",
@@ -810,6 +813,27 @@ class ToolBox:
                 ),
                 parameters=_object({}),
                 handler=self._build_design,
+                mutating=True,
+            ),
+            Tool(
+                name="propose_project_memory",
+                description=(
+                    "Suggest ONE fact worth remembering about this whole project across "
+                    "conversations: the house material, the fastener standard, the drawing "
+                    "units. The user is shown it and must confirm it before it is kept, so "
+                    "never treat it as saved. Not for what matters to this part only, and "
+                    "not for anything already under project_facts."
+                ),
+                parameters=_object(
+                    {
+                        "text": {
+                            "type": "string",
+                            "description": "One short sentence, under 300 characters.",
+                        }
+                    },
+                    ["text"],
+                ),
+                handler=self._propose_project_memory,
                 mutating=True,
             ),
             Tool(
@@ -1894,6 +1918,43 @@ class ToolBox:
                     "this parameter."
                 )
         return result
+
+    def _propose_project_memory(self, text: str) -> dict[str, Any]:
+        """Offer the user one project fact. **Nothing is kept until a person confirms it.**
+
+        The row is written `PROPOSED` and the model cannot read it back: only confirmed
+        facts reach the state block. The answer says so in words, because a model told
+        "recorded" will state the fact as settled in its reply and act on it on the next
+        step, and the user has not yet seen it. A proposal the project already holds comes
+        back as *already there* rather than as a second row.
+        """
+        from app.core import project_memory
+        from app.models import MemoryState
+
+        project = self._writable_project(None)
+        try:
+            written = project_memory.propose(
+                self.db, project, self.conversation.id if self.conversation else None, text
+            )
+        except project_memory.MemoryRefusal as exc:
+            raise ToolError(str(exc)) from exc
+        if not written.created:
+            kept = written.memory.state is MemoryState.CONFIRMED
+            return {
+                "proposed": False,
+                "note": (
+                    "The project already holds that fact and the user has confirmed it."
+                    if kept
+                    else "That fact is already waiting for the user to confirm it."
+                ),
+            }
+        return {
+            "proposed": True,
+            "note": (
+                "Shown to the user, who decides. It is NOT saved and you cannot rely on it "
+                "yet: it joins project_facts only once they confirm it."
+            ),
+        }
 
     def _build_design(self) -> dict[str, Any]:
         """Compile the recorded design and run the whole plan through `_call_catia`.

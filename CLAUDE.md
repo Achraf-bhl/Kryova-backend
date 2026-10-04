@@ -1820,8 +1820,11 @@ reason: it returns cell fields, not nodal ones, and has no load case.
    Nothing has run on Windows (THE QUEUE F1): the mount is a Windows path, there is no
    `os.getuid`, and `Allrun` must arrive with LF endings.
 
-**Flagged, not fixed (2026-09-14):** the `solve.conduction` span (steady and transient) and
-`solve.plane` are not in `metering.SPAN_METERS`, so those runs are billed for meshing only.
+**Fixed 2026-10-04:** `solve.conduction` and `solve.plane` were timed but not in
+`metering.SPAN_METERS`, so those runs were billed for meshing only. A test now fails for any
+wired `solve.*` span with no meter. `dynamics.chrono.run` is timed and deliberately unmetered
+for now -- a mechanism run is not a simulation job and has no usage scope; decide its price
+before metering it.
 
 ## Reading what users attach (`app/documents/`) — structured readers added 2026-09-14 with P4.2
 

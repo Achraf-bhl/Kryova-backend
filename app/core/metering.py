@@ -611,6 +611,18 @@ SPAN_METERS: Final[tuple[SpanMeter, ...]] = (
         "(app.observe span solve.linear_static)",
     ),
     SpanMeter(
+        span="solve.plane",
+        meter=Meter.SOLVER_SECONDS,
+        method="wall clock around plane stress / plane strain assembly, factorisation "
+        "and stress recovery (app.observe span solve.plane)",
+    ),
+    SpanMeter(
+        span="solve.conduction",
+        meter=Meter.SOLVER_SECONDS,
+        method="wall clock around steady or transient conduction assembly and solution "
+        "(app.observe span solve.conduction)",
+    ),
+    SpanMeter(
         span="solve.calculix.run",
         meter=Meter.SOLVER_SECONDS,
         method="wall clock around the ccx subprocess (app.observe span solve.calculix.run)",

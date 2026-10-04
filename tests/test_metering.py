@@ -180,6 +180,20 @@ class TestTheMapIsHonestAboutWhatItCovers:
             assert entry.span in SPAN_CATALOGUE, entry.span
             assert SPAN_CATALOGUE[entry.span].wired, entry.span
 
+    def test_every_solver_the_system_times_is_also_billed(self) -> None:
+        """The opposite hole: a solver that is timed and never metered.
+
+        `solve.plane` and `solve.conduction` were declared and wired in the span
+        catalogue in September and missing here until 2026-10-04, so every
+        plane-stress and every conduction run was billed for its meshing and
+        nothing for its solve -- with no fault, no log line and no test, because
+        an absent meter reads exactly like a cheap run.
+        """
+        timed = {name for name, site in SPAN_CATALOGUE.items() if name.startswith("solve.") and site.wired}
+        metered = {entry.span for entry in SPAN_METERS}
+
+        assert timed - metered == set()
+
     def test_every_meter_declares_where_its_numbers_come_from(self) -> None:
         assert {site.meter for site in METER_SITES} == set(Meter)
 

@@ -785,6 +785,21 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-10-04 (audit) — ten defects found by reading, each fixed with a guard that was broken on
+  purpose and failed.** The reference scene's digest differed by platform because libm's sin/cos
+  differ in the last bit (exact 30° table now, `test_render_reference.py`); `solve.plane` and
+  `solve.conduction` were timed and never billed (`test_metering.py`); the tool selector lost its
+  match slots to the floor and read the loop's own `[kryova]` nudges as the engineer
+  (`test_tool_retrieval.py`, `test_ai_context.py`); an early ending was closed with "you ran out
+  of tool calls" and an escalation quoted the loop guard instead of the tool's cause
+  (`test_agent.py`, `test_out_of_rounds_report.py`); the hosted intent router went unbilled and
+  sent the message twice; a decision outside its option set was trusted (`test_ai_decide.py`);
+  and `laya`/`torch` were pinned in `requirements.txt` — several GB of CUDA wheels in every image,
+  and no CPython 3.14 wheel for the Windows seat — now opt-in in `requirements-laya.txt`
+  (`test_ai_laya_decide.py`). Full suite 11,096 passed / 20 skipped / 1 xpassed / 0 failed.
+  No schema, response shape or enum changed. Flagged, not fixed: `ToolBox._project` owner vs
+  member, `dynamics.chrono.run` unmetered, `laya_decide._get_agent` swallowing `pick_device`'s
+  `ValueError`, usage lost when `decide` fails after a paid repair.
 - **2026-10-04 — the agent's model moved from Ollama to a hosted one (DeepSeek by default), with
   vendor-by-configuration, and the local path removed (P11).** `OpenAICompatibleProvider` gained
   bounded retries (429/5xx/connection/interrupted, `Retry-After`), 401/402 in words, a bounded

@@ -142,3 +142,18 @@ class TestAiContextSettings:
     def test_summarisation_starts_before_anything_is_dropped(self) -> None:
         settings = build()
         assert settings.ai_summarise_after_messages < settings.ai_max_context_messages
+
+    def test_the_fold_is_also_below_the_window_in_tokens(self) -> None:
+        settings = build()
+        assert 0 < settings.ai_summarise_after_tokens < settings.ai_context_token_budget
+
+    def test_a_fold_threshold_at_or_above_the_window_is_refused(self) -> None:
+        # A window that drops material before it has been folded forgets it for good, and
+        # nothing afterwards says it ever existed.
+        with pytest.raises(ValueError, match="AI_SUMMARISE_AFTER_TOKENS"):
+            build(ai_context_token_budget=10_000, ai_summarise_after_tokens=10_000)
+        with pytest.raises(ValueError, match="AI_SUMMARISE_AFTER_TOKENS"):
+            build(ai_context_token_budget=10_000, ai_summarise_after_tokens=40_000)
+
+    def test_turning_the_token_budget_off_turns_the_check_off_with_it(self) -> None:
+        assert build(ai_context_token_budget=0, ai_summarise_after_tokens=40_000)

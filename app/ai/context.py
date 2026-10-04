@@ -8,16 +8,20 @@ way with no path back. The conversation is simply dead.
 
 Three mechanisms, in the order they engage:
 
-**A rolling window.** Only the most recent `ai_max_context_messages` turns are
-replayed verbatim. This is the hard backstop: it holds even if summarisation is
-unavailable, so a provider outage degrades the agent's memory rather than
-killing the conversation.
+**A rolling window.** Only the most recent `ai_max_context_messages` turns -- and no more
+than `ai_context_token_budget` estimated tokens of them -- are replayed verbatim. This is
+the hard backstop: it holds even if summarisation is unavailable, so a provider outage
+degrades the agent's memory rather than killing the conversation. Both limits exist
+because neither can stand alone: forty messages are 800 characters or 240,000 depending
+on what the tools returned, and a token budget alone would let a thousand one-word
+messages through.
 
-**A running summary.** Once the transcript passes `ai_summarise_after_messages`
-the older half is folded into a compact record stored on the conversation row
-and re-injected each turn. Summarising *before* the window would drop anything
-is deliberate: the fold happens while the material is still in context to be
-read, not after it has already been discarded.
+**A running summary.** Once the transcript passes `ai_summarise_after_messages` -- or
+`ai_summarise_after_tokens`, whichever comes first -- the older part is folded into a
+compact record stored on the conversation row and re-injected each turn. Summarising
+*before* the window would drop anything is deliberate: the fold happens while the material
+is still in context to be read, not after it has already been discarded. (Settings refuse
+a fold threshold at or above the window's, so the order cannot be configured away.)
 
 **A state block.** Rebuilt from the database every turn -- see `state.py`. The
 window and the summary are both history; only the block is current.
@@ -37,6 +41,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import digest as tool_digest
 from app.ai import prompts
+from app.ai import tokens as token_estimate
 from app.ai.prompts import (
     SUMMARISE_SYSTEM,
     SUMMARY_CLOSE,
@@ -51,6 +56,9 @@ from app.documents.quoted import UserTurnBlock
 from app.models import Conversation, ConversationMessage, MessageRole, User
 
 logger = logging.getLogger(__name__)
+
+#: The token window never shrinks below this, whatever the summary has grown to.
+MIN_WINDOW_TOKENS = 2_000
 
 #: Tokens allowed for the summariser's own answer. A running record of a long
 #: session is a page of terse lines, not an essay.
@@ -85,6 +93,52 @@ def _keep_recent() -> int:
     rather than being triggered again on the next turn.
     """
     return max(2, settings.ai_summarise_after_messages // 2)
+
+
+def estimate_tokens(message: ConversationMessage) -> int:
+    """What a stored message will cost to replay, estimated from its length alone.
+
+    The *stored* text is counted, not the digest a result may be replayed as
+    (`digest_boundary`): the window is a ceiling, and a ceiling measured on the smaller
+    form would let the larger one through the day digests are switched off. Reasoning is
+    not counted -- a vendor replays it only for the turn in progress, which the step budget
+    already bounds -- so this under-counts an assistant turn by that much, and the margin
+    in `ai_context_token_budget` is what absorbs it.
+    """
+    chars = len(message.content or "")
+    if message.tool_calls:
+        chars += len(json.dumps(message.tool_calls, default=str, separators=(",", ":")))
+    return token_estimate.MESSAGE_OVERHEAD_TOKENS + token_estimate.estimate(chars)
+
+
+def _first_within(messages: list[ConversationMessage], budget: int) -> int:
+    """Index of the oldest message such that `messages[index:]` fits in `budget` tokens.
+
+    `len(messages)` when even the newest alone does not fit -- the caller decides what
+    that means, and for the window it means "keep the question and nothing else".
+    """
+    spent = 0
+    for index in range(len(messages) - 1, -1, -1):
+        spent += estimate_tokens(messages[index])
+        if spent > budget:
+            return index + 1
+    return 0
+
+
+def _history_budget(conversation: Conversation) -> int:
+    """Tokens the replayed messages may hold: the budget less what the summary takes.
+
+    0 means "no token limit" (the setting is off). Never below a floor, so a summary that
+    has grown large cannot squeeze the window down to nothing and leave the model with a
+    record of the past and no present. The floor never exceeds the configured budget: a
+    deliberately small budget is the operator's to set.
+    """
+    budget = settings.ai_context_token_budget
+    if budget <= 0:
+        return 0
+    summary = conversation.summary or ""
+    spent = token_estimate.estimate(len(summary)) + token_estimate.MESSAGE_OVERHEAD_TOKENS
+    return max(min(MIN_WINDOW_TOKENS, budget), budget - spent if summary else budget)
 
 
 
@@ -125,6 +179,10 @@ def window(conversation: Conversation) -> list[ConversationMessage]:
 
     limit = max(1, settings.ai_max_context_messages)
     start = max(0, len(eligible) - limit)
+    budget = _history_budget(conversation)
+    if budget:
+        # Never past the newest message: a window may be one message long, never empty.
+        start = max(start, min(_first_within(eligible, budget), len(eligible) - 1))
 
     anchor = next(
         (
@@ -164,12 +222,36 @@ def fold_boundary(conversation: Conversation) -> int | None:
     Returns an exclusive bound: messages with a lower sequence are covered by
     the summary. The boundary is nudged forward past any tool results so a fold
     never lands in the middle of a tool exchange.
+
+    A fold is due when *either* the message count or the estimated tokens pass their
+    threshold, and what is kept afterwards is bounded by both -- the last
+    `ai_summarise_after_messages // 2` messages and the last half of
+    `ai_summarise_after_tokens`, whichever is smaller -- so a fold that was triggered
+    by weight reclaims weight.
     """
     eligible = _eligible(conversation)
-    if len(eligible) <= settings.ai_summarise_after_messages:
+    over_messages = len(eligible) > settings.ai_summarise_after_messages
+    over_tokens = (
+        settings.ai_context_token_budget > 0
+        and settings.ai_summarise_after_tokens > 0
+        and sum(estimate_tokens(message) for message in eligible)
+        > settings.ai_summarise_after_tokens
+    )
+    if not (over_messages or over_tokens):
         return None
 
     index = len(eligible) - _keep_recent()
+    if settings.ai_context_token_budget > 0 and settings.ai_summarise_after_tokens > 0:
+        # What is kept has to be small in tokens too, or a fold triggered by a few
+        # six-thousand-character results keeps those very results and is triggered again
+        # on the next turn. The newest message (the question just asked) always stays.
+        index = max(
+            index,
+            min(
+                _first_within(eligible, settings.ai_summarise_after_tokens // 2),
+                len(eligible) - 1,
+            ),
+        )
     if index <= 0:
         return None
     while index < len(eligible) and eligible[index].role is MessageRole.TOOL:

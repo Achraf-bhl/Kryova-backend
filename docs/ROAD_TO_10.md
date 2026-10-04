@@ -172,12 +172,15 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
     defaults (keep 12, block 6) were *worse than doing nothing* at a 90 % cache discount; the sweep
     in `tests/test_ai_replay_digest.py` moved them to keep 8, block 24. Whether the model reasons as
     well from a digest is unmeasured: THE QUEUE H10.
-- [ ] **1.8 Window by tokens, not by message count.** [Linux] **M** — **NEW** (E16)
+- [x] **1.8 Window by tokens, not by message count.** [Linux] **M** — **NEW** (E16) → P11.12
   - `ai_max_context_messages=40` and `ai_summarise_after_messages=30` count *messages*. One message
     can be 6,000 characters or 20.
   - Do: give the window a token target, estimated from stored lengths or the provider's usage, and
     trigger the summary fold on tokens.
   - Keep the invariant `context.py` documents: a window never starts partway through a tool-call pair.
+  - **Status 2026-10-04:** done (master plan P11.12, `app/ai/tokens.py`, `AI_CONTEXT_TOKEN_BUDGET` /
+    `AI_SUMMARISE_AFTER_TOKENS`). Estimated from stored lengths; the provider's own usage is still
+    what bills.
 - [ ] **1.9 Measure the state block and cap it.** [Linux] **S** — **NEW**
   - It is rebuilt every turn (`Kryova-backend/app/ai/state.py`, 629 lines) and sits last on purpose.
   - Add a test that measures its size for a realistic conversation and fails if it grows past a

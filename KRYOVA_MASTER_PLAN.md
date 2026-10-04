@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 62/73 = 84% | 32/39 eng-months = 83% |
-| **Programme** | 23/35 | 188/209 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 62/74 = 84% | 33/39 eng-months = 83% |
+| **Programme** | 23/35 | 190/210 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 77% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 79% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8354,6 +8354,27 @@ machine with no network, so the phase is open until a run with a key confirms it
     > why the block is a setting. **Unmeasured: whether a model reasons as well from a digest
     > as from the raw result** — THE QUEUE H10. Old assistant `tool_calls` arguments are not
     > digested. Tested by: `tests/test_ai_replay_digest.py` (68 tests; 13 breaks caught).
+
+12. **The window and the fold are sized in tokens, not only in messages.** *(ROAD_TO_10 1.8.)*
+    Forty messages are 800 characters or 240,000 depending on what the tools returned, so a
+    count could neither protect a 128k window from a heavy session nor spare a light one an
+    early fold.
+    > DONE (2026-10-04) — `app/ai/tokens.py` (one estimate, 3.6 characters/token, shared with
+    > `scripts/schema_report.py`), `context.estimate_tokens` / `_first_within` /
+    > `_history_budget`; settings `AI_CONTEXT_TOKEN_BUDGET=30000` and
+    > `AI_SUMMARISE_AFTER_TOKENS=20000` (0 for the budget turns both off). Whichever of the count
+    > and the tokens is reached first wins, for the window and for the fold; what a token fold
+    > *keeps* is bounded by half the threshold too, or a fold triggered by six heavy results keeps
+    > those results and fires again next turn. The summary's own size is deducted from the window,
+    > with a floor so a grown summary cannot leave the model a record of the past and no present.
+    > The existing invariants hold and are re-pinned under the new cut: a window never starts
+    > inside a tool exchange, the question being answered is never dropped, the window is never
+    > empty. **Settings refuse to start** with a fold threshold at or above the window's (a window
+    > that drops material before it is folded forgets it for good). The start still moves a whole
+    > turn at a time, so the prompt prefix is stable between moves (pinned). **Estimates, not
+    > counts:** the vendor's tokenizer is the exact answer, so the budget carries a margin.
+    > Tested by: `tests/test_ai_continuity.py` (38 new; 12 breaks caught),
+    > `tests/test_config_and_jobs.py` (3 new).
 
 ---
 

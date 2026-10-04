@@ -26,9 +26,12 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any, cast
 
+from app.ai.tokens import CHARS_PER_TOKEN
+
 #: Bytes per token for JSON-with-prose on a typical BPE tokenizer. An estimate, kept in
-#: one place so a report that quotes tokens says which assumption it made.
-BYTES_PER_TOKEN_ESTIMATE = 3.6
+#: one place (`app/ai/tokens.py`, which the context window uses too) so a report that
+#: quotes tokens says which assumption it made.
+BYTES_PER_TOKEN_ESTIMATE = CHARS_PER_TOKEN
 
 
 @dataclass(frozen=True)
@@ -70,7 +73,7 @@ def total_bytes(sizes: list[ToolSize]) -> int:
 
 
 def estimated_tokens(byte_count: int) -> int:
-    return int(byte_count / BYTES_PER_TOKEN_ESTIMATE)
+    return int(byte_count / CHARS_PER_TOKEN)
 
 
 def report(top: int = 30) -> str:

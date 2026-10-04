@@ -377,6 +377,18 @@ class Settings(BaseSettings):
     # into a running summary. Deliberately below `ai_max_context_messages`, so
     # summarisation happens before anything would be dropped outright.
     ai_summarise_after_messages: int = 30
+    # The same two limits in *estimated tokens*, because a message count cannot see
+    # that one tool result is 6,000 characters and another is 20 (`app/ai/context.py`,
+    # `app/ai/tokens.py`). Whichever limit is reached first wins, for the window and
+    # for the fold. `ai_context_token_budget` is what the replayed history may hold;
+    # sized so history + the tool registry (~66k) + system prompt + state block + a
+    # reply fit a 128k-token window with headroom. The fold must fire first, so
+    # `ai_summarise_after_tokens` has to be the smaller (refused at startup otherwise:
+    # a window that drops material before it is folded forgets it for good).
+    # 0 for the budget switches both off and leaves the message counts alone; 0 for the
+    # fold alone leaves only the window budget.
+    ai_context_token_budget: int = 30_000
+    ai_summarise_after_tokens: int = 20_000
     # Old tool results are replayed as a one-line digest once more than this many
     # are in the window (`app/ai/digest.py`); the newest this-many stay verbatim.
     # 0 turns digests off. **The saving is measured, the accuracy is not** (THE QUEUE
@@ -650,6 +662,21 @@ class Settings(BaseSettings):
         is configured, works, and reaches nobody.
         """
         return self.mail_transport in DELIVERING_MAIL_TRANSPORTS
+
+    @model_validator(mode="after")
+    def _fold_before_the_window_drops(self) -> "Settings":
+        """The summary has to be written before the window can lose what it covers."""
+        if (
+            self.ai_context_token_budget > 0
+            and self.ai_summarise_after_tokens >= self.ai_context_token_budget
+        ):
+            raise ValueError(
+                f"AI_SUMMARISE_AFTER_TOKENS ({self.ai_summarise_after_tokens}) must be below "
+                f"AI_CONTEXT_TOKEN_BUDGET ({self.ai_context_token_budget}): the window would "
+                "drop messages before they were ever folded into the summary. Lower the "
+                "first, raise the second, or set AI_CONTEXT_TOKEN_BUDGET=0 to count messages only."
+            )
+        return self
 
     @model_validator(mode="after")
     def _harden_production(self) -> "Settings":

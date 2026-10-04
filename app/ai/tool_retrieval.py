@@ -98,6 +98,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Final, Protocol
 
+from app.ai.digest import RECALL_TOOL
+
 if TYPE_CHECKING:  # pragma: no cover - import kept out of the runtime path
     from app.ai.provider import LLMProvider, TokenUsage
 
@@ -149,6 +151,11 @@ CORE_TOOLS: Final[frozenset[str]] = frozenset(
         # produce a part nobody checked — that is the failure 16.1 would otherwise
         # cause while fixing a different one.
         "check_part",
+        # A digest in the replay says "full text kept: recall_earlier_result", so a
+        # turn that shows digests must be able to follow the pointer. A digest naming
+        # a tool the model was not offered is the prompt-describes-a-missing-tool
+        # defect `prompt_taught_tools` exists to prevent.
+        RECALL_TOOL,
     }
 )
 

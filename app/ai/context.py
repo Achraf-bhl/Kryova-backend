@@ -35,6 +35,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.ai import digest as tool_digest
 from app.ai import prompts
 from app.ai.prompts import (
     SUMMARISE_SYSTEM,
@@ -310,7 +311,53 @@ def _summary_message(conversation: Conversation) -> dict[str, Any] | None:
     }
 
 
-def _replay(message: ConversationMessage) -> dict[str, Any]:
+def digest_boundary(tool_results_in_window: int) -> int:
+    """How many of the window's oldest tool results are replayed as digests.
+
+    **The boundary moves in blocks, and the size of the block is a cost decision.**
+    Cached input is billed at a fraction of fresh input, but only for the bytes at the
+    front of the prompt that are identical to the previous request. When the boundary
+    moves, the prompt changes from the first newly digested result onward, so everything
+    after that point is re-billed at the full price once. What a digest saves is only the
+    cache price of the bytes it removed, on each step after the move. A move therefore has
+    to be paid back over many steps:
+
+    * a boundary that slid by one result per step re-bills the whole verbatim tail every
+      step and costs 2-3x what never digesting costs;
+    * a small block moves often enough that a turn of 30 steps cost up to 37 % *more*
+      than not digesting at all (keep 12, block 6, at a 90 % cache discount);
+    * eight verbatim and a block of 24 was never worse in a sweep of 30 settings, and
+      saves from the first move on a turn long enough to need it.
+
+    All three are `tests/test_ai_replay_digest.py::TestTheBoundaryMovesInBlocks`, computed
+    from the real replay. The saving is larger where the cache discount is weaker, and on
+    a provider with no prompt cache at all a *smaller* block is the cheaper one (there is
+    nothing to re-bill), which is why the block is a setting and not a constant.
+
+    A pure function of how many tool results the window holds -- no clock, no model, no
+    state -- so two builds of the same transcript agree to the byte. `ai_replay_keep_verbatim
+    <= 0` disables digests altogether.
+    """
+    keep = settings.ai_replay_keep_verbatim
+    if keep <= 0 or tool_results_in_window <= keep:
+        return 0
+    block = max(1, settings.ai_replay_digest_block)
+    return ((tool_results_in_window - keep) // block) * block
+
+
+def replay_messages(conversation: Conversation) -> list[dict[str, Any]]:
+    """The windowed transcript as provider messages, with old tool results digested.
+
+    Pure: no database, no state block, no summary. `build_messages` adds those around it,
+    and the cost tests drive this directly.
+    """
+    windowed = window(conversation)
+    tool_ids = [m.id for m in windowed if m.role is MessageRole.TOOL]
+    digested = set(tool_ids[: digest_boundary(len(tool_ids))])
+    return [_replay(message, digest=message.id in digested) for message in windowed]
+
+
+def _replay(message: ConversationMessage, *, digest: bool = False) -> dict[str, Any]:
     if message.role is MessageRole.USER:
         return {"role": "user", "content": message.content or ""}
     if message.role is MessageRole.ASSISTANT:
@@ -324,7 +371,16 @@ def _replay(message: ConversationMessage) -> dict[str, Any]:
         "role": "tool",
         "tool_call_id": message.tool_call_id or "",
         "name": message.tool_name or "",
-        "content": message.content or "",
+        "content": (
+            tool_digest.digest_content(
+                tool_name=message.tool_name,
+                tool_call_id=message.tool_call_id,
+                content=message.content,
+                is_error=message.is_error,
+            )
+            if digest
+            else message.content or ""
+        ),
         "is_error": message.is_error,
     }
 
@@ -356,7 +412,7 @@ def build_messages(
     yields its characters except `render_into_user_message`, which demands the
     user's own message and emits it first.
     """
-    replayed = [_replay(message) for message in window(conversation)]
+    replayed = replay_messages(conversation)
 
     state = {"role": "user", "content": build_state_block(db, user, conversation)}
     insert_at = len(replayed)

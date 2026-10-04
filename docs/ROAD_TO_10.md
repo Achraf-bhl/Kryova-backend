@@ -146,14 +146,18 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
     same rung or better.
   - Test: already pinned (`Kryova-backend/tests/test_tool_retrieval.py`). The decision is recorded
     with its ladder numbers.
-- [ ] **1.6 Make the tool schemas themselves shorter.** [Linux] **M** — **NEW** (P11.3)
+- [~] **1.6 Make the tool schemas themselves shorter.** [Linux] **M** — **NEW** (P11.3)
   - Measure the bytes per schema: `toolbox.schemas()` in `Kryova-backend/app/ai/tools.py` and the
     specs in `Kryova-backend/app/catia/tool_specs.py`. Rank the top 30 by size, cut repeated prose
     from the descriptions, and move long guidance into the KB (`Kryova-backend/app/catia_kb/`),
     which the agent can look up when it needs it.
   - Guard: `Kryova-backend/tests/test_prompt_cache_stability.py` must stay green. Add a test that
     caps the total schema bytes at the new measured value, so the registry cannot quietly grow back.
-- [ ] **1.7 Shrink old tool results in the replay.** [Linux] **M** — **NEW** (E16)
+  - **Status 2026-10-04:** measured and capped, not shrunk (master plan P11.10,
+    `scripts/schema_report.py`, `tests/test_tool_registry_size.py`): 244 tools, 239.6 KB, ~66.5k
+    tokens estimated. The trim waits for 1.5's accuracy ladder, because cutting prose changes what
+    the model is offered.
+- [x] **1.7 Shrink old tool results in the replay.** [Linux] **M** — **NEW** (E16) → P11.11
   - Every tool result is fenced at `MAX_TOOL_RESULT_CHARS = 6_000`
     (`Kryova-backend/app/ai/sanitise.py:49`) and replayed whole while it sits in the window
     (`Kryova-backend/app/ai/context.py::_replay`, window `ai_max_context_messages=40`).
@@ -164,6 +168,10 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
     from the stored row only, never with a model.
   - Test: a 30-step conversation's replay shrinks to the expected size, and the bytes are identical
     across two builds.
+  - **Status 2026-10-04:** done and measured (master plan P11.11, `app/ai/digest.py`). The first
+    defaults (keep 12, block 6) were *worse than doing nothing* at a 90 % cache discount; the sweep
+    in `tests/test_ai_replay_digest.py` moved them to keep 8, block 24. Whether the model reasons as
+    well from a digest is unmeasured: THE QUEUE H10.
 - [ ] **1.8 Window by tokens, not by message count.** [Linux] **M** — **NEW** (E16)
   - `ai_max_context_messages=40` and `ai_summarise_after_messages=30` count *messages*. One message
     can be 6,000 characters or 20.

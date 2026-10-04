@@ -1754,15 +1754,28 @@ a key in `.env.local` they are minutes.*
       fragments, usage on the last chunk (`stream_options.include_usage`). A server that rejects
       the form is learned once and logged.
 - [ ] **H7 — The cache.** Two identical steps in a row; read the response `usage` for a
-      cache-hit count (`prompt_cache_hit_tokens` in DeepSeek's usage block). `usage` is not read
-      for it yet — if it is there, log it, because it is the only direct measure that
-      `tests/test_prompt_cache_stability.py` is protecting anything.
+      cache-hit count (`prompt_cache_hit_tokens` in DeepSeek's usage block). Since 2026-10-04 it
+      *is* read and stored — `ai_token_usage.cached_prompt_tokens` and, per turn,
+      `turn_metrics.cached_prompt_tokens` — so this row is now: run a turn of twenty steps and
+      read `cached_prompt_tokens / prompt_tokens` off `turn_metrics`. A ratio near zero means
+      the prefix is not stable and `tests/test_prompt_cache_stability.py` is protecting
+      nothing. It is also the figure H10 needs.
 - [ ] **H8 — `AI_EFFORT_CHAT`: low or high?** Run one ladder level each way and compare steps,
       wall time and tokens. The shipped default is `low` (thinking off) for cost and speed; this
       is the measurement that justifies or reverses it.
-- [ ] **H9 — `AI_TOOL_LIMIT`.** The registry is ~235 schemas / ~58k tokens a step; retrieval at
+- [ ] **H9 — `AI_TOOL_LIMIT`.** The registry is 244 schemas / ~66.5k tokens (estimated) a step; retrieval at
       limit 60 would send ~25 % of the bytes. Compare accuracy at 0 and 60 on the prompt ladder
       before switching it on.
+- [ ] **H10 — Does a digest cost the model anything?** `AI_REPLAY_KEEP_VERBATIM=8` /
+      `AI_REPLAY_DIGEST_BLOCK=24` replays a tool result older than the newest eight as one line
+      (`app/ai/digest.py`; the full text is one `recall_earlier_result` call away). The *cost*
+      side is measured offline (`tests/test_ai_replay_digest.py`); whether `deepseek-flash`
+      still builds the right part from digests is not. Run one long ladder prompt (a turn of 30+
+      tool calls) with the setting at 0 and at its default, and compare: did it finish, how many
+      steps, how many `recall_earlier_result` calls (zero means the digests carried it; many
+      means they are too thin), and `turn_metrics.cost_micro_usd`. Also read H7's cache ratio on
+      both: the block size was chosen for a 90 % cache discount and the real one may differ.
+      Settles: whether the defaults stay on, and whether `AI_REPLAY_DIGEST_BLOCK` should move.
 
 ## Expect failures on the first run, and that is the point
 

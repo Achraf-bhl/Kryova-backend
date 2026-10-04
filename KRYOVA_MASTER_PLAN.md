@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 60/71 = 85% | 32/39 eng-months = 83% |
-| **Programme** | 23/35 | 187/207 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 62/73 = 84% | 32/39 eng-months = 83% |
+| **Programme** | 23/35 | 188/209 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 78% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 77% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8321,6 +8321,39 @@ machine with no network, so the phase is open until a run with a key confirms it
 9. **The in-app banner for AI budget notices.** *(ROAD_TO_10 1.3, frontend half.)* `GET /ai/usage`
    serves the lines; nothing in `Kryova-frontend` draws them yet.
    > NOT STARTED
+
+10. **The registry is measured, and it cannot grow back unnoticed.** *(ROAD_TO_10 1.6.)* The
+    tool registry is resent on every agent step, so its size is a line on the bill nothing else
+    comes close to. Until now nobody had a number: the figure quoted in this file (~235 tools,
+    ~58k tokens) was an estimate.
+    > PARTIAL (2026-10-04) — `scripts/schema_report.py` (per-tool bytes counted the way they
+    > travel, compact JSON, and the 30 largest) and `tests/test_tool_registry_size.py`, which caps
+    > the total (244 tools, 239.6 KB, ~66.5k tokens *estimated* at 3.6 bytes/token — the vendor's
+    > tokenizer is the exact answer), the read-only subset (41 tools, 33.5 KB) and the largest
+    > single schema. **Measured, capped, not shrunk — on purpose:** cutting prose changes what the
+    > model is offered, and accuracy cannot be measured offline (the same reasoning as
+    > `AI_TOOL_LIMIT`, THE QUEUE H9). Each cap bump is a deliberate edit with its history written
+    > beside it; `recall_earlier_result` was the first. Remaining: the trim itself, behind
+    > ROAD_TO_10 1.5's ladder. Tested by: `tests/test_tool_registry_size.py`.
+
+11. **Old tool results are replayed as a digest — and the boundary moves in blocks, because that
+    is what keeps the cache.** *(ROAD_TO_10 1.7.)* A long turn re-sent, and re-paid for, the raw
+    output of step two at step fifty. A result older than the newest eight is replayed as one
+    line (tool, ok/error with its cause, the numbers first, sizes of lists), built from the
+    stored row alone so two builds are byte-identical; the full text stays in the database and
+    the new read-only tool `recall_earlier_result` returns it (scoped to the conversation, a
+    core tool retrieval never withholds).
+    > DONE (2026-10-04) — `app/ai/digest.py`, `context.digest_boundary` / `replay_messages`,
+    > `ToolBox._recall_earlier_result`, settings `AI_REPLAY_KEEP_VERBATIM=8` /
+    > `AI_REPLAY_DIGEST_BLOCK=24`. **The defaults were moved by a measurement, and the first
+    > ones were wrong:** a sweep of 30 settings over turns of 20–60 steps showed keep 12 / block 6
+    > cost up to 37 % *more* than digesting nothing at a 90 % cache discount (every move re-bills
+    > the tail at the full price; a digest only saves the cache price of what it removed), a
+    > boundary sliding one result at a time costs 2–3×, and 8 / 24 was never worse and saved
+    > 24 % on a 60-step turn. At a provider with no prompt cache a *smaller* block wins, which is
+    > why the block is a setting. **Unmeasured: whether a model reasons as well from a digest
+    > as from the raw result** — THE QUEUE H10. Old assistant `tool_calls` arguments are not
+    > digested. Tested by: `tests/test_ai_replay_digest.py` (68 tests; 13 breaks caught).
 
 ---
 

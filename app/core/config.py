@@ -377,6 +377,25 @@ class Settings(BaseSettings):
     # into a running summary. Deliberately below `ai_max_context_messages`, so
     # summarisation happens before anything would be dropped outright.
     ai_summarise_after_messages: int = 30
+    # Old tool results are replayed as a one-line digest once more than this many
+    # are in the window (`app/ai/digest.py`); the newest this-many stay verbatim.
+    # 0 turns digests off. **The saving is measured, the accuracy is not** (THE QUEUE
+    # H10): the cost side is `tests/test_ai_replay_digest.py`, the question of whether a
+    # model reasons as well from a digest is a ladder run's to answer.
+    ai_replay_keep_verbatim: int = 8
+    # The digest boundary moves in steps of this many results, never one at a time, and
+    # the size of the step is a cost decision with a measured shape. Every move changes
+    # the prompt from the first newly digested result onward, so everything after it is
+    # re-billed at the full price instead of the cache price; what a digest saves is only
+    # the cache price of the bytes it removes, on each later step. At a 90 % cache
+    # discount a move therefore has to be paid back over many steps, and the old default
+    # (keep 12, block 6) moved so often it cost up to 37 % *more* than not shortening
+    # anything on a 30-step turn. A block of 1 -- a boundary that slides -- costs 2-3x.
+    # Eight kept and a block of 24 was never worse than not digesting in a sweep of 30
+    # settings (turns of 20-60 steps, results of 1-6 KB) and saved 7.5 % on average at
+    # a 90 % discount; the settings that saved more kept fewer results verbatim, which
+    # is the accuracy risk this file cannot measure, so they were not chosen.
+    ai_replay_digest_block: int = 24
 
     # Reference material the assistant can consult -- CATIA and FEA manuals,
     # indexed on this machine. Off removes the lookup tool from the agent's

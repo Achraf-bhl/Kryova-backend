@@ -36,6 +36,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.ai import digest as tool_digest
 from app.ai import prompts
 from app.ai.resume import HISTORY_PAGE_LIMIT, build_history
 from app.ai.state import bound_document_name
@@ -117,6 +118,7 @@ BUILTIN_TOOL_LABELS: dict[str, str] = {
     "update_task": "Updating the plan",
     "request_approval": "Asking you to sign this off",
     "estimate_cost": "Checking what this will cost",
+    "recall_earlier_result": "Re-reading an earlier result",
     # Says what it is for, not which module answers. A user watching the step
     # list should read that the work is being checked.
     "check_part": "Checking the part against the request",
@@ -931,6 +933,25 @@ class ToolBox:
                 ),
                 handler=self._request_approval,
                 mutating=True,
+            ),
+            Tool(
+                name=tool_digest.RECALL_TOOL,
+                description=(
+                    "Return the full text of an earlier tool result in this conversation. "
+                    "Older results are shown to you as a one-line `[earlier result, "
+                    "shortened]` digest; use this with the `tool_call_id` it names when "
+                    "you need what the digest left out."
+                ),
+                parameters=_object(
+                    {
+                        "tool_call_id": {
+                            "type": "string",
+                            "description": "The id printed in the digest.",
+                        }
+                    },
+                    required=["tool_call_id"],
+                ),
+                handler=self._recall_earlier_result,
             ),
             Tool(
                 name="estimate_cost",
@@ -2046,6 +2067,39 @@ class ToolBox:
         # whichever the set happened to yield first — a gate raised against a
         # different tenant on each call would be unfindable.
         return next(iter(sorted(tenants)), None)
+
+    def _recall_earlier_result(self, tool_call_id: str) -> dict[str, Any]:
+        """The stored text of one earlier tool result -- this conversation's, and only its.
+
+        The conversation is the scope, not the user: a call id from another of the
+        user's conversations, or from anyone else's, finds nothing here, so the one thing
+        this tool can be used to read is what the model was already shown.
+        """
+        if self.conversation is None:
+            raise ToolError("There is no conversation to read an earlier result from.")
+        row = self.db.scalar(
+            select(ConversationMessage)
+            .where(
+                ConversationMessage.conversation_id == self.conversation.id,
+                ConversationMessage.role == MessageRole.TOOL,
+                ConversationMessage.tool_call_id == tool_call_id,
+            )
+            .order_by(ConversationMessage.sequence.desc())
+            .limit(1)
+        )
+        if row is None:
+            raise ToolError(
+                f"No earlier result in this conversation has the call id {tool_call_id!r}. "
+                "Use the id printed in the digest, exactly."
+            )
+        text = tool_digest.inner_text(row.content or "")
+        try:
+            result: Any = json.loads(text)
+        except ValueError:
+            # Stored text is capped, and a capped JSON document no longer parses. It is
+            # still the whole of what was stored, so it is returned as text.
+            result = text
+        return {"tool": row.tool_name, "was_error": bool(row.is_error), "result": result}
 
     def _list_projects(self) -> dict[str, Any]:
         rows = self.db.scalars(

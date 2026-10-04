@@ -448,7 +448,9 @@ session.**
    (`AI_INTENT_ROUTER=laya` is a different thing: a small local *decision* model that picks the
    tool family before a turn. It is off by default, it does not converse, and the ruling above is
    about the conversational model — but it is a local model, so confirm with the user before
-   switching it on anywhere. The upstream note that `.env.local` held several `AI_PROVIDER`
+   switching it on anywhere. Its `laya`/`torch` pins are in `requirements-laya.txt`, never
+   `requirements.txt`: PyPI's torch 2.5.1 is the CUDA build on Linux and has no CPython 3.14
+   wheel. The upstream note that `.env.local` held several `AI_PROVIDER`
    blocks, last one winning, still applies to any local file with repeats: check what
    `settings.ai_model` resolves to, never what the file appears to say.)
 

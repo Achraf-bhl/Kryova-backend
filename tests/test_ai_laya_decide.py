@@ -154,6 +154,50 @@ class TestTheLazySingleton:
         assert module._get_agent() is None
         assert len(attempts) == 1
 
+    def test_a_machine_without_laya_installed_runs_the_turn_without_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The real import path, not a patched `_load_agent`: `requirements.txt`
+        # does not install laya or torch, so this is the state of every
+        # deployment that has not opted in. `None` in `sys.modules` makes the
+        # import raise whatever happens to be installed on the machine.
+        import sys
+
+        import app.ai.laya_decide as module
+
+        monkeypatch.setattr(module, "_agent", None, raising=False)
+        monkeypatch.setattr(module, "_agent_failed", False, raising=False)
+        monkeypatch.setitem(sys.modules, "laya", None)
+        monkeypatch.setitem(sys.modules, "torch", None)
+
+        assert laya_decider(agent=None)("weigh 2.4 kg", LABELS) is None
+
+
+class TestItIsNotADefaultDependency:
+    """Laya is a local model behind a router that is off by default. Pinned in
+    `requirements.txt`, torch put several GB of CUDA wheels into every image
+    and CI job, and had no wheel at all for the Windows seat's CPython 3.14."""
+
+    def test_the_main_requirements_install_neither_laya_nor_torch(self) -> None:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+        pinned = {
+            line.split("#")[0].strip().split("==")[0].split("[")[0].lower()
+            for line in (root / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        }
+
+        assert not pinned & {"laya", "torch"}
+
+    def test_the_opt_in_file_still_names_both(self) -> None:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+        text = (root / "requirements-laya.txt").read_text(encoding="utf-8")
+
+        assert "\nlaya==" in text
+        assert "\ntorch==" in text
+
 
 class TestWhereItRuns:
     """A 27B conversational model already spills a 16 GB card, so Laya has to be

@@ -1776,6 +1776,17 @@ a key in `.env.local` they are minutes.*
       means they are too thin), and `turn_metrics.cost_micro_usd`. Also read H7's cache ratio on
       both: the block size was chosen for a 90 % cache discount and the real one may differ.
       Settles: whether the defaults stay on, and whether `AI_REPLAY_DIGEST_BLOCK` should move.
+- [ ] **H11 — Can the volatile state block move behind the tool chain?** Today it is a
+      user-role message *before* the newest user message, so a turn's tool exchanges sit after
+      it and any change to it re-bills them (master plan P11.13 measured and banded the worst
+      churn; P11.14 is the structural fix). Three things only a live endpoint settles: (a) is a
+      `user` message directly after a run of `tool` messages accepted by DeepSeek, and by the
+      Anthropic adapter (consecutive user content must merge); (b) with `AI_EFFORT_CHAT=high`,
+      does DeepSeek still use the chain's `reasoning_content` when a user message follows it, or
+      treat the chain as a past turn and ignore it (the guide says turns before the newest user
+      message are ignored); (c) on one 30-step CATIA turn, read `cached_prompt_tokens /
+      prompt_tokens` per step from `turn_metrics` with the block where it is (H7's figure) — if it
+      is already ~0.9 the change is not worth its risk. Settles: whether P11.14 is built.
 
 ## Expect failures on the first run, and that is the point
 

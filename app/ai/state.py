@@ -239,6 +239,33 @@ def _project_lines(db: Session, project: Project) -> list[str]:
     return lines
 
 
+#: Documents named in the block. An assembly of this many parts is already unusual; past it
+#: the line says how many more there are instead of naming them.
+MAX_DOCUMENTS_IN_BLOCK = 30
+
+#: Design parameters spelled out in the block, for the same reason. The decisions are what a
+#: later turn gets wrong, so the cap is generous; `read_design` has every one.
+MAX_DESIGN_PARAMETERS_IN_BLOCK = 60
+
+
+def _documents_to_name(
+    owned: list[tuple[str, str, bool]],
+) -> list[tuple[str, str, bool]]:
+    """At most `MAX_DOCUMENTS_IN_BLOCK` of `owned` (oldest first), the active one always.
+
+    The oldest documents are the ones dropped when there are too many -- the newest are
+    the ones the work is happening in -- and the original order is kept.
+    """
+    if len(owned) <= MAX_DOCUMENTS_IN_BLOCK:
+        return owned
+    keep = {index for index, (_, _, active) in enumerate(owned) if active}
+    for index in range(len(owned) - 1, -1, -1):
+        if len(keep) >= MAX_DOCUMENTS_IN_BLOCK:
+            break
+        keep.add(index)
+    return [row for index, row in enumerate(owned) if index in keep]
+
+
 def _catia_lines(
     conversation: Conversation,
     available: bool | None,
@@ -319,10 +346,21 @@ def _catia_lines(
     if owned and len(owned) > 1:
         # The set, because an assembly is several documents and the agent
         # cannot assemble names it does not know it holds. Phase 14.
+        #
+        # Bounded (ROAD_TO_10 1.9): a machine is dozens of parts and this line is
+        # resent on every step. The active document is always named; of the rest the
+        # newest are, and the count says how many are not -- `catia_open_document`
+        # with a name the conversation does not own answers with every one it does.
+        shown = _documents_to_name(owned)
         described = ", ".join(
             f"{_clean(name)} ({kind}{', active' if active else ''})"
-            for name, kind, active in owned
+            for name, kind, active in shown
         )
+        if len(shown) < len(owned):
+            described += (
+                f", and {len(owned) - len(shown)} more (an unknown name given to "
+                "catia_open_document lists every one)"
+            )
         lines.append(
             f"catia_documents: this conversation owns {len(owned)} documents: "
             f"{described}. Switch with catia_open_document name=<one of these>; "
@@ -479,11 +517,17 @@ def _design_lines(db: Session, conversation: Conversation) -> list[str]:
             f"design: {document.name} (revision {document.revision_number}), stored in a "
             "format this build cannot read — do not overwrite it; say so."
         ]
+    every = list(spec.parameters)
     parameters = ", ".join(
         f"{p.name}={p.expression if p.expression is not None else f'{p.value:g}'}"
         f"{(' ' + p.unit.value) if p.unit.value else ''}"
-        for p in spec.parameters
+        for p in every[:MAX_DESIGN_PARAMETERS_IN_BLOCK]
     )
+    if len(every) > MAX_DESIGN_PARAMETERS_IN_BLOCK:
+        parameters += (
+            f", and {len(every) - MAX_DESIGN_PARAMETERS_IN_BLOCK} more "
+            "(read_design lists every one)"
+        )
     lines = [
         f"design: {spec.name}, revision {document.revision_number}, "
         f"{len(spec.features)} feature(s)"

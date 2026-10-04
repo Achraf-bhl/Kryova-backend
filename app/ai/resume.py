@@ -205,7 +205,7 @@ def resume_lines(db: Session, conversation_id: str | None) -> list[str]:
         return []
 
     lines = [
-        f"catia_work_so_far: {activity.operations} operation(s) already ran in this "
+        f"catia_work_so_far: {_how_many(activity.operations)} already ran in this "
         f"conversation, the last {_age(activity.last_at)}. They are recorded; call "
         "design_history to read what was done rather than asking the user to repeat it."
     ]
@@ -332,6 +332,25 @@ _AGE_STEPS: tuple[tuple[timedelta, str, float], ...] = (
     (timedelta(hours=1), "hour", 3_600.0),
     (timedelta(minutes=1), "minute", 60.0),
 )
+
+
+#: Where the operation count changes wording. An exact count changes on *every* operation,
+#: and the state block sits before the newest user message, so a count that moved every
+#: step re-billed the whole turn in progress at the full price on every step (measured:
+#: 5.7-6.4x the stable cost at a 90 % cache discount). The count is a size hint -- the
+#: log itself is `design_history` -- so it is given in bands and the block changes
+#: wording a handful of times in a hundred operations instead of a hundred.
+_COUNT_BANDS = ((4, 9), (10, 24), (25, 49), (50, 99), (100, 249), (250, 499))
+
+
+def _how_many(count: int) -> str:
+    """The operation count, exact up to three and in bands above (see `_COUNT_BANDS`)."""
+    if count <= 3:
+        return f"{count} operation(s)"
+    for low, high in _COUNT_BANDS:
+        if count <= high:
+            return f"between {low} and {high} operations"
+    return "500 or more operations"
 
 
 def _age(when: datetime | None) -> str:

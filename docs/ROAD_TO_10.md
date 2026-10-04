@@ -181,10 +181,14 @@ typical turn costs much less than today's baseline, with no loss of accuracy on 
   - **Status 2026-10-04:** done (master plan P11.12, `app/ai/tokens.py`, `AI_CONTEXT_TOKEN_BUDGET` /
     `AI_SUMMARISE_AFTER_TOKENS`). Estimated from stored lengths; the provider's own usage is still
     what bills.
-- [ ] **1.9 Measure the state block and cap it.** [Linux] **S** — **NEW**
+- [x] **1.9 Measure the state block and cap it.** [Linux] **S** — **NEW** → P11.13, P11.14
   - It is rebuilt every turn (`Kryova-backend/app/ai/state.py`, 629 lines) and sits last on purpose.
   - Add a test that measures its size for a realistic conversation and fails if it grows past a
     measured cap.
+  - **Status 2026-10-04:** done (master plan P11.13): 4,663 characters realistic, capped at 6,000;
+    four unbounded parts bounded; and the exact operation count that moved the block on every
+    CATIA step is banded. The structural fix (the block behind the tool chain) is P11.14, not
+    started, behind THE QUEUE H11.
 - [ ] **1.10 Re-measure the step budget.** [Seat] **S**
   - `DEFAULT_MAX_STEPS = 60` (`Kryova-backend/app/ai/agent.py:92`). Read the Phase 0 step counts per
     level, and set the default near the 95th percentile of successful turns, plus a margin. A turn

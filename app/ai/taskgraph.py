@@ -60,6 +60,19 @@ FORMAT_VERSION: Final = 1
 #: quietly accepting sixty steps nobody will follow.
 MAX_TASKS: Final = 40
 
+#: How much of a task's title and note the state block carries. The block is resent on every
+#: step and a plan may hold forty tasks, so a title and a note of any length would make the
+#: plan the largest thing in it (measured: 40 tasks of 200 characters is +21 KB). The task
+#: itself is stored whole and `read_plan`-style tools return it whole; only this one-line
+#: rendering is clipped, with an ellipsis so a clipped line never reads as a complete one.
+BRIEF_TITLE_CHARS: Final = 100
+BRIEF_NOTE_CHARS: Final = 140
+
+
+def _clip(text: str, limit: int) -> str:
+    one_line = " ".join(text.split())
+    return one_line if len(one_line) <= limit else one_line[: limit - 1] + "…"
+
 
 class PlanError(ValueError):
     """A plan that cannot be held, or a move that cannot be made in it."""
@@ -340,9 +353,9 @@ class TaskGraph:
             if blocked and not task.state.settled:
                 marks.append("waiting on " + ", ".join(blocked))
             suffix = f" [{'; '.join(marks)}]"
-            lines.append(f"  - {task.id}: {task.title}{suffix}")
+            lines.append(f"  - {task.id}: {_clip(task.title, BRIEF_TITLE_CHARS)}{suffix}")
             if task.note:
-                lines.append(f"      note: {task.note}")
+                lines.append(f"      note: {_clip(task.note, BRIEF_NOTE_CHARS)}")
         nxt = self.ready()
         if nxt:
             lines.append(f"Next: {nxt[0].id}.")
@@ -442,6 +455,8 @@ def graph_from_tasks(entries: Sequence[Mapping[str, Any]]) -> TaskGraph:
 EMPTY: Final = TaskGraph()
 
 __all__ = [
+    "BRIEF_NOTE_CHARS",
+    "BRIEF_TITLE_CHARS",
     "EMPTY",
     "FORMAT_VERSION",
     "MAX_TASKS",

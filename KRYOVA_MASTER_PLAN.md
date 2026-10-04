@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 62/74 = 84% | 33/39 eng-months = 83% |
-| **Programme** | 23/35 | 190/210 = 90% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 64/76 = 84% | 32/39 eng-months = 83% |
+| **Programme** | 23/35 | 190/212 = 90% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 79% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 75% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8375,6 +8375,37 @@ machine with no network, so the phase is open until a run with a key confirms it
     > counts:** the vendor's tokenizer is the exact answer, so the budget carries a margin.
     > Tested by: `tests/test_ai_continuity.py` (38 new; 12 breaks caught),
     > `tests/test_config_and_jobs.py` (3 new).
+
+13. **The state block is measured, bounded, and no longer changes on every operation.** *(ROAD_TO_10
+    1.9.)* It is rebuilt and resent on every step, so its size and how often its text moves are
+    both costs. Measuring it on the real builder found three things nobody had written down.
+    > DONE (2026-10-04) — a realistic mid-design CATIA conversation is **4,663 characters (~1,300
+    > tokens)**, capped at 6,000 by `tests/test_ai_state_size.py`. **Four parts had no bound:**
+    > the owned-documents line (200 documents: +9 KB), the design's parameters (300: +7 KB), and
+    > a plan's task titles and notes (40 tasks of 200 characters: +21 KB). Now at most 30 named
+    > documents (the active one always, then the newest, with a count of the rest), 60 named
+    > parameters, and a plan line clipped at 100/140 characters with an ellipsis; the worst case of
+    > everything at once is **28.9 KB**, ceilinged at 32 KB. The stored plan is not clipped.
+    > **The block moved on every CATIA operation.** `catia_work_so_far: N operation(s)` named the
+    > exact count, and the block sits before the newest user message, so every tool exchange of the
+    > turn in progress was re-billed at the full price on any step where the text moved. Measured on
+    > the real prompt builder over a 30-step turn: **an exact count kept 5 % of the previous
+    > request as a cacheable front; banded (exact to 3, then 4-9, 10-24, 25-49 ...) it keeps 97 %**;
+    > synthetic replay: 5.7-6.4x the stable cost at a 90 % cache discount. The count is a size
+    > hint (`design_history` has the log), so it is now banded. **Not done, on purpose:** moving
+    > the block after the turn's tool exchanges, or freezing it per turn, would end the churn
+    > outright but changes where the model reads the state and, for DeepSeek, what counts as "the
+    > newest user message" in a reasoning chain — task 14. Tested by: `tests/test_ai_state_size.py`
+    > (27 tests; 7 breaks caught), `tests/test_resume.py`, `tests/test_taskgraph.py`.
+
+14. **Stop the state block invalidating the turn in progress by construction.** *(ROAD_TO_10 1.9,
+    follow-up.)* Banding the count (task 13) cut the churn from every step to a few times a turn;
+    the block is still a volatile message placed *before* the turn's tool exchanges, so any
+    legitimate change (a measurement, a new failure, a design revision) re-bills them.
+    > NOT STARTED — needs a live measurement first (THE QUEUE H11): whether a user-role state
+    > message after a tool chain is accepted by every provider adapter, whether DeepSeek's
+    > thinking mode keeps the chain's reasoning when a user message follows it (H1/H2), and what a
+    > block frozen at the start of the turn gets wrong by the end of it.
 
 ---
 

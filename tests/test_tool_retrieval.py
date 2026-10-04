@@ -303,6 +303,28 @@ class TestItCanBeMeasured:
         assert DEFAULT_LIMIT == 40
 
 
+class TestTheRequestsOwnWordsKeepTheirSlots:
+    def test_a_match_the_floor_already_holds_does_not_spend_a_slot(self) -> None:
+        """`MIN_MATCH_SLOTS` is the request's guaranteed say, however full the floor.
+
+        Until 2026-10-04 a matching tool already in the floor (core, prompt-taught,
+        recent) was counted against that budget even though nothing was added, so a
+        conversation that had used three of the tools it was now asking about was
+        offered three fewer new ones -- and the core tools match most requests.
+        """
+        from app.ai.tool_retrieval import MIN_MATCH_SLOTS
+
+        words = ["anchor", "bevel", "cradle", "dowel", "ember", "flange",
+                 "gusset", "hinge", "ingot", "jig", "keel", "lug"]
+        specs = [_spec(f"catia_{w}_bracket", f"Makes a {w} on a bracket.") for w in words]
+        specs += [_spec(f"catia_other_{i:02d}", f"Unrelated thing {i}.") for i in range(40)]
+        recent = ["catia_anchor_bracket", "catia_bevel_bracket", "catia_cradle_bracket"]
+
+        chosen = select(specs, "bracket " + " ".join(words), limit=1, recent=recent)
+
+        assert len(chosen.by_rule()["match"]) == MIN_MATCH_SLOTS
+
+
 class TestTheInjectedIntentDecider:
     """`select(decide=...)` — master plan 16.1's recall gap, closed by a single pass.
 

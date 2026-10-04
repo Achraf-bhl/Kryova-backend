@@ -679,13 +679,17 @@ def select(
         described_hits = sorted((in_text & query_terms) | (in_text & set(domain)))
         if not named and len(described_hits) < 2:
             continue
-        matched += 1
         shared = sorted(set(named + described_hits) & query_terms)
         if shared:
-            take(name, "match", "shares " + ", ".join(shared[:4]), score)
+            added = take(name, "match", "shares " + ", ".join(shared[:4]), score)
         else:
             inferred = sorted({domain[term] for term in set(named + described_hits) & set(domain)})
-            take(name, "domain", "the request implies " + ", ".join(inferred[:3]), score)
+            added = take(name, "domain", "the request implies " + ", ".join(inferred[:3]), score)
+        # Only a tool this rule actually added spends a slot. A match the floor
+        # already holds (`catia_pad`, a recent tool) costs nothing to offer again,
+        # and counting it let the floor eat into `MIN_MATCH_SLOTS` -- the one
+        # thing that budget exists to prevent.
+        matched += added
 
     # -- what the *task* needs, whatever nouns it used ----------------------
     # Unconditional, like the floor. These tables are small, every entry is a

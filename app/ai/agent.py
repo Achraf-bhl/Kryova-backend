@@ -846,6 +846,7 @@ def stream_agent(
                 "arguments": call.arguments,
             }
             started = time.monotonic()
+            guarded = False
             try:
                 # A read repeated verbatim cannot tell the model anything it was
                 # not told the first time, and a model that does it three times
@@ -857,6 +858,7 @@ def stream_agent(
                 )
                 if looping is not None:
                     blocked += 1
+                    guarded = True
                     raise ToolError(looping)
                 result: Any = toolbox.call(
                     call.name, call.arguments, allow_mutations=allow_mutations
@@ -920,13 +922,28 @@ def stream_agent(
                 # turn can end with a question the user can answer rather than
                 # with "the agent kept repeating itself", which is true and is
                 # not actionable.
-                recovery.record(
-                    Recovery_Failure(
-                        tool=call.name,
-                        message=_failure_text(result),
-                        arguments=call.arguments or {},
+                #
+                # A call the loop's own guard turned back never ran, so the
+                # guard's wording is not the tool's failure. Until 2026-10-04 it
+                # was recorded as one: the guard's text says "refused", which the
+                # taxonomy reads before "geometry", so an open profile that could
+                # not be padded escalated as "the system refused it" and offered
+                # "approve as it stands". A blocked write is recorded under the
+                # words of the refusal it repeats, which is the cause; a blocked
+                # read repeated a call that may well have succeeded, and is left
+                # to the `blocked` counter rather than invented into a failure.
+                message: str | None = _failure_text(result)
+                if guarded:
+                    first = refusals.get(_read_fingerprint(call.name, call.arguments))
+                    message = first[0] if first and toolbox.is_mutating(call.name) else None
+                if message is not None:
+                    recovery.record(
+                        Recovery_Failure(
+                            tool=call.name,
+                            message=message,
+                            arguments=call.arguments or {},
+                        )
                     )
-                )
             yield {
                 "type": "tool_end",
                 "id": call.id,

@@ -2130,6 +2130,49 @@ class TestATurnStopsRepeatingItself:
         assert "kept failing the same way" in reply.text
         assert "narrowing the question" not in reply.text
 
+    def test_an_escalation_names_the_tools_cause_not_the_guards(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The reviewer's reproduction, 2026-10-04. A pad refused once for an open
+        profile, then sent again verbatim: the repeats never run, the loop's guard
+        turns them back with wording that says "refused", and the taxonomy reads
+        "refused" before "geometry". So the escalation said the *system* refused
+        it and offered to approve the part as it stands -- the wrong question,
+        about a cause that was not the cause."""
+        box = _toolbox(db_session, user, project)
+
+        def refuse(name: str, arguments: dict[str, Any], *, allow_mutations: bool) -> Any:
+            raise ToolError("Sketch 'profile' is an open profile and cannot be padded.")
+
+        monkeypatch.setattr(box, "call", refuse)
+        monkeypatch.setattr(box, "is_mutating", lambda name: True)
+        pads = [
+            AssistantTurn(
+                tool_calls=[
+                    ToolCall(id=str(i), name="catia_pad", arguments={"sketch": "profile", "length_mm": 20})
+                ]
+            )
+            for i in range(6)
+        ]
+
+        reply = run_agent(
+            db=db_session,
+            provider=ScriptedProvider(pads + [AssistantTurn(text="Stopped.")] * 3),
+            toolbox=box,
+            conversation=conversation,
+            user_message="pad it",
+            allow_mutations=True,
+        )
+
+        assert "the geometry will not take it" in reply.text
+        assert "the system refused it" not in reply.text
+        assert "open profile" in reply.text
+
     def test_repeats_spread_across_tools_still_end_as_repeated_calls(
         self, db_session: Session, user: User, project: Project, conversation: Conversation
     ) -> None:

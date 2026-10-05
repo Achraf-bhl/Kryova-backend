@@ -15,6 +15,124 @@ needs the seat.
 
 ---
 
+## START HERE — the 2026-10-05 brief for the Windows session (supersedes the order below)
+
+**Written by a Linux session at the user's request, after Phases 1–9 of `docs/ROAD_TO_10.md` were
+written there. Almost none of it has run. The user will give you a DeepSeek API key with about
+USD 2 on it, so this brief is a budgeted, staged test: free checks first, cheap model calls
+second, one expensive thing never.** Work the stages in order and stop when a stage fails until
+you understand why. Do **not** schedule cron jobs or "next turns" in this session: it is a bounded
+test with a fixed budget, and it ends with a report.
+
+### Stage 0 — a clean tree (the user's instruction)
+
+Both repos, `Kryova-backend` and `Kryova-frontend`, in this order:
+
+    git status                      # look at what you are about to throw away
+    git reset --hard                # discard tracked changes
+    git clean -fd                   # discard untracked files; NOT -x, ignored files such as
+                                    # .env.local and node_modules must survive
+    git fetch origin
+    git checkout main
+    git pull --ff-only origin main
+
+Close the installed Kryova app first (it holds `bridge.lock`; `CLAUDE.md`, *Defender* item 4).
+Check no stranded bridge daemon: `Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+Where-Object { $_.CommandLine -match 'catia_bridge run' }` must be empty.
+
+### Stage 1 — build it, free of charge
+
+1. Backend: `venv\Scripts\python -m pip install -r requirements-dev.txt`, then
+   `venv\Scripts\python -m alembic upgrade head` and `-m alembic check`. **Two migrations are new:**
+   `c7a41e9d2b60` and `0f0bec54f55e` (`product_revisions`, `product_leases`, with RLS).
+2. Frontend: **`npm ci`** (this repo uses npm and `package-lock.json`; there is no pnpm lockfile),
+   then `npm run type-check`, `npm run lint`, `npm test`. These were green on Linux (1,248 tests).
+3. **Run `tests\test_process_queue.py` ALONE first, with `-x -v` and a timeout.** A full Linux
+   run hung at ~72% with a defunct spawn child, and this file is the suspect (G10 item 1). If it
+   hangs here too, the pool rebuild after `BrokenProcessPool` in `app/jobs/queue.py` is the defect:
+   fix it before anything else. Do not start the full suite until it passes.
+4. Then **one** full `pytest` (nothing else touching the database while it runs — `CLAUDE.md`),
+   `ruff check app/ tests/`, `mypy app/`, `venv\Scripts\python -m scripts.scan_secrets`. Read
+   every red before touching either side (`CLAUDE.md`, *Testing* 13: a test never run fails for
+   one of four reasons and three are the test). Re-record V&V **last**:
+   `python -m app.verify.recorded`, then `--check`.
+5. Work down **G10 and G11** below for the items that need no model (backups, restore, the
+   observability endpoint, MCP list/instructions, two processes on one product). **G11 item 2 is
+   the first real `pg_restore` ever run** — do it on a throwaway home, not on the user's database.
+
+### Stage 2 — the key, and a budget that cannot be overrun
+
+Put the key in `.env.local` (gitignored; **never print it, never commit it, never paste it into a
+doc or a screenshot**):
+
+    AI_PROVIDER=deepseek
+    AI_MODEL=deepseek-flash
+    AI_API_KEY=<the key>
+    AI_EFFORT_CHAT=low
+    AI_DAILY_TOKEN_BUDGET=1500000
+    AI_DAILY_COST_BUDGET_USD=1.50
+
+Then check what actually resolved, not what the file says (`CLAUDE.md` warns the file has held
+repeated blocks): print `settings.ai_provider`, `settings.ai_model`,
+`settings.ai_daily_cost_budget_usd` and whether `settings.ai_prices` prices `deepseek-flash`.
+**If the model is unpriced the cost budget cannot bite** (unpriced turns are counted apart, never
+as zero), so lean on the token budget and on reading each turn's `usage` yourself. **The user has
+about USD 2: stop at roughly USD 1.50 spent**, keep the rest for a re-test after a fix, and tell
+the user the running total in every message.
+
+### Stage 3 — end to end, simplest first
+
+**Use the web interface**, from a production build, because it is the easier to drive and the one
+`CLAUDE.md` item 2a measured: `npm run build && npm start` in the frontend (the dev server never
+hydrates on that machine), everything on IPv4 (`NEXT_PUBLIC_API_URL=http://127.0.0.1:8000/api/v1`,
+`CORS_ORIGINS` including `http://127.0.0.1:3000`, browser at `127.0.0.1:3000`), backend with
+`uvicorn app.main:app` on `127.0.0.1:8000`. The backend spawns its own CATIA bridge on the first
+CATIA tool call; do not pair one by hand. Free a stuck port by PID, not with `TaskStop`. Drive
+Edge over CDP as `CLAUDE.md` describes and **never call `browser.close()`**. Try the installed
+desktop app only after the web path works.
+
+**Account:** `venv\Scripts\python -m scripts.create_admin` (idempotent; `admin@admin.com` /
+`admin`; it refuses a non-local `DATABASE_URL`). Use it. Open CATIA V5 first and leave it idle.
+
+**The staging is the point, because every step costs tokens. One prompt per step, a screenshot
+when each finishes, and do not go on until it passes:**
+
+1. **Provider only, no tools:** a one-line chat ("say hello in French"). Read the turn's cost and
+   the log's `agent step … prompt tokens`. This verifies the **H-rows**: streaming (H6), the
+   cache (H7: send the same thing twice and read `usage`), and that no 400 occurs. Cost: cents.
+2. **One tool, no CATIA:** "list my projects" / "what materials do you have". Confirms the tool
+   path and the consent flow.
+3. **The simplest part, through CATIA:** "Make a 50 x 30 x 10 mm plate". Two pictures: the
+   product's own `catia_capture_view` **and** a screenshot of the application window and of CATIA
+   itself. This is also the first `reasoning_content` echo across a multi-step tool chain (H1).
+4. **One analysis on that plate:** a fixed end and a 100 N load, asking for the stress. Read the
+   answer against σ = F/A or the beam formula yourself; do **not** ask for a convergence study
+   yet (`grids: 3` is three solves). Check the viewer: legend, colour-by field, the node click
+   (G10 item 4), and that the headline says "Governing peak von Mises" with its basis.
+5. **Only if budget remains:** the next rung of `docs/GUI_PROMPT_LADDER.md` that Level 1–2 allows.
+   Never start Levels 4–6 on this budget; say so in the report instead.
+
+**After each step, look at the result and tune.** A screenshot is not decoration: read it. Where
+the app is wrong, slow or confusing — an error message that does not say what to do, a tool the
+model never reaches for, a step that burns tokens re-reading — fix the cause in code with a test,
+using the repo's rules (`ruff`, `mypy`, a named test, break the guard once to see it fail).
+Report a token-hungry pattern as a finding, with the numbers.
+
+### Stage 4 — record it
+
+- A dated report in `docs/verification-<date>/` with the screenshots, the rung reached per step,
+  the tokens and cost per prompt, and what you fixed.
+- Update the status lines in `docs/ROAD_TO_10.md` that a passing test or a seen result now
+  justifies (and only those), tick G10/G11 rows in THE QUEUE, and add one line to
+  `KRYOVA_BUILD_PLAN.md`'s *Done* and a fresh handoff at the top of *Now*. A `DONE` needs a
+  passing test (`CLAUDE.md`).
+- Commit each finished fix locally with `git add <paths>` (never `-A`). **Do not push unless the
+  user says so in the conversation.**
+- Finish with: what passed, what failed, what you changed, USD spent, and what is still open
+  (Phase 10, 9.3 and chrono pricing are the user's — do not attempt them).
+
+---
+
 ## READ THIS FIRST — you are the Windows session, and this is your brief
 
 **The Linux stretch stopped on 2026-09-09 at phase E7.** Ten of twenty-nine phases are

@@ -15,6 +15,10 @@ happened.
 
 ## Now
 
+> **Windows session: read `docs/WINDOWS_VERIFICATION.md` § "START HERE — the 2026-10-05 brief" first.** It is a staged, budgeted test (a
+> DeepSeek key with ~USD 2): clean tree and pull, free checks, then simple prompts through the web GUI and CATIA V5 with screenshots.
+> No cron jobs. The handoff below it is the list of what is built and what is open.
+>
 > **Handoff, 2026-10-05 (latest) — ROAD_TO_10 Phases 1–9 are written as far as a Linux session can take them;
 > Phase 10 and 9.3 are not codable.** No cron job exists and no turn is scheduled (the user's instruction). Backend
 > tests for Phases 6–9 were written and **not run** — the user tests on the Windows PC with CATIA V5.

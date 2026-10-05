@@ -60,7 +60,7 @@ from app.models.project import Project
 from app.models.project_memory import MemoryState, ProjectMemory
 from app.models.session import REUSE_GRACE_SECONDS, SessionRevocation, UserSession
 from app.models.sharing import ProjectTransfer, ShareLink, ShareRevocation
-from app.models.simulation import JobStatus, SimulationJob
+from app.models.simulation import IN_FLIGHT, SLOT_HOLDERS, JobStatus, SimulationJob
 from app.models.user import User
 
 __all__ = [
@@ -92,6 +92,7 @@ __all__ = [
     "GeometryVersion",
     "ImpersonationMode",
     "ImpersonationSession",
+    "IN_FLIGHT",
     "JobStatus",
     "MaintenanceWindow",
     "Media",
@@ -110,6 +111,7 @@ __all__ = [
     "ProjectMemory",
     "ProjectTransfer",
     "RecoveryCode",
+    "SLOT_HOLDERS",
     "SessionRevocation",
     "ShareLink",
     "ShareRevocation",

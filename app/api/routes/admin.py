@@ -112,7 +112,7 @@ from app.schemas.admin import (
     SuspensionCreate,
 )
 from app.schemas.pagination import Page
-from app.simulation.runner import run_simulation
+from app.simulation import waiting
 
 logger = logging.getLogger(__name__)
 
@@ -390,7 +390,9 @@ def retry_job(
         organisation_id,
         detail={"previous_status": previous_status.value},
     )
-    queue.submit(lambda: run_simulation(job.id, session_scope, store))
+    # Through `waiting.start`, like every other start, so the owner's waiting runs get the slot
+    # this one frees. An operator's retry is deliberately *not* held to the user's ceiling.
+    waiting.start(queue, job.id, session_scope, store)
     db.refresh(job)
     return _job_view(db, job)
 

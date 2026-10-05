@@ -167,6 +167,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _start_local_postgres()
     _check_rate_limit_backend()
     _fail_orphaned_jobs()
+    _resume_waiting_runs()
     _warm_intent_router()
     yield
     get_job_queue().shutdown()
@@ -296,6 +297,29 @@ def _fail_orphaned_jobs(session_factory=None) -> None:
         if orphans:
             db.commit()
             logger.warning("Failed %d simulation job(s) orphaned by a restart", len(orphans))
+
+
+def _resume_waiting_runs() -> None:
+    """Start the runs that were waiting for a slot when the last process died (ROAD_TO_10 3.4).
+
+    `_fail_orphaned_jobs` has just failed everything that was queued or running, which freed
+    its owners' slots; the *waiting* runs were never handed to the dead queue, so they are
+    intact -- and with nothing running there is no run whose end would promote them. A failure
+    here is logged and the boot continues: a waiting run that is not resumed now is resumed
+    by the next run of its owner's to finish, and a server that will not start is worse.
+    """
+    from app.api.deps import get_session_scope
+    from app.jobs.queue import get_job_queue
+    from app.media import get_media_store
+    from app.simulation import waiting
+
+    try:
+        owners = waiting.resume(get_job_queue(), get_session_scope(), get_media_store())
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.exception("Could not resume the simulations that were waiting for a slot")
+        return
+    if owners:
+        logger.info("Resumed the waiting simulations of %d user(s)", owners)
 
 
 def docs_urls() -> dict[str, str | None]:

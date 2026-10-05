@@ -358,7 +358,7 @@ Today:
 - [x] **3.3 Move every limited route onto the principal key.** [Linux] **S** → P1.6
   - Several routes still use the bare IP key `auth_limiter`, as CLAUDE.md's *Known landmines* item 5
     notes. Users behind one office NAT then share one budget.
-- [ ] **3.4 Queue simulations instead of refusing them.** [Linux] **M** — **NEW** (E15)
+- [x] **3.4 Queue simulations instead of refusing them.** [Linux] **M** — **NEW** (E15)
   - The fourth simulation past `max_concurrent_simulations_per_user=3` is refused today. Queue it
     instead, with a visible position, and start it when a slot frees. It still respects the cost
     estimate (`/billing/estimate`) and the plan's limits.

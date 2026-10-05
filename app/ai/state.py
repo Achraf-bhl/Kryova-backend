@@ -29,6 +29,7 @@ from app.ai.sanitise import sanitise_untrusted
 from app.catia_kb import catia_knowledge
 from app.core.config import settings
 from app.models import (
+    IN_FLIGHT,
     Conversation,
     GeometryVersion,
     JobStatus,
@@ -251,17 +252,16 @@ def _project_lines(db: Session, project: Project) -> list[str]:
         .order_by(desc(SimulationJob.created_at))
         .limit(1)
     ).all()
-    active = (
-        db.scalar(
-            select(func.count())
-            .select_from(SimulationJob)
-            .where(
+    in_flight = list(
+        db.scalars(
+            select(SimulationJob.status).where(
                 SimulationJob.project_id == project.id,
-                SimulationJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+                SimulationJob.status.in_(IN_FLIGHT),
             )
         )
-        or 0
     )
+    active = sum(1 for status in in_flight if status is not JobStatus.WAITING)
+    held_back = len(in_flight) - active
     if not runs:
         lines.append("latest_run: none")
     else:
@@ -281,6 +281,10 @@ def _project_lines(db: Session, project: Project) -> list[str]:
         # The single most common way to waste real compute is to queue a second
         # run because the first one's status never made it back into context.
         lines.append(f"runs_in_flight: {active} (queued or running right now)")
+    if held_back:
+        # Accepted and not started: the user's own concurrency ceiling is holding it.
+        # Without this line the model sees "no runs in flight" and submits a duplicate.
+        lines.append(f"runs_waiting: {held_back} (held until one of the user's runs finishes)")
     return lines
 
 

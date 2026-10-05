@@ -755,10 +755,13 @@ class TestRunSimulation:
         user: User,
         project: Project,
         geometry: GeometryVersion,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The per-project check misses the case the shared queue cares about."""
         from app.core.config import settings as app_settings
 
+        # Waiting off, so the ceiling is a refusal; with it on the run waits (`test_simulation_waiting`).
+        monkeypatch.setattr(app_settings, "max_waiting_simulations_per_user", 0)
         for index in range(app_settings.max_concurrent_simulations_per_user):
             other = Project(name=f"Other {index}", owner_id=user.id)
             db_session.add(other)

@@ -364,6 +364,9 @@ class TestConcurrencyQuota:
         from app.core.config import settings
 
         monkeypatch.setattr(settings, "max_concurrent_simulations_per_user", 2)
+        # Waiting off: this is the plain refusal, which `max_waiting_simulations_per_user=0`
+        # restores. The waiting line has its own file (`tests/test_simulation_waiting.py`).
+        monkeypatch.setattr(settings, "max_waiting_simulations_per_user", 0)
         self._queue_jobs(auth_client, project_with_geometry, 2)
 
         response = auth_client.post(
@@ -379,6 +382,7 @@ class TestConcurrencyQuota:
         from app.core.config import settings
 
         monkeypatch.setattr(settings, "max_concurrent_simulations_per_user", 1)
+        monkeypatch.setattr(settings, "max_waiting_simulations_per_user", 0)
         self._queue_jobs(auth_client, project_with_geometry, 1)
 
         detail = auth_client.post(
@@ -393,6 +397,7 @@ class TestConcurrencyQuota:
         from app.core.config import settings
 
         monkeypatch.setattr(settings, "max_concurrent_simulations_per_user", 1)
+        monkeypatch.setattr(settings, "max_waiting_simulations_per_user", 0)
         self._queue_jobs(auth_client, project_with_geometry, 1)
 
         # A second project of the same user must not reset the budget.

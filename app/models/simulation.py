@@ -16,6 +16,12 @@ if TYPE_CHECKING:
 
 
 class JobStatus(str, enum.Enum):
+    #: Accepted, but **held back by its owner's concurrency ceiling** (ROAD_TO_10 3.4): not
+    #: yet handed to the job queue, and promoted to `QUEUED` when one of the same owner's
+    #: runs finishes. Distinct from `QUEUED`, which means "handed to a worker pool and
+    #: waiting for a thread" -- that wait is the fleet's, this one is the user's own, and the
+    #: autoscaler must count only the first (`admin.py`'s queue snapshot does).
+    WAITING = "waiting"
     QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -31,6 +37,20 @@ class JobStatus(str, enum.Enum):
     def is_terminal(self) -> bool:
         return self in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED)
 
+    @property
+    def holds_a_slot(self) -> bool:
+        """Counts against the owner's concurrency ceiling. `WAITING` is the thing waiting for one."""
+        return self in SLOT_HOLDERS
+
+
+#: What the per-user concurrency ceiling counts.
+SLOT_HOLDERS: tuple[JobStatus, ...] = (JobStatus.QUEUED, JobStatus.RUNNING)
+
+#: Unfinished work of any kind -- what "is something still going on in this project" means,
+#: and so what a duplicate-run guard, a state line and a delete refusal should read. A run
+#: that is only waiting is still a run the user has asked for and not had.
+IN_FLIGHT: tuple[JobStatus, ...] = (JobStatus.WAITING, JobStatus.QUEUED, JobStatus.RUNNING)
+
 
 class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
     """One mesh-and-solve run against a specific geometry version.
@@ -41,6 +61,15 @@ class SimulationJob(UUIDPrimaryKey, TimestampMixin, Base):
 
     __tablename__ = "simulation_jobs"
     __table_args__ = (Index("ix_simulation_project_created", "project_id", "created_at"),)
+
+    #: Where this run stands in its owner's queue, 1 being next -- **not a column**. It is a
+    #: function of the other waiting runs and so is worked out when a response is built
+    #: (`app/simulation/waiting.py::annotate`), never stored: a stored position is wrong the
+    #: moment anything ahead of it finishes. None for a run that is not waiting.
+    #: `__allow_unmapped__` is what lets this annotation, which is deliberately not `Mapped[]`,
+    #: sit on a declarative class.
+    __allow_unmapped__ = True
+    queue_position: int | None = None
 
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True

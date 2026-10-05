@@ -1,6 +1,6 @@
 import struct
 from datetime import date, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -18,10 +18,10 @@ from app.api.deps import (
     SessionScopeDep,
 )
 from app.api.rate_limit import PlanRateLimit
-from app.core import interruption, limits
+from app.core import interruption
 from app.core.metering import check_quota
 from app.media import MediaNotFound
-from app.models import GeometryVersion, JobStatus, Meter, Project, SimulationJob
+from app.models import GeometryVersion, JobStatus, Meter, SimulationJob
 from app.models.audit import AuditAction, AuditOutcome
 from app.schemas import (
     SimulationCreate,
@@ -31,14 +31,13 @@ from app.schemas import (
     SurfaceTemperature,
 )
 from app.schemas.fatigue import FatigueRead, FatigueRequest
-from app.simulation import coupling
+from app.simulation import coupling, waiting
 from app.simulation.runner import (
     FLOW,
     NOT_STRUCTURAL,
     THERMAL_ANALYSES,
     TRANSIENT,
     backend_for,
-    run_simulation,
 )
 
 router = APIRouter(prefix="/projects/{project_id}/simulations", tags=["simulations"])
@@ -62,8 +61,8 @@ def _resolve_geometry(db: DbSession, project_id: str, version: int | None) -> Ge
     return geometry
 
 
-def _assert_within_quota(db: DbSession, owner_id: str, organisation_id: str) -> None:
-    """Refuse a run when the user already holds their share of the workers.
+def _admit(db: DbSession, owner_id: str, organisation_id: str) -> waiting.Admission:
+    """Say whether a new run starts now or waits for a slot, or refuse it.
 
     The ceiling is the *organisation's* (`core/limits`): a tenant override, then its plan's,
     then the global setting. Until ROAD_TO_10 3.5 this read `settings` directly while the quota
@@ -72,34 +71,19 @@ def _assert_within_quota(db: DbSession, owner_id: str, organisation_id: str) -> 
 
     Meshing and solving are the most expensive thing this service does, and the
     queue is shared, so without a per-user ceiling one account can occupy every
-    worker and every other user's job waits behind it. The agent tool applies
-    the same rule before it proposes a run (`app/ai/tools.py`); this is the one
-    that actually binds, because the HTTP route is reachable without it.
+    worker and every other user's job waits behind it. **Past the ceiling a run is
+    accepted and held** (ROAD_TO_10 3.4) rather than refused, up to
+    `max_waiting_simulations_per_user`; only a full waiting line is a 429, and it names both
+    numbers. Setting that limit to 0 restores the plain refusal. The agent tool applies the
+    same rule before it proposes a run (`app/ai/tools.py`); this is the one that actually
+    binds, because the HTTP route is reachable without it.
     """
-    limit = limits.for_organisation(
-        db, organisation_id, "max_concurrent_simulations_per_user"
-    ).value
-    running = (
-        db.scalar(
-            select(func.count())
-            .select_from(SimulationJob)
-            .join(Project, Project.id == SimulationJob.project_id)
-            .where(
-                Project.owner_id == owner_id,
-                SimulationJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
-            )
-        )
-        or 0
-    )
-    if running >= limit:
+    try:
+        return waiting.admit(db, owner_id, organisation_id)
+    except waiting.Refused as refused:
         raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"You already have {running} simulation(s) queued or running, which is the "
-                f"limit of {limit}. Wait for one to finish, or delete a queued run, "
-                "before starting another."
-            ),
-        )
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(refused)
+        ) from refused
 
 
 def _assert_within_allowance(db: DbSession, organisation_id: str) -> None:
@@ -221,7 +205,7 @@ def create_simulation(
     session_scope: SessionScopeDep,
 ) -> SimulationJob:
     """Queue a mesh-and-solve run. Returns immediately with a job to poll."""
-    _assert_within_quota(db, project.owner_id, project.organisation_id)
+    admission = _admit(db, project.owner_id, project.organisation_id)
     _assert_within_allowance(db, project.organisation_id)
     geometry = _resolve_geometry(db, project.id, payload.geometry_version)
     temperature_source = (
@@ -233,7 +217,7 @@ def create_simulation(
     job = SimulationJob(
         project_id=project.id,
         geometry_version_id=geometry.id,
-        status=JobStatus.QUEUED,
+        status=admission.status,
         # What was *asked for*. The runner overwrites it with the solver that
         # actually ran, which is the one a result can be attributed to — and for
         # a conduction run that is a different solver entirely, chosen by
@@ -257,10 +241,12 @@ def create_simulation(
     db.add(job)
     db.commit()
 
-    # Commit first: the worker looks the job up by id in its own session.
-    queue.submit(lambda: run_simulation(job.id, session_scope, store))
+    # Commit first: the worker looks the job up by id in its own session. A run that has to
+    # wait is not handed to the queue at all; it is promoted when one of its owner's runs ends.
+    if admission.status is JobStatus.QUEUED:
+        waiting.start(queue, job.id, session_scope, store)
     db.refresh(job)
-    return job
+    return waiting.annotate_one(db, job)
 
 
 @router.get("", response_model=SimulationPage)
@@ -285,7 +271,9 @@ def list_simulations(
         )
         or 0
     )
-    return SimulationPage(total=total, page=page, page_size=page_size, items=list(db.scalars(stmt)))
+    items: list[Any] = list(db.scalars(stmt))  # ORM rows; `SimulationRead` reads attributes
+    waiting.annotate(db, project.owner_id, items)
+    return SimulationPage(total=total, page=page, page_size=page_size, items=items)
 
 
 def _get_job(db: DbSession, project_id: str, simulation_id: str) -> SimulationJob:
@@ -297,7 +285,7 @@ def _get_job(db: DbSession, project_id: str, simulation_id: str) -> SimulationJo
 
 @router.get("/{simulation_id}", response_model=SimulationRead)
 def read_simulation(project: OwnedProject, db: DbSession, simulation_id: str) -> SimulationJob:
-    return _get_job(db, project.id, simulation_id)
+    return waiting.annotate_one(db, _get_job(db, project.id, simulation_id))
 
 
 @router.get("/{simulation_id}/surface", response_model=SurfaceField)
@@ -538,11 +526,18 @@ def cancel_simulation(
     current_user: CurrentUser,
     audit: AuditDep,
     principal: PrincipalDep,
+    store: MediaStoreDep,
+    queue: JobQueueDep,
+    session_scope: SessionScopeDep,
     simulation_id: str,
 ) -> SimulationJob:
     """Stop a run (P5.6). What that means depends on where the run is.
 
-    **Queued** — cancelled outright. Nothing started, so nothing unwinds.
+    **Queued** — cancelled outright. Nothing started, so nothing unwinds. Its slot is
+    handed to the owner's next waiting run **now**, not when the worker pool finally reaches
+    the cancelled entry and skips it.
+
+    **Waiting** — cancelled outright, and the runs behind it move up.
 
     **Running** — the request is recorded and the runner honours it at its next
     stage boundary: after meshing and before solving, and between the grids of
@@ -556,6 +551,7 @@ def cancel_simulation(
     rather than as what was asked for.
     """
     job = _get_job(db, project.id, simulation_id)
+    held_a_slot = job.status.holds_a_slot
     refusal = interruption.request_simulation_stop(db, job, by=current_user)
     if refusal is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refusal.reason)
@@ -569,6 +565,8 @@ def cancel_simulation(
         detail={"status": job.status.value},
     )
     db.commit()
+    if held_a_slot and job.status is JobStatus.CANCELLED:
+        waiting.hand_on(queue, session_scope, store, project.owner_id)
     return job
 
 

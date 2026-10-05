@@ -530,6 +530,53 @@ class TestJobOperationsAreAuditedEitherWay:
         assert entry.organisation_id == project.organisation_id
         assert entry.detail == {"previous_status": "failed"}
 
+    def test_a_retried_run_is_started_through_the_hand_on_so_its_owners_waiting_runs_move(
+        self,
+        operator: AuthenticatedTestClient,
+        failed_job: SimulationJob,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ROAD_TO_10 3.4. Every start goes through `waiting.start`, or the owner's waiting
+        runs are stranded until the next restart when this one ends."""
+        from app.simulation import waiting
+
+        thunks: list = []
+
+        class Held(JobQueue):
+            def submit(self, job) -> None:
+                thunks.append(job)
+
+        app.dependency_overrides[get_job_queue] = Held
+        monkeypatch.setattr("app.core.config.settings.max_concurrent_simulations_per_user", 1)
+        from app.core import limits
+
+        limits.forget()
+        behind = SimulationJob(
+            project_id=failed_job.project_id,
+            geometry_version_id=failed_job.geometry_version_id,
+            status=JobStatus.WAITING,
+            solver="mock",
+            load_case={},
+        )
+        db_session.add(behind)
+        db_session.flush()
+
+        def run(job_id, session_scope, store, solver=None) -> None:
+            with session_scope() as db:
+                db.get(SimulationJob, job_id).status = JobStatus.SUCCEEDED
+                db.commit()
+
+        monkeypatch.setattr(waiting, "run_simulation", run)
+        assert operator.post(f"{API}/admin/jobs/{failed_job.id}/retry").status_code == 200
+        assert behind.status is JobStatus.WAITING, "the retried run holds the only slot"
+
+        thunks.pop()()
+
+        db_session.refresh(behind)
+        assert behind.status is JobStatus.QUEUED
+        assert len(thunks) == 1, "and the waiting run was handed to the queue"
+
     def test_a_refused_retry_is_recorded_too(
         self, operator: AuthenticatedTestClient, failed_job: SimulationJob, db_session: Session
     ) -> None:

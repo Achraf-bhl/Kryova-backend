@@ -382,6 +382,10 @@ class SimulationRead(BaseModel):
     #: the status already says what happened. It carries no percentage inside a
     #: stage on purpose — see `app/simulation/progress.py`.
     progress: dict[str, Any] | None = None
+    #: Where a `waiting` run stands in its owner's line, 1 being next to start (ROAD_TO_10
+    #: 3.4); None for a run in any other state. Worked out when the response is built, never
+    #: stored -- a stored position is wrong the moment the run ahead of it finishes.
+    queue_position: int | None = None
     result: dict[str, Any] | None
     fields_media_id: str | None
     error: str | None

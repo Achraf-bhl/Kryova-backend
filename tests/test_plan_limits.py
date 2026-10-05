@@ -544,6 +544,12 @@ class TestACallerNobodySignedInHasNoPlan:
 class TestTheConcurrencyCeilingIsTheOrganisationsNotTheGlobalSetting:
     """The defect found beside 3.5: an override was displayed and never applied."""
 
+    @pytest.fixture(autouse=True)
+    def _waiting_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # These are about which *ceiling* applies, so a run past it must be a refusal; with
+        # the waiting line on it would be accepted and held (`tests/test_simulation_waiting.py`).
+        monkeypatch.setattr(settings, "max_waiting_simulations_per_user", 0)
+
     @staticmethod
     def _queue_jobs(client: AuthenticatedTestClient, project_id: str, count: int) -> None:
         version_id = client.get(f"/api/v1/projects/{project_id}/geometry").json()["items"][0]["id"]
@@ -637,4 +643,4 @@ class TestTheConcurrencyCeilingIsTheOrganisationsNotTheGlobalSetting:
         box.db = db_session
         box.user = db_session.get(User, project.owner_id)  # type: ignore[assignment]
         with pytest.raises(ToolError, match="which is the limit"):
-            box._assert_within_quota(project)
+            box._admit(project)

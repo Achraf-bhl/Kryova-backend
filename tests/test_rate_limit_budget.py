@@ -468,6 +468,7 @@ class TestSeveralWorkersNeedASharedLimiter:
             "_warn_about_insecure_defaults",
             "_start_local_postgres",
             "_fail_orphaned_jobs",
+            "_resume_waiting_runs",
             "_warm_intent_router",
         ):
             monkeypatch.setattr(main, step, lambda: None)

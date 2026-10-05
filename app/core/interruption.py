@@ -114,7 +114,9 @@ def request_simulation_stop(
 
     A **queued** job is cancelled here and now: nothing has started, so there is
     nothing to unwind, and the runner already refuses any job that is not
-    `QUEUED` by the time it picks it up.
+    `QUEUED` by the time it picks it up. A **waiting** one (held by its owner's
+    concurrency ceiling, ROAD_TO_10 3.4) is the same: it was never handed to
+    anything, so cancelling it only closes the gap in the line behind it.
 
     A **running** job is marked, and the runner honours the mark at its next
     stage boundary. That is an honest partial: meshing and solving are each a
@@ -131,7 +133,7 @@ def request_simulation_stop(
     job.cancel_requested_at = moment
     job.cancel_requested_by_id = by.id
 
-    if job.status is JobStatus.QUEUED:
+    if job.status in (JobStatus.QUEUED, JobStatus.WAITING):
         job.status = JobStatus.CANCELLED
         job.finished_at = moment
         db.commit()

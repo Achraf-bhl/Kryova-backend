@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 77/89 = 87% | 33/39 eng-months = 84% |
-| **Programme** | 23/35 | 204/225 = 91% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 78/90 = 87% | 33/39 eng-months = 84% |
+| **Programme** | 23/35 | 205/226 = 91% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -8704,10 +8704,49 @@ machine with no network, so the phase is open until a run with a key confirms it
     > `PLAN_LIMITS` -- unknown plan, unknown limit, a rate under 1 -- is a startup error rather
     > than a limit that silently never applies. **Not done:** the plan *numbers* are the
     > operator's decision and none is shipped; a change reaches other workers within 30 s, not at
-    > once; `max_waiting_simulations_per_user` is declared and resolvable but nothing reads it
-    > until 3.4 (task 28).
+    > once; `max_waiting_simulations_per_user` is declared and resolvable but nothing read it
+    > until 3.4 (task 28, which now does).
     > Tested by: `tests/test_plan_limits.py`, `tests/test_catia_dispatch.py`,
     > `tests/test_billing.py`, `tests/test_simulations.py`.
+
+28. **A run past the ceiling waits instead of being refused.**
+    *(ROAD_TO_10 3.4.)* The fourth simulation past `max_concurrent_simulations_per_user` was
+    answered with a 429, and a person who had asked for four analyses was told to come back and
+    ask again. It is now accepted, shown with its place in line, and started when one of the
+    same person's runs ends.
+    > DONE (2026-10-05) — `JobStatus.WAITING` (VARCHAR, so no migration; `alembic check` clean)
+    > is **not** `QUEUED`: `QUEUED` is handed to the job queue and is the fleet's wait, which the
+    > autoscaler reads; `WAITING` is held by the owner's own ceiling and handed to nothing, so it
+    > costs no thread and no memory. `app/simulation/waiting.py::admit` decides in one place --
+    > a free slot starts the run, no slot but room in the line makes it `WAITING`, a full line
+    > is refused naming both numbers -- under a per-owner `pg_advisory_xact_lock` (dies at
+    > COMMIT, safe behind a pooling PgBouncer). `max_waiting_simulations_per_user` is the line's
+    > length (a plan limit like the others; **0 restores the old plain refusal**). A slot is
+    > handed on by the code that ran the job (`waiting.start` wraps every starter: the route, the
+    > agent's tools, the operator's retry): after the runner returns, however it ended, the
+    > owner's oldest waiting runs are promoted by a conditional `UPDATE ... WHERE
+    > status='waiting'` and only the caller whose update matched submits the run, so two workers
+    > cannot start one run twice. Order is strict first-in-first-out across the owner's projects
+    > (a blocked head holds the line). Also promoted at the cancel of a slot-holding run and at
+    > startup (`resume`, after `_fail_orphaned_jobs`, because waiting runs were never handed to
+    > the queue that died). **Public shape:** `SimulationRead.queue_position` (1-based, computed
+    > at response time by a window function, never stored); a waiting run is cancelled at once
+    > like a queued one; the agent's state block gains `runs_waiting:` and its duplicate-run
+    > guard counts waiting runs (`IN_FLIGHT`); the frontend shows "Waiting for a slot", the place
+    > in line, and a stop button that says stopping costs nothing. **Not done / not measured:**
+    > the advisory lock is tested only as "the SQL is issued", not under real concurrent
+    > requests; the autoscaler's exclusion of `WAITING` holds by construction and no test can
+    > pin it; the monthly allowance is checked when a run is *accepted*, not again when it is
+    > promoted, so a run can start after other runs have spent the allowance; an operator's
+    > retry bypasses the user ceiling (flagged, not changed); a run's ceiling is its own
+    > project's organisation's, but the runs counted against it are the owner's in every
+    > project, so a person in two organisations on different plans can be held by the smaller
+    > one's ceiling on work in the larger one, and the line is shared. Frontend: six guards broken one at a time, each failed a named test.
+    > Tested by: `tests/test_simulation_waiting.py`, `tests/test_simulations.py`,
+    > `tests/test_agent.py`, `tests/test_admin.py`, `tests/test_plan_limits.py`,
+    > `tests/test_startup.py`, `tests/test_interruption.py`; frontend
+    > `src/types/api.contract.test.ts`, `src/components/simulate/stop-run-button.test.tsx`,
+    > `src/app/dashboard/projects/[projectId]/simulations/[simulationId]/page.test.tsx`.
 
 ---
 

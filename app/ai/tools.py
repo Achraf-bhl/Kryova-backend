@@ -41,7 +41,6 @@ from app.ai import prompts
 from app.ai.resume import HISTORY_PAGE_LIMIT, build_history
 from app.ai.state import bound_document_name
 from app.catia_kb import catia_knowledge
-from app.core import limits
 from app.core.config import settings
 from app.geometry import backends
 from app.geometry.formats import GEOMETRY_FORMATS
@@ -49,6 +48,7 @@ from app.jobs import JobQueue
 from app.media import LocalMediaStore, MediaService
 from app.mesh.types import MeshError
 from app.models import (
+    IN_FLIGHT,
     Conversation,
     ConversationMessage,
     GeometryVersion,
@@ -59,8 +59,9 @@ from app.models import (
     User,
 )
 from app.retrieval import knowledge_service
+from app.simulation import waiting
 from app.simulation.limits import check_mesh_request
-from app.simulation.runner import SessionScope, run_simulation
+from app.simulation.runner import SessionScope
 from app.solve.linear_static import LinearStaticSolver
 from app.solve.materials import MATERIALS
 from app.solve.types import LoadCase
@@ -2454,12 +2455,13 @@ class ToolBox:
             .select_from(SimulationJob)
             .where(
                 SimulationJob.project_id == project.id,
-                SimulationJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+                SimulationJob.status.in_(IN_FLIGHT),
             )
         )
         if running:
             # Deleting the row out from under a live worker leaves it writing
-            # results to a project that no longer exists.
+            # results to a project that no longer exists -- and a waiting run would start
+            # against one the moment a slot freed.
             raise ToolError(
                 f"{running} simulation(s) in this project are still queued or running. "
                 "Wait for them to finish, or delete them first."
@@ -2765,10 +2767,11 @@ class ToolBox:
         return job
 
     def _get_simulation(self, simulation_id: str) -> dict[str, Any]:
-        job = self._simulation(simulation_id)
+        job = waiting.annotate_one(self.db, self._simulation(simulation_id))
         return {
             "id": job.id,
             "status": job.status.value,
+            **self._queue_fields(job),
             "analysis": job.analysis,
             "load_case": job.load_case,
             "thermal_case": job.thermal_case,
@@ -3020,10 +3023,8 @@ class ToolBox:
             "element_size_mm": element_size_mm,
             "element_order": element_order,
             "grids": grids,
-            "note": (
-                "Queued. Meshing and solving take minutes; call get_simulation with "
-                "this id to find out how it went. Do not report a result yet."
-            ),
+            **self._queue_fields(job),
+            "note": self._queued_note(job, "Do not report a result yet."),
         }
 
     def _bind_temperature_source(
@@ -3142,10 +3143,8 @@ class ToolBox:
             "thermal_case_name": validated.name,
             "element_size_mm": element_size_mm,
             "element_order": element_order,
-            "note": (
-                "Queued. Meshing and solving take minutes; call get_simulation with "
-                "this id to find out how it went. Do not report a temperature yet."
-            ),
+            **self._queue_fields(job),
+            "note": self._queued_note(job, "Do not report a temperature yet."),
         }
 
     def _run_flow_simulation(
@@ -3199,10 +3198,8 @@ class ToolBox:
             "flow_case_name": validated.name,
             "carries_heat": validated.heat is not None,
             "element_size_mm": element_size_mm,
-            "note": (
-                "Queued. Meshing the fluid and solving take minutes; call get_simulation "
-                "with this id to find out how it went. Do not report a pressure drop yet."
-            ),
+            **self._queue_fields(job),
+            "note": self._queued_note(job, "Do not report a pressure drop yet."),
         }
 
     def _geometry_version(self, project: Project, number: int | None) -> GeometryVersion:
@@ -3254,25 +3251,30 @@ class ToolBox:
 
         # Refuse a duplicate rather than silently burning compute on a run the
         # user already has -- the agent cannot see cost, so the tool enforces it.
-        running = self.db.scalar(
-            select(func.count())
-            .select_from(SimulationJob)
-            .where(
-                SimulationJob.project_id == project.id,
-                SimulationJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+        # A run that is only *waiting* for a slot is still a run the user has asked for and
+        # not had, so it counts here: otherwise the agent could pile up a waiting line of
+        # identical runs, which is the duplicate this guard exists to stop.
+        in_flight = list(
+            self.db.scalars(
+                select(SimulationJob.status).where(
+                    SimulationJob.project_id == project.id,
+                    SimulationJob.status.in_(IN_FLIGHT),
+                )
             )
         )
-        if running:
+        if in_flight:
+            held_back = sum(1 for s in in_flight if s is JobStatus.WAITING)
             raise ToolError(
-                f"{running} simulation(s) are already queued or running in this project. "
-                "Wait for them to finish before submitting another."
+                f"{len(in_flight)} simulation(s) are already queued or running in this project"
+                + (f" ({held_back} of them waiting for a slot)" if held_back else "")
+                + ". Wait for them to finish before submitting another."
             )
-        self._assert_within_quota(project)
+        admission = self._admit(project)
 
         job = SimulationJob(
             project_id=project.id,
             geometry_version_id=version.id,
-            status=JobStatus.QUEUED,
+            status=admission.status,
             element_size_mm=element_size_mm,
             **columns,
         )
@@ -3281,41 +3283,51 @@ class ToolBox:
         # session and would find nothing inside our open transaction.
         self.db.commit()
 
-        job_id = job.id
-        scope = self.session_scope
-        store = self.media_store
-        self.job_queue.submit(lambda: run_simulation(job_id, scope, store))
+        # A run that has to wait is held, not handed to the queue; it starts when one of this
+        # user's runs ends (`app/simulation/waiting.py`).
+        if admission.status is JobStatus.QUEUED:
+            waiting.start(self.job_queue, job.id, self.session_scope, self.media_store)
         self.db.refresh(job)
+        job.queue_position = admission.position
         return job, version
 
-    def _assert_within_quota(self, project: Project) -> None:
-        """Refuse a run when the user already holds their share of the workers.
+    def _admit(self, project: Project) -> waiting.Admission:
+        """Start the run, hold it for a slot, or refuse it -- the route's rule, one function.
 
-        The same ceiling the HTTP route applies (`_assert_within_quota` in
-        `api/routes/simulations.py`). Checked here as well because the two paths
-        submit to the same shared queue, and the agent is the path that can
-        submit repeatedly without a human clicking anything.
+        The same decision the HTTP route makes (`_admit` in `api/routes/simulations.py`, both
+        through `app.simulation.waiting.admit`). Checked here as well because the two paths
+        submit to the same shared queue, and the agent is the path that can submit repeatedly
+        without a human clicking anything.
         """
-        limit = limits.for_organisation(
-            self.db, project.organisation_id, "max_concurrent_simulations_per_user"
-        ).value
-        running = (
-            self.db.scalar(
-                select(func.count())
-                .select_from(SimulationJob)
-                .join(Project, Project.id == SimulationJob.project_id)
-                .where(
-                    Project.owner_id == self.user.id,
-                    SimulationJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
-                )
+        try:
+            return waiting.admit(self.db, self.user.id, project.organisation_id)
+        except waiting.Refused as refused:
+            raise ToolError(str(refused)) from refused
+
+    @staticmethod
+    def _queue_fields(job: SimulationJob) -> dict[str, Any]:
+        """`queue_position` for a run held for a slot, and no key at all for any other.
+
+        Absent rather than null so a payload that never waited is byte-identical to what the
+        model was shown before waiting existed.
+        """
+        if job.status is JobStatus.WAITING and job.queue_position is not None:
+            return {"queue_position": job.queue_position}
+        return {}
+
+    @staticmethod
+    def _queued_note(job: SimulationJob, tail: str) -> str:
+        """What the model is told about a run it just submitted -- queued, or held for a slot."""
+        if job.status is JobStatus.WAITING:
+            return (
+                f"Waiting for a slot: you are number {job.queue_position} in your own line, "
+                "and it starts by itself when one of your runs finishes. Call "
+                f"wait_for_simulation or get_simulation with this id to find out how it went. {tail}"
             )
-            or 0
+        return (
+            "Queued. Meshing and solving take minutes; call get_simulation with "
+            f"this id to find out how it went. {tail}"
         )
-        if running >= limit:
-            raise ToolError(
-                f"You already have {running} simulation(s) queued or running, which is "
-                f"the limit of {limit}. Wait for one to finish before submitting another."
-            )
 
     def _assess_fatigue(self, simulation_id: str, **request: Any) -> dict[str, Any]:
         """The route's fatigue check, through the same function (`app.simulation.fatigue`).

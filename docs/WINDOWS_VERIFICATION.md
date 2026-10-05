@@ -1853,6 +1853,13 @@ this file drives the ladder, with a screenshot each.
          report says is the material and not the geometry; (d) that the new conversation's `CatiaDocument`
          binds to the saved document and `catia_restore` from the timeline works on it; (e) what a *partial*
          landing leaves open on the seat when a feature is refused halfway.
+      7. **What an export costs after an edit (5.3).** The 3D view of a CATIA part needs an export after each change; none is
+         automatic because the cost is unmeasured and an export shares the agent's one-in-flight COM queue. On a seat, edit a
+         realistic part (twenty-odd features) and time `catia_export_stl` and 3DXML straight after a pad, a fillet and a
+         pattern, and time the next edit while an export is in flight. Settle: the throttle (seconds between exports), whether
+         an export can run beside an edit at all or must wait for the queue to drain, how large the STL is for a real part and
+         whether the glTF service (`app/render/gltf.py`) takes it as it takes STEP. Only then wire the trigger on
+         `geometry_changed` (G8 item 4), never during a batch (5.4).
       Settles: whether the bridge and the app agree about what is in CATIA.
 
 ---

@@ -574,6 +574,15 @@ Today:
     GLB service (P6.1) and stream it to the WebGL viewer
     (`Kryova-frontend/src/components/webgl-stress-viewer.tsx`). This replaces PNG-only captures.
   - Throttle it: at most one export per N seconds, and never during a batch (5.5).
+  - Status 2026-10-05: Deferred on evidence, not built. The backend half already exists in pieces
+    (an export becomes a geometry version, app/render/gltf.py and the geometry route serve it as
+    glTF), so what is missing is the trigger: an automatic, throttled export after a change. That
+    trigger needs two things nothing here can supply. First, the real seat does not yet send change
+    events (5.1; THE QUEUE G8 item 4), so there is nothing to trigger on. Second, an export is a COM
+    call on the same one-in-flight queue the agent's own edits use, so a background export competes
+    with the edit it follows, and what it costs on a real part (seconds or tens of seconds) is
+    unmeasured. A throttle chosen without that number would be a guess presented as a setting.
+    Recorded as THE QUEUE G8 item 7; build it after a seat measures the export.
 
 ### 5B. Kryova → CATIA: fast, safe, approved
 
@@ -665,6 +674,14 @@ Today:
     bound document from its last checkpoint (`ensure_document` reopens from disk), and tell the user
     exactly which steps after the checkpoint must be replayed. `resume.py` knows which.
   - Never replay automatically past the last successful checkpoint.
+  - Status 2026-10-05: Not attempted: needs a seat. Relaunching CATIA and reopening the bound
+    document from its last checkpoint are COM and process behaviour no Linux test can observe, and a
+    recovery path written blind is the kind this codebase keeps finding wrong on first contact
+    (CLAUDE.md, Driving CATIA's interface 3). The two things that are knowable here already exist:
+    catia_lost is published, and ensure_document reopens a bound document from disk. Whether a crash
+    leaves a recoverable file, and what the reopened part's fingerprint says, is measured on a seat;
+    THE QUEUE G8 item 3 already requires a restore to be exercised there, and this builds on that
+    result.
 - [~] **5.11 The bridge panel as a first-class status surface.** [frontend] **M** → P7.2
   - Show the seat language, CATIA version (`V5-R33`, read in `scripts/catia_bridge/catia_com.py:320`),
     the bound document, the queue depth, pending approvals, the last event and the checkpoint
@@ -678,8 +695,15 @@ Today:
   - Where: `Kryova-backend/docs/WINDOWS_VERIFICATION.md` §E.
   - Rules: read the COM parameter flags before calling an unfamiliar method; never brute-force a
     signature on a live seat (CLAUDE.md, *Driving CATIA's interface* 3a).
+  - Status 2026-10-05: Not attempted: unwritten code that can only be written against a seat (THE
+    QUEUE section E: the CATIA side of sheet metal, the four stop gates, the conduction oracle
+    against ccx). Recorded where it already lives; no Linux work is hidden inside it.
 - [ ] **5.13 CATIA DMU Kinematics as a second dynamics backend.** [Seat] **L** → E9.5 (BLOCKED,
   needs the Kinematics workbench, THE QUEUE E6)
+  - Status 2026-10-05: BLOCKED, as the item says: needs the DMU Kinematics workbench (THE QUEUE E6).
+    Never attempted on a seat that does not have it; a COM call with the wrong argument types can
+    take CATIA down outright (CLAUDE.md, Driving CATIA's interface 3a), so there is nothing to try
+    without the licence.
 
 ---
 

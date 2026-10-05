@@ -126,6 +126,13 @@ class TestWhoWinsWhenTwoSourcesNameOneVariable:
         assert env["DATABASE_URL"].startswith("postgresql://kryova:pw@127.0.0.1:54329/kryova")
         assert env["SECRET_KEY"] == "s" * 64
 
+    def test_the_home_is_stated_so_the_backup_routes_exist_even_when_the_shell_did_not_pass_it(
+        self,
+    ) -> None:
+        env = self.apply({"KRYOVA_HOME": "/somewhere/else"})
+
+        assert env["KRYOVA_HOME"] == str(Path("/home/a/kryova"))
+
     def test_the_real_environment_beats_the_users_file_which_beats_the_defaults(self) -> None:
         env = self.apply(
             {"AI_MODEL": "from-the-environment"},

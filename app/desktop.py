@@ -154,6 +154,9 @@ def apply_environment(
         "LOCAL_POSTGRES_BIN_DIR": str(bin_dir),
         "LOCAL_POSTGRES_DATA_DIR": str(data_dir),
         "MEDIA_ROOT": str(home / "media"),
+        # Turns on `/desktop/backups` (app/api/routes/desktop.py), which 404s without it. The
+        # shell passes it only sometimes, so the launcher states it from the home it resolved.
+        "KRYOVA_HOME": str(home),
         # JSON, because `cors_origins` is a list and that is how pydantic-settings reads one.
         "CORS_ORIGINS": f'["{FRONTEND_ORIGIN}"]',
         "FRONTEND_URL": FRONTEND_ORIGIN,

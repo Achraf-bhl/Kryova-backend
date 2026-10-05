@@ -6,7 +6,7 @@ laptop (Windows 11, Python 3.14.3, CATIA V5-R33 French, local PostgreSQL). Model
 
 **Rung reached: Ladder Level 2, passed.** Steps a–d of the brief passed (d after two fixes), and
 step e ran Level 2. Levels 4–6 were not started, as the brief says.
-**Money: USD 1.87 → 1.84 on DeepSeek's own balance endpoint — about USD 0.03 spent.** The ledger,
+**Money: USD 1.87 → 1.83 on DeepSeek's own balance endpoint — USD 0.04 spent.** The ledger,
 priced at DeepSeek's *peak* rates, says USD 0.0748; the run was off-peak (half price).
 
 ## Stage 0 — the tree

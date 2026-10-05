@@ -20,8 +20,8 @@ happened.
 > No cron jobs. The handoff below it is the list of what is built and what is open.
 >
 > **Handoff, 2026-10-05 evening (Windows seat) — the budgeted DeepSeek brief ran; Ladder Level 2 passed.**
-> Report: `docs/verification-2026-10-05/README.md`. Steps a–e of the brief passed (d after fixes); USD ~0.03 spent of
-> 1.87 (DeepSeek's balance endpoint; the ledger's peak-priced figure is 0.0748). Fixed on the way: the process-queue
+> Report: `docs/verification-2026-10-05/README.md`. Steps a–e of the brief passed (d after fixes); USD 0.04 spent of
+> 1.87 (DeepSeek's balance endpoint, 1.83 at the end; the ledger's peak-priced figure is 0.0748). Fixed on the way: the process-queue
 > deadlock (G10.1), the agent quoting the centroid instead of the governing peak, the viewer painting the centroid
 > average, "version not recorded" on every run page, `catia_status` vanishing while a bridge is connected, a directory
 > read as an empty log, two `.env.local` leaks into the suite, and the suite starting a real CATIA. The 16 unpushed
@@ -889,7 +889,7 @@ needs a different extraction stated up front rather than chosen after the sweep.
   longer reads the workstation's AI knobs or starts its CATIA; twelve Linux-written tests corrected; pypdf in the
   desktop lock; mypy clean on Windows. Ran: two full suites plus a final one, the frontend suite, a real Windows
   pg_dump/pg_restore drill, two processes on one product lease, observability, MCP over JSON-RPC, V&V re-recorded
-  (4/5 agree, unchanged). USD ~0.03 spent. Report: `docs/verification-2026-10-05/`.
+  (4/5 agree, unchanged). USD 0.04 spent. Report: `docs/verification-2026-10-05/`.
 - **2026-10-05 — ROAD_TO_10 Phase 9, written on Linux, backend tests not run by instruction** (backend `5c2f8b1`…`19ac953`,
   frontend `7707170`). Rigid-body check independent of the load in the in-house solves; router-device typo fails at
   settings load (9.5); product revisions and leases persisted under an advisory lock (9.4, migration `0f0bec54f55e`);

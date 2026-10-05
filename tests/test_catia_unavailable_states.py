@@ -26,14 +26,19 @@ from collections.abc import Iterator
 
 import pytest
 
-from app.catia import dispatch, local_bridge
+from app.catia import affinity, dispatch, local_bridge
 from app.catia.dispatch import CatiaUnavailable
 
 
 @pytest.fixture
 def offline_bridge(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """A single-machine install with no connected device, and no daemon to start."""
-    monkeypatch.setattr(dispatch, "_online", lambda db, user_id: None)
+    monkeypatch.setattr(dispatch, "_online", lambda db, user_id, conversation_id=None: None)
+    # `_resolve_connection` asks `_route` *why* there is no device, and that reads the
+    # database this file deliberately does not have (ROAD_TO_10 5.9 gave it a third argument).
+    monkeypatch.setattr(
+        dispatch, "_route", lambda db, user_id, conversation_id=None: (affinity.choose(online=[], document_device_id=None), {})
+    )
     monkeypatch.setattr(local_bridge, "ensure_started", lambda db, user_id, wait_s=0.0: False)
     monkeypatch.setattr(dispatch.local_bridge, "ensure_started", lambda db, u, wait_s=0.0: False)
     monkeypatch.setattr(dispatch.local_bridge, "is_supported", lambda: True)

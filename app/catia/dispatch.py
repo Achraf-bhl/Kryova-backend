@@ -34,11 +34,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
 from app.api.rate_limit import RateLimiter
-from app.catia import local_bridge
+from app.catia import affinity, local_bridge
 from app.catia.approval import ApprovalError, verify_approval
 from app.catia.connection import (
     BridgeBusy,
@@ -234,15 +234,85 @@ def _owned_devices(db: Session, user_id: str) -> list[CatiaDevice]:
     )
 
 
-def _online(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceConnection] | None:
-    for device in _owned_devices(db, user_id):
-        connection = registry.get(device.id)
-        if connection is not None and connection.user_id == user_id:
-            return device, connection
-    return None
+def _pinned_device_id(
+    db: Session, conversation_id: str | None, active_device_ids: set[str]
+) -> str | None:
+    """The seat holding this conversation's document, or None when it has none.
+
+    A document is open on one workstation and cannot be reached from another, so the
+    binding row names the device (ROAD_TO_10 5.9; `affinity.py` is why it matters). The
+    active document decides; failing that, the newest one that is on a seat at all. A
+    document on the open kernel (`device_id` None) pins nothing.
+
+    **A seat that is no longer one of the user's active devices pins nothing.** It was
+    revoked or removed, so waiting for it would strand the conversation for good -- and the
+    way back exists: a call routed to another seat reaches the daemon's `ensure_document`,
+    which refuses naming `catia_open_document`, and that restores the part from the
+    checkpoint the server kept.
+    """
+    if not conversation_id:
+        return None
+    holder = db.scalar(
+        select(CatiaDocument.device_id)
+        .where(CatiaDocument.conversation_id == conversation_id, CatiaDocument.device_id.is_not(None))
+        .order_by(CatiaDocument.is_active.desc(), CatiaDocument.created_at.desc())
+        .limit(1)
+    )
+    return holder if holder in active_device_ids else None
 
 
-def _resolve_connection(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceConnection]:
+def _route(
+    db: Session, user_id: str, conversation_id: str | None = None
+) -> tuple[affinity.Outcome, dict[str, CatiaDevice]]:
+    """Which of the user's seats serves this call, by `affinity.choose` (ROAD_TO_10 5.9).
+
+    Pinned to the seat holding the conversation's document; the least-loaded online seat when
+    it has none; and **stranded, never rerouted, when the seat holding it is offline**
+    (CLAUDE.md, *Do not* 14). `dispatch._online` used to take the first device online, which
+    routed a pinned conversation to the wrong machine the moment two were paired.
+    """
+    devices = {device.id: device for device in _owned_devices(db, user_id)}
+    online = [
+        device_id
+        for device_id in devices
+        if (connection := registry.get(device_id)) is not None and connection.user_id == user_id
+    ]
+    pinned = _pinned_device_id(db, conversation_id, set(devices))
+    load: dict[str, int] = {}
+    if pinned is None and len(online) > 1:
+        # Only an unpinned choice looks at load, so the common case costs no extra query.
+        load = {
+            str(device_id): count
+            for device_id, count in db.execute(
+                select(CatiaDocument.device_id, func.count(distinct(CatiaDocument.conversation_id)))
+                .where(CatiaDocument.is_active.is_(True), CatiaDocument.device_id.in_(online))
+                .group_by(CatiaDocument.device_id)
+            )
+        }
+    return affinity.choose(online=online, document_device_id=pinned, load=load), devices
+
+
+def _online(
+    db: Session, user_id: str, conversation_id: str | None = None
+) -> tuple[CatiaDevice, DeviceConnection] | None:
+    outcome, devices = _route(db, user_id, conversation_id)
+    if outcome.device_id is None:
+        return None
+    connection = registry.get(outcome.device_id)
+    return (devices[outcome.device_id], connection) if connection is not None else None
+
+
+def _stranded_message(outcome: affinity.Outcome, devices: dict[str, CatiaDevice]) -> str:
+    """`affinity`'s sentence, with the machine's name in place of its id."""
+    holder = devices.get(outcome.holding_device_id or "")
+    return outcome.message().replace(
+        str(outcome.holding_device_id), f"{holder.name!r}" if holder is not None else "that one"
+    )
+
+
+def _resolve_connection(
+    db: Session, user_id: str, conversation_id: str | None = None
+) -> tuple[CatiaDevice, DeviceConnection]:
     """The user's online device, or an explanation of why there isn't one.
 
     The database row is re-checked even though the socket is open: revoking a
@@ -254,15 +324,33 @@ def _resolve_connection(db: Session, user_id: str) -> tuple[CatiaDevice, DeviceC
     `catia_*` call of a session fails, the model is told CATIA is unavailable,
     and it goes back to asking the user to upload a STEP file -- while the
     daemon it needed finishes connecting a second later.
+
+    **A conversation whose document is on an offline seat is refused by name**
+    (ROAD_TO_10 5.9). The refusal is not a fallback to try another machine: the
+    document is on that one, and a call that reached a different seat would fail
+    as "no such document" or succeed against a part of the same name.
     """
-    found = _online(db, user_id)
+    found = _online(db, user_id, conversation_id)
     if found is not None:
         return found
 
-    if local_bridge.ensure_started(db, user_id, wait_s=local_bridge.CONNECT_TIMEOUT_S):
-        found = _online(db, user_id)
+    outcome, devices = _route(db, user_id, conversation_id)
+    # Starting *this* machine's daemon cannot bring back a different machine, so a document
+    # held by a remote seat is not worth the wait.
+    holder = devices.get(outcome.holding_device_id or "")
+    held_elsewhere = (
+        outcome.stranded and holder is not None and holder.name != local_bridge.LOCAL_DEVICE_NAME
+    )
+    if not held_elsewhere and local_bridge.ensure_started(
+        db, user_id, wait_s=local_bridge.CONNECT_TIMEOUT_S
+    ):
+        found = _online(db, user_id, conversation_id)
         if found is not None:
             return found
+
+    outcome, devices = _route(db, user_id, conversation_id)
+    if outcome.stranded:
+        raise CatiaUnavailable(_stranded_message(outcome, devices))
 
     if local_bridge.is_supported():
         detail = local_bridge.last_error(user_id)
@@ -687,7 +775,7 @@ def call_catia(
             )
             return data
 
-        device, connection = _resolve_connection(db, user_id)
+        device, connection = _resolve_connection(db, user_id, conversation_id)
         _enforce_rate_limit(db, user_id, device.id)
         if spec.tier is CatiaTier.DESTRUCTIVE:
             _enforce_approval(spec, user_id, conversation_id, arguments)
@@ -1913,6 +2001,9 @@ def _post_process(
         if document is not None:
             if raw.get("remote_path"):
                 document.remote_path = str(raw["remote_path"])
+            # Reopened on *this* seat -- the way back from a revoked one, restored from the
+            # checkpoint the server kept -- so this is where the document lives now.
+            document.device_id = device.id
             db.flush()
             return _clean(raw) | {"document_id": document.id}
 

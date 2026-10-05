@@ -610,11 +610,15 @@ Today:
 
 ### 5C. Seats, crashes and lifecycle
 
-- [ ] **5.9 Wire seat affinity into dispatch.** [Linux] **M** → E15.4
+- [x] **5.9 Wire seat affinity into dispatch.** [Linux] **M** → E15.4
   - `Kryova-backend/app/catia/affinity.py` (pinned, least-loaded, stranded) is imported only by its
     test. `dispatch._online` takes the first device online.
   - Wire it in, and keep the rule that a document whose seat is offline is `STRANDED`. It is never
     rerouted (CLAUDE.md, *Do not* 14).
+  - Status 2026-10-05: `dispatch._route` asks `affinity.choose`; a stranded document is refused by
+    machine name and never rerouted (master plan P7.11; `tests/test_catia_routing.py`, five guards
+    broken one at a time). A revoked seat pins nothing and `catia_open_document` rehomes the
+    document. The two-seat check on real hardware is THE QUEUE G8 item 2.
 - [ ] **5.10 Recover from a CATIA crash.** [Seat] **L** → E15.4
   - Detect `catia_lost` (already published), relaunch CATIA through `local_bridge.py`, reopen the
     bound document from its last checkpoint (`ensure_document` reopens from disk), and tell the user

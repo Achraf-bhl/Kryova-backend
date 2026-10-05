@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 82/95 = 86% | 33/39 eng-months = 85% |
-| **Programme** | 23/35 | 209/231 = 90% | 174/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 83/96 = 86% | 33/39 eng-months = 85% |
+| **Programme** | 23/35 | 210/232 = 91% | 174/190 eng-months = 92% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 60%, P9 71%, P11 89% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 64%, P9 71%, P11 89% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -7745,6 +7745,26 @@ scene in the Tauri app.
    > `SaveAs`es the import under the documents folder and the mock models the same. **Not verified:**
    > that `SaveAs` on a freshly imported STEP document behaves on a seat (THE QUEUE G8).
    > Tested by: `tests/test_catia_import_rebinds.py`, through `call_catia`.
+
+11. **Seat affinity decides which workstation serves a call.** *(ROAD_TO_10 5.9, added 2026-10-05.)*
+   `app/catia/affinity.py` (pinned, least-loaded, stranded) had been written and proved and was
+   imported by nothing but its own test; `dispatch._online` returned the first device online, so a
+   user with two paired seats had a conversation's calls sent to whichever came first, and the
+   document it owned was on the other.
+   > DONE (2026-10-05) — `dispatch._route` asks `affinity.choose`: a conversation is **pinned** to the
+   > seat holding its document, an unpinned one goes to the **least-loaded** online seat (load =
+   > conversations with an active document there), and a document whose seat is offline is
+   > **stranded** — refused with `CatiaUnavailable` naming the machine by its name, and the other seat
+   > receives no call at all (CLAUDE.md, *Do not* 14). Two decisions, both stated in the code: a seat
+   > that was **revoked or removed pins nothing** (waiting for a machine that cannot come back
+   > would strand the conversation for good; the way back is the daemon's `ensure_document`
+   > refusal naming `catia_open_document`, which restores from the checkpoint the server kept), and
+   > `catia_open_document` **rehomes** the document to the seat it ran on. This machine's own daemon
+   > is not started for a document held by a remote seat. **Flagged, not fixed:** `offered_tool_specs`
+   > and `connected_ui_language` still call `_online` with no conversation, so with two seats of
+   > different capability the tool list a pinned conversation is offered may come from the other
+   > seat's hello.
+   > Tested by: `tests/test_catia_routing.py`, `tests/test_catia_affinity.py`.
 
 ##### Phase P8 — Billing, quotas and metering #####
 

@@ -1808,6 +1808,12 @@ this file drives the ladder, with a screenshot each.
          come back, that the next scoped call activates the imported document and not the old part, and
          what an imported *assembly* is (`_document_kind` — product or part) and whether `doc_type` is
          right. A failed save must come back as "open and not bound", not as an error.
+      2. **Two real seats, one pinned conversation (5.9).** Pair two workstations to one account. Start a
+         part from the first, then disconnect the second's bridge and send another message from a
+         conversation whose part is on the second: the refusal must name that machine and the first seat must
+         log no call. Revoke the second device and reopen the part with `catia_open_document`: it should
+         restore from the checkpoint onto the first seat and the document row should follow it. Measure
+         what `offered_tool_specs` offers a pinned conversation when the two seats' tool lists differ.
       Settles: whether the bridge and the app agree about what is in CATIA.
 
 ---

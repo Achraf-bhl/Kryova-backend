@@ -3003,3 +3003,55 @@ guide — the reader believes it, it fails, and they conclude the product is bro
 `not_covered` on a guide and `not_claimed` on a gallery entry are required fields, not decoration.
 A gallery that printed the passes and dropped `Mission.unproven` would be the most misleading page
 in the product, because it would be the most convincing one.
+
+## What ROAD_TO_10 Phases 5–8 taught (2026-10-05)
+
+Written on Linux under the user's "write the tests, I will run them on the Windows PC" rule, so
+most backend items below are *claims made while writing*, not results — the frontend suite and
+`ruff`/`mypy`/`alembic`/`scan_secrets` did run. Each line is a trap, not a feature description.
+
+1. **A full-suite run can hang, not fail, and a hang looks like slowness.** On 2026-10-05 the run
+   stopped at ~72% for 15+ minutes with a *defunct* `spawn` child and the parent in `futex_do_wait`
+   (`ps -o stat`, `ls /proc/<pid>/task`). `tests/test_process_queue.py` is the suspect (the
+   `die(9)` child test); it was never named. **Run that file alone with `-x -v` before a full
+   run**, and give any run you cannot watch a `timeout`. A `sleep`-then-`tail` loop cannot tell a
+   slow run from a dead one — check the log's mtime and the child processes.
+2. **`pytest -n0` is not an option here** (no xdist): the run exits at once with a usage error and
+   a background wrapper reports "completed (exit 0)". Read the log, not the notification.
+3. **A frontend guard can be right about its claim and wrong about a file.** `token-custody.test.ts`
+   forbids `localStorage` anywhere in `src/`; the theme preference (read by an inline script before
+   first paint) needs it. The exemption is a named map with its reason, and a second test pins the
+   stored key and that the file mentions no credential words. Do not widen the map to make a run
+   green.
+4. **`scene-streaming.levelFor` drops anything under `MIN_SCREEN_PX`**, so a culling test's "part
+   that should be fetched" must be big on screen, not merely in front of the camera: a 100 mm sphere
+   90 m to the side is ~2 px and is never fetched, with or without a frustum. The failing test said
+   "expected [] to equal ['aside']" and read like a culling regression.
+5. **Contrast is arithmetic, so test it as arithmetic.** `#2f6bff` with white text is 4.4988:1 and
+   fails a 4.5:1 floor by a hair; `#2e6aff` is 4.54. `globals-theme.test.ts` computes WCAG ratios from
+   the CSS tokens. Dark and light share one token table, applied by `data-theme` only when the choice
+   is explicit and by a media query otherwise.
+6. **`react-hooks/set-state-in-effect` is an error in this repo's ESLint.** Reset dependent state in
+   the event handler that causes the change (the viewer clears its node probe in the field button's
+   `onClick`), not in an effect keyed on it.
+7. **`Math.min(...bigArray)` throws `RangeError` past ~100k arguments.** A result field has
+   hundreds of thousands of values; `scalar-field.rangeFor` loops, and a 500k-value test pins it.
+   `ArrayLike<number>` cannot be iterated with `for…of` — index it.
+8. **The governing peak is a property, not stored data.** `StaticResult.governing_*` are
+   `@property`s and are absent from the stored `result` JSON, so a client that reads `result` alone
+   cannot see them. `SimulationRead.governing` computes them from the stored result (`None` when it
+   will not validate). Do not reimplement the max-of-two rule in the client.
+9. **An attachment dropped before its conversation exists has `conversation_id` null and the agent
+   never saw it.** `ai/attached.adopt_orphans` runs at the start of `for_turn` and adopts same-
+   project, same-owner orphans; the panel lists them through `unattached_project_id`.
+10. **`rg` misses relative imports** (`from "./x"`): a search for `scene-loader` found no consumer
+    while a sibling imported it. Search the bare module name, not the `@/lib/…` path.
+11. **Setup-page checks say "configured", never "valid", and an unreadable probe is "unknown", not
+    "problem"** (`machine-checks.ts`). A check that can only read a setting must not claim it works.
+12. **The usage ledger is a sum of rows, and unpriced calls are counted, never hidden**
+    (`ai/usage.py`): a warning at 80% names its `basis` (`tokens` or `cost`) so the number beside it
+    is not read as the other one.
+13. **Six frontend modules still have no caller** — selection-model, viewer-interactions,
+    scene-loader, scene-streaming, frustum, frame-meter — because there is no assembly viewer and no
+    scene endpoint. They are unwired on purpose (ROAD_TO_10 6.9, 8.2); a green test on one is not
+    evidence the viewer uses it.

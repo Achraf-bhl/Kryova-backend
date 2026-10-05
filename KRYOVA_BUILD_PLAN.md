@@ -15,12 +15,26 @@ happened.
 
 ## Now
 
+> **Handoff, 2026-10-05 (latest) — ROAD_TO_10 Phases 5–8 are written; nothing from Phases 6–8 has been run on
+> a Windows seat, and the backend suite has not completed once since.** The user's instruction for this stretch:
+> *"ignore the cron jobs, focus on coding only, I will test on the Windows PC with CATIA V5."* So **no cron job
+> exists and no turn is scheduled** (the self-scheduling rules in CLAUDE.md were set aside by that instruction).
+> **Next target, in this order:** (1) THE QUEUE **G10** in `docs/WINDOWS_VERIFICATION.md` — item 1 first:
+> `pytest -x -v tests/test_process_queue.py`, which hung a full run at ~72% (a defunct spawn child, parent on a
+> futex); then one full suite, `ruff`, `mypy`, `alembic check`, and `verify.recorded --check` then re-record V&V
+> last (6.6 touched `app/solve/**`). (2) Phase 9 (reliability, security, operations) and Phase 10 (the proof
+> gate) of `docs/ROAD_TO_10.md`, neither started. (3) The two consumers that cannot be written without an
+> assembly viewer — 6.9 and 8.2's selection model, viewer interactions and scene streaming — and the rest of
+> 8.6's French. **Interface changes in Phases 6–8:** migration `c7a41e9d2b60`; `SimulationRead.governing`;
+> `GET /attachments?unattached_project_id=`; SSE `usage` event after `title`; the agent's project tools now
+> use the route's membership rule (7.4, widens what it may write for a non-owner member). **Not done in the
+> master plan:** no `KRYOVA_MASTER_PLAN.md` status line was moved for Phases 6–8 (ROAD_TO_10 carries the
+> status; E15/E7 lines still need `PARTIAL … Tested by:` entries once the tests have run — a `DONE` needs a
+> passing test, and none has passed yet).
+>
 > **Handoff, 2026-10-05 03:57 — ROAD_TO_10 Phases 1–4 are done as far as Linux can take them; the
 > desktop installer is built, staged and tested here and has never run on Windows.**
-> **Next continuation fires 2026-10-05 04:57**, held by **this session** (kryova-backend-c7, job `f63e993e`). The job
-> dies if this editor is closed. **The pause is 1 h, not CLAUDE.md's 2 h 30 min — the user's own
-> instruction for this chain (2026-10-05), which overrides that line.** `CronList` FIRST on wake: a
-> one-shot whose time passes while the session is mid-turn never fires.
+> **No continuation is scheduled — the user said to ignore the cron jobs (2026-10-05); the 04:57 job described below was never created.**
 > That turn does **Phases 5–8**; at its end it schedules one more, 1 h later, for **Phases 9–10**
 > ("the rest"), and that one is the last. Both gates at the end of every phase are the user's:
 > the full suite, `ruff check app/ tests/`, `mypy app/`, `alembic upgrade head` then `alembic check`,
@@ -838,6 +852,18 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-10-05 — ROAD_TO_10 Phases 6–8, written on Linux, tests not run by instruction** (backend
+  `aa5ec28`…`ef90010`, frontend `288b219`…the verification-pass fix commit). Compute: hardware probe, derived
+  worker and thread counts, admission by memory, an opt-in process-pool queue, concurrent convergence grids,
+  one factorisation per mesh, a warm OCCT import, a shape-only landing replay, Postgres sized from RAM.
+  Projects: archive, tags, stars, duplicate, templates from the mission ladder, activity feed, export/import,
+  role-based agent access. Interface: cost meter, stop reasons, shortcuts, dark mode, French catalogue,
+  step groups, attachments before the first turn, machine checks, accessibility, offline banner, results on
+  the geometry with the governing peak. **Interface changes:** migration `c7a41e9d2b60`; `SimulationRead.governing`;
+  `GET /attachments?unattached_project_id=`; SSE `usage` event. Run: `ruff`, `mypy` (528 files), `alembic
+  upgrade head` + `check`, `scan_secrets` clean; frontend lint, tsc, `vitest` 1,191 passed. **The backend suite was
+  started and abandoned** — it hung at ~72% in `tests/test_process_queue.py` territory (see THE QUEUE G10 item 1)
+  and the user then said to stop running pytest. Not done: 6.9 and 8.2 consumers (no assembly viewer), most of 8.6.
 - **2026-10-05 — ROAD_TO_10 Phases 1–4, one session, two repositories** (backend `04e063c`…`4186211`,
   frontend `054eaf1`…`037bf1e`). Token economy: tokens at their true price with a cost budget and a
   record of every turn, organisation spending caps, a measured and digest-replayed tool registry, a

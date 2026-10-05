@@ -1883,6 +1883,35 @@ this file drives the ladder, with a screenshot each.
          exist, load the largest mission assembly on the seat's integrated GPU, orbit for 30 s and read
          `FrameMeter.snapshot()` (p95 and worst frame, not the mean). Nothing about frames per second has been measured.
       Settles: whether the compute plan fits the machines Kryova is installed on.
+- [ ] **G10 — ROAD_TO_10 Phases 6 (rest), 7 and 8: everything written on Linux on 2026-10-05 and never run (added 2026-10-05).**
+      **The user's instruction for that stretch was "write the tests, do not run them; I will run them on the
+      Windows PC with CATIA V5."** So the tests below exist and were not executed on Linux, apart from the
+      frontend (`vitest` 105 files / 1,191 tests green after the three fixes it found) and `ruff`, `mypy`,
+      `alembic upgrade head` + `alembic check` (migration `c7a41e9d2b60`) and `scan_secrets`, which were run.
+      1. **FIRST: `pytest -x -v tests/test_process_queue.py`.** A full Linux run hung at ~72% with a defunct
+         `spawn` child and the parent on a futex; the file alone was killed at 180 s. Suspect
+         `test_a_child_that_dies_fails_its_job_and_the_queue_still_works` (`die(9)`) but nothing named it. If it hangs on
+         Windows too, the pool rebuild after `BrokenProcessPool` in `app/jobs/queue.py` is the defect. **Do not start the
+         full suite until this passes** — a hang there costs the whole run.
+      2. **One full backend `pytest`**, then `venv/bin/python -m app.verify.recorded --check` and, because `app/solve/**`
+         changed (6.6), re-record V&V **last**.
+      3. **The new backend files:** `test_memory_governor`, `test_study_concurrency`, `test_solver_load_cases`,
+         `test_warm_start`, `test_catia_landing`, `test_local_cluster`, `test_project_management`,
+         `test_agent_project_roles`, `test_ai_usage_view`, `test_attachments_turn`, `test_attachments`,
+         `test_simulation_governing`. Twelve earlier guards were written as unpinned (never broken to see them fail);
+         the mutation run that would pin them was not done.
+      4. **The viewer, by eye (8.3):** open a succeeded run. Colour by stress, then displacement: the legend's end
+         values must match the stated range; clicking a node must read a value that agrees with the colour there;
+         the headline must say "Governing peak von Mises" with its basis. `webgl-stress-viewer.tsx` shading and the
+         screen-space click pick (`PICK_RADIUS_PX`, back-face skip) are not testable offline — screenshot it.
+      5. **Dark mode and French (8.5, 8.6):** toggle both; check the viewer background follows the theme and that no
+         surface goes unreadable. Contrast is measured by `globals-theme.test.ts`, legibility is not.
+      6. **Offline banner (8.2):** stop the backend with the app open; the banner must name what stops and what keeps
+         working, and clear when it returns.
+      7. **Project management (Phase 7) in the browser:** archive, restore, duplicate (read what it says it left out),
+         start from a template (a part rung gets a design; an assembly rung must say it has none), export a project and
+         import it into a second account.
+      Settles: whether Phases 6–8 hold on the machine they ship to.
 
 ---
 

@@ -742,14 +742,15 @@ The real lever is **processes**, behind the `JobQueue` seam.
     import and are not touched (needs processes, 6.4). `settings.job_workers` is now `int | None`.
     The 3-threads-minimum and 4-worker cap are chosen, not measured. Master plan E15.6;
     tests/test_hardware.py.
-- [ ] **6.3 Admit jobs by memory.** [Linux] **M** — **NEW** (E15)
+- [x] **6.3 Admit jobs by memory.** [Linux] **M** — **NEW** (E15)
   - Estimate each job's peak RAM from its degrees of freedom and solver choice (direct is about
     O(n^1.5), CG about O(n); the threshold `_ITERATIVE_THRESHOLD_DOF=100_000` is in
     `Kryova-backend/app/solve/linear_static.py`).
   - Start a job only if it fits in available RAM minus a reserve; otherwise queue it (3.4). This is
     what makes several workers safe: "two direct solves at once is how a box runs out of memory".
   - Derive `max_elements=400_000` from RAM as well.
-- [ ] **6.4 A process-pool job queue.** [Linux] **L** → E15, MAKING_IT_FASTER §2.4
+  - Status 2026-10-05: Done on the backend (`80d6f71`). A solve is admitted by the memory it needs against what the machine has free, and the element limit is derived from the machine rather than fixed. Master plan E15.7; tests/test_memory_governor.py (written, not run here — runs on the Windows PC).
+- [x] **6.4 A process-pool job queue.** [Linux] **L** → E15, MAKING_IT_FASTER §2.4
   - Add a `ProcessPoolJobQueue` beside `ThreadPoolJobQueue` in `Kryova-backend/app/jobs/queue.py`.
     Each process has its own gmsh singleton, so meshing finally runs in parallel and correctly, each
     job gets a hard memory limit, and the GIL stops mattering.
@@ -758,34 +759,42 @@ The real lever is **processes**, behind the `JobQueue` seam.
   - Background jobs own their own database session (CLAUDE.md, *Non-negotiable rules*).
   - Test: two meshing jobs overlap in wall time, and each produces the mesh a single-process run
     produces.
-- [ ] **6.5 Run a convergence study's grids at the same time.** [Linux] **M** — **NEW** (E7)
+  - Status 2026-10-05: Done, opt-in: `JOB_QUEUE_BACKEND=process` (`715d505`). A child dying fails its job and the pool is rebuilt. Master plan E15.8; tests/test_process_queue.py. **One flag: a full-suite run on Linux hung at ~72% with a defunct spawn child and a parent on a futex; the likely culprit is `test_a_child_that_dies_fails_its_job_and_the_queue_still_works` (the `die(9)` child), but a file-alone run was killed by timeout at 180 s without naming the test. Unresolved — read it first on the Windows PC with `pytest -x -v tests/test_process_queue.py`.** The default queue is unchanged.
+- [x] **6.5 Run a convergence study's grids at the same time.** [Linux] **M** — **NEW** (E7)
   - The grid levels in `Kryova-backend/app/verify/convergence.py::run_study` (sizes from
     `Kryova-backend/app/simulation/runner.py:451`) are independent meshes and solves. With 6.3 and
     6.4, run them concurrently when RAM allows: a 3-grid study then takes roughly as long as its
     finest grid instead of the sum.
   - The verdict logic does not change. Only the scheduling does.
-- [ ] **6.6 Reuse a factorisation across load cases.** [Linux] **M** → MAKING_IT_FASTER §2.5
+  - Status 2026-10-05: Done (`d4c67fa`): `grids: 3` studies can run their grids at once when asked; sequential stays the default. tests/test_study_concurrency.py, tests/test_verify_convergence.py (written, not run).
+- [x] **6.6 Reuse a factorisation across load cases.** [Linux] **M** → MAKING_IT_FASTER §2.5
   - Several load cases on one mesh share the stiffness matrix. Factorise once (`splu`) and
     back-substitute per case.
   - Test: two load cases give the same answers as two separate solves, to round-off.
-- [ ] **6.7 Keep warm processes warm.** [Linux] **S** (verify)
+  - Status 2026-10-05: Done (`dcfc4b4`): load cases on one mesh share one factorisation. tests/test_solver_load_cases.py (written, not run). `app/solve/**` changed, so the recorded V&V artefact is stale until `python -m app.verify.recorded` is re-run on the Windows PC.
+- [x] **6.7 Keep warm processes warm.** [Linux] **S** (verify)
   - Measure the import and initialisation time of OCP, gmsh and the BM25 index on the first request
     after boot. Warm them in lifespan if it is noticeable. Never block `/health` on it.
-- [ ] **6.8 Lower `Detail` wherever a full measurement is not needed.** [Linux] **S** → MAKING_IT_FASTER §2.1
-- [ ] **6.9 Viewer performance at machine scale.** [frontend] **L** → P6.2
+  - Status 2026-10-05: Done (`1f79c0a`): the OCCT import is warmed on a background thread at startup. tests/test_warm_start.py (written, not run).
+- [x] **6.8 Lower `Detail` wherever a full measurement is not needed.** [Linux] **S** → MAKING_IT_FASTER §2.1
+  - Status 2026-10-05: Done (`7edbb14`): the landing's open-kernel replay measures shape only. tests/test_catia_landing.py (written, not run).
+- [~] **6.9 Viewer performance at machine scale.** [frontend] **L** → P6.2
   - Level of detail, GLB streaming (`Kryova-frontend/src/lib/scene-streaming.ts` exists with tests
     and is unused), frustum culling, and progressive loading.
   - Target: an assembly of the size the missions build stays smooth on the integrated GPU of a
     typical workstation. Measure frames per second rather than guessing.
-- [ ] **6.10 Tune the local Postgres to the machine.** [Seat] **S** — **NEW** (P7)
+  - Status 2026-10-05: Partial. Frustum culling, a prioritised scene loader and a frame meter exist as tested libraries (`288b219`: frustum, scene-streaming, scene-loader, frame-meter). **No consumer**: there is no assembly or scene viewer and no scene endpoint to stream from, so nothing calls them. Left unwired on purpose rather than bolted onto the single-part viewer. The closing step is the assembly viewer.
+- [x] **6.10 Tune the local Postgres to the machine.** [Seat] **S** — **NEW** (P7)
   - Size `shared_buffers` and `work_mem` from 6.1's RAM figure when the bundled cluster is created
     (4.3).
-- [ ] **6.11 GPU: be honest.** No structural solver here runs on the GPU, and none should be written
+  - Status 2026-10-05: Done (`4bf6e0f`): the bundled Postgres's memory settings are sized from RAM. tests/test_local_cluster.py (written, not run). Never run on a Windows install (THE QUEUE G9).
+- [x] **6.11 GPU: be honest.** No structural solver here runs on the GPU, and none should be written
   (Decision 2: physics is federated, never hand-written). The GPU's job is the viewer. If a federated
   solver with GPU support is adopted later, it comes through the `Solver` seam with its own
   verification.
 
 ---
+  - Status 2026-10-05: Note only, by decision: no structural solver here runs on a GPU and none is written (Decision 2, physics is federated). Nothing built.
 
 ## Phase 7 — Project management
 
@@ -800,89 +809,108 @@ Today:
   (`Kryova-frontend/src/hooks/use-agent-chat.ts:380`). `api.deleteProject` exists
   (`Kryova-frontend/src/lib/api-client.ts:720`) and nothing calls it. There is no rename UI.
 
-- [ ] **7.1 Rename, archive, delete and duplicate.** [Linux + frontend] **M** — **NEW** (P2)
+- [x] **7.1 Rename, archive, delete and duplicate.** [Linux + frontend] **M** — **NEW** (P2)
   - Add `archived_at` (migration). Deletion goes through `MediaService`, so shared blobs survive
     (CLAUDE.md, *Every heavy byte goes through app/media/*).
   - Duplicate copies the specs and geometry references, never the CATIA document by reference.
-- [ ] **7.2 Name the project instead of leaving it untitled.** [Linux] **S**
+  - Status 2026-10-05: Done (`73c07ed`, backend; `e496668`, frontend): archive/restore, rename, duplicate (says what it left out), delete. tests/test_project_management.py.
+- [x] **7.2 Name the project instead of leaving it untitled.** [Linux] **S**
   - Name it from the first conversation's generated title, and let the user rename it on the spot.
-- [ ] **7.3 One project page with everything.** [frontend] **L** — **NEW** (P5/P6)
+  - Status 2026-10-05: Done (`73c07ed`): an unnamed project is named after its first conversation's title; a typed name is never overwritten. tests/test_project_management.py.
+- [x] **7.3 One project page with everything.** [frontend] **L** — **NEW** (P5/P6)
   - Conversations, geometry versions, designs and their revisions, simulations, requirements
     coverage, drawings, the technical file and members.
   - Start from `Kryova-frontend/src/app/dashboard/projects/[projectId]/_components/project-content.tsx`.
-- [ ] **7.4 Fix project roles for the agent.** [Linux] **M** — the landmine flagged 2026-09-15
+  - Status 2026-10-05: Done (`ffd1df0` backend, `e496668` frontend): conversations and designs lists take `project_id`; the project page shows overview, activity and templates. tests/test_project_management.py.
+- [x] **7.4 Fix project roles for the agent.** [Linux] **M** — the landmine flagged 2026-09-15
   - `ToolBox._project` asks for the *owner* while the HTTP layer admits any *member*
     (CLAUDE.md, *Known landmines* 7). Decide the rule once:
     - **Recommended:** members may run analyses; only an editor role or above may mutate geometry.
     - Move every tool onto `ToolBox._writable_project` or a read variant.
   - Test: a member and a viewer each try one read and one write through the agent.
-- [ ] **7.5 Activity feed.** [Linux + frontend] **M** — **NEW**
+  - Status 2026-10-05: Done (`73c07ed`): the agent's project tools use the route's membership rule, so a colleague is no longer told a project is not theirs. tests/test_agent_project_roles.py. **This widens what the agent may write for a non-owner member** — a decision taken here, stated in the commit.
+- [x] **7.5 Activity feed.** [Linux + frontend] **M** — **NEW**
   - Read from the append-only audit log (`Kryova-backend/app/core/audit.py`): who ran what, approved
     what, and changed which parameter. Paginated, tenant-scoped.
-- [ ] **7.6 Search, tags, starred and recent.** [Linux + frontend] **S** — **NEW**
-- [ ] **7.7 Project templates from the mission ladder.** [Linux] **M** — **NEW** (E18)
+  - Status 2026-10-05: Done (`73c07ed`, `app/core/activity.py`; `e496668` frontend): a merged feed of design revisions, geometry, runs, gates, memory and the audit rows with no other home; actors named only where a row says who. tests/test_project_management.py.
+- [x] **7.6 Search, tags, starred and recent.** [Linux + frontend] **S** — **NEW**
+  - Status 2026-10-05: Done (`73c07ed`, `e496668`): search, tags (normalised, refused rather than repaired), stars per user, archive filter. tests/test_project_management.py.
+- [x] **7.7 Project templates from the mission ladder.** [Linux] **M** — **NEW** (E18)
   - Start a project from a rung in `Kryova-backend/app/design/missions.py` (bracket, gearbox stage,
     conveyor and so on). It comes with its spec, requirements and its `unproven` caveats shown.
-- [ ] **7.8 Export and import a whole project.** [Linux] **M** — **NEW** (E17/E19)
+  - Status 2026-10-05: Done (`73c07ed`, `app/core/project_templates.py`): templates are the rungs that build; `Mission.unproven` is printed with the claims. An assembly or mechanism starts with no design and says why. tests/test_project_management.py.
+- [x] **7.8 Export and import a whole project.** [Linux] **M** — **NEW** (E17/E19)
   - One archive with the specs, STEP files, results with provenance, drawings, the technical file
     (`Kryova-backend/app/core/technical_file.py`) and a manifest of hashes. Import verifies the
     hashes before it accepts anything.
 
 ---
+  - Status 2026-10-05: Done (`73c07ed`): export and import a whole project. **API/DB changes in this phase: migration `c7a41e9d2b60` (archive, tags, stars, template_key) — applied and `alembic check` clean on a scratch Postgres 2026-10-05.** tests/test_project_management.py.
 
 ## Phase 8 — Interface
 
 **Goal.** The interface explains what the agent is doing, what it costs and what it has not
 verified, and it does so in the engineer's language, light or dark.
 
-- [ ] **8.1 A token and cost meter.** [frontend + Linux] **M** — **NEW** (P8)
+- [x] **8.1 A token and cost meter.** [frontend + Linux] **M** — **NEW** (P8)
   - The backend tracks spend (`Kryova-backend/app/ai/usage.py`, `Conversation.prompt_tokens` and
     `completion_tokens`, `/billing/usage`). The frontend shows none of it.
   - Add: per-turn cost on the final event, a running total per conversation, today's budget left in
     the composer (`Kryova-frontend/src/components/chat/composer.tsx`), and a warning at 80%.
   - Show cost after Phase 1.2 lands, so the number is the true price.
-- [ ] **8.2 Wire up the six modules that have tests but no caller.** [frontend] **L** → P6.2/P6.4/P6.6, P7.3/P7.4
+  - Status 2026-10-05: Done (`9f7e360` backend, `8915f02` frontend): a conversation's running cost and today's allowance, a warning from 80%, an SSE `usage` event after `title`. Unpriced calls are counted, never hidden. tests/test_ai_usage_view.py; src/lib/usage-meter.test.ts.
+- [~] **8.2 Wire up the six modules that have tests but no caller.** [frontend] **L** → P6.2/P6.4/P6.6, P7.3/P7.4
   - `Kryova-frontend/src/lib/selection-model.ts`, `viewer-interactions.ts`, `scene-streaming.ts`,
     `scalar-field.ts`, `offline-capability.ts` and `desktop-powers.ts`.
   - Each is tested and imported by nothing, so the work exists but the user never sees it.
   - Priority: selection-model, so tree ↔ 3D ↔ spec selection works (P6.6); then viewer-interactions
     (measure, section, explode).
-- [ ] **8.3 Results on the geometry.** [frontend] **M** → P6.5
+  - Status 2026-10-05: Partial. Wired: desktop powers (via desktop-bridge) and offline capability (a banner, `1d02cf5`). **Not wired — no consumer exists**: selection-model, viewer-interactions, scene-loader and scene-streaming need an assembly/scene viewer that has not been built. Recorded with 6.9.
+- [x] **8.3 Results on the geometry.** [frontend] **M** → P6.5
   - Stress, temperature and fatigue damage drawn on the part in the same viewer as the geometry
     (`Kryova-frontend/src/components/webgl-stress-viewer.tsx`), with the convergence verdict and the
     `governing_basis` (centroid or nodes) shown beside the peak value.
-- [ ] **8.4 Explain why a turn stopped, and what to do next.** [frontend] **S**
+  - Status 2026-10-05: Done (`ef90010` backend, `431b474` frontend). **Response shape change: `SimulationRead` gains `governing` (`GoverningRead`: `peak_mpa`, `basis`, `factor_of_safety`), computed from the stored result.** The viewer colours by stress or displacement from one ramp with a legend and a node click-probe; the result page headlines the governing peak and says which number it is. tests/test_simulation_governing.py; src/lib/scalar-field.test.ts, src/lib/result-peak.test.ts. The click probe and viewer shading are WebGL and have not been looked at by a person.
+- [x] **8.4 Explain why a turn stopped, and what to do next.** [frontend] **S**
   - Use the typed stop reason and `next_action` from 2.2. The four endings (`step_budget`,
     `repeated_calls`, `needs_input`, `awaiting_approval`) each get their own sentence and button.
-- [ ] **8.5 Dark mode.** [frontend] **M** — **NEW**
+  - Status 2026-10-05: Done (`cf8d194`): why a turn stopped is a tested function, with an Approvals link at a checkpoint. src/lib/stop-reason.test.ts.
+- [x] **8.5 Dark mode.** [frontend] **M** — **NEW**
   - `Kryova-frontend/src/app/globals.css` is light-only. Move colours to tokens, add a
     `prefers-color-scheme` variant and a manual toggle. The WebGL viewer's background and colour maps
     must follow the theme.
-- [ ] **8.6 French first, then other languages.** [frontend] **L** — **NEW**
+  - Status 2026-10-05: Done (`785658f`, `4e1209d`): dark mode — tokens, system preference via CSS media query, explicit toggle, viewer background follows; contrast measured and enforced by src/app/globals-theme.test.ts (primary darkened to #2e6aff to reach 4.5:1 with white).
+- [~] **8.6 French first, then other languages.** [frontend] **L** — **NEW**
   - The seat is French V5-R33 and the CATIA KB already carries French names. `lang="en"` is
     hard-coded in `Kryova-frontend/src/app/layout.tsx`.
   - Use a tiny in-house message catalogue. Only three runtime dependencies are allowed by doctrine,
     so a new i18n library is a named decision in the master plan.
   - Server error strings stay English for now, and the UI translates its own copy.
-- [ ] **8.7 Keyboard shortcuts.** [frontend] **S** — **NEW**
+  - Status 2026-10-05: Partial (`533d806`): an in-house typed catalogue, server-chosen language (cookie, then Accept-Language, then English), a switcher; the shell, composer and stop banner are in French. Most other surfaces are still English-only. src/lib/i18n/catalogue.test.ts.
+- [x] **8.7 Keyboard shortcuts.** [frontend] **S** — **NEW**
   - Only ⌘K (`Kryova-frontend/src/app/dashboard/_components/sidebar.tsx:80`) exists today.
   - Add: Esc to stop a turn, ⌘Enter to send, ⌘N for a new conversation, ⌘/ for a shortcut sheet.
-- [ ] **8.8 A readable step list.** [frontend] **M**
+  - Status 2026-10-05: Done (`1f9235d`): Esc stops, Mod+Enter sends, Mod+N / Alt+N new chat, Mod+/ opens the sheet. src/lib/shortcuts.test.ts.
+- [x] **8.8 A readable step list.** [frontend] **M**
   - Group the steps of one task (from `taskgraph`), collapse successful reads, highlight refusals with
     the tool's own sentence, and show CATIA captures and 3D (5.3) inline.
   - Where: `Kryova-frontend/src/components/agent-step-list.tsx`.
-- [ ] **8.9 Attachments end to end.** [frontend + Linux] **M** → P4.6, P4.7
+  - Status 2026-10-05: Done (`2499e6c`): steps grouped by plan task, quiet reads folded, refusals shown in full and never folded. src/lib/step-groups.test.ts, src/components/agent-step-list.test.tsx.
+- [x] **8.9 Attachments end to end.** [frontend + Linux] **M** → P4.6, P4.7
   - Confirm the composer's attach flow reaches the agent's turn (the P4.7 correction), and show what
     the reader extracted, with its locators, before the agent uses it (Decision 8).
-- [ ] **8.10 Onboarding that checks the real machine.** [frontend] **S** → P10
+  - Status 2026-10-05: Done (`ad4d76f`, `778cd2d` backend; `29b2ef2` frontend): a file dropped before the conversation existed is listed with what was read, and adopted by the first turn so the agent can see it. **API change: `GET /attachments` takes `unattached_project_id`.** tests/test_attachments_turn.py, tests/test_attachments.py.
+- [x] **8.10 Onboarding that checks the real machine.** [frontend] **S** → P10
   - `FirstRunChecklist` exists. Feed it from the setup health checks
     (`Kryova-frontend/src/app/setup/page.tsx`): Postgres up, CATIA found, bridge paired, model key
     valid, and a first ladder prompt suggested.
-- [ ] **8.11 Accessibility pass.** [frontend] **M** — **NEW**
+  - Status 2026-10-05: Done (`1d9c8de`): setup and first-run read the real machine; checks say "configured", never "valid", and unreadable is "unknown", not "problem". src/lib/machine-checks.test.ts.
+- [x] **8.11 Accessibility pass.** [frontend] **M** — **NEW**
   - Focus order, labels on icon buttons (the sidebar's hover-only delete has no keyboard path, per
     CLAUDE.md 1a), contrast in both themes, and reduced motion.
 
 ---
+  - Status 2026-10-05: Done (`4e1209d`): keyboard path through the sidebar's row actions, F2 rename, touch-visible actions, measured contrast. No screen-reader pass was done.
 
 ## Phase 9 — Reliability, security and operations
 

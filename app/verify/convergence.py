@@ -372,7 +372,9 @@ class ConvergenceStudy:
         head = f"{self.quantity}: {self.verdict}."
         if self.verdict is Verdict.CONVERGED:
             band = "" if self.gci_fine is None else f" ±{self.gci_fine * 100:.2f}% (GCI)"
-            order = "" if self.observed_order is None else f", observed order {self.observed_order:.2f}"
+            order = (
+                "" if self.observed_order is None else f", observed order {self.observed_order:.2f}"
+            )
             return (
                 f"{head} {self.levels[0].value:.6g} {self.unit}{band}{order}, "
                 f"over {len(self.levels)} grids. {self.reason}"
@@ -384,9 +386,7 @@ class ConvergenceStudy:
         )
         nxt = self.next_element_size_mm()
         advice = (
-            ""
-            if nxt is None
-            else f" Add a grid at element_size_mm <= {nxt:.4g} and assess again."
+            "" if nxt is None else f" Add a grid at element_size_mm <= {nxt:.4g} and assess again."
         )
         return f"{head} {self.reason} Grids: {detail or 'none'}.{advice} No value may be stated."
 
@@ -660,9 +660,7 @@ def assess(
 
     approximate_error_32 = abs(e32 / f2) if f2 != 0.0 else abs(e32) / scale
     gci_medium = SAFETY_FACTOR * approximate_error_32 / (r32**order - 1.0)
-    asymptotic = (
-        gci_medium / (r21**order * gci_fine) if gci_fine > 0.0 else None
-    )
+    asymptotic = gci_medium / (r21**order * gci_fine) if gci_fine > 0.0 else None
     if asymptotic is not None and abs(asymptotic - 1.0) > _ASYMPTOTIC_BAND:
         cautions.append(
             f"The asymptotic-range indicator is {asymptotic:.3f} rather than ~1.0, so "
@@ -820,6 +818,46 @@ def _level_from(mesh: object, *, element_size_mm: float, value: float) -> GridLe
     )
 
 
+def _sample_all(
+    sample: Sampler, sizes: list[float], concurrency: int
+) -> list[tuple[StudyMesh, float] | BaseException]:
+    """Each size's `(mesh, value)` or the exception it raised, in the order of `sizes`.
+
+    Sequentially, a size that raises something that is not a mesh or solver failure stops the
+    study there, exactly as before: the later sizes are never sampled. Concurrently they may
+    already be running, so the exception is returned in its place and re-raised by the caller
+    when its turn comes.
+    """
+    if concurrency <= 1 or len(sizes) <= 1:
+        outcomes: list[tuple[StudyMesh, float] | BaseException] = []
+        for size in sizes:
+            try:
+                outcomes.append(sample(size))
+            except (MeshError, SolverError, ValueError) as exc:
+                outcomes.append(exc)
+        return outcomes
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(
+        max_workers=min(concurrency, len(sizes)), thread_name_prefix="kryova-grid"
+    ) as pool:
+        futures = [pool.submit(sample, size) for size in sizes]
+        concurrent: list[tuple[StudyMesh, float] | BaseException] = []
+        for future in futures:
+            try:
+                concurrent.append(future.result())
+            except BaseException as exc:  # noqa: BLE001 - classified by the caller, in size order
+                concurrent.append(exc)
+                if not isinstance(exc, (MeshError, SolverError, ValueError)):
+                    for later in futures:
+                        later.cancel()
+                    break
+        return concurrent + [RuntimeError("not sampled: an earlier grid stopped the study")] * (
+            len(sizes) - len(concurrent)
+        )
+
+
 def run_study(
     quantity: str,
     unit: str,
@@ -828,6 +866,7 @@ def run_study(
     *,
     gci_threshold: float = DEFAULT_GCI_THRESHOLD,
     formal_order: float | None = None,
+    concurrency: int = 1,
 ) -> ConvergenceStudy:
     """Run one sampler over a sequence of grid sizes and assess the result.
 
@@ -851,15 +890,25 @@ def run_study(
     carried in `failures`. Anything that is not a `MeshError` or a `SolverError`
     propagates, because a `TypeError` in a sampler is a bug in the caller and
     swallowing it would turn it into a mysterious non-convergence.
+
+    **`concurrency` changes the scheduling and nothing else** (ROAD_TO_10 6.5). The grids are
+    independent meshes and solves, so with `concurrency > 1` up to that many run at once; the
+    levels and the failures are still collected **in the order the sizes were given**, so the
+    verdict is the one a sequential run would reach, and a sampler's exception that is not a
+    mesh or solver failure still propagates (the first in size order wins, and grids not yet
+    started are cancelled). The sampler must then be safe to call from several threads.
     """
     levels: list[GridLevel] = []
     failures: list[str] = []
-    for size in element_sizes_mm:
-        try:
-            mesh, value = sample(size)
-        except (MeshError, SolverError, ValueError) as exc:
-            failures.append(f"element_size_mm={size:g}: {exc}")
-            continue
+    sizes = list(element_sizes_mm)
+    outcomes = _sample_all(sample, sizes, concurrency)
+    for size, outcome in zip(sizes, outcomes, strict=True):
+        if isinstance(outcome, BaseException):
+            if isinstance(outcome, (MeshError, SolverError, ValueError)):
+                failures.append(f"element_size_mm={size:g}: {outcome}")
+                continue
+            raise outcome
+        mesh, value = outcome
         levels.append(_level_from(mesh, element_size_mm=size, value=value))
     return assess(
         quantity,

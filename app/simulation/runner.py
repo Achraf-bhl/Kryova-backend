@@ -103,9 +103,7 @@ def run_simulation(
             _usage_cause(job), LedgerSink(session_scope), fault_scope=session_scope
         ) as usage:
             try:
-                mesh, mesh_stats, output, ran = _execute(
-                    job, media, solver, usage, session_scope
-                )
+                mesh, mesh_stats, output, ran = _execute(job, media, solver, usage, session_scope)
             except Cancelled:
                 # Stopped between stages, at the user's request (P5 task 6).
                 # **Not `_fail`**: this run did what it was told, and filing it
@@ -319,9 +317,7 @@ def _execute(
         return _execute_plane(job, path, version.file_format, case, usage)
 
     if job.grids > 1:
-        return _execute_study(
-            job, path, version.file_format, case, solver, usage, session_scope
-        )
+        return _execute_study(job, path, version.file_format, case, solver, usage, session_scope)
 
     progress.report(session_scope, job.id, progress.Stage.MESHING)
     mesh, mesh_stats = generate_tet_mesh(
@@ -520,13 +516,16 @@ def _execute_study(
     check_mesh_request(job.geometry_version.stats, min(sizes), job.element_order)
 
     solved: dict[float, tuple[TetMesh, dict[str, Any], SolveOutput]] = {}
+    # By position in `sizes`, not by how many have finished: with grids running at once the
+    # count of finished grids is not a grid's number.
+    grid_number = {size: position for position, size in enumerate(sizes, start=1)}
 
     def sample(element_size_mm: float) -> tuple[TetMesh, float]:
         # A study is the one workload with genuinely countable progress: the
         # grids are known up front and each is a whole solve. This is the count
         # `progress.py` will report; the *inside* of a grid still gets none,
         # because there is nothing there to count that is not invented.
-        grid = len(solved) + 1
+        grid = grid_number[element_size_mm]
         progress.report(
             session_scope,
             job.id,
@@ -538,7 +537,6 @@ def _execute_study(
         mesh, stats = generate_tet_mesh(
             path, file_format, element_size_mm, element_order=job.element_order
         )
-        usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
         limit = memory.element_limit(job.element_order)
         if mesh.tet_count > limit:
             raise MeshError(
@@ -563,12 +561,21 @@ def _execute_study(
         solved[element_size_mm] = (mesh, stats, output)
         return mesh, MAX_VON_MISES.read(mesh, output)
 
-    study = run_study(MAX_VON_MISES.name, MAX_VON_MISES.unit, sizes, sample)
+    study = run_study(
+        MAX_VON_MISES.name,
+        MAX_VON_MISES.unit,
+        sizes,
+        sample,
+        concurrency=settings.study_concurrency,
+    )
 
     if not solved:
         raise MeshError("No grid in the study could be meshed and solved. " + study.report())
 
     mesh, mesh_stats, output = solved[min(solved)]
+    # Once, from the finest grid: with grids running at once the last to *report* is not the
+    # finest, and usage is metered on the size of the answer that was kept.
+    usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
     output.result.mesh_convergence = MeshConvergence.from_study(study)
     mesh_stats = dict(mesh_stats) | {"study": study.to_dict()}
     return mesh, mesh_stats, output, solver.name
@@ -888,9 +895,7 @@ def _nodal_average_over(node_count: int, corners, element_values):
     return np.divide(totals, np.maximum(counts, 1))
 
 
-def _store_fields(
-    media: MediaService, job: SimulationJob, mesh: TetMesh | TriMesh, output
-):
+def _store_fields(media: MediaService, job: SimulationJob, mesh: TetMesh | TriMesh, output):
     """Persist the full result fields alongside the surface the viewer draws.
 
     These are tens of megabytes for a real part, so they go to the local media

@@ -252,6 +252,11 @@ class Settings(BaseSettings):
     # left for everything else on the workstation (unset: a tenth of the machine's, at least
     # 1 GB); a solve that does not fit what is free waits up to `memory_wait_s`, and one that
     # can never fit is refused at once.
+    # Grids of one convergence study solved at once (ROAD_TO_10 6.5). 1 = one after another,
+    # exactly as before. Above 1 the grids still mesh one at a time (gmsh's lock) and each solve
+    # is admitted against memory separately, so a study that does not fit waits rather than
+    # fails. Default 1 because the win is unmeasured: see docs/MAKING_IT_FASTER.md.
+    study_concurrency: int = Field(default=1, ge=1, le=5)
     memory_reserve_mb: int | None = Field(default=None, ge=0)
     memory_wait_s: float = Field(default=120.0, ge=0)
     # Element-size floor, as a divisor of the geometry's bounding-box diagonal.
@@ -911,9 +916,7 @@ class Settings(BaseSettings):
                 'Set one: python -c "import secrets; print(secrets.token_urlsafe(48))"'
             )
         elif len(self.secret_key) < MIN_SECRET_KEY_LENGTH:
-            found.append(
-                f"SECRET_KEY is shorter than {MIN_SECRET_KEY_LENGTH} characters"
-            )
+            found.append(f"SECRET_KEY is shorter than {MIN_SECRET_KEY_LENGTH} characters")
         unpriced = self.unpriced_cost_budget()
         if unpriced:
             found.append(unpriced)

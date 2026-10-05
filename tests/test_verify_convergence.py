@@ -271,9 +271,7 @@ class TestAnUnconvergedNumberCannotBeStated:
         nxt = study.next_element_size_mm()
         assert nxt is not None
         assert nxt < study.levels[0].element_size_mm
-        assert nxt == pytest.approx(
-            study.levels[0].element_size_mm / RECOMMENDED_REFINEMENT_RATIO
-        )
+        assert nxt == pytest.approx(study.levels[0].element_size_mm / RECOMMENDED_REFINEMENT_RATIO)
 
     def test_a_converged_study_asks_for_no_further_grid(self) -> None:
         study = assess("q", "mm", power_law_levels(1.0, 2.0, 0.001))
@@ -461,7 +459,9 @@ class TestGridIndependence:
         sign, which is meaningless — half the time it would read as an
         oscillation and refuse an exact answer.
         """
-        study = assess("q", "mm", [level(1.0, 2.5), level(2.0, 2.5 + 3e-14), level(4.0, 2.5 - 1e-14)])
+        study = assess(
+            "q", "mm", [level(1.0, 2.5), level(2.0, 2.5 + 3e-14), level(4.0, 2.5 - 1e-14)]
+        )
         assert study.verdict is Verdict.CONVERGED
 
     def test_differences_above_the_negligible_band_are_assessed_properly(self) -> None:
@@ -629,6 +629,110 @@ class TestRunStudy:
             assert lvl.element_type == "tet4"
 
 
+class TestGridsRunningAtOnceChangeTheSchedulingAndNothingElse:
+    """ROAD_TO_10 6.5: `concurrency` is how many grids run together. The verdict, the order of the
+    levels and the failures recorded are the sequential run's, whatever order the grids finish in."""
+
+    SIZES = [4.0, 2.0, 1.0, 0.5]
+
+    def _sample(self, delays: dict[float, float] | None = None):
+        import time
+
+        values = {4.0: 1.16, 2.0: 1.04, 1.0: 1.01, 0.5: 1.003}
+
+        def sample(size: float) -> tuple[TetMesh, float]:
+            time.sleep((delays or {}).get(size, 0.0))
+            n = max(1, int(round(10.0 / size)))
+            return box_mesh((10.0, 10.0, 10.0), divisions=(n, n, n)), values[size]
+
+        return sample
+
+    def test_the_study_is_the_same_study(self) -> None:
+        sequential = run_study("q", "mm", self.SIZES, self._sample())
+        together = run_study("q", "mm", self.SIZES, self._sample(), concurrency=4)
+        assert together.to_dict() == sequential.to_dict()
+
+    def test_the_levels_keep_the_order_the_sizes_were_given_in_however_the_grids_finish(
+        self,
+    ) -> None:
+        # The coarsest grid finishes last.
+        slow_first = {4.0: 0.4, 2.0: 0.3, 1.0: 0.2, 0.5: 0.0}
+        together = run_study("q", "mm", self.SIZES, self._sample(slow_first), concurrency=4)
+        assert [lvl.element_size_mm for lvl in together.levels] == sorted(self.SIZES, reverse=True)
+
+    def test_they_really_do_run_at_the_same_time(self) -> None:
+        import threading
+
+        barrier = threading.Barrier(3, timeout=10)
+
+        def sample(size: float) -> tuple[TetMesh, float]:
+            barrier.wait()  # a sequential run would time this out
+            return _stub_mesh(), 1.0
+
+        run_study("q", "mm", [4.0, 2.0, 1.0], sample, concurrency=3)
+
+    def test_never_more_than_the_concurrency_at_once(self) -> None:
+        import threading
+        import time
+
+        lock = threading.Lock()
+        running = {"now": 0, "max": 0}
+
+        def sample(size: float) -> tuple[TetMesh, float]:
+            with lock:
+                running["now"] += 1
+                running["max"] = max(running["max"], running["now"])
+            time.sleep(0.05)
+            with lock:
+                running["now"] -= 1
+            return _stub_mesh(), 1.0
+
+        run_study("q", "mm", self.SIZES, sample, concurrency=2)
+        assert running["max"] == 2
+
+    def test_a_grid_that_fails_to_mesh_is_recorded_in_its_place(self) -> None:
+        def sample(size: float) -> tuple[TetMesh, float]:
+            if size == 4.0:
+                raise MeshError("too coarse")
+            return _stub_mesh(), 1.0
+
+        sequential = run_study("q", "mm", self.SIZES, sample)
+        together = run_study("q", "mm", self.SIZES, sample, concurrency=4)
+        assert together.failures == sequential.failures
+        assert "element_size_mm=4" in together.failures[0]
+
+    def test_a_bug_in_one_grid_still_propagates(self) -> None:
+        def sample(size: float) -> tuple[TetMesh, float]:
+            if size == 2.0:
+                return None.missing  # type: ignore[attr-defined,return-value]
+            return _stub_mesh(), 1.0
+
+        with pytest.raises(AttributeError):
+            run_study("q", "mm", self.SIZES, sample, concurrency=4)
+
+    def test_a_cancellation_raised_in_a_grid_stops_the_study(self) -> None:
+        class Stopped(Exception):
+            pass
+
+        def sample(size: float) -> tuple[TetMesh, float]:
+            if size == 4.0:
+                raise Stopped
+            return _stub_mesh(), 1.0
+
+        with pytest.raises(Stopped):
+            run_study("q", "mm", self.SIZES, sample, concurrency=2)
+
+    def test_one_grid_at_a_time_is_the_default_and_calls_in_order(self) -> None:
+        called: list[float] = []
+
+        def sample(size: float) -> tuple[TetMesh, float]:
+            called.append(size)
+            return _stub_mesh(), 1.0
+
+        run_study("q", "mm", self.SIZES, sample)
+        assert called == self.SIZES
+
+
 # --------------------------------------------------------------------------
 # A real solve, where the finite-element answer is exact
 # --------------------------------------------------------------------------
@@ -778,9 +882,9 @@ class TestTheStressComponentQuantity:
         class _Output:
             nodal_stress = tensor
 
-        assert stress_component_at((0.0, 0.0, 0.0), "yy").read(
-            mesh, _Output()
-        ) == pytest.approx(-5.38)
+        assert stress_component_at((0.0, 0.0, 0.0), "yy").read(mesh, _Output()) == pytest.approx(
+            -5.38
+        )
 
     def test_a_solver_that_reported_no_tensor_is_refused_by_name(self) -> None:
         """`SolveOutput.nodal_stress` is optional so the seam still admits a

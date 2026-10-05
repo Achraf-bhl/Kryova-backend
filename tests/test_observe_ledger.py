@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.models import CatiaOperation, StaffGrant, StaffRole, TurnMetric
 from app.models.base import utcnow
-from app.observe import collect, ledger, ops
+from app.observe import ledger, ops
+from app.observe.collect import INERT, listeners, span
 from app.observe.ledger import SCOPE, WINDOW, SpanLedger
 from app.observe.records import Span
 from tests.typing import AuthenticatedTestClient
@@ -77,7 +78,7 @@ class TestTheLedgerKeepsTheNewestAndCountsEverything:
 
     def test_a_listener_that_cannot_record_does_not_break_the_work(self) -> None:
         book = SpanLedger()
-        book("not a span")  # type: ignore[arg-type]  -- raises inside, and is swallowed
+        book("not a span")  # type: ignore[arg-type]
         assert book.snapshot().sites == ()
 
     def test_reset_forgets_everything(self) -> None:
@@ -90,21 +91,21 @@ class TestTheLedgerKeepsTheNewestAndCountsEverything:
 class TestInstallingItIsReversible:
     def test_install_registers_one_listener_and_uninstall_removes_it(self) -> None:
         assert not ledger.is_installed()
-        before = collect.listeners()
+        before = listeners()
         try:
             ledger.install()
             ledger.install()  # idempotent
-            assert collect.listeners().count(ledger.LEDGER) == 1
+            assert listeners().count(ledger.LEDGER) == 1
         finally:
             ledger.uninstall()
-        assert collect.listeners() == before
+        assert listeners() == before
         assert not ledger.is_installed()
 
     def test_a_span_run_while_installed_lands_in_the_ledger(self) -> None:
         ledger.LEDGER.reset()
         try:
             ledger.install()
-            with collect.span("kernel.rebuild"):
+            with span("kernel.rebuild"):
                 pass
         finally:
             ledger.uninstall()
@@ -115,7 +116,7 @@ class TestInstallingItIsReversible:
     def test_after_uninstall_spans_are_inert_again(self) -> None:
         ledger.install()
         ledger.uninstall()
-        assert collect.span("kernel.rebuild") is collect.INERT
+        assert span("kernel.rebuild") is INERT
 
 
 def _turn(user_id: str, *, cost: int | None, wall_ms: int, reason: str = "finished") -> TurnMetric:

@@ -1831,6 +1831,15 @@ this file drives the ladder, with a screenshot each.
          does a sketch edit that moves no named parameter not (the stated blind spot); (c) is a read on a
          second thread safe when a modal dialog holds COM, which is why `supports_watching` stays False
          until measured; (d) with the watcher off, is the pre-call report alone enough for a turn.
+      5. The checkpoint timeline, the approved rollback and the bridge panel in a browser, on a seat
+         (ROAD_TO_10 5.7 and 5.11). The route and the components are tested against the real daemon in mock
+         mode and against jsdom; nothing has been clicked. Drive the production build on `127.0.0.1:3000`
+         (CLAUDE.md, *Driving the GUI* 2a): build a part through the chatbot, open Checkpoints, restore the
+         one before the last feature and take the screenshot. Settle: (a) does `Documents.Open` on the
+         restored file land on the document the conversation is bound to, with the part visibly back;
+         (b) does the next turn's reply acknowledge the rollback from the state block without being asked;
+         (c) does the panel show the seat's real interface language and queue depth, and an honest
+         "not reported" where the daemon cannot tell; (d) is the confirmation reachable by keyboard alone.
       Settles: whether the bridge and the app agree about what is in CATIA.
 
 ---

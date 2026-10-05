@@ -34,7 +34,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.api.deps import CurrentUser, DbSession, MediaServiceDep, OwnedProject
 from app.api.rate_limit import RateLimiter, enforce
-from app.catia.approval import mint_approval
+from app.catia.approval import ApprovalError, mint_approval, verify_approval
 from app.catia.bridge import (
     CATIABridgeError,
     CatiaStatus,
@@ -50,7 +50,7 @@ from app.catia.connection import (
     DeviceConnection,
     registry,
 )
-from app.catia.dispatch import status_payload
+from app.catia.dispatch import CatiaError, CatiaUnavailable, call_catia, status_payload
 from app.catia.events import KNOWN_EVENTS, bus
 from app.catia.sanitize import clean_result, clean_text
 from app.catia.tool_specs import CATIA_TOOL_SPECS, CatiaTier
@@ -157,6 +157,21 @@ class ApprovalRequest(BaseModel):
 class ApprovalResponse(BaseModel):
     approval_token: str
     expires_in_seconds: int
+
+
+class RestoreRequest(BaseModel):
+    checkpoint_id: str = Field(min_length=1, max_length=36)
+    approval_token: str = Field(
+        min_length=1,
+        max_length=512,
+        description="From POST /catia/approvals, minted after the user confirmed this rollback.",
+    )
+
+
+class RestoreResponse(BaseModel):
+    restored_checkpoint_id: str
+    label: str
+    message: str
 
 
 class CheckpointRead(BaseModel):
@@ -545,6 +560,25 @@ def list_tools(current_user: CurrentUser) -> dict[str, Any]:
     }
 
 
+def _owned_active_document(db: DbSession, conversation_id: str, user_id: str) -> CatiaDocument:
+    """The conversation's active CATIA document, or 404 for anyone but its owner.
+
+    One rule for both the list and the restore: another user's conversation and a conversation
+    with no document are the same answer, so ids cannot be enumerated across accounts.
+    """
+    document = db.scalar(
+        select(CatiaDocument).where(
+            CatiaDocument.conversation_id == conversation_id,
+            CatiaDocument.is_active.is_(True),
+        )
+    )
+    if document is None or document.conversation.owner_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No CATIA document for that conversation"
+        )
+    return document
+
+
 @router.get("/conversations/{conversation_id}/checkpoints", response_model=list[CheckpointRead])
 def list_checkpoints(
     conversation_id: str, db: DbSession, current_user: CurrentUser
@@ -554,16 +588,7 @@ def list_checkpoints(
     This is what a rollback UI lists, and what the user picks from before the
     approval token below is minted.
     """
-    document = db.scalar(
-        select(CatiaDocument).where(
-            CatiaDocument.conversation_id == conversation_id,
-            CatiaDocument.is_active.is_(True),
-        )
-    )
-    if document is None or document.conversation.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No CATIA document for that conversation"
-        )
+    document = _owned_active_document(db, conversation_id, current_user.id)
     checkpoints = db.scalars(
         select(CatiaCheckpoint)
         .where(CatiaCheckpoint.document_id == document.id)
@@ -614,6 +639,64 @@ def create_approval(
             target=payload.checkpoint_id,
         ),
         expires_in_seconds=APPROVAL_TTL_S,
+    )
+
+
+@router.post("/conversations/{conversation_id}/restore", response_model=RestoreResponse)
+def restore_checkpoint(
+    conversation_id: str,
+    payload: RestoreRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> RestoreResponse:
+    """Roll the conversation's document back to a checkpoint the user approved.
+
+    This is the only way a restore reaches CATIA from the app: the agent cannot approve its own
+    destructive call (the token is the user's click, and `approval_token` is not a parameter
+    the model is offered), so before this route nobody could. **It does not enforce the
+    approval itself** beyond answering 403 early with a precise reason -- the dispatcher
+    verifies the token again against the user, tool, conversation and checkpoint, so there is
+    one enforcement point and this route cannot be a way around it.
+
+    The next agent turn is told the part was rolled back (`catia_state`, see
+    `dispatch._note_restore`), because its transcript says the later features exist.
+    """
+    document = _owned_active_document(db, conversation_id, current_user.id)
+    checkpoint = db.get(CatiaCheckpoint, payload.checkpoint_id)
+    if checkpoint is None or checkpoint.document_id != document.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checkpoint not found")
+    try:
+        verify_approval(
+            payload.approval_token,
+            user_id=current_user.id,
+            tool="catia_restore",
+            conversation_id=conversation_id,
+            target=checkpoint.id,
+        )
+    except ApprovalError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    label = checkpoint.label
+    try:
+        result = call_catia(
+            db,
+            user_id=current_user.id,
+            conversation_id=conversation_id,
+            tool="catia_restore",
+            arguments={"checkpoint_id": checkpoint.id, "approval_token": payload.approval_token},
+        )
+    except CatiaUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except CatiaError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    return RestoreResponse(
+        restored_checkpoint_id=str(result.get("restored_checkpoint_id") or checkpoint.id),
+        label=label,
+        message=(
+            f"The part is back at the checkpoint {label!r}. Everything built after it is gone; "
+            "the assistant will be told on its next message."
+        ),
     )
 
 

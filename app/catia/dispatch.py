@@ -1382,6 +1382,39 @@ def _record_fingerprint(
     db.flush()
 
 
+def _note_restore(
+    db: Session,
+    conversation: Conversation,
+    connection: DeviceConnection,
+    reported: dict[str, Any] | None,
+    arguments: dict[str, Any],
+) -> None:
+    """Tell the next turn the part was rolled back (ROAD_TO_10 5.7).
+
+    The transcript and the operation log still say every feature after the checkpoint was
+    built, and a restore is the one change nothing else contradicts. It is the user's act
+    (the approval token says so), so it is a note of its own kind rather than a hand edit.
+    """
+    checkpoint = db.get(CatiaCheckpoint, str(arguments.get("checkpoint_id") or ""))
+    bound = _bound_document(db, conversation.id)
+    key = fingerprint.document_key(bound.remote_path, bound.doc_name) if bound is not None else ""
+    done = db.scalar(
+        select(func.count())
+        .select_from(CatiaOperation)
+        .where(CatiaOperation.conversation_id == conversation.id, CatiaOperation.ok.is_(True))
+    )
+    conversation.catia_state = fingerprint.with_restore(
+        conversation.catia_state,
+        checkpoint.label if checkpoint is not None else "an earlier checkpoint",
+        after_step=int(done or 0) + 1,
+        fingerprint=reported,
+        document=key,
+    )
+    if key:
+        connection.forget_observation(key)
+    db.flush()
+
+
 def manual_edit_notes(db: Session, user_id: str, conversation: Conversation) -> list[str]:
     """The state block's lines about changes made in CATIA by hand since the last operation.
 
@@ -1674,7 +1707,9 @@ def _execute(
         arguments=arguments,
         raw=raw,
     )
-    if spec.mutating and conversation is not None and reported is not None:
+    if spec.name == "catia_restore" and conversation is not None:
+        _note_restore(db, conversation, connection, reported, arguments)
+    elif spec.mutating and conversation is not None and reported is not None:
         # A hand edit the daemon reported before or during this call becomes a note first, or
         # the fingerprint recorded next -- which includes it -- would swallow it silently and
         # the agent would never be told (ROAD_TO_10 5.2). The daemon sends the event ahead of

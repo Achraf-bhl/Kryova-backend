@@ -173,11 +173,50 @@ def with_absorbed(
     }
 
 
+RESTORE = "restore"
+
+
+def with_restore(
+    state: dict[str, Any] | None,
+    label: str,
+    *,
+    after_step: int,
+    fingerprint: dict[str, Any] | None,
+    document: str,
+) -> dict[str, Any]:
+    """The state after the user rolled the document back to a checkpoint (ROAD_TO_10 5.7).
+
+    A restore is the one change to the part that is neither the agent's operation nor an edit
+    the daemon can see happen: the transcript and the operation log still say every feature
+    after the checkpoint exists, and nothing else contradicts them. So it is a note of its own
+    kind. **The recorded fingerprint is replaced by what the restore reported, or dropped when
+    the daemon reported none** -- keeping the pre-restore one would make the next comparison
+    read the rollback itself as a hand edit.
+    """
+    notes = list((state or {}).get("manual_changes") or [])[-(MAX_NOTES - 1) :]
+    notes.append({"after_step": after_step, "kind": RESTORE, "text": label})
+    updated = {**(state or {}), "manual_changes": notes}
+    if fingerprint is not None:
+        updated["fingerprint"] = {**fingerprint, "step": after_step, "document": document}
+    else:
+        updated.pop("fingerprint", None)
+    return updated
+
+
 def notes_for(state: dict[str, Any] | None, observed: dict[str, Any] | None) -> list[str]:
     """The lines the state block carries: past hand edits first, then one not yet absorbed."""
     lines: list[str] = []
     for note in (state or {}).get("manual_changes") or []:
-        if isinstance(note, dict) and note.get("text"):
+        if not isinstance(note, dict) or not note.get("text"):
+            continue
+        if note.get("kind") == RESTORE:
+            lines.append(
+                f"catia_manual_change: after step {note.get('after_step')} the user rolled the "
+                f"document back to the checkpoint {note['text']!r}, so everything built after "
+                "that checkpoint is gone from the part even where the conversation says it was "
+                "built. Read the part again (catia_list_features) before you edit it."
+            )
+        else:
             lines.append(
                 f"catia_manual_change: after step {note.get('after_step')} the document was "
                 f"changed in CATIA by hand -- {note['text']}"

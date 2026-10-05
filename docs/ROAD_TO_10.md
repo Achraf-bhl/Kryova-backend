@@ -600,13 +600,21 @@ Today:
     natural producer. Late-bound names (`Created(feature)`) are resolved on the daemon side, from
     the results of earlier operations in the same batch.
   - E15.1 has already measured the CATIA half on the seat. Read its status before designing this.
+  - Status 2026-10-05: deferred on evidence, not built. E15.1's own seat measurement (master plan
+    E15 task 1) gives about 2x on COM calls and says the saving is not worth a protocol surface
+    until a real plan's call count asks for it; build_design is already one agent step and 5.4
+    already cut the checkpoints to two. A daemon-side invoke_batch needs a wire syntax for the late-
+    bound Created(feature) (the daemon cannot import app.design), which is new protocol nobody has
+    asked for and nobody can verify here. Revisit when a measured plan is slow on round trips, not
+    before. 5.6 therefore replays the plan one call at a time through call_catia, inside
+    checkpoint_batch (5.4).
 - [ ] **5.6 Design in OCCT, land in CATIA.** [Both] **M** → Decision 1
   - Make the documented intent the default flow: iterate on the open kernel
     (`GEOMETRY_BACKEND=occt`, fast and headless), then **Send to CATIA** replays the final compiled
     plan as one batch (5.5), with a before and after comparison (mass, bounding box, face count).
   - Face counts agree between the two kernels, but edge counts differ by one per closed cylindrical
     face (CLAUDE.md, kernel item 1), so compare faces, never edges.
-- [ ] **5.7 Approvals and restore in the UI.** [Linux + frontend] **M** → P7.2
+- [~] **5.7 Approvals and restore in the UI.** [Linux + frontend] **M** → P7.2
   - The backend issues approval tokens for destructive tools (`Kryova-backend/app/catia/approval.py`;
     `/catia/approvals`). The frontend never calls `/catia/approvals`,
     `/catia/conversations/{id}/checkpoints`, `/catia/documents` or `/catia/launch`. So
@@ -615,6 +623,12 @@ Today:
     (`Kryova-frontend/src/components/catia-bridge-panel.tsx`), and an approval dialog for destructive
     tiers.
   - Test: the frontend's api-client test plus a backend route test for the full approval round trip.
+  - Status 2026-10-05: Done and tested: POST /catia/conversations/{id}/restore (master plan P7.14;
+    tests/test_catia_restore_route.py), a note so the next turn knows the part was rolled back, and
+    in the frontend a checkpoint timeline with a confirmation, a Checkpoints menu in the chat header
+    and the api-client calls. Open: nothing has been clicked in a browser or run on a seat (THE
+    QUEUE G8 item 5). /catia/documents and /catia/launch are legacy direct-COM routes and are not
+    wired.
 - [~] **5.8 `catia_import` rebinds the conversation's document.** [Linux] **S** — **NEW**
   - The `dispatch.py` comments say this is still open: after an import, the binding still points at
     the old document.
@@ -640,10 +654,14 @@ Today:
     bound document from its last checkpoint (`ensure_document` reopens from disk), and tell the user
     exactly which steps after the checkpoint must be replayed. `resume.py` knows which.
   - Never replay automatically past the last successful checkpoint.
-- [ ] **5.11 The bridge panel as a first-class status surface.** [frontend] **M** → P7.2
+- [~] **5.11 The bridge panel as a first-class status surface.** [frontend] **M** → P7.2
   - Show the seat language, CATIA version (`V5-R33`, read in `scripts/catia_bridge/catia_com.py:320`),
     the bound document, the queue depth, pending approvals, the last event and the checkpoint
     timeline (5.7).
+  - Status 2026-10-05: The panel states the workstation, CATIA build, interface language, bound
+    document and queue depth for a connected seat only, and carries the timeline (master plan
+    P7.15). Pending approvals is not built on purpose: an approval is minted at the click and spent
+    at once, so none is ever pending. Not yet seen in a browser or on a seat (THE QUEUE G8 item 5).
 - [ ] **5.12 Section E of THE QUEUE: code that can only be written on the seat.** [Seat] **XL** → E1, E2, E3
   - The CATIA side of sheet metal, the four stop gates, and the conduction check against ccx.
   - Where: `Kryova-backend/docs/WINDOWS_VERIFICATION.md` §E.

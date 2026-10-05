@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 84/98 = 86% | 33/39 eng-months = 85% |
-| **Programme** | 23/35 | 211/234 = 90% | 174/190 eng-months = 92% |
+| Product — P1–P11 | 6/11 | 85/100 = 85% | 33/39 eng-months = 85% |
+| **Programme** | 23/35 | 212/236 = 90% | 174/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 62%, P9 71%, P11 89% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 60%, P9 71%, P11 89% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -7819,6 +7819,49 @@ scene in the Tauri app.
    > already folded into the database.
    > Tested by: `tests/test_catia_manual_edits.py` (pure rule, daemon, server, and the whole way
    > over the real socket via `tests/test_catia_e2e.py`'s `bridge`).
+
+14. **A rollback the user can approve and run from the app.** *(ROAD_TO_10 5.7, added 2026-10-05.)*
+   `catia_restore` is destructive and needs an approval the *user* signs; `approval_token` is not a
+   parameter the model is offered, and nothing in `app/ai` supplies one. `/catia/approvals` minted
+   tokens and `/catia/conversations/{id}/checkpoints` listed them, and **nothing took a token and ran
+   the restore**, so the only recovery path in the product was approvable by nobody.
+   > PARTIAL (2026-10-05) — **the route, the agent-side note, the timeline, the confirmation and the
+   > header menu are done and tested; no browser has driven it and no seat has run it.** New
+   > `POST /catia/conversations/{id}/restore` takes `{checkpoint_id, approval_token}` and calls
+   > `call_catia("catia_restore")`: the route answers 404 for another user's conversation or a
+   > checkpoint of another document (the same rule as the list, one helper), 403 for a token that is
+   > expired or was minted for another checkpoint or conversation, 503 with the workstation named
+   > when the seat is offline, and **leaves the enforcement to the dispatcher**, which verifies the
+   > token again — proved by removing the route's own check and watching the restore still refused.
+   > A restore is also the one change nothing else contradicts (the transcript and the operation log
+   > still say every later feature was built), so `dispatch._note_restore` writes a note of its own
+   > kind into `catia_state` and the next state block says the part was rolled back, through
+   > `_clean`; the recorded fingerprint is replaced by what the restore reported, or dropped when it
+   > reported none, so the rollback is never read as a hand edit. Frontend (`Kryova-frontend`
+   > 41424d3): `CheckpointTimeline`, a confirmation that says what will be lost before anything is
+   > minted, and a Checkpoints menu in the chat header offered only on a connected seat holding the
+   > conversation's document. **Changed, stated plainly:** a new public route
+   > `POST /catia/conversations/{id}/restore`; `catia_state.manual_changes` entries may carry
+   > `kind: "restore"`; no schema or enum change, no migration. **Not done:** no browser run, and
+   > nothing has restored a document on a seat (THE QUEUE G8 item 5); `/catia/documents` and
+   > `/catia/launch` are legacy direct-COM routes the app still does not call, and are left alone.
+   > Tested by: `tests/test_catia_restore_route.py`, `tests/test_catia_manual_edits.py`; frontend
+   > `checkpoint-timeline.test.tsx`, `checkpoints-menu.test.tsx`, `chat-view-checkpoints.test.tsx`,
+   > `api-client.test.ts`.
+
+15. **The bridge panel says what the seat is.** *(ROAD_TO_10 5.11, added 2026-10-05.)* The panel showed
+   a heading, a version pill and a list of event names; the seat's interface language, bound document
+   and queue depth were in the status payload and not on screen.
+   > PARTIAL (2026-10-05) — **the panel states the workstation, the CATIA build (marked simulated for
+   > the mock), the interface language (`not reported` rather than a blank), the bound document and
+   > the queue depth, only for a connected seat — never for the open kernel, whose status has none of
+   > those fields — and carries the checkpoint timeline (P7.14) when told which conversation.**
+   > **Decision:** the panel's "pending approvals" item is not built, because there is nothing to
+   > show: an approval here is minted at the moment of the click and spent in the same breath, so no
+   > approval is ever pending; `app/core/gates.py`'s sign-off gates are a different thing and not a
+   > bridge fact. **Not done:** no browser run, and the language and queue depth are read off a real
+   > seat's hello for the first time on one (THE QUEUE G8 item 5).
+   > Tested by: `Kryova-frontend/src/components/catia-bridge-panel.test.tsx`.
 
 ##### Phase P8 — Billing, quotas and metering #####
 

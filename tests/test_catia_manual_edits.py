@@ -144,6 +144,55 @@ class TestWhatADifferenceMeans:
         assert drift is not None and "and 6 more" in drift.describe()
 
 
+class TestARestoreIsNotAHandEdit:
+    """ROAD_TO_10 5.7: the user rolling the part back is a note of its own kind."""
+
+    def _state(self) -> dict[str, Any]:
+        return fingerprint.with_result(
+            None, fingerprint.normalise(fp({"Length": 55.0})) or {}, step=4, document=KEY
+        )
+
+    def test_the_note_says_rolled_back_and_names_the_checkpoint(self) -> None:
+        state = fingerprint.with_restore(
+            self._state(), "before the hole", after_step=5, fingerprint=None, document=KEY
+        )
+
+        (line,) = fingerprint.notes_for(state, None)
+
+        assert "rolled the document back to the checkpoint 'before the hole'" in line
+        assert "by hand" not in line
+
+    def test_the_pre_restore_part_is_not_kept_when_the_daemon_reports_none(self) -> None:
+        # Kept, the next comparison would read the rollback itself as an edit, with the wrong
+        # "before" values.
+        state = fingerprint.with_restore(
+            self._state(), "before the hole", after_step=5, fingerprint=None, document=KEY
+        )
+
+        assert fingerprint.recorded_of(state) is None
+
+    def test_the_part_the_restore_reported_replaces_it(self) -> None:
+        reported = fingerprint.normalise(fp({"Length": 10.0}))
+        state = fingerprint.with_restore(
+            self._state(), "before the hole", after_step=5, fingerprint=reported, document=KEY
+        )
+
+        recorded = fingerprint.recorded_of(state)
+        assert recorded is not None and recorded["parameters"] == {"Length": 10.0}
+        assert fingerprint.compare(recorded, reported) is None  # no phantom difference
+
+    def test_a_hand_edit_after_a_restore_is_still_a_hand_edit(self) -> None:
+        reported = fingerprint.normalise(fp({"Length": 10.0}))
+        state = fingerprint.with_restore(
+            self._state(), "before the hole", after_step=5, fingerprint=reported, document=KEY
+        )
+
+        lines = fingerprint.notes_for(state, fingerprint.normalise(fp({"Length": 30.0})))
+
+        assert len(lines) == 2
+        assert "Length 10.0 -> 30.0" in lines[1]
+
+
 # -- the daemon --------------------------------------------------------------------------------
 
 

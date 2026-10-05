@@ -23,6 +23,7 @@ from app.api.rate_limit import RateLimitHeadersMiddleware
 from app.api.router import api_router
 from app.core.config import BASE_DIR, settings
 from app.jobs import get_job_queue
+from app.observe import ledger
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _resume_waiting_runs()
     _warm_intent_router()
     _warm_geometry_kernel()
+    ledger.install()
     yield
+    ledger.uninstall()
     get_job_queue().shutdown()
     _stop_local_catia_bridge()
 

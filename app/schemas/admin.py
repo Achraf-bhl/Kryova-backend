@@ -362,6 +362,66 @@ class AiCacheHealthRead(BaseModel):
     alert: str | None
 
 
+class SiteLatencyRead(BaseModel):
+    """One timed site's recent durations, from this worker's span ledger (ROAD_TO_10 9.6)."""
+
+    name: str
+    seen: int
+    failures: int
+    window_size: int
+    median_seconds: float
+    p95_seconds: float
+    max_seconds: float
+    #: True when `window_size` is too small for p95 to be anything but the maximum.
+    p95_is_the_maximum: bool
+
+
+class SpanLedgerRead(BaseModel):
+    #: The sentence that says whose view this is: one process, not the fleet.
+    scope: str
+    sites: list[SiteLatencyRead]
+
+
+class TurnCostRead(BaseModel):
+    turns: int
+    priced_turns: int
+    #: Turns with no configured price. Counted apart: unpriced is not free.
+    unpriced_turns: int
+    total_micro_usd: int
+    mean_micro_usd: int | None
+    max_micro_usd: int | None
+    median_wall_ms: int | None
+    p95_wall_ms: int | None
+    by_stop_reason: dict[str, int]
+
+
+class OperationLatencyRead(BaseModel):
+    tool: str
+    count: int
+    failures: int
+    median_ms: int
+    p95_ms: int
+    max_ms: int
+    p95_is_the_maximum: bool
+
+
+class BridgeLatencyRead(BaseModel):
+    operations: list[OperationLatencyRead]
+    #: True when the window held more rows than were read; the figures are for the newest.
+    truncated: bool
+
+
+class ObservabilityRead(BaseModel):
+    """What the operator reads to answer "is it slow, and where" (ROAD_TO_10 9.6)."""
+
+    window_hours: int
+    spans: SpanLedgerRead
+    turns: TurnCostRead
+    ai_cache: AiCacheHealthRead
+    queue_depth: dict[str, int]
+    bridge: BridgeLatencyRead
+
+
 class HardwareRead(BaseModel):
     """What this machine has, as `app/core/hardware.py` read it (ROAD_TO_10 6.1).
 

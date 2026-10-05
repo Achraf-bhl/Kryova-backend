@@ -81,6 +81,8 @@ from app.models import (
     live_staff_grant,
 )
 from app.models.base import utcnow
+from app.observe import ops as observe_ops
+from app.observe.ledger import LEDGER
 from app.schemas.admin import (
     AdminJobRead,
     AdminOrganisationRead,
@@ -107,6 +109,7 @@ from app.schemas.admin import (
     LifecycleRead,
     MaintenanceCreate,
     MaintenanceRead,
+    ObservabilityRead,
     OrganisationUsageRead,
     PurgeRead,
     StaffRead,
@@ -1413,6 +1416,33 @@ def read_compute_scaling(
         max_workers=policy.max_workers,
         jobs_per_worker=policy.jobs_per_worker,
         target_wait_s=policy.target_wait_s,
+    )
+
+
+@router.get("/observability", response_model=ObservabilityRead)
+def read_observability(
+    staff: SupportStaff,
+    db: DbSession,
+    hours: Annotated[int, Query(ge=1, le=720)] = 24,
+) -> ObservabilityRead:
+    """Where the time and the money go (ROAD_TO_10 9.6).
+
+    Four sources, each stating what it is a view of. The span table is **this worker's memory**
+    (`spans.scope` says so) and resets at restart; turn cost, CATIA operation latency and the
+    queue are read from rows and cover every worker. A figure that is a maximum under the name of
+    a percentile is flagged (`p95_is_the_maximum`), and an unpriced turn is counted apart, never
+    as zero.
+    """
+    since = utcnow() - timedelta(hours=hours)
+    return ObservabilityRead.model_validate(
+        {
+            "window_hours": hours,
+            "spans": asdict(LEDGER.snapshot()),
+            "turns": asdict(observe_ops.turn_cost(db, since)),
+            "ai_cache": asdict(cache_health.read(db, since)),
+            "queue_depth": observe_ops.queue_depth(db),
+            "bridge": asdict(observe_ops.bridge_latency(db, since)),
+        }
     )
 
 

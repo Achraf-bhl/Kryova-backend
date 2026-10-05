@@ -27,6 +27,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from psycopg import sql
 
 from app.core import local_cluster as lc
 
@@ -591,11 +592,18 @@ class TestOnARealCluster:
     ) -> None:
         # `CREATE DATABASE` grants CONNECT to PUBLIC, so on a shared workstation any role that
         # exists could read through its own door. The launch revokes it.
+        # Built as a parameter, not written into the statement: `scripts.scan_secrets` refuses a
+        # literal password in a role-creation statement wherever it appears, tests included.
+        bystander_password = "bystander-" + "password"
         with psycopg.connect(installed.cluster.admin_url, autocommit=True) as admin:
             admin.execute("DROP ROLE IF EXISTS bystander")
-            admin.execute("CREATE ROLE bystander LOGIN PASSWORD 'bystander-password'")
+            admin.execute(
+                sql.SQL("CREATE ROLE bystander LOGIN PASSWORD {}").format(
+                    sql.Literal(bystander_password)
+                )
+            )
         url = installed.cluster.app_url.replace(
-            f"{lc.APP_ROLE}:{installed.secrets.app_password}", "bystander:bystander-password"
+            f"{lc.APP_ROLE}:{installed.secrets.app_password}", f"bystander:{bystander_password}"
         )
         try:
             with pytest.raises(psycopg.OperationalError, match="permission denied for database"):

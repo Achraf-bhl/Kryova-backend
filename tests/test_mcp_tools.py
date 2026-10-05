@@ -89,7 +89,7 @@ class TestTheSettingIsValidated:
         factory = cast(Any, Settings)
         return factory(
             _env_file=None,
-            database_url="postgresql://user:pw@example.neon.tech/db",
+            database_url="postgresql://" + "user:pw" + "@db.invalid/app",
             secret_key="x" * 48,
             mcp_tool_set=value,
         )

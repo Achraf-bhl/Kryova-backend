@@ -250,14 +250,30 @@ class ProcessPoolJobQueue(JobQueue):
                     )
                 self._local.submit(ThreadPoolJobQueue._run, job, ticket)
                 return
-            future = self._pool.submit(_run_remote, remote)
-            future.add_done_callback(lambda done: self._ended(done, job, ticket))  # type: ignore[arg-type]
+            try:
+                future = self._pool.submit(_run_remote, remote)
+            except BrokenProcessPool:
+                # A child died and its callback has not rebuilt the pool yet.
+                self._replace_locked(self._pool)
+                future = self._pool.submit(_run_remote, remote)
+            pool = self._pool
+            # The done callback only hands off. CPython calls it on the executor's management
+            # thread, and for a broken pool from inside `terminate_broken`, which holds the
+            # executor's non-reentrant `_shutdown_lock` -- so a callback that calls
+            # `shutdown()` on that pool waits on its own thread forever, and so does every
+            # later `shutdown(wait=True)`. Measured on Python 3.14, 2026-10-05: the crash test
+            # hung there and took the whole suite with it.
+            future.add_done_callback(
+                lambda done: self._local.submit(self._ended, done, job, ticket, pool)  # type: ignore[arg-type]
+            )
             ticket.started()  # accepted by the pool; a child picks it up as soon as one is free
 
-    def _ended(self, future: Future[None], job: Work, ticket: JobTicket) -> None:
+    def _ended(
+        self, future: Future[None], job: Work, ticket: JobTicket, pool: ProcessPoolExecutor
+    ) -> None:
         error = future.exception()
         if isinstance(error, BrokenProcessPool):
-            self._rebuild_pool()
+            self._rebuild_pool(pool)
         if error is None:
             ticket.finished(ok=True)
         else:
@@ -276,13 +292,20 @@ class ProcessPoolJobQueue(JobQueue):
         except Exception:  # noqa: BLE001 - a callback must never take a worker thread down
             logger.exception("A job-queue callback failed")
 
-    def _rebuild_pool(self) -> None:
+    def _rebuild_pool(self, broken: ProcessPoolExecutor) -> None:
         with self._lock:
             if self._closed:
                 return
-            logger.error("A worker process ended abnormally; starting a fresh pool")
-            self._pool.shutdown(wait=False, cancel_futures=False)
-            self._pool = self._new_pool()
+            self._replace_locked(broken)
+
+    def _replace_locked(self, broken: ProcessPoolExecutor) -> None:
+        # Two jobs in flight when a child dies both fail with BrokenProcessPool; only the
+        # first replaces the pool, or the second would discard the fresh one and its jobs.
+        if self._pool is not broken:
+            return
+        logger.error("A worker process ended abnormally; starting a fresh pool")
+        broken.shutdown(wait=False, cancel_futures=False)
+        self._pool = self._new_pool()
 
     def shutdown(self) -> None:
         with self._lock:

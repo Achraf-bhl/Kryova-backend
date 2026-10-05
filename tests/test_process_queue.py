@@ -191,6 +191,21 @@ class TestWhatHappensBackInTheParent:
         queue.submit(Work(lambda: None, remote=call("stamp", str(tmp_path), "after-crash")))
         assert _wait(lambda: (tmp_path / "after-crash.pid").exists())
 
+    def test_two_children_dying_together_leave_one_working_pool(
+        self, pool, tmp_path: Path
+    ) -> None:
+        # Both futures fail with BrokenProcessPool. The second must not replace the pool the
+        # first already rebuilt, and neither callback may touch the broken pool's lock.
+        queue = pool(2)
+        crashes: list[str] = []
+        for _ in range(2):
+            queue.submit(Work(lambda: None, remote=call("die", 9), on_crash=crashes.append))
+        assert _wait(lambda: len(crashes) == 2)
+        assert all("BrokenProcessPool" in c for c in crashes)
+
+        queue.submit(Work(lambda: None, remote=call("stamp", str(tmp_path), "survivor")))
+        assert _wait(lambda: (tmp_path / "survivor.pid").exists())
+
     def test_a_callback_that_raises_does_not_stop_the_next_one(self, pool) -> None:
         queue = pool(1)
         later: list[str] = []

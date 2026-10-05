@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field, model_validator
 
 from app.models.simulation import JobStatus
 from app.solve.conduction import ThermalCase, TransientThermalCase
 from app.solve.openfoam.case import FlowCase
-from app.solve.types import LoadCase, Material
+from app.solve.types import LoadCase, Material, StaticResult
 from app.verify.standards import NOT_VALIDATED
 
 #: Which case each analysis reads. Everything absent reads a `load_case`.
@@ -358,6 +358,23 @@ class SimulationCreate(BaseModel):
         return self
 
 
+class GoverningRead(BaseModel):
+    """The peak a verdict rests on, and which number it came from (ROAD_TO_10 8.3).
+
+    `StaticResult.governing_peak_mpa` / `governing_basis` / `governing_factor_of_safety` are
+    properties and so are not in the stored `result` dump. The rule (the larger of the element
+    centroid and the nodal surface value -- each under-reads where the other does not) lives in
+    one place, `app/solve/types.py`; a client reproducing it would be a second copy. So the
+    response carries the answer.
+    """
+
+    peak_mpa: float
+    #: Which number `peak_mpa` is: "nodal, at the surface", "element centroid", or the
+    #: element value with the reason no nodal tensor existed.
+    basis: str
+    factor_of_safety: float
+
+
 class SimulationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -392,6 +409,26 @@ class SimulationRead(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def governing(self) -> GoverningRead | None:
+        """The governing peak stress of a structural result; None for any other kind of run.
+
+        A thermal or flow result does not parse as a `StaticResult` and gets None, which is
+        the truth -- it has no von Mises peak -- rather than a zero.
+        """
+        if not self.result:
+            return None
+        try:
+            parsed = StaticResult.model_validate(self.result)
+        except ValidationError:
+            return None
+        return GoverningRead(
+            peak_mpa=parsed.governing_peak_mpa,
+            basis=parsed.governing_basis,
+            factor_of_safety=parsed.governing_factor_of_safety,
+        )
 
     @computed_field  # type: ignore[prop-decorator]
     @property

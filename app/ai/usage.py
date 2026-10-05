@@ -20,7 +20,7 @@ budget.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from app.ai import org_budget, pricing
@@ -134,9 +134,8 @@ class DayUsage:
         return self.prompt_tokens + self.completion_tokens
 
 
-def usage_today(db: Session, user_id: str) -> DayUsage:
-    """Everything this user has spent on the current UTC day, in one index lookup."""
-    today = datetime.now(timezone.utc).date()
+def _ledger_usage(db: Session, *conditions: ColumnElement[bool]) -> DayUsage:
+    """Sum the ledger rows matching `conditions`, priced and unpriced kept apart."""
     row = db.execute(
         select(
             func.coalesce(func.sum(AITokenUsage.prompt_tokens), 0),
@@ -146,7 +145,7 @@ def usage_today(db: Session, user_id: str) -> DayUsage:
             # Counted in SQL rather than by loading rows: this runs on every chat
             # turn and the ledger is append-only and large.
             func.count().filter(AITokenUsage.cost_micro_usd.is_(None)),
-        ).where(AITokenUsage.user_id == user_id, AITokenUsage.usage_date == today)
+        ).where(*conditions)
     ).one()
     return DayUsage(
         prompt_tokens=int(row[0]),
@@ -155,6 +154,56 @@ def usage_today(db: Session, user_id: str) -> DayUsage:
         cost_micro_usd=int(row[3]),
         unpriced_calls=int(row[4]),
     )
+
+
+def usage_today(db: Session, user_id: str) -> DayUsage:
+    """Everything this user has spent on the current UTC day, in one index lookup."""
+    today = datetime.now(timezone.utc).date()
+    return _ledger_usage(db, AITokenUsage.user_id == user_id, AITokenUsage.usage_date == today)
+
+
+def conversation_usage(db: Session, conversation_id: str) -> DayUsage:
+    """Everything one conversation has cost, from the ledger -- titles and summaries included.
+
+    The ledger rather than `Conversation.prompt_tokens`: those two columns are a running
+    token total with no money in them, and a price is a fact about the model *at the time of
+    the call* (`record` prices it then), so a sum over rows is the only honest figure.
+    """
+    return _ledger_usage(db, AITokenUsage.conversation_id == conversation_id)
+
+
+#: The point at which the composer starts saying how much of the day is left.
+WARN_AT_PERCENT = 80
+
+
+@dataclass(frozen=True, slots=True)
+class Allowance:
+    """How much of today's allowance a user has used, as one answer.
+
+    `percent` is the larger of the token and cost percentages -- the ceiling that will be hit
+    first -- and `None` when neither ceiling exists. `level` is `unlimited`, `ok`, `warning`
+    (from `WARN_AT_PERCENT`) or `exhausted` (at 100), and `basis` names which ceiling it is
+    about, so "80% of your tokens" never reads as "80% of your money".
+    """
+
+    daily_token_budget: int
+    daily_cost_budget_micro_usd: int
+    percent: int | None
+    level: str
+    basis: str | None
+
+
+def allowance(used: DayUsage, *, token_budget: int, cost_budget_micro: int) -> Allowance:
+    shares: list[tuple[int, str]] = []
+    if token_budget > 0:
+        shares.append((used.total_tokens * 100 // token_budget, "tokens"))
+    if cost_budget_micro > 0:
+        shares.append((used.cost_micro_usd * 100 // cost_budget_micro, "cost"))
+    if not shares:
+        return Allowance(token_budget, cost_budget_micro, None, "unlimited", None)
+    percent, basis = max(shares)
+    level = "exhausted" if percent >= 100 else "warning" if percent >= WARN_AT_PERCENT else "ok"
+    return Allowance(token_budget, cost_budget_micro, percent, level, basis)
 
 
 def over_budget(db: Session, user_id: str) -> bool:

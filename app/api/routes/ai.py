@@ -102,6 +102,13 @@ class UserAllowanceRead(BaseModel):
     daily_token_budget: int
     #: 0 means unlimited.
     daily_cost_budget_micro_usd: int
+    #: Whole percent of the ceiling that will be hit first, or null when there is none
+    #: (ROAD_TO_10 8.1). `basis` says which one -- "tokens" or "cost" -- so a warning about
+    #: tokens is never read as one about money.
+    percent: int | None = None
+    #: `unlimited`, `ok`, `warning` (from 80 %) or `exhausted` (from 100 %).
+    level: str = "unlimited"
+    basis: str | None = None
 
 
 class OrgCapRead(BaseModel):
@@ -380,6 +387,65 @@ def _settle_turn(
     )
 
 
+def _day_read(used: token_usage.DayUsage) -> DayUsageRead:
+    return DayUsageRead(
+        prompt_tokens=used.prompt_tokens,
+        completion_tokens=used.completion_tokens,
+        cached_prompt_tokens=used.cached_prompt_tokens,
+        cost_micro_usd=used.cost_micro_usd,
+        unpriced_calls=used.unpriced_calls,
+    )
+
+
+def _allowance_read(
+    db: Session, used: token_usage.DayUsage, organisation_id: str | None
+) -> UserAllowanceRead:
+    token_budget = token_usage.effective_daily_token_budget(db, organisation_id)
+    cost_budget = token_usage.daily_cost_budget_micro()
+    state = token_usage.allowance(used, token_budget=token_budget, cost_budget_micro=cost_budget)
+    return UserAllowanceRead(
+        daily_token_budget=token_budget,
+        daily_cost_budget_micro_usd=cost_budget,
+        percent=state.percent,
+        level=state.level,
+        basis=state.basis,
+    )
+
+
+class ConversationUsageRead(BaseModel):
+    """What one conversation has cost, beside what the whole day has (ROAD_TO_10 8.1).
+
+    Both are ledger sums, so they include the calls that are not chat steps -- a title, a
+    summary fold, a picture read -- and `cost_micro_usd` leaves out any call on a model with
+    no configured price, which `unpriced_calls` counts: "$0.40" is never printed over a
+    call nobody could price.
+    """
+
+    conversation: DayUsageRead
+    today: DayUsageRead
+    allowance: UserAllowanceRead
+
+
+def _conversation_usage(
+    db: Session, user: User, conversation: Conversation
+) -> ConversationUsageRead:
+    organisation_id = org_budget.billed_organisation(db, user, conversation.project_id)
+    today = token_usage.usage_today(db, user.id)
+    return ConversationUsageRead(
+        conversation=_day_read(token_usage.conversation_usage(db, conversation.id)),
+        today=_day_read(today),
+        allowance=_allowance_read(db, today, organisation_id),
+    )
+
+
+@router.get("/ai/conversations/{conversation_id}/usage", response_model=ConversationUsageRead)
+def conversation_usage(
+    conversation_id: str, db: DbSession, current_user: CurrentUser
+) -> ConversationUsageRead:
+    """The running cost of this conversation and how much of today's allowance is left."""
+    return _conversation_usage(db, current_user, _owned_conversation(db, current_user, conversation_id))
+
+
 @router.get("/ai/usage", response_model=AIUsageRead)
 def ai_usage(
     db: DbSession,
@@ -423,10 +489,7 @@ def ai_usage(
             cost_micro_usd=used.cost_micro_usd,
             unpriced_calls=used.unpriced_calls,
         ),
-        allowance=UserAllowanceRead(
-            daily_token_budget=token_usage.effective_daily_token_budget(db, organisation_id),
-            daily_cost_budget_micro_usd=token_usage.daily_cost_budget_micro(),
-        ),
+        allowance=_allowance_read(db, used, organisation_id),
         organisation_id=organisation_id,
         organisation_caps=caps,
         organisation_unpriced_calls=unpriced,
@@ -1033,6 +1096,18 @@ def chat_stream(
                 _maybe_title(db, current_user, provider, conversation, user_message, reply_text)
             settle()
             yield emit({"type": "title", "title": conversation.title})
+            # After `settle`, so the totals include this turn. A failure to read them is the
+            # client's `GET .../usage` to fill in -- a cost line is never a reason to lose the
+            # answer it describes.
+            try:
+                yield emit(
+                    {
+                        "type": "usage",
+                        **_conversation_usage(db, current_user, conversation).model_dump(),
+                    }
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not read usage for conversation %s", conversation_id)
         except LLMError as exc:
             # Roll back the failed unit of work, then still bill the provider
             # calls this turn already made -- steps 1..N-1 of a multi-step turn

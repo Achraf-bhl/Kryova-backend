@@ -60,6 +60,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from app.ai import mcp_tools
+
 PROTOCOL_VERSION = "2026-07-28"
 SUPPORTED_VERSIONS: tuple[str, ...] = (PROTOCOL_VERSION,)
 
@@ -82,12 +84,7 @@ HEADER_MISMATCH = -32020
 UNSUPPORTED_PROTOCOL_VERSION = -32022
 
 SERVER_NAME = "kryova"
-INSTRUCTIONS = (
-    "Kryova designs, analyses and documents machine parts. Every tool acts on the one "
-    "conversation named in this endpoint's URL. A tool that changes state needs "
-    f"`_meta[\"{META_ALLOW_MUTATIONS}\"]: true` on the request; without it the tool refuses "
-    "in words. A measurement that could not be made comes back UNMEASURED, which is not a pass."
-)
+INSTRUCTIONS = mcp_tools.INSTRUCTIONS
 
 _SENTINEL_OPEN = "=?base64?"
 _SENTINEL_CLOSE = "?="

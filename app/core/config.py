@@ -233,6 +233,10 @@ class Settings(BaseSettings):
     # Import the OCCT kernel on a background thread at startup so the first geometry operation
     # does not pay its 2.2 s (measured 2026-10-05). Off in the test suite.
     warm_geometry_kernel: bool = True
+    #: Which tools an MCP client is offered: `"curated"` (about thirty, `app/ai/mcp_tools.py`)
+    #: or `"full"` (every tool the agent's box holds). Curated by default: an outside client has
+    #: no retrieval and would spend its context on 212 CATIA operations.
+    mcp_tool_set: str = "curated"
     job_queue_backend: str = "threadpool"  # "threadpool", "process" or "inline"
     # With `job_queue_backend=process`: a hard ceiling on each worker process's *address space*
     # (POSIX RLIMIT_AS; ignored on Windows). Unset by default because address space is larger
@@ -673,6 +677,14 @@ class Settings(BaseSettings):
         choice = (value or "auto").strip().lower()
         if choice not in ("auto", "cpu", "cuda"):
             raise ValueError(f"AI_INTENT_ROUTER_DEVICE must be auto, cpu or cuda; got {value!r}.")
+        return choice
+
+    @field_validator("mcp_tool_set")
+    @classmethod
+    def _known_mcp_tool_set(cls, value: str) -> str:
+        choice = (value or "").strip().lower()
+        if choice not in ("curated", "full"):
+            raise ValueError(f"MCP_TOOL_SET must be curated or full; got {value!r}.")
         return choice
 
     @field_validator("jwt_algorithm")

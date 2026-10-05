@@ -40,7 +40,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 
-from app.ai import mcp
+from app.ai import mcp, mcp_tools
 from app.ai.tools import ToolBox, ToolError, tool_label
 from app.api.deps import (
     CurrentUser,
@@ -102,10 +102,17 @@ class ToolBoxHost:
         # day the route shipped. It did not, and `draft_load_case` was in every
         # `tools/list` until 2026-09-17 — caught by `tests/test_mcp.py` the first
         # time it was executed.
+        #
+        # **And only the curated set** unless `MCP_TOOL_SET=full` (ROAD_TO_10 9.7): an outside
+        # client has no tool retrieval, so offering all of them spends its context on operations
+        # it will never find the one it needs among. A tool outside the set is *unknown* here,
+        # not refused: the name does not exist on this surface.
+        curated = settings.mcp_tool_set != "full"
         self._tools = {
             tool.name: tool
             for tool in toolbox.every_tool()
             if toolbox.missing_dependency(tool.name) is None
+            and (not curated or tool.name in mcp_tools.CURATED)
         }
 
     def list_tools(self) -> list[dict[str, Any]]:

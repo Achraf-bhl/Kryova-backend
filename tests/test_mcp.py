@@ -299,33 +299,56 @@ class TestTheRouteIsTheSameTrustBoundary:
 
 
 class TestTheRouteOffersTheToolBox:
-    def test_tools_list_is_exactly_the_toolbox_vocabulary(
+    def test_tools_list_is_the_curated_set_the_box_can_serve(
         self,
         auth_client: AuthenticatedTestClient,
         db_session: Session,
         account: User,
         conversation: Conversation,
     ) -> None:
+        """ROAD_TO_10 9.7. Was "exactly the toolbox vocabulary" (246 tools); an outside client
+        has no tool retrieval, so the surface is the curated set, intersected with what this
+        box can serve. This test was re-read, not edited until green: the absence it pinned --
+        the full registry -- is the thing 9.7 removed on purpose."""
+        from app.ai import mcp_tools
         from app.ai.tools import ToolBox
 
         response = _post(auth_client, conversation.id, _message("tools/list"))
         assert response.status_code == 200, response.text
         names = [tool["name"] for tool in response.json()["result"]["tools"]]
         box = ToolBox(db=db_session, user=account, conversation=conversation)
-        # The vocabulary **minus what this box cannot serve**. `ToolBox` offers
-        # `draft_load_case` and refuses at call time — a refusal the agent can
-        # act on — and `ToolBoxHost` drops it here, because an MCP client brings
-        # its own model and would only spend a turn discovering the same thing.
-        # Written as the whole vocabulary until 2026-09-17, which contradicted
-        # the `not in` line below it and was satisfiable only while the tool was
-        # withheld one layer too low.
         expected = sorted(
-            tool.name for tool in box.every_tool() if box.missing_dependency(tool.name) is None
+            tool.name
+            for tool in box.every_tool()
+            if box.missing_dependency(tool.name) is None and tool.name in mcp_tools.CURATED
         )
         assert names == expected
         assert "list_materials" in names
         assert "draft_load_case" not in names
         assert "draft_load_case" in {tool.name for tool in box.every_tool()}
+
+    def test_the_full_set_is_still_available_when_asked_for(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        account: User,
+        conversation: Conversation,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.ai.tools import ToolBox
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "mcp_tool_set", "full")
+        names = [
+            tool["name"]
+            for tool in _post(auth_client, conversation.id, _message("tools/list"))
+            .json()["result"]["tools"]
+        ]
+        box = ToolBox(db=db_session, user=account, conversation=conversation)
+        assert names == sorted(
+            tool.name for tool in box.every_tool() if box.missing_dependency(tool.name) is None
+        )
+        assert "delete_simulation" in names
 
     def test_a_read_only_tool_runs_through_the_toolbox(
         self, auth_client: AuthenticatedTestClient, conversation: Conversation
@@ -338,10 +361,19 @@ class TestTheRouteOffersTheToolBox:
     def test_a_mutating_tool_without_consent_refuses_in_the_toolboxs_words(
         self, auth_client: AuthenticatedTestClient, conversation: Conversation
     ) -> None:
-        body = _message("tools/call", {"name": "delete_simulation", "arguments": {"simulation_id": "x"}})
-        result = _post(auth_client, conversation.id, body, "delete_simulation").json()["result"]
+        body = _message("tools/call", {"name": "create_project", "arguments": {"name": "x"}})
+        result = _post(auth_client, conversation.id, body, "create_project").json()["result"]
         assert result["isError"] is True
         assert "confirmation" in result["content"][0]["text"]
+
+    def test_a_destructive_tool_is_not_on_this_surface_at_all(
+        self, auth_client: AuthenticatedTestClient, conversation: Conversation
+    ) -> None:
+        """Unknown, not refused: `delete_simulation` does not exist here (ROAD_TO_10 9.7)."""
+        body = _message("tools/call", {"name": "delete_simulation", "arguments": {"simulation_id": "x"}})
+        reply = _post(auth_client, conversation.id, body, "delete_simulation").json()
+        assert reply["error"]["code"] == mcp.INVALID_PARAMS
+        assert "Unknown tool" in reply["error"]["message"]
 
     def test_an_undeclared_argument_is_named_before_the_handler_runs(
         self, auth_client: AuthenticatedTestClient, conversation: Conversation

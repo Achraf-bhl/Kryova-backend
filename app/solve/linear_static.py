@@ -94,6 +94,10 @@ _MIN_JACOBIAN = 1e-12
 # preconditioner. The crossover favours CG once memory becomes the bottleneck.
 _ITERATIVE_THRESHOLD_DOF = 100_000
 
+#: The same figure under a public name, for the memory estimate (`app/simulation/memory.py`):
+#: which method a solve will use decides how much memory it needs.
+ITERATIVE_THRESHOLD_DOF = _ITERATIVE_THRESHOLD_DOF
+
 # Equilibrium residual accepted as "solved", relative to the applied load.
 _RESIDUAL_TOLERANCE = 1e-8
 

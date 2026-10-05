@@ -17,6 +17,7 @@ import numpy as np
 
 from app.core.config import settings
 from app.mesh.types import MeshError
+from app.simulation import memory
 
 # A cube of side h fills with roughly six tetrahedra of that edge length (the
 # Kuhn decomposition), so one tet occupies about h^3 / 6.
@@ -49,7 +50,9 @@ def estimate_element_count(volume_mm3: float, element_size_mm: float) -> float:
     return volume_mm3 / (element_size_mm**3 / _TETS_PER_CUBE)
 
 
-def finest_element_size_mm(stats: dict[str, Any] | None) -> float | None:
+def finest_element_size_mm(
+    stats: dict[str, Any] | None, element_order: int = 2
+) -> float | None:
     """The smallest element size this geometry can be meshed at within the limits.
 
     The size that lands exactly on the element budget, rounded *up* to two
@@ -65,7 +68,7 @@ def finest_element_size_mm(stats: dict[str, Any] | None) -> float | None:
     if diagonal <= 0.0:
         return None
     volume = _solid_volume(stats) or float(np.prod(np.asarray(extents, dtype=np.float64)))
-    by_count = (volume * _TETS_PER_CUBE / settings.max_elements) ** (1.0 / 3.0)
+    by_count = (volume * _TETS_PER_CUBE / memory.element_limit(element_order)) ** (1.0 / 3.0)
     by_diagonal = diagonal / settings.max_elements_along_diagonal
     finest = max(by_count, by_diagonal)
     if finest <= 0.0:
@@ -74,7 +77,9 @@ def finest_element_size_mm(stats: dict[str, Any] | None) -> float | None:
     return float(np.ceil(finest / magnitude) * magnitude)
 
 
-def check_mesh_request(stats: dict[str, Any] | None, element_size_mm: float | None) -> None:
+def check_mesh_request(
+    stats: dict[str, Any] | None, element_size_mm: float | None, element_order: int = 2
+) -> None:
     """Raise `MeshError` for a request that cannot end well.
 
     Silent when the geometry has no recorded bounding box or the element size is
@@ -96,7 +101,7 @@ def check_mesh_request(stats: dict[str, Any] | None, element_size_mm: float | No
     if diagonal <= 0.0:
         return
 
-    finest = finest_element_size_mm(stats)
+    finest = finest_element_size_mm(stats, element_order)
     advice = f" Use at least {finest:g} mm, or omit element_size_mm for an automatic size."
 
     floor = diagonal / settings.max_elements_along_diagonal
@@ -112,11 +117,21 @@ def check_mesh_request(stats: dict[str, Any] | None, element_size_mm: float | No
     # a mesh it can comfortably produce.
     volume = _solid_volume(stats) or float(np.prod(np.asarray(extents, dtype=np.float64)))
     estimate = estimate_element_count(volume, element_size_mm)
-    if estimate > settings.max_elements:
+    limit = memory.element_limit(element_order)
+    if estimate > limit:
         raise MeshError(
             f"An element size of {element_size_mm:g} mm would produce roughly "
-            f"{estimate:,.0f} elements, over the {settings.max_elements:,} limit.{advice}"
+            f"{estimate:,.0f} elements, over the {limit:,} limit.{limit_source(element_order)}"
+            f"{advice}"
         )
+
+
+def limit_source(element_order: int) -> str:
+    """Where the limit came from, said only when it was derived: a limit nobody typed is one
+    nobody can find in a settings file, and "why is it 130,000 here and 400,000 there" has this
+    answer."""
+    basis = memory.element_limit_basis(element_order)
+    return f" ({basis}.)" if basis.startswith("derived") else ""
 
 
 def _solid_volume(stats: dict[str, Any] | None) -> float | None:

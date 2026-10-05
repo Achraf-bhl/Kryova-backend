@@ -38,8 +38,8 @@ from app.mesh.gmsh_mesher import (
 from app.mesh.planar import TriMesh
 from app.mesh.types import MeshError, TetMesh
 from app.models import JobStatus, MediaKind, SimulationJob
-from app.simulation import cache, progress
-from app.simulation.limits import check_mesh_request
+from app.simulation import cache, memory, progress
+from app.simulation.limits import check_mesh_request, limit_source
 from app.solve.base import SolveOutput, Solver
 from app.solve.plane import PlaneCase, PlaneSolver, PlaneState
 from app.solve.postprocess import nodal_average
@@ -293,7 +293,7 @@ def _execute(
     # Before gmsh, not after: the post-mesh check below only fires once the
     # machine has already paid for the mesh, and a small enough element size
     # makes that bill unbounded.
-    check_mesh_request(version.stats, job.element_size_mm)
+    check_mesh_request(version.stats, job.element_size_mm, job.element_order)
 
     # Blobs live on this machine, so gmsh can read the file in place -- no
     # staging copy, however large the part is.
@@ -340,10 +340,11 @@ def _execute(
     # number — which is the honest outcome, and not the one we want.
     usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
 
-    if mesh.tet_count > settings.max_elements:
+    limit = memory.element_limit(job.element_order)
+    if mesh.tet_count > limit:
         raise MeshError(
-            f"The mesh has {mesh.tet_count:,} elements, over the {settings.max_elements:,} "
-            "limit. Increase element_size_mm to coarsen it."
+            f"The mesh has {mesh.tet_count:,} elements, over the {limit:,} "
+            f"limit.{limit_source(job.element_order)} Increase element_size_mm to coarsen it."
         )
 
     progress.report(
@@ -352,10 +353,47 @@ def _execute(
         progress.Stage.SOLVING,
         detail=f"{mesh.tet_count:,} elements",
     )
-    if job.temperature_source is not None:
-        field = _borrowed_temperature_change(job, media, mesh, solver)
-        return mesh, mesh_stats, solver.solve(mesh, case, temperatures=field), solver.name  # type: ignore[call-arg]
-    return mesh, mesh_stats, solver.solve(mesh, case), solver.name
+    # Hold the memory this solve needs for the length of it, or wait for another to give some
+    # back, or be refused in words (ROAD_TO_10 6.3). After the progress line above so a run
+    # that waits says so under "solving" rather than looking stuck in "meshing".
+    with _admitted(job, session_scope, mesh):
+        if job.temperature_source is not None:
+            field = _borrowed_temperature_change(job, media, mesh, solver)
+            output = solver.solve(mesh, case, temperatures=field)  # type: ignore[call-arg]
+        else:
+            output = solver.solve(mesh, case)
+    return mesh, mesh_stats, output, solver.name
+
+
+def _admitted(
+    job: SimulationJob,
+    session_scope: SessionScope,
+    mesh: TetMesh,
+    *,
+    index: int | None = None,
+    total: int | None = None,
+):
+    """The memory this mesh's structural solve needs, held for a `with` block.
+
+    A solve that does not fit what is free waits (and the job's progress says so); one that can
+    never fit raises `memory.InsufficientMemory`, a `SolverError`, recorded on the job in its own
+    words. Only the structural solvers are governed: conduction has one degree of freedom a node
+    and a flow run is a container with its own limits.
+    """
+    degrees = mesh.node_count * 3
+    needed = memory.estimate_peak_mb(degrees).peak_mb
+
+    def say(free_mb: int) -> None:
+        progress.report(
+            session_scope,
+            job.id,
+            progress.Stage.SOLVING,
+            detail=f"waiting for memory: needs about {needed:,} MB, {free_mb:,} MB free",
+            index=index,
+            total=total,
+        )
+
+    return memory.admit_solve(degrees, label=f"job {job.id}", on_wait=say)
 
 
 def _borrowed_temperature_change(
@@ -479,7 +517,7 @@ def _execute_study(
     from app.verify.quantities import MAX_VON_MISES
 
     sizes = _study_sizes(job.element_size_mm or _automatic_size(job), job.grids)
-    check_mesh_request(job.geometry_version.stats, min(sizes))
+    check_mesh_request(job.geometry_version.stats, min(sizes), job.element_order)
 
     solved: dict[float, tuple[TetMesh, dict[str, Any], SolveOutput]] = {}
 
@@ -501,11 +539,12 @@ def _execute_study(
             path, file_format, element_size_mm, element_order=job.element_order
         )
         usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
-        if mesh.tet_count > settings.max_elements:
+        limit = memory.element_limit(job.element_order)
+        if mesh.tet_count > limit:
             raise MeshError(
                 f"Grid at {element_size_mm:g} mm has {mesh.tet_count:,} elements, over "
-                f"the {settings.max_elements:,} limit. A study refines from the size you "
-                "gave, so raise element_size_mm or ask for fewer grids."
+                f"the {limit:,} limit.{limit_source(job.element_order)} A study refines from "
+                "the size you gave, so raise element_size_mm or ask for fewer grids."
             )
         # Per grid, because a study is the longest thing this product runs and
         # each grid costs roughly `REFINEMENT_RATIO ** 3` times the one before:
@@ -519,7 +558,8 @@ def _execute_study(
             index=grid,
             total=len(sizes),
         )
-        output = solver.solve(mesh, case)
+        with _admitted(job, session_scope, mesh, index=grid, total=len(sizes)):
+            output = solver.solve(mesh, case)
         solved[element_size_mm] = (mesh, stats, output)
         return mesh, MAX_VON_MISES.read(mesh, output)
 
@@ -582,9 +622,9 @@ def _execute_conduction(
         path, file_format, job.element_size_mm, element_order=job.element_order
     )
     usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
-    if mesh.tet_count > settings.max_elements:
+    if mesh.tet_count > memory.default_element_limit():
         raise MeshError(
-            f"The mesh has {mesh.tet_count:,} elements, over the {settings.max_elements:,} "
+            f"The mesh has {mesh.tet_count:,} elements, over the {memory.default_element_limit():,} "
             "limit. Increase element_size_mm to coarsen it."
         )
 
@@ -649,9 +689,9 @@ def _execute_transient(
         path, file_format, job.element_size_mm, element_order=job.element_order
     )
     usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
-    if mesh.tet_count > settings.max_elements:
+    if mesh.tet_count > memory.default_element_limit():
         raise MeshError(
-            f"The mesh has {mesh.tet_count:,} elements, over the {settings.max_elements:,} "
+            f"The mesh has {mesh.tet_count:,} elements, over the {memory.default_element_limit():,} "
             "limit. Increase element_size_mm to coarsen it."
         )
 
@@ -738,9 +778,9 @@ def _execute_flow(
         path, file_format, job.element_size_mm, element_order=job.element_order
     )
     usage.annotate(elements=mesh.tet_count, nodes=mesh.node_count)
-    if mesh.tet_count > settings.max_elements:
+    if mesh.tet_count > memory.default_element_limit():
         raise MeshError(
-            f"The mesh has {mesh.tet_count:,} elements, over the {settings.max_elements:,} "
+            f"The mesh has {mesh.tet_count:,} elements, over the {memory.default_element_limit():,} "
             "limit. Increase element_size_mm to coarsen it."
         )
 
@@ -811,10 +851,10 @@ def _execute_plane(
     )
     usage.annotate(elements=mesh.element_count, nodes=mesh.node_count)
 
-    if mesh.element_count > settings.max_elements:
+    if mesh.element_count > memory.default_element_limit():
         raise MeshError(
             f"The mesh has {mesh.element_count:,} elements, over the "
-            f"{settings.max_elements:,} limit. Increase element_size_mm to coarsen it."
+            f"{memory.default_element_limit():,} limit. Increase element_size_mm to coarsen it."
         )
 
     plane_case = PlaneCase(

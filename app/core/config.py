@@ -239,7 +239,17 @@ class Settings(BaseSettings):
     autoscale_target_wait_s: float = 120.0
 
     # Analysis limits, to keep one upload from consuming the whole machine.
-    max_elements: int = 400_000
+    # **A value set here is used as given; unset, the limit for a structural run is derived from
+    # this machine's memory** and never exceeds 400,000 (`app/simulation/memory.py::element_limit`).
+    # Read it through that function. Conduction, flow and plane runs have far less to hold per
+    # element and keep 400,000 when this is unset (`memory.default_element_limit`).
+    max_elements: int | None = Field(default=None, ge=1)
+    # Memory a solve admits itself against (ROAD_TO_10 6.3). `memory_reserve_mb` is what is always
+    # left for everything else on the workstation (unset: a tenth of the machine's, at least
+    # 1 GB); a solve that does not fit what is free waits up to `memory_wait_s`, and one that
+    # can never fit is refused at once.
+    memory_reserve_mb: int | None = Field(default=None, ge=0)
+    memory_wait_s: float = Field(default=120.0, ge=0)
     # Element-size floor, as a divisor of the geometry's bounding-box diagonal.
     # A size below diagonal/this is refused before meshing starts: it is never a
     # deliberate request, and gmsh would spend minutes building a mesh that the

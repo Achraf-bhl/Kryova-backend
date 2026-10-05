@@ -3263,7 +3263,7 @@ class ToolBox:
         # that. Here it is one round, and the message carries the size that
         # would have fitted.
         try:
-            check_mesh_request(version.stats, element_size_mm)
+            check_mesh_request(version.stats, element_size_mm, columns.get("element_order") or 2)
         except MeshError as exc:
             raise ToolError(str(exc)) from exc
 

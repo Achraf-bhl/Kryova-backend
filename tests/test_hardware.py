@@ -25,6 +25,10 @@ from app.core.compute_plan import (
 )
 from app.core.hardware import Hardware
 
+# The real functions, captured before the suite's autouse fixture swaps in a fixed machine.
+_REAL_HARDWARE = hw.hardware
+_REAL_AVAILABLE = hw.available_ram_mb
+
 MEMINFO = """\
 MemTotal:       16123456 kB
 MemFree:          812344 kB
@@ -148,15 +152,15 @@ class TestReadingLinux:
             "/sys/fs/cgroup/memory.current": str(1536 * 1024 * 1024),
         }
 
-        assert hw.available_ram_mb(_reader(files), platform="linux") == 512
+        assert _REAL_AVAILABLE(_reader(files), platform="linux") == 512
 
     def test_available_memory_with_no_container_is_the_hosts(self) -> None:
         files = {"/proc/meminfo": MEMINFO}
 
-        assert hw.available_ram_mb(_reader(files), platform="linux") == 9123456 // 1024
+        assert _REAL_AVAILABLE(_reader(files), platform="linux") == 9123456 // 1024
 
     def test_a_reader_that_finds_nothing_gives_none_not_an_exception(self) -> None:
-        assert hw.available_ram_mb(_reader({}), platform="linux") is None
+        assert _REAL_AVAILABLE(_reader({}), platform="linux") is None
         assert hw.probe(_reader({}), platform="linux").total_ram_mb is None
 
 
@@ -198,11 +202,11 @@ class TestAnyMachine:
         assert found.physical_cores is None or 1 <= found.physical_cores <= found.logical_cores
 
     def test_the_probe_is_read_once_per_process(self) -> None:
-        assert hw.hardware() is hw.hardware()
+        assert _REAL_HARDWARE() is _REAL_HARDWARE()
 
     def test_available_memory_is_asked_live_each_time(self) -> None:
         # Never cached: it changes by the second, and a stale figure admits a job that no longer fits.
-        assert "lru_cache" not in repr(hw.available_ram_mb)
+        assert "lru_cache" not in repr(_REAL_AVAILABLE)
 
 
 # -- the plan -------------------------------------------------------------------------------

@@ -225,6 +225,31 @@ def _no_real_catia_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _a_fixed_machine(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Every test runs on the same imaginary workstation, whatever machine runs the suite.
+
+    The derived worker count, thread count and mesh-size limit (ROAD_TO_10 6.1 to 6.3) read the
+    probe, and a probe answers differently on a four-core laptop in CI and a sixty-four-core
+    server, so a test about meshing limits would pass on one and fail on the other for a reason
+    nobody could see in its text. This is `test_catia_local_bridge`'s lesson (*do not let a suite
+    ask the machine*) applied to the machine itself: eight physical cores, 64 GB, 48 GB free.
+
+    The tests of the probe call `hardware.probe()` with an injected reader, and the one test that
+    asks about the real process captures the real functions at import, so none of them is blind.
+    """
+    from app.core import compute_plan, hardware
+
+    machine = hardware.Hardware(16, 8, 64 * 1024, "tests: a fixed machine", ())
+    monkeypatch.setattr(hardware, "hardware", lambda: machine)
+    monkeypatch.setattr(hardware, "available_ram_mb", lambda *args, **kwargs: 48 * 1024)
+    compute_plan.reset()
+    try:
+        yield
+    finally:
+        compute_plan.reset()
+
+
+@pytest.fixture(autouse=True)
 def _forget_the_maintenance_window() -> Iterator[None]:
     """No test inherits another test's cached maintenance state.
 

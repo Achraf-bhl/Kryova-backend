@@ -3,9 +3,10 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -95,8 +96,7 @@ class HumanLogFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         base = (
-            f"{self.formatTime(record)} {record.levelname:<7} "
-            f"{record.name}: {record.getMessage()}"
+            f"{self.formatTime(record)} {record.levelname:<7} {record.name}: {record.getMessage()}"
         )
         request_id = getattr(record, "request_id", None)
         if request_id:
@@ -132,9 +132,7 @@ def _configure_logging() -> None:
     root handler here does not double up the access log.
     """
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        JsonLogFormatter() if settings.is_production else HumanLogFormatter()
-    )
+    handler.setFormatter(JsonLogFormatter() if settings.is_production else HumanLogFormatter())
 
     level = getattr(logging, settings.log_level.strip().upper(), None)
     if not isinstance(level, int):
@@ -170,6 +168,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _fail_orphaned_jobs()
     _resume_waiting_runs()
     _warm_intent_router()
+    _warm_geometry_kernel()
     yield
     get_job_queue().shutdown()
     _stop_local_catia_bridge()
@@ -266,6 +265,42 @@ def _warm_intent_router() -> None:
         return
     if not loaded:
         logger.warning("Laya intent router unavailable; AI_INTENT_ROUTER=laya has no effect")
+
+
+def _import_kernel() -> None:
+    from app.kernel.occt import binding
+
+    binding.symbol("TopoDS")
+
+
+def _warm_geometry_kernel(importer: Callable[[], None] | None = None) -> threading.Thread | None:
+    """Import OCCT in the background so the first geometry request does not pay for it.
+
+    Measured 2026-10-05 on the dev machine: importing OCP costs 2.2 s and ~357 MB the first time
+    (numpy and scipy 0.35 s, gmsh 0.16 s, the first BM25 search 0.06 s -- none of those is worth
+    warming). A user's first geometry operation after a boot used to carry that 2.2 s.
+
+    **A thread, never the boot.** `_warm_intent_router` blocks on purpose because it must finish
+    before a request can be answered; this must not: `/health` and the first request stay
+    instant, and a request that arrives while the import is running simply waits on Python's
+    own per-module import lock for what is left of it. A failure is logged and swallowed -- the
+    first real use would raise the same error in context.
+    """
+    if not settings.warm_geometry_kernel:
+        return None
+
+    def work() -> None:
+        started = time.perf_counter()
+        try:
+            (importer or _import_kernel)()
+        except Exception:  # noqa: BLE001 - a warm-up failure must not matter to anyone
+            logger.exception("The geometry kernel could not be warmed up")
+        else:
+            logger.info("geometry kernel warmed in %.1f s", time.perf_counter() - started)
+
+    thread = threading.Thread(target=work, name="kryova-warm-kernel", daemon=True)
+    thread.start()
+    return thread
 
 
 def _warn_about_insecure_defaults() -> None:

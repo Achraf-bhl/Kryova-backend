@@ -1,5 +1,3 @@
-
-
 import os
 import struct
 from collections.abc import Iterator
@@ -238,7 +236,10 @@ def _a_fixed_machine(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     asks about the real process captures the real functions at import, so none of them is blind.
     """
     from app.core import compute_plan, hardware
+    from app.core.config import settings
 
+    # No suite run should start importing OCCT in a thread behind a test that did not ask.
+    monkeypatch.setattr(settings, "warm_geometry_kernel", False)
     machine = hardware.Hardware(16, 8, 64 * 1024, "tests: a fixed machine", ())
     monkeypatch.setattr(hardware, "hardware", lambda: machine)
     monkeypatch.setattr(hardware, "available_ram_mb", lambda *args, **kwargs: 48 * 1024)
@@ -325,9 +326,7 @@ def client(
 
 
 @pytest.fixture
-def auth_client(
-    client: AuthenticatedTestClient, db_session: Session
-) -> AuthenticatedTestClient:
+def auth_client(client: AuthenticatedTestClient, db_session: Session) -> AuthenticatedTestClient:
     """A client already registered, verified, and carrying a bearer token."""
     auth_limiter.reset()
     login_limiter.reset()
@@ -372,9 +371,7 @@ def register_verified(
     Does not sign in: callers differ on whether they want the session on this
     client or another.
     """
-    response = client.post(
-        "/api/v1/auth/register", json={"email": email, "password": password}
-    )
+    response = client.post("/api/v1/auth/register", json={"email": email, "password": password})
     assert response.status_code == 201, response.text
     user_id: str = response.json()["id"]
     user = db_session.get(User, user_id)

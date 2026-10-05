@@ -230,6 +230,9 @@ class Settings(BaseSettings):
     # `compute_plan.current()`, never from these two fields.
     job_workers: int | None = Field(default=None, ge=1)
     solver_threads: int | None = Field(default=None, ge=1)
+    # Import the OCCT kernel on a background thread at startup so the first geometry operation
+    # does not pay its 2.2 s (measured 2026-10-05). Off in the test suite.
+    warm_geometry_kernel: bool = True
     job_queue_backend: str = "threadpool"  # "threadpool", "process" or "inline"
     # With `job_queue_backend=process`: a hard ceiling on each worker process's *address space*
     # (POSIX RLIMIT_AS; ignored on Windows). Unset by default because address space is larger

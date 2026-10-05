@@ -17,7 +17,7 @@ happened.
 
 > **Handoff, 2026-10-05 03:57 — ROAD_TO_10 Phases 1–4 are done as far as Linux can take them; the
 > desktop installer is built, staged and tested here and has never run on Windows.**
-> **Next continuation fires 2026-10-05 04:57**, held by **this session** (kryova-backend-c7). The job
+> **Next continuation fires 2026-10-05 04:57**, held by **this session** (kryova-backend-c7, job `f63e993e`). The job
 > dies if this editor is closed. **The pause is 1 h, not CLAUDE.md's 2 h 30 min — the user's own
 > instruction for this chain (2026-10-05), which overrides that line.** `CronList` FIRST on wake: a
 > one-shot whose time passes while the session is mid-turn never fires.

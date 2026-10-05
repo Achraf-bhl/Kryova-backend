@@ -1152,3 +1152,41 @@ class TestPlanarSolverIsASibling:
         # assumption that makes it two-dimensional.
         assert output.nodal_stress[:, 4] == pytest.approx(0.0, abs=0.0)
         assert output.nodal_stress[:, 5] == pytest.approx(0.0, abs=0.0)
+
+
+class TestARigidMotionTheLoadDoesNotExciteIsStillRefused:
+    """ROAD_TO_10 9.5. The residual check only sees a free mode the load excites: an x-only
+    roller under an x load is a *consistent* singular system and used to solve. The restraint
+    check asks the fixtures alone, so it does not matter which way the load points."""
+
+    def _case(self, force: tuple[float, float, float]) -> PlaneCase:
+        return PlaneCase(
+            name="roller only",
+            material=STEEL,
+            thickness_mm=THICKNESS,
+            state=PlaneState.STRESS,
+            fixtures=[
+                Fixture(where=FaceSelector(axis="x", side="min"), dofs=["x"], name="left roller")
+            ],
+            loads=[ForceLoad(where=FaceSelector(axis="x", side="max"), force_n=force, name="pull")],
+        )
+
+    @pytest.mark.parametrize("force", [(PULL_N, 0.0, 0.0), (0.0, PULL_N, 0.0)])
+    def test_an_x_roller_alone_is_refused_whichever_way_the_load_points(
+        self, strip_tri3: TriMesh, force: tuple[float, float, float]
+    ) -> None:
+        with pytest.raises(SolverError, match="under-constrained"):
+            PlaneSolver().solve(strip_tri3, self._case(force))
+
+    def test_the_message_says_how_many_motions_survive_and_what_to_add(
+        self, strip_tri3: TriMesh
+    ) -> None:
+        with pytest.raises(SolverError) as caught:
+            PlaneSolver().solve(strip_tri3, self._case((PULL_N, 0.0, 0.0)))
+        text = str(caught.value)
+        assert "1 of its 3" in text or "2 of its 3" in text
+        assert "both translations and the rotation" in text
+
+    def test_a_properly_held_strip_still_solves(self, strip_tri3: TriMesh) -> None:
+        output = PlaneSolver().solve(strip_tri3, uniaxial_case(PlaneState.STRESS))
+        assert output.displacements.shape[0] == strip_tri3.node_count

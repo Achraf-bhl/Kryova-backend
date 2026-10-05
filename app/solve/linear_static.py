@@ -32,6 +32,7 @@ from numpy.typing import NDArray
 from app import observe
 from app.mesh.types import TET10_EDGES, TetMesh
 from app.solve.base import SolveOutput, Solver
+from app.solve.constraints import require_restrained
 from app.solve.loads import assemble_loads
 from app.solve.postprocess import nodal_average, summarise_static
 from app.solve.selection import select_nodes
@@ -415,6 +416,11 @@ class LinearStaticSolver(Solver):
         free = np.setdiff1d(np.arange(n_dof), fixed)
         if len(free) == 0:
             raise SolverError("Every degree of freedom is fixed; there is nothing to solve")
+        # Load-independent, and before the factorisation: the equilibrium residual below only
+        # sees a free rigid-body mode that the load excites, so a roller under a load along its
+        # free direction solves "consistently" and returns a displacement (ROAD_TO_10 9.5).
+        # Asked of the dofs this solve actually holds, so the answer cannot disagree with it.
+        require_restrained(mesh, (), held=fixed)
 
         # Assembly and factorisation get separate stages on purpose: a slow assembly and a slow
         # solve have different fixes — one is element count, the other is bandwidth and fill-in —

@@ -661,6 +661,20 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("ai_intent_router_device")
+    @classmethod
+    def _known_router_device(cls, value: str) -> str:
+        """A typo in the router's device fails at startup, not as a router that never loads.
+
+        `laya_decide._get_agent` catches every load failure and disables the router for the
+        life of the process, so a misspelt `AI_INTENT_ROUTER_DEVICE` used to look exactly like
+        "torch is not installed". The accepted words are `laya_decide.pick_device`'s.
+        """
+        choice = (value or "auto").strip().lower()
+        if choice not in ("auto", "cpu", "cuda"):
+            raise ValueError(f"AI_INTENT_ROUTER_DEVICE must be auto, cpu or cuda; got {value!r}.")
+        return choice
+
     @field_validator("jwt_algorithm")
     @classmethod
     def _known_jwt_algorithm(cls, value: str) -> str:

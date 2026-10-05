@@ -222,3 +222,27 @@ class TestWhereItRuns:
     def test_a_typo_is_refused_loudly(self) -> None:
         with pytest.raises(ValueError, match="AI_INTENT_ROUTER_DEVICE"):
             pick_device("gpu", True)
+
+
+class TestATypoFailsAtSettingsLoad:
+    """`_get_agent` swallows every load failure, so a typo that only `pick_device` caught
+    looked like "torch is not installed" -- the router just never came on (ROAD_TO_10 9.5)."""
+
+    @staticmethod
+    def _build(device: str) -> Any:
+        from app.core.config import Settings
+
+        return Settings(  # type: ignore[call-arg, misc]
+            _env_file=None,
+            database_url="postgresql://user:pw@example.neon.tech/db",
+            secret_key="x" * 48,
+            ai_intent_router_device=device,
+        )
+
+    def test_a_misspelt_device_is_refused_when_settings_are_built(self) -> None:
+        with pytest.raises(ValueError, match="AI_INTENT_ROUTER_DEVICE"):
+            self._build("gpu")
+
+    @pytest.mark.parametrize("word", ["auto", "cpu", "cuda", " CPU ", ""])
+    def test_the_three_words_are_accepted_in_any_case(self, word: str) -> None:
+        assert self._build(word).ai_intent_router_device in ("auto", "cpu", "cuda")

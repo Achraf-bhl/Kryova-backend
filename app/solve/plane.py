@@ -45,6 +45,7 @@ from pydantic import BaseModel, Field
 from app import observe
 from app.mesh.planar import TRI6_EDGES, TriMesh
 from app.solve.base import SolveOutput
+from app.solve.constraints import require_plane_restrained
 from app.solve.linear_static import von_mises
 from app.solve.selection import select_nodes
 from app.solve.types import (
@@ -854,6 +855,8 @@ class PlaneSolver(PlanarSolver):
         free = np.setdiff1d(np.arange(n_dof), fixed)
         if len(free) == 0:
             raise SolverError("Every degree of freedom is fixed; there is nothing to solve")
+        # Load-independent, so a free x-roller under an x load is refused too (ROAD_TO_10 9.5).
+        require_plane_restrained(mesh.nodes[:, :2], fixed, dofs_per_node=_DOF_PER_NODE)
 
         # Assembly and factorisation get separate spans for the reason
         # `linear_static` gives: a slow assembly and a slow solve have different

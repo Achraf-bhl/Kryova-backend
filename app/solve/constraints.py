@@ -436,6 +436,7 @@ def check_restraints(
     fixtures: Sequence[Fixture],
     *,
     dofs_per_node: int = SOLID_DOFS,
+    held: NDArray[np.int64] | None = None,
 ) -> ConstraintReport:
     """Do these fixtures remove all six rigid-body motions? Exact, and cheap.
 
@@ -446,9 +447,17 @@ def check_restraints(
     Never raises for an under-constrained model — that is a report, not an
     exception, because the API and the agent both want to *render* it. Use
     `require_restrained` where a `SolverError` is what the caller wants.
+
+    `held` is for a solver that has already resolved its own held degrees of freedom: the
+    answer is then about the set the solve will actually use, not a second reading of the
+    fixtures that could differ from it (ROAD_TO_10 9.5).
     """
     modes = _normalised_modes(mesh.nodes, dofs_per_node)
-    constrained = held_dofs(mesh, fixtures, dofs_per_node=dofs_per_node)
+    constrained = (
+        np.unique(np.asarray(held, dtype=np.int64))
+        if held is not None
+        else held_dofs(mesh, fixtures, dofs_per_node=dofs_per_node)
+    )
 
     # Whitening: G = R^T R is a correlation matrix (unit diagonal, since the
     # columns are normalised). In the whitened coordinates a unit vector is a
@@ -516,6 +525,7 @@ def require_restrained(
     fixtures: Sequence[Fixture],
     *,
     dofs_per_node: int = SOLID_DOFS,
+    held: NDArray[np.int64] | None = None,
 ) -> ConstraintReport:
     """`check_restraints`, but raise `SolverError` when the model can still move.
 
@@ -524,13 +534,56 @@ def require_restrained(
     is the only thing standing between a part held nowhere and a plausible-looking
     displacement of 5.4e+11 mm.
     """
-    report = check_restraints(mesh, fixtures, dofs_per_node=dofs_per_node)
+    report = check_restraints(mesh, fixtures, dofs_per_node=dofs_per_node, held=held)
     if not report.restrained:
         raise SolverError(report.message())
     return report
 
 
+#: A free body in a plane has three motions: two translations and one rotation about z.
+PLANE_RIGID_BODY_MODES = 3
+
+
+def require_plane_restrained(
+    nodes: NDArray[np.float64], held: NDArray[np.int64], *, dofs_per_node: int = 2
+) -> int:
+    """Raise `SolverError` unless these held dofs remove x, y and the in-plane spin.
+
+    The plane solver's counterpart of `require_restrained`, for the same reason and with the
+    same independence from the load: its equilibrium residual only notices a free mode that the
+    load excites, so an x-only roller under a y load is refused and under an x load is solved
+    "consistently" and returns a displacement (CLAUDE.md, measured 2026-09-14). A rigid motion is
+    ``(1, 0)``, ``(0, 1)`` and ``(-y, x)`` at every node; the model is held iff those three
+    columns, restricted to the held dofs, have rank 3. Returns the rank.
+    """
+    count = len(nodes)
+    modes = np.zeros((dofs_per_node * count, PLANE_RIGID_BODY_MODES), dtype=np.float64)
+    modes[0::dofs_per_node, 0] = 1.0
+    modes[1::dofs_per_node, 1] = 1.0
+    modes[0::dofs_per_node, 2] = -nodes[:, 1]
+    modes[1::dofs_per_node, 2] = nodes[:, 0]
+    norms = np.linalg.norm(modes, axis=0)
+    if np.any(norms == 0.0):  # pragma: no cover - a single node at the origin
+        raise SolverError("This plane mesh is degenerate. Re-mesh the part.")
+    modes = modes / norms[None, :]
+    held = np.unique(np.asarray(held, dtype=np.int64))
+    if len(held) == 0:
+        rank = 0
+    else:
+        singular = np.linalg.svd(modes[held, :], compute_uv=False)
+        rank = int((singular > RANK_TOLERANCE).sum())
+    if rank < PLANE_RIGID_BODY_MODES:
+        raise SolverError(
+            "The model is under-constrained: a plane model can still translate or spin freely "
+            f"({PLANE_RIGID_BODY_MODES - rank} of its 3 rigid-body motions survive the fixtures). "
+            "Check that the fixtures remove both translations and the rotation in the plane."
+        )
+    return rank
+
+
 __all__ = [
+    "PLANE_RIGID_BODY_MODES",
+    "require_plane_restrained",
     "MODE_NAMES",
     "RANK_TOLERANCE",
     "RIGID_BODY_MODES",

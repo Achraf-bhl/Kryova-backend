@@ -514,3 +514,41 @@ class TestReportSurface:
     def test_a_restrained_report_has_no_instruction(self) -> None:
         report = check_restraints(block(), [clamp_bottom()])
         assert report.what_to_do() == ""
+
+
+class TestHeldDofsAreTakenFromTheSolverNotReResolved:
+    """ROAD_TO_10 9.5: `linear_static` asks the check about the dofs it will hold."""
+
+    def test_held_dofs_given_directly_agree_with_the_fixtures(self) -> None:
+        mesh = box_mesh((10.0, 10.0, 10.0), divisions=(2, 2, 2))
+        fixtures = [
+            Fixture(where=FaceSelector(axis="z", side="min"), dofs=["z"]),
+            Fixture(where=FaceSelector(axis="x", side="min"), dofs=["x"]),
+            Fixture(where=FaceSelector(axis="y", side="min"), dofs=["y"]),
+        ]
+        by_fixture = check_restraints(mesh, fixtures)
+        by_held = check_restraints(mesh, (), held=held_dofs(mesh, fixtures))
+        assert by_fixture.restrained and by_held.restrained
+        assert by_fixture.rank == by_held.rank
+
+    def test_no_held_dofs_at_all_leaves_all_six_free(self) -> None:
+        mesh = box_mesh((10.0, 10.0, 10.0), divisions=(2, 2, 2))
+        report = check_restraints(mesh, (), held=np.zeros(0, dtype=np.int64))
+        assert not report.restrained and report.free_count == 6
+
+
+class TestTheInHouseSolidSolverAsksBeforeItFactorises:
+    def test_a_single_roller_under_a_load_it_does_not_excite_is_refused(self) -> None:
+        from app.solve.linear_static import LinearStaticSolver
+        from app.solve.materials import MATERIALS
+        from app.solve.types import ForceLoad, LoadCase
+
+        mesh = box_mesh((10.0, 10.0, 10.0), divisions=(2, 2, 2))
+        case = LoadCase(
+            name="one roller",
+            material=MATERIALS["steel-1018"],
+            fixtures=[Fixture(where=FaceSelector(axis="z", side="min"), dofs=["z"])],
+            loads=[ForceLoad(where=FaceSelector(axis="z", side="max"), force_n=(0.0, 0.0, 100.0))],
+        )
+        with pytest.raises(SolverError, match="under-constrained"):
+            LinearStaticSolver().solve(mesh, case)

@@ -18,7 +18,7 @@ import httpx
 import pytest
 from pydantic import BaseModel
 
-from app.ai.provider import Finished, LLMError, LLMUnavailable, TextDelta
+from app.ai.provider import Finished, LLMBusy, LLMError, LLMUnavailable, TextDelta
 from app.ai.providers import openai_compatible as module
 from app.ai.providers.openai_compatible import (
     HTTP_ATTEMPTS,
@@ -527,3 +527,94 @@ class TestThePromptCacheIsReportedWhenTheServerSaysSo:
         with caplog.at_level("INFO", logger=module.logger.name):
             _complete(_provider(), _Script(_ok()), monkeypatch)
         assert not any("prompt cache" in r.getMessage() for r in caplog.records)
+
+
+class TestARetryThatRunsOutIsBusyNotBroken:
+    """ROAD_TO_10 3.6: "not now" is its own type, because the agent does something else with it.
+
+    The transport already retried these. What it raised afterwards was a bare `LLMError`
+    reading "Chat completion failed (503)", which the loop could not tell from a fault -- so
+    a busy service ended a turn in an error and a busy service is the one failure where the
+    right answer is "press Continue".
+    """
+
+    @pytest.mark.parametrize("status", [429, 502, 503, 504])
+    def test_a_busy_status_that_outlasts_the_retries_is_busy(
+        self, status: int, sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = _Script(*([status] * 10))
+
+        with pytest.raises(LLMBusy, match=str(status)):
+            _complete(_provider(), script, monkeypatch)
+
+        assert len(script.requests) == HTTP_ATTEMPTS
+
+    def test_an_internal_error_is_not_called_busy(
+        self, sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Telling a user "it was only busy" about a fault in the service is a guess.
+        script = _Script(*([500] * 10))
+
+        with pytest.raises(LLMError) as raised:
+            _complete(_provider(), script, monkeypatch)
+
+        assert not isinstance(raised.value, LLMBusy)
+
+    @pytest.mark.parametrize("status", [400, 401, 402, 404])
+    def test_a_client_or_account_error_is_not_called_busy(
+        self, status: int, sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = _Script(status)
+
+        with pytest.raises(LLMError) as raised:
+            _complete(_provider(), script, monkeypatch)
+
+        assert not isinstance(raised.value, LLMBusy)
+
+    def test_the_providers_own_wait_is_carried_uncapped(
+        self, sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The transport caps how long it *sleeps*; the user is told what the service asked.
+        script = _Script(*[(429, {"retry-after": "999"}, "") for _ in range(HTTP_ATTEMPTS)])
+
+        with pytest.raises(LLMBusy) as raised:
+            _complete(_provider(), script, monkeypatch)
+
+        assert raised.value.retry_after_s == 999.0
+        assert max(sleeps) == module.MAX_RETRY_WAIT_S
+
+    @pytest.mark.parametrize("header", [{}, {"retry-after": "soon"}, {"retry-after": "-4"}])
+    def test_no_usable_wait_is_none_and_not_a_guess(
+        self, header: dict[str, str], sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = _Script(*[(503, header, "") for _ in range(HTTP_ATTEMPTS)])
+
+        with pytest.raises(LLMBusy) as raised:
+            _complete(_provider(), script, monkeypatch)
+
+        assert raised.value.retry_after_s is None
+
+    def test_a_generation_cut_short_for_capacity_is_busy(
+        self, sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = _Script(*[_ok("", "aborted") for _ in range(HTTP_ATTEMPTS)])
+
+        with pytest.raises(LLMBusy, match="short of capacity"):
+            _complete(_provider(), script, monkeypatch)
+
+    def test_busy_is_still_an_llm_error_so_every_older_handler_keeps_working(self) -> None:
+        assert issubclass(LLMBusy, LLMError)
+        assert not issubclass(LLMBusy, LLMUnavailable)
+
+    def test_a_stream_whose_whole_request_fallback_is_refused_is_busy(
+        self, sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The streaming call fails, the one repeat as a whole request is shed on every
+        # attempt, and what surfaces from `stream_chat` is the same typed answer.
+        stream = _Stream(status=503)
+        whole = _Script(*([503] * 10))
+        monkeypatch.setattr(httpx, "stream", stream)
+        monkeypatch.setattr(httpx, "post", whole)
+
+        with pytest.raises(LLMBusy):
+            _collect(_provider())

@@ -6,6 +6,7 @@ deployment choice, not a code dependency. Default is DeepSeek (hosted).
 
 from app.ai.provider import (
     Completion,
+    LLMBusy,
     LLMError,
     LLMProvider,
     LLMRefusal,
@@ -19,6 +20,7 @@ from app.ai.service import draft_load_case, generate_title, interpret_result
 __all__ = [
     "PROVIDER_NAMES",
     "Completion",
+    "LLMBusy",
     "LLMError",
     "LLMProvider",
     "LLMRefusal",

@@ -43,6 +43,7 @@ from app.ai.provider import (
     ChatEvent,
     Completion,
     Finished,
+    LLMBusy,
     LLMError,
     LLMProvider,
     LLMRefusal,
@@ -82,6 +83,13 @@ HTTP_ATTEMPTS = len(RETRY_BACKOFF_S) + 1
 #: Statuses worth another attempt. A 4xx other than 429 is a bug in what was
 #: sent and fails identically forever.
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+#: The retryable statuses that mean "not now" rather than "something broke". When the transport
+#: has retried them to the end the failure is `LLMBusy`, not a bare `LLMError`, so the agent
+#: can end the turn with a Continue instead of an error (ROAD_TO_10 3.6). **500 is not here on
+#: purpose**: an internal error is a fault in the service, retrying it is a courtesy, and
+#: telling the user "it was only busy" about one would be a guess.
+BUSY_STATUSES = frozenset({429, 502, 503, 504})
 
 #: Ceiling on how long a `Retry-After` header can make one attempt wait.
 MAX_RETRY_WAIT_S = 8.0
@@ -154,6 +162,31 @@ def _log_prompt_cache(usage: dict[str, Any] | None) -> None:
     hit, miss = usage.get("prompt_cache_hit_tokens"), usage.get("prompt_cache_miss_tokens")
     if isinstance(hit, int) and isinstance(miss, int) and hit + miss > 0:
         logger.info("prompt cache: %d of %d prompt tokens were hits", hit, hit + miss)
+
+
+def _retry_after(response: httpx.Response | None) -> float | None:
+    """The provider's own `Retry-After` in seconds, or None when it sent none we can read.
+
+    Only the delta-seconds form: the HTTP-date form is legal but no provider this module
+    talks to sends it, and parsing a date to turn it into a wait is where a clock skew would
+    become a one-hour sleep.
+    """
+    if response is None:
+        return None
+    try:
+        asked = float(response.headers.get("retry-after", ""))
+    except ValueError:
+        return None
+    return asked if asked >= 0 else None
+
+
+def _describe_busy(status: int) -> str:
+    return {
+        429: "HTTP 429, rate limited",
+        502: "HTTP 502, bad gateway",
+        503: "HTTP 503, overloaded or unavailable",
+        504: "HTTP 504, gateway timeout",
+    }.get(status, f"HTTP {status}")
 
 
 def _finish_reason(body: dict[str, Any]) -> str | None:
@@ -511,11 +544,9 @@ class OpenAICompatibleProvider(LLMProvider):
     def _wait(self, attempt: int, response: httpx.Response | None) -> None:
         """Sleep before the next attempt: the server's `Retry-After`, else backoff."""
         delay = RETRY_BACKOFF_S[min(attempt, len(RETRY_BACKOFF_S)) - 1]
-        if response is not None:
-            try:
-                delay = max(delay, float(response.headers.get("retry-after", "")))
-            except ValueError:
-                pass
+        asked = _retry_after(response)
+        if asked is not None:
+            delay = max(delay, asked)
         time.sleep(min(delay, MAX_RETRY_WAIT_S))
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -553,6 +584,12 @@ class OpenAICompatibleProvider(LLMProvider):
                     )
                     self._wait(attempt, exc.response)
                     continue
+                if status in BUSY_STATUSES:
+                    raise LLMBusy(
+                        f"The model service is too busy to answer ({_describe_busy(status)}). "
+                        "It was asked again and still could not take the request.",
+                        retry_after_s=_retry_after(exc.response),
+                    ) from exc
                 raise LLMError(f"Chat completion failed ({status}): {error_text[:200]}") from exc
             except httpx.HTTPError as exc:
                 if not last:
@@ -581,7 +618,7 @@ class OpenAICompatibleProvider(LLMProvider):
                     )
                     self._wait(attempt, None)
                     continue
-                raise LLMError(
+                raise LLMBusy(
                     f"The provider stopped generating before the answer was finished ({reason}). "
                     "That is the server being short of capacity -- try again shortly."
                 )

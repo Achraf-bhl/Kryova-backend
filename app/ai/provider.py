@@ -204,6 +204,33 @@ class LLMUnavailable(LLMError):
     """The configured provider is not usable -- no key, or nothing listening."""
 
 
+class LLMBusy(LLMError):
+    """The provider is up and said "not now", on every try the transport was willing to make.
+
+    A rate limit (429), an overloaded or unavailable service (502, 503, 504, Anthropic's 529), or
+    a generation the server cut short for want of capacity -- each one is the provider telling
+    us to come back, which is a different thing from a key it rejected (`LLMUnavailable`: fix
+    the configuration), a refusal on safety grounds (`LLMRefusal`) and a failure nobody can name
+    (`LLMError`). It has its own type because the agent loop does something different with it
+    (ROAD_TO_10 3.6): the work already done is real and recorded, nothing about the request is
+    wrong, and the one useful thing to offer is the same request again a little later -- so a
+    turn ends with a typed `provider_busy` stop and a Continue, not with an error that reads as
+    "something broke".
+
+    `retry_after_s` is the provider's own `Retry-After` where it sent one, uncapped: the
+    transport caps how long it *sleeps*, but the user is told what the service asked for.
+    """
+
+    def __init__(
+        self,
+        *args: object,
+        usage: TokenUsage | None = None,
+        retry_after_s: float | None = None,
+    ) -> None:
+        super().__init__(*args, usage=usage)
+        self.retry_after_s = retry_after_s
+
+
 class LLMRefusal(LLMError):
     """The provider declined the request on safety grounds."""
 

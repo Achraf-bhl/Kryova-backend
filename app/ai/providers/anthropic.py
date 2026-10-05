@@ -33,6 +33,7 @@ from pydantic import BaseModel, ValidationError
 from app.ai.provider import (
     AssistantTurn,
     Completion,
+    LLMBusy,
     LLMError,
     LLMProvider,
     LLMRefusal,
@@ -61,6 +62,20 @@ DEFAULT_MODEL = "claude-opus-5"
 #: these prefixes is far more likely to be a leftover model id from another
 #: provider than a real Claude release, and `health()` says so.
 KNOWN_MODEL_PREFIXES = ("claude-",)
+
+
+#: Statuses that mean "come back" rather than "broken". 529 is Anthropic's own "overloaded".
+_BUSY_STATUSES = frozenset({502, 503, 504, 529})
+
+
+def _retry_after_seconds(exc: Any) -> float | None:
+    """The `Retry-After` the API sent, in seconds, when the SDK kept the response."""
+    response = getattr(exc, "response", None)
+    try:
+        asked = float(response.headers.get("retry-after", "")) if response is not None else None
+    except (TypeError, ValueError):
+        return None
+    return asked if asked is not None and asked >= 0 else None
 
 
 def _effort(value: str) -> str:
@@ -217,10 +232,20 @@ class AnthropicProvider(LLMProvider):
         if isinstance(exc, anthropic.AuthenticationError):
             raise LLMUnavailable("The Anthropic API key was rejected.") from exc
         if isinstance(exc, anthropic.RateLimitError):
-            raise LLMError("Anthropic rate limit reached. Retry shortly.") from exc
+            raise LLMBusy(
+                "Anthropic rate limit reached. Retry shortly.",
+                retry_after_s=_retry_after_seconds(exc),
+            ) from exc
         if isinstance(exc, anthropic.APIConnectionError):
             raise LLMError(f"Could not reach the Anthropic API: {exc}") from exc
         if isinstance(exc, anthropic.APIStatusError):
+            if exc.status_code in _BUSY_STATUSES:
+                # 529 is Anthropic's own "overloaded"; 502-504 are the gateway saying the
+                # same thing from further out. All of them are "come back", not "broken".
+                raise LLMBusy(
+                    f"Anthropic is overloaded or unavailable (HTTP {exc.status_code}).",
+                    retry_after_s=_retry_after_seconds(exc),
+                ) from exc
             raise LLMError(f"Anthropic API error {exc.status_code}: {exc.message}") from exc
         raise exc
 

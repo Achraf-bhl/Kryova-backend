@@ -366,7 +366,7 @@ Today:
   - Read every limit above from the organisation's billing plan
     (`Kryova-backend/app/api/routes/billing.py`, `PUT /billing/plan`), with config values as the
     defaults.
-- [ ] **3.6 Handle provider rate limits within a whole turn.** [Linux] **S**
+- [x] **3.6 Handle provider rate limits within a whole turn.** [Linux] **S**
   - The transport already retries 429 with a capped `Retry-After`
     (`Kryova-backend/app/ai/providers/openai_compatible.py`).
   - Add: when retries run out in the middle of a turn, end it with a typed `provider_busy` stop and a

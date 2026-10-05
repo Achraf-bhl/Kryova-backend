@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 75/87 = 86% | 33/39 eng-months = 84% |
-| **Programme** | 23/35 | 202/223 = 91% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 76/88 = 86% | 33/39 eng-months = 84% |
+| **Programme** | 23/35 | 203/224 = 91% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -8658,6 +8658,27 @@ machine with no network, so the phase is open until a run with a key confirms it
     > widened. **Not done:** an authenticated route on the bare address key is still possible
     > to add; no route that has a signed-in principal uses one today.
     > Tested by: `tests/test_auth_rate_limits.py`, `tests/test_rate_limit.py`.
+
+26. **A provider that stays busy ends the turn with a Continue, not an error.**
+    *(ROAD_TO_10 3.6.)* The transport already retried 429 with a capped `Retry-After`; what it
+    raised afterwards was a bare `LLMError` the loop could not tell from a fault, so a busy
+    service ended a turn in a red error banner and the one failure whose right answer is "press
+    Continue" had no Continue.
+    > DONE (2026-10-05) — `LLMBusy(LLMError)` carries the provider's own `retry_after_s`,
+    > uncapped (the transport caps how long it *sleeps*; the user is told what the service
+    > asked). `openai_compatible` raises it when 429, 502, 503 or 504 outlast the retries, or a
+    > generation is cut short for capacity; **500 stays a plain `LLMError` on purpose** -- calling
+    > a fault "busy" would be a guess. The Anthropic provider maps `RateLimitError` and 502, 503,
+    > 504 and 529. The agent loop catches it at the model call and ends the turn with stop reason
+    > `provider_busy` and a Continue, **makes no further model call** (a closing summary asked of
+    > a service that just refused is a second refusal), bills the refused attempt as well as the
+    > step before it, and writes a server-worded assistant message, so a reload keeps the button.
+    > Outside a turn the routes answer 503 with `Retry-After` instead of the 502 of a fault.
+    > The frontend already rendered `provider_busy` (2.2/2.4). **Not measured:** the Anthropic
+    > mapping is tested against a stand-in SDK, not the real one (the package is not installed
+    > here), and no hosted endpoint was asked to rate-limit us.
+    > Tested by: `tests/test_continuation.py`, `tests/test_openai_compatible_resilience.py`,
+    > `tests/test_ai_providers.py`.
 
 ---
 

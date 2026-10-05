@@ -14,11 +14,19 @@ import json
 from typing import Any
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai import agent, continuation, prompts, turn_metrics
 from app.ai.agent import stream_agent
-from app.ai.provider import AssistantTurn, LLMError, LLMProvider, TokenUsage, ToolCall
+from app.ai.provider import (
+    AssistantTurn,
+    LLMBusy,
+    LLMError,
+    LLMProvider,
+    TokenUsage,
+    ToolCall,
+)
 from app.ai.taskgraph import Task, TaskGraph, TaskState
 from app.ai.tools import ToolBox
 from app.api.routes import ai as ai_routes
@@ -882,3 +890,206 @@ class TestAReturningUserIsToldFromTheRecord:
 
         assert response.status_code == 200
         assert response.json()["resume"]["design"] is None
+
+
+# -- a busy provider (ROAD_TO_10 3.6) -----------------------------------------------
+
+
+class _BusyAfter(_Scripted):
+    """Plays its scripted turns, then answers every call as the provider shedding load."""
+
+    def __init__(self, *turns: AssistantTurn, retry_after_s: float | None = None) -> None:
+        super().__init__(*turns)
+        self.calls = 0
+        self.retry_after_s = retry_after_s
+
+    def chat(self, *args: Any, **kwargs: Any) -> AssistantTurn:
+        self.calls += 1
+        if not self.turns:
+            raise LLMBusy(
+                "The model service is too busy to answer (HTTP 503).",
+                usage=TokenUsage(7, 0),
+                retry_after_s=self.retry_after_s,
+            )
+        return self.turns.pop(0)
+
+
+class TestABusyProviderEndsTheTurnWithAContinue:
+    """The transport has already retried. What is left to say is *come back*, not *it broke*."""
+
+    def test_the_turn_ends_with_a_typed_stop_and_a_continue_and_no_error(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        provider = _BusyAfter(_call("c1", "list_projects"))
+
+        events = _run(db_session, user, conversation, provider)
+
+        assert not [event for event in events if event["type"] == "error"]
+        done = _done(events)
+        assert done["stop_reason"] == "provider_busy"
+        assert done["truncated"] is True
+        assert done["next_action"]["kind"] == "continue"
+        assert done["next_action"]["reason"] == "provider_busy"
+        assert "Everything that ran is kept" in done["next_action"]["detail"]
+
+    def test_it_makes_no_further_model_call(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        # A closing summary asked of a service that just refused us is a second refusal,
+        # and a third paid-for retry the transport already did three times.
+        provider = _BusyAfter(_call("c1", "list_projects"))
+
+        _run(db_session, user, conversation, provider)
+
+        assert provider.calls == 2
+
+    def test_what_ran_before_the_refusal_is_kept_and_the_message_says_so(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        provider = _BusyAfter(_call("c1", "list_projects"))
+
+        events = _run(db_session, user, conversation, provider)
+
+        assert any(event["type"] == "tool_end" for event in events)
+        stored = [m for m in conversation.messages if m.role is MessageRole.ASSISTANT]
+        assert stored[-1].content is not None
+        assert "Nothing that ran has been lost" in stored[-1].content
+        assert "Press Continue" in stored[-1].content
+        # A reload reads the stored turn, so the button has to be derivable from it.
+        assert any(
+            m.role is MessageRole.TOOL for m in conversation.messages
+        ), "the tool step before the refusal must be in the transcript"
+
+    def test_the_failed_attempt_is_billed_as_well_as_the_step_before_it(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        provider = _BusyAfter(_call("c1", "list_projects"))
+
+        done = _done(_run(db_session, user, conversation, provider))
+
+        # 10 for the step that ran plus the 7 the refused call had already been billed.
+        assert done["prompt_tokens"] == 10 + 7
+
+    def test_a_refusal_on_the_very_first_call_is_still_a_continue(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        done = _done(_run(db_session, user, conversation, _BusyAfter()))
+
+        assert done["stop_reason"] == "provider_busy"
+        assert done["steps"] == 0
+        assert done["next_action"]["reason"] == "provider_busy"
+
+    def test_the_providers_own_wait_is_named_when_it_gave_one(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        events = _run(db_session, user, conversation, _BusyAfter(retry_after_s=30))
+
+        text = next(event["content"] for event in events if event["type"] == "message")
+        assert "about 30 s" in text
+
+    def test_no_wait_is_invented_when_it_gave_none(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        events = _run(db_session, user, conversation, _BusyAfter())
+
+        text = next(event["content"] for event in events if event["type"] == "message")
+        assert "asked for a wait" not in text
+
+    def test_a_fault_that_is_not_busy_still_raises(
+        self, db_session: Session, user: User, conversation: Conversation
+    ) -> None:
+        # Only "not now" is a Continue. A failure nobody can name stays an error: telling
+        # the user it was only busy would be a guess.
+        class _Broken(_Scripted):
+            def chat(self, *args: Any, **kwargs: Any) -> AssistantTurn:
+                raise LLMError("Chat completion failed (500): boom")
+
+        with pytest.raises(LLMError, match="500"):
+            _run(db_session, user, conversation, _Broken())
+
+
+@pytest.fixture
+def busy_conversation(
+    auth_client: Any, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Any, str, _BusyAfter]:
+    provider = _BusyAfter(retry_after_s=12)
+    monkeypatch.setattr(ai_routes, "get_provider", lambda: provider)
+    events = _stream(auth_client, {"message": "build the bracket"})
+    done = next(event for event in events if event["type"] == "done")
+    assert done["stop_reason"] == "provider_busy", events
+    return auth_client, done["conversation_id"], provider
+
+
+class TestABusyTurnSurvivesAReloadAndCanBeContinued:
+    def test_the_stream_ends_in_done_and_not_in_error(
+        self, auth_client: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(ai_routes, "get_provider", lambda: _BusyAfter())
+
+        events = _stream(auth_client, {"message": "build the bracket"})
+
+        assert any(event["type"] == "done" for event in events)
+        assert not [event for event in events if event["type"] == "error"]
+
+    def test_a_reload_still_offers_the_button(
+        self, busy_conversation: tuple[Any, str, _BusyAfter]
+    ) -> None:
+        client, conversation_id, _ = busy_conversation
+
+        detail = client.get(f"/api/v1/ai/conversations/{conversation_id}").json()
+
+        assert detail["next_action"]["reason"] == "provider_busy"
+
+    def test_the_stop_is_what_the_metrics_row_records(
+        self, busy_conversation: tuple[Any, str, _BusyAfter], db_session: Session
+    ) -> None:
+        _, conversation_id, _ = busy_conversation
+
+        recorded = db_session.scalar(
+            select(TurnMetric.stop_reason).where(TurnMetric.conversation_id == conversation_id)
+        )
+
+        assert recorded == "provider_busy"
+
+    def test_pressing_it_with_the_service_back_finishes_the_work(
+        self, busy_conversation: tuple[Any, str, _BusyAfter], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, conversation_id, _ = busy_conversation
+        recovered = _RouteProvider()
+        recovered.chat = lambda *a, **k: AssistantTurn(text="Built.", usage=TokenUsage(1, 1))  # type: ignore[method-assign]
+        monkeypatch.setattr(ai_routes, "get_provider", lambda: recovered)
+
+        events = _stream(client, {"continuation": "continue", "conversation_id": conversation_id})
+
+        done = next(event for event in events if event["type"] == "done")
+        assert done["stop_reason"] == "finished"
+        detail = client.get(f"/api/v1/ai/conversations/{conversation_id}").json()
+        assert detail["next_action"] is None
+
+    def test_the_non_streaming_route_answers_with_the_same_sentence(
+        self, auth_client: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(ai_routes, "get_provider", lambda: _BusyAfter())
+
+        response = auth_client.post("/api/v1/ai/chat", json={"message": "build the bracket"})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["truncated"] is True
+        assert "Press Continue" in response.json()["reply"]
+
+
+class TestABusyProviderOutsideATurnIs503WithItsWait:
+    def test_translate_says_503_and_forwards_the_wait(self) -> None:
+        error = ai_routes._translate(LLMBusy("busy", retry_after_s=30))
+
+        assert error.status_code == 503
+        assert error.headers == {"Retry-After": "30"}
+
+    def test_translate_sends_no_retry_after_it_was_not_given(self) -> None:
+        error = ai_routes._translate(LLMBusy("busy"))
+
+        assert error.status_code == 503
+        assert error.headers is None
+
+    def test_a_fault_is_still_a_bad_gateway(self) -> None:
+        assert ai_routes._translate(LLMError("boom")).status_code == 502

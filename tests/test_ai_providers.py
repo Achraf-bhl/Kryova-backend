@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from app.ai.provider import LLMError, LLMRefusal, LLMUnavailable, TokenUsage
+from app.ai.provider import LLMBusy, LLMError, LLMRefusal, LLMUnavailable, TokenUsage
 from app.ai.providers.anthropic import (
     DEFAULT_EFFORT,
     DEFAULT_MODEL,
@@ -297,6 +297,37 @@ class TestSdkErrorTranslation:
         provider = _provider(sdk.RateLimitError("slow down", 429), sdk)
         with pytest.raises(LLMError, match="Retry"):
             provider.chat(system="S", messages=[], tools=[], max_tokens=1)
+
+    def test_a_rate_limit_is_busy_so_a_turn_can_end_with_a_continue(
+        self, sdk: types.ModuleType
+    ) -> None:
+        provider = _provider(sdk.RateLimitError("slow down", 429), sdk)
+        with pytest.raises(LLMBusy):
+            provider.chat(system="S", messages=[], tools=[], max_tokens=1)
+
+    @pytest.mark.parametrize("status", [502, 503, 504, 529])
+    def test_an_overloaded_service_is_busy(self, status: int, sdk: types.ModuleType) -> None:
+        # 529 is Anthropic's own "overloaded"; the gateway statuses say the same from further out.
+        provider = _provider(sdk.APIStatusError("overloaded", status), sdk)
+        with pytest.raises(LLMBusy, match=str(status)):
+            provider.chat(system="S", messages=[], tools=[], max_tokens=1)
+
+    @pytest.mark.parametrize("status", [400, 404, 500])
+    def test_a_fault_is_not_called_busy(self, status: int, sdk: types.ModuleType) -> None:
+        provider = _provider(sdk.APIStatusError("nope", status), sdk)
+        with pytest.raises(LLMError) as raised:
+            provider.chat(system="S", messages=[], tools=[], max_tokens=1)
+        assert not isinstance(raised.value, LLMBusy)
+
+    def test_the_providers_own_wait_is_carried(self, sdk: types.ModuleType) -> None:
+        refused = sdk.RateLimitError("slow down", 429)
+        refused.response = types.SimpleNamespace(headers={"retry-after": "42"})  # type: ignore[attr-defined]
+        provider = _provider(refused, sdk)
+
+        with pytest.raises(LLMBusy) as raised:
+            provider.chat(system="S", messages=[], tools=[], max_tokens=1)
+
+        assert raised.value.retry_after_s == 42.0
 
     def test_a_connection_failure_names_the_api(self, sdk: types.ModuleType) -> None:
         provider = _provider(sdk.APIConnectionError("no route"), sdk)

@@ -48,12 +48,18 @@ from app.ai.attached import for_turn as attachments_for_turn
 from app.ai.context import build_messages, maybe_summarise
 from app.ai.malformed import correction_for, find_written_tool_calls, is_contentless
 from app.ai.planning import extract_objectives
-from app.ai.provider import LLMError, LLMProvider, TextDelta, TokenUsage
+from app.ai.provider import LLMBusy, LLMError, LLMProvider, TextDelta, TokenUsage
 from app.ai.recovery import Failure as Recovery_Failure
 from app.ai.recovery import Recovery
 from app.ai.sanitise import MAX_TOOL_RESULT_CHARS, fence_tool_result
 from app.ai.tools import ToolBox, ToolError
-from app.ai.turn_metrics import STOP_CANCELLED, STOP_FINISHED, STOP_TASK_BOUNDARY, TurnMeter
+from app.ai.turn_metrics import (
+    STOP_CANCELLED,
+    STOP_FINISHED,
+    STOP_PROVIDER_BUSY,
+    STOP_TASK_BOUNDARY,
+    TurnMeter,
+)
 from app.ai.verification import (
     assess,
     measurements_in,
@@ -669,16 +675,28 @@ def stream_agent(
         # code path for both — and a non-streaming provider is not disguised as
         # a model that happened to write its answer in one go.
         turn = None
-        for chunk in provider.stream_chat(
-            system=system,
-            messages=build_messages(db, owner, conversation, attached=attached),
-            tools=schemas,
-            max_tokens=max_tokens,
-        ):
-            if isinstance(chunk, TextDelta):
-                yield {"type": "token", "content": chunk.text}
-            else:
-                turn = chunk.turn
+        try:
+            for chunk in provider.stream_chat(
+                system=system,
+                messages=build_messages(db, owner, conversation, attached=attached),
+                tools=schemas,
+                max_tokens=max_tokens,
+            ):
+                if isinstance(chunk, TextDelta):
+                    yield {"type": "token", "content": chunk.text}
+                else:
+                    turn = chunk.turn
+        except LLMBusy as busy:
+            # ROAD_TO_10 3.6. The transport has already retried, with the provider's own
+            # `Retry-After`, and the service still said "not now". Everything this turn did
+            # so far is committed and real; what is left to say is *come back*. So the turn
+            # ends here with a typed stop and a Continue, and **makes no further model call**
+            # -- a closing summary asked of a service that just refused us is a second
+            # refusal, and the user sees neither answer.
+            yield from _provider_busy_exit(
+                db, conversation, toolbox, meter, provider, steps, busy
+            )
+            return
         if turn is None:
             # The contract says exactly one `Finished`. A provider that ends
             # without one has not produced a turn, and inventing an empty one
@@ -1490,6 +1508,46 @@ def _ended_early(stop_reason: str) -> str:
     exit is waiting on a person, and says so.
     """
     return prompts.AGENT_TASK_BOUNDARY if stop_reason == STOP_TASK_BOUNDARY else prompts.AGENT_ENDED_EARLY
+
+
+def _provider_busy_exit(
+    db: Session,
+    conversation: Conversation,
+    toolbox: ToolBox,
+    meter: TurnMeter,
+    provider: LLMProvider,
+    steps: list[AgentStep],
+    busy: LLMBusy,
+) -> Iterator[dict[str, Any]]:
+    """End a turn whose model call was refused as "busy", with a Continue and no error.
+
+    The sentence is the server's, not the model's: asking the model to describe its own
+    unavailability is the call that just failed. It says the two things a person needs --
+    that nothing was lost, and what pressing Continue does -- and names the wait the
+    provider asked for when it said one, because "try again shortly" is a guess and a number
+    is not.
+    """
+    meter.charge(busy.usage)
+    asked = busy.retry_after_s
+    wait = (
+        f" The service asked for a wait of about {max(1, round(asked))} s."
+        if asked is not None and asked >= 1
+        else ""
+    )
+    text = (
+        "The model service is too busy to answer right now, even after trying again."
+        f"{wait} Nothing that ran has been lost: every step above really happened and is kept. "
+        "Press Continue to try again from where I stopped."
+    )
+    logger.warning("turn ended on a busy provider after %d step(s): %s", len(steps), busy)
+    _append(db, conversation, MessageRole.ASSISTANT, content=text)
+    db.commit()
+    yield {"type": "message", "content": text}
+    yield _done_event(
+        conversation, toolbox, meter, provider, steps,
+        truncated=True, stop_reason=STOP_PROVIDER_BUSY,
+        next_action=_next_action(STOP_PROVIDER_BUSY, conversation),
+    )
 
 
 def _next_action(stop_reason: str, conversation: Conversation) -> dict[str, Any] | None:

@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import (
     Completion,
+    LLMBusy,
     LLMError,
     LLMProvider,
     LLMRefusal,
@@ -174,6 +175,15 @@ def _translate(exc: LLMError) -> HTTPException:
         return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
     if isinstance(exc, LLMRefusal):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    if isinstance(exc, LLMBusy):
+        # 503, not the 502 of a failure nobody can name: this one is "come back", and the
+        # provider's own wait goes out as `Retry-After` when it gave one.
+        asked = exc.retry_after_s
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+            headers={"Retry-After": str(max(1, round(asked)))} if asked is not None else None,
+        )
 
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 

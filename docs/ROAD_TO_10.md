@@ -384,7 +384,7 @@ Node, no Python and no Postgres preinstalled, updates itself, and is not quarant
 (`option_env!`), and `tauri.conf.json` loads `frontendDist: "http://localhost:3000"`. An installer
 built anywhere else starts nothing.
 
-- [ ] **4.1 Bundle the frontend.** [Both] **L** → P9.5
+- [~] **4.1 Bundle the frontend.** [Both] **L** → P9.5
   - The app uses server components and the middleware in `Kryova-frontend/src/proxy.ts`, so a static
     export is not a drop-in change.
   - Recommended route: set `output: "standalone"` in `Kryova-frontend/next.config.ts`, and ship the
@@ -392,19 +392,49 @@ built anywhere else starts nothing.
     The webview then loads `http://127.0.0.1:<port>` from the bundled server.
   - Alternative: refactor to a static export plus client-side routing. This is cleaner at runtime
     but a large refactor. Decide once, and record it in the plan.
-- [ ] **4.2 Bundle the backend.** [Both] **XL** → P9.5, P7.2
+  - **Status 2026-10-05: built and cross-staged on Linux; never installed or run on Windows**
+    (master plan P9.5, `Kryova-frontend/scripts/stage-desktop.mjs`, `next.config.ts`). The Next
+    standalone server is staged beside a pinned Node, the shell finds it beside its own executable
+    (`src-tauri/src/layout.rs`: named checkout > complete bundle > baked checkout), and
+    `desktop-build.mjs --bundled` bakes no path. The first real staging run found a defect no unit
+    test could: one dynamic `path.join` in `src/lib/diagnostics.ts` made Turbopack trace the whole
+    project, so the frontend carried the source, `CLAUDE.md` and `src-tauri/target` — **5.3 GB, now
+    52 MB**. Open: a first launch from `Program Files` on a clean machine (THE QUEUE G7).
+- [~] **4.2 Bundle the backend.** [Both] **XL** → P9.5, P7.2
   - Ship an embeddable CPython (python-build-standalone), with every wheel from
     `Kryova-backend/requirements.txt` preinstalled, as a sidecar.
   - The heavy native parts must be checked on a clean VM: OCP/OCCT, gmsh, scipy, openpyxl, ezdxf.
   - **Not** PyInstaller: its import scanning has a long record of missing OCP's and gmsh's native
     plugins. **(verify on a clean VM)**
   - `laya`/`torch` stay out (`Kryova-backend/requirements-laya.txt`, decided 2026-10-04).
-- [ ] **4.3 Bundle Postgres.** [Both] **L** — **NEW** (P7)
+  - **Status 2026-10-05: built; the wheels were cross-installed and counted, nothing was run on
+    Windows** (master plan P9.5 and P7.2, `Kryova-backend/scripts/stage_desktop_backend.py`,
+    `requirements-desktop.lock.txt`). The backend is staged by an allow-list, never a directory copy
+    (no `.env*`, no tests, no 450 MB of manuals), with the code's own wheels from a hashed lock — 73
+    wheels, pywin32 included, `laya`/`torch` excluded. A pinned relocatable CPython carries them.
+    **The staged tree is 1.4 GB, of which 313 MB is VTK**, a hard dependency of `cadquery-ocp` that
+    nothing here imports; whether OCP's native modules link against it was not tested, so it
+    is **not** stripped (`requirements.txt` calls stripping a container-layer job). Open: that OCP,
+    gmsh, scipy and ezdxf load from the bundled interpreter on a clean VM (THE QUEUE G7), and the MSI's
+    compressed size and build time, never measured.
+- [~] **4.3 Bundle Postgres.** [Both] **L** — **NEW** (P7)
   - Ship the PostgreSQL binaries, create a cluster in `%LOCALAPPDATA%\Kryova\pgdata` on first run,
     create the `NOBYPASSRLS` application role, and run `alembic upgrade head`. Wire this into
     `Kryova-backend/app/core/local_postgres.py`, which already starts `pg_ctl` from lifespan.
   - Keep the server log outside the data directory (CLAUDE.md, *Database* 4a).
-- [ ] **4.4 Fix the setup script's three wrong defaults.** [Linux] **S** — **NEW**, found 2026-10-04
+  - **Status 2026-10-05: built and tested on Linux; never run on Windows** (master plan P7.6,
+    `Kryova-backend/app/core/local_cluster.py`, `app/desktop.py`). A clean home became a migrated
+    database in about two seconds against a real PostgreSQL: `initdb`, scram on loopback only, an
+    admin role and an application role that is `NOSUPERUSER NOBYPASSRLS` (so row-level security
+    still enforces), every migration, a `pg_dump` before an upgrade that migrates and a restore of
+    it, the port moved if squatted, and the log beside the data directory. The data lives in
+    `%LOCALAPPDATA%\Kryova`, never in the install, and **an uninstall keeps it** (the pipeline
+    asserts that). One trap found: `settings` is built once at import, so the launcher sets the
+    environment before importing anything under `app`, and the code's migration head is read by AST
+    because three revisions import `settings`. EDB publishes no checksum, so the pin for the
+    PostgreSQL archive is trust-on-first-use (measured 2026-10-05). Open: `initdb` under Windows
+    antivirus (THE QUEUE G7).
+- [x] **4.4 Fix the setup script's three wrong defaults.** [Linux] **S** — **NEW**, found 2026-10-04
   - `Kryova-frontend/scripts/setup.mjs:79` creates `.venv`, but `Kryova-frontend/src-tauri/src/lib.rs:140`
     looks for `venv`.
   - `setup.mjs:109` writes `DATABASE_URL=sqlite:///./kryova_dev.db`, which the backend refuses at
@@ -415,14 +445,34 @@ built anywhere else starts nothing.
   - The same applies to `backend_url()` in `lib.rs:37`. **(verify on the seat)**
   - Test: `Kryova-frontend/src/lib/desktop-bundle.test.ts` reads `tauri.conf.json` and asserts no
     `11434` and no `localhost`.
+  - **Status 2026-10-05: done** (master plan P7.7, `Kryova-frontend` `20346a0`).
 - [ ] **4.5 Code signing.** [Seat] **M**, needs a certificate purchase → P9.5
   - Sign the MSI and the exe (OV, or EV for immediate SmartScreen trust). This is the real fix for
     Defender's `Wacatac.H!ml` quarantine (CLAUDE.md, *The installed desktop app and Microsoft
     Defender*). A rebuild that happens to scan clean is luck, not a fix.
-- [ ] **4.6 Signed auto-update.** [Both] **M** → P7.1
+  - **Status 2026-10-05: BLOCKED on a purchase, and the half that does not need it is built**
+    (master plan P9.5). A signing certificate is the owner's to buy, and one issued today lives in
+    a hardware module or a vendor's cloud, so there is no `.pfx` to hand a runner.
+    `Kryova-frontend/scripts/desktop-config.mjs` configures either route — a certificate in the
+    store named by thumbprint (refused without a timestamp, which a signature needs to outlive the
+    certificate) or a vendor's command containing `%1` — and refuses two ways at once. Validated
+    against Tauri's own config parser: a good overlay passes, an unknown key is refused by name.
+    **Until a certificate exists the pipeline builds and tests an unsigned MSI and refuses to
+    publish it.** Defender's `Wacatac.H!ml` quarantine stays unfixed (CLAUDE.md, *The installed
+    desktop app and Microsoft Defender*).
+- [~] **4.6 Signed auto-update.** [Both] **M** → P7.1
   - Tauri v2 updater, offline signing key kept in a hardware token, beta and stable channels, and
     `latest.json` published by the pipeline. Blocked on 4.1–4.3.
-- [ ] **4.7 Native desktop features.** [Both] **M** → P7.3, QUEUE G5
+  - **Status 2026-10-05: the client half is built; no key, host or release exists** (master plan
+    P7.1). The updater is registered only in a build that carries a public key, one endpoint per
+    channel, `requireSignedVersion` on (read out of the plugin's own `Config`: it makes the client
+    refuse a response that pairs a new version number with an older release's valid signature),
+    and the page asks once per launch and installs only on a click.
+    `scripts/make-latest-json.mjs` refuses a signature recorded for a different version.
+    `latest.json` cannot be made in CI: its signature is made offline with the updater key.
+    The runbook, including key custody, is `Kryova-backend/docs/DESKTOP_RELEASE.md`. Nothing has
+    updated anything (THE QUEUE G7).
+- [~] **4.7 Native desktop features.** [Both] **M** → P7.3, QUEUE G5
   - The TypeScript side exists but nothing calls it: `Kryova-frontend/src/lib/desktop-powers.ts`
     (deep links, local open filter, notification policy).
   - Add the Tauri plugins to `Kryova-frontend/src-tauri/Cargo.toml`: `dialog`, `fs` (scoped),
@@ -432,15 +482,42 @@ built anywhere else starts nothing.
     `.step`. Opening one starts a conversation with it attached.
   - Add a tray icon showing bridge status and running jobs. A second launch focuses the existing
     window (single instance).
-- [ ] **4.8 Logs that survive a crash.** [Linux] **S** — **NEW**
+  - **Status 2026-10-05: written and tested; IPC, the tray and deep links are unverified in a
+    webview** (master plan P7.3, THE QUEUE G5). Registered: `dialog`, `fs` (read-file only),
+    `notification`, `deep-link`, `single-instance` and the tray, each at the narrowest permission,
+    granted to the page by origin. A `kryova://` link is judged for *shape* by the shell, held, and
+    judged for *meaning* by the page's allow-list (three read-only targets, one id); a second
+    launch hands its link to the first window. **Not built:** a running-jobs count on the tray and
+    a notification when a background run ends need an endpoint listing the user's active runs
+    across projects (new master-plan task P7.9); the file-open dialog has no caller; and the file
+    associations (`.CATPart`, `.CATProduct`, `.stp`, `.step`) are **not registered**, on purpose —
+    registering an extension takes it from whatever opens it today. Because the page is the
+    granted origin, **the CSP in `proxy.ts` is the only wall** between an injected script and
+    these commands.
+- [x] **4.8 Logs that survive a crash.** [Linux] **S** — **NEW**
   - `lib.rs:115` truncates `backend.log` and `frontend.log` on every launch, so a crash report is
     lost on restart. Rotate them instead (keep 5), and add a "Copy diagnostics" button to the setup
     page (`Kryova-frontend/src/app/setup/page.tsx`).
   - Fix the log path on Linux and macOS, which depends on `LOCALAPPDATA`. **(verify)**
-- [ ] **4.9 A release pipeline that installs what it builds.** [CI] **M** → P9.5
+  - **Status 2026-10-05: done** (master plan P7.8, `Kryova-frontend` `20346a0`).
+- [~] **4.9 A release pipeline that installs what it builds.** [CI] **M** → P9.5
   - Build on a Windows runner, sign, install the MSI on a clean VM, launch it, wait for `/health`,
     then uninstall and confirm both uninstall entries are gone. Only then publish.
   - `Kryova-frontend/.github/workflows/desktop.yml` today only type-checks the Rust code.
+  - **Status 2026-10-05: written, linted and tested as text; it has never run** (master plan P9.5,
+    `Kryova-frontend/.github/workflows/desktop.yml`, `src/lib/desktop-workflow.test.ts`).
+    `cargo-check` stays. `build` checks out both repositories side by side, signs when a
+    certificate is configured, stages and builds the MSI, and names it by SHA-256.
+    `install-test` runs on a **second runner** with nothing of Kryova's installed: `msiexec /i`, the
+    installed tree against the shell's required-file list, launch, `/health` 200 on
+    `127.0.0.1:8000` and the frontend answering, the database under the user's data and nowhere in
+    the install, close the window and fail if any of the install's processes remain, `msiexec /x`,
+    no uninstall entry in any of the three lists, and the user's database still there. `publish`
+    makes a **draft** release, only for a signed build and only when asked, because `latest.json`
+    carries a signature made offline. Every action is pinned to a commit; actionlint is clean and
+    was shown to fail on a broken reference. **Expect the first run to find something**: the
+    PowerShell has no syntax check here, and the runner's WebView2, its desktop session and its
+    antivirus are assumptions (THE QUEUE G7). The runbook is `Kryova-backend/docs/DESKTOP_RELEASE.md`.
 
 ---
 

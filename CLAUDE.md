@@ -977,7 +977,11 @@ including why the role must not be a superuser, is in **[docs/LOCAL_POSTGRES.md]
    change that *fills an absence* some test pins. Both pass every targeted run. Neither is
    findable by grep, because what broke was a test asserting the old world, not a caller.
    **A test pinning an absence has to be re-read the day the absence is filled, not edited
-   until it passes.**
+   until it passes.** A third shape, 2026-10-05: **a helper that gains a parameter breaks every test
+   that stubs it with the old arity** — P11.27 gave `_enforce_rate_limit` a third argument and three
+   `test_catia_material` tests, which replaced it with a one-argument lambda, failed with a
+   `TypeError` in a file that is about materials. Only the full suite sees it; grep the suite for the
+   helper's name (`grep -rn "_enforce_rate_limit" tests/`) before narrowing a signature.
 
 ## Subagents — never more than one at a time
 
@@ -2393,6 +2397,40 @@ The unsigned 0.2.0 MSI installs cleanly and Defender then quarantines `kryova.ex
 
 Do **not** "Allow on device" to get past it: that allows the threat ID machine-wide, and
 `Wacatac.H!ml` also covers real malware. The fixes are code signing and P9 task 5's bundling.
+
+### The installed app makes its own database and carries its own runtimes — ROAD_TO_10 Phase 4, 2026-10-05
+
+`python -m app.desktop` is the backend as the installer runs it: `app/desktop.py` (home, config,
+environment), `app/core/local_cluster.py` (the cluster), `scripts/stage_desktop_backend.py` (what
+ships). The frontend's `scripts/stage-desktop.mjs` assembles the rest, and
+**[docs/DESKTOP_RELEASE.md](docs/DESKTOP_RELEASE.md) is the runbook and the list of what has never run.**
+Seven facts that cost time, none of which errors:
+
+1. **`app.core.config.settings` is built once, at import, so the launcher sets the environment
+   before importing anything under `app`.** `local_cluster` must not import `settings` (a test pins
+   it). The same trap hid in Alembic: `ScriptDirectory.get_heads()` *imports* the revision files, three
+   of which import `settings`, so asking for the code's head froze a stale `DATABASE_URL` into the
+   process. `code_head` reads the head by AST instead.
+2. **The application role is `NOSUPERUSER NOBYPASSRLS`; a second, admin role makes and backs up the
+   database.** One superuser for both would make every row-level-security policy inert on the
+   desktop exactly as on Neon (*Database* 3). `config.env` may not name the database, the signing
+   key, the media folder or the origins — those lines are ignored with a warning.
+3. **An uninstall must keep `%LOCALAPPDATA%\Kryova`.** It is the user's database. The pipeline's
+   install test asserts it survives.
+4. **Next's standalone output can silently carry the whole checkout** (a dynamic `path.join` in a
+   route's import chain: a build *warning*, exit 0): 5.3 GB instead of 52 MB. Found by the first real
+   staging run; the stager's forbidden list is what refused the tree. See the frontend's CLAUDE.md.
+5. **A signing certificate issued today is not a `.pfx`.** Its key lives in a hardware module or a
+   vendor's cloud, so `KRYOVA_SIGN_COMMAND` (Tauri splits the string on single spaces — no argument
+   may contain one) is the general route and a store thumbprint the older one. Neither has a
+   certificate behind it yet, and the pipeline refuses to publish unsigned.
+6. **A `bundle.resources` map and an updater/signing overlay can be checked on Linux** with
+   `TAURI_CONFIG=<json> cargo check --locked --target x86_64-pc-windows-gnu` (scratch
+   `CARGO_TARGET_DIR`); it proves the config parses and the resource exists, and nothing about
+   whether the installer installs.
+7. **`gh release download` printed nothing and wrote no file in this sandbox, exit 0.** Fetching a
+   release asset worked with `curl -L` on the URL from `gh api repos/<o>/<r>/releases/latest`.
+   (How `actionlint` was obtained into the scratchpad to lint `desktop.yml`; it is not in the repo.)
 
 ### Two seat behaviours that cost a restart each — measured, not theorised
 

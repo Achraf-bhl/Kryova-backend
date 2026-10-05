@@ -157,7 +157,13 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     cookie_samesite: str = "lax"
 
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # Both spellings of the loopback origin, because a browser treats them as different origins
+    # and the desktop shell loads the app from the numeric one (CLAUDE.md, *Driving the GUI*
+    # 2a: Chromium resolves `localhost` to ::1 and the stack is IPv4). With only the first, the
+    # window opened and every API call failed CORS, which reads as "Failed to fetch".
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
+    )
     frontend_url: str = "http://localhost:3000"
     redis_url: str | None = None
     # How many server processes run. `uvicorn` and `gunicorn` both read this same

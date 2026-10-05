@@ -1741,6 +1741,63 @@ this file drives the ladder, with a screenshot each.
       `KinematicEngine` in `engines()` — though note that ordering is now justified by the
       kinematic engine being *exact*, not by Chrono being unverified, so it does not expire.
 
+- [ ] **G7 — ROAD_TO_10 Phase 4: the installer on a machine that did not build it (added
+      2026-10-05).** Everything the installer carries is staged and tested on Linux, and a real
+      cross-staging run produced a complete 1.4 GB tree. **Nothing has been installed or started
+      on Windows**, the workflow that does it has never run, and `lib.rs` has only been compiled
+      (`cargo check --target x86_64-pc-windows-gnu`, never linked or run). Read
+      `docs/DESKTOP_RELEASE.md` first; it is the runbook and it lists these as its last section.
+      1. **Run the pipeline once, with *publish* off.** Actions → Desktop → Run workflow. It is
+         written to fail legibly: read the run's summary (what was built, the backend commit,
+         whether it was signed), then `install.log`, then the `kryova-install-logs` artifact.
+         **Expect it to find something** — the PowerShell has had no syntax check, and the
+         runner's WebView2, desktop session and antivirus are assumptions. A green run settles
+         steps 2, 3, 7 and 9 below on a clean runner at once.
+      2. **A real build, here:** `npm run desktop:release` in `Kryova-frontend`. Record the
+         staging time, the compile time and **the MSI's size** (the staged tree is 1.4 GB, 313 MB of
+         it VTK; compressed is unmeasured). Check `src-tauri/bundle` carries none of `.env*`,
+         `src`, `scripts`, `src-tauri`, `tests`.
+      3. **Install it and start it from `Program Files`**, on this machine with no checkout in the
+         way (rename the repositories). Time the first launch — `initdb` and every migration on
+         the pinned EDB build under Defender — and read `backend.log`, `frontend.log` and
+         `pgdata.log` under `%LOCALAPPDATA%\Kryova`. Then launch again and time that: the
+         second launch is what the shell's 90-second budget is for.
+      4. **The heavy native parts from the bundled interpreter**, not the venv:
+         `backend\python\python.exe -c "import OCP, gmsh, scipy, openpyxl, ezdxf, faiss"`, then
+         one design build through the chatbot. This is the claim PyInstaller was refused on, and
+         it was never tested for the interpreter chosen instead. Also: does removing VTK (313
+         MB) break `import OCP`? Untested, so it ships.
+      5. **Defender, per build hash.** Scan the installed `kryova.exe` and read events 1116 and
+         1117 (CLAUDE.md, *The installed desktop app and Microsoft Defender*). The verdict is per
+         build and an unsigned build can be quarantined again; signing is the fix and needs a
+         certificate (ROAD_TO_10 4.5).
+      6. **IPC from the page** — the same question as G5, now with the installed app: in the
+         devtools console, `await window.__TAURI__.core.invoke("take_deep_links")` must answer an
+         array and not "not allowed". If it is refused, the capability's `remote.urls` did not do
+         what its documentation says and **none of the page's native powers work** (deep links,
+         the tray's status, the update notice). Also confirm the CSP in `proxy.ts` is the wall it
+         is described as: a page script that is not the app's own must not be able to call it.
+      7. **Squat a port.** Start any listener on 8000, then on 3000, and launch: the setup page
+         must say which half did not start. The database's port is chosen and moved if taken; the
+         API's and the frontend's are fixed, so this is expected to fail visibly rather than
+         work.
+      8. **Close the window and look for orphans:** `Get-Process python, node, postgres`. The shell
+         stops Postgres and the backend; whether the CATIA bridge daemon the backend spawned goes
+         with them is unmeasured, and a hard kill of the app (Task Manager) may leave all three.
+      9. **Uninstall:** `msiexec /x`, then *Apps & features*, `HKLM`, `HKCU` and the `WOW6432Node`
+         view must list no Kryova, and `%LOCALAPPDATA%\Kryova\pgdata` must still be there. A
+         0.1.2 NSIS row left by an older install (P7.5) is a different defect and will still show.
+      10. **The update round trip**, once the owner has a key and a host (neither exists): build a
+         beta, publish a newer one, and watch the older app offer it, install on a click, and come
+         back. Then publish a *downgrade* with an older release's signature and confirm the client
+         refuses it — that is `requireSignedVersion`, and it has only been read, never exercised.
+      11. **Compare the PostgreSQL archive's hash with EDB's** whenever EDB publishes one. The pin
+         in `desktop-runtime.json` is what Kryova measured on 2026-10-05, so it stops a later
+         substitution and cannot say the first file was what EDB meant.
+      Settles: whether the installer is a product or a build artefact — whether a person who has
+      never seen this repository can install one file, start it, lose nothing on uninstall, and
+      be offered an update that is checked before it is trusted.
+
 ---
 
 ### H. The hosted provider itself — DeepSeek, written 2026-10-04 from the vendor's API reference

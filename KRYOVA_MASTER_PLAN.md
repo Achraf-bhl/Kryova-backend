@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 78/90 = 87% | 33/39 eng-months = 84% |
-| **Programme** | 23/35 | 205/226 = 91% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 82/94 = 87% | 33/39 eng-months = 85% |
+| **Programme** | 23/35 | 208/230 = 91% | 174/190 eng-months = 92% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 89% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 61%, P9 71%, P11 89% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -7428,6 +7428,26 @@ scene in the Tauri app.
    written down** (lost key = no more updates for installed apps, ever — key in a hardware token or
    sealed secret store, never CI plaintext); staged rollout channels (stable/beta); `latest.json` +
    signatures published per release (P9's pipeline builds it).
+   > PARTIAL (2026-10-05) — **the client half exists; what only the owner can supply does not.**
+   > Built: the updater plugin is registered only in a build that carries a public key
+   > (`src-tauri/src/lib.rs`; a build with none says so in `shell.log` instead of failing to
+   > start). The release overlay (`scripts/desktop-config.mjs`) wires one endpoint per channel,
+   > refuses half an updater (a key without a host, or the reverse), refuses a host that is not
+   > https and a key that is not a public key, and turns **`requireSignedVersion` on**, so a
+   > response pairing a new version number with an older release's valid signature is refused by
+   > the client (that key was read out of `tauri-plugin-updater` 2.13.1's own `Config`, not
+   > recalled). `scripts/make-latest-json.mjs` builds the file from a signed MSI and refuses a
+   > signature recorded for a different version and a beta on the stable channel. The page asks once
+   > per launch and offers an install that waits for a click. Key custody is written down in
+   > `docs/DESKTOP_RELEASE.md`. **Not built, and not Kryova's to build:** the signing key
+   > (`tauri signer generate`, kept offline), the update host, and any release ever published.
+   > **Nothing has updated anything**: the client's refusals are tested and the round trip is not
+   > (THE QUEUE G7).
+   > Tested by: `../Kryova-frontend/src/lib/desktop-release.test.ts`,
+   > `../Kryova-frontend/src/lib/desktop-bridge.test.ts`,
+   > `../Kryova-frontend/src/components/desktop-bridge.test.tsx`.
+
+   <!-- superseded 2026-10-05 -->
    > NOT STARTED — blocked behind **P9 task 5**'s finding: the MSI launches a dev server from
    > checkout paths baked in at build time, so an update channel would ship an app that starts
    > nothing on any machine but the one that built it. *(Pointer corrected 2026-09-19: this line
@@ -7437,12 +7457,47 @@ scene in the Tauri app.
    desktop app on workstation installs; the `catia-bridge-panel` grows into a first-class status
    surface (connection, seat language, document binding, pending approvals). The tier/approval model
    already exists — the desktop UI is where destructive-tier approvals belong.
+   > PARTIAL (2026-10-05) — **the daemon now ships inside the installer.** `scripts/catia_bridge`
+   > is on the staged backend's allow-list (and `scripts/create_admin.py`, which mints a platform
+   > admin, is refused by name), pywin32 is a pinned, hashed line of the desktop lock, and
+   > `app/catia/local_bridge.py` finds the package from the application's own location and starts it
+   > with the bundled interpreter, so nothing about it names a checkout. The tray shows whether the
+   > bridge is connected. **Not claimed:** that a bundled daemon runs against a seat from an
+   > install (THE QUEUE G7); the panel's document binding and pending approvals as a first-class
+   > surface; and that closing the window ends the daemon on Windows, where the backend's child
+   > can outlive a hard kill of the app.
+   > Tested by: `tests/test_desktop_stage.py`,
+   > `../Kryova-frontend/src/components/desktop-bridge.test.tsx`.
+
+   <!-- superseded 2026-10-05 -->
    > PARTIAL — the Tauri shell and bridge panel exist. Code: `src-tauri/`,
    > `catia-bridge-panel.tsx`.
 
 3. **Desktop-only powers, used sparingly**: local file open/save into the attachment pipeline, OS
    notifications for long-run completion, deep links (`kryova://run/...`) from CI or email into the
    app.
+   > PARTIAL (2026-10-05) — **the native half is written; two of its three powers still have no
+   > caller.** Registered in the shell: `dialog`, `fs` (read-file only), `notification`,
+   > `deep-link`, `single-instance` and the tray, each granted at the narrowest permission that does
+   > its job, with no write access to the file system and no command execution, to the page by
+   > origin (`capabilities/default.json`, pinned by `desktop-bundle.test.ts`). **Deep links work
+   > end to end in code**: `links.rs` judges the *shape* only and holds each link, the page
+   > collects them, and `desktop-powers.ts`'s allow-list decides (three read-only targets, one id);
+   > a second launch hands its link to the first window; a refused link is shown, not swallowed.
+   > **Still unwired**: `sendNotice` (a run's completion) and the file-open dialog have no caller —
+   > a notification needs a list of the signed-in user's active runs (task 9), and the dialog needs
+   > the attachment composer. File associations are deliberately **not** registered: taking an
+   > extension from whatever opens it today is the user's decision. **Unverified without a webview
+   > (THE QUEUE G5):** that Tauri grants IPC to a remote loopback origin at all — and, because the
+   > page is the granted origin, the CSP in the frontend's `proxy.ts` is the only wall between an
+   > injected script and these commands.
+   > Tested by: `../Kryova-frontend/src/lib/desktop-bundle.test.ts`,
+   > `../Kryova-frontend/src/lib/desktop-bridge.test.ts`,
+   > `../Kryova-frontend/src/components/desktop-bridge.test.tsx`,
+   > `../Kryova-frontend/src/lib/desktop-powers.test.ts`, and `src-tauri/src/links.rs` under
+   > `rustc --test`.
+
+   <!-- superseded 2026-10-05 -->
    > PARTIAL (2026-09-17, evening) — **the decidable half is written, and this time it was
    > run.** `../Kryova-frontend/src/lib/desktop-powers.ts` (`7b7e7f0`), 27 tests through
    > vitest, `tsc --noEmit` and eslint clean, whole frontend suite green at 498.
@@ -7624,6 +7679,58 @@ scene in the Tauri app.
    > this machine, release profile, WiX candle+light, ~41 s Rust compile. **Built is not
    > installed**: nothing has run the installer and confirmed the app starts from it, so task 1 and
    > P9 task 4 both remain open and a release still needs a human.
+
+6. **The installed app makes its own database.** *(ROAD_TO_10 4.3, added 2026-10-05.)* An installed
+   Kryova has nobody to set up PostgreSQL, so the backend does: `python -m app.desktop`
+   (`app/desktop.py`) finds a home (`%LOCALAPPDATA%\Kryova`, never the install directory) and
+   `app/core/local_cluster.py` runs `initdb` there, starts the server, provisions two roles — an
+   admin that exists to make and back up the database, and an application role that is
+   `NOSUPERUSER NOBYPASSRLS`, so row-level security still enforces (CLAUDE.md, *Database* 3) —
+   migrates, and takes a `pg_dump` before any upgrade that changes the schema. Authentication is
+   scram on loopback only; a generated secrets file is written once and never regenerated; the port
+   is chosen, and moved if something holds it; the log sits beside the data directory (*Database*
+   4a); the server is stopped when the backend ends and by the shell on exit.
+   > PARTIAL (2026-10-05) — **built, and exercised against a real PostgreSQL on Linux; never run on
+   > Windows.** A clean home became a migrated database (every migration) in about two seconds, the
+   > roles read `rolsuper f / rolbypassrls f`, and a backup restored. `config.env` may tune the app
+   > but may not name the database, the signing key, the media folder or the origins. One trap
+   > found and pinned: `settings` is built once at import, so nothing under `app` is imported until
+   > the environment is complete, and the code's migration head is read by AST because three
+   > revisions import `settings`. **Not claimed:** `initdb` and the migrations under Windows
+   > antivirus on the pinned EDB build (whose SHA-256 is trust-on-first-use — EDB publishes none),
+   > and a first launch on a clean VM (THE QUEUE G7).
+   > Tested by: `tests/test_local_cluster.py`, `tests/test_desktop.py`,
+   > `tests/test_desktop_stage.py`.
+
+7. **The setup script's three wrong defaults.** *(ROAD_TO_10 4.4, added 2026-10-05.)* A developer's
+   `setup.mjs` made a `.venv` the shell does not look for, wrote a SQLite `DATABASE_URL` the backend
+   refuses at startup, and used `localhost` where the browser and the bridge split on IPv6.
+   > DONE (2026-10-05) — `scripts/setup.mjs` makes the venv the shell looks for, writes no SQLite
+   > URL, and every default is the numeric loopback address; the Tauri CSP dropped the removed
+   > Ollama port (`11434`) and `localhost`, and `backend_url()` is IPv4. Frontend `20346a0`.
+   > Tested by: `../Kryova-frontend/src/lib/desktop-bundle.test.ts`.
+
+8. **Logs that survive a crash.** *(ROAD_TO_10 4.8, added 2026-10-05.)* The shell truncated
+   `backend.log` and `frontend.log` on every launch, so relaunching to see whether a crash was a
+   one-off erased the evidence.
+   > DONE (2026-10-05) — each log is rotated (the last five launches are kept), the log directory is
+   > right on Linux and macOS, and the setup page has "Copy diagnostics": the failed checks plus the
+   > log tails, read through `/api/diagnostics`, which stays up when the backend does not. That
+   > route serves files, so it is opt-in twice, opens four fixed names, answers only a loopback
+   > Host, and redacts passwords in URLs, tokens, cookies and keys. Frontend `20346a0`. Not verified
+   > on Windows: `lib.rs` itself, which only `cargo check` has seen (THE QUEUE G7).
+   > Tested by: `../Kryova-frontend/src/lib/diagnostics.test.ts`,
+   > `../Kryova-frontend/src/app/api/diagnostics/route.test.ts`,
+   > `../Kryova-frontend/src/lib/diagnostics-report.test.ts`, and `src-tauri/src/logs.rs` under
+   > `rustc --test`.
+
+9. **A user's active runs, across projects.** *(ROAD_TO_10 4.7, added 2026-10-05.)* The tray's
+   running-jobs count and a notification when a background run ends both need one list, and the API
+   lists simulations per project only. A Linux task: an endpoint for the signed-in user's
+   non-terminal runs (organisation-scoped, cross-tenant is 404, paginated), then the page wiring —
+   the count on the tray, and `sendNotice` through `desktop-powers.ts::noticeFor` (which stays
+   silent under a minute).
+   > NOT STARTED — no endpoint exists; `DesktopBridge` says so in its own comment.
 
 ##### Phase P8 — Billing, quotas and metering #####
 
@@ -7889,6 +7996,32 @@ scene in the Tauri app.
 
 5. **Desktop release pipeline**: tauri build matrix (Windows first — the CATIA audience), signing,
    `latest.json` publication, channel promotion (beta → stable) as a pipeline step.
+   > PARTIAL (2026-10-05) — **the three blockers recorded below are fixed in the tree, and the
+   > pipeline is written; nothing has run on a Windows machine or a runner.** (1) The binary bakes
+   > no path: `desktop-build.mjs --bundled` stages first and compiles none in, and the shell finds
+   > what it runs beside its own executable. (2) The app is no longer a shell around a dev server:
+   > `scripts/stage-desktop.mjs` assembles the Next standalone server, a pinned Node, a pinned
+   > relocatable CPython carrying the backend's hashed wheels, and PostgreSQL's bin/lib/share —
+   > every download pinned by SHA-256 and refused on a mismatch. A real cross-staging run on Linux
+   > produced a complete 1.4 GB tree and **found a defect no unit test could**: one dynamic
+   > `path.join` in a route made Turbopack trace the whole project, so the frontend carried the
+   > source, `CLAUDE.md` and `src-tauri/target` — 5.3 GB, now 52 MB; the stager's forbidden list
+   > refused the first tree. (3) `.github/workflows/desktop.yml` builds the MSI, installs it on a
+   > **second, clean runner**, launches it, waits for `/health`, checks the database is under the
+   > user's data and not in the install, closes the app and checks no process is left, uninstalls,
+   > and checks no uninstall entry remains and the user's database survived — and only a signed
+   > build, on request, becomes a **draft** release. Every action is pinned to a commit; actionlint
+   > is clean and was shown to fail on a broken reference. **Not done, and why it is PARTIAL
+   > rather than done:** the workflow has never run, its PowerShell is not syntax-checked (no
+   > `pwsh` here), no certificate exists (a purchase, and a certificate issued today lives in a
+   > hardware module or a cloud service, so a `.pfx` secret fits only an older one), and no MSI
+   > size or build time has been measured. `docs/DESKTOP_RELEASE.md` is the runbook.
+   > Tested by: `../Kryova-frontend/src/lib/desktop-stage.test.ts`,
+   > `../Kryova-frontend/src/lib/desktop-workflow.test.ts`,
+   > `../Kryova-frontend/src/lib/desktop-release.test.ts`,
+   > `../Kryova-frontend/src/lib/desktop-bundle.test.ts`, `tests/test_desktop_stage.py`.
+
+   <!-- superseded 2026-10-05 -->
    > BLOCKED, and the reason is not scheduling (decided 2026-09-06). `src-tauri/src/lib.rs`
    > resolves both checkouts and node through `option_env!`, fixed at compile time by
    > `scripts/desktop-build.mjs`, and `tauri.conf.json` sets

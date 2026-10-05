@@ -31,6 +31,28 @@ JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 COOKIE_SAMESITE_VALUES = frozenset({"lax", "strict", "none"})
 ENVIRONMENTS = frozenset({"development", "test", "staging", "production"})
 
+#: Every limit a plan or a tenant may change (ROAD_TO_10 3.5). Each is also a global setting
+#: of the same name, which is what answers when neither a tenant override nor a plan does --
+#: the order `core/limits.py` resolves them in. Listed here, not in `metering`, because
+#: `plan_limits` below is validated against it and config imports nothing from the app.
+LIMIT_FIELDS: tuple[str, ...] = (
+    "max_concurrent_simulations_per_user",
+    "max_waiting_simulations_per_user",
+    "chat_requests_per_minute",
+    "simulation_requests_per_minute",
+    "mcp_requests_per_minute",
+    "catia_ops_per_minute",
+)
+
+#: The one limit for which 0 is a real answer: no queue at all, so a run past the concurrency
+#: limit is refused exactly as it was before queueing existed. For a per-minute rate, 0 would
+#: mean "refuse every request", which is a suspended account and not a limit.
+LIMITS_THAT_MAY_BE_ZERO: frozenset[str] = frozenset({"max_waiting_simulations_per_user"})
+
+#: The plan names `plan_limits` may use. Must equal `app.models.billing.Plan`'s values
+#: (`tests/test_plan_limits.py` compares them), because this module cannot import models.
+PLAN_NAMES: frozenset[str] = frozenset({"free", "team", "enterprise"})
+
 # Declared here rather than in `app/mail/transport.py` so the validator below can
 # read it without importing that module -- which imports these settings, and the
 # cycle would only show up as an ImportError at startup.
@@ -214,6 +236,11 @@ class Settings(BaseSettings):
     # solving are the most expensive thing this service does, so the quota is
     # what stops a single account from occupying every worker.
     max_concurrent_simulations_per_user: int = 3
+    # How many more runs one user may have *waiting* behind that limit (ROAD_TO_10 3.4). A
+    # run past the concurrency limit is queued and started when a slot frees, up to this many;
+    # past it, the request is refused with the position it would have taken. 0 turns queueing
+    # off and restores the old refusal.
+    max_waiting_simulations_per_user: int = 10
 
     # Per-principal request budgets (P1.6). These are *rate* limits, distinct
     # from the concurrency cap above and from P8's quotas: this is "how often
@@ -225,6 +252,13 @@ class Settings(BaseSettings):
     # MCP calls (E23.3). One `tools/call` is one request, and a client agent makes many per
     # task, so this is wider than the chat budget, which is one per turn.
     mcp_requests_per_minute: int = 120
+    # Limits by plan (ROAD_TO_10 3.5), as JSON: `{"free": {"chat_requests_per_minute": 10},
+    # "team": {"chat_requests_per_minute": 40}}`. Any name in `LIMIT_FIELDS`, any plan in
+    # `PLAN_NAMES`. **Empty by default and that is the honest state**: a price list is the
+    # operator's decision, and a plan that says nothing falls through to the global setting of
+    # the same name, so a fresh deployment behaves exactly as it did before plans carried limits.
+    # A per-tenant override on the billing account outranks a plan.
+    plan_limits: dict[str, dict[str, int]] = Field(default_factory=dict)
     # Login, the second factor and the silent token refresh, counted *per address*
     # (ROAD_TO_10 3.3). Wider than the ten a minute the other pre-sign-in routes keep,
     # because one office behind one NAT is one address and a hundred engineers all signing
@@ -665,6 +699,35 @@ class Settings(BaseSettings):
                 f"got {value!r}."
             )
         return candidate
+
+    @field_validator("plan_limits")
+    @classmethod
+    def _plan_limits_name_real_things(
+        cls, value: dict[str, dict[str, int]]
+    ) -> dict[str, dict[str, int]]:
+        """A typo in `PLAN_LIMITS` must be a startup error, not a limit that silently never applies.
+
+        An unknown plan or limit name would be read as "this plan says nothing" and fall
+        through to the global setting -- configured, parsed, and doing nothing, which is the
+        failure class this file refuses everywhere else.
+        """
+        for plan, limits in value.items():
+            if plan not in PLAN_NAMES:
+                raise ValueError(
+                    f"PLAN_LIMITS names a plan {plan!r}; the plans are {', '.join(sorted(PLAN_NAMES))}."
+                )
+            for name, number in limits.items():
+                if name not in LIMIT_FIELDS:
+                    raise ValueError(
+                        f"PLAN_LIMITS[{plan!r}] names a limit {name!r}; the limits are "
+                        f"{', '.join(LIMIT_FIELDS)}."
+                    )
+                minimum = 0 if name in LIMITS_THAT_MAY_BE_ZERO else 1
+                if number < minimum:
+                    raise ValueError(
+                        f"PLAN_LIMITS[{plan!r}][{name!r}] is {number}; it must be at least {minimum}."
+                    )
+        return value
 
     @property
     def is_production(self) -> bool:

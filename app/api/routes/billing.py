@@ -42,6 +42,7 @@ from app.api.deps import (
     PrincipalDep,
     ViewerOrganisation,
 )
+from app.core import limits
 from app.core.estimates import estimate_run
 from app.core.metering import (
     METERING,
@@ -233,6 +234,11 @@ def update_billing_account(
         "max_concurrent_simulations_per_user",
         "max_media_bytes",
         "ai_daily_token_budget",
+        "max_waiting_simulations_per_user",
+        "chat_requests_per_minute",
+        "simulation_requests_per_minute",
+        "mcp_requests_per_minute",
+        "catia_ops_per_minute",
     ):
         value = getattr(payload, name)
         if value is None:
@@ -251,6 +257,9 @@ def update_billing_account(
 
     db.flush()
     db.commit()
+    # A limit is cached per person for a few seconds (`core/limits.py`); a plan change should
+    # not wait out the cache in the process that made it. Other workers do, for at most that long.
+    limits.forget()
     return read_billing_account(organisation, db)
 
 

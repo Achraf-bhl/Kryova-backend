@@ -1204,6 +1204,14 @@ class PlanAllowance:
     max_concurrent_simulations_per_user: int | None = None
     max_media_bytes: int | None = None
     ai_daily_token_budget: int | None = None
+    #: The rate and queue limits ROAD_TO_10 3.5 moved off global constants. Read from
+    #: `settings.plan_limits` and `None` unless the operator wrote one, for the same reason
+    #: as everything above: a plan that says nothing falls through to the global setting.
+    max_waiting_simulations_per_user: int | None = None
+    chat_requests_per_minute: int | None = None
+    simulation_requests_per_minute: int | None = None
+    mcp_requests_per_minute: int | None = None
+    catia_ops_per_minute: int | None = None
     #: Per-period allowance in each meter's scaled units. Empty for the same
     #: reason as the fields above.
     meter_allowances: Mapping[Meter, int] = _NO_ALLOWANCES
@@ -1223,6 +1231,16 @@ def _plan_meters(seconds: int, tokens: int, storage: int) -> Mapping[Meter, int]
         Meter.STORAGE_BYTES: storage * Meter.STORAGE_BYTES.scale,
     }
     return MappingProxyType({meter: units for meter, units in scaled.items() if units > 0})
+
+
+def _plan_limits(plan: Plan) -> dict[str, Any]:
+    """The rate and queue limits the operator wrote for `plan` in `PLAN_LIMITS`, and no others.
+
+    Names were checked when the settings loaded (`config._plan_limits_name_real_things`), so
+    every key here is a real `PlanAllowance` field; a plan the operator said nothing about
+    contributes nothing, and each of its limits then falls through to the global setting.
+    """
+    return dict(settings.plan_limits.get(plan.value, {}))
 
 
 def build_plans() -> Mapping[Plan, PlanAllowance]:
@@ -1248,6 +1266,7 @@ def build_plans() -> Mapping[Plan, PlanAllowance]:
                     settings.free_plan_ai_tokens,
                     settings.free_plan_storage_bytes,
                 ),
+                **_plan_limits(Plan.FREE),
             ),
             Plan.TEAM: PlanAllowance(
                 plan=Plan.TEAM,
@@ -1256,8 +1275,9 @@ def build_plans() -> Mapping[Plan, PlanAllowance]:
                     settings.team_plan_ai_tokens,
                     settings.team_plan_storage_bytes,
                 ),
+                **_plan_limits(Plan.TEAM),
             ),
-            Plan.ENTERPRISE: PlanAllowance(plan=Plan.ENTERPRISE),
+            Plan.ENTERPRISE: PlanAllowance(plan=Plan.ENTERPRISE, **_plan_limits(Plan.ENTERPRISE)),
         }
     )
 
@@ -1347,6 +1367,15 @@ _QUOTA_FIELDS: Final[tuple[tuple[str, str], ...]] = (
     ),
     ("max_media_bytes", "largest single blob the store will accept, in bytes"),
     ("ai_daily_token_budget", "tokens one user may spend per UTC day; 0 means unlimited"),
+    (
+        "max_waiting_simulations_per_user",
+        "simulations one user may have waiting for a slot behind the limit above; 0 means "
+        "none wait and a run past it is refused",
+    ),
+    ("chat_requests_per_minute", "chat requests one person may send per minute"),
+    ("simulation_requests_per_minute", "simulations one person may ask for per minute"),
+    ("mcp_requests_per_minute", "MCP requests one person may make per minute"),
+    ("catia_ops_per_minute", "CATIA operations one workstation may run per minute"),
 )
 
 

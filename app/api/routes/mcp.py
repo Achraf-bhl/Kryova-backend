@@ -50,7 +50,7 @@ from app.api.deps import (
     MediaStoreDep,
     SessionScopeDep,
 )
-from app.api.rate_limit import RateLimit
+from app.api.rate_limit import PlanRateLimit
 from app.api.routes.ai import _owned_conversation
 from app.core.config import settings
 
@@ -61,7 +61,7 @@ router = APIRouter(prefix="/mcp", tags=["mcp"])
 #: `serverInfo.version` is required to be a string and this service has no release number.
 SERVER_VERSION = "unreleased"
 
-_mcp_rate_limit = RateLimit("mcp", settings.mcp_requests_per_minute, window_seconds=60)
+_mcp_rate_limit = PlanRateLimit("mcp", "mcp_requests_per_minute")
 
 
 def _origin_guard(request: Request) -> None:

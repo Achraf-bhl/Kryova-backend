@@ -41,6 +41,7 @@ from app.ai import prompts
 from app.ai.resume import HISTORY_PAGE_LIMIT, build_history
 from app.ai.state import bound_document_name
 from app.catia_kb import catia_knowledge
+from app.core import limits
 from app.core.config import settings
 from app.geometry import backends
 from app.geometry.formats import GEOMETRY_FORMATS
@@ -3266,7 +3267,7 @@ class ToolBox:
                 f"{running} simulation(s) are already queued or running in this project. "
                 "Wait for them to finish before submitting another."
             )
-        self._assert_within_quota()
+        self._assert_within_quota(project)
 
         job = SimulationJob(
             project_id=project.id,
@@ -3287,7 +3288,7 @@ class ToolBox:
         self.db.refresh(job)
         return job, version
 
-    def _assert_within_quota(self) -> None:
+    def _assert_within_quota(self, project: Project) -> None:
         """Refuse a run when the user already holds their share of the workers.
 
         The same ceiling the HTTP route applies (`_assert_within_quota` in
@@ -3295,7 +3296,9 @@ class ToolBox:
         submit to the same shared queue, and the agent is the path that can
         submit repeatedly without a human clicking anything.
         """
-        limit = settings.max_concurrent_simulations_per_user
+        limit = limits.for_organisation(
+            self.db, project.organisation_id, "max_concurrent_simulations_per_user"
+        ).value
         running = (
             self.db.scalar(
                 select(func.count())

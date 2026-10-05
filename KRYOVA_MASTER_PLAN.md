@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 76/88 = 86% | 33/39 eng-months = 84% |
-| **Programme** | 23/35 | 203/224 = 91% | 173/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 77/89 = 87% | 33/39 eng-months = 84% |
+| **Programme** | 23/35 | 204/225 = 91% | 173/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 88% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 50%, P9 64%, P11 89% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -8679,6 +8679,35 @@ machine with no network, so the phase is open until a run with a key confirms it
     > here), and no hosted endpoint was asked to rate-limit us.
     > Tested by: `tests/test_continuation.py`, `tests/test_openai_compatible_resilience.py`,
     > `tests/test_ai_providers.py`.
+
+27. **Limits come from the plan, in one order, everywhere.**
+    *(ROAD_TO_10 3.5.)* Six numbers were module constants -- the concurrent-run ceiling, the
+    queue behind it, and the per-minute budgets for chat, simulations, MCP and CATIA -- so a
+    free account and a paid team met the same ones. **And one of them was worse than a
+    constant:** the quota surface showed `max_concurrent_simulations_per_user` with its
+    source while the route and the agent tool read `settings` directly, so an owner could
+    raise it, see "tenant override" printed beside it, and never have it applied.
+    > DONE (2026-10-05) — `core/limits.py` is the one resolver: tenant override on the billing
+    > account, then the plan's (`PLAN_LIMITS`, JSON in settings, empty by default so a fresh
+    > deployment behaves as before), then the global setting; it is `metering.quota_envelope`'s
+    > order, so what an owner is shown and what a request meets are one number. `for_organisation`
+    > serves project-bound limits (the route and the agent tool now use it for the concurrency
+    > ceiling -- **the override that was displayed and never applied now applies**);
+    > `for_user` serves rates, which are decided before a body is read, and gives a person in
+    > several organisations **the most generous of them** (cached 30 s per person; the process
+    > that changes a plan forgets at once). `PlanRateLimit` carries the plan's budget on chat,
+    > simulations and MCP with the key unchanged (the principal), and CATIA operations take it
+    > per workstation owner, the hour staying ten times the minute. Five nullable columns on
+    > `billing_accounts` (migration `16c0cc4190d5`, no backfill: null is today's behaviour);
+    > `PUT /billing` takes them, `-1` clears, and **0 is refused for a rate** (it would read as
+    > both "unlimited" and "nothing allowed") but real for the queue length. A typo in
+    > `PLAN_LIMITS` -- unknown plan, unknown limit, a rate under 1 -- is a startup error rather
+    > than a limit that silently never applies. **Not done:** the plan *numbers* are the
+    > operator's decision and none is shipped; a change reaches other workers within 30 s, not at
+    > once; `max_waiting_simulations_per_user` is declared and resolvable but nothing reads it
+    > until 3.4 (task 28).
+    > Tested by: `tests/test_plan_limits.py`, `tests/test_catia_dispatch.py`,
+    > `tests/test_billing.py`, `tests/test_simulations.py`.
 
 ---
 

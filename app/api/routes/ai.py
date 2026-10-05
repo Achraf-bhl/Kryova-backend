@@ -62,7 +62,7 @@ from app.api.deps import (
     OwnedProject,
     SessionScopeDep,
 )
-from app.api.rate_limit import RateLimit
+from app.api.rate_limit import PlanRateLimit, RateLimit
 from app.core import interruption
 from app.core.config import settings
 from app.core.metering import Cause, LedgerSink, record_tokens, usage_scope
@@ -777,9 +777,7 @@ def _message_count(db: Session, conversation_id: str) -> int:
 #: share one budget deliberately: they are two ways to ask for the same turn,
 #: and separate budgets would just mean a client alternating between them gets
 #: double.
-_chat_rate_limit = RateLimit(
-    "ai.chat", settings.chat_requests_per_minute, window_seconds=60
-)
+_chat_rate_limit = PlanRateLimit("ai.chat", "chat_requests_per_minute")
 
 
 def _turn_message(db: Session, conversation: Conversation, payload: ChatRequest) -> str:

@@ -377,6 +377,59 @@ def test_rate_limits_are_per_device(wired, db_session, monkeypatch):
     assert dispatch._ops_per_minute.check(f"catia:min:{other.name}") is True
 
 
+class TestTheBudgetIsThePlansNotAConstant:
+    """ROAD_TO_10 3.5. The per-minute figure is the signed-in owner's: override, plan, then
+    the setting -- and the hour stays ten times it."""
+
+    @pytest.fixture
+    def on_a_plan(self, wired, auth_client, monkeypatch):
+        from app.core import limits
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "plan_limits", {"free": {"catia_ops_per_minute": 2}})
+        limits.forget()
+        response = auth_client.post("/api/v1/organisations", json={"name": "Kryova Machines"})
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    def test_the_plans_minute_budget_binds_and_the_message_names_it(self, wired, on_a_plan):
+        for _ in range(2):
+            run(wired, "catia_measure")
+
+        with pytest.raises(CatiaError, match="limit of 2 CATIA operations per minute"):
+            run(wired, "catia_measure")
+
+    def test_the_hour_budget_is_ten_times_the_plans_minute(self, wired, on_a_plan):
+        for _ in range(20):
+            dispatch._ops_per_minute.reset()
+            run(wired, "catia_measure")
+        dispatch._ops_per_minute.reset()
+
+        with pytest.raises(CatiaError, match="limit of 20 CATIA operations per hour"):
+            run(wired, "catia_measure")
+
+    def test_a_tenant_override_beats_the_plan(self, wired, on_a_plan, auth_client):
+        response = auth_client.put(
+            f"/api/v1/organisations/{on_a_plan}/billing", json={"catia_ops_per_minute": 4}
+        )
+        assert response.status_code == 200, response.text
+
+        for _ in range(4):
+            run(wired, "catia_measure")
+        with pytest.raises(CatiaError, match="limit of 4 CATIA operations per minute"):
+            run(wired, "catia_measure")
+
+    def test_with_nothing_written_the_limiters_own_budget_stands(self, wired, monkeypatch):
+        # The path every deployment without a PLAN_LIMITS is on, and what the older tests
+        # above pin by lowering `_max` directly.
+        monkeypatch.setattr(dispatch._ops_per_minute, "_max", 2)
+        run(wired, "catia_measure")
+        run(wired, "catia_measure")
+
+        with pytest.raises(CatiaError, match="limit of 2 CATIA operations per minute"):
+            run(wired, "catia_measure")
+
+
 # -- auto-checkpointing ------------------------------------------------------
 
 

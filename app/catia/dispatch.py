@@ -73,6 +73,7 @@ from app.catia_kb.ui import (
     resolve_command,
     resolve_workbench,
 )
+from app.core import limits
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.geometry import backends
@@ -690,7 +691,7 @@ def call_catia(
             return data
 
         device, connection = _resolve_connection(db, user_id)
-        _enforce_rate_limit(device.id)
+        _enforce_rate_limit(db, user_id, device.id)
         if spec.tier is CatiaTier.DESTRUCTIVE:
             _enforce_approval(spec, user_id, conversation_id, arguments)
 
@@ -1225,16 +1226,25 @@ def _resolve_ui(tool: str, arguments: dict[str, Any], language: str | None) -> d
     }
 
 
-def _enforce_rate_limit(device_id: str) -> None:
-    if not _ops_per_minute.check(f"catia:min:{device_id}"):
+def _enforce_rate_limit(db: Session, user_id: str, device_id: str) -> None:
+    """Spend one operation of this workstation's budget, which is its owner's plan's.
+
+    The per-minute figure is resolved through `core/limits` -- tenant override, then plan,
+    then the global setting -- and the per-hour one stays ten times it. When the setting is
+    what answers, the limiters' own budgets stand, as they always did.
+    """
+    minute = limits.for_user(db, user_id, "catia_ops_per_minute")
+    per_minute = _ops_per_minute.max_requests if minute.from_settings else minute.value
+    per_hour = _ops_per_hour.max_requests if minute.from_settings else minute.value * 10
+    if not _ops_per_minute.hit(f"catia:min:{device_id}", per_minute).allowed:
         raise CatiaError(
-            f"This workstation has hit its limit of {settings.catia_ops_per_minute} CATIA "
+            f"This workstation has hit its limit of {per_minute} CATIA "
             "operations per minute. Wait a moment before continuing, and prefer one "
             "parameter change over a burst of small edits."
         )
-    if not _ops_per_hour.check(f"catia:hour:{device_id}"):
+    if not _ops_per_hour.hit(f"catia:hour:{device_id}", per_hour).allowed:
         raise CatiaError(
-            f"This workstation has hit its limit of {settings.catia_ops_per_minute * 10} "
+            f"This workstation has hit its limit of {per_hour} "
             "CATIA operations per hour. Stop and tell the user; something is looping."
         )
 

@@ -400,6 +400,15 @@ class BillingAccount(UUIDPrimaryKey, TimestampMixin, Base):
     )
     max_media_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
     ai_daily_token_budget: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    #: Rate and queue limits (ROAD_TO_10 3.5), null meaning the plan's or the global setting.
+    #: For the four per-minute rates a stored 0 is refused at the API -- it would be an
+    #: account that may do nothing, which is a suspension and not a limit -- but for
+    #: `max_waiting_simulations_per_user` 0 is real: nothing waits.
+    max_waiting_simulations_per_user: Mapped[int | None] = mapped_column(Integer, default=None)
+    chat_requests_per_minute: Mapped[int | None] = mapped_column(Integer, default=None)
+    simulation_requests_per_minute: Mapped[int | None] = mapped_column(Integer, default=None)
+    mcp_requests_per_minute: Mapped[int | None] = mapped_column(Integer, default=None)
+    catia_ops_per_minute: Mapped[int | None] = mapped_column(Integer, default=None)
     #: What the whole organisation may spend on the model per UTC day / calendar
     #: month, in micro-dollars (`app/ai/pricing.py`). Null means the global
     #: `AI_ORG_*_COST_BUDGET_USD`; **0 is a real override meaning "this tenant is

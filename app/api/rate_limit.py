@@ -34,11 +34,14 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy.orm import Session
 
+from app.core import limits
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.security import decode_access_token
 
 logger = logging.getLogger(__name__)
@@ -524,6 +527,43 @@ class RateLimit:
     def reset(self) -> None:
         """Clear this limit's state. For tests and for the admin panel."""
         self._limiter.reset()
+
+
+class PlanRateLimit(RateLimit):
+    """A `RateLimit` whose budget is the caller's plan's, not a constant (ROAD_TO_10 3.5).
+
+    `field` names one of the per-minute settings (`chat_requests_per_minute`, ...). The
+    budget is resolved per request -- tenant override, then plan, then that global setting,
+    through `core/limits.for_user` -- and **the key is unchanged**: still the principal where
+    there is one, so two people on one plan do not share a budget. A caller nobody has signed
+    in (an address, not a person) has no plan and gets the global setting, which is what the
+    budget was before plans carried limits.
+
+    The database session is the request's own (`get_db` is cached per request), so the lookup
+    costs nothing extra in a route that already has one, and a test that overrides `get_db`
+    sees the same rows the route does.
+    """
+
+    def __init__(self, scope: str, field: str, window_seconds: int = 60) -> None:
+        super().__init__(scope, lambda _request: int(getattr(settings, field)), window_seconds)
+        self.field = field
+
+    def __call__(  # type: ignore[override]
+        self, request: Request, db: Annotated[Session, Depends(get_db)]
+    ) -> None:
+        principal = principal_id(request)
+        budget = (
+            limits.for_user(db, principal, self.field).value
+            if principal is not None
+            else limits.global_limit(self.field).value
+        )
+        enforce(
+            request,
+            self._limiter,
+            limit_key(request, scope=self.scope),
+            max_requests=budget,
+            detail=None,
+        )
 
 
 # ---------------------------------------------------------------------------

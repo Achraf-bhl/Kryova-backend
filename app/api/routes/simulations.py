@@ -17,9 +17,8 @@ from app.api.deps import (
     PrincipalDep,
     SessionScopeDep,
 )
-from app.api.rate_limit import RateLimit
-from app.core import interruption
-from app.core.config import settings
+from app.api.rate_limit import PlanRateLimit
+from app.core import interruption, limits
 from app.core.metering import check_quota
 from app.media import MediaNotFound
 from app.models import GeometryVersion, JobStatus, Meter, Project, SimulationJob
@@ -63,8 +62,13 @@ def _resolve_geometry(db: DbSession, project_id: str, version: int | None) -> Ge
     return geometry
 
 
-def _assert_within_quota(db: DbSession, owner_id: str) -> None:
+def _assert_within_quota(db: DbSession, owner_id: str, organisation_id: str) -> None:
     """Refuse a run when the user already holds their share of the workers.
+
+    The ceiling is the *organisation's* (`core/limits`): a tenant override, then its plan's,
+    then the global setting. Until ROAD_TO_10 3.5 this read `settings` directly while the quota
+    surface displayed the override, so an owner could raise a limit, see it recorded, and never
+    have it applied.
 
     Meshing and solving are the most expensive thing this service does, and the
     queue is shared, so without a per-user ceiling one account can occupy every
@@ -72,7 +76,9 @@ def _assert_within_quota(db: DbSession, owner_id: str) -> None:
     the same rule before it proposes a run (`app/ai/tools.py`); this is the one
     that actually binds, because the HTTP route is reachable without it.
     """
-    limit = settings.max_concurrent_simulations_per_user
+    limit = limits.for_organisation(
+        db, organisation_id, "max_concurrent_simulations_per_user"
+    ).value
     running = (
         db.scalar(
             select(func.count())
@@ -197,9 +203,7 @@ def _refuse_a_thermal_run(job: SimulationJob) -> None:
 #: `max_concurrent_simulations_per_user`, which caps how many run at once: this
 #: caps how fast they can be *asked for*, which is what a client stuck in a
 #: retry loop does to a queue.
-_simulation_rate_limit = RateLimit(
-    "simulations.create", settings.simulation_requests_per_minute, window_seconds=60
-)
+_simulation_rate_limit = PlanRateLimit("simulations.create", "simulation_requests_per_minute")
 
 
 @router.post(
@@ -217,7 +221,7 @@ def create_simulation(
     session_scope: SessionScopeDep,
 ) -> SimulationJob:
     """Queue a mesh-and-solve run. Returns immediately with a job to poll."""
-    _assert_within_quota(db, project.owner_id)
+    _assert_within_quota(db, project.owner_id, project.organisation_id)
     _assert_within_allowance(db, project.organisation_id)
     geometry = _resolve_geometry(db, project.id, payload.geometry_version)
     temperature_source = (

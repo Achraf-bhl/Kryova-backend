@@ -362,7 +362,7 @@ Today:
   - The fourth simulation past `max_concurrent_simulations_per_user=3` is refused today. Queue it
     instead, with a visible position, and start it when a slot frees. It still respects the cost
     estimate (`/billing/estimate`) and the plan's limits.
-- [ ] **3.5 Limits per plan, not global constants.** [Linux] **M** → P8
+- [x] **3.5 Limits per plan, not global constants.** [Linux] **M** → P8
   - Read every limit above from the organisation's billing plan
     (`Kryova-backend/app/api/routes/billing.py`, `PUT /billing/plan`), with config values as the
     defaults.

@@ -19,7 +19,7 @@ from app.api.deps import get_media_service, get_session_scope
 from app.api.rate_limit import account_limiter, auth_limiter, login_limiter
 from app.api.routes.attachments import get_attachment_look
 from app.catia import local_bridge
-from app.core import email_verification, maintenance
+from app.core import email_verification, limits, maintenance
 from app.core.config import _as_psycopg_url, settings
 from app.core.database import Base, get_db
 from app.jobs import InlineJobQueue, get_job_queue
@@ -259,11 +259,15 @@ def _fresh_rate_limits() -> Iterator[None]:
     """
     for limiter in (auth_limiter, login_limiter, account_limiter):
         limiter.reset()
+    limits.forget()
     try:
         yield
     finally:
         for limiter in (auth_limiter, login_limiter, account_limiter):
             limiter.reset()
+        # `core/limits` keeps one person's resolved limits for 30 s; two tests that reuse a
+        # user id (or a recycled uuid in a rolled-back transaction) must not share a plan.
+        limits.forget()
 
 
 @pytest.fixture

@@ -23,7 +23,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.billing import Meter, Plan
 
@@ -174,11 +174,39 @@ class BillingAccountUpdate(BaseModel):
     max_concurrent_simulations_per_user: int | None = Field(default=None, ge=-1)
     max_media_bytes: int | None = Field(default=None, ge=-1)
     ai_daily_token_budget: int | None = Field(default=None, ge=-1)
+    #: Rate and queue limits (ROAD_TO_10 3.5). `-1` clears, as above. `0` is refused for the
+    #: four per-minute rates (see the validator) and is real for `max_waiting_...`: nothing waits.
+    max_waiting_simulations_per_user: int | None = Field(default=None, ge=-1)
+    chat_requests_per_minute: int | None = Field(default=None, ge=-1)
+    simulation_requests_per_minute: int | None = Field(default=None, ge=-1)
+    mcp_requests_per_minute: int | None = Field(default=None, ge=-1)
+    catia_ops_per_minute: int | None = Field(default=None, ge=-1)
     #: Dollars the whole organisation may spend on the model per UTC day / month.
     #: `-1` clears the override (back to the global setting); `0` makes this tenant
     #: unlimited, which is a different thing and is deliberately expressible.
     ai_org_daily_cost_budget_usd: Decimal | None = Field(default=None, ge=-1)
     ai_org_monthly_cost_budget_usd: Decimal | None = Field(default=None, ge=-1)
+
+    @field_validator(
+        "chat_requests_per_minute",
+        "simulation_requests_per_minute",
+        "mcp_requests_per_minute",
+        "catia_ops_per_minute",
+    )
+    @classmethod
+    def _a_rate_of_zero_is_not_a_limit(cls, value: int | None) -> int | None:
+        """Refuse 0 for a per-minute rate, in words, rather than store an account that can do nothing.
+
+        Unlike `ai_org_*_budget_usd`, where 0 means *unlimited*, 0 here would read either way to
+        whoever typed it -- unlimited, or none allowed -- and one of the two readings bricks an
+        organisation. A suspension is a different act and deserves its own control.
+        """
+        if value == 0:
+            raise ValueError(
+                "A rate of 0 is ambiguous: it could mean unlimited or nothing allowed. Use a "
+                "number of at least 1, or -1 to go back to the plan's or the global setting."
+            )
+        return value
 
 
 class UsageRollupRead(BaseModel):

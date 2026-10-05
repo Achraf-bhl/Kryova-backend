@@ -361,9 +361,9 @@ class TestConcurrencyQuota:
     def test_a_run_is_refused_once_the_quota_is_full(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
     ) -> None:
-        from app.api.routes import simulations
+        from app.core.config import settings
 
-        monkeypatch.setattr(simulations.settings, "max_concurrent_simulations_per_user", 2)
+        monkeypatch.setattr(settings, "max_concurrent_simulations_per_user", 2)
         self._queue_jobs(auth_client, project_with_geometry, 2)
 
         response = auth_client.post(
@@ -376,9 +376,9 @@ class TestConcurrencyQuota:
     def test_the_message_says_how_to_proceed(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
     ) -> None:
-        from app.api.routes import simulations
+        from app.core.config import settings
 
-        monkeypatch.setattr(simulations.settings, "max_concurrent_simulations_per_user", 1)
+        monkeypatch.setattr(settings, "max_concurrent_simulations_per_user", 1)
         self._queue_jobs(auth_client, project_with_geometry, 1)
 
         detail = auth_client.post(
@@ -390,9 +390,9 @@ class TestConcurrencyQuota:
     def test_the_quota_counts_across_a_user_s_projects_not_within_one(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
     ) -> None:
-        from app.api.routes import simulations
+        from app.core.config import settings
 
-        monkeypatch.setattr(simulations.settings, "max_concurrent_simulations_per_user", 1)
+        monkeypatch.setattr(settings, "max_concurrent_simulations_per_user", 1)
         self._queue_jobs(auth_client, project_with_geometry, 1)
 
         # A second project of the same user must not reset the budget.
@@ -410,9 +410,9 @@ class TestConcurrencyQuota:
     def test_finished_runs_do_not_count(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str, monkeypatch
     ) -> None:
-        from app.api.routes import simulations
+        from app.core.config import settings
 
-        monkeypatch.setattr(simulations.settings, "max_concurrent_simulations_per_user", 1)
+        monkeypatch.setattr(settings, "max_concurrent_simulations_per_user", 1)
         # Jobs run inline here, so this one is already SUCCEEDED on return.
         assert run(auth_client, project_with_geometry)["status"] == "succeeded"
         assert run(auth_client, project_with_geometry)["status"] == "succeeded"
@@ -1285,10 +1285,11 @@ class TestATransientConductionRunCanBeAskedFor:
         """What the row says before the runner overwrites it with what ran. The
         three settings default to one value, so they are moved apart here."""
         from app.api.routes import simulations as routes
+        from app.core.config import settings
 
-        monkeypatch.setattr(routes.settings, "solver_backend", "structural-only")
-        monkeypatch.setattr(routes.settings, "conduction_backend", "steady-only")
-        monkeypatch.setattr(routes.settings, "transient_conduction_backend", "transient-only")
+        monkeypatch.setattr(settings, "solver_backend", "structural-only")
+        monkeypatch.setattr(settings, "conduction_backend", "steady-only")
+        monkeypatch.setattr(settings, "transient_conduction_backend", "transient-only")
         assert routes._requested_solver(analysis) == expected
 
     def test_an_identical_second_run_is_a_cache_hit_and_a_longer_one_is_not(

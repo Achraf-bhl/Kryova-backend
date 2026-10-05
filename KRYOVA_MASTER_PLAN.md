@@ -71,9 +71,9 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
-| Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
+| Engineering — E1–E23 | 17/24 | 128/137 = 93% | 141/151 eng-months = 93% |
 | Product — P1–P11 | 6/11 | 86/101 = 85% | 33/39 eng-months = 85% |
-| **Programme** | 23/35 | 212/237 = 90% | 174/190 eng-months = 91% |
+| **Programme** | 23/35 | 214/238 = 90% | 174/190 eng-months = 92% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 59%, P9 71%, P11 89% |
+| in flight | E8 92%, E9 75%, E15 83%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 59%, P9 71%, P11 89% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -3704,6 +3704,45 @@ answerable meaning.
    > rebuilds. That argument has been the basis of the OCCT decision since the plan was written
    > and had never been measured. Tested by: `tests/test_observe*.py` (68 tests). Code:
    > `app/observe/` (5 modules).
+
+6. **Know the machine, and size the work to it** (ROAD_TO_10 6.1, 6.2). `job_workers = 2` was typed;
+   nothing in `app/` read a core count or the memory, so every later decision about parallelism or
+   admission would have been a guess about a machine nobody had looked at.
+   > DONE (2026-10-05) — **the machine is probed once and the pool is sized from it; an explicit
+   > setting always wins, and the startup log and `/admin/health` say which one is in force.**
+   > `app/core/hardware.py` reads logical and physical cores and total and *available* memory
+   > from the standard library alone (no `psutil`: a new dependency on a path every install runs,
+   > for three small reads). Three facts it will not get wrong: `os.cpu_count()` is the *host's*,
+   > so the usable count is the affinity mask capped by a cgroup CPU quota; `MemTotal` is the
+   > host's, so a cgroup limit below it wins; and *available* (`MemAvailable`, Windows
+   > `ullAvailPhys`) is asked live and never stored, because `MemFree` calls a healthy machine
+   > full. A physical-core count the platform does not report is **None**, never invented.
+   > `app/core/compute_plan.py` derives `workers = clamp((physical − reserve) // 3, 1, 4)` and
+   > `threads = budget // workers`, with one core kept for CATIA and the system on a machine of
+   > eight or fewer and two above that, none on a dual-core. **The three and the four are chosen,
+   > not measured**, and the module says so: no timing shows they are the best values.
+   > **Explicit `JOB_WORKERS` / `SOLVER_THREADS` are used as given, even oversubscribing**, and
+   > the plan then reports `oversubscribed` and the log warns. Wired into `get_job_queue`, into
+   > CalculiX's child (`OMP_NUM_THREADS`, which is the one thread count this process can set per
+   > solve) and into the autoscale policy. The in-house solver's BLAS threads are fixed when
+   > numpy loads and are **not** touched: a setting that pretended to would be a promise the
+   > solver cannot keep (that needs processes, task 8).
+   > **Interface changes, stated:** `settings.job_workers` is `int | None` (default None =
+   > derived, was 2) and `solver_threads` is new; read the figure through
+   > `compute_plan.current()`. `GET /admin/health` gains an additive `compute` block
+   > (hardware, live available memory, the plan with its basis). A deployment that set
+   > `JOB_WORKERS=2` explicitly keeps 2. No migration. `.env.example` documents both.
+   > **The setup page** is the offline wizard and cannot read an authenticated route, and a
+   > machine's specification is not for the public `/health`; its "Copy diagnostics" already
+   > carries the backend log tail, which now holds the `hardware:` and `compute plan:` lines.
+   > **Not claimed:** the Windows reads (`GlobalMemoryStatusEx`,
+   > `GetLogicalProcessorInformation`) have never run on Windows — their parser is tested on a
+   > buffer built to the documented layout, and the live call is THE QUEUE G9 item 1. On a hybrid
+   > CPU "physical" counts efficiency cores too. **Guards broken on purpose:** 24, each caught by
+   > a named test; two were first unpinned (the worker cap, which a test read from the very
+   > constant being broken, and the autoscale divisor, which a typed 2 matched on the test
+   > machine) and each now has a literal.
+   > Tested by: `tests/test_hardware.py` (78).
 
 ## ERA VI — THE AGENT
 

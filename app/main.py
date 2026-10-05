@@ -165,6 +165,7 @@ _configure_logging()
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _warn_about_insecure_defaults()
     _start_local_postgres()
+    _log_compute_plan()
     _check_rate_limit_backend()
     _fail_orphaned_jobs()
     _resume_waiting_runs()
@@ -172,6 +173,48 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     get_job_queue().shutdown()
     _stop_local_catia_bridge()
+
+
+def _log_compute_plan() -> None:
+    """Say what this machine has and how many jobs and threads were chosen for it.
+
+    One line each, at every start, because "why is a solve using five cores" and "why did two
+    jobs not run together" have the same answer and it is otherwise nowhere an operator looks.
+    Nothing here can stop the boot: a probe that fails is a missing line, never an outage.
+    """
+    from app.core import compute_plan, hardware
+
+    try:
+        machine = hardware.hardware()
+        plan = compute_plan.current()
+    except Exception:  # noqa: BLE001 - observability must not fail the boot
+        logger.exception("Could not read this machine's hardware")
+        return
+    logger.info(
+        "hardware: %d logical / %s physical cores, %s MB RAM (%s)",
+        machine.logical_cores,
+        machine.physical_cores if machine.physical_cores is not None else "unknown",
+        machine.total_ram_mb if machine.total_ram_mb is not None else "unknown",
+        machine.source,
+    )
+    for note in machine.notes:
+        logger.info("hardware note: %s", note)
+    logger.info(
+        "compute plan: %d job worker(s) x %d solver thread(s); %s; %s",
+        plan.job_workers,
+        plan.solver_threads,
+        plan.basis["job_workers"],
+        plan.basis["solver_threads"],
+    )
+    if plan.oversubscribed:
+        logger.warning(
+            "compute plan oversubscribes this machine: %d x %d is more than the %d core(s) it can "
+            "spare. This is what the settings ask for; remove JOB_WORKERS / SOLVER_THREADS to "
+            "have it derived.",
+            plan.job_workers,
+            plan.solver_threads,
+            plan.physical_cores - plan.reserved_cores,
+        )
 
 
 def _check_rate_limit_backend() -> None:

@@ -55,7 +55,7 @@ from app.api.deps import (
     SessionScopeDep,
     SupportStaff,
 )
-from app.core import flags, lifecycle, maintenance
+from app.core import compute_plan, flags, hardware, lifecycle, maintenance
 from app.core.audit import AuditService, Principal, audit_page
 from app.core.config import settings
 from app.core.security import create_impersonation_token
@@ -90,6 +90,7 @@ from app.schemas.admin import (
     AnnouncementRead,
     AuditEventRead,
     ChainVerificationRead,
+    ComputeHealthRead,
     ComputeScalingRead,
     DeletionCreate,
     FailureClassRead,
@@ -1395,7 +1396,7 @@ def read_compute_scaling(
     policy = ScalingPolicy(
         min_workers=settings.autoscale_min_workers,
         max_workers=settings.autoscale_max_workers,
-        jobs_per_worker=settings.job_workers,
+        jobs_per_worker=compute_plan.current().job_workers,
         target_wait_s=settings.autoscale_target_wait_s,
     )
     answer = recommend(snapshot, policy, current_workers=current)
@@ -1527,5 +1528,12 @@ def read_fleet_health(
         maintenance_active=maintenance.active_window(db) is not None,
         ai_cache=AiCacheHealthRead.model_validate(
             asdict(cache_health.read(db, since)),
+        ),
+        compute=ComputeHealthRead.model_validate(
+            {
+                "hardware": hardware.hardware().to_dict(),
+                "available_ram_mb": hardware.available_ram_mb(),
+                "plan": compute_plan.current().to_dict(),
+            }
         ),
     )

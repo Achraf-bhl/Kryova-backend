@@ -86,9 +86,15 @@ def _internal(executable: str | os.PathLike[str] | None = None) -> Solver:
 
 def _calculix(executable: str | os.PathLike[str] | None = None) -> Solver:
     # Imported here rather than at module scope: see the module docstring.
+    from app.core import compute_plan
     from app.solve.calculix.solver import CalculiXSolver
 
-    return CalculiXSolver(executable=executable or None)
+    # The child's OMP_NUM_THREADS is the one thread count this process can set per solve
+    # (BLAS in this process is fixed when numpy loads): left unset, ccx takes every core and a
+    # second solve beside it, or CATIA, gets none (ROAD_TO_10 6.2).
+    return CalculiXSolver(
+        executable=executable or None, threads=compute_plan.current().solver_threads
+    )
 
 
 _FACTORIES: Final[Mapping[str, Callable[..., Solver]]] = {

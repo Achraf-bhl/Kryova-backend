@@ -362,6 +362,46 @@ class AiCacheHealthRead(BaseModel):
     alert: str | None
 
 
+class HardwareRead(BaseModel):
+    """What this machine has, as `app/core/hardware.py` read it (ROAD_TO_10 6.1).
+
+    `physical_cores` and `total_ram_mb` are **None** where the platform does not say, and
+    `notes` explains each one and anything that made a figure smaller than the host's own (a
+    container limit, a CPU affinity mask). A blank would read as zero.
+    """
+
+    logical_cores: int
+    physical_cores: int | None
+    total_ram_mb: int | None
+    source: str
+    notes: list[str]
+
+
+class ComputePlanRead(BaseModel):
+    """The worker and thread counts in force and where each came from (ROAD_TO_10 6.2)."""
+
+    job_workers: int
+    solver_threads: int
+    reserved_cores: int
+    physical_cores: int
+    physical_assumed: bool
+    basis: dict[str, str]
+    oversubscribed: bool
+
+
+class ComputeHealthRead(BaseModel):
+    """The machine, what is free on it now, and the plan derived from it.
+
+    `available_ram_mb` is live on every read and is None where it cannot be read; the other two
+    are fixed for the life of the process. Staff-only like the rest of `/admin/health`: a
+    machine's specification is not for the public status page.
+    """
+
+    hardware: HardwareRead
+    available_ram_mb: int | None
+    plan: ComputePlanRead
+
+
 class ComputeScalingRead(BaseModel):
     """The worker count the job table asks for (E15.2), and why.
 
@@ -420,3 +460,6 @@ class FleetHealthRead(BaseModel):
     #: The prompt-cache hit rate of the agent's turns in the window (ROAD_TO_10 1.11). Added
     #: 2026-10-04; additive, so an older console that does not read it is unaffected.
     ai_cache: AiCacheHealthRead
+    #: The machine and the worker plan derived from it (ROAD_TO_10 6.1/6.2). Added 2026-10-05;
+    #: additive, so a console that does not read it is unaffected.
+    compute: ComputeHealthRead

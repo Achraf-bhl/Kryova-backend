@@ -222,7 +222,14 @@ class Settings(BaseSettings):
     # Background jobs. Inline runs meshing/solving on the request thread, which
     # is what tests and `--reload` dev servers want.
     inline_jobs: bool = False
-    job_workers: int = 2
+    # How many jobs run at once, and how many threads each solve may use (ROAD_TO_10 6.2).
+    # **Unset means derived from this machine** (`app/core/compute_plan.py`): the cores that are
+    # actually there, less what CATIA and the system keep. A value set here is used as given,
+    # even where it oversubscribes -- the operator may know something the derivation does not --
+    # and the startup log and `/admin/health` say which one is in force. Read the figure through
+    # `compute_plan.current()`, never from these two fields.
+    job_workers: int | None = Field(default=None, ge=1)
+    solver_threads: int | None = Field(default=None, ge=1)
     job_queue_backend: str = "threadpool"  # "threadpool" or "inline"
     # The autoscale recommendation (`app/jobs/autoscale.py`, GET /admin/compute/scaling).
     # The application computes a worker count; an orchestrator acts on it. `job_workers`

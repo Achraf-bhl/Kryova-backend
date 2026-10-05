@@ -1862,6 +1862,18 @@ this file drives the ladder, with a screenshot each.
          `geometry_changed` (G8 item 4), never during a batch (5.4).
       Settles: whether the bridge and the app agree about what is in CATIA.
 
+- [ ] **G9 — ROAD_TO_10 Phase 6: what only a real workstation can say about performance (added 2026-10-05).**
+      Each item is code that is written and tested on Linux and has **never run on Windows**, or a figure
+      measured on one Linux machine that a Windows workstation will not share. Measure before believing.
+      1. **The hardware probe on Windows (6.1).** Run `python -c "from app.core import hardware; print(hardware.hardware(), hardware.available_ram_mb())"`
+         on the seat and compare it with Task Manager's *Performance* tab: logical and physical cores, total
+         memory, and that available memory moves when a large CATIA assembly is opened. `GlobalMemoryStatusEx`
+         and `GetLogicalProcessorInformation` are called through `ctypes` and **have never run on Windows**; their
+         parser is tested against a buffer built to the documented layout and a structure one byte too long
+         reads plausible nonsense rather than failing. Also check a hybrid CPU (performance and efficiency
+         cores): `RelationProcessorCore` counts both kinds, so "physical" may overstate what a BLAS solve can use.
+      Settles: whether the compute plan fits the machines Kryova is installed on.
+
 ---
 
 ### H. The hosted provider itself — DeepSeek, written 2026-10-04 from the vendor's API reference

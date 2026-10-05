@@ -720,15 +720,28 @@ the app feels instant everywhere except where physics genuinely takes time.
 
 The real lever is **processes**, behind the `JobQueue` seam.
 
-- [ ] **6.1 Probe the hardware at startup.** [Linux] **S** — **NEW** (E15)
+- [x] **6.1 Probe the hardware at startup.** [Linux] **S** — **NEW** (E15)
   - Nothing in `Kryova-backend/app/` reads the core count or RAM today, and `job_workers=2` is fixed
     (`config.py:164`). Read logical and physical cores and total and available RAM at lifespan
     (`Kryova-backend/app/main.py`). Log them, and expose them on `/admin/health` and the setup page.
-- [ ] **6.2 Derive the worker and thread counts from the hardware.** [Linux] **M** → MAKING_IT_FASTER §2.3
+  - Status 2026-10-05: Done on the backend. `app/core/hardware.py` reads logical and physical cores
+    and total and live-available memory (affinity mask, cgroup CPU quota and memory limit honoured;
+    physical None where unreported), logs them at lifespan and exposes them on `GET /admin/health`
+    (`compute`). The setup page is not changed: its Copy diagnostics carries the backend log, which
+    now holds the hardware line. The Windows reads have never run there (THE QUEUE G9 item 1).
+    Master plan E15.6; tests/test_hardware.py.
+- [x] **6.2 Derive the worker and thread counts from the hardware.** [Linux] **M** → MAKING_IT_FASTER §2.3
   - Set `job_workers × BLAS threads ≤ physical cores`. Pin `OMP_NUM_THREADS` per worker; CalculiX
     already takes an explicit thread count (`Kryova-backend/app/solve/calculix/run.py:190`).
   - Leave headroom for CATIA, which shares the workstation.
   - Explicit settings always override the derived ones.
+  - Status 2026-10-05: Done. `app/core/compute_plan.py` derives workers and per-job threads from
+    physical cores less a CATIA reserve; `JOB_WORKERS` / `SOLVER_THREADS` override and an
+    oversubscribing override is reported, not prevented. Wired into the thread pool, the CalculiX
+    child's OMP_NUM_THREADS and the autoscale policy. In-house BLAS threads are fixed at numpy
+    import and are not touched (needs processes, 6.4). `settings.job_workers` is now `int | None`.
+    The 3-threads-minimum and 4-worker cap are chosen, not measured. Master plan E15.6;
+    tests/test_hardware.py.
 - [ ] **6.3 Admit jobs by memory.** [Linux] **M** — **NEW** (E15)
   - Estimate each job's peak RAM from its degrees of freedom and solver choice (direct is about
     O(n^1.5), CG about O(n); the threshold `_ITERATIVE_THRESHOLD_DOF=100_000` is in

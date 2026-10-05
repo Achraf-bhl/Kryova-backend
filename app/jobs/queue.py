@@ -104,8 +104,9 @@ class ThreadPoolJobQueue(JobQueue):
 
 @lru_cache
 def get_job_queue() -> JobQueue:
+    from app.core import compute_plan
     from app.core.config import settings
 
     if settings.inline_jobs or settings.job_queue_backend == "inline":
         return InlineJobQueue()
-    return ThreadPoolJobQueue(max_workers=settings.job_workers)
+    return ThreadPoolJobQueue(max_workers=compute_plan.current().job_workers)

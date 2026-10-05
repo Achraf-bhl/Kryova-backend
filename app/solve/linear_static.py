@@ -22,6 +22,7 @@ around 20%.
 import time
 import warnings as warnings_module
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import scipy.sparse as sp
@@ -73,6 +74,8 @@ _TET10_CORNERS_NATURAL: tuple[tuple[float, float, float], ...] = (
     (0.0, 1.0, 0.0),
     (0.0, 0.0, 1.0),
 )
+
+
 def _midside_natural(a: int, b: int) -> tuple[float, float, float]:
     first, second = _TET10_CORNERS_NATURAL[a], _TET10_CORNERS_NATURAL[b]
     return (
@@ -338,33 +341,72 @@ class LinearStaticSolver(Solver):
         case: LoadCase,
         temperatures: NDArray[np.float64] | None = None,
     ) -> SolveOutput:
+        return self._solve_many(mesh, [case], temperatures, factorise_once=False)[0]
+
+    def solve_cases(self, mesh: TetMesh, cases: Sequence[LoadCase]) -> list[SolveOutput]:
+        """Several load cases on one mesh, factorising the stiffness matrix **once**.
+
+        The stiffness matrix and the set of free degrees of freedom depend on the material and the
+        fixtures and on nothing else, so cases that differ only in their loads share both.
+        Factorising is the expensive part of a direct solve and each further case is then a
+        forward and back substitution (ROAD_TO_10 6.6, MAKING_IT_FASTER 2.5). The answers agree
+        with separate `solve` calls to round-off -- the same SuperLU factorisation, applied to
+        each right-hand side -- and `tests/test_solver_load_cases.py` holds them to that.
+
+        **A case that does not share the first one's material and fixtures is refused by name**,
+        never solved on the first one's stiffness: that would answer a question nobody asked and
+        look like an answer. Above `ITERATIVE_THRESHOLD_DOF` there is no factorisation to share
+        (conjugate gradient restarts per right-hand side), so the matrix is assembled once and each
+        case is iterated; the saving there is the assembly only, and nothing is claimed beyond it.
+        """
+        return self._solve_many(mesh, list(cases), None, factorise_once=True)
+
+    def _solve_many(
+        self,
+        mesh: TetMesh,
+        cases: list[LoadCase],
+        temperatures: NDArray[np.float64] | None,
+        *,
+        factorise_once: bool,
+    ) -> list[SolveOutput]:
+        if not cases:
+            return []
+        first = cases[0]
+        for position, other in enumerate(cases[1:], start=2):
+            if (
+                other.material != first.material
+                or other.fixtures != first.fixtures
+                or bool(other.delta_t_k) != bool(first.delta_t_k)
+            ):
+                raise SolverError(
+                    f"Load case {position} ('{other.name}') does not share load case 1's material, "
+                    "fixtures and thermal state, so they cannot share one stiffness matrix. Solve "
+                    "them as separate runs, or make the cases differ only in their loads."
+                )
         started = time.perf_counter()
-        warnings: list[str] = []
-
         n_dof = 3 * mesh.node_count
-        # Every load type -- force, pressure, moment, bearing, gravity,
-        # centrifugal -- resolves to a nodal force vector in `app.solve.loads`.
-        # The density comes from the case's material because the body loads need
-        # it and nothing else in the assembly does.
-        forces, load_warnings = assemble_loads(
-            mesh, case.loads, case.material.density_kg_m3
-        )
-        warnings.extend(load_warnings)
 
-        # Restrained thermal expansion is a load like any other, so it is added
-        # here rather than solved separately: a part that is both heated and
-        # pushed has one displacement field, not two to superpose by hand.
-        delta_t = _temperature_change(mesh, case, temperatures)
-        if delta_t is not None:
-            from app.solve.thermal import thermal_load
+        # Per case, and before the span as it always was: every load type -- force, pressure,
+        # moment, bearing, gravity, centrifugal -- resolves to a nodal force vector in
+        # `app.solve.loads`; the density comes from the case's material because the body loads
+        # need it and nothing else in the assembly does. Restrained thermal expansion is a load
+        # like any other, added here, so a part that is both heated and pushed has one
+        # displacement field, not two to superpose by hand.
+        prepared: list[tuple[NDArray[np.float64], NDArray[np.float64] | None, list[str]]] = []
+        for case in cases:
+            forces, load_warnings = assemble_loads(mesh, case.loads, case.material.density_kg_m3)
+            delta_t = _temperature_change(mesh, case, temperatures)
+            if delta_t is not None:
+                from app.solve.thermal import thermal_load
 
-            forces += thermal_load(mesh, case.material, delta_t)
+                forces += thermal_load(mesh, case.material, delta_t)
+            prepared.append((forces, delta_t, list(load_warnings)))
 
         fixed = np.unique(
             np.concatenate(
                 [
                     _dof_indices(select_nodes(mesh, fixture.where), fixture.held)
-                    for fixture in case.fixtures
+                    for fixture in first.fixtures
                 ]
             )
         )
@@ -372,10 +414,13 @@ class LinearStaticSolver(Solver):
         if len(free) == 0:
             raise SolverError("Every degree of freedom is fixed; there is nothing to solve")
 
-        # Assembly and factorisation get separate spans on purpose: a slow
-        # assembly and a slow solve have different fixes — one is element count,
-        # the other is bandwidth and fill-in — and a single span over both cannot
-        # tell them apart, which is the whole reason to time anything.
+        # Assembly and factorisation get separate stages on purpose: a slow assembly and a slow
+        # solve have different fixes — one is element count, the other is bandwidth and fill-in —
+        # and a single span over both cannot tell them apart, which is the whole reason to time
+        # anything. ONE span for the whole call, so the metering sees one solve however many
+        # cases it carried (`cases` is a field of it).
+        iterative = n_dof > _ITERATIVE_THRESHOLD_DOF
+        solutions: list[NDArray[np.float64]] = []
         with observe.span(
             "solve.linear_static",
             nodes=mesh.node_count,
@@ -383,60 +428,94 @@ class LinearStaticSolver(Solver):
             degrees_of_freedom=int(n_dof),
         ) as timing:
             timing.set("stage", "assemble")
-            stiffness = assemble_stiffness(mesh, case.material)
+            stiffness = assemble_stiffness(mesh, first.material)
             k_ff = stiffness[free][:, free].tocsc()
             k_ff.eliminate_zeros()
-
-            displacements = np.zeros(n_dof, dtype=np.float64)
-            applied = forces[free]
+            timing.set("cases", len(cases))
 
             timing.set("stage", "factorise")
-            if n_dof > _ITERATIVE_THRESHOLD_DOF:
+            if iterative:
                 timing.set("method", "iterative")
-                solution = self._solve_iterative(k_ff, applied)
+            elif factorise_once and len(cases) > 1:
+                timing.set("method", "direct-shared-factor")
             else:
                 timing.set("method", "direct")
-                solution = self._solve_direct(k_ff, applied)
+            lu = (
+                self._factorise(k_ff)
+                if factorise_once and len(cases) > 1 and not iterative
+                else None
+            )
+            for forces, _, _ in prepared:
+                applied = forces[free]
+                if iterative:
+                    solution = self._solve_iterative(k_ff, applied)
+                elif lu is not None:
+                    solution = np.asarray(lu.solve(applied), dtype=np.float64)
+                else:
+                    solution = self._solve_direct(k_ff, applied)
+                solutions.append(solution)
+        solve_s = (time.perf_counter() - started) / len(cases)
 
-        if not np.all(np.isfinite(solution)) or not _residual_is_small(k_ff, solution, applied):
-            raise _under_constrained("the solution does not satisfy equilibrium")
-        displacements[free] = solution
+        outputs: list[SolveOutput] = []
+        for case, (forces, delta_t, warnings), solution in zip(
+            cases, prepared, solutions, strict=True
+        ):
+            post = time.perf_counter()
+            applied = forces[free]
+            if not np.all(np.isfinite(solution)) or not _residual_is_small(k_ff, solution, applied):
+                raise _under_constrained("the solution does not satisfy equilibrium")
+            displacements = np.zeros(n_dof, dtype=np.float64)
+            displacements[free] = solution
 
-        element_stress = self._recover_stress(
-            mesh, case.material, displacements, delta_t_k=delta_t
-        )
-        mises = von_mises(element_stress)
-        # Recovered before the summary rather than after, because the summary
-        # needs it: the peak at the *nodes* is where a surface is, and a part in
-        # bending carries its peak at the skin rather than at the centroid the
-        # element value sits on. See `StaticResult.governing_peak_mpa`.
-        nodal_stress = self._recover_nodal_stress(
-            mesh, case.material, displacements, delta_t_k=delta_t
-        )
-        # Shared with every other Solver rather than computed here: two
-        # solvers that summarised their own results would be free to mean
-        # different things by "factor of safety", and 6.5 compares them.
-        result = summarise_static(
-            mesh,
-            case,
-            displacements,
-            mises,
-            warnings,
-            time.perf_counter() - started,
-            nodal_von_mises=von_mises(nodal_stress),
-        )
-        return SolveOutput(
-            result=result,
-            displacements=displacements.reshape(-1, 3),
-            von_mises=mises,
-            # Averaged onto the nodes rather than reported per element. The
-            # headline peak in `result` stays the raw element value — smoothing
-            # a concentration out of the number an engineer sizes to would be a
-            # different and much worse decision — but a stress *at a named
-            # point* is a nodal question, and CalculiX answers it at nodes too,
-            # so the oracle compares like with like.
-            nodal_stress=nodal_stress,
-        )
+            element_stress = self._recover_stress(
+                mesh, case.material, displacements, delta_t_k=delta_t
+            )
+            mises = von_mises(element_stress)
+            # Recovered before the summary rather than after, because the summary
+            # needs it: the peak at the *nodes* is where a surface is, and a part in
+            # bending carries its peak at the skin rather than at the centroid the
+            # element value sits on. See `StaticResult.governing_peak_mpa`.
+            nodal_stress = self._recover_nodal_stress(
+                mesh, case.material, displacements, delta_t_k=delta_t
+            )
+            # Shared with every other Solver rather than computed here: two
+            # solvers that summarised their own results would be free to mean
+            # different things by "factor of safety", and 6.5 compares them.
+            result = summarise_static(
+                mesh,
+                case,
+                displacements,
+                mises,
+                warnings,
+                solve_s + (time.perf_counter() - post),
+                nodal_von_mises=von_mises(nodal_stress),
+            )
+            outputs.append(
+                SolveOutput(
+                    result=result,
+                    displacements=displacements.reshape(-1, 3),
+                    von_mises=mises,
+                    # Averaged onto the nodes rather than reported per element. The
+                    # headline peak in `result` stays the raw element value — smoothing
+                    # a concentration out of the number an engineer sizes to would be a
+                    # different and much worse decision — but a stress *at a named
+                    # point* is a nodal question, and CalculiX answers it at nodes too,
+                    # so the oracle compares like with like.
+                    nodal_stress=nodal_stress,
+                )
+            )
+        return outputs
+
+    @staticmethod
+    def _factorise(k_ff: sp.csc_matrix) -> Any:
+        """One SuperLU factorisation, to be applied to every right-hand side."""
+        try:
+            with warnings_module.catch_warnings():
+                # A singular K raises MatrixRankWarning rather than failing.
+                warnings_module.simplefilter("error", spla.MatrixRankWarning)
+                return spla.splu(k_ff, permc_spec="COLAMD")
+        except (RuntimeError, spla.MatrixRankWarning) as exc:
+            raise _under_constrained(str(exc)) from exc
 
     @staticmethod
     def _solve_direct(k_ff: sp.csc_matrix, applied: NDArray[np.float64]) -> NDArray[np.float64]:

@@ -479,8 +479,55 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
 
     # -- sketches ------------------------------------------------------------
 
-    def sketch_rectangle(self, *, plane: str, width_mm: float, height_mm: float) -> dict[str, Any]:
-        return self._add_sketch(plane, "rectangle", (width_mm, height_mm))
+    def sketch_create(
+        self, *, support: str, name: str | None = None, origin: Any = None
+    ) -> dict[str, Any]:
+        """An empty sketch on a base plane, to be drawn into by name.
+
+        This is the call every compiled design opens with (`app.design.compile` refuses a
+        feature that points at a one-shot `sketch_rectangle`, because that tool leaves nothing
+        to name), so without it no design could be built on this seat at all and "send the
+        design to CATIA" had no mock to be tested against. A named face is refused: this
+        simulator has no B-rep to find one on. `origin` is accepted and ignored, which the
+        reply says.
+        """
+        reply = self._add_sketch(support, "empty", (0.0, 0.0), name=name)
+        if origin is not None:
+            reply["origin_ignored"] = "Mock CATIA places every sketch at the part origin."
+        return reply
+
+    def sketch_rectangle(
+        self,
+        *,
+        width_mm: float,
+        height_mm: float,
+        plane: str | None = None,
+        sketch: str | None = None,
+    ) -> dict[str, Any]:
+        if sketch is None:
+            if plane is None:
+                raise CatiaOperationError(
+                    "Say where to draw: give `sketch` (an open sketch) or `plane`."
+                )
+            return self._add_sketch(plane, "rectangle", (width_mm, height_mm))
+        self._require_document()
+        target = self._sketch(sketch)
+        if target.shape != "empty":
+            raise CatiaOperationError(
+                f"{sketch} already holds a {target.shape}. Mock CATIA keeps one profile per "
+                "sketch; open a new one."
+            )
+        target.shape = "rectangle"
+        target.size = (float(width_mm), float(height_mm))
+        self._write_document()
+        return {
+            "feature": target.name,
+            "sketch": target.name,
+            "plane": target.plane,
+            "shape": "rectangle",
+            "area_mm2": round(target.area_mm2(), 4),
+            "features": self._feature_names(),
+        }
 
     def sketch_circle(self, *, plane: str, diameter_mm: float) -> dict[str, Any]:
         return self._add_sketch(plane, "circle", (diameter_mm, diameter_mm))
@@ -599,11 +646,12 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
         shape: str,
         size: tuple[float, float],
         meta: dict[str, float] | None = None,
+        name: str | None = None,
     ) -> dict[str, Any]:
         self._require_document()
         if plane not in _PLANE_AXES:
             raise CatiaOperationError(f"{plane!r} is not one of the XY, YZ, ZX planes.")
-        sketch = _Sketch(self._name("Sketch"), plane, shape, size, meta)
+        sketch = _Sketch(name or self._name("Sketch"), plane, shape, size, meta)
         self.sketches[sketch.name] = sketch
         self.features.append({"name": sketch.name, "type": "Sketch", "plane": plane})
         self._write_document()
@@ -1058,6 +1106,39 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
             }
         )
         return self._mutation_result(name)
+
+    def feature_rename(self, *, feature: str, name: str) -> dict[str, Any]:
+        """Rename a tree entry, and every reference the mock keeps to it.
+
+        A compiled design renames each feature it creates to its semantic name, so a seat that
+        cannot rename cannot be sent a design -- the first call after the first pad stops it.
+        Features reach a sketch by name (`pad.sketch`), so the name is changed there too; a
+        rename that left a dangling reference would make the next feature fail on a part that
+        looks fine.
+        """
+        self._require_document()
+        entry = next((f for f in self.features if f["name"] == feature), None)
+        if entry is None:
+            known = ", ".join(f["name"] for f in self.features) or "(none)"
+            raise CatiaOperationError(
+                f"No feature named {feature!r} in this part. Features: {known}."
+            )
+        if any(f["name"] == name for f in self.features):
+            raise CatiaOperationError(f"A feature named {name!r} already exists in this part.")
+        entry["name"] = name
+        if feature in self.sketches:
+            sketch = self.sketches.pop(feature)
+            sketch.name = name
+            self.sketches[name] = sketch
+        for other in self.features:
+            if other.get("sketch") == feature:
+                other["sketch"] = name
+        self._write_document()
+        return {
+            "feature": name,
+            "renamed_from": feature,
+            "features": self._feature_names(),
+        }
 
     def delete_feature(self, *, feature: str) -> dict[str, Any]:
         self._require_document()

@@ -763,6 +763,69 @@ def check_conversation_requirements(
     }
 
 
+@router.post("/conversations/{conversation_id}/send-to-catia")
+def send_design_to_catia(
+    db: DbSession,
+    current_user: CurrentUser,
+    conversation_id: str,
+) -> dict[str, Any]:
+    """Land this conversation's recorded design in CATIA and say whether it matches.
+
+    Decision 1 as a button's worth of API: the design was iterated on the open kernel, and this
+    replays the recorded design's compiled plan on a licensed seat, into a new conversation of
+    its own, then measures both builds and reports per quantity whether they agree
+    (`app/catia/landing.py`). It rebuilds on the open kernel first, so the comparison is taken
+    the same way at the same moment on both sides and a design the kernel cannot build never
+    reaches the seat.
+
+    What it needs is a **recorded design**, not a live part: the open kernel's document is
+    in-memory state that nothing reads back, and guessing a plan from the operation journal
+    would land a part the user never described. 409 says so. Three answers beyond a report:
+    422 when the kernel could not build the design (nothing was sent), 503 when no workstation
+    is online (nothing was sent, and nothing was created), and a 200 report with
+    `landed: false` when the seat stopped partway — a part exists there, and the report says
+    where it stopped.
+    """
+    conversation = _owned_conversation(db, current_user, conversation_id)
+
+    from app.catia.landing import land_in_catia
+    from app.core import designs
+    from app.design.compile import compile_spec
+    from app.design.errors import SpecError
+
+    document = designs.load(db, conversation)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This conversation has no recorded design to send. Landing replays the "
+                "design as it was written down; a part built one operation at a time has "
+                "nothing to replay."
+            ),
+        )
+    try:
+        plan = compile_spec(designs.spec_of(document))
+    except SpecError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"The recorded design does not compile, so nothing was sent: {exc}",
+        ) from exc
+
+    landing = land_in_catia(
+        db, user_id=current_user.id, plan=plan, source_conversation=conversation
+    )
+    if landing.stopped_on == "occt":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=landing.summary()
+        )
+    if landing.stopped_on == "catia-unavailable" and landing.calls_on_seat == 0:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=landing.summary()
+        )
+    db.commit()
+    return landing.to_dict()
+
+
 class LimitIn(BaseModel):
     value: float
     source: str = Field(min_length=1, max_length=500)

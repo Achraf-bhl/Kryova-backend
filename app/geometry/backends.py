@@ -48,6 +48,9 @@ from __future__ import annotations
 
 import logging
 from collections import OrderedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Final, Literal
 
 from app.core.config import settings
@@ -75,6 +78,29 @@ _sessions: OrderedDict[str, Any] = OrderedDict()
 _evicted: set[str] = set()
 
 
+#: A backend forced for the duration of one operation, in front of the setting. Only
+#: `use_backend` sets it. A `ContextVar` rather than a module global, because requests run on
+#: a thread pool and a global forced by one request would redirect every other request's
+#: tool calls to a seat for as long as it ran.
+_forced: ContextVar[Backend | None] = ContextVar("forced_geometry_backend", default=None)
+
+
+@contextmanager
+def use_backend(backend: Backend) -> Iterator[None]:
+    """Run a block as though this deployment were configured for `backend`.
+
+    For the one operation that has to use *both* kernels in one process: landing a design
+    that was iterated on the open kernel in CATIA (ROAD_TO_10 5.6). It is deliberately not
+    a general switch -- `selected_backend` says why guessing is not recoverable -- and it
+    ends with the block, on this thread and this task only.
+    """
+    token = _forced.set(backend)
+    try:
+        yield
+    finally:
+        _forced.reset(token)
+
+
 def selected_backend() -> Backend:
     """Which backend this deployment drives, from settings.
 
@@ -84,6 +110,9 @@ def selected_backend() -> Backend:
     result is bound to what produced it. Choosing is cheap; guessing is not
     recoverable.
     """
+    forced = _forced.get()
+    if forced is not None:
+        return forced
     choice = (settings.geometry_backend or "catia").strip().lower()
     if choice not in BACKENDS:
         logger.warning(
@@ -242,5 +271,6 @@ __all__ = [
     "selected_backend",
     "session_count",
     "session_for",
+    "use_backend",
     "was_evicted",
 ]

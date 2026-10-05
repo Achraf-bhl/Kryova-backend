@@ -608,12 +608,23 @@ Today:
     asked for and nobody can verify here. Revisit when a measured plan is slow on round trips, not
     before. 5.6 therefore replays the plan one call at a time through call_catia, inside
     checkpoint_batch (5.4).
-- [ ] **5.6 Design in OCCT, land in CATIA.** [Both] **M** → Decision 1
+- [~] **5.6 Design in OCCT, land in CATIA.** [Both] **M** → Decision 1
   - Make the documented intent the default flow: iterate on the open kernel
     (`GEOMETRY_BACKEND=occt`, fast and headless), then **Send to CATIA** replays the final compiled
     plan as one batch (5.5), with a before and after comparison (mass, bounding box, face count).
   - Face counts agree between the two kernels, but edge counts differ by one per closed cylindrical
     face (CLAUDE.md, kernel item 1), so compare faces, never edges.
+  - Status 2026-10-05: Linux half done and tested; no button and no real seat. New POST
+    /kernel/conversations/{id}/send-to-catia (master plan P7.16; app/catia/landing.py) replays the
+    recorded design's compiled plan on a fresh open kernel, then on the seat into a new conversation
+    of its own under backends.use_backend, and reports per quantity (volume, surface area, centre of
+    mass, bounding box, face count) agrees / differs / unmeasured. Edges are never compared; mass is
+    reported and does not count. Kernel failure is a 422 before the seat is touched, no seat is a
+    503 that creates nothing, no recorded design is a 409. The mock bridge gained sketch_create,
+    sketch_rectangle into a sketch and feature_rename, without which no compiled design could be
+    built on it. Open: the app has no Send to CATIA button, and nothing has landed on a real seat
+    (THE QUEUE G8 item 6). Tested by tests/test_catia_landing.py and
+    tests/test_geometry_backends.py.
 - [~] **5.7 Approvals and restore in the UI.** [Linux + frontend] **M** → P7.2
   - The backend issues approval tokens for destructive tools (`Kryova-backend/app/catia/approval.py`;
     `/catia/approvals`). The frontend never calls `/catia/approvals`,

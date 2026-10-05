@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 85/100 = 85% | 33/39 eng-months = 85% |
-| **Programme** | 23/35 | 212/236 = 90% | 174/190 eng-months = 91% |
+| Product — P1–P11 | 6/11 | 86/101 = 85% | 33/39 eng-months = 85% |
+| **Programme** | 23/35 | 212/237 = 90% | 174/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 60%, P9 71%, P11 89% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 59%, P9 71%, P11 89% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -7862,6 +7862,39 @@ scene in the Tauri app.
    > bridge fact. **Not done:** no browser run, and the language and queue depth are read off a real
    > seat's hello for the first time on one (THE QUEUE G8 item 5).
    > Tested by: `Kryova-frontend/src/components/catia-bridge-panel.test.tsx`.
+
+16. **Design in OCCT, land in CATIA.** *(ROAD_TO_10 5.6, added 2026-10-05.)* Decision 1 says the agent
+   designs on the open kernel because a loop needs tens of rebuilds a minute, and the result lands in
+   CATIA where the customer works. The compiled plan, `OcctRunner`, `CatiaSeatRunner` and the
+   conformance comparator all existed; **nothing joined them**, so "send it to CATIA" was a sentence
+   and not a route, and `conformance.compare` had never had a seat on its right-hand side outside a
+   test.
+   > PARTIAL (2026-10-05) — **the flow, the comparison and the route are done and tested against the
+   > real daemon in mock mode; there is no button, and no real seat has built anything from it.**
+   > New `POST /kernel/conversations/{id}/send-to-catia` replays the conversation's *recorded design*
+   > (not the live part: the open kernel's document is in-memory state nothing reads back, and a plan
+   > guessed from the operation journal would land a part the user never described) on a fresh open
+   > kernel, then on the seat into **a new conversation of its own** — `CatiaDocument` binds a
+   > conversation to one document, and a seat part under the iterating conversation would overwrite
+   > that binding — under `backends.use_backend("catia")`, because `call_catia` otherwise chooses by
+   > the deployment's setting and a deployment on `occt` would "land" the part back in the kernel.
+   > The two builds are measured the same way and reported per quantity — volume, surface area, centre
+   > of mass, bounding box, face count — as *agrees*, *differs* or **unmeasured** (the seat did not
+   > say, which is not the seat saying something different). **Edge counts are never compared** (the
+   > seam edge, CLAUDE.md kernel item 1) and mass is reported but does not count: the two sides hold
+   > different densities for "steel", so a mass gap with an agreeing volume is the material. The
+   > kernel failing refuses 422 *before the seat is touched*; no workstation online refuses 503 and
+   > creates nothing; no recorded design is 409; another user's conversation is 404; a seat that stops
+   > partway is a 200 report saying where. **Found while testing, and fixed in the mock rather than
+   > worked around:** a compiled design opens with `catia_sketch_create` and renames every feature,
+   > and the mock bridge implemented neither, so no design could be built on it at all.
+   > `sketch_create`, `sketch_rectangle(sketch=…)` and `feature_rename` now exist there. **Changed,
+   > stated plainly:** a new public route; a new `backends.use_backend` context manager; the mock
+   > bridge gained three operations; no schema or enum change, no migration. **Not done:** no button
+   > in the app; no real seat has built a design this way, and the mock draws a rectangle with its
+   > corner on the origin where the kernel and a real seat centre it, so a mock landing reports the
+   > centre of mass as differing — correctly (THE QUEUE G8 item 6).
+   > Tested by: `tests/test_catia_landing.py`.
 
 ##### Phase P8 — Billing, quotas and metering #####
 

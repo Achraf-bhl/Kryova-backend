@@ -1840,6 +1840,19 @@ this file drives the ladder, with a screenshot each.
          (b) does the next turn's reply acknowledge the rollback from the state block without being asked;
          (c) does the panel show the seat's real interface language and queue depth, and an honest
          "not reported" where the daemon cannot tell; (d) is the confirmation reachable by keyboard alone.
+      6. **Send a design to a real seat (5.6).** `POST /kernel/conversations/{id}/send-to-catia` has only ever
+         built against the mock. On a seat, record a design on a conversation (the plate in
+         `tests/test_catia_landing.py` is the smallest), send it, and read the report. Settle: (a) does
+         `catia_sketch_create` / `catia_sketch_rectangle(sketch=…)` / `catia_pad` / `catia_feature_rename`
+         build the same part the open kernel built, and does every counting quantity (volume, surface area,
+         centre of mass, bounding box) agree to `SEAT_TOLERANCE_MM3` — the mock draws a rectangle with its
+         corner on the origin where the kernel centres it, so a mock landing reports the centre of mass as
+         differing, and a seat must not; (b) does the seat report a `face_count` at all (today the bridge
+         reports none, so the finding is *unmeasured*), and if it does, whether it equals the kernel's —
+         faces only, never edges; (c) what the mass difference is for the same named material, which the
+         report says is the material and not the geometry; (d) that the new conversation's `CatiaDocument`
+         binds to the saved document and `catia_restore` from the timeline works on it; (e) what a *partial*
+         landing leaves open on the seat when a feature is refused halfway.
       Settles: whether the bridge and the app agree about what is in CATIA.
 
 ---

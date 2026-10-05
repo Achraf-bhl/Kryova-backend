@@ -76,6 +76,47 @@ class TestChoosingABackend:
         assert backends.is_local() is False
 
 
+class TestForcingABackendForOneBlock:
+    """`use_backend` is for the one flow that must reach the seat whatever the deployment says
+    (landing a design, ROAD_TO_10 5.6). It scopes to a block and never changes the setting."""
+
+    def test_it_overrides_the_setting_only_inside_the_block(self, occt: None) -> None:
+        with backends.use_backend("catia"):
+            assert backends.selected_backend() == "catia"
+            assert backends.is_local() is False
+
+        assert backends.selected_backend() == "occt"
+
+    def test_it_never_writes_the_setting(self, occt: None) -> None:
+        with backends.use_backend("catia"):
+            assert settings.geometry_backend == "occt"
+
+    def test_it_is_undone_when_the_block_raises(self, occt: None) -> None:
+        with pytest.raises(RuntimeError), backends.use_backend("catia"):
+            raise RuntimeError("the seat went away")
+
+        assert backends.selected_backend() == "occt"
+
+    def test_blocks_nest_and_each_restores_the_one_outside_it(self, occt: None) -> None:
+        with backends.use_backend("catia"):
+            with backends.use_backend("occt"):
+                assert backends.selected_backend() == "occt"
+            assert backends.selected_backend() == "catia"
+
+    def test_another_thread_does_not_see_it(self, occt: None) -> None:
+        # Requests are sync `def` run on a threadpool: one request's override must not turn the
+        # next request's geometry into seat calls.
+        import threading
+
+        seen: list[str] = []
+        with backends.use_backend("catia"):
+            worker = threading.Thread(target=lambda: seen.append(backends.selected_backend()))
+            worker.start()
+            worker.join()
+
+        assert seen == ["occt"]
+
+
 class TestSessionsAreOnePartEach:
     def test_a_conversation_keeps_one_document_across_calls(self, occt: None) -> None:
         """OCAF labels must persist between calls or feature#selector cannot work."""

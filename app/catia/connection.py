@@ -40,6 +40,7 @@ from typing import Any
 
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from app.catia import fingerprint
 from app.models.base import utcnow
 
 logger = logging.getLogger(__name__)
@@ -281,6 +282,12 @@ class DeviceConnection:
         self._close_reason = "disconnected"
         self._missed_pongs = 0
         self._last_activity = time.monotonic()
+        #: document key -> the last fingerprint the daemon reported *by event*, i.e. what
+        #: CATIA has when somebody other than Kryova changed it (ROAD_TO_10 5.2). In memory on
+        #: purpose, beside the socket it came over: writing it to the database from the
+        #: socket's loop would wait on a row lock the agent's own transaction holds while the
+        #: agent waits on this socket for the call's result.
+        self._observations: dict[str, dict[str, Any]] = {}
 
     # -- state ---------------------------------------------------------------
 
@@ -431,6 +438,7 @@ class DeviceConnection:
             self._missed_pongs = 0
             return None
         if kind == "event":
+            self._note_observation(frame)
             return frame
         if kind == "ping":
             # The daemon may ping too; answering keeps a NAT mapping alive from
@@ -439,6 +447,29 @@ class DeviceConnection:
             return None
         logger.warning("CATIA device %s sent unknown frame type %r", self.device_id, kind)
         return None
+
+    def _note_observation(self, frame: dict[str, Any]) -> None:
+        """Keep the fingerprint an event carried, so the agent can be told what moved."""
+        data = frame.get("data")
+        if not isinstance(data, dict):
+            return
+        observed = fingerprint.normalise(data.get("fingerprint"))
+        document = data.get("document")
+        if observed is None or not isinstance(document, dict):
+            return
+        key = fingerprint.document_key(document.get("remote_path"), document.get("doc_name"))
+        if key:
+            with self._lock:
+                self._observations[key] = observed
+
+    def observation(self, key: str) -> dict[str, Any] | None:
+        """What the daemon last reported for this document, or None when it reported nothing."""
+        with self._lock:
+            return self._observations.get(key)
+
+    def forget_observation(self, key: str) -> None:
+        with self._lock:
+            self._observations.pop(key, None)
 
     def _resolve(self, frame: dict[str, Any]) -> None:
         call_id = frame.get("id")

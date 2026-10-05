@@ -137,6 +137,27 @@ def _catia_available(db: Session, user_id: str) -> bool | None:
         return None
 
 
+def _manual_edit_lines(db: Session, user_id: str, conversation: Conversation) -> list[str]:
+    """What was changed in CATIA by hand since the last operation (ROAD_TO_10 5.2).
+
+    Without it the agent edits a part it believes it knows. Every line is built from names and
+    values CATIA reported, which is text a person typed into a part, so each goes through
+    `_clean` like every other field of this block -- a feature called `</current_state>` must
+    not close it early.
+    """
+    if not settings.catia_enabled:
+        return []
+    try:
+        from app.catia.dispatch import manual_edit_notes
+    except Exception:  # noqa: BLE001 - the package is optional and in flight
+        return []
+    try:
+        return [_clean(line) for line in manual_edit_notes(db, user_id, conversation)]
+    except Exception:  # noqa: BLE001 - a note about drift must not kill the turn
+        logger.warning("Reading manual CATIA edits failed", exc_info=True)
+        return []
+
+
 def _local_bridge_supported() -> bool:
     """Whether this server starts the CATIA daemon itself. Never raises."""
     try:
@@ -726,6 +747,7 @@ def build_state_block(db: Session, user: User, conversation: Conversation) -> st
             owned_documents(db, conversation.id),
         )
     )
+    lines.extend(_manual_edit_lines(db, user.id, conversation))
     lines.extend(_branch_lines(conversation, document))
     # What this conversation already did, read from the operation log rather
     # than from the transcript -- the transcript is what the window and the

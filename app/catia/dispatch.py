@@ -39,7 +39,7 @@ from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
 from app.api.rate_limit import RateLimiter
-from app.catia import affinity, local_bridge
+from app.catia import affinity, fingerprint, local_bridge
 from app.catia.approval import ApprovalError, verify_approval
 from app.catia.connection import (
     BridgeBusy,
@@ -104,6 +104,7 @@ __all__ = [
     "call_catia",
     "catia_available",
     "checkpoint_batch",
+    "manual_edit_notes",
     "status_payload",
 ]
 
@@ -1338,6 +1339,70 @@ def _enforce_approval(
         raise CatiaError(str(exc)) from exc
 
 
+# -- what changed in CATIA that Kryova did not do ----------------------------
+
+
+def _absorb_manual_changes(
+    db: Session, conversation: Conversation, connection: DeviceConnection
+) -> None:
+    """Turn a hand edit the daemon reported into a note, and forget the report."""
+    state = conversation.catia_state or {}
+    recorded = fingerprint.recorded_of(state)
+    if recorded is None:
+        return
+    key = str(recorded.get("document") or "")
+    updated = fingerprint.with_absorbed(state, connection.observation(key))
+    if updated is None:
+        return
+    conversation.catia_state = updated
+    connection.forget_observation(key)
+    db.flush()
+
+
+def _record_fingerprint(
+    db: Session,
+    conversation: Conversation,
+    connection: DeviceConnection,
+    reported: dict[str, Any],
+) -> None:
+    """Record the part as this operation left it: what Kryova's picture is true of."""
+    bound = _bound_document(db, conversation.id)
+    if bound is None:
+        return
+    key = fingerprint.document_key(bound.remote_path, bound.doc_name)
+    done = db.scalar(
+        select(func.count())
+        .select_from(CatiaOperation)
+        .where(CatiaOperation.conversation_id == conversation.id, CatiaOperation.ok.is_(True))
+    )
+    conversation.catia_state = fingerprint.with_result(
+        conversation.catia_state, reported, step=int(done or 0) + 1, document=key
+    )
+    connection.forget_observation(key)
+    db.flush()
+
+
+def manual_edit_notes(db: Session, user_id: str, conversation: Conversation) -> list[str]:
+    """The state block's lines about changes made in CATIA by hand since the last operation.
+
+    Empty -- and no query run -- for a conversation that has never recorded a fingerprint,
+    which is every conversation on a daemon that does not send them.
+    """
+    state = conversation.catia_state or {}
+    recorded = fingerprint.recorded_of(state)
+    if recorded is None and not state.get("manual_changes"):
+        return []
+    observed = None
+    if recorded is not None:
+        key = str(recorded.get("document") or "")
+        bound = _bound_document(db, conversation.id)
+        holder = bound.device_id if bound is not None else None
+        connection = registry.get(holder) if holder else None
+        if connection is not None and connection.user_id == user_id:
+            observed = connection.observation(key)
+    return fingerprint.notes_for(state, observed)
+
+
 # -- one checkpoint per batch ------------------------------------------------
 
 
@@ -1534,6 +1599,7 @@ def _execute(
     # mutation's undo is of some other part.
     target = _target_document(db, spec, document, conversation_id)
     protected = target if target is not None else document
+    conversation = db.get(Conversation, conversation_id) if conversation_id else None
 
     if spec.mutating and spec.name not in _NO_AUTO_CHECKPOINT and protected is not None:
         batch = _active_batch()
@@ -1593,7 +1659,12 @@ def _execute(
     )
     device.last_seen_at = utcnow()
 
-    return _post_process(
+    # The daemon's fingerprint of the part as this operation left it. It is bookkeeping
+    # for the server, so it is taken out before anything the model reads is built.
+    reported = fingerprint.normalise(raw.get("fingerprint"))
+    raw = {key: value for key, value in raw.items() if key != "fingerprint"}
+
+    result = _post_process(
         db,
         spec=spec,
         device=device,
@@ -1603,6 +1674,14 @@ def _execute(
         arguments=arguments,
         raw=raw,
     )
+    if spec.mutating and conversation is not None and reported is not None:
+        # A hand edit the daemon reported before or during this call becomes a note first, or
+        # the fingerprint recorded next -- which includes it -- would swallow it silently and
+        # the agent would never be told (ROAD_TO_10 5.2). The daemon sends the event ahead of
+        # the result, over the same socket, so by here the connection has it.
+        _absorb_manual_changes(db, conversation, connection)
+        _record_fingerprint(db, conversation, connection, reported)
+    return result
 
 
 def _send(

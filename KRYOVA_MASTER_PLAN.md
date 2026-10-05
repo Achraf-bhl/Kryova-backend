@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 84/97 = 86% | 33/39 eng-months = 85% |
-| **Programme** | 23/35 | 210/233 = 90% | 174/190 eng-months = 92% |
+| Product — P1–P11 | 6/11 | 84/98 = 86% | 33/39 eng-months = 85% |
+| **Programme** | 23/35 | 211/234 = 90% | 174/190 eng-months = 92% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -7788,6 +7788,37 @@ scene in the Tauri app.
    > yet uses `rollback_on_failure=True`**, so batch rollback is proved by tests and exercised by
    > nothing; and nothing here has run on a seat (THE QUEUE G8).
    > Tested by: `tests/test_catia_checkpoint_batch.py`, `tests/test_design_build_tool.py`.
+
+13. **A part edited by hand in CATIA is something the agent is told about.** *(ROAD_TO_10 5.1 and 5.2,
+   added 2026-10-05.)* The agent builds a pad at 40 mm, the engineer makes it 55 in CATIA, and the
+   agent's next message is about a part that no longer exists: its picture is the transcript and the
+   state block, both true when written. And `BridgeClient.emit` had no caller, so the only events a
+   browser ever received were the server's own.
+   > PARTIAL (2026-10-05) — **the server, the daemon's code and the mock are done and tested over a
+   > real WebSocket; the real seat sends nothing yet, so on a seat this changes no behaviour.** A
+   > *fingerprint* is names and numbers only (feature names in build order, parameter values rounded
+   > to 6 decimals, saved or not) — no rebuild, so it is cheap, and it **does not see** a hand edit
+   > that changes a sketch's geometry without moving a named parameter or adding a feature. The
+   > daemon attaches one to every mutating result and, before the next mutating call, compares the
+   > part with it: a difference goes out as a `parameters_changed` / `geometry_changed` event
+   > *ahead of* the result that would swallow it, and `check_for_changes()` is the same comparison
+   > for a watcher thread (polling, never COM event sinks; it takes the session lock without
+   > blocking, so it cannot race a call). The server keeps the last observation in memory on the
+   > connection and **not in the database** — the socket's loop would wait on a row lock the agent's
+   > own transaction holds while it waits on that socket for the result — folds it into
+   > `conversation.catia_state["manual_changes"]` *before* recording the operation's own
+   > fingerprint (otherwise the recorded part includes the edit and the difference vanishes), and
+   > `state._manual_edit_lines` puts it in front of the model through `_clean`. **Changed, stated
+   > plainly:** a call result's `data` gains a `fingerprint` the server removes before the model
+   > sees it; the two events' `data` gains `document` and `fingerprint`, and the SSE relay strips
+   > the fingerprint; `catia_state` (JSONB) gains `fingerprint` and `manual_changes` — no migration.
+   > **Not done:** `CatiaCom` implements no `fingerprint()` and says `supports_watching = False`
+   > (pinned by a test, so it cannot inherit a claim); a COM read must run on the operation thread
+   > and the real read of features and parameters is unwritten (THE QUEUE G8). Observations live on
+   > one worker's connection, so a state block built on another worker shows only the notes
+   > already folded into the database.
+   > Tested by: `tests/test_catia_manual_edits.py` (pure rule, daemon, server, and the whole way
+   > over the real socket via `tests/test_catia_e2e.py`'s `bridge`).
 
 ##### Phase P8 — Billing, quotas and metering #####
 

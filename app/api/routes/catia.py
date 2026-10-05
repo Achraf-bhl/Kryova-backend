@@ -431,7 +431,14 @@ def _relay(user_id: str, device_id: str, frame: dict[str, Any]) -> None:
         logger.info("Dropping unknown CATIA event %r from device %s", name[:64], device_id)
         return
     data = frame.get("data")
-    payload = clean_result(data) if isinstance(data, dict) else {}
+    # The fingerprint is for the server -- `DeviceConnection` has already kept it for the state
+    # block -- and the browser reads the event's name alone, so up to 400 feature and
+    # parameter names and a workstation path are not carried over SSE for nothing.
+    payload = (
+        clean_result({k: v for k, v in data.items() if k != "fingerprint"})
+        if isinstance(data, dict)
+        else {}
+    )
     bus.publish(user_id, _envelope(name, {"device_id": device_id, **payload}))
 
 

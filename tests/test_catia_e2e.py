@@ -134,8 +134,9 @@ def bridge(auth_client, db_session, current_user_id, media_store, tmp_path, monk
     db_session.commit()
 
     backend = MockCatia(tmp_path / "catia")
-    with daemon_connected(auth_client, paired.json()["device_token"], backend):
+    with daemon_connected(auth_client, paired.json()["device_token"], backend) as daemon:
         yield {
+            "daemon": daemon,
             "db": db_session,
             "user_id": current_user_id,
             "conversation": conversation,

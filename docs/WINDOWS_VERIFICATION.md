@@ -1821,6 +1821,16 @@ this file drives the ladder, with a screenshot each.
          product caller yet: if one is wired, `catia_restore` of a snapshot taken moments earlier on a
          part with a feature added since must be exercised on a seat, because the restore is the call
          whose failure modes (a dialog, a reopened window, a renamed document) nothing here has seen.
+      4. `CatiaCom.fingerprint()` and the real watcher (ROAD_TO_10 5.1/5.2). Today the real backend inherits
+         `None`, so a seat reports no fingerprint, the server records none, and a hand edit is never noted.
+         Write the read on the operation thread: feature names in build order (the active body's shapes and
+         sketches) and `part.Parameters` values, as names and numbers only. Read the generated wrapper's
+         parameter flags before calling anything unfamiliar and never `EnsureDispatch` the Application.
+         Settle: (a) do the feature list and the parameter values agree with `catia_list_features` and
+         `catia_list_parameters`; (b) does a parameter edited by hand in CATIA change the fingerprint, and
+         does a sketch edit that moves no named parameter not (the stated blind spot); (c) is a read on a
+         second thread safe when a modal dialog holds COM, which is why `supports_watching` stays False
+         until measured; (d) with the watcher off, is the pre-call report alone enough for a turn.
       Settles: whether the bridge and the app agree about what is in CATIA.
 
 ---

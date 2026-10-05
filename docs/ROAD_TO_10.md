@@ -539,7 +539,7 @@ Today:
 
 ### 5A. CATIA → Kryova: a live view
 
-- [ ] **5.1 Make the daemon actually send events.** [Seat] **L** — **NEW** (P7.2), found 2026-10-04
+- [~] **5.1 Make the daemon actually send events.** [Seat] **L** — **NEW** (P7.2), found 2026-10-04
   - `Kryova-backend/scripts/catia_bridge/bridge.py:182` defines `emit()`, and **nothing calls it**.
   - The server allows `parameters_changed`, `geometry_changed`, `document_opened`, `document_saved`,
     `checkpoint_created` and `export_completed` (`Kryova-backend/app/catia/events.py`,
@@ -552,12 +552,22 @@ Today:
   - The watcher must never call COM while a tool call is in flight. Share the session's lock.
   - Test: the mock (`scripts/catia_bridge/mock_catia.py`) changes a parameter outside a call, and the
     event reaches the SSE stream.
-- [ ] **5.2 Tell the agent about manual edits.** [Linux] **M** — **NEW** (E16)
+  - Status 2026-10-05: The mock half is done: the daemon compares the part with itself and emits
+    parameters_changed or geometry_changed, ahead of the result that would swallow it, and the event
+    reaches the user's SSE stream over a real WebSocket (tests/test_catia_manual_edits.py). Polling,
+    not COM sinks; the watcher thread is off unless the backend says supports_watching, which
+    CatiaCom does not. The COM read and the watcher on a seat are THE QUEUE G8 item 4.
+- [~] **5.2 Tell the agent about manual edits.** [Linux] **M** — **NEW** (E16)
   - When the fingerprint from 5.1 differs from the one recorded after the last Kryova operation, the
     state block (`Kryova-backend/app/ai/state.py`) says "the document was changed in CATIA since
     step N: these parameters moved, this feature is new".
   - Without this, the agent edits a part it believes it knows.
   - Test: a manual change made between two turns appears in the next turn's state block.
+  - Status 2026-10-05: The server half, the daemon's code and the mock are done and proved over the
+    real socket (master plan P7.13; tests/test_catia_manual_edits.py): a hand edit outside a call
+    becomes a note naming what moved, in the next turn's state block, and survives the operation
+    that follows it. The real backend sends no fingerprint yet, so on a seat nothing changes (THE
+    QUEUE G8 item 4).
 - [ ] **5.3 Show the CATIA part in 3D in Kryova.** [Both] **L** → P6.1/P6.5
   - After each geometry change (5.1), export a tessellation through the bridge (STL or 3DXML, both
     measured working on the seat, CLAUDE.md *Exporting from a seat*). Convert it with the existing

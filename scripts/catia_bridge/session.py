@@ -39,7 +39,7 @@ from .backend import (
     unimplemented_options,
     unsupported,
 )
-from .tool_table import LONG_RUNNING, ToolRefused, check_call, tier_of
+from .tool_table import LONG_RUNNING, READ, ToolRefused, check_call, tier_of
 
 logger = logging.getLogger("kryova.catia.session")
 
@@ -73,6 +73,8 @@ class BridgeSession:
         self.hostname = hostname
         self._send = send
         self._lock = threading.Lock()
+        #: The document and fingerprint as the last mutating call left them (ROAD_TO_10 5.2).
+        self._last: tuple[str, dict[str, Any]] | None = None
 
     # -- frames --------------------------------------------------------------
 
@@ -213,7 +215,81 @@ class BridgeSession:
         try:
             self._ensure_alive(tool)
             self._ensure_document(tool, frame.get("document"))
-            return getattr(self.backend, method)(**arguments)
+            # A change somebody else made since the last mutating call is reported *before*
+            # this one runs, so the server hears of it ahead of the result that would
+            # otherwise swallow it. Reads are not bracketed: only a mutation owns the
+            # "after" the next comparison starts from.
+            watching = tool not in OUT_OF_BAND_TOOLS and tier_of(tool) != READ
+            if watching:
+                self._report_changes()
+            result = getattr(self.backend, method)(**arguments)
+            if watching:
+                snapshot = self._snapshot()
+                if snapshot is not None:
+                    self._last = snapshot
+                    result = {**result, "fingerprint": snapshot[1]}
+            return result
+        finally:
+            self._lock.release()
+
+    # -- changes made outside a call -------------------------------------------
+
+    def _snapshot(self) -> tuple[str, dict[str, Any]] | None:
+        """The active document's key and fingerprint, or None when the backend has none.
+
+        Never raises: a failed read is "cannot say", which switches the comparison off for this
+        call rather than failing an operation that has nothing to do with it.
+        """
+        try:
+            raw = self.backend.fingerprint()
+        except Exception:  # noqa: BLE001 - bookkeeping must not fail a call
+            logger.debug("fingerprint() raised", exc_info=True)
+            return None
+        if not isinstance(raw, dict):
+            return None
+        document = raw.get("document") or {}
+        key = str(document.get("remote_path") or document.get("doc_name") or "").strip().lower()
+        return (key, raw) if key else None
+
+    def _report_changes(self) -> bool:
+        """Emit what moved in the document since the last mutating call. Call under the lock.
+
+        Compared only when it is the *same* document: a different one is the engineer clicking
+        another window, not an edit, and says nothing about the part Kryova was building.
+        """
+        if self._last is None:
+            return False
+        current = self._snapshot()
+        if current is None or current[0] != self._last[0]:
+            return False
+        before, after = self._last[1], current[1]
+        parameters_moved = before.get("parameters") != after.get("parameters")
+        geometry_moved = before.get("features") != after.get("features")
+        if not (parameters_moved or geometry_moved):
+            return False
+        self._last = current
+        for name, moved in (("parameters_changed", parameters_moved), ("geometry_changed", geometry_moved)):
+            if moved:
+                self._send(
+                    {
+                        "type": "event",
+                        "event": name,
+                        "data": {"document": after.get("document"), "fingerprint": after},
+                    }
+                )
+        return True
+
+    def check_for_changes(self) -> bool:
+        """The watcher's tick: report a hand edit now, never while a call is in flight.
+
+        Returns whether an event went out. A call holds the session lock for its whole run, so
+        failing to take it means "busy", and the answer is to try again at the next tick -- the
+        watcher must never queue behind, or race, an operation.
+        """
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            return self._report_changes()
         finally:
             self._lock.release()
 

@@ -179,6 +179,18 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
             "up_to_date": True,
         }
 
+    supports_watching = True
+
+    def fingerprint(self) -> dict[str, Any] | None:
+        if self.doc_path is None:
+            return None
+        return {
+            "document": {"doc_name": self.doc_name, "remote_path": str(self.doc_path)},
+            "features": [str(feature["name"]) for feature in self.features],
+            "parameters": {name: entry["value"] for name, entry in self.parameters.items()},
+            "saved": True,
+        }
+
     def import_file(
         self,
         *,

@@ -66,6 +66,26 @@ class CatiaBackend(ABC):
         thread that acquired it, so only this thread can repair its own.
         """
 
+    #: Whether `BridgeClient` may run a background thread that reads `fingerprint()` between
+    #: calls. False for any backend whose reads belong to the operation thread (COM: a proxy
+    #: belongs to the apartment of the thread that acquired it, and a read on another thread
+    #: that blocks behind a modal dialog would hold the session lock the dialog-dismissing tools
+    #: need). The mock has no apartment and no dialog, so it may.
+    supports_watching: bool = False
+
+    def fingerprint(self) -> dict[str, Any] | None:
+        """A small summary of the active document, or None when this backend cannot give one.
+
+        ``{"document": {"doc_name", "remote_path"}, "features": [names in build order],
+        "parameters": {name: value}, "saved": bool}`` -- names and numbers, never a rebuild.
+        The session takes one before and after every mutating call; a difference between this
+        call's "before" and the last call's "after" is a change somebody else made, and the
+        server tells the agent (ROAD_TO_10 5.2). **The default is None**, which switches the
+        whole mechanism off for this backend instead of guessing: `CatiaCom` does not
+        implement it until the COM reads have been written against a seat (THE QUEUE G8).
+        """
+        return None
+
     def ensure_document(self, *, doc_name: str, remote_path: str | None) -> bool:
         """Make the named document the one the next operation will act on.
 

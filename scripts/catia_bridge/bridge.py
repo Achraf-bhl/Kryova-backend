@@ -28,8 +28,10 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import random
 import socket
+import threading
 from typing import Any
 
 from .backend import CatiaBackend
@@ -147,6 +149,7 @@ class BridgeClient:
 
             await websocket.send(json.dumps(session.hello_frame()))
             logger.info("Connected as %s", self.config.device_name or self.config.device_id)
+            stop_watching = self._start_watcher(session)
 
             sender = asyncio.create_task(self._drain(websocket), name="bridge-sender")
             try:
@@ -157,9 +160,38 @@ class BridgeClient:
                     # server never gets answered.
                     await asyncio.to_thread(session.handle_frame, text)
             finally:
+                stop_watching.set()
                 sender.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await sender
+
+    # -- the watcher ---------------------------------------------------------
+
+    def _start_watcher(self, session: BridgeSession) -> threading.Event:
+        """Poll for hand edits between calls, on backends that can be read from a second thread.
+
+        Polling, not COM event sinks: sinks need early binding, and generating a type library
+        has broken this bridge machine-wide twice (CLAUDE.md, *Driving CATIA's interface*
+        3b/3c). **Off for any backend that does not say `supports_watching`** -- the real one
+        does not, because its reads belong to the operation thread's COM apartment and a read
+        blocked behind a modal dialog would hold the lock the dialog-dismissing tools need.
+        That half is THE QUEUE G8; until it is measured the real daemon still reports a hand
+        edit, but only at the next mutating call (`BridgeSession._report_changes`).
+        """
+        stop = threading.Event()
+        interval = _watch_interval()
+        if interval <= 0 or not getattr(self.backend, "supports_watching", False):
+            return stop
+
+        def watch() -> None:
+            while not stop.wait(interval):
+                try:
+                    session.check_for_changes()
+                except Exception:  # noqa: BLE001 - a watcher must never take the daemon down
+                    logger.debug("The change watcher failed", exc_info=True)
+
+        threading.Thread(target=watch, name="catia-watch", daemon=True).start()
+        return stop
 
     # -- sending -------------------------------------------------------------
 
@@ -182,6 +214,19 @@ class BridgeClient:
     def emit(self, event: str, data: dict[str, Any] | None = None) -> None:
         """Push an event up to the browser (via the server's SSE relay)."""
         self._enqueue({"type": "event", "event": event, "data": data or {}})
+
+
+#: Seconds between watcher ticks; 0 turns the watcher off. Read per connection, so a daemon
+#: restarted with a different value is the whole of "reconfiguring" it.
+ENV_WATCH_INTERVAL = "KRYOVA_BRIDGE_WATCH_S"
+DEFAULT_WATCH_INTERVAL_S = 3.0
+
+
+def _watch_interval() -> float:
+    try:
+        return float(os.environ.get(ENV_WATCH_INTERVAL, DEFAULT_WATCH_INTERVAL_S))
+    except ValueError:
+        return DEFAULT_WATCH_INTERVAL_S
 
 
 def run(config: BridgeConfig, backend: CatiaBackend) -> None:

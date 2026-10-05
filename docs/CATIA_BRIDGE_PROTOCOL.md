@@ -134,6 +134,26 @@ Anything else is rejected by the daemon's schema check.
 Event names: `document_opened`, `document_saved`, `geometry_changed`,
 `parameters_changed`, `checkpoint_created`, `export_completed`, `catia_lost`.
 
+### Fingerprints — telling the agent what was changed by hand (ROAD_TO_10 5.2)
+
+A backend that implements `fingerprint()` (the mock does; `CatiaCom` does not yet, THE QUEUE G8)
+gets two additions to the frames above.
+
+* **A mutating call's `result.data` carries `fingerprint`**: the part as the call left it,
+  `{"document": {"doc_name", "remote_path"}, "features": [names, build order],
+  "parameters": {name: value}, "saved": bool}` — names and numbers, never a rebuild. The server
+  removes it before the model sees the result and records it as what Kryova's picture is true of.
+* **Before the next mutating call, the daemon compares the document with that fingerprint.** If
+  it is the *same* document and a parameter value or the feature list differs, it sends
+  `parameters_changed` / `geometry_changed` with `data: {"document": …, "fingerprint": …}`
+  **ahead of** the call's result, over the same socket, so the server has heard of the edit
+  before a new fingerprint that includes it arrives. A different document is not an edit.
+  Reads are not compared and do not move the baseline.
+
+The browser's SSE copy of these events omits `fingerprint`. A watcher thread may call the same
+comparison between calls (`check_for_changes()`), but only for a backend that says
+`supports_watching`, and it never waits for the session lock a call holds.
+
 ### heartbeat
 Server sends `{"type":"ping","t":<epoch>}` every 20 s; daemon replies
 `{"type":"pong","t":<same>}`. Two missed pongs ⇒ server marks the device

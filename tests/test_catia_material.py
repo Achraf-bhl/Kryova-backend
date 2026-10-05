@@ -180,7 +180,7 @@ class TestTheDensityActuallyReachesTheDaemon:
             return {"material": kwargs["arguments"].get("material"), "mass_kg": 0.75552}
 
         monkeypatch.setattr(
-            dispatch, "_resolve_connection", lambda db, user_id: (MagicMock(id="d"), MagicMock())
+            dispatch, "_resolve_connection", lambda db, user_id, conversation_id=None: (MagicMock(id="d"), MagicMock())
         )
         monkeypatch.setattr(dispatch, "_enforce_rate_limit", lambda db, user_id, device_id: None)
         monkeypatch.setattr(dispatch, "_execute", fake_execute)

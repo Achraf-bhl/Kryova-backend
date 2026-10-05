@@ -145,6 +145,35 @@ class TestResultSurface:
             job["result"]["max_von_mises_mpa"], rel=1e-9
         )
 
+    def test_the_colour_field_is_the_nodal_stress_the_headline_peak_comes_from(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The viewer paints, labels its legend from and reads node clicks off `von_mises_nodal`.
+        It was the average of centroid values, which under-reads a part in bending; on the seat,
+        2026-10-05, the legend topped out at 7.6 MPa beneath a card quoting the 9.6 MPa governing
+        peak. It is now the von Mises of the recovered nodal tensor, whose maximum *is*
+        `max_von_mises_surface_mpa`."""
+        import io
+
+        import numpy as np
+
+        # A cantilever, not the axial pull: under uniform stress the centroid average and the
+        # nodal value coincide and the test could not tell the two fields apart.
+        case = load_case()
+        case["fixtures"] = [
+            {"where": {"type": "face", "axis": "z", "side": "min"}, "dofs": ["x", "y", "z"]}
+        ]
+        case["loads"] = [
+            {"where": {"type": "face", "axis": "z", "side": "max"}, "force_n": [500.0, 0.0, 0.0]}
+        ]
+        job = run(auth_client, project_with_geometry, load_case=case)
+        assert job["status"] == "succeeded", job["error"]
+        content = auth_client.get(f"/api/v1/media/{job['fields_media_id']}/content").content
+        archive = np.load(io.BytesIO(content))
+        assert float(archive["von_mises_nodal"].max()) == pytest.approx(
+            job["result"]["max_von_mises_surface_mpa"], rel=1e-9
+        )
+
     def test_surface_carries_only_boundary_nodes(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str
     ) -> None:

@@ -41,6 +41,7 @@ from app.models import JobStatus, MediaKind, SimulationJob
 from app.simulation import cache, memory, progress
 from app.simulation.limits import check_mesh_request, limit_source
 from app.solve.base import SolveOutput, Solver
+from app.solve.linear_static import von_mises
 from app.solve.plane import PlaneCase, PlaneSolver, PlaneState
 from app.solve.postprocess import nodal_average
 from app.solve.registry import INTERNAL, OPENFOAM, backend_of, build_solver, solver_version
@@ -956,11 +957,19 @@ def _store_fields(media: MediaService, job: SimulationJob, mesh: TetMesh | TriMe
             "heat_flux_w_m2": output.heat_flux_w_m2,
         }
     else:
-        nodal = (
-            _nodal_average_over(mesh.node_count, mesh.tris, output.von_mises)
-            if isinstance(mesh, TriMesh)
-            else nodal_average(mesh, output.von_mises)
-        )
+        tensor = getattr(output, "nodal_stress", None)
+        if isinstance(mesh, TriMesh):
+            nodal = _nodal_average_over(mesh.node_count, mesh.tris, output.von_mises)
+        elif tensor is not None:
+            # The von Mises of the stress recovered *at each node* -- the field the result's
+            # `max_von_mises_surface_mpa` (and so the governing peak) is the maximum of. The
+            # viewer colours by this array, and its legend and node click read it; painting
+            # the average of centroid values instead under-read a plate in bending by ~21 %
+            # beside a headline quoting the true peak (seat, 2026-10-05: legend 7.6 MPa under
+            # a card saying 9.6). The average stays the fallback for a solver with no tensor.
+            nodal = von_mises(tensor)
+        else:
+            nodal = nodal_average(mesh, output.von_mises)
         arrays = {
             "displacements": output.displacements,
             "von_mises_element": output.von_mises,

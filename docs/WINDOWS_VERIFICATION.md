@@ -1913,6 +1913,34 @@ this file drives the ladder, with a screenshot each.
          import it into a second account.
       Settles: whether Phases 6–8 hold on the machine they ship to.
 
+- [ ] **G11 — ROAD_TO_10 Phase 9: everything written on Linux on 2026-10-05 after G10 and never run (added 2026-10-05).**
+      Same instruction as G10: tests written, not executed on Linux (`ruff`, `mypy app/` and the frontend's `vitest`
+      were; `alembic upgrade head` + `alembic check` for migration `0f0bec54f55e` were run earlier on the scratch DB).
+      1. **Backend files:** `test_backups`, `test_product_store`, `test_observe_ledger`, `test_mcp`, `test_mcp_tools`,
+         `test_solve_constraints`, `test_solver_plane`, `test_ai_laya_decide`, `test_desktop`, `test_local_cluster`.
+         Run `test_process_queue` first (G10 item 1).
+      2. **A real restore (9.1), on the installed app:** let it run a day or call `POST /desktop/backups`; confirm a
+         `kryova-scheduled-*.dump` appears. Then `POST /desktop/backups/restore` with that name, close and reopen
+         Kryova. Expect: a `kryova-before-restore-*.dump`, the data back as it was in the dump, the app role still
+         `NOBYPASSRLS` (`_provision` runs again after a restore), and `restore-request.json` gone. **Untested
+         assumptions:** that `pg_restore --clean --if-exists --single-transaction --exit-on-error` runs clean over
+         `public` as the admin role (a `DROP SCHEMA public` or an owner error would make it a recorded failure, not a
+         loss), and that the Windows `pg_dump.exe` takes `--enable-row-security`.
+      3. **A failed restore leaves the app usable:** put a truncated file named like a backup in `backups/`, request
+         it, relaunch. Expect `restore-request.failed.json` with a reason and a normal launch.
+      4. **Crash report (9.2):** in the desktop app, force a dashboard error; press "Send a report". Expect the full
+         text in a box, nothing sent, Send disabled with the explanation while `KRYOVA_CRASH_REPORT_URL` is unset.
+         Then point it at a local `https` or `http://127.0.0.1` listener and confirm exactly one POST, scrubbed.
+         **Open: whether the shell passes `KRYOVA_CRASH_REPORT_URL` through to the Next server's environment.**
+      5. **Observability (9.6):** `GET /admin/observability` after a few turns; open the admin console's panel.
+      6. **MCP (9.7), with a real client** (Claude Desktop or the MCP inspector): `tools/list` returns 37 tools,
+         the instructions arrive on `initialize`, a mutating call without `kryova/allowMutations` is refused, and a
+         withheld tool (e.g. `delete_simulation`) is "unknown".
+      7. **Two processes, one product (9.4):** start two backends on one database, take a lease in one and commit
+         against it from the other; the second must be refused with the holder named.
+      Settles: whether Phase 9 holds on the machine it ships to. **Not testable anywhere yet:** chrono pricing (a
+      decision), 9.3 (a decision), Phase 10 (needs a key, a seat and people).
+
 ---
 
 ### H. The hosted provider itself — DeepSeek, written 2026-10-04 from the vendor's API reference

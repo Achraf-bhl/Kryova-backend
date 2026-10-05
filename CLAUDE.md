@@ -3055,3 +3055,32 @@ most backend items below are *claims made while writing*, not results — the fr
     scene-loader, scene-streaming, frustum, frame-meter — because there is no assembly viewer and no
     scene endpoint. They are unwired on purpose (ROAD_TO_10 6.9, 8.2); a green test on one is not
     evidence the viewer uses it.
+
+## What ROAD_TO_10 Phase 9 taught (2026-10-05)
+
+1. **A persisted product is the in-memory rules run against rows under an advisory lock**
+   (`app/assembly/store.py`), not a second implementation. `pg_advisory_xact_lock(hashtext(...))` is
+   Postgres-only and dies at COMMIT; the unique `(project, key, number)` index is the wall behind it. Lease
+   times are epoch seconds because two processes need one clock. Nothing serves a product yet.
+2. **The span ledger is installed in `lifespan` and removed at shutdown, never at import.** A global
+   `span()` listener makes every span non-inert, which would break `TestDisabledIsFree` for the whole
+   suite. Its numbers are per worker process and the response says so.
+3. **`from app.observe import collect` imports a function, not the submodule** (the package re-exports one
+   called `collect`). Import `span`, `INERT`, `listeners` from `app.observe.collect` by name.
+4. **MCP offers a curated 37 by default** (`app/ai/mcp_tools.py`, `MCP_TOOL_SET=curated|full`). A tool outside
+   the set is *unknown*, not refused, so a client cannot learn what exists behind it. Withhold at the surface
+   that has the requirement, not in the shared `ToolBox` (the 2026-09-17 lesson).
+5. **A restore is requested, then applied at the next launch** (`local_cluster.request_restore` /
+   `apply_pending_restore`). A restore under a serving app corrupts what it replaces. The name must match
+   `BACKUP_NAME` and exist in `backups/`; a failed restore is recorded in `restore-request.failed.json` and the
+   launch carries on, because retrying forever makes the app unusable. Scheduled dumps have their own name and
+   retention so a week of dailies never evicts the pre-upgrade dump. `/desktop/*` is 404 unless `KRYOVA_HOME` is
+   set, which the launcher now states itself. **Never run, only tested with a fake `pg_dump`/`pg_restore`.**
+6. **The crash report is assembled in the frontend's shell layer** (it owns the logs and the version), previewed
+   in full, sent only on the Send click, scrubbed twice, and has no input for files or attachments. There is no
+   collector: `KRYOVA_CRASH_REPORT_URL` unset means 501 and a Copy button. `redact` lives in `lib/redact.ts` so
+   the browser can scrub before anything crosses the wire; `token-custody.test.ts` exempts `crash-report.ts` for
+   its one stored word, `never`.
+7. **Unresolved: a full Linux `pytest` hung at ~72%** with a defunct spawn child (suspect
+   `tests/test_process_queue.py`, a child that dies). THE QUEUE G10 item 1; do not start the full suite before
+   that file passes.

@@ -15,7 +15,20 @@ happened.
 
 ## Now
 
-> **Handoff, 2026-10-05 (latest) — ROAD_TO_10 Phases 5–8 are written; nothing from Phases 6–8 has been run on
+> **Handoff, 2026-10-05 (latest) — ROAD_TO_10 Phases 1–9 are written as far as a Linux session can take them;
+> Phase 10 and 9.3 are not codable.** No cron job exists and no turn is scheduled (the user's instruction). Backend
+> tests for Phases 6–9 were written and **not run** — the user tests on the Windows PC with CATIA V5.
+> **Next target, in this order:** (1) THE QUEUE **G10** then **G11** in `docs/WINDOWS_VERIFICATION.md`; G10 item 1
+> first (`pytest -x -v tests/test_process_queue.py`, the unresolved hang), then one full suite, `ruff`, `mypy`,
+> `alembic check`, `verify.recorded --check`, re-record V&V last. (2) Decisions that are the user's: **9.3** (the
+> 450 MB of Dassault PDFs in history), **chrono pricing** (9.5), **who runs the crash-report collector** (9.2).
+> (3) Phase 10 (10.1–10.4) needs a live key, the seat and outside reviewers. **Interface changes in Phase 9:** new
+> routes `GET /admin/observability`, `GET/POST /desktop/backups`, `POST/DELETE /desktop/backups/restore`; new
+> settings `KRYOVA_HOME`, `MCP_TOOL_SET`; the MCP surface is now 37 curated tools by default (`full` restores the
+> old behaviour); migration `0f0bec54f55e` (`product_revisions`, `product_leases`, RLS); the in-house solvers now
+> refuse a rigidly-free body whatever the load; `Cluster` gains `restored_from`; frontend `/api/crash-report`.
+>
+> **Handoff, 2026-10-05 (earlier, superseded by the one above) — ROAD_TO_10 Phases 5–8 are written; nothing from Phases 6–8 has been run on
 > a Windows seat, and the backend suite has not completed once since.** The user's instruction for this stretch:
 > *"ignore the cron jobs, focus on coding only, I will test on the Windows PC with CATIA V5."* So **no cron job
 > exists and no turn is scheduled** (the self-scheduling rules in CLAUDE.md were set aside by that instruction).
@@ -852,6 +865,13 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-10-05 — ROAD_TO_10 Phase 9, written on Linux, backend tests not run by instruction** (backend `5c2f8b1`…`19ac953`,
+  frontend `7707170`). Rigid-body check independent of the load in the in-house solves; router-device typo fails at
+  settings load (9.5); product revisions and leases persisted under an advisory lock (9.4, migration `0f0bec54f55e`);
+  `GET /admin/observability` and its panel (9.6); a 37-tool curated MCP surface with instructions (9.7); daily
+  backups, a backup list and a launch-time restore (9.1); an opt-in, previewed crash report (9.2). **Open:** 9.3 and
+  chrono pricing are the user's decisions; the crash-report collector has no owner; a real restore and a real MCP
+  client have not run (THE QUEUE G11); the process-queue hang from G10 is unresolved.
 - **2026-10-05 — ROAD_TO_10 Phases 6–8, written on Linux, tests not run by instruction** (backend
   `aa5ec28`…`ef90010`, frontend `288b219`…the verification-pass fix commit). Compute: hardware probe, derived
   worker and thread counts, admission by memory, an opt-in process-pool queue, concurrent convergence grids,

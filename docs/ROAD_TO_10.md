@@ -908,27 +908,33 @@ verified, and it does so in the engineer's language, light or dark.
 - [x] **8.11 Accessibility pass.** [frontend] **M** — **NEW**
   - Focus order, labels on icon buttons (the sidebar's hover-only delete has no keyboard path, per
     CLAUDE.md 1a), contrast in both themes, and reduced motion.
+  - Status 2026-10-05: Done (`4e1209d`): keyboard path through the sidebar's row actions, F2 rename, touch-visible actions, measured contrast. No screen-reader pass was done.
 
 ---
-  - Status 2026-10-05: Done (`4e1209d`): keyboard path through the sidebar's row actions, F2 rename, touch-visible actions, measured contrast. No screen-reader pass was done.
 
 ## Phase 9 — Reliability, security and operations
 
-- [ ] **9.1 Back up and restore the bundled database on the desktop.** [Seat] **M** → P9.6
+> **Phase status 2026-10-05:** everything a Linux session can write is written. 9.4 and 9.6 are done; 9.1, 9.2, 9.5 and 9.7 are partial for the stated reasons (a seat run, a collector nobody runs, a billing price, a real MCP client); **9.3 is yours to decide**. None of the Phase 9 backend tests has been run (the instruction was to write them and test on the Windows PC).
+
+- [~] **9.1 Back up and restore the bundled database on the desktop.** [Seat] **M** → P9.6
   - A scheduled `pg_dump --enable-row-security` into `%LOCALAPPDATA%\Kryova\backups`, plus a one-click
     restore. The drill script exists (`Kryova-backend/scripts/restore_drill.py`).
-- [ ] **9.2 Crash reporting for the desktop app.** [Both] **M** — **NEW**
+  - Status 2026-10-05: Linux half done and tested as text (`a5b5b23`, `19ac953`); the real restore has never run. A daily `pg_dump --enable-row-security` (kept 7, separate from the pre-upgrade dumps), `GET/POST /desktop/backups`, and `POST/DELETE /desktop/backups/restore`, which is **deferred to the next launch** (a request file; the launcher takes a safety dump, then `pg_restore --single-transaction`; a failed restore is recorded and the launch carries on). **New routes, new setting `KRYOVA_HOME`; no schema change.** No button yet. tests/test_backups.py. Seat: THE QUEUE G11.
+- [~] **9.2 Crash reporting for the desktop app.** [Both] **M** — **NEW**
   - It is opt-in, with the backend log tail and the version, and it never includes attachment
     contents or model transcripts unless the user ticks a box.
+  - Status 2026-10-05: Built and tested (`Kryova-frontend` `7707170`); there is no collector. The report is previewed in full, sent only on the Send click, never carries files or attachments (the builder has no input for them), and includes a conversation's messages only if ticked. `/api/crash-report` answers 501 until `KRYOVA_CRASH_REPORT_URL` is set to an `https:` endpoint: **someone has to run that endpoint, which is not decided.** No backend change (the logs and version live in the shell layer). src/lib/crash-report.test.ts, src/app/api/crash-report/route.test.ts, src/components/crash-report-button.test.tsx.
 - [ ] **9.3 The 450 MB of Dassault PDFs in git history.** [decision] **S** to decide, **M** to do
   - Listed under CLAUDE.md, *Known landmines* item 1. Rewrite the history before the repository is
     shared, and fetch the manuals at setup instead.
   - This is a legal question for the user, not a session.
-- [ ] **9.4 Locks that hold across processes.** [Linux] **L** → E15
+  - Status 2026-10-05: NOT DONE, and it is not a session's to do: rewriting history is irreversible and the legal question is yours. Nothing was changed.
+- [x] **9.4 Locks that hold across processes.** [Linux] **L** → E15
   - `Kryova-backend/app/assembly/locking.py` is in-process, as are the rate limits until 3.1. Persist
     the product locks in Postgres (advisory locks or a lease table) before more than one worker runs
     in production.
-- [ ] **9.5 The flagged items from the 2026-10-04 audit.** [Linux] **S** each
+  - Status 2026-10-05: Done as written, tests not run (`0f0bd30`): revisions and leases are rows (migration `0f0bec54f55e`, RLS, rollback note), serialised by a transaction-scoped advisory lock with the unique `(project, key, number)` index as the second wall; lease times are epoch seconds so two processes share a clock. Nothing serves a product yet, so no route reads it. **The rate limits are the other half of this item and are 3.1's.** tests/test_product_store.py.
+- [~] **9.5 The flagged items from the 2026-10-04 audit.** [Linux] **S** each
   - `dynamics.chrono.run` is timed and unbilled; decide a price, then add a `SpanMeter`
     (`Kryova-backend/app/core/metering.py`).
   - `laya_decide._get_agent` swallows `pick_device`'s `ValueError`
@@ -936,15 +942,17 @@ verified, and it does so in the engineer's language, light or dark.
     settings load, not disable the router silently.
   - Rigid-body modes are only caught when the load excites them (CLAUDE.md, *Non-negotiable rules*,
     the residual). Add a load-independent check of the fixtures.
-- [ ] **9.6 Observability you can read.** [Linux] **M** → P3
+  - Status 2026-10-05: Two of three done (`5c2f8b1`): a router-device typo now fails at settings load, and the in-house solid and plane solves refuse a body the fixtures leave free to move whatever the load (solid 6 modes, plane 3). **Chrono pricing is open and is a billing decision** (it also has no usage scope); it stays unmetered and the test that names it stays. tests/test_ai_laya_decide.py, tests/test_solve_constraints.py, tests/test_solver_plane.py.
+- [x] **9.6 Observability you can read.** [Linux] **M** → P3
   - The spans exist (`Kryova-backend/app/observe/catalogue.py`). Add a small admin view: p50 and p95
     per span, turn cost, cache hit rate (1.11), queue depth, and bridge latency per operation.
-- [ ] **9.7 MCP as a curated channel.** [Linux] **M** — **NEW** (E23.3)
+  - Status 2026-10-05: Done, tests not run (`0ab74af`, `Kryova-frontend` panel): `GET /admin/observability?hours=` — p50/p95 per span (labelled the maximum on a small sample), turn cost (unpriced turns counted apart, never zero), CATIA operation latency from the newest 20,000 rows, queue depth, cache hit rate. The span ledger is per worker process and says so. tests/test_observe_ledger.py.
+- [~] **9.7 MCP as a curated channel.** [Linux] **M** — **NEW** (E23.3)
   - Expose about 20–40 well-described tools through `Kryova-backend/app/api/routes/mcp.py` instead
     of the full registry, and add server instructions covering units, mutation consent and "never
     quote an unconverged number".
   - Test it once with a real MCP client before announcing it.
-
+  - Status 2026-10-05: Done except the last line of the item (`bcd3f1a`): 37 curated tools (`MCP_TOOL_SET=curated|full`), destructive and UI-driving tools withheld, instructions on units, consent, unconverged numbers and the one `NOT_VALIDATED` string. **Not tried with a real MCP client**, which the item asks for. tests/test_mcp_tools.py, tests/test_mcp.py.
 ---
 
 ## Phase 10 — Proof: the 10/10 gate

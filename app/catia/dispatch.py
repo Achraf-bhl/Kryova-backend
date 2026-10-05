@@ -189,14 +189,11 @@ _UNSCOPED_TOOLS = frozenset(
         # window itself, so it can report "it was not open" instead of creating
         # one to report closing.
         "catia_close_document",
-        # Opens the imported file, which is not the bound one. Note what that
-        # leaves unresolved: nothing rebinds the conversation to the imported
-        # document, so the next scoped call reattaches to the part that was
-        # already bound and the import sits open beside it. That is at least
-        # coherent -- before scoping existed, the mutation landed on the
-        # imported document while its checkpoint and its log row named the
-        # bound one. Deciding whether an import should rebind is a product
-        # question, and it is still open.
+        # Opens the imported file, which is not the bound one -- and since
+        # ROAD_TO_10 5.8 it is rebound afterwards (`_bind_imported`): the call
+        # itself stays unscoped because activating the old part in order to open
+        # a new one beside it is work done for nothing, but the *next* call is
+        # for the imported document, so the model can build on what it brought in.
         "catia_import",
         # The interactive family, for the reason that gets them out of the
         # auto-checkpoint too: they run precisely when a modal dialog has COM
@@ -1900,6 +1897,15 @@ def _post_process(
             )
         return result
 
+    if spec.name == "catia_import":
+        return _bind_imported(
+            db,
+            device=device,
+            document=document,
+            conversation_id=conversation_id,
+            raw=raw,
+        )
+
     if spec.name == "catia_open_document":
         # `_enrich` may have switched the active document by name, so the row
         # handed in is not necessarily the one that was opened. Re-read.
@@ -1981,6 +1987,63 @@ def _post_process(
         )
 
     return _clean(raw)
+
+
+def _bind_imported(
+    db: Session,
+    *,
+    device: CatiaDevice,
+    document: CatiaDocument | None,
+    conversation_id: str | None,
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    """After an import, the conversation works on what it imported (ROAD_TO_10 5.8).
+
+    The daemon opens the file as a *new* document, so CATIA's active window is the
+    import while the conversation's binding still named the part it had before --
+    the next scoped call reattached to the old part and the import sat open beside
+    it, which is coherent and useless: the point of importing a supplier's STEP is to
+    model on it.
+
+    **It rebinds only when the daemon says where the document now lives.** A binding
+    with no path cannot be found again after CATIA restarts (`ensure_document` has
+    nothing to reopen), so an import the daemon did not save is reported as open and
+    *not bound*, naming the part Kryova still points at. The previous document is
+    kept and owned, exactly as a second `catia_new_part` keeps the first: nothing is
+    discarded and `catia_open_document name=` brings it back.
+    """
+    result = _clean(raw)
+    remote_path = raw.get("remote_path")
+    doc_name = str(raw.get("doc_name") or "").strip()
+    if not remote_path or not doc_name:
+        previous = f" Kryova still points at {document.doc_name!r}." if document else ""
+        result["bound"] = False
+        result["note"] = (
+            "The file is open in CATIA but this workstation did not report where it "
+            "saved it, so the conversation was not rebound to it and a later call would "
+            f"not find it again after a restart.{previous}"
+        )
+        return result
+
+    kind = raw.get("doc_type")
+    previous_document = document
+    bound = _bind_document(
+        db,
+        conversation_id=conversation_id,
+        device=device,
+        doc_name=doc_name,
+        remote_path=remote_path,
+        existing=document,
+        doc_type=kind if kind in ("part", "product") else "part",
+    )
+    result |= {"document_id": bound.id, "doc_type": bound.doc_type, "bound": True}
+    if previous_document is not None:
+        result["note"] = (
+            f"{bound.doc_name!r} is the active document now. This conversation still "
+            f"owns {previous_document.doc_name!r}; nothing was discarded. Switch back "
+            "with catia_open_document name=<document>."
+        )
+    return result
 
 
 def _bind_document(

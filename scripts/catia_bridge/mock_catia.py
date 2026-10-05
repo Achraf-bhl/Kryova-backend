@@ -179,6 +179,62 @@ class MockCatia(MockKnowledgeMixin, CatiaBackend):
             "up_to_date": True,
         }
 
+    def import_file(
+        self,
+        *,
+        file: str,
+        content_b64: str = "",
+        content_hash: str = "",
+        filename: str = "",
+        format: str = "",  # noqa: A002 - the schema's name
+        import_as: str = "solid",
+        heal: bool | None = None,
+        scale: float | None = None,
+    ) -> dict[str, Any]:
+        """Accept an uploaded file as a new, saved document, the way the seat does.
+
+        What this models is the *document handling*, which is what the server's rebinding
+        depends on: the bytes are checked against their hash, the import becomes the active
+        document, and it is saved under the documents folder so it has a path. What it does
+        **not** model is reading the geometry -- the mock is a box that pads and pockets and
+        cannot parse a STEP file -- so the imported part is empty and the result says so.
+        Obviously approximate beats subtly wrong (see the module docstring).
+        """
+        if not content_b64:
+            raise CatiaOperationError(
+                f"The server did not resolve {file!r} to an uploaded file. Upload the file "
+                "to Kryova first, then name it exactly as it appears there."
+            )
+        data = base64.b64decode(content_b64)
+        if content_hash and hashlib.sha256(data).hexdigest() != content_hash:
+            raise CatiaOperationError(
+                f"{file!r} did not arrive intact: its hash does not match what the server sent."
+            )
+        stem = _safe_filename(Path(filename or file).stem)
+        path = self.documents / f"{stem}.CATPart"
+        counter = 2
+        while path.exists():
+            path = self.documents / f"{stem}-{counter}.CATPart"
+            counter += 1
+
+        self._reset()
+        self.product = None
+        self.doc_name = path.stem
+        self.doc_path = path
+        self._write_document()
+        return {
+            "file": file,
+            "format": format or Path(filename or file).suffix.lstrip(".").lower(),
+            "document": self.doc_name,
+            "doc_name": self.doc_name,
+            "remote_path": str(path),
+            "doc_type": "part",
+            "import_as": import_as,
+            "solids": 0,
+            "surfaces": 0,
+            "note": "The mock accepts the file and does not read its geometry.",
+        }
+
     def _holds_document(self, doc_name: str | None, wanted: Path | None) -> bool:
         """Whether the document in hand is the one the server named.
 

@@ -72,8 +72,8 @@ block by hand — regenerate it with `--write`, and `--check` says whether it ha
 | Track | Phases complete | Tasks | Effort |
 |---|---|---|---|
 | Engineering — E1–E23 | 17/24 | 127/136 = 93% | 141/151 eng-months = 93% |
-| Product — P1–P11 | 6/11 | 82/94 = 87% | 33/39 eng-months = 85% |
-| **Programme** | 23/35 | 208/230 = 91% | 174/190 eng-months = 92% |
+| Product — P1–P11 | 6/11 | 82/95 = 86% | 33/39 eng-months = 85% |
+| **Programme** | 23/35 | 209/231 = 90% | 174/190 eng-months = 91% |
 
 Weighting: `DONE` 1, `PARTIAL` ½, `IN PROGRESS` ¼, `BLOCKED` and `NOT STARTED` 0. The half is
 a convention rather than a measurement, so read the per-phase rows, not the headline.
@@ -81,7 +81,7 @@ a convention rather than a measurement, so read the per-phase rows, not the head
 | | Phases |
 |---|---|
 | ✅ complete | E1, E2, E3, E4, E5, E6, E7, E10, E11, E12, E13, E14, E16, E17.3, E18, E19, E20, P1, P2, P3, P5, P8, P10 |
-| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 61%, P9 71%, P11 89% |
+| in flight | E8 92%, E9 75%, E15 80%, E17 92%, E21 58%, E22 62%, E23 75%, P4 86%, P7 60%, P9 71%, P11 89% |
 | nothing finished yet | P6 |
 
 **What this is not.** It is progress against the plan, not against a shipped product. Almost
@@ -7731,6 +7731,20 @@ scene in the Tauri app.
    the count on the tray, and `sendNotice` through `desktop-powers.ts::noticeFor` (which stays
    silent under a minute).
    > NOT STARTED — no endpoint exists; `DesktopBridge` says so in its own comment.
+
+10. **`catia_import` rebinds the conversation's document.** *(ROAD_TO_10 5.8, added 2026-10-05.)* The
+   daemon opens an imported file as a new document, so CATIA's active window was the import while
+   the conversation's binding still named the part it had before: the next scoped call reattached
+   to the old part and the import sat open beside it, useless for modelling on a supplier's STEP.
+   > PARTIAL (2026-10-05) — **the server half, the mock and the daemon's code are done; the seat half
+   > is unrun.** After `catia_import`, `dispatch._bind_imported` makes the imported document the
+   > conversation's active one when the daemon reports where it saved it (`remote_path` and
+   > `doc_name`), keeps the previous document owned and says so in the result; an import the daemon
+   > did not save is reported *open and not bound*, because a binding with no path cannot be found
+   > again after CATIA restarts. The call itself stays unscoped. The daemon's COM `import_file` now
+   > `SaveAs`es the import under the documents folder and the mock models the same. **Not verified:**
+   > that `SaveAs` on a freshly imported STEP document behaves on a seat (THE QUEUE G8).
+   > Tested by: `tests/test_catia_import_rebinds.py`, through `call_catia`.
 
 ##### Phase P8 — Billing, quotas and metering #####
 

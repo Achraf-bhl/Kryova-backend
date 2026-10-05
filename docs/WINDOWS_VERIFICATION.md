@@ -1798,6 +1798,18 @@ this file drives the ladder, with a screenshot each.
       never seen this repository can install one file, start it, lose nothing on uninstall, and
       be offered an update that is checked before it is trusted.
 
+- [ ] **G8 — ROAD_TO_10 Phase 5: the CATIA halves a Linux session could not run (added 2026-10-05).**
+      Each item is code that is written, tested against the mock and the scripted device, and has
+      **never touched a seat**. Read the COM parameter flags before calling anything unfamiliar and never
+      sweep a signature on a live seat (CLAUDE.md, *Driving CATIA's interface* 3a/3b).
+      1. **`catia_import` saves what it imported (5.8).** Import a STEP through the chatbot on a seat, then
+         build on it. Check `SaveAs` on a freshly imported document does not raise a dialog (a `Save As`
+         dialog blocks COM — `_free_document_path` exists to avoid it), that `remote_path` and `doc_name`
+         come back, that the next scoped call activates the imported document and not the old part, and
+         what an imported *assembly* is (`_document_kind` — product or part) and whether `doc_type` is
+         right. A failed save must come back as "open and not bound", not as an error.
+      Settles: whether the bridge and the app agree about what is in CATIA.
+
 ---
 
 ### H. The hosted provider itself — DeepSeek, written 2026-10-04 from the vendor's API reference

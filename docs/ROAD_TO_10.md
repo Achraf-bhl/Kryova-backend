@@ -599,10 +599,14 @@ Today:
     (`Kryova-frontend/src/components/catia-bridge-panel.tsx`), and an approval dialog for destructive
     tiers.
   - Test: the frontend's api-client test plus a backend route test for the full approval round trip.
-- [ ] **5.8 `catia_import` rebinds the conversation's document.** [Linux] **S** — **NEW**
+- [~] **5.8 `catia_import` rebinds the conversation's document.** [Linux] **S** — **NEW**
   - The `dispatch.py` comments say this is still open: after an import, the binding still points at
     the old document.
   - Test: through `call_catia`, not through the dispatcher directly (CLAUDE.md, *Testing* 8).
+  - Status 2026-10-05: Linux half done: `dispatch._bind_imported` rebinds to the imported document
+    when the daemon reports its saved path (master plan P7.10; tested through `call_catia` in
+    `tests/test_catia_import_rebinds.py`). The seat half — that `SaveAs` on a fresh import behaves —
+    is THE QUEUE G8 item 1.
 
 ### 5C. Seats, crashes and lifecycle
 

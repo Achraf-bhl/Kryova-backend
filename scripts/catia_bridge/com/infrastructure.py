@@ -249,13 +249,33 @@ class InfrastructureMixin:
         if heal is not False and imported.get("surfaces", 0) > 0:
             imported["healed"] = _heal(document)
 
-        return {
+        result: dict[str, Any] = {
             "file": file,
             "format": detected,
             "document": str(document.Name),
             "import_as": import_as,
             **imported,
         }
+
+        # Save what was imported under the documents folder and say where (ROAD_TO_10 5.8).
+        # The import came from a temp file that is deleted above, so without this the new
+        # document has no path: the server cannot bind a conversation to it, because a
+        # binding that cannot be reopened after CATIA restarts is worse than none. A failed
+        # save must not fail the import -- the geometry is in CATIA either way -- so it is
+        # reported by *omitting* `remote_path`, and the server then says it did not rebind.
+        # **Never run against a seat** (THE QUEUE G8): `SaveAs` on a freshly imported STEP
+        # document is the call whose behaviour -- a dialog, a refusal, a different name --
+        # nothing here has observed.
+        try:
+            suffix = ".CATProduct" if _document_kind(document) == "product" else ".CATPart"
+            target = self._free_document_path(Path(stem).stem or "Import", suffix=suffix)
+            document.SaveAs(str(target))
+            result["doc_name"] = target.stem
+            result["remote_path"] = str(target)
+            result["doc_type"] = "product" if suffix == ".CATProduct" else "part"
+        except Exception as error:  # noqa: BLE001
+            logger.warning("The imported document could not be saved: %s", error)
+        return result
 
     # -- export --------------------------------------------------------------
 

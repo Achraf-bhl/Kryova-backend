@@ -132,3 +132,4 @@ disable_error_code = ["import-untyped"]
 # redefinition to F811 and is not.
 "tests/test_multi_document.py" = ["F811"]
 "tests/test_assembly_scoping.py" = ["F811"]
+"tests/test_catia_import_rebinds.py" = ["F811"]

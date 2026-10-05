@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # because both the schema's `le=` and the media service check it.
 MAX_UPLOAD_CHUNK_BYTES = 64 * 1024 * 1024
 
-JOB_QUEUE_BACKENDS = ("threadpool", "inline")
+JOB_QUEUE_BACKENDS = ("threadpool", "process", "inline")
 
 # Every value below is an allow-list because each field is read straight into a
 # security decision: the signing algorithm, a Set-Cookie attribute, and the
@@ -230,7 +230,11 @@ class Settings(BaseSettings):
     # `compute_plan.current()`, never from these two fields.
     job_workers: int | None = Field(default=None, ge=1)
     solver_threads: int | None = Field(default=None, ge=1)
-    job_queue_backend: str = "threadpool"  # "threadpool" or "inline"
+    job_queue_backend: str = "threadpool"  # "threadpool", "process" or "inline"
+    # With `job_queue_backend=process`: a hard ceiling on each worker process's *address space*
+    # (POSIX RLIMIT_AS; ignored on Windows). Unset by default because address space is larger
+    # than resident memory and a low figure can stop a solve that would have fitted in RAM.
+    job_memory_limit_mb: int | None = Field(default=None, ge=256)
     # The autoscale recommendation (`app/jobs/autoscale.py`, GET /admin/compute/scaling).
     # The application computes a worker count; an orchestrator acts on it. `job_workers`
     # above is the jobs-per-worker figure the recommendation divides by.

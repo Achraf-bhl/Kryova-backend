@@ -47,7 +47,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from app.core import limits
-from app.jobs.queue import JobQueue
+from app.jobs.queue import JobQueue, RemoteCall, Work
 from app.media import LocalMediaStore
 from app.models import SLOT_HOLDERS, JobStatus, Project, SimulationJob
 from app.simulation.runner import SessionScope, run_simulation
@@ -259,7 +259,36 @@ def start(
     operator's retry and a promotion -- so the hand-on cannot be forgotten by one of them,
     which would strand that user's waiting runs until the next restart.
     """
-    queue.submit(lambda: _run_then_hand_on(queue, job_id, session_scope, store))
+    queue.submit(
+        Work(
+            lambda: _run_then_hand_on(queue, job_id, session_scope, store),
+            # A queue with processes runs this in a child that rebuilds its own session and
+            # store (`app/simulation/worker.py`), and the hand-on and a crash record happen back
+            # here. A queue without them calls the closure above and never looks at these.
+            remote=RemoteCall("app.simulation.worker:run_in_child", (job_id,)),
+            after=lambda: _hand_on_after(queue, job_id, session_scope, store),
+            on_crash=lambda reason: _record_crash(job_id, session_scope, reason),
+        )
+    )
+
+
+def _record_crash(job_id: str, session_scope: SessionScope, reason: str) -> None:
+    """A run whose worker process vanished is failed with that said, not left `RUNNING`.
+
+    Only a run still `QUEUED` or `RUNNING` is touched: a child that finished and wrote its own
+    outcome before dying (or whose exit raced the result) keeps what it wrote.
+    """
+    with session_scope() as db:
+        job = db.get(SimulationJob, job_id)
+        if job is None or job.status not in (JobStatus.QUEUED, JobStatus.RUNNING):
+            return
+        job.status = JobStatus.FAILED
+        job.error = (
+            "The worker process running this simulation ended unexpectedly "
+            f"({reason}). It was most likely stopped for using too much memory. "
+            "Increase element_size_mm to coarsen the mesh, or run it again."
+        )
+        db.commit()
 
 
 def _run_then_hand_on(

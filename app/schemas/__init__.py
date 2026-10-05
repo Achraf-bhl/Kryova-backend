@@ -36,7 +36,19 @@ from app.schemas.pagination import (
     ProjectPage,
     SimulationPage,
 )
-from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
+from app.schemas.project import (
+    ActivityEntryRead,
+    ActivityPage,
+    ProjectCreate,
+    ProjectDuplicate,
+    ProjectDuplicated,
+    ProjectFromTemplate,
+    ProjectFromTemplateRead,
+    ProjectImported,
+    ProjectRead,
+    ProjectTemplateRead,
+    ProjectUpdate,
+)
 from app.schemas.simulation import (
     MaterialList,
     SimulationCreate,
@@ -73,7 +85,15 @@ __all__ = [
     "Page",
     "PasswordReset",
     "PasswordResetRequest",
+    "ActivityEntryRead",
+    "ActivityPage",
     "ProjectCreate",
+    "ProjectDuplicate",
+    "ProjectDuplicated",
+    "ProjectFromTemplate",
+    "ProjectFromTemplateRead",
+    "ProjectImported",
+    "ProjectTemplateRead",
     "ProjectPage",
     "ProjectRead",
     "ProjectUpdate",

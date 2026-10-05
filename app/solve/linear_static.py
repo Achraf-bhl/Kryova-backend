@@ -392,7 +392,9 @@ class LinearStaticSolver(Solver):
         # need it and nothing else in the assembly does. Restrained thermal expansion is a load
         # like any other, added here, so a part that is both heated and pushed has one
         # displacement field, not two to superpose by hand.
-        prepared: list[tuple[NDArray[np.float64], NDArray[np.float64] | None, list[str]]] = []
+        prepared: list[
+            tuple[NDArray[np.float64], float | NDArray[np.float64] | None, list[str]]
+        ] = []
         for case in cases:
             forces, load_warnings = assemble_loads(mesh, case.loads, case.material.density_kg_m3)
             delta_t = _temperature_change(mesh, case, temperatures)

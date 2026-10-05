@@ -56,7 +56,7 @@ from app.models.platform import (
     FeatureFlagOverride,
     MaintenanceWindow,
 )
-from app.models.project import Project
+from app.models.project import Project, ProjectStar
 from app.models.project_memory import MemoryState, ProjectMemory
 from app.models.session import REUSE_GRACE_SECONDS, SessionRevocation, UserSession
 from app.models.sharing import ProjectTransfer, ShareLink, ShareRevocation
@@ -109,6 +109,7 @@ __all__ = [
     "Plan",
     "Project",
     "ProjectMemory",
+    "ProjectStar",
     "ProjectTransfer",
     "RecoveryCode",
     "SLOT_HOLDERS",

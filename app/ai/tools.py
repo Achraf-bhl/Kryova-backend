@@ -55,6 +55,7 @@ from app.models import (
     GeometryVersion,
     JobStatus,
     MessageRole,
+    OrgRole,
     Project,
     SimulationJob,
     User,
@@ -470,7 +471,21 @@ class ToolBox:
 
     # -- lookup helpers -----------------------------------------------------
 
-    def _project(self, project_id: str | None) -> Project:
+    def _project(self, project_id: str | None, minimum: OrgRole = OrgRole.VIEWER) -> Project:
+        """The project, if the user's role in its organisation is at least `minimum`.
+
+        The HTTP layer's rule, once (ROAD_TO_10 7.4). This used to ask for the project's
+        *owner*, so a colleague with a perfectly good `MEMBER` role was told "no project
+        belongs to you" by the agent for a project the button opened. Roles are
+        `VIEWER < MEMBER < ADMIN < OWNER` and there is no separate editor role: `MEMBER` is
+        what every route that uploads geometry, runs an analysis or drives CATIA asks for,
+        so it is what a tool that does those things asks for. Read tools default to `VIEWER`.
+
+        A project that does not exist and one the user may not touch get the same sentence,
+        so an id cannot be probed (the HTTP layer's 404-not-403).
+        """
+        from app.models.organisation import membership_for_user
+
         resolved = project_id or self.project_id
         if not resolved:
             raise ToolError(
@@ -478,10 +493,17 @@ class ToolBox:
                 "Call list_projects and ask the user which one they mean."
             )
         project = self.db.get(Project, resolved)
-        # Same 404-not-403 posture as the HTTP layer: never confirm that an id
-        # exists for a project the user does not own.
-        if project is None or project.owner_id != self.user.id:
-            raise ToolError(f"No project with id {resolved!r} belongs to you.")
+        membership = (
+            membership_for_user(self.db, self.user, project.organisation_id)
+            if project is not None
+            else None
+        )
+        if project is None or membership is None or not membership.role.at_least(minimum):
+            verb = "open" if minimum is OrgRole.VIEWER else "change"
+            raise ToolError(
+                f"No project with id {resolved!r} belongs to you or to an organisation "
+                f"in which you may {verb} it."
+            )
         return project
 
     # -- the tools ----------------------------------------------------------
@@ -2351,9 +2373,14 @@ class ToolBox:
         return {"tool": row.tool_name, "was_error": bool(row.is_error), "result": result}
 
     def _list_projects(self) -> dict[str, Any]:
+        from app.models import Membership
+
+        # Every project in an organisation the user belongs to, which is what the HTTP
+        # layer lets them open -- not only the ones they made (ROAD_TO_10 7.4).
         rows = self.db.scalars(
             select(Project)
-            .where(Project.owner_id == self.user.id)
+            .join(Membership, Membership.organisation_id == Project.organisation_id)
+            .where(Membership.user_id == self.user.id, Project.archived_at.is_(None))
             .order_by(Project.created_at.desc())
         ).all()
         return {
@@ -2415,7 +2442,7 @@ class ToolBox:
         Only the fields actually supplied are touched, so a caller changing the
         name cannot accidentally blank the description by omitting it.
         """
-        project = self._project(project_id)
+        project = self._project(project_id, OrgRole.MEMBER)
         if name is None and description is None:
             raise ToolError("Nothing to change: pass a new name, a new description, or both.")
 
@@ -2451,7 +2478,7 @@ class ToolBox:
         cascade run. Gated behind `mutating`, so it cannot fire without the
         caller having confirmed this turn.
         """
-        project = self._project(project_id)
+        project = self._project(project_id, OrgRole.MEMBER)
         geometry_count = int(
             self.db.scalar(
                 select(func.count())
@@ -2539,33 +2566,8 @@ class ToolBox:
         }
 
     def _writable_project(self, project_id: str | None) -> Project:
-        """The project, if this user may write to it, by the HTTP layer's rule.
-
-        `MEMBER` or above in the owning organisation, which is what `OwnedProject`
-        asks of `POST .../geometry/from-attachment`. **Not `_project`**, which asks
-        for the project's owner: a tool stricter than the route beside it would
-        refuse, in the agent, what the same product's button does. A project that
-        does not exist and one the user cannot write to get one sentence, so an id
-        cannot be probed.
-        """
-        from app.models import OrgRole
-        from app.models.organisation import membership_for_user
-
-        resolved = project_id or self.project_id
-        if not resolved:
-            raise ToolError(
-                "No project specified and this conversation is not scoped to one. "
-                "Call list_projects and ask the user which one they mean."
-            )
-        project = self.db.get(Project, resolved)
-        membership = (
-            membership_for_user(self.db, self.user, project.organisation_id)
-            if project is not None
-            else None
-        )
-        if project is None or membership is None or not membership.role.at_least(OrgRole.MEMBER):
-            raise ToolError(f"No project with id {resolved!r} is one you can write to.")
-        return project
+        """The project, if this user may write to it: `MEMBER` or above, as `OwnedProject`."""
+        return self._project(project_id, OrgRole.MEMBER)
 
     def _the_attached_part(self) -> str:
         """The id of the one STEP, IGES or STL attached to this conversation.
@@ -2777,11 +2779,13 @@ class ToolBox:
             ],
         }
 
-    def _simulation(self, simulation_id: str) -> SimulationJob:
+    def _simulation(
+        self, simulation_id: str, minimum: OrgRole = OrgRole.VIEWER
+    ) -> SimulationJob:
         job = self.db.get(SimulationJob, simulation_id)
         if job is None:
             raise ToolError(f"No simulation with id {simulation_id!r}.")
-        self._project(job.project_id)  # ownership check, raises if not theirs
+        self._project(job.project_id, minimum)  # role check, raises if not theirs
         return job
 
     def _get_simulation(self, simulation_id: str) -> dict[str, Any]:
@@ -2894,7 +2898,7 @@ class ToolBox:
         """
         from app.ai.service import draft_load_case as draft
 
-        project = self._project(project_id)
+        project = self._project(project_id, OrgRole.MEMBER)
         if self.provider is None:
             raise ToolError(
                 "No model is available to draft a load case here. Write the load "
@@ -2968,7 +2972,7 @@ class ToolBox:
         and the first where the product *names the missing parameter in its own
         prose*.
         """
-        project = self._project(project_id)
+        project = self._project(project_id, OrgRole.MEMBER)
 
         if element_order not in (1, 2):
             raise ToolError(
@@ -3112,7 +3116,7 @@ class ToolBox:
         from app.simulation.runner import CONDUCTION, TRANSIENT
         from app.solve.conduction import ThermalCase, TransientThermalCase
 
-        project = self._project(project_id)
+        project = self._project(project_id, OrgRole.MEMBER)
         if element_order not in (1, 2):
             raise ToolError(
                 f"element_order must be 1 (linear tets) or 2 (quadratic); got {element_order!r}."
@@ -3186,7 +3190,7 @@ class ToolBox:
         from app.solve.openfoam.case import FlowCase
         from app.solve.openfoam.run import availability
 
-        project = self._project(project_id)
+        project = self._project(project_id, OrgRole.MEMBER)
         try:
             validated = FlowCase.model_validate(flow_case)
         except ValidationError as exc:
@@ -3391,7 +3395,7 @@ class ToolBox:
 
     def _delete_simulation(self, simulation_id: str) -> dict[str, Any]:
         """Delete one finished run, mirroring the HTTP route's ordering."""
-        job = self._simulation(simulation_id)
+        job = self._simulation(simulation_id, OrgRole.MEMBER)
         if not job.status.is_terminal:
             raise ToolError(
                 f"Simulation {job.id} is {job.status.value}; wait for it to finish "
@@ -4143,7 +4147,7 @@ class ToolBox:
         from app.media import MediaService, get_media_store
         from app.models import MediaKind
 
-        project = self._project(project_id)
+        project = self._project(project_id, OrgRole.MEMBER)
 
         with tempfile.TemporaryDirectory(prefix="kryova-catia-") as staging:
             try:

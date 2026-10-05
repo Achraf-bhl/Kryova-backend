@@ -9,7 +9,7 @@ viewer", because a 403 there still confirms which ids exist.
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -207,13 +207,19 @@ def list_organisation_projects(
     db: DbSession,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    archived: Annotated[Literal["exclude", "include", "only"], Query()] = "exclude",
 ) -> ProjectPage:
     """Every project the tenant owns, whoever created it.
 
     `GET /projects` still answers with what *you* made; this is what the *team*
-    owns, which is the thing an organisation exists to make visible.
+    owns, which is the thing an organisation exists to make visible. Archived projects
+    are hidden unless asked for (ROAD_TO_10 7.1).
     """
     condition = Project.organisation_id == organisation.id
+    if archived == "exclude":
+        condition = condition & Project.archived_at.is_(None)
+    elif archived == "only":
+        condition = condition & Project.archived_at.is_not(None)
     total = db.scalar(select(func.count()).select_from(Project).where(condition)) or 0
     rows = db.scalars(
         select(Project)

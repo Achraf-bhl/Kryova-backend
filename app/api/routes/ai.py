@@ -63,7 +63,7 @@ from app.api.deps import (
     SessionScopeDep,
 )
 from app.api.rate_limit import PlanRateLimit, RateLimit
-from app.core import interruption
+from app.core import interruption, projects
 from app.core.config import settings
 from app.core.metering import Cause, LedgerSink, record_tokens, usage_scope
 from app.models import (
@@ -72,6 +72,7 @@ from app.models import (
     GeometryVersion,
     JobStatus,
     MessageRole,
+    Project,
     SimulationJob,
     User,
 )
@@ -742,6 +743,13 @@ def _maybe_title(
         return
     title, usage = generate_title(provider, user_message=user_message, assistant_reply=reply)
     conversation.title = title
+    # A project the first chat created is called "New project" until somebody names it; the
+    # conversation's title is the best name available, and a name a person chose is never
+    # touched (`projects.name_from_conversation` replaces only the placeholder).
+    if conversation.project_id is not None:
+        project = db.get(Project, conversation.project_id)
+        if project is not None:
+            projects.name_from_conversation(project, title)
     token_usage.record(
         db,
         user=user,

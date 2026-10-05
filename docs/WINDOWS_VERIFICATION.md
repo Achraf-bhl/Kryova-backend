@@ -1877,6 +1877,11 @@ this file drives the ladder, with a screenshot each.
       4. **Concurrent grids and a shared factorisation, timed (6.5, 6.6).** `STUDY_CONCURRENCY` defaults to 1 because no timing says 2 or 3 is faster here: meshing still serialises behind gmsh's lock and the in-house solve's BLAS is already threaded. On the seat time one 3-grid study at `STUDY_CONCURRENCY` 1, 2 and 3, and one run of `LinearStaticSolver.solve_cases` with 4 load cases against 4 separate `solve` calls on a 30,000-DOF mesh. Turn the default up only on a measured win. `solve_cases` has no caller yet: a simulation job carries one load case.
       5. **The bundled Postgres's memory settings (6.10).** `app/core/local_cluster.tuning_for` sizes `shared_buffers`, `effective_cache_size`, `work_mem` and `maintenance_work_mem` from RAM when a cluster is first created. The figures are chosen, not measured. On a fresh install on the seat read `%LOCALAPPDATA%\Kryova\pgdata\postgresql.conf` for them, and time a project list and a result fetch before and after on a machine with 8 GB and one with 32 GB. A cluster made before this change keeps Postgres's defaults; nothing rewrites it.
       6. **A cold first request (6.7).** The OCCT import (2.2 s on Linux) is warmed on a background thread at startup. On the seat start the backend, wait 5 s, and time the first geometry operation against one started within a second of boot: the warm-up should remove most of the difference and `/health` must answer instantly throughout.
+      7. **Viewer frame rate on a real GPU (6.9).** `Kryova-frontend/src/lib/frustum.ts`, `scene-loader.ts` and
+         `frame-meter.ts` are pure libraries with tests and **no caller**: there is no assembly viewer yet and no
+         endpoint returning each part's bounding sphere and available levels, which `SceneLoader` needs. When both
+         exist, load the largest mission assembly on the seat's integrated GPU, orbit for 30 s and read
+         `FrameMeter.snapshot()` (p95 and worst frame, not the mean). Nothing about frames per second has been measured.
       Settles: whether the compute plan fits the machines Kryova is installed on.
 
 ---

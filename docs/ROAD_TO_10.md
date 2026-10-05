@@ -750,6 +750,7 @@ The real lever is **processes**, behind the `JobQueue` seam.
     what makes several workers safe: "two direct solves at once is how a box runs out of memory".
   - Derive `max_elements=400_000` from RAM as well.
   - Status 2026-10-05: Done on the backend (`80d6f71`). A solve is admitted by the memory it needs against what the machine has free, and the element limit is derived from the machine rather than fixed. Master plan E15.7; tests/test_memory_governor.py (written, not run here — runs on the Windows PC).
+  - Seat 2026-10-05: tests/test_memory_governor.py ran on Windows: 81 passed after one test fix (the estimate rounds to whole MB, so `>` became `>=` at the 60 MB case; arithmetic, not platform).
 - [x] **6.4 A process-pool job queue.** [Linux] **L** → E15, MAKING_IT_FASTER §2.4
   - Add a `ProcessPoolJobQueue` beside `ThreadPoolJobQueue` in `Kryova-backend/app/jobs/queue.py`.
     Each process has its own gmsh singleton, so meshing finally runs in parallel and correctly, each
@@ -760,6 +761,7 @@ The real lever is **processes**, behind the `JobQueue` seam.
   - Test: two meshing jobs overlap in wall time, and each produces the mesh a single-process run
     produces.
   - Status 2026-10-05: Done, opt-in: `JOB_QUEUE_BACKEND=process` (`715d505`). A child dying fails its job and the pool is rebuilt. Master plan E15.8; tests/test_process_queue.py. **One flag: a full-suite run on Linux hung at ~72% with a defunct spawn child and a parent on a futex; the likely culprit is `test_a_child_that_dies_fails_its_job_and_the_queue_still_works` (the `die(9)` child), but a file-alone run was killed by timeout at 180 s without naming the test. Unresolved — read it first on the Windows PC with `pytest -x -v tests/test_process_queue.py`.** The default queue is unchanged.
+  - Seat 2026-10-05: **the hang was a deadlock, now fixed** (`aec6a56`). CPython 3.14's `terminate_broken` holds the executor's non-reentrant `_shutdown_lock` while it runs done-callbacks; ours rebuilt the pool and called `shutdown()` on it. The callback now only hands off to the queue's thread pool and the rebuild replaces only the pool that broke. tests/test_process_queue.py: 16 passed in 3.6 s (was a hang); the break brings the hang back.
 - [x] **6.5 Run a convergence study's grids at the same time.** [Linux] **M** — **NEW** (E7)
   - The grid levels in `Kryova-backend/app/verify/convergence.py::run_study` (sizes from
     `Kryova-backend/app/simulation/runner.py:451`) are independent meshes and solves. With 6.3 and
@@ -767,6 +769,7 @@ The real lever is **processes**, behind the `JobQueue` seam.
     finest grid instead of the sum.
   - The verdict logic does not change. Only the scheduling does.
   - Status 2026-10-05: Done (`d4c67fa`): `grids: 3` studies can run their grids at once when asked; sequential stays the default. tests/test_study_concurrency.py, tests/test_verify_convergence.py (written, not run).
+  - Seat 2026-10-05: both files ran; two tests corrected (the study is in `mesh_stats.study`; `assess` orders levels fine-first by design). The level test now compares the whole concurrent study to the sequential one, and an `as_completed` break fails it.
 - [x] **6.6 Reuse a factorisation across load cases.** [Linux] **M** → MAKING_IT_FASTER §2.5
   - Several load cases on one mesh share the stiffness matrix. Factorise once (`splu`) and
     back-substitute per case.
@@ -871,6 +874,7 @@ verified, and it does so in the engineer's language, light or dark.
     (`Kryova-frontend/src/components/webgl-stress-viewer.tsx`), with the convergence verdict and the
     `governing_basis` (centroid or nodes) shown beside the peak value.
   - Status 2026-10-05: Done (`ef90010` backend, `431b474` frontend). **Response shape change: `SimulationRead` gains `governing` (`GoverningRead`: `peak_mpa`, `basis`, `factor_of_safety`), computed from the stored result.** The viewer colours by stress or displacement from one ramp with a legend and a node click-probe; the result page headlines the governing peak and says which number it is. tests/test_simulation_governing.py; src/lib/scalar-field.test.ts, src/lib/result-peak.test.ts. The click probe and viewer shading are WebGL and have not been looked at by a person.
+  - Seat 2026-10-05: **looked at by a person, and two defects fixed.** The archived colour field was the centroid average, so the legend read 0.4-7.6 MPa under a 9.6 MPa governing peak (now the nodal tensor's von Mises, `6438075`; legend 0.1-9.6 on the re-run, a neutral-axis band visible). The agent's simulation tools never carried `governing`, so it answered with the 8.39 MPa centroid value (`fcf97c2`). Node click agrees with the colour. tests/test_simulations.py, tests/test_simulation_governing.py.
 - [x] **8.4 Explain why a turn stopped, and what to do next.** [frontend] **S**
   - Use the typed stop reason and `next_action` from 2.2. The four endings (`step_budget`,
     `repeated_calls`, `needs_input`, `awaiting_approval`) each get their own sentence and button.
@@ -880,6 +884,7 @@ verified, and it does so in the engineer's language, light or dark.
     `prefers-color-scheme` variant and a manual toggle. The WebGL viewer's background and colour maps
     must follow the theme.
   - Status 2026-10-05: Done (`785658f`, `4e1209d`): dark mode — tokens, system preference via CSS media query, explicit toggle, viewer background follows; contrast measured and enforced by src/app/globals-theme.test.ts (primary darkened to #2e6aff to reach 4.5:1 with white).
+  - Seat 2026-10-05: toggled in the production build; the viewer background follows and the result page stays legible (screenshot in docs/verification-2026-10-05/).
 - [~] **8.6 French first, then other languages.** [frontend] **L** — **NEW**
   - The seat is French V5-R33 and the CATIA KB already carries French names. `lang="en"` is
     hard-coded in `Kryova-frontend/src/app/layout.tsx`.
@@ -887,6 +892,7 @@ verified, and it does so in the engineer's language, light or dark.
     so a new i18n library is a named decision in the master plan.
   - Server error strings stay English for now, and the UI translates its own copy.
   - Status 2026-10-05: Partial (`533d806`): an in-house typed catalogue, server-chosen language (cookie, then Accept-Language, then English), a switcher; the shell, composer and stop banner are in French. Most other surfaces are still English-only. src/lib/i18n/catalogue.test.ts.
+  - Seat 2026-10-05: with Français chosen, the dashboard greeting, the three suggestion cards, "Attach", "OLDER" and the whole run page are still English.
 - [x] **8.7 Keyboard shortcuts.** [frontend] **S** — **NEW**
   - Only ⌘K (`Kryova-frontend/src/app/dashboard/_components/sidebar.tsx:80`) exists today.
   - Add: Esc to stop a turn, ⌘Enter to send, ⌘N for a new conversation, ⌘/ for a shortcut sheet.
@@ -920,6 +926,7 @@ verified, and it does so in the engineer's language, light or dark.
   - A scheduled `pg_dump --enable-row-security` into `%LOCALAPPDATA%\Kryova\backups`, plus a one-click
     restore. The drill script exists (`Kryova-backend/scripts/restore_drill.py`).
   - Status 2026-10-05: Linux half done and tested as text (`a5b5b23`, `19ac953`); the real restore has never run. A daily `pg_dump --enable-row-security` (kept 7, separate from the pre-upgrade dumps), `GET/POST /desktop/backups`, and `POST/DELETE /desktop/backups/restore`, which is **deferred to the next launch** (a request file; the launcher takes a safety dump, then `pg_restore --single-transaction`; a failed restore is recorded and the launch carries on). **New routes, new setting `KRYOVA_HOME`; no schema change.** No button yet. tests/test_backups.py. Seat: THE QUEUE G11.
+  - Seat 2026-10-05: **a real Windows `pg_dump`/`pg_restore` round trip ran** on a throwaway home through `prepare`/`take_scheduled`/`request_restore`: the data came back, a before-restore dump was taken first, the app role stayed `NOBYPASSRLS`, and a truncated dump failed cleanly into `restore-request.failed.json`. Still not run through the installed app's routes and relaunch.
 - [~] **9.2 Crash reporting for the desktop app.** [Both] **M** — **NEW**
   - It is opt-in, with the backend log tail and the version, and it never includes attachment
     contents or model transcripts unless the user ticks a box.
@@ -934,6 +941,7 @@ verified, and it does so in the engineer's language, light or dark.
     the product locks in Postgres (advisory locks or a lease table) before more than one worker runs
     in production.
   - Status 2026-10-05: Done as written, tests not run (`0f0bd30`): revisions and leases are rows (migration `0f0bec54f55e`, RLS, rollback note), serialised by a transaction-scoped advisory lock with the unique `(project, key, number)` index as the second wall; lease times are epoch seconds so two processes share a clock. Nothing serves a product yet, so no route reads it. **The rate limits are the other half of this item and are 3.1's.** tests/test_product_store.py.
+  - Seat 2026-10-05: tests ran on Postgres, and two real processes on one product were checked by hand: B waited 3.0 s on the advisory lock while A held it, then was refused with A's lease named.
 - [~] **9.5 The flagged items from the 2026-10-04 audit.** [Linux] **S** each
   - `dynamics.chrono.run` is timed and unbilled; decide a price, then add a `SpanMeter`
     (`Kryova-backend/app/core/metering.py`).
@@ -947,6 +955,7 @@ verified, and it does so in the engineer's language, light or dark.
   - The spans exist (`Kryova-backend/app/observe/catalogue.py`). Add a small admin view: p50 and p95
     per span, turn cost, cache hit rate (1.11), queue depth, and bridge latency per operation.
   - Status 2026-10-05: Done, tests not run (`0ab74af`, `Kryova-frontend` panel): `GET /admin/observability?hours=` — p50/p95 per span (labelled the maximum on a small sample), turn cost (unpriced turns counted apart, never zero), CATIA operation latency from the newest 20,000 rows, queue depth, cache hit rate. The span ledger is per worker process and says so. tests/test_observe_ledger.py.
+  - Seat 2026-10-05: `GET /admin/observability` answered on the seat with spans, turn cost, a 94.7 % cache hit rate, queue depth and bridge operations; tests/test_observe_ledger.py ran. The console panel was not opened.
 - [~] **9.7 MCP as a curated channel.** [Linux] **M** — **NEW** (E23.3)
   - Expose about 20–40 well-described tools through `Kryova-backend/app/api/routes/mcp.py` instead
     of the full registry, and add server instructions covering units, mutation consent and "never
@@ -954,6 +963,7 @@ verified, and it does so in the engineer's language, light or dark.
   - Test it once with a real MCP client before announcing it.
   - Status 2026-10-05: Done except the last line of the item (`bcd3f1a`): 37 curated tools (`MCP_TOOL_SET=curated|full`), destructive and UI-driving tools withheld, instructions on units, consent, unconverged numbers and the one `NOT_VALIDATED` string. **Not tried with a real MCP client**, which the item asks for. tests/test_mcp_tools.py, tests/test_mcp.py.
 ---
+  - Seat 2026-10-05: exercised over raw JSON-RPC (no desktop client installed): instructions on `server/discover`, consent refused in the toolbox's words, withheld tools unknown. `tools/list` returned 36 of 37 because `catia_status` dropped out while a bridge was connected (fixed, `cef0286`). A real client is still owed.
 
 ## Phase 10 — Proof: the 10/10 gate
 

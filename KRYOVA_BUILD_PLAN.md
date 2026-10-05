@@ -19,7 +19,20 @@ happened.
 > DeepSeek key with ~USD 2): clean tree and pull, free checks, then simple prompts through the web GUI and CATIA V5 with screenshots.
 > No cron jobs. The handoff below it is the list of what is built and what is open.
 >
-> **Handoff, 2026-10-05 (latest) — ROAD_TO_10 Phases 1–9 are written as far as a Linux session can take them;
+> **Handoff, 2026-10-05 evening (Windows seat) — the budgeted DeepSeek brief ran; Ladder Level 2 passed.**
+> Report: `docs/verification-2026-10-05/README.md`. Steps a–e of the brief passed (d after fixes); USD ~0.03 spent of
+> 1.87 (DeepSeek's balance endpoint; the ledger's peak-priced figure is 0.0748). Fixed on the way: the process-queue
+> deadlock (G10.1), the agent quoting the centroid instead of the governing peak, the viewer painting the centroid
+> average, "version not recorded" on every run page, `catia_status` vanishing while a bridge is connected, a directory
+> read as an empty log, two `.env.local` leaks into the suite, and the suite starting a real CATIA. The 16 unpushed
+> 2026-09-24/25 seat commits were rebased onto `origin/main` (backup branches `backup/windows-2026-09-25` in both
+> repos). **Nothing is pushed.** **Next target, in this order:** (1) push, if the user says so; (2) the rest of THE
+> QUEUE G10/G11 (offline banner, Phase 7 in the browser, crash report, restore through the installed app, a real MCP
+> client); (3) H1 at `AI_EFFORT_CHAT=high`, H8, H10, H11 (each needs the key and a token budget that counts cached
+> tokens sensibly — see the report's token findings); (4) move the E15/E7 master-plan lines for Phases 6–8 now that
+> their tests have passed here. Phase 10, 9.3 and chrono pricing stay the user's. No cron job exists.
+>
+> **Handoff, 2026-10-05 (Linux, superseded by the Windows one above) — ROAD_TO_10 Phases 1–9 are written as far as a Linux session can take them;
 > Phase 10 and 9.3 are not codable.** No cron job exists and no turn is scheduled (the user's instruction). Backend
 > tests for Phases 6–9 were written and **not run** — the user tests on the Windows PC with CATIA V5.
 > **Next target, in this order:** (1) THE QUEUE **G10** then **G11** in `docs/WINDOWS_VERIFICATION.md`; G10 item 1
@@ -869,6 +882,14 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-10-05 — the budgeted DeepSeek brief on the Windows seat; Ladder Level 2 passed** (backend `aec6a56`…`3916853`,
+  frontend `3af153d`, `6188b53`). Rebased 16 unpushed seat commits onto origin. Fixed: process-queue deadlock under
+  CPython 3.14; governing peak handed to the agent's tools; viewer colours by the nodal tensor; solver version on the
+  run page; `catia_status` offered while a bridge is connected; a directory never read as an empty log; the suite no
+  longer reads the workstation's AI knobs or starts its CATIA; twelve Linux-written tests corrected; pypdf in the
+  desktop lock; mypy clean on Windows. Ran: two full suites plus a final one, the frontend suite, a real Windows
+  pg_dump/pg_restore drill, two processes on one product lease, observability, MCP over JSON-RPC, V&V re-recorded
+  (4/5 agree, unchanged). USD ~0.03 spent. Report: `docs/verification-2026-10-05/`.
 - **2026-10-05 — ROAD_TO_10 Phase 9, written on Linux, backend tests not run by instruction** (backend `5c2f8b1`…`19ac953`,
   frontend `7707170`). Rigid-body check independent of the load in the in-house solves; router-device typo fails at
   settings load (9.5); product revisions and leases persisted under an advisory lock (9.4, migration `0f0bec54f55e`);

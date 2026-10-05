@@ -2030,6 +2030,21 @@ this file drives the ladder, with a screenshot each.
          start from a template (a part rung gets a design; an assembly rung must say it has none), export a project and
          import it into a second account.
       Settles: whether Phases 6–8 hold on the machine they ship to.
+      **RESULTS on the seat, 2026-10-05 (`docs/verification-2026-10-05/`):**
+      1. **Done — it hung here too, and it was a deadlock** (`aec6a56`): the pool-rebuild callback ran on
+         CPython 3.14's management thread inside `terminate_broken`, which holds the executor's
+         non-reentrant `_shutdown_lock`, and called `shutdown()` on that pool. 16 passed in 3.6 s; break shown.
+      2. **Done.** Run 1: 23 failed / 12,411 passed (11 = stale V&V); the 12 others read and fixed
+         (`a80f95c`, `b99d585`, `44a15aa`, `21f4666`). Run 3 on the final tree: 12,441 passed, 0 failed. V&V re-recorded last (4/5, unchanged).
+      3. **Done** — all twelve files ran in those runs.
+      4. **Done, two defects fixed.** The legend topped out at 7.6 MPa under a 9.6 MPa governing peak: the
+         archived colour field was the centroid average (`6438075`, now the nodal tensor's von Mises).
+         The agent quoted the 8.39 MPa centroid value as "the peak": its tools never carried `governing`
+         (`fcf97c2`). The page said "version not recorded" for every run (`ce6801f`, frontend `6188b53`).
+         Node click agrees with the colour (5.80 MPa in the orange band). Headline basis named.
+      5. **Partly.** Dark mode: viewer background follows, legible. French: shell and composer only; the
+         greeting, suggestion cards, "Attach", "OLDER" and the whole run page stay English (8.6 is PARTIAL).
+      6. Not done (offline banner).  7. Not done in the browser (Phase 7 UI); the backend file passes.
 
 - [ ] **G11 — ROAD_TO_10 Phase 9: everything written on Linux on 2026-10-05 after G10 and never run (added 2026-10-05).**
       Same instruction as G10: tests written, not executed on Linux (`ruff`, `mypy app/` and the frontend's `vitest`
@@ -2058,6 +2073,26 @@ this file drives the ladder, with a screenshot each.
          against it from the other; the second must be refused with the holder named.
       Settles: whether Phase 9 holds on the machine it ships to. **Not testable anywhere yet:** chrono pricing (a
       decision), 9.3 (a decision), Phase 10 (needs a key, a seat and people).
+      **RESULTS on the seat, 2026-10-05:**
+      1. **Done** — every file named ran in the full runs (fixes in `a80f95c`).
+      2. **Done on a throwaway home, not the installed app**, through the same `local_cluster.prepare` /
+         `backups.take_scheduled` / `request_restore` code: Windows `pg_dump --enable-row-security` works
+         (172 kB), `pg_restore --clean --if-exists --single-transaction` over `public` as the admin runs clean,
+         the marker row came back, a `kryova-before-restore-*` dump was taken first, the app role is still
+         `NOSUPERUSER NOBYPASSRLS` after, `restore-request.json` gone. The route-and-relaunch path on the
+         installed app is still unexercised.
+      3. **Done, same home:** a truncated dump gives `restore-request.failed.json` with pg_restore's reason and
+         a normal launch on the untouched data.
+      4. Not done (desktop app).
+      5. **Done (endpoint):** spans, turn cost (7 priced turns), cache hit rate 94.7 %, queue depth, bridge
+         operations. The console panel was not opened.
+      6. **Done over raw JSON-RPC, not a desktop client** (none installed): the server speaks MCP 2026-07-28 only
+         (`server/discover` carries the instructions; no `initialize`); a mutating call without consent is
+         refused in the toolbox's words; `delete_simulation` is "Unknown tool". **`tools/list` gave 36, not 37**:
+         `catia_status` dropped out whenever a bridge was connected (`cef0286`, fixed).
+      7. **Done with two processes on one Postgres** (no route serves a product yet, so not two backends):
+         worker B waited 3.0 s on the advisory lock while A held it, then was refused — "frame is held by
+         'ana'". The advisory lock is exactly what the unit tests say they do not assert.
 
 ---
 
@@ -2071,6 +2106,7 @@ a key in `.env.local` they are minutes.*
 - [ ] **H1 — A tool-calling chain survives its second step.** `AI_EFFORT_CHAT=high`, one prompt
       that makes the agent call two tools in a row. Expect no 400. This is the
       `reasoning_content` echo. Settles: whether the replayed column satisfies the server.
+      *2026-10-05:* at `AI_EFFORT_CHAT=low` an 11-step and a 19-step CATIA chain ran with no 400. `high` (the row's setting) not run.
 - [ ] **H2 — Is an empty `reasoning_content` accepted?** Not in the docs. The offline code
       sends `''` for an assistant turn whose reasoning was returned empty. Settles whether that
       needs special handling.
@@ -2083,22 +2119,25 @@ a key in `.env.local` they are minutes.*
 - [ ] **H5 — Image input.** Attach a picture with `AI_VISION_MODEL` unset. The reference allows
       `image_url` parts; whether `deepseek-flash` actually reads them is not stated. Expect a
       description, or a 400 that `look` reports in words.
-- [ ] **H6 — SSE streaming.** Watch a turn stream: text deltas, a tool call assembled from
+- [x] **H6 — SSE streaming.** Watch a turn stream: text deltas, a tool call assembled from
       fragments, usage on the last chunk (`stream_options.include_usage`). A server that rejects
       the form is learned once and logged.
-- [ ] **H7 — The cache.** Two identical steps in a row; read the response `usage` for a
+      *2026-10-05: settled.* 185 and 222 `token` deltas per answer, usage on the last chunk (`turn_metrics` filled), tool calls assembled across 11- and 19-step chains.
+- [x] **H7 — The cache.** Two identical steps in a row; read the response `usage` for a
       cache-hit count (`prompt_cache_hit_tokens` in DeepSeek's usage block). Since 2026-10-04 it
       *is* read and stored — `ai_token_usage.cached_prompt_tokens` and, per turn,
       `turn_metrics.cached_prompt_tokens` — so this row is now: run a turn of twenty steps and
       read `cached_prompt_tokens / prompt_tokens` off `turn_metrics`. A ratio near zero means
       the prefix is not stable and `tests/test_prompt_cache_stability.py` is protecting
       nothing. It is also the figure H10 needs.
+      *2026-10-05: settled.* The same one-liner twice: 0 % then **99 %** cached (70,016 of 70,674). Turns: 98-100 % cached; the admin endpoint reads **94.7 %** over the day. The prefix is stable. One break seen: after a backend restart the offer moved 243 -> 246 tools and that turn was 72 %.
 - [ ] **H8 — `AI_EFFORT_CHAT`: low or high?** Run one ladder level each way and compare steps,
       wall time and tokens. The shipped default is `low` (thinking off) for cost and speed; this
       is the measurement that justifies or reverses it.
 - [ ] **H9 — `AI_TOOL_LIMIT`.** The registry is 244 schemas / ~66.5k tokens (estimated) a step; retrieval at
       limit 60 would send ~25 % of the bytes. Compare accuracy at 0 and 60 on the prompt ladder
       before switching it on.
+      *2026-10-05:* measured at 0: **70,476 prompt tokens for "say hello in French"**, 243 tools offered. With the cache that is $0.0004 a repeat step, but `AI_DAILY_TOKEN_BUDGET` counts cached tokens in full, so 1.5M tokens is ~20 steps a day. Accuracy at 60 not compared.
 - [ ] **H10 — Does a digest cost the model anything?** `AI_REPLAY_KEEP_VERBATIM=8` /
       `AI_REPLAY_DIGEST_BLOCK=24` replays a tool result older than the newest eight as one line
       (`app/ai/digest.py`; the full text is one `recall_earlier_result` call away). The *cost*
@@ -2130,6 +2169,7 @@ a key in `.env.local` they are minutes.*
       `rounds` and `prompt_tokens` again — a sentence changes the cached prefix once, so the first
       run after it bills the whole prompt at the full price. Settles: whether the prompt change
       is worth shipping.
+      *2026-10-05:* calls per round ~1.0 (plate 11/11, Level 2 19 rounds / 20 calls). The prompt sentence was not tried.
 - [ ] **H13 — Does `build_design` hold up on a real seat, and does the model reach for it?**
       Three things only a live run settles. (a) On the seat, record a ten-feature design and call
       `build_design` once: does every call land, how long does the whole step take (it is one
@@ -2144,6 +2184,7 @@ a key in `.env.local` they are minutes.*
       the cached prefix once). (c) With `AI_TOOL_LIMIT` on, the design tools are in no family and
       not in `CORE_TOOLS`, so retrieval withholds them: check before comparing accuracy at H8/H9.
       Settles: whether ROAD_TO_10 1.13 is done, and whether the design tools join `CORE_TOOLS`.
+      *2026-10-05:* (b) on "make a plate" the model called `record_design` after building by hand and never `build_design`.
 
 ## Expect failures on the first run, and that is the point
 

@@ -683,7 +683,9 @@ SuperLU returns a finite, meaningless vector for a singular system. Do not repla
 excites** (measured 2026-09-14 on `PlaneSolver`): an x-only roller under a load along x is a
 *consistent* singular system, SuperLU raises no rank warning, the residual is small, and the
 solve returns a displacement with no error. The same roller under a load along y is refused.
-Nothing checks the fixtures for rigid-body modes independently of the load — flagged, not fixed.
+Since ROAD_TO_10 9.5 `app/solve/constraints.py` counts the rigid-body modes the fixtures leave
+free *before* solving, independently of the load, so that x-roller is now refused too (pinned by
+`tests/test_solver_plane.py`, first run on the seat 2026-10-05).
 
 **Loads are distributed by tributary area** (`solve/selection.distribute_force`), so refining the
 mesh does not change the applied load. Region selection is by geometric selector
@@ -1089,8 +1091,9 @@ Ten things that each cost an hour or more; the numbers are in the commits and
    Read the llama.cpp log's `checking sim` / `forcing full` lines before blaming the model.
 3. **Thinking at the model default can spend the whole budget and return nothing.** The
    L-bracket's first step: 8,000 tokens in 100 min, no tool call; `think=false` did it
-   correctly in 159 s; `low` ran 3 h 47 min on one turn. `AI_THINK` is opt-in (default
-   unchanged, the user's choice); this seat's `.env.local` sets `false`.
+   correctly in 159 s; `low` ran 3 h 47 min on one turn. (`AI_THINK`, the knob written for
+   this, never reached `main`: the Ollama provider was removed upstream, `0d4443d`, and the
+   commit was dropped in the 2026-10-05 rebase. Local models are gone; this section is history.)
 4. **`AI_TOOL_LIMIT=15` narrows almost nothing**: core + prompt-taught tools are ~42 before
    any rule runs, so 44-55 are offered whatever Laya says. Laya adds 0-5 tools, costs
    0.3-1.5 s on CPU and ~2.5 GB of backend RAM, and routed 1 of 4 ladder prompts right.
@@ -1120,6 +1123,49 @@ Ten things that each cost an hour or more; the numbers are in the commits and
 10. **PowerShell 5.1's `*>` writes UTF-16**, so `grep` in the Bash tool matches nothing in
    a backend log started that way -- a monitor on it stays silent for 30 min. Read it with
    `Get-Content`.
+
+## DeepSeek on the seat, and the first Windows run of ROAD_TO_10 6-9 — 2026-10-05
+
+Ten things that each cost real time; the numbers are in `docs/verification-2026-10-05/`.
+
+1. **This machine's `main` can hold commits nobody pushed.** The 2026-09-24/25 seat work (17
+   commits) was never pushed, so `git pull --ff-only` refused. `git log --cherry-mark --left-only
+   main...origin/main` says whether upstream already has each one (`+` = it does not). Branch the
+   old head (`backup/<date>`) and **rebase**; never `reset` to origin over them.
+2. **`git clean -fd` deletes untracked evidence.** `docs/verification-<date>/` from a seat run is
+   untracked until someone commits it. Copy it out before a clean (it is in
+   `Desktop\Kryova-backups\` for 2026-09-24).
+3. **Never touch a `ProcessPoolExecutor` from its own done callback.** CPython 3.14's
+   `terminate_broken` holds the executor's non-reentrant `_shutdown_lock` while it calls
+   `future.set_exception()`, which runs callbacks on the management thread; a callback that calls
+   `shutdown()` waits on itself forever, and so does every later `shutdown(wait=True)`. That was
+   the Linux full-run hang at ~72 %. Hand off to another executor (`app/jobs/queue.py`).
+4. **`AI_DAILY_TOKEN_BUDGET` counts cached tokens in full**, and DeepSeek serves 98-100 % of a
+   step from cache. A step is ~70k prompt tokens with `AI_TOOL_LIMIT=0` (243 schemas), so 1.5M is
+   ~20 steps a day while those steps cost about $0.0004 each. Price the model in `AI_PRICES` (the
+   vendor page, peak rates) and let `AI_DAILY_COST_BUDGET_USD` be the money guard. **The real
+   spend is `GET https://api.deepseek.com/user/balance`** — read it before and after; the ledger
+   prices at whatever `AI_PRICES` says, and off-peak is half of peak.
+5. **Earlier `.env.local` blocks leak into a new provider.** The Ollama block's
+   `AI_BASE_URL=http://127.0.0.1:11434` would have sent DeepSeek calls to Ollama's port, and its
+   `AI_TOOL_LIMIT=15` turned `test_turn_metrics` red (conftest now pins `ai_tool_limit = 0`). A new
+   provider block must restate `AI_BASE_URL`, `AI_TOOL_LIMIT` and `AI_INTENT_ROUTER`.
+6. **The suite COM-activated a real CATIA** (parent `svchost`, 83 s into a run) that stayed open.
+   `tests/conftest.py::_no_real_catia_com` now makes real `Dispatch`/`GetActiveObject` raise and
+   prints the node ids that tried. After any full run, `Get-CimInstance Win32_Process -Filter
+   "Name='CNEXT.exe'"` and check the parents: one started by `svchost` was not started by you.
+7. **The viewer, its legend and its node click read the archived `von_mises_nodal`, not the
+   result's peak.** It was the centroid average until `6438075` (7.6 MPa legend under a 9.6 MPa
+   headline). Runs archived before that keep the old field; re-run to compare.
+8. **The agent reads a run through its tools, not through `SimulationRead`.** A computed field on
+   the response (`governing`) is invisible to the model unless the tool adds it (`fcf97c2`). Same
+   class as *Testing* 8: check the tool payload, not only the route.
+9. **MCP here is 2026-07-28 only**: no `initialize`; `server/discover` carries the instructions,
+   and every request needs `params._meta` with `io.modelcontextprotocol/protocolVersion`. A
+   browser cannot call it (origin guard + CORS) — drive it from Python with the session cookies
+   and `x-csrf-token`.
+10. **`pg_ctl start ... | Out-String` never returns**: the postmaster inherits the pipe. Start it
+   without capturing output, then check `Get-NetTCPConnection -LocalPort 5432 -State Listen`.
 
 ## Single-pass decisions (`app/ai/decide.py`) and Gemini — added 2026-09-22
 

@@ -546,3 +546,30 @@ def test_verify_alone_reads_nothing_into_the_database(tmp_path: Path) -> None:
     path.write_bytes(b"nope")
     with pytest.raises(project_archive.ArchiveRefusal):
         project_archive.verify(path)
+
+
+class TestTheProjectPageCanAskForItsOwnConversationsAndDesigns:
+    """ROAD_TO_10 7.3: both lists take `project_id`, so a project page reads its own."""
+
+    def test_conversations_and_designs_are_filtered_by_project(
+        self,
+        auth_client: AuthenticatedTestClient,
+        db_session: Session,
+        project_id: str,
+        current_user_id: str,
+    ) -> None:
+        other = auth_client.post(f"{API}/projects", json={"name": "Other"}).json()["id"]
+        mine = Conversation(title="in the bracket", owner_id=current_user_id, project_id=project_id)
+        theirs = Conversation(title="in the other", owner_id=current_user_id, project_id=other)
+        db_session.add_all([mine, theirs])
+        db_session.flush()
+        designs.save(db_session, mine, bracket())
+
+        conversations = auth_client.get(
+            f"{API}/ai/conversations", params={"project_id": project_id}
+        ).json()
+        assert [c["id"] for c in conversations["items"]] == [mine.id]
+
+        listed = auth_client.get(f"{API}/designs", params={"project_id": project_id}).json()
+        assert listed["total"] == 1
+        assert auth_client.get(f"{API}/designs", params={"project_id": other}).json()["total"] == 0

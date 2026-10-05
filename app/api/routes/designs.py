@@ -27,7 +27,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, DbSession
@@ -82,6 +82,7 @@ def list_designs(
     current_user: CurrentUser,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    project_id: Annotated[str | None, Query(description="Only this project's designs.")] = None,
 ) -> DesignPage:
     """Every design this user owns, most recently edited first.
 
@@ -90,18 +91,16 @@ def list_designs(
     and a list view needs a name and a revision number.
     """
     owned = select(Conversation.id).where(Conversation.owner_id == current_user.id)
+    in_scope: list[ColumnElement[bool]] = [DesignDocument.conversation_id.in_(owned)]
+    if project_id is not None:
+        in_scope.append(DesignDocument.project_id == project_id)
     total = (
-        db.scalar(
-            select(func.count())
-            .select_from(DesignDocument)
-            .where(DesignDocument.conversation_id.in_(owned))
-        )
-        or 0
+        db.scalar(select(func.count()).select_from(DesignDocument).where(*in_scope)) or 0
     )
     rows = list(
         db.scalars(
             select(DesignDocument)
-            .where(DesignDocument.conversation_id.in_(owned))
+            .where(*in_scope)
             .order_by(DesignDocument.updated_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)

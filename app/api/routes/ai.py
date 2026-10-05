@@ -1316,6 +1316,10 @@ def list_conversations(
             ),
         ),
     ] = None,
+    project_id: Annotated[
+        str | None,
+        Query(description="Only this project's conversations (ROAD_TO_10 7.3)."),
+    ] = None,
 ) -> ConversationPage:
     """The user's conversations: pinned first, then newest activity first.
 
@@ -1331,6 +1335,8 @@ def list_conversations(
     is applied first) and has no index of its own -- stated, not hidden.
     """
     filters: list[Any] = [Conversation.owner_id == current_user.id]
+    if project_id is not None:
+        filters.append(Conversation.project_id == project_id)
     needle = " ".join(q.split()) if q else None
     if needle:
         filters.append(

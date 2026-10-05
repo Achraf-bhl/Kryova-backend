@@ -9,7 +9,8 @@ the application its configuration, and serve on loopback.
       pgdata/  pgdata.log    the database and its log (`core/local_cluster.py`)
       secrets.json           generated once, owner-readable, never regenerated
       media/                 every uploaded and derived file
-      backups/               a dump before any upgrade that changes the schema
+      backups/               a dump before any upgrade that changes the schema, and a daily one
+                             (`core/backups.py`); a restore request is `restore-request.json`
       config.env             the user's own settings -- a model key, SMTP -- optional
 
 **The order is the point.** `app.core.config.settings` is read once, at import, so every
@@ -43,6 +44,7 @@ import os
 import sys
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
+from typing import Any
 
 from dotenv import dotenv_values
 
@@ -193,15 +195,35 @@ def main() -> int:
 
     port = api_port(os.environ)
     logger.info("Serving on 127.0.0.1:%d from %s", port, home)
+    scheduler = _start_backups(home)
     try:
         uvicorn.run("app.main:app", host="127.0.0.1", port=port, log_level="info", workers=1)
     finally:
+        if scheduler is not None:
+            scheduler.stop()
         from app.core import local_cluster
 
         local_cluster.stop(
             Path(os.environ["LOCAL_POSTGRES_BIN_DIR"]), Path(os.environ["LOCAL_POSTGRES_DATA_DIR"])
         )
     return 0
+
+
+def _start_backups(home: Path) -> Any:
+    """Start the daily backup thread. A backup problem must never be why the app is not serving."""
+    try:
+        from app.core import backups
+
+        scheduler = backups.Scheduler(
+            Path(os.environ["LOCAL_POSTGRES_BIN_DIR"]),
+            backups.admin_url_for(home),
+            home / "backups",
+        )
+        scheduler.start()
+        return scheduler
+    except Exception as error:  # noqa: BLE001 -- see the docstring
+        logger.warning("Scheduled backups are off: %s", error)
+        return None
 
 
 def _apply_without_importing_app(home: Path, backend_dir: Path) -> list[str]:
@@ -235,6 +257,8 @@ def _apply_without_importing_app(home: Path, backend_dir: Path) -> list[str]:
     )
     if cluster.backup is not None:
         logger.info("Backed up the database before upgrading it: %s", cluster.backup)
+    if cluster.restored_from is not None:
+        logger.info("Restored the database from %s", cluster.restored_from)
     return refused
 
 

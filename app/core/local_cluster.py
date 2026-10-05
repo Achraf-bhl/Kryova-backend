@@ -114,6 +114,8 @@ class Cluster:
     admin_url: str
     backup: Path | None
     migrated: bool
+    #: The dump a restore request was applied from on this launch, if there was one.
+    restored_from: Path | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -520,18 +522,31 @@ def back_up(
     backups: Path,
     label: str,
     *,
+    stem: str | None = None,
+    keep_glob: str = "kryova-before-*.dump",
+    keep: int = KEEP_BACKUPS,
+    row_security: bool = False,
     run: Runner = subprocess.run,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> Path:
-    """`pg_dump` the application database to `backups/`, keeping the newest `KEEP_BACKUPS`."""
+    """`pg_dump` the application database to `backups/`, keeping the newest `keep` of a kind.
+
+    The default is the dump taken before an upgrade, named for the revision it preserves.
+    `stem`/`keep_glob`/`keep` let the scheduled dump (`app/core/backups.py`) share this one
+    code path with its own name and its own retention, so a week of daily dumps never evicts
+    the one taken before the last schema change. `row_security` adds `--enable-row-security`,
+    which `CLAUDE.md` *Database* item 7 explains: complete only because every policy here admits
+    every row when no tenant is set.
+    """
     backups.mkdir(parents=True, exist_ok=True)
     stamp = now().strftime("%Y%m%dT%H%M%SZ")
-    target = backups / f"kryova-before-{label}-{stamp}.dump"
+    target = backups / f"{stem or f'kryova-before-{label}'}-{stamp}.dump"
     url = make_url(admin_url)
     result = run(
         [
             str(_exe(bin_dir, "pg_dump")),
             "-Fc",
+            *(["--enable-row-security"] if row_security else []),
             "-h",
             url.host or "127.0.0.1",
             "-p",
@@ -555,9 +570,158 @@ def back_up(
             f"The backup before upgrading failed (pg_dump exit {result.returncode}): "
             f"{(result.stderr or '').strip()[-400:]} The database was left as it was."
         )
-    for stale in sorted(backups.glob("kryova-before-*.dump"))[:-KEEP_BACKUPS]:
+    for stale in sorted(backups.glob(keep_glob))[:-keep]:
         stale.unlink(missing_ok=True)
     return target
+
+
+RESTORE_REQUEST = "restore-request.json"
+RESTORE_FAILED = "restore-request.failed.json"
+
+#: What a dump this module wrote is called: `kryova-before-<revision|restore>-<stamp>.dump` or
+#: `kryova-scheduled-<stamp>.dump`. A restore names a file from this folder and nothing else.
+BACKUP_NAME = re.compile(
+    r"^kryova-(?:scheduled|before-[A-Za-z0-9_]+)-\d{8}T\d{6}Z\.dump$"
+)
+
+
+def request_restore(home: Path, name: str) -> Path:
+    """Record that the next launch should restore `backups/<name>`. Returns the dump.
+
+    A restore is **deferred to the next launch on purpose**: the running backend holds
+    connections and open transactions on the very tables a restore drops, and a half-applied
+    restore under a live application is the worst available shape of data loss. The request is
+    a file, so it survives the app being closed between the click and the restart, and it can
+    be taken back (`cancel_restore`) until then.
+
+    `name` must be a bare file name matching what this module writes and must exist: a path, a
+    `..` or a file somebody dropped in the folder by hand is refused, so the route that calls
+    this cannot be made to feed `pg_restore` an arbitrary file.
+    """
+    if not BACKUP_NAME.fullmatch(name):
+        raise ClusterError(f"{name!r} is not the name of a backup this app made.")
+    dump = home / "backups" / name
+    if not dump.is_file():
+        raise ClusterError(f"There is no backup called {name!r} in the backups folder.")
+    _write_private(
+        home / RESTORE_REQUEST,
+        json.dumps({"backup": name, "requested_at": datetime.now(UTC).isoformat()}),
+    )
+    return dump
+
+
+def cancel_restore(home: Path) -> bool:
+    """Take back a pending request. True if there was one."""
+    path = home / RESTORE_REQUEST
+    existed = path.exists()
+    path.unlink(missing_ok=True)
+    return existed
+
+
+def pending_restore(home: Path) -> str | None:
+    """The backup name a restore is waiting to apply, or None. Never raises."""
+    try:
+        data = json.loads((home / RESTORE_REQUEST).read_text(encoding="utf-8"))
+        name = data.get("backup") if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+    return name if isinstance(name, str) and BACKUP_NAME.fullmatch(name) else None
+
+
+def apply_pending_restore(
+    home: Path,
+    bin_dir: Path,
+    admin_url: str,
+    *,
+    run: Runner = subprocess.run,
+) -> Path | None:
+    """Apply a restore request, if there is one. Returns the dump restored from.
+
+    Three rules, each because the alternative loses data quietly:
+
+    1. **A safety dump of what is there comes first**, named `kryova-before-restore-...`. A
+       restore is the one operation here that throws a database away on purpose, and the person
+       who clicked it may have clicked the wrong file.
+    2. **It runs as one transaction** (`--single-transaction`), so a restore that fails halfway
+       leaves the database exactly as it was rather than half old and half new.
+    3. **A failed restore does not become a launch that never ends.** The request is renamed
+       to `restore-request.failed.json` with the reason, the launch carries on against the
+       untouched database, and the reason is logged for the setup page. Retrying forever on
+       every start is the other way to make an app unusable.
+    """
+    name = pending_restore(home)
+    request = home / RESTORE_REQUEST
+    if name is None:
+        if request.exists():
+            _fail_restore(home, "the request did not name a backup this app made")
+        return None
+    dump = home / "backups" / name
+    if not dump.is_file():
+        _fail_restore(home, f"{name} is no longer in the backups folder")
+        return None
+    url = make_url(admin_url)
+    try:
+        has_data = _has_tables(admin_url)
+        if has_data:
+            back_up(bin_dir, admin_url, home / "backups", "restore", run=run)
+        result = run(
+            [
+                str(_exe(bin_dir, "pg_restore")),
+                "--clean",
+                "--if-exists",
+                "--single-transaction",
+                "--exit-on-error",
+                "-h",
+                url.host or "127.0.0.1",
+                "-p",
+                str(url.port),
+                "-U",
+                url.username or ADMIN_ROLE,
+                "-d",
+                url.database or APP_DATABASE,
+                str(dump),
+            ],  # fmt: skip
+            env={**os.environ, "PGPASSWORD": url.password or ""},
+            capture_output=True,
+            text=True,
+            timeout=1800,
+            **_quiet(),
+        )
+    except (ClusterError, psycopg.Error, OSError, subprocess.SubprocessError) as error:
+        _fail_restore(home, str(error))
+        return None
+    if result.returncode != 0:
+        _fail_restore(
+            home,
+            f"pg_restore exit {result.returncode}: {(result.stderr or '').strip()[-400:]}",
+        )
+        return None
+    request.unlink(missing_ok=True)
+    logger.info("Restored the database from %s", dump)
+    return dump
+
+
+def _has_tables(admin_url: str) -> bool:
+    with psycopg.connect(admin_url, connect_timeout=10) as connection:
+        row = connection.execute(
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = %s",
+            (APP_SCHEMA,),
+        ).fetchone()
+    return bool(row and row[0])
+
+
+def _fail_restore(home: Path, reason: str) -> None:
+    logger.error(
+        "The restore was not applied and the database is as it was: %s. The request is kept "
+        "as %s.",
+        reason,
+        RESTORE_FAILED,
+    )
+    _write_private(
+        home / RESTORE_FAILED,
+        json.dumps({"reason": reason, "at": datetime.now(UTC).isoformat()}),
+    )
+    (home / RESTORE_REQUEST).unlink(missing_ok=True)
 
 
 def migrate(
@@ -625,6 +789,16 @@ def prepare(
 
     try:
         _provision(admin_url, secrets_)
+        restored_from = apply_pending_restore(
+            home,
+            bin_dir,
+            database_url(ADMIN_ROLE, secrets_.admin_password, port, APP_DATABASE),
+            run=run,
+        )
+        if restored_from is not None:
+            # A restore recreates objects as the admin; put the application role's state back
+            # the way a first launch would have left it before anything connects as it.
+            _provision(admin_url, secrets_)
         current, head = migration_state(app_url, backend_dir)
         backup: Path | None = None
         migrated = current != head
@@ -651,6 +825,7 @@ def prepare(
         admin_url=admin_url,
         backup=backup,
         migrated=migrated,
+        restored_from=restored_from,
     )
 
 

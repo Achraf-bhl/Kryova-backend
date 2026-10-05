@@ -136,6 +136,10 @@ class Settings(BaseSettings):
     # app/core/local_postgres.py.
     local_postgres_bin_dir: str | None = None
     local_postgres_data_dir: str | None = None
+    # The installed desktop app's home folder (`%LOCALAPPDATA%\\Kryova`), passed by the shell.
+    # Set means "this is a desktop install": it turns on `/desktop/backups`, which 404s
+    # everywhere else. See app/api/routes/desktop.py.
+    kryova_home: str | None = None
 
     # The schema the application's tables live in. Every statement is compiled
     # schema-qualified against this rather than relying on search_path -- see

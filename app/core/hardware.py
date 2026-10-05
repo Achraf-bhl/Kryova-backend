@@ -269,9 +269,13 @@ def _windows() -> Hardware:
 def _elsewhere() -> Hardware:
     logical, notes = _usable_cores()
     total: int | None = None
+    # `getattr`, not `os.sysconf`: it does not exist on Windows, and mypy checks this file
+    # against the platform it runs on (CLAUDE.md, *Known landmines*, `os.getuid`).
+    sysconf = getattr(os, "sysconf", None)
     try:
-        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // _MB
-    except (ValueError, OSError, AttributeError):
+        if sysconf is not None:
+            total = sysconf("SC_PAGE_SIZE") * sysconf("SC_PHYS_PAGES") // _MB
+    except (ValueError, OSError):
         total = None
     return Hardware(
         logical,

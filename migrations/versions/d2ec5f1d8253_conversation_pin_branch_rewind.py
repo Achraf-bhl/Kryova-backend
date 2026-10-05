@@ -24,9 +24,8 @@ Continue again until the next turn is recorded. No message, design or ledger row
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'd2ec5f1d8253'

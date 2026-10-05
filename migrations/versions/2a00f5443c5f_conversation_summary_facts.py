@@ -19,9 +19,8 @@ read from are untouched, and the next fold writes nothing to a column that no lo
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '2a00f5443c5f'

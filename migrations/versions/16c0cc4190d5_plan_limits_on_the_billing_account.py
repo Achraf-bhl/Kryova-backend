@@ -24,9 +24,8 @@ the billing routes fail on the missing attributes, so roll them back together.
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '16c0cc4190d5'

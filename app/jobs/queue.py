@@ -180,7 +180,8 @@ def _limit_address_space(megabytes: int) -> None:
     except ImportError:  # pragma: no cover - Windows
         return
     limit = megabytes * 1024 * 1024
-    resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+    # Through `getattr`: mypy on Windows reads a `resource` stub with neither name in it.
+    getattr(resource, "setrlimit")(getattr(resource, "RLIMIT_AS"), (limit, limit))
 
 
 def _run_remote(call: RemoteCall) -> None:

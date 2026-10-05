@@ -80,6 +80,36 @@ class TurnAttachments:
         return bool(self.block)
 
 
+def adopt_orphans(db: Session, conversation: Conversation, owner: User) -> int:
+    """Claim the files this user attached before the conversation existed. Returns how many.
+
+    The composer attaches to a *conversation*, and a new chat has none until its first turn
+    (the id is minted by the backend, ROAD_TO_10 8.9). A file dropped in that gap was stored
+    with `conversation_id` null, and `list_for` -- which is the whole of what a turn reads --
+    filters on the conversation, so the file was on the user's screen and invisible to the
+    agent: the P4.7 failure again, by another door. So the first turn after the drop adopts
+    the owner's unattached files **for the same project**. A conversation with no project
+    adopts nothing: there is nothing to say a stray file belonged to it, and guessing would
+    put somebody's attachment into a conversation they did not choose.
+    """
+    if conversation.project_id is None:
+        return 0
+    orphans = list(
+        db.scalars(
+            select(Attachment).where(
+                Attachment.conversation_id.is_(None),
+                Attachment.owner_id == owner.id,
+                Attachment.project_id == conversation.project_id,
+            )
+        )
+    )
+    for row in orphans:
+        row.conversation_id = conversation.id
+    if orphans:
+        db.flush()
+    return len(orphans)
+
+
 def for_turn(db: Session, conversation: Conversation, owner: User) -> TurnAttachments:
     """Everything this conversation's attachments contribute to one user turn.
 
@@ -88,6 +118,7 @@ def for_turn(db: Session, conversation: Conversation, owner: User) -> TurnAttach
     attachment older than the message that has just arrived, so nothing would
     ever be quoted.
     """
+    adopt_orphans(db, conversation, owner)
     rows = list(attachment_store.list_for(db, conversation=conversation, owner=owner))
     if not rows:
         return TurnAttachments(block=quote_for_user_turn(()), listed=0, quoted=0)

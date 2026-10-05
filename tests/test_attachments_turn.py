@@ -765,3 +765,93 @@ class TestWhatIsNew:
         found = for_turn(db_session, conversation, user)
 
         assert found.quoted > 0
+
+
+class TestAFileDroppedBeforeTheConversationExisted:
+    """ROAD_TO_10 8.9: the composer attaches to a conversation, a new chat has none yet.
+
+    The upload then stores `conversation_id` null, and a turn reads only its own
+    conversation's attachments -- so the file was on screen and invisible to the agent.
+    """
+
+    def _orphan(
+        self, db: Session, owner: User, project: Project, tmp_path: Path, name: str = "loads.csv"
+    ) -> Attachment:
+        path = tmp_path / name
+        path.write_text("Case,Force N\nTip load,4200\n", encoding="utf-8")
+        return attachments.attach(
+            db,
+            owner=owner,
+            media=_media(db, owner, name, sha=f"{abs(hash(name)):064x}"[:64]),
+            filename=name,
+            path=path,
+            project_id=project.id,
+        ).attachment
+
+    def test_the_first_turn_adopts_it_and_the_agent_sees_the_cell(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        tmp_path: Path,
+    ) -> None:
+        orphan = self._orphan(db_session, user, project, tmp_path)
+        assert orphan.conversation_id is None
+        provider = ScriptedProvider()
+
+        _run(db_session, provider, conversation, user, "use the file I dropped")
+
+        assert orphan.conversation_id == conversation.id
+        assert "4200" in provider.user_turns
+
+    def test_a_conversation_with_no_project_adopts_nothing(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        tmp_path: Path,
+    ) -> None:
+        from app.ai.attached import adopt_orphans
+
+        orphan = self._orphan(db_session, user, project, tmp_path)
+        loose = Conversation(owner_id=user.id, project_id=None, title="t")
+        db_session.add(loose)
+        db_session.flush()
+
+        assert adopt_orphans(db_session, loose, user) == 0
+        assert orphan.conversation_id is None
+
+    def test_another_users_orphan_in_the_same_project_is_left_alone(
+        self,
+        db_session: Session,
+        user: User,
+        stranger: User,
+        project: Project,
+        conversation: Conversation,
+        tmp_path: Path,
+    ) -> None:
+        from app.ai.attached import adopt_orphans
+
+        theirs = self._orphan(db_session, stranger, project, tmp_path, name="theirs.csv")
+
+        assert adopt_orphans(db_session, conversation, user) == 0
+        assert theirs.conversation_id is None
+
+    def test_an_attachment_already_in_a_conversation_is_not_moved(
+        self,
+        db_session: Session,
+        user: User,
+        project: Project,
+        conversation: Conversation,
+        tmp_path: Path,
+    ) -> None:
+        from app.ai.attached import adopt_orphans
+
+        other = Conversation(owner_id=user.id, project_id=project.id, title="other")
+        db_session.add(other)
+        db_session.flush()
+        kept = _spreadsheet(db_session, user, other, tmp_path, name="kept.csv")
+
+        assert adopt_orphans(db_session, conversation, user) == 0
+        assert kept.conversation_id == other.id

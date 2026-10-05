@@ -182,7 +182,7 @@ class TestTheDensityActuallyReachesTheDaemon:
         monkeypatch.setattr(
             dispatch, "_resolve_connection", lambda db, user_id: (MagicMock(id="d"), MagicMock())
         )
-        monkeypatch.setattr(dispatch, "_enforce_rate_limit", lambda device_id: None)
+        monkeypatch.setattr(dispatch, "_enforce_rate_limit", lambda db, user_id, device_id: None)
         monkeypatch.setattr(dispatch, "_execute", fake_execute)
         monkeypatch.setattr(dispatch, "_log", lambda db, **kwargs: None)
         return captured

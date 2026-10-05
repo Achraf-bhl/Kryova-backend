@@ -974,3 +974,29 @@ def _seed_checkpoint(wired) -> CatiaCheckpoint:
     db.add(checkpoint)
     db.commit()
     return checkpoint
+
+
+class TestTheServerAnswersCatiaStatusWhateverTheDaemonListed:
+    """`offered_tool_specs` intersects the registry with the daemon's `hello.tools`, and a
+    daemon never lists a server-side tool. So `catia_status` vanished from the agent's and the
+    MCP route's vocabulary exactly while a bridge was connected (seat, 2026-10-05: MCP listed
+    36 of its 37 curated tools)."""
+
+    def test_a_connected_daemon_that_lists_two_tools_still_leaves_catia_status_offered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        connection = ScriptedDevice("dev-1", "user-1")
+        connection.hello = BridgeHello(
+            catia_version="V5-6R2023",
+            bridge_version="1.0.0",
+            hostname="WS-ENG-04",
+            mock=False,
+            capabilities=("part",),
+            tools=("catia_new_part", "catia_pad"),
+        )
+        monkeypatch.setattr(dispatch.backends, "is_local", lambda: False)
+        monkeypatch.setattr(dispatch, "_online", lambda db, user_id, conversation_id=None: (None, connection))
+
+        offered = {spec.name for spec in dispatch.offered_tool_specs(None, "user-1")}  # type: ignore[arg-type]
+
+        assert offered == {"catia_status", "catia_new_part", "catia_pad"}

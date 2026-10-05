@@ -434,10 +434,14 @@ def offered_tool_specs(db: Session, user_id: str) -> list[CatiaToolSpec]:
     if found is None:
         return list(CATIA_TOOL_SPECS)
     hello = found[1].hello
+    # A server-side tool is answered here whatever the daemon is (`_SERVER_SIDE_TOOLS`), and a
+    # daemon never lists one -- the bridge's SERVER_ONLY set refuses them on the wire. So the
+    # intersection alone dropped `catia_status` exactly when a bridge was connected: the MCP
+    # surface listed 36 of its 37 curated tools on the seat, 2026-10-05.
     return [
         _without_unavailable_options(spec, hello.unavailable_options(spec.name))
         for spec in CATIA_TOOL_SPECS
-        if hello.offers(spec.name)
+        if spec.name in _SERVER_SIDE_TOOLS or hello.offers(spec.name)
     ]
 
 

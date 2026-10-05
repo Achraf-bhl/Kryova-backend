@@ -568,7 +568,7 @@ class TestTheProjectPageCanAskForItsOwnConversationsAndDesigns:
         conversations = auth_client.get(
             f"{API}/ai/conversations", params={"project_id": project_id}
         ).json()
-        assert [c["id"] for c in conversations["items"]] == [mine.id]
+        assert [c["conversation_id"] for c in conversations["items"]] == [mine.id]
 
         listed = auth_client.get(f"{API}/designs", params={"project_id": project_id}).json()
         assert listed["total"] == 1

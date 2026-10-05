@@ -10,6 +10,7 @@ import pytest
 
 from app.core.config import Settings
 from app.jobs import InlineJobQueue, JobQueue, ThreadPoolJobQueue, get_job_queue
+from app.jobs.queue import ProcessPoolJobQueue
 
 VALID = {
     "database_url": "postgresql://user:pw@example.neon.tech/db",
@@ -53,15 +54,15 @@ class TestJobQueueBackend:
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module("app.jobs.celery_app")
 
-    def test_only_two_queue_implementations_ship(self) -> None:
+    def test_only_the_three_queue_implementations_ship(self) -> None:
         """Restricted to the ones defined in `app.jobs`, deliberately.
 
         `JobQueue.__subclasses__()` is every subclass alive in the process, so a
         stub defined inside some other test file joins it — and this assertion
         then passes alone and fails in a full run, which is the worst way for a
         test to be wrong. What the seam actually promises is that *this package*
-        ships two implementations; a test's own stub is evidence the seam works,
-        not a violation of it.
+        ships its implementations -- three since ROAD_TO_10 6.4 added the process
+        pool -- and a test's own stub is evidence the seam works, not a violation of it.
         """
         shipped = {
             cls
@@ -69,7 +70,7 @@ class TestJobQueueBackend:
             if cls.__module__.startswith("app.jobs")
         }
 
-        assert shipped == {InlineJobQueue, ThreadPoolJobQueue}
+        assert shipped == {InlineJobQueue, ThreadPoolJobQueue, ProcessPoolJobQueue}
 
 
 class TestJobQueueSelection:

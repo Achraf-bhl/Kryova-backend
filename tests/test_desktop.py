@@ -177,7 +177,8 @@ class TestWhoWinsWhenTwoSourcesNameOneVariable:
         assert settings.database_url.startswith("postgresql+psycopg://kryova:")
         assert settings.media_root == Path("/home/a/kryova/media")
         assert settings.require_verified_email_for_projects is False
-        assert settings.local_postgres_data_dir == "/home/a/kryova/pgdata"
+        # The native spelling: the desktop writes str(Path(...)), "\home\a\..." on Windows.
+        assert settings.local_postgres_data_dir == str(Path("/home/a/kryova/pgdata"))
 
 
 class TestThePortsAndPaths:

@@ -658,7 +658,13 @@ class TestGridsRunningAtOnceChangeTheSchedulingAndNothingElse:
         # The coarsest grid finishes last.
         slow_first = {4.0: 0.4, 2.0: 0.3, 1.0: 0.2, 0.5: 0.0}
         together = run_study("q", "mm", self.SIZES, self._sample(slow_first), concurrency=4)
-        assert [lvl.element_size_mm for lvl in together.levels] == sorted(self.SIZES, reverse=True)
+        sequential = run_study("q", "mm", self.SIZES, self._sample())
+        # `assess` orders a study fine-first whatever order it was given in; what concurrency
+        # must not change is that order -- not reorder the levels by finishing time.
+        order = [lvl.element_size_mm for lvl in together.levels]
+        assert order == [lvl.element_size_mm for lvl in sequential.levels] == sorted(self.SIZES)
+        # And each level still carries its own grid's value, not the one that finished first.
+        assert together.to_dict() == sequential.to_dict()
 
     def test_they_really_do_run_at_the_same_time(self) -> None:
         import threading

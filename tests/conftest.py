@@ -260,8 +260,13 @@ def _no_real_intent_router(monkeypatch: pytest.MonkeyPatch) -> None:
     on first use) and lets its answer change which tools the scripted turn is
     offered -- a suite whose verdict depends on the workstation's `.env.local`.
     A test that wants a router sets `ai_intent_router` itself.
+
+    `ai_tool_limit` is the same leak: this seat's `.env.local` carried `AI_TOOL_LIMIT=15`
+    from its local-model profile, and `test_turn_metrics` counted 21 tools offered against
+    the 41 a full box holds (2026-10-05). The suite runs the shipped default, 0.
     """
     monkeypatch.setattr(settings, "ai_intent_router", "none", raising=False)
+    monkeypatch.setattr(settings, "ai_tool_limit", 0)
 
 
 @pytest.fixture(autouse=True)

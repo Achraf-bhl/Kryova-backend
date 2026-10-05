@@ -29,9 +29,11 @@ class TestTheSameStudyAtOnce:
         project_with_geometry: str,  # noqa: F811
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        sequential = _study(auth_client, project_with_geometry)["result"]["mesh_convergence"]
+        # The study itself rides in the mesh stats; `result.mesh_convergence` is only the claim
+        # (basis, grids), the way tests/test_simulations.py reads both.
+        sequential = _study(auth_client, project_with_geometry)["mesh_stats"]["study"]
         monkeypatch.setattr(settings, "study_concurrency", 3)
-        together = _study(auth_client, project_with_geometry)["result"]["mesh_convergence"]
+        together = _study(auth_client, project_with_geometry)["mesh_stats"]["study"]
         assert together["verdict"] == sequential["verdict"]
         assert [level["element_count"] for level in together["levels"]] == [
             level["element_count"] for level in sequential["levels"]

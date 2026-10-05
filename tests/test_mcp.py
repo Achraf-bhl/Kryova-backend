@@ -361,8 +361,14 @@ class TestTheRouteOffersTheToolBox:
     def test_a_mutating_tool_without_consent_refuses_in_the_toolboxs_words(
         self, auth_client: AuthenticatedTestClient, conversation: Conversation
     ) -> None:
-        body = _message("tools/call", {"name": "create_project", "arguments": {"name": "x"}})
-        result = _post(auth_client, conversation.id, body, "create_project").json()["result"]
+        # Not `create_project`: making an empty project is deliberately un-gated
+        # (test_agent.py::test_is_available_without_the_mutation_gate), so it was never an
+        # example of a mutating tool. `set_design_parameter` is, and it is on the curated list.
+        body = _message(
+            "tools/call",
+            {"name": "set_design_parameter", "arguments": {"name": "width_mm", "value": 40}},
+        )
+        result = _post(auth_client, conversation.id, body, "set_design_parameter").json()["result"]
         assert result["isError"] is True
         assert "confirmation" in result["content"][0]["text"]
 

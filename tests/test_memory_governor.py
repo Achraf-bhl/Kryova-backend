@@ -361,7 +361,9 @@ class TestTheDerivedElementLimit:
         self, budget_mb: int
     ) -> None:
         dof = max_dof_for(budget_mb)
-        assert estimate_peak_mb(int(dof * 1.02) + 10).peak_mb > budget_mb
+        # `>=`, the mirror of the sibling's `+ 1`: the estimate rounds to whole MB, so at 60 MB a
+        # model 2 % past the limit estimates 60.38 MB and reads back as exactly the budget.
+        assert estimate_peak_mb(int(dof * 1.02) + 10).peak_mb >= budget_mb
 
     def test_the_direct_branch_never_reaches_the_threshold(self) -> None:
         # Why `max_dof_for` has no clamp on that branch: every budget the iterative branch does

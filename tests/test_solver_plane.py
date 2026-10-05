@@ -713,21 +713,17 @@ class TestBadlyPosedModels:
         with pytest.raises(SolverError, match="under-constrained"):
             PlaneSolver().solve(mesh, self.free_to_slide_case())
 
-    def test_a_free_mode_the_load_never_excites_is_not_detected(self) -> None:
-        """A recorded limitation, not a desired behaviour.
+    def test_a_free_mode_the_load_never_excites_is_refused_too(self) -> None:
+        """This used to be a recorded limitation, and ROAD_TO_10 9.5 closed it.
 
-        The check is the equilibrium residual, and it is exact about what it
-        checks: `K u = f` has a solution whenever `f` is orthogonal to the null
-        space, however large that null space is. Restrain the strip in x only
-        and pull it in x only, and the free y-translation has no load in it --
-        SuperLU picks one member of the solution family and the residual is
-        1e-10 of the applied load. The stress field is still right (a rigid-body
-        mode carries no strain); `max_displacement_mm` is not, because the
-        displacement it reports has an arbitrary offset in y.
-
-        `app/solve/linear_static.py` has the same property and the same check.
-        Detecting it needs a rank or null-space test, which neither solver does.
-        This test exists so the boundary is written down rather than discovered.
+        The equilibrium residual is exact about what it checks: `K u = f` has a
+        solution whenever `f` is orthogonal to the null space. Restrain the strip
+        in x only and pull it in x only, and the free y-translation has no load in
+        it -- SuperLU picked one member of the solution family, the residual was
+        1e-10 of the load, and `max_displacement_mm` carried an arbitrary offset
+        in y. `app/solve/constraints.py` now counts the rigid-body motions the
+        fixtures leave free *before* solving, independently of the load, so this
+        model is refused by name instead of answered.
         """
         mesh = rectangle_mesh(LENGTH, HEIGHT, 6, 2)
         case = PlaneCase(
@@ -739,9 +735,8 @@ class TestBadlyPosedModels:
                 ForceLoad(where=FaceSelector(axis="x", side="max"), force_n=(PULL_N, 0.0, 0.0))
             ],
         )
-        output = PlaneSolver().solve(mesh, case)
-        assert output.nodal_stress is not None
-        assert output.nodal_stress[:, 0] == pytest.approx(SIGMA, rel=1e-9)
+        with pytest.raises(SolverError, match="under-constrained"):
+            PlaneSolver().solve(mesh, case)
 
     def test_the_equilibrium_residual_rejects_a_vector_that_does_not_solve(self) -> None:
         # The mechanism itself, pinned directly: a finite vector that does not

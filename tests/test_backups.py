@@ -439,7 +439,13 @@ class TestTheRoutesExistOnlyOnADesktop:
         monkeypatch.setattr(settings, "local_postgres_bin_dir", str(fake_bin(tmp_path)))
         monkeypatch.setattr(backups, "admin_url_for", lambda home: ADMIN)
         run = FakeRun(writes_the_dump)
-        monkeypatch.setattr(subprocess, "run", run)
+        # Through the route's own call, not by patching `subprocess.run`: `take_scheduled`'s
+        # `run=subprocess.run` default was bound at import, so a patch made now never reaches it
+        # and the real `subprocess.run` executes the empty fake (WinError 193 on Windows).
+        real = backups.take_scheduled
+        monkeypatch.setattr(
+            backups, "take_scheduled", lambda *args, **kwargs: real(*args, run=run, **kwargs)
+        )
 
         response = auth_client.post("/api/v1/desktop/backups")
 

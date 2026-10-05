@@ -50,6 +50,8 @@ OPERATIONS: tuple[Operation, ...] = (
     # -- product structure ---------------------------------------------------
     Operation(
         name="catia_product_create",
+        # No snapshot before it: an empty assembly is being started; nothing to snapshot.
+        no_auto_checkpoint=True,
         summary=(
             "Create a new empty assembly document.\n"
             "Everything else in this module needs one. An assembly holds components "

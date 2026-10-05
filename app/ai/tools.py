@@ -29,6 +29,7 @@ import json
 import logging
 import time
 from collections.abc import Callable, Collection, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Final
 
@@ -2029,7 +2030,24 @@ class ToolBox:
             result = self._call_catia(tool, dict(arguments))
             return result if isinstance(result, dict) else {}
 
-        report = execute_plan(plan, run_one)
+        # One snapshot at the start of the build and one at the end, instead of one before every
+        # feature (ROAD_TO_10 5.4): twenty features were twenty COM saves and uploads. Without
+        # rollback, because this tool's contract is that a failed build keeps what it made so the
+        # agent carries on from there; the end snapshot then records that half-built state.
+        dispatch = _catia_dispatch()
+        batch_scope: AbstractContextManager[Any] = (
+            dispatch.checkpoint_batch(
+                self.db,
+                user_id=self.user.id,
+                conversation_id=conversation.id,
+                label="build_design",
+                rollback_on_failure=False,
+            )
+            if dispatch is not None
+            else nullcontext()
+        )
+        with batch_scope:
+            report = execute_plan(plan, run_one)
 
         total = len(plan.calls)
         if report.failure is not None:

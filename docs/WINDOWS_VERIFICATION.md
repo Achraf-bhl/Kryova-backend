@@ -1814,6 +1814,13 @@ this file drives the ladder, with a screenshot each.
          log no call. Revoke the second device and reopen the part with `catia_open_document`: it should
          restore from the checkpoint onto the first seat and the document row should follow it. Measure
          what `offered_tool_specs` offers a pinned conversation when the two seats' tool lists differ.
+      3. **A twenty-feature build is two snapshots (5.4).** On a seat, `build_design` a design with
+         twenty or so features and count `catia_checkpoint` calls in the bridge log (expect two) and the
+         wall time against the same build before this change. Then fail a build halfway and confirm the end
+         snapshot restores to a part that opens. **Batch rollback** (`rollback_on_failure=True`) has no
+         product caller yet: if one is wired, `catia_restore` of a snapshot taken moments earlier on a
+         part with a feature added since must be exercised on a seat, because the restore is the call
+         whose failure modes (a dialog, a reopened window, a renamed document) nothing here has seen.
       Settles: whether the bridge and the app agree about what is in CATIA.
 
 ---

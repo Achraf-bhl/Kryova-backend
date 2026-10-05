@@ -101,6 +101,8 @@ OPERATIONS: tuple[Operation, ...] = (
     ),
     Operation(
         name="catia_fill_dialog",
+        # No snapshot before it: runs when a modal dialog has COM blocked, and a checkpoint is a COM save.
+        no_auto_checkpoint=True,
         summary=(
             "Set fields in the open dialog, by the labels catia_describe_dialog reported.\n"
             "Values are strings because that is what a dialog field holds; write them "
@@ -133,6 +135,8 @@ OPERATIONS: tuple[Operation, ...] = (
     ),
     Operation(
         name="catia_dialog_action",
+        # No snapshot before it: runs when a modal dialog has COM blocked, and a checkpoint is a COM save.
+        no_auto_checkpoint=True,
         summary=(
             "Press a button in the open dialog, by what it does rather than what it "
             "says.\n"
@@ -150,6 +154,8 @@ OPERATIONS: tuple[Operation, ...] = (
     ),
     Operation(
         name="catia_press_key",
+        # No snapshot before it: runs when a modal dialog has COM blocked, and a checkpoint is a COM save.
+        no_auto_checkpoint=True,
         summary=(
             "Send one keystroke to whatever CATIA is currently showing.\n"
             "Mostly for escaping a state nothing else can reach — a dialog with no "
@@ -161,6 +167,8 @@ OPERATIONS: tuple[Operation, ...] = (
     ),
     Operation(
         name="catia_switch_workbench",
+        # No snapshot before it: changing workbench changes nothing.
+        no_auto_checkpoint=True,
         summary=(
             "Activate a workbench, so its commands become available.\n"
             "Most commands only exist in their own workbench: Pad needs Part Design, "

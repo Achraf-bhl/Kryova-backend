@@ -98,6 +98,8 @@ OPERATIONS: tuple[Operation, ...] = (
     ),
     Operation(
         name="catia_select",
+        # No snapshot before it: selecting changes nothing.
+        no_auto_checkpoint=True,
         summary=(
             "Put things into CATIA's selection, which is what most commands act on.\n"
             "Select a sketch then run Pad; select a face then run Pocket. Name features "

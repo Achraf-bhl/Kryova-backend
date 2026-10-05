@@ -59,6 +59,8 @@ OPERATIONS: tuple[Operation, ...] = (
     # -- documents -----------------------------------------------------------
     Operation(
         name="catia_new_part",
+        # No snapshot before it: there is nothing yet to snapshot.
+        no_auto_checkpoint=True,
         summary=(
             "Create a new empty part document and make it the active one.\n"
             "Start here for anything modelled from scratch. Everything that follows "
@@ -75,6 +77,8 @@ OPERATIONS: tuple[Operation, ...] = (
     ),
     Operation(
         name="catia_open_document",
+        # No snapshot before it: nothing is open yet, and it is the path that restores a lost file.
+        no_auto_checkpoint=True,
         summary=(
             "Open one of the documents this conversation owns and make it the "
             "active one.\n"
@@ -101,6 +105,8 @@ OPERATIONS: tuple[Operation, ...] = (
     ),
     Operation(
         name="catia_close_document",
+        # No snapshot before it: saves the document itself first; a checkpoint protects nothing and its failure would refuse the one tool that tidies a cluttered seat.
+        no_auto_checkpoint=True,
         summary=(
             "Save this conversation's document and close its window in CATIA.\n"
             "Use it when the part is finished with, or when the seat has collected "
@@ -202,6 +208,8 @@ OPERATIONS: tuple[Operation, ...] = (
     ),
     Operation(
         name="catia_export_step",
+        # No snapshot before it: reads the model out; does not change it.
+        no_auto_checkpoint=True,
         summary=(
             "Export the part as a STEP file and attach it to the conversation.\n"
             "The way to hand the finished geometry to the user or to the simulation "
@@ -271,6 +279,8 @@ OPERATIONS: tuple[Operation, ...] = (
     # -- the safety net ------------------------------------------------------
     Operation(
         name="catia_checkpoint",
+        # No snapshot before it: it is the checkpoint.
+        no_auto_checkpoint=True,
         summary=(
             "Save the document's current state so it can be restored later.\n"
             "Taken automatically before every mutating operation, so this is only "

@@ -30,7 +30,8 @@ import tempfile
 import time
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import replace
+from contextvars import ContextVar
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,7 @@ from app.catia.connection import (
     registry,
 )
 from app.catia.geometry_import import GeometryImportError, import_step_export
+from app.catia.ops import no_auto_checkpoint_names
 from app.catia.ops.placement import PlacementError, declares_polar, resolve_polar
 from app.catia.sanitize import clean_result, clean_text
 from app.catia.tool_specs import (
@@ -98,8 +100,10 @@ __all__ = [
     "offered_tool_specs",
     "CatiaError",
     "CatiaUnavailable",
+    "CheckpointBatch",
     "call_catia",
     "catia_available",
+    "checkpoint_batch",
     "status_payload",
 ]
 
@@ -122,48 +126,29 @@ class CatiaError(RuntimeError):
 #: connected", and asking the device whether the device is reachable is circular.
 _SERVER_SIDE_TOOLS = frozenset({"catia_status"})
 
-#: Mutating tools that are *not* auto-checkpointed, and why.
-_NO_AUTO_CHECKPOINT = frozenset(
-    {
-        "catia_new_part",  # there is nothing yet to snapshot
-        "catia_product_create",  # nor here: an empty assembly is being started
-        "catia_open_document",  # nothing is open yet either
-        "catia_checkpoint",  # it is the checkpoint
-        "catia_export_step",  # reads the model out; does not change it
-        # Saves the document itself before closing it, so a checkpoint taken
-        # first would snapshot a state the close does not alter -- it protects
-        # nothing, and costs a full file upload on every window the agent tidies
-        # away. Worse, `_auto_checkpoint` *refuses the call* when the snapshot
-        # fails, which would make the one tool whose job is to clean up a
-        # cluttered seat unavailable in exactly the conditions that clutter it.
-        # Nothing becomes unrecoverable: the earlier checkpoints still exist, the
-        # file stays on the workstation, and the binding row is kept.
-        #
-        # Note that `Operation.no_auto_checkpoint` is *not* what decides this.
-        # The field exists and `registry.no_auto_checkpoint_names()` reads it,
-        # but nothing consumes that anywhere -- this set is the only thing that
-        # takes effect, so declaring the flag as well would be a second statement
-        # of one fact with only one of them true.
-        "catia_close_document",
-        # The interactive tools, for one reason that applies to all four: a
-        # checkpoint is a COM save, and these run precisely when a modal dialog
-        # has COM blocked. Requiring one would mean the tools that dismiss a
-        # stuck dialog can only run when no dialog is stuck -- and since a
-        # failed checkpoint refuses the call, the session would be wedged with
-        # no way out but a human hand.
-        #
-        # The safety they lose is smaller than it looks. `catia_run_command` is
-        # checkpointed and it is the only one of the family that starts
-        # anything; by the time a dialog is open, the snapshot from before the
-        # command that opened it is already recorded, and pressing OK is
-        # covered by it.
-        "catia_fill_dialog",
-        "catia_dialog_action",
-        "catia_press_key",
-        "catia_select",  # selecting changes nothing
-        "catia_switch_workbench",  # nor does changing workbench
-    }
-)
+#: Mutating tools that are *not* auto-checkpointed. **The registry decides**:
+#: `Operation.no_auto_checkpoint` is declared beside each operation, with the reason
+#: (ROAD_TO_10 5.4). This used to be a second, hand-written list in this file while the
+#: field sat unread, and the two had already disagreed -- `catia_restore` was flagged
+#: and checkpointed anyway. The reasons that apply to families rather than to one
+#: operation, since they are the part worth keeping in view:
+#:
+#: * **The interactive tools** (`catia_fill_dialog`, `catia_dialog_action`,
+#:   `catia_press_key`) run precisely when a modal dialog has COM blocked, and a
+#:   checkpoint is a COM save -- and a failed checkpoint *refuses the call*. Requiring
+#:   one would make the tools that dismiss a stuck dialog usable only when no dialog is
+#:   stuck. `catia_run_command` is checkpointed and is the only one that starts
+#:   anything, so the snapshot from before the command that opened the dialog covers it.
+#: * **`catia_close_document`** saves the document itself before closing it, so a
+#:   snapshot first protects nothing and costs an upload for every window the agent
+#:   tidies away; and the same refusal would make the one tool whose job is to clean up
+#:   a cluttered seat unavailable in exactly the conditions that clutter it.
+#: * **`catia_restore`** is the recovery path, and a recovery that is refused because the
+#:   document is too broken to snapshot is no recovery. It is approved by a person
+#:   (DESTRUCTIVE tier) and the checkpoint it restores still exists, so what is given up
+#:   is only the ability to undo a restore. *Behaviour change 2026-10-05:* it was
+#:   checkpointed before, against its own declaration.
+_NO_AUTO_CHECKPOINT = no_auto_checkpoint_names()
 
 #: Tools whose call frame does *not* carry the conversation's document, and why.
 #: Everything else is scoped: the daemon activates the bound document -- reopening
@@ -1353,6 +1338,176 @@ def _enforce_approval(
         raise CatiaError(str(exc)) from exc
 
 
+# -- one checkpoint per batch ------------------------------------------------
+
+
+@dataclass
+class CheckpointBatch:
+    """What a `checkpoint_batch` block has done, for the caller to report.
+
+    Keyed by document: the first mutation on each document the batch touches is
+    snapshotted once, which is the whole saving, and a batch that starts a second part
+    must not leave that part's edits unprotected by a snapshot of the first.
+    """
+
+    label: str
+    rollback_on_failure: bool
+    #: document id -> the snapshot taken before the batch first changed it.
+    starts: dict[str, CatiaCheckpoint] = field(default_factory=dict)
+    #: document id -> the snapshot taken after, when the batch ended well enough to take one.
+    ends: dict[str, CatiaCheckpoint] = field(default_factory=dict)
+    steps: int = 0
+    rolled_back: bool = False
+
+
+_BATCH: ContextVar[CheckpointBatch | None] = ContextVar("catia_checkpoint_batch", default=None)
+
+
+@contextmanager
+def checkpoint_batch(
+    db: Session,
+    *,
+    user_id: str,
+    conversation_id: str | None,
+    label: str,
+    rollback_on_failure: bool = True,
+) -> Iterator[CheckpointBatch]:
+    """Snapshot a run of edits once at the start and once at the end, not before each one.
+
+    Every mutating call used to pay a COM save and an upload first, so a twenty-feature
+    build made twenty snapshots and the rollback granularity was one feature. Inside this
+    block a mutating call does not checkpoint; the first one that changes a document takes
+    the start snapshot (lazily, because a batch that begins with `catia_new_part` has
+    nothing to snapshot until the part exists), and leaving the block takes the end one.
+    Rollback granularity becomes the batch, which is the unit the user approved.
+
+    **A step that raises ends the batch badly.** With `rollback_on_failure` (the default)
+    the start snapshots are restored, in reverse, so the part is back where it was before the
+    batch rather than half-built; without it -- `build_design` keeps what a failed build did
+    make, so the agent can carry on from there -- the end snapshot is taken instead. The
+    restore is the dispatcher's own and is **not** an approval-gated `catia_restore`: it undoes
+    work the batch itself did, to a state that was the user's before the batch began, and an
+    approval for it would be a dialog asking whether to put back what the person had a moment
+    ago. It is logged like any other restore.
+
+    **A batch that fails to snapshot does not run.** The first mutating call still refuses
+    when the start snapshot fails, exactly as a single one does. A failed *end* snapshot is
+    logged and does not undo the work: the edits are done and refusing would misreport them.
+
+    The open kernel keeps no checkpoints, so a batch there records nothing and costs nothing.
+    A batch inside a batch joins the outer one.
+    """
+    outer = _BATCH.get()
+    if outer is not None:
+        yield outer
+        return
+    batch = CheckpointBatch(label=label, rollback_on_failure=rollback_on_failure)
+    token = _BATCH.set(batch)
+    failed = False
+    try:
+        yield batch
+    except Exception:
+        failed = True
+        raise
+    finally:
+        # Reset first: the snapshots and the restore below are the dispatcher's own and must
+        # not be counted as steps of the batch they are closing.
+        _BATCH.reset(token)
+        try:
+            _close_batch(
+                db, batch, user_id=user_id, conversation_id=conversation_id, failed=failed
+            )
+        except Exception:  # noqa: BLE001 - closing must never replace the error that ended the batch
+            logger.exception("Closing checkpoint batch %r failed", batch.label)
+
+
+def _active_batch() -> CheckpointBatch | None:
+    return _BATCH.get()
+
+
+def _close_batch(
+    db: Session,
+    batch: CheckpointBatch,
+    *,
+    user_id: str,
+    conversation_id: str | None,
+    failed: bool,
+) -> None:
+    if not batch.starts:
+        return  # nothing checkpointable was changed
+    try:
+        device, connection = _resolve_connection(db, user_id, conversation_id)
+    except (CatiaUnavailable, CatiaError) as exc:
+        logger.warning("Batch %r ended with no seat to snapshot or restore on: %s", batch.label, exc)
+        return
+    if failed and batch.rollback_on_failure:
+        _roll_back(db, batch, device=device, connection=connection, user_id=user_id)
+        return
+    for document_id in batch.starts:
+        document = db.get(CatiaDocument, document_id)
+        if document is None:
+            continue
+        try:
+            batch.ends[document_id] = _auto_checkpoint(
+                db,
+                connection=connection,
+                document=document,
+                user_id=user_id,
+                label=f"after {batch.label}",
+            )
+        except (CatiaUnavailable, CatiaError) as exc:
+            logger.warning(
+                "The end-of-batch checkpoint for %r was not taken (%s); the edits stand.",
+                batch.label,
+                exc,
+            )
+
+
+def _roll_back(
+    db: Session,
+    batch: CheckpointBatch,
+    *,
+    device: CatiaDevice,
+    connection: DeviceConnection,
+    user_id: str,
+) -> None:
+    spec = get_spec("catia_restore")
+    assert spec is not None  # noqa: S101 - the vocabulary is a module constant
+    for document_id, checkpoint in reversed(list(batch.starts.items())):
+        document = db.get(CatiaDocument, document_id)
+        if document is None:
+            continue
+        started = time.monotonic()
+        arguments = {"checkpoint": _checkpoint_payload(db, checkpoint)}
+        try:
+            result = _send(
+                connection,
+                spec=spec,
+                conversation_id=document.conversation_id,
+                arguments=arguments,
+                timeout_s=settings.catia_call_timeout_s,
+                document=_envelope(document),
+            )
+            error = None
+        except (CatiaUnavailable, CatiaError) as exc:
+            result, error = None, str(exc)
+            logger.error("Rolling back %r to checkpoint %s failed: %s", batch.label, checkpoint.id, exc)
+        _log(
+            db,
+            user_id=user_id,
+            conversation_id=document.conversation_id,
+            device_id=device.id,
+            tool="catia_restore",
+            tier=spec.tier.value,
+            arguments={"checkpoint_id": checkpoint.id, "reason": f"{batch.label} failed"},
+            result=_clean(result) if result else None,
+            ok=error is None,
+            error=error,
+            started=started,
+        )
+        batch.rolled_back = batch.rolled_back or error is None
+
+
 # -- execution ---------------------------------------------------------------
 
 
@@ -1381,16 +1536,30 @@ def _execute(
     protected = target if target is not None else document
 
     if spec.mutating and spec.name not in _NO_AUTO_CHECKPOINT and protected is not None:
-        # A mutation that could not be checkpointed does not run. Refusing is
-        # the whole reason checkpoints exist: an unrecoverable change made
-        # because the safety net was unavailable is the worst of both.
-        _auto_checkpoint(
-            db,
-            connection=connection,
-            document=protected,
-            user_id=user_id,
-            label=f"before {spec.name}",
-        )
+        batch = _active_batch()
+        if batch is None:
+            # A mutation that could not be checkpointed does not run. Refusing is
+            # the whole reason checkpoints exist: an unrecoverable change made
+            # because the safety net was unavailable is the worst of both.
+            _auto_checkpoint(
+                db,
+                connection=connection,
+                document=protected,
+                user_id=user_id,
+                label=f"before {spec.name}",
+            )
+        else:
+            # Inside `checkpoint_batch`: one snapshot per document, before the batch first
+            # changes it. The refusal rule above holds for that first one.
+            batch.steps += 1
+            if protected.id not in batch.starts:
+                batch.starts[protected.id] = _auto_checkpoint(
+                    db,
+                    connection=connection,
+                    document=protected,
+                    user_id=user_id,
+                    label=f"before {batch.label}",
+                )
 
     payload = _enrich(
         db,

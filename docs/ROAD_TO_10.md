@@ -567,7 +567,7 @@ Today:
 
 ### 5B. Kryova → CATIA: fast, safe, approved
 
-- [ ] **5.4 One checkpoint per batch, not per edit.** [Both] **M** — **NEW** (E15.1)
+- [~] **5.4 One checkpoint per batch, not per edit.** [Both] **M** — **NEW** (E15.1)
   - Today every mutation pays a COM save plus upload first. Inside a declared plan (`taskgraph`) or a
     compiled design batch (5.5), take one checkpoint at the start of the batch and one at the end.
   - Rollback granularity becomes the batch, which is also the unit the user approved.
@@ -576,6 +576,12 @@ Today:
     source of truth.
   - Test: a five-step batch makes exactly two checkpoint calls, and a failure in step three restores
     the start checkpoint.
+  - Status 2026-10-05: `dispatch.checkpoint_batch` (one snapshot per document at the start, one at
+    the end; a raising step restores the start) and `_NO_AUTO_CHECKPOINT` is now the registry's
+    `no_auto_checkpoint` flags, nothing else; `build_design` runs in a batch without rollback
+    (master plan P7.12; `tests/test_catia_checkpoint_batch.py`, six breaks). Open: a declared
+    `plan_work` plan is not a batch, no product caller uses rollback, nothing has run on a seat (THE
+    QUEUE G8 item 3). Behaviour change: `catia_restore` is no longer snapshotted first.
 - [ ] **5.5 A batch frame: many operations in one round trip.** [Both] **L** → E15.1
   - Add an `invoke_batch` message to the protocol
     (`Kryova-backend/docs/CATIA_BRIDGE_PROTOCOL.md`; `scripts/catia_bridge/session.py`). It runs the

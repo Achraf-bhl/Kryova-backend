@@ -484,3 +484,38 @@ class _Scripted(LLMProvider):
         if not self._turns:
             return AssistantTurn(text="Done.", usage=TokenUsage(3, 4))
         return self._turns.pop(0)
+
+
+class TestTheBuildIsOneCheckpointBatch:
+    """ROAD_TO_10 5.4: a twenty-feature build is two snapshots, not twenty.
+
+    The saving happens on a seat, which this file does not drive (THE QUEUE G8); what is
+    pinned here is the wiring -- that the build runs inside `checkpoint_batch`, and without
+    rollback, because this tool's contract is that a failed build keeps what it made.
+    """
+
+    @needs_kernel
+    def test_the_build_runs_inside_a_batch_that_keeps_a_failed_builds_features(
+        self, occt: None, box: ToolBox, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from contextlib import contextmanager
+
+        from app.catia import dispatch
+
+        entered: list[dict[str, Any]] = []
+        real = dispatch.checkpoint_batch
+
+        @contextmanager
+        def spy(*args: Any, **kwargs: Any) -> Any:
+            entered.append(kwargs)
+            with real(*args, **kwargs) as batch:
+                yield batch
+
+        monkeypatch.setattr(dispatch, "checkpoint_batch", spy)
+        record(box)
+
+        box.call("build_design", {}, allow_mutations=True)
+
+        assert len(entered) == 1
+        assert entered[0]["label"] == "build_design"
+        assert entered[0]["rollback_on_failure"] is False

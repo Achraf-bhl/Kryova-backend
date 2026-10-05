@@ -302,9 +302,15 @@ def land_in_catia(
     `OcctRunner` and the second is bound to a new landing conversation.
     """
     if occt_runner is None:
+        from app.kernel.measurement import Detail
         from app.kernel.occt.runner import OcctRunner
 
-        occt_runner = OcctRunner()
+        # Shape counts only (ROAD_TO_10 6.8, MAKING_IT_FASTER 2.1): this replay is a bulk one --
+        # nothing reads a call's post-state, and the comparison below asks for its own explicit
+        # measurement of the finished part. A mutating call at `Detail.FULL` integrates over the
+        # whole shape after every step, which is the cost this replay would otherwise pay N times
+        # for a number it throws away.
+        occt_runner = OcctRunner(detail=Detail.SHAPE)
 
     before = execute_plan(plan, occt_runner)
     if not before.ok:

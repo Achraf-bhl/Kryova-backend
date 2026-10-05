@@ -250,6 +250,36 @@ class TestTheFlow:
         assert by["volume_mm3"].occt == pytest.approx(60 * 20 * 10)
         assert by["face_count"].verdict == AGREES
 
+    def test_the_open_kernel_replay_measures_shape_only_and_the_comparison_is_unchanged(
+        self, db_session, monkeypatch
+    ) -> None:
+        # ROAD_TO_10 6.8: the replay's per-call post-state is thrown away, so it is not computed;
+        # the finished part is still measured explicitly, so every finding is what it was.
+        from app.kernel.measurement import Detail
+        from app.kernel.occt import runner as occt_runner_module
+
+        seen: list[Detail] = []
+        real = occt_runner_module.OcctRunner
+
+        class Recording(real):  # type: ignore[valid-type,misc]
+            def __init__(self, *, detail: Detail = Detail.FULL) -> None:
+                seen.append(detail)
+                super().__init__(detail=detail)
+
+        monkeypatch.setattr(occt_runner_module, "OcctRunner", Recording)
+        landing = land_in_catia(
+            db_session,
+            user_id="u",
+            plan=compile_spec(_plate()),
+            source_conversation=Conversation(owner_id="u", title="x"),
+            seat_runner=_Recorder(),
+        )
+        assert seen == [Detail.SHAPE]
+        assert landing.landed and landing.agrees
+        by = _by_name(landing.findings)
+        assert by["volume_mm3"].occt == pytest.approx(60 * 20 * 10)
+        assert by["face_count"].verdict == AGREES
+
     def test_the_seat_is_built_on_whatever_the_deployment_setting_says(
         self, db_session, monkeypatch
     ) -> None:

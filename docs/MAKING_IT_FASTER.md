@@ -97,6 +97,32 @@ Two costs that are chosen rather than incurred:
   grids is already 64×, which is why it is capped there. The requested size is the *coarsest*
   grid deliberately, so a study can cost more time and never more memory.
 
+### Memory, measured 2026-10-05 (ROAD_TO_10 6.3)
+
+Peak resident memory of one in-house solve on a tet10 box, **each size in its own process** (Linux
+x86-64, CPython 3.12, 12 logical cores) -- the table `app/simulation/memory.py` fits:
+
+| path | degrees of freedom | peak above the mesh's own |
+|---|---|---|
+| direct (SuperLU) | 4,131 | 47 MB |
+| direct | 12,675 | 257 MB |
+| direct | 28,611 | 692 MB |
+| direct | 54,243 | 1,912 MB |
+| iterative (CG, Jacobi) | 143,811 | 1,465 MB |
+| iterative | 212,355 | 2,185 MB |
+
+The direct path is super-linear (fit: `50 + 1.6e-4 * DOF^1.5` MB) and is the reason a solve just
+under `ITERATIVE_THRESHOLD_DOF` (100,000) needs about **5 GB** while one just *over* it needs 1.1 GB:
+the estimate is deliberately not monotonic across the threshold, because the iterative method is
+the cheaper one. **CalculiX's memory was not measured**; the in-house figure stands in for it and
+is labelled so. The estimate is for planning an admission, never a bound.
+
+### Cold start, measured 2026-10-05 (ROAD_TO_10 6.7)
+
+First import in a fresh interpreter: OCP **2.2 s / 357 MB**, numpy + scipy.sparse.linalg 0.35 s,
+gmsh import + initialise 0.16 s, the first BM25 search 0.06 s (a second one 1 ms). Only OCP is worth
+warming, and it is done on a background thread so the boot and `/health` never wait for it.
+
 ### The database
 
 **~250 ms per round trip on Neon; ~0.14 ms locally** (measured 2026-09-07/08). That ratio is

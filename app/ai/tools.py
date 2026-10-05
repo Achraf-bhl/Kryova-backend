@@ -61,6 +61,7 @@ from app.models import (
     User,
 )
 from app.retrieval import knowledge_service
+from app.schemas.simulation import governing_of
 from app.simulation import waiting
 from app.simulation.limits import check_mesh_request
 from app.simulation.runner import SessionScope
@@ -2773,6 +2774,8 @@ class ToolBox:
                     "load_case_name": (s.load_case or {}).get("name"),
                     "factor_of_safety": (s.result or {}).get("factor_of_safety"),
                     "max_von_mises_mpa": (s.result or {}).get("max_von_mises_mpa"),
+                    # The peak to quote; the line above is the centroid value alone.
+                    "governing_peak_mpa": (g.peak_mpa if (g := governing_of(s.result)) else None),
                     "error": s.error,
                 }
                 for s in rows
@@ -2802,6 +2805,10 @@ class ToolBox:
             "element_size_mm": job.element_size_mm,
             "mesh_stats": job.mesh_stats,
             "result": job.result,
+            # The peak a verdict rests on, with which number it is -- the larger of the centroid
+            # and the nodal surface value (`StaticResult.governing_peak_mpa`). A property, so
+            # not in `result`; computed here exactly as `SimulationRead.governing` does.
+            "governing": (g.model_dump() if (g := governing_of(job.result)) else None),
             "error": job.error,
         }
 

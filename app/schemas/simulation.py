@@ -375,6 +375,28 @@ class GoverningRead(BaseModel):
     factor_of_safety: float
 
 
+def governing_of(result: dict[str, Any] | None) -> GoverningRead | None:
+    """The governing peak of a stored result, or None when it is not a stress result.
+
+    The one place a stored `result` dict becomes `StaticResult`'s governing values, for the
+    API response *and* the agent's simulation tools: the agent reads the same raw `result`
+    a client would, and without this it was handed both peaks and left to pick -- on the seat
+    2026-10-05 it quoted the 8.39 MPa centroid value as "the peak" of a run whose surface
+    value was 9.64 MPa against a closed-form 10.
+    """
+    if not result:
+        return None
+    try:
+        parsed = StaticResult.model_validate(result)
+    except ValidationError:
+        return None
+    return GoverningRead(
+        peak_mpa=parsed.governing_peak_mpa,
+        basis=parsed.governing_basis,
+        factor_of_safety=parsed.governing_factor_of_safety,
+    )
+
+
 class SimulationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -418,17 +440,7 @@ class SimulationRead(BaseModel):
         A thermal or flow result does not parse as a `StaticResult` and gets None, which is
         the truth -- it has no von Mises peak -- rather than a zero.
         """
-        if not self.result:
-            return None
-        try:
-            parsed = StaticResult.model_validate(self.result)
-        except ValidationError:
-            return None
-        return GoverningRead(
-            peak_mpa=parsed.governing_peak_mpa,
-            basis=parsed.governing_basis,
-            factor_of_safety=parsed.governing_factor_of_safety,
-        )
+        return governing_of(self.result)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

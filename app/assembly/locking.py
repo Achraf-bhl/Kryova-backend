@@ -82,6 +82,16 @@ class Lease:
             "note": self.note,
         }
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Lease:
+        return cls(
+            component=str(data["component"]),
+            holder=str(data["holder"]),
+            taken_at=float(data["taken_at"]),
+            expires_at=float(data["expires_at"]),
+            note=str(data.get("note") or ""),
+        )
+
 
 class LeaseBook:
     """Who is working on what, and until when.
@@ -94,6 +104,18 @@ class LeaseBook:
 
     def __init__(self) -> None:
         self._leases: dict[str, Lease] = {}
+
+    @classmethod
+    def restore(cls, leases: Iterable[Lease]) -> LeaseBook:
+        """A book holding exactly these leases, live or not -- history stays history."""
+        book = cls()
+        for lease in leases:
+            book._leases[lease.component] = lease
+        return book
+
+    def all(self) -> tuple[Lease, ...]:
+        """Every lease in the book including expired ones, by component name."""
+        return tuple(lease for _name, lease in sorted(self._leases.items()))
 
     def take(
         self,
@@ -227,6 +249,15 @@ class Change:
             "root_changed": self.root_changed,
         }
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Change:
+        return cls(
+            added=tuple(str(name) for name in data.get("added") or ()),
+            removed=tuple(str(name) for name in data.get("removed") or ()),
+            modified=tuple(str(name) for name in data.get("modified") or ()),
+            root_changed=bool(data.get("root_changed")),
+        )
+
 
 def changes_between(before: ProductStructure, after: ProductStructure) -> Change:
     """Which components differ between two structures.
@@ -278,6 +309,38 @@ class Revision:
             "change": self.change.to_dict(),
         }
 
+    @classmethod
+    def from_parts(
+        cls,
+        *,
+        number: int,
+        structure: Mapping[str, Any],
+        author: str,
+        change: Mapping[str, Any],
+        parent: str | None,
+        note: str,
+        at: float | None,
+        digest: str,
+    ) -> Revision:
+        """A revision read back from storage. The digest is recomputed and must agree."""
+        rebuilt = ProductStructure.from_dict(structure)
+        if rebuilt.digest() != digest:
+            raise LockError(
+                f"Revision {number} was stored with digest {digest!r} but its structure now "
+                f"hashes to {rebuilt.digest()!r}. The stored document was changed, or this "
+                "build digests a structure differently from the one that wrote it."
+            )
+        return cls(
+            number=number,
+            digest=digest,
+            structure=rebuilt,
+            author=author,
+            change=Change.from_dict(change),
+            parent=parent,
+            note=note,
+            at=at,
+        )
+
 
 class ProductRepository:
     """One product, its history, and the rules that keep two authors from erasing each other.
@@ -314,6 +377,37 @@ class ProductRepository:
                 at=at,
             )
         ]
+
+    @classmethod
+    def restore(
+        cls, history: Iterable[Revision], leases: Iterable[Lease] = ()
+    ) -> ProductRepository:
+        """A repository rebuilt from stored revisions and leases (ROAD_TO_10 9.4).
+
+        The history is checked rather than believed: numbered 1..n in order, and every
+        revision's `parent` the digest of the one before it. A store that returns rows out of
+        order, or with one missing, produces a repository that would accept a commit against
+        a head nobody wrote, so it is refused here, naming the break.
+        """
+        entries = list(history)
+        if not entries:
+            raise LockError("A product has at least one revision; this history is empty.")
+        for index, entry in enumerate(entries, start=1):
+            if entry.number != index:
+                raise LockError(
+                    f"The stored history is broken at position {index}: it holds revision "
+                    f"{entry.number}. Revisions are numbered 1..n with none missing."
+                )
+            expected = entries[index - 2].digest if index > 1 else None
+            if entry.parent != expected:
+                raise LockError(
+                    f"The stored history is broken at revision {index}: its parent is "
+                    f"{entry.parent!r} but the revision before it is {expected!r}."
+                )
+        repository = cls.__new__(cls)
+        repository._history = entries
+        repository._leases = LeaseBook.restore(leases)
+        return repository
 
     # -- reading -------------------------------------------------------------
 

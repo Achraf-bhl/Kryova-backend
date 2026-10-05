@@ -56,6 +56,7 @@ from app.models.platform import (
     FeatureFlagOverride,
     MaintenanceWindow,
 )
+from app.models.product import ProductLeaseRow, ProductRevisionRow
 from app.models.project import Project, ProjectStar
 from app.models.project_memory import MemoryState, ProjectMemory
 from app.models.session import REUSE_GRACE_SECONDS, SessionRevocation, UserSession
@@ -107,6 +108,8 @@ __all__ = [
     "Organisation",
     "OrganisationInvitation",
     "Plan",
+    "ProductLeaseRow",
+    "ProductRevisionRow",
     "Project",
     "ProjectMemory",
     "ProjectStar",

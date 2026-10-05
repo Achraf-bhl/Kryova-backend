@@ -13,6 +13,7 @@ real COM surface, so they are not mocked: a mocked export cannot tell you that
 `ExportData` wants `"stp"` rather than `"step"`.
 """
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -39,9 +40,15 @@ def _catia_is_live() -> bool:
         return False
 
 
+#: The live layer is opt-in, not ambient. It used to switch itself on whenever a CATIA happened to
+#: be running, so the suite's verdict followed what the engineer had open (and, before the
+#: conftest guard, the suite could start a CATIA of its own). Run it on purpose:
+#: `KRYOVA_LIVE_CATIA=1 pytest tests/test_catia.py -k Live` with CATIA open.
+LIVE = os.environ.get("KRYOVA_LIVE_CATIA") == "1"
+
 requires_catia = pytest.mark.skipif(
-    not _catia_is_live(),
-    reason="No running CATIA V5 instance to attach to",
+    not (LIVE and _catia_is_live()),
+    reason="The live CATIA layer is opt-in: set KRYOVA_LIVE_CATIA=1 with CATIA V5 running",
 )
 
 
@@ -260,6 +267,7 @@ class TestCatiaRoutes:
 
 
 @requires_catia
+@pytest.mark.live_catia
 class TestLiveCatia:
     @staticmethod
     def _skip_without_an_exportable_document() -> None:
@@ -351,3 +359,15 @@ class TestLiveCatia:
         )
         assert len(mesh.nodes) > 0
         assert len(mesh.tets) > 0
+
+
+class TestTheSuiteCannotReachTheWorkstationsCatia:
+    """`tests/conftest.py::_no_real_catia_com`. On the seat, 2026-10-05, `TestCatiaErrorTranslation`
+    in test_ai_context called `Dispatch` and a full run started a real CATIA that outlived it."""
+
+    def test_dispatch_and_attach_are_refused_outside_the_live_layer(self) -> None:
+        win32 = pytest.importorskip("win32com.client")
+        pywintypes = pytest.importorskip("pywintypes")
+        for call in (win32.Dispatch, win32.GetActiveObject):
+            with pytest.raises(pywintypes.com_error):
+                call("CATIA.Application")

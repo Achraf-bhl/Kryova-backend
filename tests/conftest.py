@@ -222,6 +222,57 @@ def _no_real_catia_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(local_bridge, "is_supported", lambda: False)
 
 
+#: Tests that reached the real CATIA COM server, by node id. Read in `pytest_sessionfinish`.
+_REACHED_REAL_CATIA: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def _no_real_catia_com(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    """The suite never starts, or attaches to, the workstation's real CATIA.
+
+    `_no_real_catia_bridge`'s lesson one layer down. Measured on the seat 2026-10-05: a full
+    run COM-activated a real CATIA (parent `svchost`, 83 s into the run) that was still open
+    afterwards -- and with CATIA open, `GetActiveObject` attaches to the user's session and a
+    test's answer depends on what the user has open (the `tasklist` probe trap again).
+    `win32com.client.Dispatch` / `GetActiveObject` raise `com_error` here, which every caller
+    already reads as "CATIA is not running". Tests that inject a fake `win32com` through
+    `sys.modules` never reach these attributes and are unaffected.
+    """
+    if request.node.get_closest_marker("live_catia") is not None:
+        return  # the explicit, opt-in live layer (KRYOVA_LIVE_CATIA=1), tests/test_catia.py
+    try:
+        import pywintypes  # noqa: PLC0415 - Windows only
+        import win32com.client  # noqa: PLC0415
+    except ImportError:
+        return
+    node = request.node.nodeid
+
+    def refusing(call: str):  # noqa: ANN202 - a closure factory
+        def refuse(*_args: object, **_kwargs: object) -> object:
+            # `Dispatch` is the one that *starts* CATIA; `GetActiveObject` only attaches.
+            _REACHED_REAL_CATIA.append(f"{node} ({call})")
+            raise pywintypes.com_error(
+                -2147221021, "the test suite never reaches a real CATIA", None, None
+            )
+
+        return refuse
+
+    monkeypatch.setattr(win32com.client, "Dispatch", refusing("Dispatch"))
+    monkeypatch.setattr(win32com.client, "GetActiveObject", refusing("GetActiveObject"))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "live_catia: the opt-in live CATIA layer; real COM is allowed (KRYOVA_LIVE_CATIA=1)"
+    )
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if _REACHED_REAL_CATIA:
+        names = sorted(set(_REACHED_REAL_CATIA))
+        print(f"\n[conftest] {len(names)} test(s) reached for the real CATIA COM server: {names}")
+
+
 @pytest.fixture(autouse=True)
 def _a_fixed_machine(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Every test runs on the same imaginary workstation, whatever machine runs the suite.
@@ -261,12 +312,26 @@ def _no_real_intent_router(monkeypatch: pytest.MonkeyPatch) -> None:
     offered -- a suite whose verdict depends on the workstation's `.env.local`.
     A test that wants a router sets `ai_intent_router` itself.
 
-    `ai_tool_limit` is the same leak: this seat's `.env.local` carried `AI_TOOL_LIMIT=15`
-    from its local-model profile, and `test_turn_metrics` counted 21 tools offered against
-    the 41 a full box holds (2026-10-05). The suite runs the shipped default, 0.
+    The same leak, measured twice on the seat 2026-10-05: `AI_TOOL_LIMIT=15` (an old local-model
+    profile) made `test_turn_metrics` count 21 tools offered of 41, and the brief's
+    `AI_DAILY_COST_BUDGET_USD=1.50` made five `test_ai_org_budget` tests refuse at "$1.50". So
+    every per-workstation AI knob is reset to the *shipped* default, read from the field itself;
+    a test that wants another value sets it.
     """
     monkeypatch.setattr(settings, "ai_intent_router", "none", raising=False)
-    monkeypatch.setattr(settings, "ai_tool_limit", 0)
+    for name in _WORKSTATION_AI_KNOBS:
+        field = type(settings).model_fields[name]
+        default = field.default_factory() if field.default_factory else field.default  # type: ignore[call-arg]
+        monkeypatch.setattr(settings, name, default)
+
+
+#: Settings a workstation's `.env.local` sets for its own runs and the suite must not inherit.
+_WORKSTATION_AI_KNOBS = (
+    "ai_tool_limit",
+    "ai_daily_token_budget",
+    "ai_daily_cost_budget_usd",
+    "ai_prices",
+)
 
 
 @pytest.fixture(autouse=True)

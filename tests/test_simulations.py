@@ -124,6 +124,19 @@ class TestRunningASimulation:
         assert job["result"]["factor_of_safety"] < 1.0
 
 
+class TestTheRunSaysWhatSolvedIt:
+    def test_a_finished_run_reports_its_solver_version(
+        self, auth_client: AuthenticatedTestClient, project_with_geometry: str
+    ) -> None:
+        """The run page printed "version not recorded" for every run (seat, 2026-10-05): the
+        version is a column on the job and the response never carried it."""
+        from app.solve.registry import backend_of, solver_version
+
+        job = run(auth_client, project_with_geometry)
+        assert job["solver_version"] == solver_version(backend_of(job["solver"]))
+        assert job["solver_version"]
+
+
 class TestResultSurface:
     def test_surface_is_ready_for_a_viewer(
         self, auth_client: AuthenticatedTestClient, project_with_geometry: str

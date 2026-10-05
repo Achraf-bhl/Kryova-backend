@@ -405,6 +405,10 @@ class SimulationRead(BaseModel):
     geometry_version_id: str
     status: JobStatus
     solver: str
+    #: What computed the answer, read off the run (`registry.solver_version`), e.g.
+    #: "0.2.0+21f4666". None only before a run has solved. Without it the run page
+    #: told every reader "version not recorded" about runs whose version was recorded.
+    solver_version: str | None = None
     load_case: dict[str, Any] | None
     thermal_case: dict[str, Any] | None
     transient_case: dict[str, Any] | None = None

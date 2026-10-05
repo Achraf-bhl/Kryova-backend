@@ -264,6 +264,38 @@ def cluster_exists(data_dir: Path) -> bool:
     return (data_dir / "PG_VERSION").is_file()
 
 
+#: Chosen, not measured -- no benchmark of this database on a workstation has been run. The rule is
+#: the usual one (PostgreSQL's own guidance is a quarter of RAM for shared_buffers) *scaled down*,
+#: because this server shares the machine with CATIA and the solvers and holds a few thousand rows of
+#: an engineer's designs and jobs, not a warehouse. Each figure has a floor (what a stock install
+#: gets) and a ceiling (beyond which the rows it would cache do not exist).
+_MAX_CONNECTIONS = 60
+
+
+def tuning_for(total_ram_mb: int | None) -> dict[str, str]:
+    """`postgresql.conf` memory settings sized to this machine, or `{}` when it will not say.
+
+    Unknown memory writes nothing rather than a guess: Postgres's own defaults are safe on any
+    machine and a figure sized for sixty-four gigabytes is not.
+    """
+    if not total_ram_mb or total_ram_mb <= 0:
+        return {}
+
+    def megabytes(value: float, floor: int, ceiling: int) -> str:
+        return f"{int(min(max(value, floor), ceiling))}MB"
+
+    return {
+        # A shared cache of the hot pages: an eighth of the machine, 128 MB (stock) to 1 GB.
+        "shared_buffers": megabytes(total_ram_mb / 8, 128, 1024),
+        # A planner hint, not an allocation: roughly what the operating system will cache for it.
+        "effective_cache_size": megabytes(total_ram_mb / 2, 512, 8192),
+        # Per sort or hash per connection, so it is divided across the connections that could
+        # each be using several: a quarter of the machine over 60 connections x 3 operations.
+        "work_mem": megabytes(total_ram_mb / 4 / (_MAX_CONNECTIONS * 3), 4, 64),
+        "maintenance_work_mem": megabytes(total_ram_mb / 16, 64, 512),
+    }
+
+
 def init_cluster(
     bin_dir: Path,
     data_dir: Path,
@@ -272,8 +304,14 @@ def init_cluster(
     preferred_port: int = DEFAULT_PORT,
     run: Runner = subprocess.run,
     is_free: Callable[[int], bool] = port_is_free,
+    total_ram_mb: int | None | Callable[[], int | None] = None,
 ) -> int:
-    """`initdb` a new cluster and shape its configuration. Returns the port it will use."""
+    """`initdb` a new cluster and shape its configuration. Returns the port it will use.
+
+    `total_ram_mb` sizes the memory settings (`tuning_for`); left alone it is read from the
+    machine (`app.core.hardware`, which imports no settings), and a callable is accepted so a test
+    can say what the machine has without a probe.
+    """
     initdb = _exe(bin_dir, "initdb")
     if not initdb.is_file():
         raise ClusterError(
@@ -324,17 +362,27 @@ def init_cluster(
     text = conf.read_text(encoding="utf-8", errors="replace")
     if not text.endswith("\n"):
         text += "\n"
+    if total_ram_mb is None:
+        from app.core import hardware
+
+        total_ram_mb = hardware.hardware().total_ram_mb
+    elif callable(total_ram_mb):
+        total_ram_mb = total_ram_mb()
+    tuning = tuning_for(total_ram_mb)
+    tuned = "".join(f"{key} = {value}\n" for key, value in tuning.items())
     conf.write_text(
         text + "\n# --- Kryova --------------------------------------------------------------\n"
         "listen_addresses = '127.0.0.1'\n"
         # No Unix socket: on POSIX it is a second, filesystem-permissioned way in that the
         # rules above do not describe, and Windows has none.
         "unix_socket_directories = ''\n"
-        "max_connections = 60\n"
-        f"port = {port}\n",
+        f"max_connections = {_MAX_CONNECTIONS}\n"
+        f"port = {port}\n" + tuned,
         encoding="utf-8",
         newline="\n",
     )
+    if tuning:
+        logger.info("Sized the database's memory for %s MB of RAM: %s", total_ram_mb, tuning)
     logger.info("Created a Postgres cluster in %s on port %d", data_dir, port)
     return port
 

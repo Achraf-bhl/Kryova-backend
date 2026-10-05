@@ -301,6 +301,71 @@ class TestTheClusterIsShapedSafely:
 # --------------------------------------------------------------------------------------
 
 
+class TestTheDatabaseMemoryIsSizedToTheMachine:
+    """ROAD_TO_10 6.10. The figures are chosen, not measured, so what is tested is the shape of the
+    rule -- a floor, a ceiling, growth with the machine, and *nothing at all* for a machine that
+    will not say -- and that it reaches the file the server reads."""
+
+    def test_a_large_machine_hits_the_ceilings(self) -> None:
+        assert lc.tuning_for(16 * 1024) == {
+            "shared_buffers": "1024MB",
+            "effective_cache_size": "8192MB",
+            "work_mem": "22MB",
+            "maintenance_work_mem": "512MB",
+        }
+
+    def test_a_small_machine_gets_the_floors_not_a_share_of_nothing(self) -> None:
+        assert lc.tuning_for(2 * 1024) == {
+            "shared_buffers": "256MB",
+            "effective_cache_size": "1024MB",
+            "work_mem": "4MB",
+            "maintenance_work_mem": "128MB",
+        }
+
+    def test_a_machine_that_will_not_say_is_left_on_postgres_defaults(self) -> None:
+        assert lc.tuning_for(None) == {}
+        assert lc.tuning_for(0) == {}
+
+    @pytest.mark.parametrize("key", ["shared_buffers", "effective_cache_size", "work_mem", "maintenance_work_mem"])
+    def test_a_bigger_machine_never_gets_less(self, key: str) -> None:
+        sizes = [1024, 2048, 4096, 8192, 16384, 65536, 262144]
+        values = [int(lc.tuning_for(mb)[key].removesuffix("MB")) for mb in sizes]
+        assert values == sorted(values)
+
+    def test_the_connection_count_the_work_mem_is_divided_by_is_the_one_written(
+        self, tmp_path: Path
+    ) -> None:
+        bin_dir = fake_bin(tmp_path, "initdb")
+        data = tmp_path / "home" / "pgdata"
+        lc.init_cluster(
+            bin_dir,
+            data,
+            SECRETS,
+            run=FakeRun(initdb_that_makes_a_cluster),
+            is_free=lambda port: True,
+            total_ram_mb=lambda: 8 * 1024,
+        )
+        conf = (data / "postgresql.conf").read_text()
+        assert f"max_connections = {lc._MAX_CONNECTIONS}" in conf
+        assert "shared_buffers = 1024MB" in conf
+        assert "work_mem = 11MB" in conf
+
+    def test_a_machine_that_will_not_say_writes_no_memory_lines(self, tmp_path: Path) -> None:
+        bin_dir = fake_bin(tmp_path, "initdb")
+        data = tmp_path / "home" / "pgdata"
+        lc.init_cluster(
+            bin_dir,
+            data,
+            SECRETS,
+            run=FakeRun(initdb_that_makes_a_cluster),
+            is_free=lambda port: True,
+            total_ram_mb=lambda: None,
+        )
+        conf = (data / "postgresql.conf").read_text()
+        assert "shared_buffers" not in conf and "work_mem" not in conf
+        assert "listen_addresses = '127.0.0.1'" in conf
+
+
 class TestAnUpgradeIsPrecededByADump:
     ADMIN = "postgresql://kryova_admin:secret-admin-pw@127.0.0.1:54329/kryova?sslmode=disable"
 

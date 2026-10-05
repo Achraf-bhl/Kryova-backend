@@ -15,6 +15,59 @@ happened.
 
 ## Now
 
+> **Handoff, 2026-10-05 03:57 — ROAD_TO_10 Phases 1–4 are done as far as Linux can take them; the
+> desktop installer is built, staged and tested here and has never run on Windows.**
+> **Next continuation fires 2026-10-05 04:57**, held by **this session** (kryova-backend-c7). The job
+> dies if this editor is closed. **The pause is 1 h, not CLAUDE.md's 2 h 30 min — the user's own
+> instruction for this chain (2026-10-05), which overrides that line.** `CronList` FIRST on wake: a
+> one-shot whose time passes while the session is mid-turn never fires.
+> That turn does **Phases 5–8**; at its end it schedules one more, 1 h later, for **Phases 9–10**
+> ("the rest"), and that one is the last. Both gates at the end of every phase are the user's:
+> the full suite, `ruff check app/ tests/`, `mypy app/`, `alembic upgrade head` then `alembic check`,
+> `scan_secrets`, `verify.recorded --check` — and for the frontend `npm run lint`, `npx tsc --noEmit`,
+> `npx vitest run`, `node scripts/check-dependencies.mjs`.
+> **What this turn closed.** Phase 1 (token economy, 1.1–1.13 except 1.5, BLOCKED on a live key and the
+> ladder), Phase 2 (2.1–2.7, conversation memory, Continue, branch/rewind/search/pin, project memory),
+> Phase 3 (3.1–3.6, a shared limiter, per-plan limits, WAITING runs, a Continue instead of a busy
+> error) and Phase 4 (4.1–4.9). Phase 0 and Phase 10 need a live key, a seat or people and were not
+> attempted. **Board 23/35 phases · 208.5/230 tasks = 90.7%.** Backend suite **11,908 passed / 20
+> skipped / 1 xpassed / 0 failed** (21 min 48 s); frontend **971 passed (76 files)**; ruff, mypy (518
+> files), alembic, scan_secrets, `verify.recorded --check` and the retrieval index all clean.
+> **Schema changes this chain (7 migrations, all nullable or defaulted, each with a rollback note):**
+> `90b05c4b90e3` (ledger cached tokens and cost), `be18af3e6a04` (`turn_metrics`), `9becb1e46a38`
+> (org budgets), `2a00f5443c5f` (`summary_facts`), `d2ec5f1d8253` (pin/branch/rewind),
+> `7da3113b27aa` (`project_memories`), `16c0cc4190d5` (plan limits), after `c3a7d1f08b52`
+> (`conversation_messages.reasoning`). Phase 4 changed **no** schema, response shape or enum; it changed
+> one default (CORS origins now include both loopback spellings). Response shapes that moved in
+> Phases 1–3 are named in each commit message.
+> **Phase 4's honest state — read `docs/DESKTOP_RELEASE.md` and THE QUEUE G7.** Built: a staged
+> installer tree (a real cross-staging run produced a complete 1.4 GB tree), a first-run database,
+> the shell reading from the bundle, deep links, tray, single instance, a consent-gated update notice,
+> a signing overlay, `latest.json` tooling, and `desktop.yml` (build → install on a second runner →
+> health → uninstall → draft release only if signed). **Never run on Windows or on a runner.** Not
+> Kryova's to supply: the updater key, an update host, a code-signing certificate (4.5 BLOCKED on a
+> purchase). The first real staging run found that one dynamic `path.join` made the frontend carry
+> 5.3 GB of the checkout (now 52 MB; CLAUDE.md, frontend and backend, records it).
+> **Flagged, not fixed:** `scripts/seed_demo.py` has an unsorted import block (ruff, outside the
+> project's `app/ tests/` command); the 313 MB of VTK in the bundle is a hard dependency of
+> `cadquery-ocp` that nothing imports, left in because whether OCP links against it is untested;
+> IPC from a remote loopback origin means the CSP in the frontend's `proxy.ts` is the only wall
+> against an injected script reaching the shell's commands.
+>
+> **Prompt for the 04:57 job** (kept here so the next session can read what it was told):
+> *Phases 5–8 of `docs/ROAD_TO_10.md`; seven-task rule; Linux halves only; a seat claim is PARTIAL with
+> a THE QUEUE row, never DONE. Order: 5.8 (`catia_import` rebinds the document — through
+> `call_catia`), 5.9 (seat affinity into `dispatch._online`; STRANDED never reroutes), 5.4 (one
+> checkpoint per batch; unify `_NO_AUTO_CHECKPOINT` with `Operation.no_auto_checkpoint`), 5.2 (manual
+> edits in the state block — test with the mock's out-of-call parameter change), 5.5 (`invoke_batch`
+> protocol, written here, proved on the seat), 5.7 (approvals and restore in the bridge panel, both
+> repos), 5.11, then Phase 6 (6.1 probe, 6.2 workers from hardware, 6.3 admission by memory, 6.4
+> process-pool queue, 6.5 grids in parallel, 6.6 factorisation reuse, 6.8 lower `Detail`; 6.7 verify),
+> Phase 7 (master plan P7.9 first — the user-level active-runs endpoint the tray and notifications
+> need — then 7.1–7.8; 7.4 is the owner-versus-member landmine), Phase 8 (8.1 cost meter, 8.3, 8.4,
+> 8.8, 8.9 and the rest that are frontend-only). Commit each task as it closes with its status line
+> and a `plan_progress` re-stamp; `git add` by path; never push. Phase gate after each of 5, 6, 7, 8.*
+
 > **Handoff, 2026-10-04 — the agent's model is a hosted one (DeepSeek), local models are gone,
 > and nothing about the vendor has run against the live endpoint.** The user ruled that no local
 > LLM is supported, for testing or production. Master plan **P11** records it (task 1 PARTIAL,
@@ -785,6 +838,19 @@ needs a different extraction stated up front rather than chosen after the sweep.
 ---
 
 ## Done
+- **2026-10-05 — ROAD_TO_10 Phases 1–4, one session, two repositories** (backend `04e063c`…`4186211`,
+  frontend `054eaf1`…`037bf1e`). Token economy: tokens at their true price with a cost budget and a
+  record of every turn, organisation spending caps, a measured and digest-replayed tool registry, a
+  context window sized in tokens, a bounded state block, the cache hit rate as a watched number, and
+  `build_design` (one agent step builds a recorded design). Conversation: server-written summary
+  facts, Continue as a typed action, resume from the record, branch/rewind/search/pin, project memory.
+  Limits: a shared limiter across workers, a budget on every response, per-plan limits, WAITING runs
+  with a place in line, a Continue instead of a busy error. Desktop: see `docs/DESKTOP_RELEASE.md` — a
+  staged installer, a first-run database, a pipeline that installs what it builds, all unrun on
+  Windows (THE QUEUE G7). Seven migrations (listed in *Now*). Full suite 11,908 passed / 20 skipped /
+  1 xpassed / 0 failed; frontend 971 passed. Master plan P7 gained tasks 6–9 and P7.1–7.3 and P9.5
+  moved to PARTIAL; board 23/35 phases, 90.7%. Found by running the thing rather than reading it:
+  one dynamic `path.join` put 5.3 GB of the checkout into the installer's frontend (52 MB now).
 - **2026-10-04 (audit) — ten defects found by reading, each fixed with a guard that was broken on
   purpose and failed.** The reference scene's digest differed by platform because libm's sin/cos
   differ in the last bit (exact 30° table now, `test_render_reference.py`); `solve.plane` and

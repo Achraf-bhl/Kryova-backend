@@ -173,6 +173,15 @@ def list_attachments(
     db: DbSession,
     current_user: CurrentUser,
     conversation_id: Annotated[str | None, Query()] = None,
+    unattached_project_id: Annotated[
+        str | None,
+        Query(
+            description=(
+                "With no `conversation_id`: this project's files that are in no conversation "
+                "yet -- what a new chat's composer shows before its first turn adopts them."
+            )
+        ),
+    ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> AttachmentPage:
@@ -190,7 +199,17 @@ def list_attachments(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
             )
 
-    rows = list(attachments.list_for(db, conversation=conversation, owner=current_user))
+    if unattached_project_id is not None:
+        # A project the caller cannot read answers 404, like every other project route.
+        get_owned_project(db, current_user, unattached_project_id)
+    rows = list(
+        attachments.list_for(
+            db,
+            conversation=conversation,
+            owner=current_user,
+            unattached_project_id=unattached_project_id if conversation is None else None,
+        )
+    )
     start = (page - 1) * page_size
     return AttachmentPage(
         items=[AttachmentRead.model_validate(row) for row in rows[start : start + page_size]],

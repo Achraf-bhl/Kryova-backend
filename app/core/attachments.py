@@ -260,7 +260,11 @@ def _cell(cell: Cell) -> dict[str, Any]:
 
 
 def list_for(
-    db: Session, *, conversation: Conversation | None = None, owner: User | None = None
+    db: Session,
+    *,
+    conversation: Conversation | None = None,
+    owner: User | None = None,
+    unattached_project_id: str | None = None,
 ) -> Sequence[Attachment]:
     """This conversation's attachments, newest first.
 
@@ -273,6 +277,13 @@ def list_for(
         query = query.where(Attachment.conversation_id == conversation.id)
     if owner is not None:
         query = query.where(Attachment.owner_id == owner.id)
+    if unattached_project_id is not None:
+        # Files dropped before the conversation existed (`ai/attached.adopt_orphans` claims them
+        # on the first turn): in this project, in no conversation yet.
+        query = query.where(
+            Attachment.project_id == unattached_project_id,
+            Attachment.conversation_id.is_(None),
+        )
     return list(db.scalars(query))
 
 

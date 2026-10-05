@@ -1191,3 +1191,76 @@ class TestTheAgentCanMakeAnAttachedPartGeometry:
             "no-such-project", "<id>"
         )
         assert db_session.query(Attachment).filter_by(id=attached["id"]).one().media_id
+
+
+class TestFilesDroppedBeforeAConversationExisted:
+    """ROAD_TO_10 8.9: a new chat's composer lists them, a project's owner only."""
+
+    def _project_for(self, db: Session, owner_id: str) -> Project:
+        project = Project(name="Bracket", owner_id=owner_id)
+        db.add(project)
+        db.flush()
+        return project
+
+    def _orphan(self, db: Session, owner_id: str, project_id: str, name: str, sha: str) -> Attachment:
+        media = Media(
+            owner_id=owner_id,
+            kind=MediaKind.CAD,
+            filename=name,
+            size_bytes=10,
+            sha256=sha,
+            meta={},
+        )
+        db.add(media)
+        db.flush()
+        row = Attachment(
+            owner_id=owner_id, project_id=project_id, media_id=media.id, filename=name
+        )
+        db.add(row)
+        db.flush()
+        return row
+
+    def test_the_route_lists_this_projects_unattached_files_only(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        project = self._project_for(db_session, current_user_id)
+        other = self._project_for(db_session, current_user_id)
+        mine = self._orphan(db_session, current_user_id, project.id, "a.txt", "6" * 64)
+        self._orphan(db_session, current_user_id, other.id, "b.txt", "7" * 64)
+        conversation = Conversation(owner_id=current_user_id, project_id=project.id, title="t")
+        db_session.add(conversation)
+        db_session.flush()
+        placed = self._orphan(db_session, current_user_id, project.id, "c.txt", "8" * 64)
+        placed.conversation_id = conversation.id
+        db_session.flush()
+
+        response = auth_client.get(f"{API}/attachments", params={"unattached_project_id": project.id})
+
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["items"]] == [mine.id]
+
+    def test_a_project_the_caller_cannot_read_is_404(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, owner: User
+    ) -> None:
+        theirs = self._project_for(db_session, owner.id)
+
+        response = auth_client.get(f"{API}/attachments", params={"unattached_project_id": theirs.id})
+
+        assert response.status_code == 404
+
+    def test_a_conversation_filter_wins_over_the_project_one(
+        self, auth_client: AuthenticatedTestClient, db_session: Session, current_user_id: str
+    ) -> None:
+        project = self._project_for(db_session, current_user_id)
+        self._orphan(db_session, current_user_id, project.id, "a.txt", "9" * 64)
+        conversation = Conversation(owner_id=current_user_id, project_id=project.id, title="t")
+        db_session.add(conversation)
+        db_session.flush()
+
+        response = auth_client.get(
+            f"{API}/attachments",
+            params={"conversation_id": conversation.id, "unattached_project_id": project.id},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["items"] == []
